@@ -2,33 +2,32 @@
 
 ## Project Structure & Module Organization
 
-This repository is currently a minimal skeleton for `relay-knowledge`, a graph-database-based knowledge graph project. The root contains `README.md`, `LICENSE`, and `.gitignore`; no source tree or build manifest is present yet.
+This repository is a Rust skeleton for `relay-knowledge`, a graph-database-based knowledge graph project. The root contains Cargo metadata, contributor docs, pre-commit configuration, and GitHub Actions workflow files.
 
-When adding implementation code, follow standard Rust layout unless the project defines a different structure:
+Use the existing Rust layout:
 
-- `Cargo.toml`: package/workspace manifest.
-- `src/`: application and library source code.
-- `tests/`: integration tests.
-- `examples/`: runnable usage examples or demos.
-- `docs/`: architecture notes, schema details, and operational guides.
+- `Cargo.toml`: package manifest and Rust lint configuration.
+- `src/lib.rs`: reusable knowledge graph primitives.
+- `src/main.rs`: default CLI entry point.
+- `tests/`: integration and smoke tests.
+- `.github/workflows/pr-checks.yml`: CI quality gates.
 
 Keep generated output, build products, and large temporary data out of version control.
 
 ## Build, Test, and Development Commands
 
-No runnable build is configured yet. Once `Cargo.toml` is added, use the standard Cargo workflow:
-
 - `cargo build`: compile the project.
-- `cargo test`: run unit and integration tests.
-- `cargo fmt --check`: verify formatting without rewriting files.
+- `cargo test --all-targets --all-features`: run unit and integration tests.
+- `cargo fmt --all -- --check`: verify formatting without rewriting files.
 - `cargo clippy --all-targets --all-features -- -D warnings`: run lint checks and fail on warnings.
-- `cargo run`: run the default binary, if one exists.
+- `cargo run`: run the default binary.
+- `pre-commit run --all-files`: run the local quality hooks.
 
 Document required services, such as graph databases or local containers, in `README.md` and commit example configuration files.
 
 ## Coding Style & Naming Conventions
 
-Use idiomatic Rust conventions: four-space indentation, `snake_case` for functions/modules, `PascalCase` for types and traits, and `SCREAMING_SNAKE_CASE` for constants. Prefer small modules with clear ownership. Run `cargo fmt` before committing Rust code.
+Use idiomatic Rust conventions: four-space indentation, `snake_case` for functions/modules, `PascalCase` for types and traits, and `SCREAMING_SNAKE_CASE` for constants. Keep `unsafe` out of the codebase unless explicitly justified. Run `cargo fmt` before committing Rust code.
 
 Configuration and documentation files should use descriptive names, for example `docs/graph-schema.md` or `examples/load_dataset.rs`.
 
@@ -40,7 +39,7 @@ For graph/database behavior, prefer deterministic fixtures and isolate tests fro
 
 ## Commit & Pull Request Guidelines
 
-The current history only contains an initial commit, so no repository-specific convention is established. Use short, imperative subjects, for example `Add graph schema loader` or `Document local database setup`.
+Use short, imperative commit subjects, for example `Add graph schema loader` or `Document local database setup`.
 
 Pull requests should include a summary, reason for the change, test results, and configuration or migration notes. Link related issues when available. Include screenshots only for UI or documentation rendering changes.
 

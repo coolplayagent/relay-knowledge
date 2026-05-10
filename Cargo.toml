@@ -1,0 +1,13 @@
+[package]
+name = "relay-knowledge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Graph-database-based knowledge graph project."
+license = "MIT"
+repository = "https://github.com/coolplayagent/relay-knowledge"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
