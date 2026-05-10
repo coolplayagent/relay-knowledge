@@ -21,6 +21,7 @@ Keep generated output, build products, and large temporary data out of version c
 - `cargo fmt --all -- --check`: verify formatting without rewriting files.
 - `cargo clippy --all-targets --all-features -- -D warnings`: run lint checks and fail on warnings.
 - `cargo run`: run the default binary.
+- `./setup.sh` or `setup.bat`: install/check the Rust toolchain, set up hooks, and run quality gates.
 - `pre-commit run --all-files`: run the local quality hooks.
 
 Document required services, such as graph databases or local containers, in `README.md` and commit example configuration files.

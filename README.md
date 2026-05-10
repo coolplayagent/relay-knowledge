@@ -19,3 +19,11 @@ Optional local pre-commit checks:
 pre-commit install
 pre-commit run --all-files
 ```
+
+Setup helpers are also available:
+
+```bash
+./setup.sh
+```
+
+On Windows, run `setup.bat` from Command Prompt.
