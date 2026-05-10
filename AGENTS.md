@@ -33,6 +33,8 @@ Document required services, such as graph databases or local containers, in `REA
 - Use bounded queues, backpressure, timeouts, and cancellation for event pipelines so ingestion or query spikes cannot grow without control.
 - Keep graph storage, event transport, and domain logic separated behind small interfaces. Tests should be able to exercise domain behavior without a live database.
 - Prefer observable workflows: important events should carry enough structured context for logging, tracing, retries, and debugging.
+- Provide both CLI and Web usage modes. They must share the same core services and domain APIs so behavior does not diverge between interfaces.
+- Provide three-layer retrieval from the start: keyword BM25, semantic retrieval, and vector retrieval. Retrieval indexes and answers must stay tied to the latest graph state, with explicit refresh, versioning, or invalidation when graph data changes.
 
 ## Coding Style & Naming Conventions
 
