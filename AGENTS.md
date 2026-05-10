@@ -26,6 +26,14 @@ Keep generated output, build products, and large temporary data out of version c
 
 Document required services, such as graph databases or local containers, in `README.md` and commit example configuration files.
 
+## Architecture Constraints
+
+- Build the project as event-driven and async-first from the beginning. New I/O, graph database access, indexing, ingestion, and service orchestration should expose async APIs.
+- Do not add blocking work to async execution paths. If blocking CPU or filesystem work is unavoidable, isolate it behind explicit worker boundaries.
+- Use bounded queues, backpressure, timeouts, and cancellation for event pipelines so ingestion or query spikes cannot grow without control.
+- Keep graph storage, event transport, and domain logic separated behind small interfaces. Tests should be able to exercise domain behavior without a live database.
+- Prefer observable workflows: important events should carry enough structured context for logging, tracing, retries, and debugging.
+
 ## Coding Style & Naming Conventions
 
 Use idiomatic Rust conventions: four-space indentation, `snake_case` for functions/modules, `PascalCase` for types and traits, and `SCREAMING_SNAKE_CASE` for constants. Keep `unsafe` out of the codebase unless explicitly justified. Run `cargo fmt` before committing Rust code.
