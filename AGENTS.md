@@ -35,6 +35,11 @@ Document required services, such as graph databases or local containers, in `REA
 - Prefer observable workflows: important events should carry enough structured context for logging, tracing, retries, and debugging.
 - Provide both CLI and Web usage modes. They must share the same core services and domain APIs so behavior does not diverge between interfaces.
 - Provide three-layer retrieval from the start: keyword BM25, semantic retrieval, and vector retrieval. Retrieval indexes and answers must stay tied to the latest graph state, with explicit refresh, versioning, or invalidation when graph data changes.
+- Treat installed background operation as a first-class runtime. Long-running graph refresh, indexing, maintenance, and diagnostics should be hosted by the platform service manager (systemd, Windows Service, or launchd) rather than an unmanaged CLI loop.
+- Silent background updates must be user-configurable, observable, and reversible. They may refresh graph data and derived indexes only within authorized scopes, and must expose freshness, stale, paused, degraded, and failure states.
+- Background pipelines must use bounded queues, resource budgets, backpressure, timeouts, cancellation, retry backoff, persistent cursors or leases, and dead-letter handling so spikes cannot consume unbounded CPU, memory, or disk.
+- CPU-heavy or disk-heavy work such as embedding, OCR, large-file parsing, full index rebuilds, WAL checkpointing, and compaction must run behind explicit worker or maintenance boundaries and must not block query hot paths or async runtime executors.
+- Design ingestion, indexing, and maintenance for crash recovery and hung-task recovery. Startup reconcilers should replay missed index refresh work, recover expired task leases, report index lag, and keep graph facts and derived indexes consistent by version.
 
 ## Coding Style & Naming Conventions
 
