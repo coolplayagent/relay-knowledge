@@ -10,6 +10,7 @@ Use the existing Rust layout:
 - `src/lib.rs`: reusable knowledge graph primitives.
 - `src/main.rs`: default CLI entry point.
 - `tests/`: integration and smoke tests.
+- `docs/specs/installation-and-release.md`: installation, packaging, publishing, service deployment, upgrade, and uninstall requirements.
 - `.github/workflows/pr-checks.yml`: CI quality gates.
 
 Keep generated output, build products, and large temporary data out of version control.
@@ -21,6 +22,8 @@ Keep generated output, build products, and large temporary data out of version c
 - `cargo fmt --all -- --check`: verify formatting without rewriting files.
 - `cargo clippy --all-targets --all-features -- -D warnings`: run lint checks and fail on warnings.
 - `cargo run`: run the default binary.
+- `cargo package`: verify the crate contents that would be published to crates.io.
+- `cargo publish --dry-run`: validate the center-repository publishing path without publishing.
 - `./setup.sh` or `setup.bat`: install/check the Rust toolchain, set up hooks, and run quality gates.
 - `pre-commit run --all-files`: run the local quality hooks.
 
@@ -40,6 +43,16 @@ Document required services, such as graph databases or local containers, in `REA
 - Background pipelines must use bounded queues, resource budgets, backpressure, timeouts, cancellation, retry backoff, persistent cursors or leases, and dead-letter handling so spikes cannot consume unbounded CPU, memory, or disk.
 - CPU-heavy or disk-heavy work such as embedding, OCR, large-file parsing, full index rebuilds, WAL checkpointing, and compaction must run behind explicit worker or maintenance boundaries and must not block query hot paths or async runtime executors.
 - Design ingestion, indexing, and maintenance for crash recovery and hung-task recovery. Startup reconcilers should replay missed index refresh work, recover expired task leases, report index lag, and keep graph facts and derived indexes consistent by version.
+
+## Release & Installation Constraints
+
+- Treat installation and deployment as first-class product surfaces. New user-facing capabilities must consider install, upgrade, rollback, uninstall, service operation, and diagnostics.
+- Stable releases must prioritize convenient user installation: publish prebuilt cross-platform binaries, checksums, and release notes through GitHub Releases, and keep `cargo install relay-knowledge` working through crates.io.
+- Installation paths must be short, versioned, verifiable, and reversible. Installers should support explicit version selection, install directory selection, service installation, dry-run, and safe rollback after partial failure.
+- Keep binary installation separate from runtime state. Configuration, graph databases, indexes, logs, caches, temporary files, and dead-letter data must use documented platform directories, not the repository, current working directory, or release extraction directory unless the user explicitly configures that.
+- Service installation must use the platform service manager: systemd on Linux, Windows Service on Windows, and launchd on macOS. Do not implement long-running background operation as an unmanaged CLI loop.
+- Package manager manifests such as Homebrew, Scoop, winget, or distro packages should reference artifacts produced from the same release tag rather than rebuilding divergent snapshots.
+- Any change that affects packaging, release artifacts, service templates, data directories, configuration, migration, upgrade, or uninstall behavior must update `docs/specs/installation-and-release.md` and any affected README or release-note guidance.
 
 ## Coding Style & Naming Conventions
 
