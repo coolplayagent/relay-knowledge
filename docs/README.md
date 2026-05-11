@@ -13,3 +13,4 @@
 - [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
 - [先进架构与可观测性设计](specs/advanced-architecture-observability.md): 本地优先、日志、telemetry、Grafana 和模块解耦设计。
 - [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
+- [Source Scope 与多模态摄取规格](specs/source-scope-and-multimodal-ingestion.md): Git 分支/rebase 快照隔离、检索 scope 和文档文字/图片多模态 evidence 设计。
