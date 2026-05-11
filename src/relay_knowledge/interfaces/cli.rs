@@ -111,7 +111,7 @@ impl fmt::Display for CliError {
 impl Error for CliError {}
 
 /// Runs the default CLI command and renders its response.
-pub fn run<I, S>(args: I) -> Result<String, CliError>
+pub async fn run<I, S>(args: I) -> Result<String, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<String>,
@@ -122,9 +122,10 @@ where
     }
 
     let service = RelayKnowledgeService::from_process_environment()
+        .await
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
     let context = RequestContext::for_interface(InterfaceKind::Cli);
-    let response = service.project_status(context);
+    let response = service.project_status(context).await;
 
     render_project_status(&response, command.format)
 }

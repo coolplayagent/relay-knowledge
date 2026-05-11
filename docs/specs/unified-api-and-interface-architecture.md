@@ -82,14 +82,14 @@ API 层负责定义稳定的交互边界，而不是承载业务逻辑。
 
 v1 已落地的最小 API:
 
-- `RelayKnowledgeService::project_status`
+- async `RelayKnowledgeService::project_status`
 - CLI `--format text`
 - CLI `--format json`
 - CLI `--format streaming-json`
 
 ## 4. CLI 输出协议
 
-CLI adapter 只做参数解析、调用 application service、渲染输出和设置退出码。
+CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async application service、渲染输出和设置退出码。
 
 格式:
 

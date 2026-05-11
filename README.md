@@ -31,6 +31,8 @@ cargo run
 cargo run -- --format json
 ```
 
+The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
+
 Optional local pre-commit checks:
 
 ```bash

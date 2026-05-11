@@ -1,8 +1,8 @@
-use relay_knowledge::{KnowledgeEntity, project_name};
+use relay_knowledge::{KnowledgeEntity, PROJECT_NAME};
 
 #[test]
 fn exposes_project_name() {
-    assert_eq!(project_name(), "relay-knowledge");
+    assert_eq!(PROJECT_NAME, "relay-knowledge");
 }
 
 #[test]
