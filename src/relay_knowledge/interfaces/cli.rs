@@ -69,6 +69,7 @@ pub enum CliError {
     InvalidFormat(String),
     MissingFormatValue,
     UnexpectedArgument(String),
+    RuntimeConfigFailed(String),
     RenderFailed(String),
 }
 
@@ -81,7 +82,7 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::InvalidFormat(_) | Self::MissingFormatValue | Self::UnexpectedArgument(_) => 2,
-            Self::RenderFailed(_) => 1,
+            Self::RuntimeConfigFailed(_) | Self::RenderFailed(_) => 1,
         }
     }
 }
@@ -98,6 +99,9 @@ impl fmt::Display for CliError {
             }
             Self::UnexpectedArgument(argument) => {
                 write!(formatter, "unexpected argument '{argument}'")
+            }
+            Self::RuntimeConfigFailed(message) => {
+                write!(formatter, "failed to load runtime configuration: {message}")
             }
             Self::RenderFailed(message) => write!(formatter, "failed to render output: {message}"),
         }
@@ -117,7 +121,8 @@ where
         return Ok(help_text().to_owned());
     }
 
-    let service = RelayKnowledgeService::new();
+    let service = RelayKnowledgeService::from_process_environment()
+        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
     let context = RequestContext::for_interface(InterfaceKind::Cli);
     let response = service.project_status(context);
 

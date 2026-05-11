@@ -120,6 +120,12 @@ relay-knowledge service uninstall
 
 运行态数据不能写入源码仓库、release archive 解压目录或当前工作目录，除非用户显式把这些目录配置为数据目录。
 
+当前基础运行时层已经通过 `paths` 模块实现这些默认目录，并通过
+[`基础运行时层规格`](foundational-runtime.md) 记录 `RELAY_KNOWLEDGE_HOME`、
+逐项路径覆盖、HTTP bind 和 QoS 预算等环境变量。安装器和后续
+`relay-knowledge service install|doctor` 必须复用同一套路径解析结果，
+不能重新实现目录规则。
+
 ## 4. 后台服务部署
 
 后台服务部署必须沿用 [后台服务、静默更新与自愈设计](background-service-and-self-healing.md) 的约束:

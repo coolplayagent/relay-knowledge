@@ -64,7 +64,7 @@ user selector -> git rev-parse -> commit sha -> tree hash -> scope_id
 
 代码符号需要区分“逻辑身份”和“快照实例”:
 
-- `canonical_symbol_id`: 可选的跨快照逻辑符号，例如 `repo://core/src/lib.rs::GraphStore`。
+- `canonical_symbol_id`: 可选的跨快照逻辑符号，例如 `repo://core/src/relay_knowledge/lib.rs::GraphStore`。
 - `symbol_snapshot_id`: 必须存在的快照实例，例如 hash(`repository_id`, `tree_hash`, `qualified_name`, `blob_hash`)。
 
 图事实、边、evidence 和索引记录默认绑定到 `symbol_snapshot_id`。跨分支或跨 rebase 合并同名符号只能通过显式关系表达，例如 `SAME_LOGICAL_SYMBOL_AS`，不能靠裸 `qualified_name` 自动合并。

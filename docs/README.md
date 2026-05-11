@@ -13,6 +13,7 @@
 - [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
 - [安装部署与发布规格](specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
 - [工程硬约束](specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、HTTP 事件驱动、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。
+- [基础运行时层规格](specs/foundational-runtime.md): `env`、`paths`、`net::http` 和 `net::qos` 的环境变量、路径默认值、网络预算、失败模式和测试策略。
 - [先进架构与可观测性设计](specs/advanced-architecture-observability.md): 本地优先、日志、telemetry、Grafana 和模块解耦设计。
 - [后台服务、静默更新与自愈设计](specs/background-service-and-self-healing.md): 安装后常驻进程、静默图谱/索引更新、资源治理、假死检测和自愈恢复设计。
 - [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
