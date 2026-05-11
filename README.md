@@ -11,6 +11,7 @@
 
 重点架构文档:
 
+- [工程硬约束](docs/specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、事件驱动 HTTP、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。
 - [安装部署与发布规格](docs/specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
 - [统一 API 层与交互层架构](docs/specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
 - [先进架构与可观测性设计](docs/specs/advanced-architecture-observability.md): 本地优先、异步优先、模块解耦和 telemetry 设计。
