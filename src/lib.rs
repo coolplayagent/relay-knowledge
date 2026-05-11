@@ -1,31 +1,11 @@
-//! Core primitives for the relay-knowledge knowledge graph.
+//! Core primitives and API boundaries for the relay-knowledge knowledge graph.
 
-/// A minimal entity model used by early graph-building code.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnowledgeEntity {
-    id: String,
-    label: String,
-}
+pub mod api;
+pub mod application;
+pub mod domain;
+pub mod interfaces;
 
-impl KnowledgeEntity {
-    /// Creates a new knowledge entity with a stable identifier and display label.
-    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            label: label.into(),
-        }
-    }
-
-    /// Returns the stable entity identifier.
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Returns the human-readable entity label.
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-}
+pub use domain::KnowledgeEntity;
 
 /// Returns the crate's canonical project name.
 pub fn project_name() -> &'static str {

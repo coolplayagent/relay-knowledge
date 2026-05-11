@@ -12,3 +12,4 @@
 - [Code-Review-Graph 能力规格文档](specs/code-review-graph-capabilities.md): 代码知识图谱系统能力规格与参考分析。
 - [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
 - [先进架构与可观测性设计](specs/advanced-architecture-observability.md): 本地优先、日志、telemetry、Grafana 和模块解耦设计。
+- [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
