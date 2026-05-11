@@ -98,6 +98,11 @@ relay-knowledge service doctor
 relay-knowledge service uninstall
 ```
 
+当前 CLI 已先落地 `relay-knowledge service status|doctor` 的统一 API 输出，
+用于报告服务名、默认 disabled 模式、后台更新默认关闭和平台服务定义路径。
+后续真正注册 systemd、Windows Service 或 launchd 时必须复用同一 application service，
+不能在 installer 或 CLI adapter 中重新实现路径规则。
+
 安装器必须处理:
 
 - 检测目标平台和 CPU 架构，选择正确 artifact。

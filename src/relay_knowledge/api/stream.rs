@@ -25,6 +25,8 @@ pub struct ApiStreamEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error_kind: Option<ErrorKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ApiMetadata>,
@@ -43,8 +45,95 @@ impl ApiStreamEvent {
             message: message.map(str::to_owned),
             project_name: (event == StreamEventKind::Item).then(|| response.project_name.clone()),
             runtime: (event == StreamEventKind::Item).then(|| response.runtime.clone()),
+            payload: None,
             error_kind: None,
             metadata: Some(response.metadata.clone()),
         }
+    }
+
+    /// Creates a generic streaming event for non-status operations.
+    pub fn operation(
+        event: StreamEventKind,
+        operation: impl Into<String>,
+        metadata: ApiMetadata,
+        message: Option<&str>,
+        payload: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            event,
+            operation: operation.into(),
+            message: message.map(str::to_owned),
+            project_name: None,
+            runtime: None,
+            payload,
+            error_kind: None,
+            metadata: Some(metadata),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{
+        api::{InterfaceKind, RequestContext},
+        domain::GraphVersion,
+    };
+
+    #[test]
+    fn project_status_event_only_attaches_payload_to_item() {
+        let context = RequestContext::with_ids(InterfaceKind::Cli, "req", "trace");
+        let response = ProjectStatusResponse {
+            project_name: "relay-knowledge".to_owned(),
+            metadata: ApiMetadata::graph_only(&context, GraphVersion::ZERO),
+            runtime: RuntimeStatus {
+                config_dir: "/config".to_owned(),
+                data_dir: "/data".to_owned(),
+                state_dir: "/state".to_owned(),
+                cache_dir: "/cache".to_owned(),
+                log_dir: "/logs".to_owned(),
+                temp_dir: "/tmp".to_owned(),
+                runtime_dir: "/run".to_owned(),
+                service_dir: "/service".to_owned(),
+                http_bind: "127.0.0.1:8791".to_owned(),
+                http_request_timeout_ms: 30000,
+                http_graceful_shutdown_timeout_ms: 10000,
+                http_max_request_body_bytes: 1024,
+                http_proxy_configured: false,
+                http_no_proxy_rules: 0,
+                http_ssl_verify: true,
+                qos_max_connections: 1,
+                qos_max_in_flight_requests: 1,
+                qos_max_queue_depth: 1,
+            },
+        };
+
+        let started =
+            ApiStreamEvent::project_status(StreamEventKind::Started, &response, Some("starting"));
+        let item = ApiStreamEvent::project_status(StreamEventKind::Item, &response, None);
+
+        assert_eq!(started.project_name, None);
+        assert_eq!(started.message, Some("starting".to_owned()));
+        assert_eq!(item.project_name, Some("relay-knowledge".to_owned()));
+        assert!(item.runtime.is_some());
+    }
+
+    #[test]
+    fn operation_event_carries_generic_payload() {
+        let context = RequestContext::with_ids(InterfaceKind::Api, "req", "trace");
+        let metadata = ApiMetadata::graph_only(&context, GraphVersion::ZERO);
+
+        let event = ApiStreamEvent::operation(
+            StreamEventKind::Item,
+            "health",
+            metadata,
+            None,
+            Some(json!({"healthy": true})),
+        );
+
+        assert_eq!(event.operation, "health");
+        assert_eq!(event.payload, Some(json!({"healthy": true})));
     }
 }

@@ -165,10 +165,23 @@ QoS admission 使用当前 snapshot 判断:
 
 - `RelayKnowledgeService::from_process_environment`
 - `RelayKnowledgeService::from_environment`
+- `RelayKnowledgeService::with_store`
 - `RelayKnowledgeService::refresh_network_from_process_environment`
 - `RelayKnowledgeService::refresh_network_from_environment`
 - `RelayKnowledgeService::project_status`
+- `RelayKnowledgeService::ingest`
+- `RelayKnowledgeService::retrieve_context`
+- `RelayKnowledgeService::inspect_graph`
+- `RelayKnowledgeService::refresh_indexes`
+- `RelayKnowledgeService::health`
+- `RelayKnowledgeService::service_status`
 - `interfaces::cli::run`
+
+存储初始化仍由 application service 编排，但数据库路径只来自 `paths.data_dir`。
+SQLite 是当前默认本地后端，所有 SQLite 调用通过 `storage` 边界进入
+`tokio::task::spawn_blocking`，不能直接在 async executor 上执行阻塞数据库工作。
+`indexing` 和 `retrieval` 模块分别承载 index refresh plan 与 retrieval plan 校验，
+application service 只编排这些 contract，不把策略留在 CLI/Web adapter 中。
 
 ## 6. 测试策略
 
@@ -182,3 +195,4 @@ QoS admission 使用当前 snapshot 判断:
 - application service 测试使用 Tokio test runtime 覆盖 async 配置加载、状态输出和网络刷新。
 - 集成测试集中在 `tests/relay_knowledge/`，并按 `application`、`domain`、`interfaces` 目录组织。
 - CLI 集成测试清除所有 `RELAY_KNOWLEDGE_*`、`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY` 覆盖项，避免开发者 shell 污染测试结果。
+- CLI ingest/query/health/service 集成测试使用临时 `RELAY_KNOWLEDGE_HOME`，避免写入开发者默认数据目录。

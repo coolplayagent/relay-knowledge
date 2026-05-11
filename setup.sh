@@ -28,7 +28,7 @@ if ! command_exists rustup; then
   exit 1
 fi
 
-rustup toolchain install stable --profile minimal --component rustfmt clippy
+rustup toolchain install stable --profile minimal --component rustfmt --component clippy
 rustup component add rustfmt clippy
 load_cargo_env
 
@@ -85,5 +85,28 @@ echo "Running quality checks..."
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+
+if ! cargo llvm-cov --version >/dev/null 2>&1; then
+  echo "Installing cargo-llvm-cov..."
+  cargo install cargo-llvm-cov --locked
+fi
+cargo llvm-cov --all-targets --all-features --fail-under-lines 90
+
+if command_exists npm; then
+  echo "Building Web diagnostics..."
+  npm install --prefix web
+  npm run build --prefix web
+else
+  echo "[Warning] npm not found. Skipping Web build."
+fi
+
+if command_exists uv; then
+  echo "Running browser integration gate..."
+  uv sync --extra dev --no-default-groups
+  uv run --extra dev python -m playwright install --with-deps chromium
+  uv run --extra dev pytest tests/browser
+else
+  echo "[Warning] uv not found. Skipping browser integration gate."
+fi
 
 echo "Environment setup completed."

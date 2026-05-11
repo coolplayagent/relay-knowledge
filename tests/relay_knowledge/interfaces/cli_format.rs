@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use relay_knowledge::{
     env::{
@@ -12,7 +13,7 @@ use relay_knowledge::{
         RELAY_KNOWLEDGE_SERVICE_DIR, RELAY_KNOWLEDGE_STATE_DIR, RELAY_KNOWLEDGE_TEMP_DIR,
         SSL_VERIFY, SSL_VERIFY_LOWER,
     },
-    interfaces::cli::{CliCommand, OutputFormat},
+    interfaces::cli::{CliAction, CliCommand, OutputFormat},
 };
 use serde_json::Value;
 
@@ -26,6 +27,7 @@ fn parses_cli_output_formats() {
     assert_eq!(text.format, OutputFormat::Text);
     assert_eq!(json.format, OutputFormat::Json);
     assert_eq!(streaming_json.format, OutputFormat::StreamingJson);
+    assert_eq!(text.action, CliAction::Status);
 }
 
 #[test]
@@ -97,12 +99,101 @@ fn binary_outputs_streaming_json_as_ndjson_events() {
     assert_eq!(events[2]["event"], "item");
     assert_eq!(events[2]["project_name"], "relay-knowledge");
     assert_eq!(events[2]["runtime"]["http_bind"], "127.0.0.1:8791");
+    assert!(events[2]["payload"].is_null());
     assert_eq!(events[3]["event"], "completed");
 
     for event in events {
         assert_eq!(event["operation"], "project.status");
         assert_eq!(event["metadata"]["graph_version"], 0);
     }
+}
+
+#[test]
+fn binary_ingests_queries_and_inspects_isolated_graph() {
+    let home = isolated_home("binary-ingests-queries");
+    let ingest = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args([
+            "ingest",
+            "--source",
+            "docs",
+            "--content",
+            "Rust async services isolate blocking SQLite work",
+            "--entity",
+            "Rust",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("ingest command should run");
+
+    assert!(ingest.status.success());
+    assert!(ingest.stderr.is_empty());
+    let ingest_json: Value = serde_json::from_slice(&ingest.stdout).expect("ingest JSON");
+    assert_eq!(ingest_json["metadata"]["graph_version"], 1);
+    assert_eq!(ingest_json["receipt"]["evidence_count"], 1);
+    assert_eq!(ingest_json["indexes"].as_array().expect("indexes").len(), 3);
+
+    let query = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args([
+            "query",
+            "--query",
+            "SQLite",
+            "--source",
+            "docs",
+            "--freshness",
+            "wait-until-fresh",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("query command should run");
+
+    assert!(query.status.success());
+    assert!(query.stderr.is_empty());
+    let query_json: Value = serde_json::from_slice(&query.stdout).expect("query JSON");
+    assert_eq!(query_json["metadata"]["graph_version"], 1);
+    assert_eq!(query_json["metadata"]["stale"], false);
+    assert_eq!(query_json["results"].as_array().expect("results").len(), 1);
+
+    let inspect = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args(["graph", "inspect", "--format", "json"])
+        .output()
+        .expect("inspect command should run");
+
+    assert!(inspect.status.success());
+    let inspect_json: Value = serde_json::from_slice(&inspect.stdout).expect("inspect JSON");
+    assert_eq!(inspect_json["graph"]["entity_count"], 1);
+    assert_eq!(inspect_json["graph"]["evidence_count"], 1);
+}
+
+#[test]
+fn binary_reports_health_and_service_status() {
+    let home = isolated_home("binary-health-service");
+
+    let health = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args(["health", "--format", "json"])
+        .output()
+        .expect("health command should run");
+
+    assert!(health.status.success());
+    let health_json: Value = serde_json::from_slice(&health.stdout).expect("health JSON");
+    assert_eq!(health_json["healthy"], true);
+    assert_eq!(health_json["graph"]["graph_version"], 0);
+
+    let service = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args(["service", "doctor", "--format", "json"])
+        .output()
+        .expect("service command should run");
+
+    assert!(service.status.success());
+    let service_json: Value = serde_json::from_slice(&service.stdout).expect("service JSON");
+    assert_eq!(service_json["service_name"], "relay-knowledge");
+    assert_eq!(service_json["mode"], "disabled");
 }
 
 fn relay_command() -> Command {
@@ -140,4 +231,14 @@ fn relay_command() -> Command {
     }
 
     command
+}
+
+fn isolated_home(test_name: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("relay-knowledge-{test_name}-{nanos}"));
+
+    path.display().to_string()
 }

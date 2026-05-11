@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 jobs:
-  rust-quality:
+  format:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
@@ -35,14 +35,94 @@ jobs:
       - name: Format gate
         run: cargo fmt --all -- --check
 
+  clippy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+
       - name: Clippy gate
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Test suite
+  unit-test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Unit and integration test suite
         run: cargo test --all-targets --all-features
+
+  coverage:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: Unit coverage gate
+        run: cargo llvm-cov --all-targets --all-features --fail-under-lines 90
+
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
 
       - name: Build
         run: cargo build --all-targets --all-features
 
       - name: Verify repository is unchanged after checks
         run: git diff --exit-code
+
+  browser-integration:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build Web diagnostics
+        run: npm run build
+        working-directory: web
+
+      - name: Install browser test dependencies
+        run: uv sync --extra dev --no-default-groups
+
+      - name: Install Playwright Chromium
+        run: uv run --extra dev python -m playwright install --with-deps chromium
+
+      - name: Browser integration gate
+        run: uv run --extra dev pytest tests/browser

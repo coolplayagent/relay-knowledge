@@ -13,7 +13,7 @@ v1 的架构目标:
 
 1. **统一 API 层**: CLI、Web、未来服务接口共享同一套 request / response / error / stream event 类型。
 2. **后端少框架**: domain、application、api 不依赖 Web 框架；HTTP server 只作为最外层 adapter。
-3. **Web 先进但克制**: Web v1 使用 React + Vite + TypeScript，组件只负责交互和渲染，通过 API client 调用统一 API。
+3. **Web 先进但克制**: Web v1 使用轻量 TypeScript 静态前端，组件只负责交互和渲染，通过 API client 调用统一 API。
 4. **CLI 可机器消费**: CLI 支持 `--format text|json|streaming-json`，其中 `streaming-json` 使用 NDJSON。
 5. **可测试分层**: domain 和 application 使用 Rust 单元测试；CLI 用二进制集成测试；Web 用 API client mock、组件测试和关键端到端测试。
 
@@ -83,9 +83,32 @@ API 层负责定义稳定的交互边界，而不是承载业务逻辑。
 v1 已落地的最小 API:
 
 - async `RelayKnowledgeService::project_status`
+- async `RelayKnowledgeService::ingest`
+- async `RelayKnowledgeService::retrieve_context`
+- async `RelayKnowledgeService::inspect_graph`
+- async `RelayKnowledgeService::refresh_indexes`
+- async `RelayKnowledgeService::health`
+- async `RelayKnowledgeService::service_status`
 - CLI `--format text`
 - CLI `--format json`
 - CLI `--format streaming-json`
+
+当前 CLI 已接入这些命令:
+
+- `status`
+- `ingest --source <scope> --content <text> [--entity <label>]`
+- `query --query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]`
+- `graph inspect`
+- `index refresh [--kind bm25|semantic|vector]`
+- `health`
+- `service status|doctor`
+
+`ingest`、`query`、`graph inspect`、`index refresh`、`health` 和 `service doctor`
+都通过统一 API contract 调用 application service，不直接访问 storage 或 index metadata。
+`query` 的可选 `source_scope` 在 application service 边界按 domain 规则验证和归一化；
+`graph-only` freshness 路径不得读取或刷新 index metadata，这样索引元数据损坏时仍可返回图事实查询。
+未显式提供 evidence ID 时，application service 只能从已验证的 source scope 和 trim 后
+content 生成稳定 ID；哈希输入必须使用无歧义编码，不能用可出现在字段值中的分隔符拼接。
 
 ## 4. CLI 输出协议
 
@@ -117,6 +140,11 @@ CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async applica
 ## 5. Web 架构
 
 Web v1 默认采用 React + Vite + TypeScript。Web 是交互层，不是第二套业务后端。
+当前 Web diagnostics 工程位于 `web/`，使用 TypeScript 静态前端，通过前端 typed
+contract 复用 `ProjectStatusResponse`、`HealthResponse` 和 index status 字段形状。
+Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/health`，不得在前端
+伪造健康状态、图版本、运行时路径或索引元数据。浏览器测试只验证交互层能渲染统一
+contract，不把业务逻辑放入前端。
 
 推荐目录:
 
@@ -149,5 +177,9 @@ web/
 1. 扩展 `api` 模块，补 ingest、query、retrieval、health 的 request / response / stream event。
 2. 把 storage、indexing、event runtime、observability 接入 application service builder。
 3. 增加真实 CLI 子命令，并保持所有子命令支持 `--format`。
-4. 新增 Web 工程时使用 React + Vite + TypeScript，并从共享 API contract 生成或手写 typed client。
+4. 新增 Web 工程时使用轻量 TypeScript 前端，并从共享 API contract 生成或手写 typed client。
 5. 引入 HTTP/MCP 时只新增 adapter，不改变 application service 的行为语义。
+
+当前 PR CI 已拆分 Rust format、clippy、unit/integration tests、coverage、build 和
+Playwright Chromium browser integration gate。浏览器 gate 先构建 Web diagnostics，
+再安装 Chromium 并运行 `tests/browser`。
