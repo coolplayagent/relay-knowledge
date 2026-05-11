@@ -10,3 +10,4 @@
 ## Specs
 
 - [Code-Review-Graph 能力规格文档](specs/code-review-graph-capabilities.md): 代码知识图谱系统能力规格与参考分析。
+- [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
