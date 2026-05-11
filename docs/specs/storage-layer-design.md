@@ -18,6 +18,16 @@ v1 建议采用 **SQLite-first**:
 3. **测试成本低**: 临时文件数据库、内存数据库和 deterministic fixture 都容易接入 CI。
 4. **可替换**: 所有业务逻辑通过 Rust trait 访问存储，不暴露 SQLite SQL 到 domain、retrieval 或 interface 层。
 
+当前实现已经落地 SQLite-first 的最小生产路径:
+
+- `storage` 模块定义 `GraphStore`、`MutationLogStore`、`IndexStore` 和 `KnowledgeStore` contract。
+- `SqliteGraphStore` 负责 evidence、entity、mutation log、graph version 和 index metadata。
+- `indexing` 模块负责 index refresh plan 和 index family 去重选择。
+- `retrieval` 模块负责 query 文本、limit 和 freshness policy 的检索计划校验。
+- application service 默认在 `paths.data_dir/relay-knowledge.sqlite` 打开 SQLite 数据库。
+- SQLite 阻塞调用通过 `tokio::task::spawn_blocking` 隔离，不在 async executor 上运行。
+- CLI ingest/query/graph/index/health 命令只调用 application service，不直接访问 SQLite。
+
 核心判断:
 
 - **GraphStore 是事实真源，IndexStore 是派生读模型**。BM25、向量、语义摘要、社区摘要都不能覆盖图事实本身。
@@ -84,6 +94,10 @@ Extracted facts
 - 索引失败不能回滚图写入，但必须记录 stale 状态和失败原因。
 - 写入 API 接收批次，避免每条事实单独开事务。
 
+当前最小实现中，evidence 写入、entity upsert、mutation log 追加和 graph version bump
+在同一个 SQLite transaction 内完成。提交会把全部 index metadata 标记为 stale；
+`refresh_indexes` 和 `ingest` 后置刷新会把指定 index family 标记到当前 graph version。
+
 ### 2.3 读取路径
 
 ```text
@@ -97,9 +111,22 @@ Query request
 设计要求:
 
 - 所有查询结果都携带 `graph_version`。
+- 存储查询必须按请求中的 `graph_version` 快照过滤事实，不能在同一个响应中混入更新版本写入的数据。
 - 经过索引的查询同时携带对应 `index_version` 和 `indexed_graph_version`。
 - 当索引落后于图版本时，调用方可选择 `allow_stale`、`wait_until_fresh` 或 `graph_only` 降级。
 - 遍历查询必须有 hop、节点数、边数和耗时预算。
+
+当前 SQLite 搜索实现会读取指定 graph snapshot 内的所有 evidence 候选并在评分后按
+请求 limit 截断，避免先按“最新 N 条”裁剪导致旧但相关的证据被跳过。持久化 entity
+ID 使用固定哈希算法从规范化 label 生成，mutation receipt 中的 entity count 记录本次
+事务实际链接到的唯一 entity ID 数。
+Index metadata 必须保持单调: 较旧的 refresh completion 不能覆盖更新的
+`indexed_graph_version`。缺失或未知的 `index_status` kind 属于存储元数据损坏，
+未知的 state 也必须作为 storage error 暴露，而不是映射成默认 BM25 或普通 stale
+状态。更新 evidence 的实体链接后必须清理不再被任何 evidence 引用的 orphan entity。
+检索读取 entity label 时不得依赖分隔符拼接/拆分；label 可以包含控制字符，存储层
+必须按行读取并保持原值。相同 score 的检索结果必须使用稳定 tie-breaker，避免同一
+输入在不同执行计划下返回不同截断子集。
 
 ## 3. 核心接口
 

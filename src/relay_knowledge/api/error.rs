@@ -7,6 +7,8 @@ use super::ApiMetadata;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     InvalidArgument,
+    StorageUnavailable,
+    Timeout,
     Internal,
 }
 
@@ -27,5 +29,30 @@ impl ApiError {
             message: message.into(),
             metadata: None,
         }
+    }
+
+    /// Creates a storage boundary error without exposing backend internals.
+    pub fn storage_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            error_kind: ErrorKind::StorageUnavailable,
+            message: message.into(),
+            metadata: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_stable_error_shapes() {
+        let invalid = ApiError::invalid_argument("bad input");
+        let storage = ApiError::storage_unavailable("database busy");
+
+        assert_eq!(invalid.error_kind, ErrorKind::InvalidArgument);
+        assert_eq!(invalid.message, "bad input");
+        assert_eq!(storage.error_kind, ErrorKind::StorageUnavailable);
+        assert_eq!(storage.message, "database busy");
     }
 }

@@ -29,4 +29,22 @@ impl ApiMetadata {
             stale: false,
         }
     }
+
+    /// Builds response metadata for operations that used derived indexes.
+    pub fn indexed(
+        context: &RequestContext,
+        graph_version: GraphVersion,
+        index_version: Option<u64>,
+        indexed_graph_version: Option<GraphVersion>,
+        stale: bool,
+    ) -> Self {
+        Self {
+            trace_id: context.trace_id.clone(),
+            request_id: context.request_id.clone(),
+            graph_version: graph_version.get(),
+            index_version,
+            indexed_graph_version: indexed_graph_version.map(GraphVersion::get),
+            stale,
+        }
+    }
 }

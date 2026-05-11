@@ -218,6 +218,11 @@ Rust 默认要求:
 - 浏览器集成测试必须覆盖关键 Web/API 交互路径、流式输出、错误状态、超时/取消、服务健康和可观测诊断入口。
 - Playwright Chromium 安装失败、浏览器集成测试失败或测试环境无法启动，都必须阻塞 PR。
 - CI 不能只跑 `cargo test` 或只跑端到端测试；必须显式包含 UT gate 和 integration gate。
+
+当前 PR workflow 已显式拆分 format、clippy、unit/integration test、coverage、build
+和 browser integration gate。coverage gate 使用 `cargo llvm-cov --all-targets --all-features --fail-under-lines 90`。
+browser integration gate 使用 `PLAYWRIGHT_BROWSERS_PATH`、`uv sync --extra dev --no-default-groups`、
+`uv run --extra dev python -m playwright install --with-deps chromium` 和 `uv run --extra dev pytest tests/browser`。
 - 集成测试失败、Playwright Chromium 浏览器测试失败或 UT 覆盖率不达标，都必须阻塞合并。
 
 禁止把 Web/API/诊断界面改动以“暂无前端”或“临时页面”名义绕过浏览器集成测试门禁。

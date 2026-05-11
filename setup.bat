@@ -19,7 +19,7 @@ if %errorlevel% neq 0 (
     set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 )
 
-rustup toolchain install stable --profile minimal --component rustfmt clippy
+rustup toolchain install stable --profile minimal --component rustfmt --component clippy
 if %errorlevel% neq 0 (
     echo [Error] Rust toolchain setup failed.
     exit /b 1
@@ -83,5 +83,39 @@ if %errorlevel% neq 0 exit /b 1
 
 cargo test --all-targets --all-features
 if %errorlevel% neq 0 exit /b 1
+
+cargo llvm-cov --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing cargo-llvm-cov...
+    cargo install cargo-llvm-cov --locked
+    if %errorlevel% neq 0 exit /b 1
+)
+
+cargo llvm-cov --all-targets --all-features --fail-under-lines 90
+if %errorlevel% neq 0 exit /b 1
+
+where npm >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Building Web diagnostics...
+    npm install --prefix web
+    if %errorlevel% neq 0 exit /b 1
+    npm run build --prefix web
+    if %errorlevel% neq 0 exit /b 1
+) else (
+    echo [Warning] npm not found. Skipping Web build.
+)
+
+where uv >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Running browser integration gate...
+    uv sync --extra dev --no-default-groups
+    if %errorlevel% neq 0 exit /b 1
+    uv run --extra dev python -m playwright install --with-deps chromium
+    if %errorlevel% neq 0 exit /b 1
+    uv run --extra dev pytest tests/browser
+    if %errorlevel% neq 0 exit /b 1
+) else (
+    echo [Warning] uv not found. Skipping browser integration gate.
+)
 
 echo Environment setup completed.

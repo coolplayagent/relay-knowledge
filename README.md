@@ -27,11 +27,35 @@ This is a Rust project. Install Rust through `rustup`, then run:
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 cargo run
 cargo run -- --format json
 ```
 
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
+SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
+
+Current CLI commands:
+
+```bash
+cargo run -- status --format json
+cargo run -- ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
+cargo run -- query --query SQLite --freshness wait-until-fresh --format json
+cargo run -- graph inspect --format json
+cargo run -- index refresh --kind bm25 --format json
+cargo run -- health --format json
+cargo run -- service doctor --format json
+```
+
+Web diagnostics and browser integration checks:
+
+```bash
+npm install --prefix web
+npm run build --prefix web
+uv sync --extra dev --no-default-groups
+uv run --extra dev python -m playwright install --with-deps chromium
+uv run --extra dev pytest tests/browser
+```
 
 Optional local pre-commit checks:
 

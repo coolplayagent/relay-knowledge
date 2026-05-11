@@ -573,4 +573,117 @@ mod tests {
             PathBuf::from("/shared-temp/relay-knowledge")
         );
     }
+
+    #[test]
+    fn resolves_macos_application_support_paths() {
+        let environment = PlatformEnvironment {
+            platform: PlatformKind::Macos,
+            home_dir: Some(PathBuf::from("/Users/alice")),
+            xdg_config_home: None,
+            xdg_data_home: None,
+            xdg_state_home: None,
+            xdg_cache_home: None,
+            xdg_runtime_dir: None,
+            app_data: None,
+            local_app_data: None,
+            temp_dir: None,
+        };
+
+        let paths =
+            RuntimePaths::resolve(&environment, &PathEnvOverrides::default()).expect("mac paths");
+
+        assert_eq!(
+            paths.config_dir,
+            PathBuf::from("/Users/alice/Library/Application Support/relay-knowledge/config")
+        );
+        assert_eq!(
+            paths.cache_dir,
+            PathBuf::from("/Users/alice/Library/Caches/relay-knowledge")
+        );
+        assert_eq!(paths.temp_dir, PathBuf::from("/tmp/relay-knowledge"));
+    }
+
+    #[test]
+    fn macos_requires_home_directory() {
+        let environment = PlatformEnvironment {
+            platform: PlatformKind::Macos,
+            home_dir: None,
+            xdg_config_home: None,
+            xdg_data_home: None,
+            xdg_state_home: None,
+            xdg_cache_home: None,
+            xdg_runtime_dir: None,
+            app_data: None,
+            local_app_data: None,
+            temp_dir: None,
+        };
+
+        let error = RuntimePaths::resolve(&environment, &PathEnvOverrides::default())
+            .expect_err("missing HOME should fail");
+
+        assert_eq!(error.purpose, PathPurpose::Home);
+        assert_eq!(
+            error.to_string(),
+            "cannot resolve home directory because HOME is unavailable"
+        );
+    }
+
+    #[test]
+    fn windows_falls_back_to_home_appdata_paths() {
+        let environment = PlatformEnvironment {
+            platform: PlatformKind::Windows,
+            home_dir: Some(PathBuf::from("/Users/Alice")),
+            xdg_config_home: None,
+            xdg_data_home: None,
+            xdg_state_home: None,
+            xdg_cache_home: None,
+            xdg_runtime_dir: None,
+            app_data: None,
+            local_app_data: None,
+            temp_dir: None,
+        };
+
+        let paths = RuntimePaths::resolve(&environment, &PathEnvOverrides::default())
+            .expect("windows fallback should resolve");
+
+        assert_eq!(
+            paths.config_dir,
+            PathBuf::from("/Users/Alice/AppData/Roaming/relay-knowledge")
+        );
+        assert_eq!(
+            paths.data_dir,
+            PathBuf::from("/Users/Alice/AppData/Local/relay-knowledge/data")
+        );
+        assert_eq!(
+            paths.temp_dir,
+            PathBuf::from("/Users/Alice/AppData/Local/relay-knowledge/tmp")
+        );
+    }
+
+    #[test]
+    fn per_directory_overrides_replace_defaults() {
+        let overrides = PathEnvOverrides {
+            config_dir: Some(PathBuf::from("/custom/config")),
+            data_dir: Some(PathBuf::from("/custom/data")),
+            state_dir: Some(PathBuf::from("/custom/state")),
+            cache_dir: Some(PathBuf::from("/custom/cache")),
+            log_dir: Some(PathBuf::from("/custom/log")),
+            temp_dir: Some(PathBuf::from("/custom/tmp")),
+            runtime_dir: Some(PathBuf::from("/custom/run")),
+            service_dir: Some(PathBuf::from("/custom/service")),
+            ..PathEnvOverrides::default()
+        };
+
+        let paths = RuntimePaths::resolve(&unix_environment(), &overrides)
+            .expect("overrides should resolve");
+
+        assert_eq!(paths.config_dir, PathBuf::from("/custom/config"));
+        assert_eq!(paths.data_dir, PathBuf::from("/custom/data"));
+        assert_eq!(paths.state_dir, PathBuf::from("/custom/state"));
+        assert_eq!(paths.cache_dir, PathBuf::from("/custom/cache"));
+        assert_eq!(paths.log_dir, PathBuf::from("/custom/log"));
+        assert_eq!(paths.temp_dir, PathBuf::from("/custom/tmp"));
+        assert_eq!(paths.runtime_dir, PathBuf::from("/custom/run"));
+        assert_eq!(paths.service_dir, PathBuf::from("/custom/service"));
+    }
 }
