@@ -1,5 +1,6 @@
-fn main() {
-    match relay_knowledge::interfaces::cli::run(std::env::args().skip(1)) {
+#[tokio::main]
+async fn main() {
+    match relay_knowledge::interfaces::cli::run(std::env::args().skip(1)).await {
         Ok(output) => print!("{output}"),
         Err(error) => {
             eprintln!("{error}");

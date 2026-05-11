@@ -1,5 +1,3 @@
-//! Pure domain types.
-
 use serde::{Deserialize, Serialize};
 
 /// A minimal entity model used by early graph-building code.
@@ -29,21 +27,15 @@ impl KnowledgeEntity {
     }
 }
 
-/// Monotonic graph state version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct GraphVersion(u64);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl GraphVersion {
-    /// The empty graph version used before storage is attached.
-    pub const ZERO: Self = Self(0);
+    #[test]
+    fn creates_entity_with_id_and_label() {
+        let entity = KnowledgeEntity::new("entity:rust", "Rust");
 
-    /// Creates a graph version from its numeric representation.
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the numeric graph version.
-    pub const fn get(self) -> u64 {
-        self.0
+        assert_eq!(entity.id(), "entity:rust");
+        assert_eq!(entity.label(), "Rust");
     }
 }

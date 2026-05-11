@@ -12,10 +12,10 @@
 - `paths`: 唯一解析运行态目录的模块，负责 config、data、state、cache、log、temp、runtime 和 service 目录。
 - `net`: 唯一承载网络配置和准入策略的模块，当前包含 `net::http` 的 HTTP 运行时配置和 `net::qos` 的资源预算策略。
 
-应用服务在启动时读取 typed environment snapshot，并把解析后的路径和网络预算暴露在 `project.status` JSON 响应里。路径配置保持启动时解析结果；网络配置通过 `net::NetworkRuntime` 支持刷新后即时生效。文本 CLI 输出仍保持只输出项目名。
+应用服务通过 async public API 读取 typed environment snapshot，并把解析后的路径和网络预算暴露在 `project.status` JSON 响应里。路径配置保持启动时解析结果；网络配置通过 `net::NetworkRuntime` 支持刷新后即时生效。文本 CLI 输出仍保持只输出项目名，CLI 二进制入口由 Tokio runtime 驱动。
 
 Rust 源码集中在 `src/relay_knowledge/` 下，`Cargo.toml` 通过显式 `lib` 和 `bin`
-路径指向 `src/relay_knowledge/lib.rs` 与 `src/relay_knowledge/main.rs`，避免把模块文件直接散放在 `src/` 根目录。`env`、`paths` 和 `net` 都是独立目录模块，分别位于 `src/relay_knowledge/env/`、`src/relay_knowledge/paths/` 和 `src/relay_knowledge/net/`。
+路径指向 `src/relay_knowledge/lib.rs` 与 `src/relay_knowledge/main.rs`，避免把模块文件直接散放在 `src/` 根目录。`api`、`application`、`domain`、`env`、`paths` 和 `net` 都是独立目录模块；`project` 模块只承载 `PROJECT_NAME` 这类项目身份常量。
 
 ## 2. 环境变量
 
@@ -110,7 +110,7 @@ Windows 默认目录:
 
 ## 4. 网络和 QoS
 
-`net::http` 目前只定义配置与验证，不启动 socket、线程或后台循环。后续 HTTP server/client 必须在该边界内接入成熟 async runtime，并在分配连接、请求或队列资源前调用 `net::qos`。
+`net::http` 目前只定义配置与验证，不启动 socket、线程或后台循环。后续 HTTP server/client 必须在该边界内接入 Tokio 或同等级成熟 async runtime，并在分配连接、请求或队列资源前调用 `net::qos`。
 
 `net::NetworkRuntime` 是可刷新网络配置句柄。长运行进程启动时用 typed environment snapshot 构建初始配置；当环境变量或配置来源发生变化时，调用 `refresh_from_process_environment` 或 `refresh_from_environment` 会重新验证 proxy、no-proxy、TLS verification、HTTP budget 和 QoS budget，并替换 net 模块中的当前配置。HTTP client/server adapter 必须读取该句柄的 `current` 配置，不能缓存旧的环境变量字符串。
 
@@ -161,6 +161,15 @@ QoS admission 使用当前 snapshot 判断:
 
 `--format streaming-json` 的 `item` event 同样包含 `runtime` 字段。启动配置无效时，CLI 退出码为 `1`，并输出 `failed to load runtime configuration: ...`。
 
+当前已落地的 application 和 CLI 边界是 async:
+
+- `RelayKnowledgeService::from_process_environment`
+- `RelayKnowledgeService::from_environment`
+- `RelayKnowledgeService::refresh_network_from_process_environment`
+- `RelayKnowledgeService::refresh_network_from_environment`
+- `RelayKnowledgeService::project_status`
+- `interfaces::cli::run`
+
 ## 6. 测试策略
 
 基础层使用不触碰开发者本地状态的确定性单元测试:
@@ -170,5 +179,6 @@ QoS admission 使用当前 snapshot 判断:
 - `net::http` 测试 bind address hostname/IP literal、timeout、body budget、proxy URL、no-proxy 规则和 port `0` 拒绝。
 - `net::qos` 测试准入、连接预算、请求预算、队列预算和零预算拒绝。
 - `net::NetworkRuntime` 测试 env snapshot refresh 后当前网络配置即时变化。
+- application service 测试使用 Tokio test runtime 覆盖 async 配置加载、状态输出和网络刷新。
 - 集成测试集中在 `tests/relay_knowledge/`，并按 `application`、`domain`、`interfaces` 目录组织。
 - CLI 集成测试清除所有 `RELAY_KNOWLEDGE_*`、`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY` 覆盖项，避免开发者 shell 污染测试结果。

@@ -4,8 +4,8 @@ use relay_knowledge::{
     env::{EnvironmentConfig, PlatformKind},
 };
 
-#[test]
-fn cli_and_web_can_use_the_same_application_service() {
+#[tokio::test]
+async fn cli_and_web_can_use_the_same_application_service() {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -15,13 +15,14 @@ fn cli_and_web_can_use_the_same_application_service() {
         ],
     )
     .expect("environment should parse");
-    let service =
-        RelayKnowledgeService::from_environment(&environment).expect("service should compose");
+    let service = RelayKnowledgeService::from_environment(&environment)
+        .await
+        .expect("service should compose");
     let cli_context = RequestContext::with_ids(InterfaceKind::Cli, "req-cli", "trace-cli");
     let web_context = RequestContext::with_ids(InterfaceKind::Web, "req-web", "trace-web");
 
-    let cli_response = service.project_status(cli_context);
-    let web_response = service.project_status(web_context);
+    let cli_response = service.project_status(cli_context).await;
+    let web_response = service.project_status(web_context).await;
 
     assert_eq!(cli_response.project_name, "relay-knowledge");
     assert_eq!(web_response.project_name, "relay-knowledge");
