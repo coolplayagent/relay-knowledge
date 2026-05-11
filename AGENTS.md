@@ -10,6 +10,7 @@ Use the existing Rust layout:
 - `src/lib.rs`: reusable knowledge graph primitives.
 - `src/main.rs`: default CLI entry point.
 - `tests/`: integration and smoke tests.
+- `docs/specs/engineering-hard-constraints.md`: hard constraints for shallow functions, dead code, documentation completeness, foundational modules, acyclic dependencies, max file length, unit-test coverage, event-driven HTTP, QoS, and Playwright Chromium browser integration-test readiness.
 - `docs/specs/installation-and-release.md`: installation, packaging, publishing, service deployment, upgrade, and uninstall requirements.
 - `.github/workflows/pr-checks.yml`: CI quality gates.
 
@@ -43,6 +44,13 @@ Document required services, such as graph databases or local containers, in `REA
 - Background pipelines must use bounded queues, resource budgets, backpressure, timeouts, cancellation, retry backoff, persistent cursors or leases, and dead-letter handling so spikes cannot consume unbounded CPU, memory, or disk.
 - CPU-heavy or disk-heavy work such as embedding, OCR, large-file parsing, full index rebuilds, WAL checkpointing, and compaction must run behind explicit worker or maintenance boundaries and must not block query hot paths or async runtime executors.
 - Design ingestion, indexing, and maintenance for crash recovery and hung-task recovery. Startup reconcilers should replay missed index refresh work, recover expired task leases, report index lag, and keep graph facts and derived indexes consistent by version.
+- Follow `docs/specs/engineering-hard-constraints.md` as a hard architecture contract, not optional guidance.
+- Do not introduce circular dependencies between crates, modules, traits, services, adapters, or configuration objects. Keep the dependency graph acyclic; when two modules need shared types or behavior, extract the contract into the lower layer or a narrowly scoped contract module.
+- Provide foundational modules with strict ownership boundaries: `env` owns environment variable loading/parsing/validation, `paths` owns platform paths and runtime directories, and `net` owns all network capabilities including HTTP.
+- Do not read environment variables outside `env`, do not construct runtime/config/data/log/cache paths outside `paths`, and do not create sockets, HTTP clients, HTTP servers, listeners, or network loops outside `net`, except for tightly scoped tests or bootstrap code with documented reasons.
+- HTTP must live under `net::http` and be implemented through non-blocking operating-system event mechanisms such as epoll, kqueue, or IOCP through a mature async runtime or HTTP library. Do not implement HTTP with blocking sockets, one-thread-per-connection designs, busy polling, or unmanaged background loops.
+- Network and HTTP entry points must support high-concurrency operation with bounded memory, connection budgets, request budgets, timeouts, cancellation, backpressure, graceful shutdown, and observability for connection counts, queue depth, drops, rate limits, and timeouts.
+- Provide a `net::qos` module for admission control, per-source or per-tenant limits, priorities, resource budgets, overload behavior, and QoS metrics. All inbound and outbound network work must pass through QoS policy before consuming unbounded resources.
 
 ## Release & Installation Constraints
 
@@ -60,11 +68,25 @@ Use idiomatic Rust conventions: four-space indentation, `snake_case` for functio
 
 Configuration and documentation files should use descriptive names, for example `docs/graph-schema.md` or `examples/load_dataset.rs`.
 
+No tracked file may exceed 1000 lines. Split Rust modules, tests, docs, scripts, and workflow files by responsibility before they cross that limit; do not use dense formatting or unrelated aggregation to bypass the cap.
+
+Do not add shallow functions. A function must enforce an invariant, perform meaningful validation/transformation, isolate an external boundary, manage resource lifecycle, map errors, add observability, or coordinate a real workflow. Prefer constants, typed config, or direct calls over pass-through wrappers that only rename another call.
+
+Do not add or keep dead code. Remove unused modules, functions, types, fields, feature flags, fixtures, commented-out implementations, TODO stubs, and speculative extension points. New public APIs need a production caller or a documented spec-backed extension point with tests. Do not hide dead code with `#[allow(dead_code)]` or similar attributes except for generated/platform/protocol cases with an explicit removal condition.
+
+Documentation completeness is mandatory. Any change that adds or changes public modules, configuration, environment variables, paths, network behavior, HTTP behavior, QoS policy, failure modes, install/runtime directories, diagnostics, or service operation must update the matching docs and README guidance.
+
 ## Testing Guidelines
 
 Place unit tests next to the code they exercise using `#[cfg(test)]`. Put cross-module tests in `tests/`. Name tests after observable behavior, such as `creates_node_when_entity_is_new`.
 
 For graph/database behavior, prefer deterministic fixtures and isolate tests from developer-local state. If tests require an external service, provide setup instructions and sensible defaults.
+
+Tests for foundational modules must cover environment parsing errors, platform path resolution, network timeout/backpressure behavior, QoS admission/limit decisions, and HTTP cancellation or graceful shutdown where applicable.
+
+Unit-test line coverage must stay above 90%. Use `cargo llvm-cov` or an equivalent auditable coverage gate for Rust, and add focused unit tests for invariants, error branches, boundary values, and async cancellation/backpressure behavior instead of relying on broad integration tests.
+
+Testing must be layered for the whole project: keep a distinct UT gate and a distinct integration-test gate. The integration-test gate must mirror the `relay-teams` browser pattern by installing Playwright Chromium, for example `uv run --extra dev python -m playwright install --with-deps chromium`, before browser integration tests and failing CI when browser setup or integration tests fail.
 
 ## Commit & Pull Request Guidelines
 
