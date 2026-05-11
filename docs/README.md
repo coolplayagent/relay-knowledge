@@ -9,7 +9,7 @@
 
 ## Specs
 
-- [Code-Review-Graph 能力规格文档](specs/code-review-graph-capabilities.md): 代码知识图谱系统能力规格与参考分析。
+- [代码知识图谱能力参考](specs/knowledge-graph-capability-reference.md): 代码知识图谱系统能力规格与参考分析。
 - [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
 - [安装部署与发布规格](specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
 - [工程硬约束](specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、HTTP 事件驱动、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。
