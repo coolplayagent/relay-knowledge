@@ -506,8 +506,4 @@ dependencies = [
 | **Web API** | 仅有 MCP (stdio/HTTP) | 构建完整的 REST/gRPC Web API |
 | **知识类型** | 仅代码结构 | 扩展到文档、Issue、PR 讨论、ADR、运行时拓扑 |
 | **时间维度** | better fork 有基础时间列 | 构建完整的时间旅行查询 + 差分分析 |
-| **多仓库联邦** | 基础 TOML 注册表 | 跨仓库调用解析、统一图谱查询、Blast Radius 跨仓库分析 |<｜end▁of▁thinking｜>
-
-<｜｜DSML｜｜tool_calls>
-<｜｜DSML｜｜invoke name="shell">
-<｜｜DSML｜｜parameter name="command" string="true">wc -l /opt/workspace/relay-knowledge/docs/code-review-graph-capabilities.md
+| **多仓库联邦** | 基础 TOML 注册表 | 跨仓库调用解析、统一图谱查询、Blast Radius 跨仓库分析 |
