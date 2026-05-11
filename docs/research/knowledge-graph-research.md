@@ -105,7 +105,7 @@ BM25 来自 Okapi/TREC 传统信息检索体系，仍是关键词精确匹配的
 
 ### 3.2 最小可用图模型
 
-当前 `src/lib.rs` 只有 `KnowledgeEntity { id, label }`，可作为最小起点，但不足以承载研究结论。建议演进为:
+当前 `src/relay_knowledge/lib.rs` 只有 `KnowledgeEntity { id, label }`，可作为最小起点，但不足以承载研究结论。建议演进为:
 
 - `Entity`: `id`、`kind`、`label`、`aliases`、`properties`、`evidence_refs`、`confidence`、`version_range`。
 - `Relation`: `id`、`kind`、`source_id`、`target_id`、`properties`、`evidence_refs`、`confidence`、`version_range`。

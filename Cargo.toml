@@ -7,6 +7,13 @@ description = "Graph-database-based knowledge graph project."
 license = "MIT"
 repository = "https://github.com/coolplayagent/relay-knowledge"
 
+[lib]
+path = "src/relay_knowledge/lib.rs"
+
+[[bin]]
+name = "relay-knowledge"
+path = "src/relay_knowledge/main.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
