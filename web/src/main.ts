@@ -22,6 +22,8 @@ type Diagnostics = {
   health: HealthResponse;
 };
 
+type Tone = "good" | "warn" | "bad";
+
 let currentDiagnostics: Diagnostics | null = null;
 
 async function renderApp() {
@@ -72,6 +74,7 @@ function sidebar(): HTMLElement {
   nav.setAttribute("aria-label", "Primary");
   nav.append(
     navLink("Status", "#status"),
+    navLink("Readiness", "#readiness"),
     navLink("Operations", "#operations"),
     navLink("Indexes", "#indexes"),
     navLink("Runtime", "#runtime")
@@ -94,6 +97,7 @@ function content(status: ProjectStatusResponse, health: HealthResponse): HTMLEle
   main.append(
     toolbar(status, health),
     statusSection(status, health),
+    readinessSection(status, health),
     operationsSection(status, health),
     indexesSection(health.indexes, health.metadata.graph_version),
     runtimeSection(status)
@@ -182,6 +186,89 @@ function metricItem(label: string, value: number): HTMLElement {
   item.append(textElement("dt", undefined, label), textElement("dd", undefined, String(value)));
 
   return item;
+}
+
+function readinessSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+  const section = sectionShell("readiness", "GraphRAG readiness");
+  const grid = element("div", "readiness-grid");
+  const graph = health.graph;
+  const graphVersion = health.metadata.graph_version;
+  const bm25 = health.indexes.find((index) => index.kind === "bm25");
+  const semantic = health.indexes.find((index) => index.kind === "semantic");
+  const vector = health.indexes.find((index) => index.kind === "vector");
+  const hasEvidence = graph.entity_count > 0 || graph.evidence_count > 0;
+  const hasCodeGraph = graph.code_file_count > 0 || graph.code_symbol_count > 0;
+
+  grid.append(
+    readinessItem(
+      "Evidence graph",
+      hasEvidence ? "active" : "empty",
+      hasEvidence ? "good" : "warn",
+      `${graph.entity_count} entities / ${graph.evidence_count} evidence`
+    ),
+    readinessItem(
+      "BM25 read model",
+      bm25?.state ?? "missing",
+      indexReadinessTone(bm25, graphVersion),
+      indexReadinessDetail(bm25, graphVersion)
+    ),
+    readinessItem(
+      "Semantic cursor",
+      semantic?.state ?? "missing",
+      indexReadinessTone(semantic, graphVersion),
+      indexReadinessDetail(semantic, graphVersion)
+    ),
+    readinessItem(
+      "Vector cursor",
+      vector?.state ?? "missing",
+      indexReadinessTone(vector, graphVersion),
+      indexReadinessDetail(vector, graphVersion)
+    ),
+    readinessItem(
+      "Code graph",
+      hasCodeGraph ? "indexed" : "empty",
+      hasCodeGraph ? "good" : "warn",
+      `${graph.code_file_count} files / ${graph.code_symbol_count} symbols`
+    ),
+    readinessItem(
+      "Runtime budgets",
+      health.healthy ? "ready" : "degraded",
+      health.healthy ? "good" : "warn",
+      `${status.runtime.qos_max_in_flight_requests} in-flight / ${status.runtime.qos_max_queue_depth} queue`
+    )
+  );
+  section.append(grid);
+
+  return section;
+}
+
+function readinessItem(label: string, value: string, tone: Tone, detail: string): HTMLElement {
+  const item = element("div", "readiness-item");
+  const heading = element("div", "readiness-heading");
+  heading.append(textElement("span", "readiness-label", label), statusPill(value, tone));
+  item.append(heading, textElement("div", "readiness-detail", detail));
+
+  return item;
+}
+
+function indexReadinessTone(index: IndexStatus | undefined, graphVersion: number): Tone {
+  if (!index || index.state === "failed") {
+    return "bad";
+  }
+  if (index.state === "stale" || index.state === "paused" || index.indexed_graph_version < graphVersion) {
+    return "warn";
+  }
+
+  return "good";
+}
+
+function indexReadinessDetail(index: IndexStatus | undefined, graphVersion: number): string {
+  if (!index) {
+    return "index status unavailable";
+  }
+  const lag = Math.max(0, graphVersion - index.indexed_graph_version);
+
+  return `version ${index.index_version} / lag ${lag}`;
 }
 
 function operationsSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {

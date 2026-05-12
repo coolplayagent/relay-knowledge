@@ -4,6 +4,7 @@
 
 ## Features
 
+- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、Web readiness、MCP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
 
@@ -18,6 +19,7 @@
 ## Specs
 
 - [代码知识图谱能力参考](specs/knowledge-graph-capability-reference.md): 代码知识图谱系统能力规格与参考分析。
+- [GraphRAG 产品与实现路线规格](specs/graphrag-product-and-implementation-roadmap.md): relay-knowledge 的 GraphRAG 产品边界、当前实现基线、优化措施和分阶段路线。
 - [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
 - [安装部署与发布规格](specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
 - [工程硬约束](specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、HTTP 事件驱动、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。

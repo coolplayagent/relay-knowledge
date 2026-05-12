@@ -11,6 +11,7 @@
   --green: #7ecf96;
   --amber: #d8a85f;
   --red: #dd7668;
+  --cyan: #7cb7d8;
   --focus: #d8a85f;
   color: var(--text);
   background: var(--bg);
@@ -300,6 +301,7 @@ a {
 }
 
 .metric-item,
+.readiness-item,
 .runtime-list div,
 .operation-form,
 .operation-preview,
@@ -312,6 +314,38 @@ a {
 .metric-item {
   min-width: 0;
   padding: 12px;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.readiness-item {
+  min-width: 0;
+  padding: 12px;
+}
+
+.readiness-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.readiness-label {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.readiness-detail {
+  margin-top: 8px;
+  color: var(--cyan);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 dt {
@@ -600,6 +634,7 @@ tr:last-child td {
   }
 
   .metric-grid,
+  .readiness-grid,
   .runtime-list,
   .operation-layout {
     grid-template-columns: 1fr;
