@@ -320,7 +320,7 @@ fn build_worktree_overlay_snapshot(
             }
         }
         let path = &change.path;
-        if !path_scope_allows(path, registration, selector) {
+        if !path_scope_overlaps(path, registration, selector) {
             continue;
         }
         let full_path = root.join(path);
@@ -346,7 +346,9 @@ fn build_worktree_overlay_snapshot(
         }
         if file_type.is_dir() {
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                record_worktree_status_marker(path, &mut overlay_hash_input);
+                if path_is_selected(path, registration, selector) {
+                    record_worktree_status_marker(path, &mut overlay_hash_input);
+                }
                 continue;
             }
             for nested_path in worktree_directory_files(root, path)? {
@@ -364,7 +366,9 @@ fn build_worktree_overlay_snapshot(
             continue;
         }
         if !file_type.is_file() {
-            record_worktree_status_marker(path, &mut overlay_hash_input);
+            if path_is_selected(path, registration, selector) {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+            }
             continue;
         }
         if path_is_selected(path, registration, selector) {
@@ -899,11 +903,27 @@ fn path_scope_allows(
         && path_filter_allows(path, &selector.path_filters)
 }
 
+fn path_scope_overlaps(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    path_filter_overlaps(path, &registration.path_filters)
+        && path_filter_overlaps(path, &selector.path_filters)
+}
+
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters
             .iter()
             .any(|filter| path_matches_filter(path, filter))
+}
+
+fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| path_overlaps_filter(path, filter))
 }
 
 fn language_filter_allows(path: &str, filters: &[String]) -> bool {
@@ -914,11 +934,25 @@ fn language_filter_allows(path: &str, filters: &[String]) -> bool {
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
+    let path = normalize_path_filter(path);
     let filter = normalize_path_filter(filter);
     if filter == "." {
         return true;
     }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn path_overlaps_filter(path: &str, filter: &str) -> bool {
+    let path = normalize_path_filter(path);
+    let filter = normalize_path_filter(filter);
+    if filter == "." {
+        return true;
+    }
+    !path.is_empty()
+        && !filter.is_empty()
+        && (path == filter
+            || path.starts_with(&format!("{filter}/"))
+            || filter.starts_with(&format!("{path}/")))
 }
 
 fn normalize_path_filter(filter: &str) -> &str {

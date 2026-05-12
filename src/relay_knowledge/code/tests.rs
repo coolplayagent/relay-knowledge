@@ -36,6 +36,24 @@ fn detects_supported_languages_and_filters_paths() {
     ));
     assert!(!path_is_selected("tests/lib.rs", &registration, &selector));
     assert!(!path_is_selected("src/app.py", &registration, &selector));
+
+    let file_filter_selector = CodeRepositorySelector::new(
+        "alias",
+        "HEAD",
+        vec!["src/generated/temp.rs".to_owned()],
+        vec!["rust".to_owned()],
+    )
+    .expect("selector should validate");
+    assert!(!path_scope_allows(
+        "src/generated",
+        &registration,
+        &file_filter_selector
+    ));
+    assert!(path_scope_overlaps(
+        "src/generated",
+        &registration,
+        &file_filter_selector
+    ));
 }
 
 #[test]
@@ -455,6 +473,8 @@ fn worktree_overlay_skips_modified_submodule_directories() {
             .iter()
             .all(|file| !file.path.starts_with("src/submodule/"))
     );
+    assert!(snapshot.full_replace);
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
 }
 
 #[test]
@@ -487,6 +507,8 @@ fn worktree_overlay_skips_untracked_nested_git_repositories() {
             .iter()
             .all(|file| !file.path.starts_with("src/vendor/"))
     );
+    assert!(snapshot.full_replace);
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
 }
 
 #[test]
