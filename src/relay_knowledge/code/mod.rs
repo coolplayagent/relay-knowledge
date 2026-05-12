@@ -62,15 +62,15 @@ pub fn register_repository(
     language_filters: Vec<String>,
 ) -> Result<CodeRepositoryRegistration, CodeIndexError> {
     let root = resolve_git_root(path.as_ref())?;
-    let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?
-        .unwrap_or_else(|| root.display().to_string());
     let root_identity = root.display().to_string();
+    let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?
+        .unwrap_or_else(|| root_identity.clone());
     let repository_id = stable_id("repo", [origin.as_str(), root_identity.as_str()]);
 
     CodeRepositoryRegistration::new(
         repository_id,
         alias,
-        root.display().to_string(),
+        root_identity,
         path_filters,
         language_filters,
     )
@@ -562,8 +562,11 @@ fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
 }
 
 fn resolve_ref(root: &Path, ref_selector: &str) -> Result<String, CodeIndexError> {
-    validate_git_ref_argument(ref_selector)?;
-    git_text(root, ["rev-parse", "--verify", ref_selector])
+    validate_git_ref_arg("ref_selector", ref_selector)?;
+    git_text(
+        root,
+        ["rev-parse", "--verify", "--end-of-options", ref_selector],
+    )
 }
 
 fn resolve_tree(root: &Path, commit: &str) -> Result<String, CodeIndexError> {
@@ -581,8 +584,8 @@ fn diff_changes(
     base_ref: &str,
     head_ref: &str,
 ) -> Result<Vec<GitChange>, CodeIndexError> {
-    validate_git_ref_argument(base_ref)?;
-    validate_git_ref_argument(head_ref)?;
+    validate_git_ref_arg("base_ref", base_ref)?;
+    validate_git_ref_arg("head_ref", head_ref)?;
     let bytes = git_bytes(
         root,
         [
@@ -590,19 +593,21 @@ fn diff_changes(
             "--name-status",
             "--find-renames",
             "-z",
+            "--end-of-options",
             base_ref,
             head_ref,
+            "--",
         ],
     )?;
 
     parse_name_status_z(&bytes)
 }
 
-fn validate_git_ref_argument(ref_selector: &str) -> Result<(), CodeIndexError> {
-    if ref_selector.starts_with('-') {
-        return Err(CodeIndexError::InvalidInput(
-            "git ref selectors must not start with '-'".to_owned(),
-        ));
+fn validate_git_ref_arg(field: &'static str, value: &str) -> Result<(), CodeIndexError> {
+    if value.starts_with('-') {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "{field} must not start with '-'"
+        )));
     }
 
     Ok(())

@@ -411,7 +411,6 @@ fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
         "callers" => Ok(CodeQueryKind::Callers),
         "callees" => Ok(CodeQueryKind::Callees),
         "imports" => Ok(CodeQueryKind::Imports),
-        "impact" => Ok(CodeQueryKind::Impact),
         other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
     }
 }
@@ -560,7 +559,10 @@ mod tests {
         assert_eq!(parse_query_kind("callers").unwrap(), CodeQueryKind::Callers);
         assert_eq!(parse_query_kind("callees").unwrap(), CodeQueryKind::Callees);
         assert_eq!(parse_query_kind("imports").unwrap(), CodeQueryKind::Imports);
-        assert_eq!(parse_query_kind("impact").unwrap(), CodeQueryKind::Impact);
+        assert_eq!(
+            parse_query_kind("impact").unwrap_err(),
+            CliError::InvalidCodeQueryKind("impact".to_owned())
+        );
 
         let positional_query = parse_repo(&[
             "query".to_owned(),

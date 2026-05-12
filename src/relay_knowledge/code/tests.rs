@@ -150,6 +150,42 @@ fn worktree_status_uses_destination_path_for_renames_and_copies() {
 }
 
 #[test]
+fn repository_ids_include_local_checkout_identity() {
+    let first = TempGitRepo::create("repo-id-first");
+    let second = TempGitRepo::create("repo-id-second");
+    first.git([
+        "config",
+        "remote.origin.url",
+        "https://example.invalid/repo.git",
+    ]);
+    second.git([
+        "config",
+        "remote.origin.url",
+        "https://example.invalid/repo.git",
+    ]);
+
+    let first = register_repository(&first.path, "first", Vec::new(), Vec::new())
+        .expect("first repository should register");
+    let second = register_repository(&second.path, "second", Vec::new(), Vec::new())
+        .expect("second repository should register");
+
+    assert_ne!(first.repository_id, second.repository_id);
+}
+
+#[test]
+fn rejects_dash_prefixed_git_refs_before_diff_execution() {
+    let repo = TempGitRepo::create("dash-ref");
+    repo.write("src/lib.rs", "fn value() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    let error = changed_paths_for_diff(&repo.path, "--cached", "HEAD")
+        .expect_err("dash-prefixed refs should be rejected");
+
+    assert!(error.to_string().contains("base_ref"));
+}
+
+#[test]
 fn impact_paths_for_copies_only_include_destination() {
     let paths = impact_paths_from_changes(vec![GitChange::Copied {
         old_path: "src/source.rs".to_owned(),

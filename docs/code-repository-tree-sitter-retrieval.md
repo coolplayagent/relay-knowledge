@@ -19,13 +19,16 @@ relay-knowledge repo status core --format json
 
 `--kind hybrid` searches symbols, definitions, references, imports, calls, and
 chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
-`callees`, `imports`, and `impact`.
+`callees`, and `imports`. Diff-based impact analysis is served by
+`repo impact`; `impact` is rejected as a plain query kind so changeset results
+cannot be confused with hybrid search.
 
 ## Implementation
 
 - Git registration resolves the repository root and derives a stable
-  `repository_id` from `remote.origin.url`, falling back to the absolute root
-  path when no origin is configured.
+  `repository_id` from both `remote.origin.url` and the local repository root,
+  falling back to the absolute root path when no origin is configured. Status
+  lookup treats values beginning with `repo:` as repository ids, not aliases.
 - Full indexing reads a clean Git tree using `git ls-tree` and `git show`.
 - Incremental indexing reads `git diff --name-status --find-renames -z` and
   only reparses changed, copied, renamed, or type-changed paths. Selected
@@ -45,7 +48,9 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
   possible.
 - Revision-scoped queries are served only when the requested ref resolves to the
   currently indexed commit or to the explicit `worktree` overlay ref; callers
-  must index another ref before querying it.
+  must index another ref before querying it. Refs beginning with `-` are
+  rejected before invoking Git so user-supplied ref names cannot be parsed as
+  Git options.
 - Request path/language filters are intersected with the registered repository
   scope and cannot widen ingestion, retrieval, or impact analysis.
 - `wait-until-fresh` code queries reject stale repository status. `graph-only`
@@ -54,7 +59,12 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
 - Impact analysis validates that `head_ref` resolves to the indexed snapshot,
   filters changed paths before deriving module/symbol seeds, matches callers by
   resolved symbol identity, and carries deleted symbol names so callers of
-  removed APIs remain visible.
+  removed APIs remain visible. Deleted paths that no longer have file rows fall
+  back to extension-based language inference for path/language filtering.
+- Import impact seeds include path modules, Rust `crate::...` module keys,
+  symbol qualified names, and symbol names. Import matches require module
+  boundaries such as punctuation or whitespace; `_` and `-` remain part of a
+  module token.
 - Retrieval hits include repository id, scope alias, resolved commit, tree hash,
   path, language id, byte and line ranges, symbol/file identifiers, retrieval
   layers, index version, stale flag, degraded reason, score, and excerpt.

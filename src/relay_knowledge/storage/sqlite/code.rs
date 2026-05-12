@@ -3,6 +3,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[path = "code_query.rs"]
 mod code_query;
 
+#[path = "code_impact.rs"]
+mod code_impact;
+
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
@@ -209,7 +212,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: CodeImpactRequest,
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        self.run(move |connection| code_query::analyze_impact(connection, request, changes))
+        self.run(move |connection| code_impact::analyze_impact(connection, request, changes))
     }
 }
 
@@ -243,7 +246,7 @@ fn upsert_repository(
         ],
     )?;
 
-    repository_status(connection, &registration.alias)?.ok_or_else(|| {
+    repository_status(connection, &registration.repository_id)?.ok_or_else(|| {
         StorageError::InvalidInput("registered code repository was not persisted".to_owned())
     })
 }
@@ -252,52 +255,60 @@ pub(super) fn repository_status(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    if let Some(status) = repository_status_by_column(connection, "repository_id", repository)? {
-        return Ok(Some(status));
-    }
-
-    repository_status_by_column(connection, "alias", repository)
-}
-
-fn repository_status_by_column(
-    connection: &mut Connection,
-    column: &'static str,
-    value: &str,
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    connection
-        .query_row(
-            &format!(
-                "
+    let lookup = if repository.starts_with("repo:") {
+        RepositoryLookup::RepositoryId
+    } else {
+        RepositoryLookup::AliasOrId
+    };
+    let query = match lookup {
+        RepositoryLookup::RepositoryId => {
+            "
             SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
                    last_indexed_commit, tree_hash,
                    state, indexed_file_count, symbol_count, reference_count, chunk_count,
                    stale, degraded_reason
             FROM code_repositories
-            WHERE {column} = ?1
-            ",
-            ),
-            params![value],
-            |row| {
-                Ok(CodeRepositoryStatus {
-                    repository_id: row.get(0)?,
-                    alias: row.get(1)?,
-                    root_path: row.get(2)?,
-                    path_filters: parse_json_list(row.get::<_, String>(3)?)?,
-                    language_filters: parse_json_list(row.get::<_, String>(4)?)?,
-                    last_indexed_commit: row.get(5)?,
-                    tree_hash: row.get(6)?,
-                    state: row.get(7)?,
-                    indexed_file_count: row.get(8)?,
-                    symbol_count: row.get(9)?,
-                    reference_count: row.get(10)?,
-                    chunk_count: row.get(11)?,
-                    stale: row.get::<_, i64>(12)? != 0,
-                    degraded_reason: row.get(13)?,
-                })
-            },
-        )
+            WHERE repository_id = ?1
+            "
+        }
+        RepositoryLookup::AliasOrId => {
+            "
+            SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
+                   last_indexed_commit, tree_hash,
+                   state, indexed_file_count, symbol_count, reference_count, chunk_count,
+                   stale, degraded_reason
+            FROM code_repositories
+            WHERE alias = ?1 OR repository_id = ?1
+            "
+        }
+    };
+
+    connection
+        .query_row(query, params![repository], |row| {
+            Ok(CodeRepositoryStatus {
+                repository_id: row.get(0)?,
+                alias: row.get(1)?,
+                root_path: row.get(2)?,
+                path_filters: parse_json_list(row.get::<_, String>(3)?)?,
+                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
+                last_indexed_commit: row.get(5)?,
+                tree_hash: row.get(6)?,
+                state: row.get(7)?,
+                indexed_file_count: row.get(8)?,
+                symbol_count: row.get(9)?,
+                reference_count: row.get(10)?,
+                chunk_count: row.get(11)?,
+                stale: row.get::<_, i64>(12)? != 0,
+                degraded_reason: row.get(13)?,
+            })
+        })
         .optional()
         .map_err(StorageError::from)
+}
+
+enum RepositoryLookup {
+    RepositoryId,
+    AliasOrId,
 }
 
 fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {

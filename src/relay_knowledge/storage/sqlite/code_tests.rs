@@ -53,6 +53,46 @@ async fn stores_code_repository_and_queries_fallback_chunks() {
 }
 
 #[tokio::test]
+async fn repository_id_lookup_takes_precedence_over_alias_like_ids() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo:first",
+                "first",
+                "/tmp/first",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("first registration should validate"),
+        )
+        .await
+        .expect("first repository should persist");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo:second",
+                "repo:first",
+                "/tmp/second",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("second registration should validate"),
+        )
+        .await
+        .expect("second repository should persist");
+
+    let status = store
+        .code_repository_status("repo:first".to_owned())
+        .await
+        .expect("status should query")
+        .expect("repository id should resolve");
+
+    assert_eq!(status.repository_id, "repo:first");
+    assert_eq!(status.alias, "first");
+}
+
+#[tokio::test]
 async fn text_only_chunk_hits_are_marked_as_text_fallback() {
     let store = store_with_repository_snapshot(snapshot_with_chunk_status(
         "repo",
@@ -149,7 +189,7 @@ async fn rejects_code_queries_for_unindexed_refs() {
 }
 
 #[tokio::test]
-async fn rejects_impact_kind_in_plain_code_search() {
+async fn rejects_impact_kind_for_plain_code_queries() {
     let store = store_with_repository_snapshot(snapshot_with_chunk(
         "repo",
         "src/lib.rs",
@@ -171,49 +211,9 @@ async fn rejects_impact_kind_in_plain_code_search() {
             .expect("request should validate"),
         )
         .await
-        .expect_err("impact query kind should be rejected");
+        .expect_err("impact query kind should require repo impact");
 
     assert!(error.to_string().contains("repo impact"));
-}
-
-#[tokio::test]
-async fn repository_id_lookup_wins_over_conflicting_alias() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    store
-        .upsert_code_repository(
-            CodeRepositoryRegistration::new(
-                "repo:actual",
-                "actual",
-                "/tmp/actual",
-                Vec::new(),
-                Vec::new(),
-            )
-            .expect("registration should validate"),
-        )
-        .await
-        .expect("actual repo should persist");
-    store
-        .upsert_code_repository(
-            CodeRepositoryRegistration::new(
-                "repo:other",
-                "repo:actual",
-                "/tmp/other",
-                Vec::new(),
-                Vec::new(),
-            )
-            .expect("registration should validate"),
-        )
-        .await
-        .expect("alias repo should persist");
-
-    let status = store
-        .code_repository_status("repo:actual".to_owned())
-        .await
-        .expect("status should load")
-        .expect("status should exist");
-
-    assert_eq!(status.repository_id, "repo:actual");
-    assert_eq!(status.alias, "actual");
 }
 
 #[tokio::test]
@@ -255,6 +255,78 @@ async fn language_filters_apply_to_references_calls_and_imports() {
         assert_eq!(hits[0].language_id, "rust");
         assert_eq!(hits[0].path, "src/lib.rs");
     }
+}
+
+#[tokio::test]
+async fn impact_imports_use_rust_symbol_namespace_seeds() {
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_rust_symbol_importer(),
+        Vec::new(),
+        vec!["rust".to_owned()],
+    )
+    .await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["src/lib.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
+        .await
+        .expect("impact should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.path == "src/main.rs"
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+    }));
+}
+
+#[tokio::test]
+async fn impact_preserves_deleted_rust_paths_under_language_filters() {
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_deleted_rust_module_importer(),
+        Vec::new(),
+        vec!["rust".to_owned()],
+    )
+    .await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["src/deleted.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
+        .await
+        .expect("impact should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.path == "src/caller.rs"
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+    }));
 }
 
 #[tokio::test]
@@ -364,32 +436,6 @@ async fn impact_callers_can_use_deleted_symbol_names() {
 }
 
 #[tokio::test]
-async fn impact_imports_use_changed_symbol_names_as_module_seeds() {
-    let store = store_with_repository_snapshot(snapshot_with_import_dependent()).await;
-    let request = crate::domain::CodeImpactRequest::new(
-        CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
-            .expect("selector should validate"),
-        "base",
-        "commit",
-        10,
-    )
-    .expect("impact request should validate");
-
-    let hits = store
-        .analyze_code_impact(
-            request,
-            CodeImpactChanges {
-                paths: vec!["src/lib.rs".to_owned()],
-                deleted_symbol_names: Vec::new(),
-            },
-        )
-        .await
-        .expect("impact should succeed");
-
-    assert!(hits.iter().any(|hit| hit.path == "src/main.rs"));
-}
-
-#[tokio::test]
 async fn incremental_updates_retain_existing_degraded_status() {
     let store = store_with_repository_snapshot(snapshot_with_degraded_and_parsed_files()).await;
     store
@@ -407,10 +453,23 @@ async fn incremental_updates_retain_existing_degraded_status() {
 }
 
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
+    store_with_repository_snapshot_and_filters(snapshot, Vec::new(), Vec::new()).await
+}
+
+async fn store_with_repository_snapshot_and_filters(
+    snapshot: CodeIndexSnapshot,
+    path_filters: Vec<String>,
+    language_filters: Vec<String>,
+) -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    let registration =
-        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
-            .expect("registration should validate");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "fixture",
+        "/tmp/repo",
+        path_filters,
+        language_filters,
+    )
+    .expect("registration should validate");
     store
         .upsert_code_repository(registration)
         .await
@@ -641,7 +700,7 @@ fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {
     }
 }
 
-fn snapshot_with_import_dependent() -> CodeIndexSnapshot {
+fn snapshot_with_rust_symbol_importer() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         resolved_commit_sha: "commit".to_owned(),
@@ -674,14 +733,43 @@ fn snapshot_with_import_dependent() -> CodeIndexSnapshot {
             "retry_policy",
         )],
         references: Vec::new(),
-        imports: vec![CodeImportRecord {
-            repository_id: "repo".to_owned(),
-            import_id: "main-import".to_owned(),
-            file_id: "main-file".to_owned(),
-            path: "src/main.rs".to_owned(),
-            module: "crate::retry_policy".to_owned(),
-            line_range: RepositoryCodeRange { start: 1, end: 1 },
-        }],
+        imports: vec![import_module(
+            "main-import",
+            "main-file",
+            "src/main.rs",
+            "use crate::retry_policy;",
+        )],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_deleted_rust_module_importer() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "caller-file",
+            "src/caller.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![import_module(
+            "caller-import",
+            "caller-file",
+            "src/caller.rs",
+            "use crate::deleted;",
+        )],
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -828,12 +916,16 @@ fn reference(
 }
 
 fn import(id: &str, file_id: &str, path: &str) -> CodeImportRecord {
+    import_module(id, file_id, path, "module::target")
+}
+
+fn import_module(id: &str, file_id: &str, path: &str, module: &str) -> CodeImportRecord {
     CodeImportRecord {
         repository_id: "repo".to_owned(),
         import_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
-        module: "module::target".to_owned(),
+        module: module.to_owned(),
         line_range: RepositoryCodeRange { start: 1, end: 1 },
     }
 }

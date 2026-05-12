@@ -235,7 +235,7 @@ impl fmt::Display for CliError {
             ),
             Self::InvalidCodeQueryKind(value) => write!(
                 formatter,
-                "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, imports, or impact"
+                "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, or imports"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,
@@ -430,7 +430,7 @@ pub fn help_text() -> &'static str {
         "  repo index <alias> [--ref <ref>]\n",
         "  repo update <alias> --base <ref> --head <ref>\n",
         "  repo query <alias> --query <text> ",
-        "[--kind hybrid|symbol|definition|references|callers|callees|imports|impact]\n",
+        "[--kind hybrid|symbol|definition|references|callers|callees|imports]\n",
         "  repo impact <alias> --base <ref> --head <ref>\n",
         "  repo status <alias>\n",
         "  graph inspect\n",

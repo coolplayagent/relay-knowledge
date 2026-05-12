@@ -1,117 +1,58 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use rusqlite::{Connection, OptionalExtension, params};
-
-#[path = "code_query_support.rs"]
-mod code_query_support;
+use rusqlite::{Connection, params};
 
 use crate::{
     domain::{
-        CodeImpactRequest, CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit,
-        CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeRange,
+        CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
+        CodeRetrievalRequest, RepositoryCodeRange,
     },
-    storage::{CodeImpactChanges, StorageError},
+    storage::StorageError,
 };
 
 use super::repository_status;
-use code_query_support::{
-    chunk_layers, language_id_for_path, module_import_matches, path_matches_filter,
-    path_to_module_keys, score_text,
-};
 
 pub(super) fn search_code(
     connection: &mut Connection,
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    if request.code_query_kind == CodeQueryKind::Impact {
-        return Err(StorageError::InvalidInput(
-            "code query kind 'impact' requires the repo impact command".to_owned(),
-        ));
-    }
     let status = required_repository(
         connection,
         &request.repository.repository,
         &request.repository.ref_selector,
     )?;
+    if request.code_query_kind == CodeQueryKind::Impact {
+        return Err(StorageError::InvalidInput(
+            "impact query kind requires repo impact with base/head refs".to_owned(),
+        ));
+    }
     let mut hits = Vec::new();
     if matches!(
         request.code_query_kind,
-        CodeQueryKind::Hybrid
-            | CodeQueryKind::Impact
-            | CodeQueryKind::Symbol
-            | CodeQueryKind::Definition
+        CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
     ) {
         hits.extend(search_symbols(connection, &status, &request)?);
     }
     if matches!(
         request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::Impact | CodeQueryKind::References
+        CodeQueryKind::Hybrid | CodeQueryKind::References
     ) {
         hits.extend(search_references(connection, &status, &request)?);
     }
     if matches!(
         request.code_query_kind,
-        CodeQueryKind::Hybrid
-            | CodeQueryKind::Impact
-            | CodeQueryKind::Callers
-            | CodeQueryKind::Callees
+        CodeQueryKind::Hybrid | CodeQueryKind::Callers | CodeQueryKind::Callees
     ) {
         hits.extend(search_calls(connection, &status, &request)?);
     }
     if matches!(
         request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::Impact | CodeQueryKind::Imports
+        CodeQueryKind::Hybrid | CodeQueryKind::Imports
     ) {
         hits.extend(search_imports(connection, &status, &request)?);
     }
-    if matches!(
-        request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::Impact
-    ) {
+    if matches!(request.code_query_kind, CodeQueryKind::Hybrid) {
         hits.extend(search_chunks(connection, &status, &request)?);
-    }
-    dedupe_sort_truncate(&mut hits, request.limit);
-
-    Ok(hits)
-}
-
-pub(super) fn analyze_impact(
-    connection: &mut Connection,
-    request: CodeImpactRequest,
-    changes: CodeImpactChanges,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let status = required_repository(
-        connection,
-        &request.repository.repository,
-        &request.repository.ref_selector,
-    )?;
-    let changed = selected_changed_paths(connection, &status, &request, changes.paths)?;
-    let changed_modules = module_seeds_for_paths(
-        connection,
-        &status.repository_id,
-        &changed,
-        &changes.deleted_symbol_names,
-    )?;
-    let changed_symbols = symbol_ids_for_paths(connection, &status.repository_id, &changed)?;
-    let mut hits = Vec::new();
-
-    hits.extend(chunks_for_paths(connection, &status, &changed, &request)?);
-    hits.extend(callers_for_symbols(
-        connection,
-        &status,
-        &changed_symbols,
-        &changes.deleted_symbol_names,
-        &request,
-    )?);
-    hits.extend(importers_for_modules(
-        connection,
-        &status,
-        &changed_modules,
-        &request,
-    )?);
-    for hit in &mut hits {
-        hit.retrieval_layers.push(CodeRetrievalLayer::Impact);
-        hit.score += 3.0;
     }
     dedupe_sort_truncate(&mut hits, request.limit);
 
@@ -305,6 +246,12 @@ fn search_calls(
             let score = score_text(&query, search_fields);
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
+                let symbol_snapshot_id = if request.code_query_kind == CodeQueryKind::Callees {
+                    row.callee_symbol_snapshot_id
+                        .or(row.caller_symbol_snapshot_id)
+                } else {
+                    row.caller_symbol_snapshot_id
+                };
                 hit_from_parts(
                     status,
                     HitParts {
@@ -312,7 +259,7 @@ fn search_calls(
                         language_id: row.language_id,
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
-                        symbol_snapshot_id: row.caller_symbol_snapshot_id,
+                        symbol_snapshot_id,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                         score: score + 1.25,
@@ -450,272 +397,7 @@ fn search_chunks(
         .collect())
 }
 
-fn symbol_ids_for_paths(
-    connection: &Connection,
-    repository_id: &str,
-    paths: &BTreeSet<String>,
-) -> Result<Vec<String>, StorageError> {
-    let mut path_statement = connection.prepare(
-        "
-        SELECT symbol_snapshot_id
-        FROM code_repository_symbols
-        WHERE repository_id = ?1 AND path = ?2
-        ",
-    )?;
-    let mut symbols = Vec::new();
-    for path in paths {
-        let rows = path_statement.query_map(params![repository_id, path], |row| row.get(0))?;
-        symbols.extend(
-            rows.collect::<Result<Vec<String>, _>>()
-                .map_err(StorageError::from)?,
-        );
-    }
-    symbols.sort();
-    symbols.dedup();
-
-    Ok(symbols)
-}
-
-fn module_seeds_for_paths(
-    connection: &Connection,
-    repository_id: &str,
-    paths: &BTreeSet<String>,
-    deleted_symbol_names: &[String],
-) -> Result<Vec<String>, StorageError> {
-    let mut seeds = deleted_symbol_names.to_vec();
-    let mut symbol_statement = connection.prepare(
-        "
-        SELECT name, qualified_name
-        FROM code_repository_symbols
-        WHERE repository_id = ?1 AND path = ?2
-        ",
-    )?;
-    let mut import_statement = connection.prepare(
-        "
-        SELECT module
-        FROM code_repository_imports
-        WHERE repository_id = ?1 AND path = ?2
-        ",
-    )?;
-    for path in paths {
-        seeds.extend(path_to_module_keys(path));
-        let symbol_rows = symbol_statement.query_map(params![repository_id, path], |row| {
-            Ok([row.get::<_, String>(0)?, row.get::<_, String>(1)?])
-        })?;
-        for row in symbol_rows {
-            seeds.extend(row?);
-        }
-        let import_rows =
-            import_statement.query_map(params![repository_id, path], |row| row.get(0))?;
-        seeds.extend(
-            import_rows
-                .collect::<Result<Vec<String>, _>>()
-                .map_err(StorageError::from)?,
-        );
-    }
-    seeds.sort();
-    seeds.dedup();
-
-    Ok(seeds)
-}
-
-fn chunks_for_paths(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    paths: &BTreeSet<String>,
-    request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
-               c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
-               f.degraded_reason
-        FROM code_repository_chunks c
-        INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
-        ORDER BY c.path ASC, c.line_start ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ChunkRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            content: row.get(3)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            symbol_snapshot_id: row.get(8)?,
-            parse_status: row.get(9)?,
-            degraded_reason: row.get(10)?,
-        })
-    })?;
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| paths.contains(&row.path))
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
-        .map(|row| {
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: row.byte_range,
-                    line_range: row.line_range,
-                    symbol_snapshot_id: row.symbol_snapshot_id,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: chunk_layers(&row.parse_status),
-                    score: 4.0,
-                    excerpt: row.content,
-                    degraded_reason: row.degraded_reason,
-                },
-            )
-        })
-        .collect())
-}
-
-fn callers_for_symbols(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    symbol_ids: &[String],
-    deleted_symbol_names: &[String],
-    request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
-               c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
-               c.line_start, c.line_end
-        FROM code_repository_calls c
-        INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
-        ORDER BY c.path ASC, c.line_start ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(CallRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            caller_symbol_snapshot_id: row.get(3)?,
-            caller_name: row.get(4)?,
-            callee_symbol_snapshot_id: row.get(5)?,
-            callee_name: row.get(6)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
-            },
-        })
-    })?;
-    let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
-    let deleted_name_set = deleted_symbol_names.iter().collect::<BTreeSet<_>>();
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
-        .filter(|row| {
-            row.callee_symbol_snapshot_id
-                .as_ref()
-                .is_some_and(|symbol_id| symbol_set.contains(symbol_id))
-                || (row.callee_symbol_snapshot_id.is_none()
-                    && deleted_name_set.contains(&row.callee_name))
-        })
-        .map(|row| {
-            let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                    line_range: row.line_range,
-                    symbol_snapshot_id: row.caller_symbol_snapshot_id,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
-                    score: 2.5,
-                    excerpt: format!("{caller} calls {}", row.callee_name),
-                    degraded_reason: None,
-                },
-            )
-        })
-        .collect())
-}
-
-fn importers_for_modules(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    modules: &[String],
-    request: &CodeImpactRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
-        FROM code_repository_imports i
-        INNER JOIN code_repository_files f
-            ON f.repository_id = i.repository_id AND f.path = i.path
-        WHERE i.repository_id = ?1
-        ORDER BY i.path ASC, i.line_start ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ImportRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-        })
-    })?;
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
-        .filter(|row| {
-            modules
-                .iter()
-                .any(|module| module_import_matches(&row.module, module))
-        })
-        .map(|row| {
-            hit_from_parts(
-                status,
-                HitParts {
-                    path: row.path,
-                    language_id: row.language_id,
-                    byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                    line_range: row.line_range,
-                    symbol_snapshot_id: None,
-                    file_id: Some(row.file_id),
-                    retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
-                    score: 2.0,
-                    excerpt: row.module,
-                    degraded_reason: None,
-                },
-            )
-        })
-        .collect())
-}
-
-fn required_repository(
+pub(super) fn required_repository(
     connection: &mut Connection,
     repository: &str,
     ref_selector: &str,
@@ -735,49 +417,6 @@ fn required_repository(
     Ok(status)
 }
 
-fn selected_changed_paths(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    request: &CodeImpactRequest,
-    changed_paths: Vec<String>,
-) -> Result<BTreeSet<String>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT language_id
-        FROM code_repository_files
-        WHERE repository_id = ?1 AND path = ?2
-        ",
-    )?;
-    let mut selected = BTreeSet::new();
-    for path in changed_paths {
-        if !path_filter_allows(&path, &status.path_filters)
-            || !path_filter_allows(&path, &request.repository.path_filters)
-        {
-            continue;
-        }
-        let language_id = statement
-            .query_row(params![status.repository_id, path], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()?;
-        if language_id
-            .as_deref()
-            .or_else(|| language_id_for_path(&path))
-            .map(|language| {
-                language_filter_allows(language, &status.language_filters)
-                    && language_filter_allows(language, &request.repository.language_filters)
-            })
-            .unwrap_or_else(|| {
-                status.language_filters.is_empty() && request.repository.language_filters.is_empty()
-            })
-        {
-            selected.insert(path);
-        }
-    }
-
-    Ok(selected)
-}
-
 fn selected_row(
     path: &str,
     language_id: &str,
@@ -790,43 +429,45 @@ fn selected_row(
         && language_filter_allows(language_id, &request.repository.language_filters)
 }
 
-fn selected_impact_row(
-    path: &str,
-    language_id: &str,
-    status: &CodeRepositoryStatus,
-    request: &CodeImpactRequest,
-) -> bool {
-    path_filter_allows(path, &status.path_filters)
-        && path_filter_allows(path, &request.repository.path_filters)
-        && language_filter_allows(language_id, &status.language_filters)
-        && language_filter_allows(language_id, &request.repository.language_filters)
-}
-
-fn path_filter_allows(path: &str, filters: &[String]) -> bool {
+pub(super) fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters
             .iter()
             .any(|filter| path_matches_filter(path, filter))
 }
 
-fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
+pub(super) fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
     filters.is_empty() || filters.iter().any(|filter| filter == language_id)
 }
 
-struct HitParts {
-    path: String,
-    language_id: String,
-    byte_range: RepositoryCodeRange,
-    line_range: RepositoryCodeRange,
-    symbol_snapshot_id: Option<String>,
-    file_id: Option<String>,
-    retrieval_layers: Vec<CodeRetrievalLayer>,
-    score: f64,
-    excerpt: String,
-    degraded_reason: Option<String>,
+fn path_matches_filter(path: &str, filter: &str) -> bool {
+    let filter = filter.trim_end_matches(['/', '\\']);
+    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
 }
 
-fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetrievalHit {
+pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
+    let mut layers = vec![CodeRetrievalLayer::Lexical];
+    if parse_status != "parsed" {
+        layers.push(CodeRetrievalLayer::TextFallback);
+    }
+
+    layers
+}
+
+pub(super) struct HitParts {
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) byte_range: RepositoryCodeRange,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) symbol_snapshot_id: Option<String>,
+    pub(super) file_id: Option<String>,
+    pub(super) retrieval_layers: Vec<CodeRetrievalLayer>,
+    pub(super) score: f64,
+    pub(super) excerpt: String,
+    pub(super) degraded_reason: Option<String>,
+}
+
+pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetrievalHit {
     CodeRetrievalHit {
         repository_id: status.repository_id.clone(),
         scope_id: status.alias.clone(),
@@ -852,7 +493,7 @@ fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetriev
     }
 }
 
-fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {
+pub(super) fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {
     let mut best = BTreeMap::<(String, u32, String), CodeRetrievalHit>::new();
     for hit in hits.drain(..) {
         let key = (hit.path.clone(), hit.line_range.start, hit.excerpt.clone());
@@ -904,6 +545,22 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
     if target.file_id.is_none() {
         target.file_id = source.file_id.clone();
     }
+}
+
+fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
+    let haystack = fields
+        .into_iter()
+        .map(|field| field.as_ref().to_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut score = 0.0;
+    for token in query.split_whitespace() {
+        if haystack.contains(token) {
+            score += 1.0;
+        }
+    }
+
+    score
 }
 
 struct SymbolRow {
@@ -964,15 +621,6 @@ struct ChunkRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn module_import_matching_respects_boundaries() {
-        assert!(module_import_matches("crate::foo::bar", "foo::bar"));
-        assert!(module_import_matches("foo::bar::baz", "foo::bar"));
-        assert!(!module_import_matches("foo::barista", "foo::bar"));
-        assert!(!module_import_matches("foo::bar_baz", "foo::bar"));
-        assert!(!module_import_matches("foo::bar-baz", "foo::bar"));
-    }
 
     #[test]
     fn path_filters_accept_trailing_slashes() {
