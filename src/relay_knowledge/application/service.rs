@@ -306,6 +306,7 @@ impl RelayKnowledgeService {
 struct StorageProvider {
     path: Option<PathBuf>,
     ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
+    init_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl StorageProvider {
@@ -313,6 +314,7 @@ impl StorageProvider {
         Self {
             path: Some(path),
             ready: Arc::new(OnceLock::new()),
+            init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -323,10 +325,15 @@ impl StorageProvider {
         Self {
             path: None,
             ready: Arc::new(ready),
+            init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     async fn get(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+        if let Some(store) = self.ready.get() {
+            return Ok(Arc::clone(store));
+        }
+        let _guard = self.init_lock.lock().await;
         if let Some(store) = self.ready.get() {
             return Ok(Arc::clone(store));
         }
