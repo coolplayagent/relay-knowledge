@@ -570,7 +570,7 @@ fn symbol_record(
         qualified_name,
         kind: kind.to_owned(),
         signature,
-        doc_comment: doc_comment_before(context.content, range.line_start),
+        doc_comment: doc_comment_before(context.content, range.line_start, context.language_id),
         byte_range: RepositoryCodeRange::new("byte_range", range.byte_start, range.byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
@@ -650,18 +650,13 @@ fn module_path(path: &str) -> String {
         .replace(['/', '\\'], "::")
 }
 
-fn doc_comment_before(content: &str, line_start: usize) -> Option<String> {
+fn doc_comment_before(content: &str, line_start: usize, language_id: &str) -> Option<String> {
     let lines = content.lines().collect::<Vec<_>>();
     let mut cursor = line_start.saturating_sub(2);
     let mut comments = Vec::new();
     while let Some(line) = lines.get(cursor) {
         let trimmed = line.trim();
-        let text = trimmed
-            .strip_prefix("///")
-            .or_else(|| trimmed.strip_prefix("//!"))
-            .or_else(|| trimmed.strip_prefix('#'))
-            .or_else(|| trimmed.strip_prefix("//"))
-            .map(str::trim);
+        let text = doc_comment_text(trimmed, language_id);
         let Some(text) = text else {
             break;
         };
@@ -673,6 +668,21 @@ fn doc_comment_before(content: &str, line_start: usize) -> Option<String> {
     }
     comments.reverse();
     (!comments.is_empty()).then(|| comments.join("\n"))
+}
+
+fn doc_comment_text<'a>(trimmed: &'a str, language_id: &str) -> Option<&'a str> {
+    match language_id {
+        "rust" => trimmed
+            .strip_prefix("///")
+            .or_else(|| trimmed.strip_prefix("//!"))
+            .map(str::trim),
+        "python" => trimmed.strip_prefix('#').map(str::trim),
+        "typescript" | "tsx" => trimmed
+            .strip_prefix("///")
+            .or_else(|| trimmed.strip_prefix("//"))
+            .map(str::trim),
+        _ => None,
+    }
 }
 
 fn trim_to_budget(content: &str, max_bytes: usize) -> String {
@@ -794,6 +804,43 @@ fn retry_policy() {
     }
 
     #[test]
+    fn rust_attributes_are_not_doc_comments() {
+        let snapshot = parse_source_snapshot(
+            "src/lib.rs",
+            br#"
+#[derive(Debug)]
+pub struct Settings;
+"#,
+        );
+        let settings = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "Settings")
+            .expect("struct symbol should be extracted");
+
+        assert_eq!(settings.doc_comment, None);
+    }
+
+    #[test]
+    fn python_hash_comments_are_doc_comments() {
+        let snapshot = parse_source_snapshot(
+            "src/app.py",
+            br#"
+# Runs the worker.
+def run_worker():
+    pass
+"#,
+        );
+        let worker = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "run_worker")
+            .expect("function symbol should be extracted");
+
+        assert_eq!(worker.doc_comment.as_deref(), Some("Runs the worker."));
+    }
+
+    #[test]
     fn text_only_files_keep_bm25_fallback_chunks() {
         let registration =
             CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
@@ -887,6 +934,28 @@ fn retry_policy() {
     }
 
     fn parse_fixture_snapshot(repository_id: &str) -> crate::domain::CodeIndexSnapshot {
+        parse_source_snapshot_for_repository(
+            repository_id,
+            "src/main.rs",
+            br#"
+use crate::retry_policy;
+
+fn run_worker() {
+    retry_policy(); retry_policy();
+}
+"#,
+        )
+    }
+
+    fn parse_source_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
+        parse_source_snapshot_for_repository("repo", path, source)
+    }
+
+    fn parse_source_snapshot_for_repository(
+        repository_id: &str,
+        path: &str,
+        source: &[u8],
+    ) -> crate::domain::CodeIndexSnapshot {
         let registration = CodeRepositoryRegistration::new(
             repository_id,
             "alias",
@@ -903,15 +972,8 @@ fn retry_policy() {
             1,
             0,
         );
-        let source = br#"
-use crate::retry_policy;
 
-fn run_worker() {
-    retry_policy(); retry_policy();
-}
-"#;
-
-        parse_indexed_file(&mut build, "src/main.rs", source).expect("file should parse");
+        parse_indexed_file(&mut build, path, source).expect("file should parse");
 
         build.finish()
     }

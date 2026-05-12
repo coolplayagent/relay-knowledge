@@ -248,7 +248,6 @@ fn search_calls(
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
                 let symbol_snapshot_id = if request.code_query_kind == CodeQueryKind::Callees {
                     row.callee_symbol_snapshot_id
-                        .or(row.caller_symbol_snapshot_id)
                 } else {
                     row.caller_symbol_snapshot_id
                 };
@@ -441,11 +440,20 @@ pub(super) fn language_filter_allows(language_id: &str, filters: &[String]) -> b
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let filter = filter.trim_end_matches(['/', '\\']);
+    let filter = normalize_path_filter(filter);
     if filter == "." {
         return true;
     }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn normalize_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
@@ -631,6 +639,7 @@ mod tests {
         assert!(path_matches_filter("src/lib.rs", "src"));
         assert!(path_matches_filter("src/lib.rs", "."));
         assert!(path_matches_filter("src/lib.rs", "./"));
+        assert!(path_matches_filter("src/lib.rs", "./src"));
         assert!(!path_matches_filter("src-other/lib.rs", "src/"));
     }
 }

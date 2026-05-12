@@ -36,6 +36,24 @@ fn detects_supported_languages_and_filters_paths() {
     ));
     assert!(!path_is_selected("tests/lib.rs", &registration, &selector));
     assert!(!path_is_selected("src/app.py", &registration, &selector));
+
+    let file_filter_selector = CodeRepositorySelector::new(
+        "alias",
+        "HEAD",
+        vec!["src/generated/temp.rs".to_owned()],
+        vec!["rust".to_owned()],
+    )
+    .expect("selector should validate");
+    assert!(!path_scope_allows(
+        "src/generated",
+        &registration,
+        &file_filter_selector
+    ));
+    assert!(path_scope_overlaps(
+        "src/generated",
+        &registration,
+        &file_filter_selector
+    ));
 }
 
 #[test]
@@ -82,10 +100,18 @@ fn dot_path_filter_selects_repository_root() {
     let selector_dot =
         CodeRepositorySelector::new("alias", "HEAD", vec!["./".to_owned()], Vec::new())
             .expect("selector should validate");
+    let selector_relative =
+        CodeRepositorySelector::new("alias", "HEAD", vec!["./src".to_owned()], Vec::new())
+            .expect("selector should validate");
 
     assert!(path_is_selected("src/lib.rs", &registration, &selector));
     assert!(path_is_selected("README.md", &registration, &selector));
     assert!(path_is_selected("src/lib.rs", &registration, &selector_dot));
+    assert!(path_is_selected(
+        "src/lib.rs",
+        &registration,
+        &selector_relative
+    ));
 }
 
 #[test]
@@ -319,11 +345,12 @@ fn worktree_overlay_hash_ignores_out_of_scope_changes() {
 }
 
 #[test]
-fn worktree_overlay_skips_directories_and_counts_changed_path_skips() {
-    let repo = TempGitRepo::create("overlay-skip");
+fn worktree_overlay_indexes_untracked_files_under_new_directories() {
+    let repo = TempGitRepo::create("overlay-untracked-all");
     repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
+    repo.git(["config", "status.showUntrackedFiles", "no"]);
     let content = "fn value() -> u32 { 1 }\n";
     repo.write("src/lib.rs", content);
     repo.write("src/generated/temp.rs", "fn generated() {}\n");
@@ -343,10 +370,170 @@ fn worktree_overlay_skips_directories_and_counts_changed_path_skips() {
             },
         ],
     )
-    .expect("overlay should skip non-file paths");
+    .expect("overlay should index untracked files despite local status config");
 
     assert_eq!(snapshot.skipped_unchanged_count, 1);
-    assert!(snapshot.files.is_empty());
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/generated/temp.rs")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_overlay_skips_symlinked_directories() {
+    let repo = TempGitRepo::create("overlay-symlink-dir");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let outside = repo.path.with_extension("outside-target");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    fs::write(outside.join("secret.rs"), "fn secret() {}\n")
+        .expect("outside source should be written");
+    std::os::unix::fs::symlink(&outside, repo.path.join("src/link"))
+        .expect("directory symlink should be created");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should not traverse symlink directories");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/link/"))
+    );
+    fs::remove_dir_all(outside).expect("outside target should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn worktree_overlay_ignores_out_of_language_dangling_symlinks() {
+    let repo = TempGitRepo::create("overlay-dangling-symlink");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    std::os::unix::fs::symlink(repo.path.join("missing-target"), repo.path.join("src/bad"))
+        .expect("dangling symlink should be created");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("dangling symlinks outside language filters should not fail overlay indexing");
+
+    assert!(snapshot.files.iter().all(|file| file.path != "src/bad"));
+}
+
+#[test]
+fn worktree_overlay_skips_modified_submodule_directories() {
+    let source = TempGitRepo::create("overlay-submodule-source");
+    source.write("lib.rs", "fn submodule_value() -> u32 { 0 }\n");
+    source.git(["add", "."]);
+    source.git(["commit", "-m", "initial"]);
+    let repo = TempGitRepo::create("overlay-submodule-parent");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let source_path = source.path.display().to_string();
+    repo.git([
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &source_path,
+        "src/submodule",
+    ]);
+    repo.git(["commit", "-am", "add submodule"]);
+    fs::write(
+        repo.path.join("src/submodule/lib.rs"),
+        "fn submodule_value() -> u32 { 1 }\n",
+    )
+    .expect("submodule worktree should be modified");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should not recurse into modified submodules");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/submodule/"))
+    );
+    assert!(snapshot.full_replace);
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+}
+
+#[test]
+fn worktree_overlay_skips_untracked_nested_git_repositories() {
+    let repo = TempGitRepo::create("overlay-nested-git");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let nested = repo.path.join("src/vendor");
+    fs::create_dir_all(&nested).expect("nested repository should be created");
+    let nested_repo = TempGitRepo { path: nested };
+    nested_repo.git(["init"]);
+    nested_repo.git(["config", "user.email", "relay@example.invalid"]);
+    nested_repo.git(["config", "user.name", "Relay Test"]);
+    nested_repo.write("lib.rs", "fn nested_value() -> u32 { 0 }\n");
+    nested_repo.git(["add", "."]);
+    nested_repo.git(["commit", "-m", "initial"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should not recurse into nested repositories");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("src/vendor/"))
+    );
+    assert!(snapshot.full_replace);
+    assert!(!snapshot.resolved_commit_sha.starts_with("worktree:"));
+}
+
+#[test]
+fn worktree_overlay_rejects_refs_that_are_not_checked_out() {
+    let repo = TempGitRepo::create("overlay-ref-binding");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let initial = repo.git_text(["rev-parse", "HEAD"]);
+    repo.write("src/lib.rs", "fn value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update"]);
+    repo.write("src/lib.rs", "fn value() -> u32 { 2 }\n");
+    let selector = CodeRepositorySelector::new("alias", initial, Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let error = build_index_snapshot(
+        &repo.registration(),
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect_err("overlay ref should match checked-out HEAD");
+
+    assert!(error.to_string().contains("worktree overlay ref"));
 }
 
 #[test]

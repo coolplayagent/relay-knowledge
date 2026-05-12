@@ -35,14 +35,18 @@ cannot be confused with hybrid search.
 - Incremental indexing reads `git diff --name-status --find-renames -z` and
   only reparses changed, copied, renamed, or type-changed paths. Selected
   deleted and renamed paths are removed from the active index, copy sources do
-  not seed impact analysis, and rename lineage is kept as tombstones.
+  not seed impact analysis, and rename lineage is kept as tombstones. The
+  incremental base ref must resolve to the currently indexed snapshot before
+  previous file fingerprints are reused.
 - Worktree overlay mode indexes changed worktree files under a synthetic
   `worktree:<hash>` tree id and `worktree:<commit>:<hash>` resolved snapshot
   identity. Queries must use `--ref worktree` to read overlay rows; clean commit
   refs are rejected while an overlay is active so uncommitted content is not
   mislabeled as a clean Git snapshot. Clean or out-of-scope-only worktree status
-  falls back to a clean full snapshot. Non-file status entries are skipped, and
-  selected rename sources are removed from the active overlay index.
+  falls back to a clean full snapshot. Overlay indexing is bound to the
+  checked-out `HEAD`, forces untracked-file visibility, expands untracked
+  directories to file-level changes, skips non-file status entries, and removes
+  selected rename sources from the active overlay index.
 - Parser work runs behind application-level `spawn_blocking` boundaries.
   SQLite writes also remain behind the storage blocking worker.
 - Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Unsupported,
@@ -55,7 +59,8 @@ cannot be confused with hybrid search.
   Git options.
 - Request path/language filters are intersected with the registered repository
   scope and cannot widen ingestion, retrieval, or impact analysis. `.` and `./`
-  path filters select the repository root.
+  path filters select the repository root, and leading `./` is normalized for
+  relative filters such as `./src`.
 - `wait-until-fresh` code queries reject stale repository status. `graph-only`
   returns no repository-index rows and reports that the graph-only policy was
   selected.

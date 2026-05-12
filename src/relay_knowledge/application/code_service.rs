@@ -11,8 +11,8 @@ use crate::{
         deleted_symbol_names_for_diff, register_repository, resolve_repository_ref,
     },
     domain::{
-        CodeImpactRequest, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration,
+        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::{CodeImpactChanges, StorageError},
 };
@@ -60,6 +60,7 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
+        validate_index_mode_against_status(&status, &request.mode).await?;
         let previous = store
             .code_file_fingerprints(status.repository_id.clone())
             .await
@@ -234,6 +235,30 @@ fn registration_from_status(
         path_filters: status.path_filters.clone(),
         language_filters: status.language_filters.clone(),
     }
+}
+
+async fn validate_index_mode_against_status(
+    status: &CodeRepositoryStatus,
+    mode: &CodeIndexMode,
+) -> Result<(), ApiError> {
+    let CodeIndexMode::Incremental { base_ref, .. } = mode else {
+        return Ok(());
+    };
+    let indexed_commit = status.last_indexed_commit.as_deref().ok_or_else(|| {
+        ApiError::invalid_argument(format!(
+            "code repository '{}' must be fully indexed before incremental indexing",
+            status.alias
+        ))
+    })?;
+    let base_commit = resolve_code_ref(status, base_ref.clone()).await?;
+    if base_commit != indexed_commit {
+        return Err(ApiError::invalid_argument(format!(
+            "incremental base ref '{}' resolves to {}, but code repository '{}' is indexed at {}",
+            base_ref, base_commit, status.alias, indexed_commit
+        )));
+    }
+
+    Ok(())
 }
 
 async fn retrieval_request_at_indexed_ref(

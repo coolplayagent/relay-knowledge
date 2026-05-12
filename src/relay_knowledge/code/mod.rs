@@ -290,7 +290,17 @@ fn build_worktree_overlay_snapshot(
     previous_hashes: &BTreeMap<String, String>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
-    let status = git_bytes(root, ["status", "--porcelain=v1", "-z"])?;
+    let head_commit = resolve_ref(root, "HEAD")?;
+    if commit != head_commit {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "worktree overlay ref '{}' resolves to {}, but checked-out HEAD is {}",
+            selector.ref_selector, commit, head_commit
+        )));
+    }
+    let status = git_bytes(
+        root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
     let changes = worktree_changed_paths(&status);
     if changes.is_empty() {
         return build_full_snapshot(registration, selector, root);
@@ -310,36 +320,67 @@ fn build_worktree_overlay_snapshot(
             }
         }
         let path = &change.path;
-        if !path_is_selected(path, registration, selector) {
+        if !path_scope_overlaps(path, registration, selector) {
             continue;
         }
         let full_path = root.join(path);
-        if !full_path.exists() {
-            overlay_hash_input.extend_from_slice(b"D\0");
-            overlay_hash_input.extend_from_slice(path.as_bytes());
-            overlay_hash_input.push(0);
-            deleted_paths.push(path.clone());
+        let metadata = match fs::symlink_metadata(&full_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if path_is_selected(path, registration, selector) {
+                    overlay_hash_input.extend_from_slice(b"D\0");
+                    overlay_hash_input.extend_from_slice(path.as_bytes());
+                    overlay_hash_input.push(0);
+                    deleted_paths.push(path.clone());
+                }
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            if path_is_selected(path, registration, selector) {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+            }
             continue;
         }
-        let metadata = fs::metadata(&full_path)?;
-        if !metadata.is_file() {
-            overlay_hash_input.extend_from_slice(b"S\0");
-            overlay_hash_input.extend_from_slice(path.as_bytes());
-            overlay_hash_input.push(0);
+        if file_type.is_dir() {
+            if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
+                if path_is_selected(path, registration, selector) {
+                    record_worktree_status_marker(path, &mut overlay_hash_input);
+                }
+                continue;
+            }
+            for nested_path in worktree_directory_files(root, path)? {
+                if path_is_selected(&nested_path, registration, selector) {
+                    record_worktree_file(
+                        root,
+                        &nested_path,
+                        previous_hashes,
+                        &mut overlay_hash_input,
+                        &mut files_to_parse,
+                        &mut skipped_unchanged_count,
+                    )?;
+                }
+            }
             continue;
         }
-        let bytes = fs::read(&full_path)?;
-        let blob_hash = stable_content_hash(&bytes);
-        overlay_hash_input.extend_from_slice(b"F\0");
-        overlay_hash_input.extend_from_slice(path.as_bytes());
-        overlay_hash_input.push(0);
-        overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
-        overlay_hash_input.push(0);
-        if previous_hashes.get(path) == Some(&blob_hash) {
-            skipped_unchanged_count += 1;
+        if !file_type.is_file() {
+            if path_is_selected(path, registration, selector) {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+            }
             continue;
         }
-        files_to_parse.push((path.clone(), bytes));
+        if path_is_selected(path, registration, selector) {
+            record_worktree_file(
+                root,
+                path,
+                previous_hashes,
+                &mut overlay_hash_input,
+                &mut files_to_parse,
+                &mut skipped_unchanged_count,
+            )?;
+        }
     }
     if overlay_hash_input.is_empty() {
         return build_full_snapshot(registration, selector, root);
@@ -363,6 +404,93 @@ fn build_worktree_overlay_snapshot(
     }
 
     Ok(build.finish())
+}
+
+fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
+    overlay_hash_input.extend_from_slice(b"S\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+}
+
+fn record_worktree_file(
+    root: &Path,
+    path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    overlay_hash_input: &mut Vec<u8>,
+    files_to_parse: &mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &mut usize,
+) -> Result<(), CodeIndexError> {
+    let bytes = fs::read(root.join(path))?;
+    let blob_hash = stable_content_hash(&bytes);
+    overlay_hash_input.extend_from_slice(b"F\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+    overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
+    overlay_hash_input.push(0);
+    if previous_hashes.get(path) == Some(&blob_hash) {
+        *skipped_unchanged_count += 1;
+        return Ok(());
+    }
+    files_to_parse.push((path.to_owned(), bytes));
+
+    Ok(())
+}
+
+fn worktree_directory_files(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<Vec<String>, CodeIndexError> {
+    if !worktree_directory_is_expandable(root, relative_dir)? {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    collect_worktree_directory_files(root, Path::new(relative_dir), &mut files)?;
+    files.sort();
+
+    Ok(files)
+}
+
+fn worktree_directory_is_expandable(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<bool, CodeIndexError> {
+    let full_path = root.join(relative_dir);
+    let metadata = fs::symlink_metadata(&full_path)?;
+    if !metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+
+    Ok(!contains_git_metadata(root, Path::new(relative_dir))?)
+}
+
+fn contains_git_metadata(root: &Path, relative: &Path) -> Result<bool, CodeIndexError> {
+    match fs::symlink_metadata(root.join(relative).join(".git")) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn collect_worktree_directory_files(
+    root: &Path,
+    relative: &Path,
+    files: &mut Vec<String>,
+) -> Result<(), CodeIndexError> {
+    for entry in fs::read_dir(root.join(relative))? {
+        let entry = entry?;
+        let path = relative.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            if entry.file_name() == ".git" || contains_git_metadata(root, &path)? {
+                continue;
+            }
+            collect_worktree_directory_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_changed_path(
@@ -712,8 +840,15 @@ fn split_nul(bytes: &[u8]) -> Vec<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorktreePathChange {
+    status: String,
     path: String,
     deleted_source: Option<String>,
+}
+
+impl WorktreePathChange {
+    fn is_untracked(&self) -> bool {
+        self.status == "??"
+    }
 }
 
 fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
@@ -731,6 +866,7 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
         if (status.contains('R') || status.contains('C')) && tokens.get(index + 1).is_some() {
             let source = tokens[index + 1].clone();
             changes.push(WorktreePathChange {
+                status: status.to_owned(),
                 path,
                 deleted_source: status.contains('R').then_some(source),
             });
@@ -738,6 +874,7 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
             continue;
         }
         changes.push(WorktreePathChange {
+            status: status.to_owned(),
             path,
             deleted_source: None,
         });
@@ -752,10 +889,27 @@ fn path_is_selected(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> bool {
-    path_filter_allows(path, &registration.path_filters)
-        && path_filter_allows(path, &selector.path_filters)
+    path_scope_allows(path, registration, selector)
         && language_filter_allows(path, &registration.language_filters)
         && language_filter_allows(path, &selector.language_filters)
+}
+
+fn path_scope_allows(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    path_filter_allows(path, &registration.path_filters)
+        && path_filter_allows(path, &selector.path_filters)
+}
+
+fn path_scope_overlaps(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    path_filter_overlaps(path, &registration.path_filters)
+        && path_filter_overlaps(path, &selector.path_filters)
 }
 
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {
@@ -763,6 +917,13 @@ fn path_filter_allows(path: &str, filters: &[String]) -> bool {
         || filters
             .iter()
             .any(|filter| path_matches_filter(path, filter))
+}
+
+fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| path_overlaps_filter(path, filter))
 }
 
 fn language_filter_allows(path: &str, filters: &[String]) -> bool {
@@ -773,11 +934,34 @@ fn language_filter_allows(path: &str, filters: &[String]) -> bool {
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let filter = filter.trim_end_matches(['/', '\\']);
+    let path = normalize_path_filter(path);
+    let filter = normalize_path_filter(filter);
     if filter == "." {
         return true;
     }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn path_overlaps_filter(path: &str, filter: &str) -> bool {
+    let path = normalize_path_filter(path);
+    let filter = normalize_path_filter(filter);
+    if filter == "." {
+        return true;
+    }
+    !path.is_empty()
+        && !filter.is_empty()
+        && (path == filter
+            || path.starts_with(&format!("{filter}/"))
+            || filter.starts_with(&format!("{path}/")))
+}
+
+fn normalize_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 pub(super) fn stable_content_hash(bytes: &[u8]) -> String {
