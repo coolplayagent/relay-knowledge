@@ -137,27 +137,48 @@ fn validate_text_content(
             None,
         ));
     }
-    if bytes.len() > MAX_TEXT_FILE_BYTES {
-        return Ok((
-            CodeParseStatus::TextOnly,
-            Some(format!(
-                "file exceeds {MAX_TEXT_FILE_BYTES} byte code index budget"
-            )),
-            String::from_utf8(bytes[..MAX_TEXT_FILE_BYTES].to_vec()).ok(),
+
+    let mut degraded_reasons = Vec::new();
+    let content_bytes = if bytes.len() > MAX_TEXT_FILE_BYTES {
+        degraded_reasons.push(format!(
+            "file exceeds {MAX_TEXT_FILE_BYTES} byte code index budget"
         ));
-    }
-    let content = String::from_utf8(bytes.to_vec()).map_err(|error| {
-        CodeIndexError::InvalidInput(format!("{path} is not valid UTF-8: {error}"))
-    })?;
+        truncate_bytes_at_utf8_boundary(bytes, MAX_TEXT_FILE_BYTES)
+    } else {
+        bytes
+    };
+    let content = match String::from_utf8(content_bytes.to_vec()) {
+        Ok(content) => content,
+        Err(_) => {
+            degraded_reasons.push(format!(
+                "{path} is not valid UTF-8; using lossy text fallback"
+            ));
+            String::from_utf8_lossy(content_bytes).into_owned()
+        }
+    };
     if language.is_none() {
+        degraded_reasons
+            .push("tree-sitter grammar is not configured for this file extension".to_owned());
+    }
+
+    if !degraded_reasons.is_empty() {
         return Ok((
             CodeParseStatus::TextOnly,
-            Some("tree-sitter grammar is not configured for this file extension".to_owned()),
+            Some(degraded_reasons.join("; ")),
             Some(content),
         ));
     }
 
     Ok((CodeParseStatus::Parsed, None, Some(content)))
+}
+
+fn truncate_bytes_at_utf8_boundary(bytes: &[u8], max_bytes: usize) -> &[u8] {
+    let end = bytes.len().min(max_bytes);
+    match std::str::from_utf8(&bytes[..end]) {
+        Ok(_) => &bytes[..end],
+        Err(error) if error.error_len().is_none() => &bytes[..error.valid_up_to()],
+        Err(_) => &bytes[..end],
+    }
 }
 
 fn parse_tree(language: LanguageSpec, content: &str) -> Result<tree_sitter::Tree, CodeIndexError> {
@@ -732,5 +753,53 @@ fn retry_policy() {
         assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::TextOnly);
         assert_eq!(snapshot.chunks.len(), 1);
         assert!(snapshot.diagnostics[0].message.contains("grammar"));
+    }
+
+    #[test]
+    fn invalid_utf8_files_degrade_to_lossy_text_chunks() {
+        let registration =
+            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate");
+        let mut build = SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        );
+
+        parse_indexed_file(
+            &mut build,
+            "src/lib.rs",
+            b"fn retry_policy() {}\n\xff\nfn caller() {}",
+        )
+        .expect("invalid utf8 should degrade instead of failing");
+        let snapshot = build.finish();
+
+        assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::TextOnly);
+        assert!(snapshot.diagnostics[0].message.contains("not valid UTF-8"));
+        assert!(snapshot.chunks[0].content.contains("retry_policy"));
+    }
+
+    #[test]
+    fn oversized_files_truncate_on_utf8_boundary() {
+        let mut bytes = vec![b'a'; MAX_TEXT_FILE_BYTES - 1];
+        bytes.extend("é".as_bytes());
+        bytes.extend(b"tail");
+
+        let (status, reason, content) =
+            validate_text_content("src/lib.rs", &bytes, detect_language("src/lib.rs"))
+                .expect("oversized utf8 should degrade");
+        let content = content.expect("oversized file should keep fallback content");
+
+        assert_eq!(status, CodeParseStatus::TextOnly);
+        assert!(
+            reason
+                .expect("reason should explain budget")
+                .contains("exceeds")
+        );
+        assert_eq!(content.len(), MAX_TEXT_FILE_BYTES - 1);
+        assert!(!content.contains('\u{fffd}'));
     }
 }

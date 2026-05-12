@@ -563,12 +563,10 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<String> {
         }
         let status = &token[..2];
         let path = token[3..].to_owned();
-        if status.contains('R') || status.contains('C') {
-            if let Some(new_path) = tokens.get(index + 1) {
-                paths.push(new_path.clone());
-                index += 2;
-                continue;
-            }
+        if (status.contains('R') || status.contains('C')) && tokens.get(index + 1).is_some() {
+            paths.push(path);
+            index += 2;
+            continue;
         }
         paths.push(path);
         index += 1;
@@ -679,6 +677,22 @@ mod tests {
                 GitChange::Deleted {
                     path: "gone.ts".to_owned()
                 }
+            ]
+        );
+    }
+
+    #[test]
+    fn worktree_status_uses_destination_path_for_renames_and_copies() {
+        let paths = worktree_changed_paths(
+            b"R  src/new.rs\0src/old.rs\0C  src/copied.rs\0src/source.rs\0 M src/lib.rs\0",
+        );
+
+        assert_eq!(
+            paths,
+            vec![
+                "src/new.rs".to_owned(),
+                "src/copied.rs".to_owned(),
+                "src/lib.rs".to_owned()
             ]
         );
     }
