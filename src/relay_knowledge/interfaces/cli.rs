@@ -11,8 +11,9 @@ use crate::{
         IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind, ProjectStatusResponse,
         RequestContext, StreamEventKind,
     },
-    application::RelayKnowledgeService,
+    application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{FreshnessPolicy, IndexKind},
+    interfaces::agent::mcp::McpServer,
 };
 
 /// Supported CLI output formats.
@@ -144,6 +145,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--base"
             | "--head"
             | "--query"
+            | "--mcp"
     )
 }
 
@@ -184,7 +186,17 @@ pub enum CliAction {
     Repo(repo_cli::RepoCommand),
     Health,
     ServiceStatus,
+    ServiceRun {
+        mcp: ServiceMcpTransport,
+    },
     Version,
+}
+
+/// MCP transport option for foreground service mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceMcpTransport {
+    Configured,
+    StreamableHttp,
 }
 
 /// CLI adapter error.
@@ -201,6 +213,7 @@ pub enum CliError {
     UnexpectedArgument(String),
     RuntimeConfigFailed(String),
     ApiFailed(String),
+    ServiceRunFailed(String),
     RenderFailed(String),
 }
 
@@ -221,7 +234,10 @@ impl CliError {
             | Self::MissingValue(_)
             | Self::UnsupportedVersionFormat(_)
             | Self::UnexpectedArgument(_) => 2,
-            Self::RuntimeConfigFailed(_) | Self::ApiFailed(_) | Self::RenderFailed(_) => 1,
+            Self::RuntimeConfigFailed(_)
+            | Self::ApiFailed(_)
+            | Self::ServiceRunFailed(_)
+            | Self::RenderFailed(_) => 1,
         }
     }
 }
@@ -262,6 +278,7 @@ impl fmt::Display for CliError {
                 write!(formatter, "failed to load runtime configuration: {message}")
             }
             Self::ApiFailed(message) => write!(formatter, "{message}"),
+            Self::ServiceRunFailed(message) => write!(formatter, "{message}"),
             Self::RenderFailed(message) => write!(formatter, "failed to render output: {message}"),
         }
     }
@@ -281,6 +298,9 @@ where
     }
     if command.action == CliAction::Version {
         return render_version(command.format);
+    }
+    if let CliAction::ServiceRun { mcp } = command.action.clone() {
+        return run_service(mcp).await;
     }
 
     let service = RelayKnowledgeService::from_process_environment()
@@ -413,6 +433,9 @@ pub async fn run_with_service(
                 format,
             )
         }
+        CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
+            "service run requires process runtime".to_owned(),
+        )),
         CliAction::Version => render_version(command.format),
     }
 }
@@ -437,6 +460,7 @@ pub fn help_text() -> &'static str {
         "  index refresh [--kind bm25|semantic|vector]\n",
         "  health\n",
         "  service status|doctor\n",
+        "  service run [--mcp streamable-http]\n",
         "  version [--format text|json]\n",
         "  --version [--format text|json]\n",
     )
@@ -612,6 +636,9 @@ fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
     if tokens == ["status"] || tokens == ["doctor"] {
         return Ok(CliAction::ServiceStatus);
     }
+    if tokens.first().map(String::as_str) == Some("run") {
+        return parse_service_run(&tokens[1..]);
+    }
 
     Err(CliError::UnexpectedArgument(
         tokens
@@ -619,6 +646,26 @@ fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
             .cloned()
             .unwrap_or_else(|| "service".to_owned()),
     ))
+}
+
+fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {
+    let mut mcp = ServiceMcpTransport::Configured;
+    let mut index = 0;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--mcp" => {
+                let value = value_after(tokens, index, "--mcp")?;
+                mcp = match value.as_str() {
+                    "streamable-http" => ServiceMcpTransport::StreamableHttp,
+                    other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+                };
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(CliAction::ServiceRun { mcp })
 }
 
 pub(super) fn value_after(
@@ -784,6 +831,48 @@ where
         serde_json::to_string(value).map_err(|error| CliError::RenderFailed(error.to_string()))?;
 
     Ok(format!("{line}\n"))
+}
+
+async fn run_service(mcp: ServiceMcpTransport) -> Result<String, CliError> {
+    let mut runtime = RuntimeConfiguration::from_process_environment()
+        .await
+        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
+    if mcp == ServiceMcpTransport::StreamableHttp {
+        runtime.agent = runtime.agent.clone().with_streamable_http_enabled();
+    }
+
+    let service = RelayKnowledgeService::new(runtime.clone());
+    let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
+    server
+        .serve_until_shutdown(service_shutdown_signal())
+        .await
+        .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+
+    Ok(String::new())
+}
+
+async fn service_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use crate::api::RuntimeStatus;
+use crate::api::{AgentProtocolStatus, RuntimeStatus};
 
 use super::RuntimeConfiguration;
 
@@ -26,6 +26,18 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
         qos_max_connections: network.qos.max_connections,
         qos_max_in_flight_requests: network.qos.max_in_flight_requests,
         qos_max_queue_depth: network.qos.max_queue_depth,
+    }
+}
+
+pub(super) fn agent_protocol_status(runtime: &RuntimeConfiguration) -> AgentProtocolStatus {
+    let network = runtime.network.current();
+
+    AgentProtocolStatus {
+        mcp_streamable_http_enabled: runtime.agent.mcp_streamable_http_enabled,
+        mcp_endpoint: runtime.agent.mcp_endpoint.clone(),
+        http_bind: network.http.bind_address.to_string(),
+        allowed_origin_count: runtime.agent.mcp_allowed_origins.len(),
+        policy: runtime.agent.access_policy.summary(),
     }
 }
 

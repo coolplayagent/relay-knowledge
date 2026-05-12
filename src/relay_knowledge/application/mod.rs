@@ -5,5 +5,5 @@ mod runtime;
 mod service;
 mod status;
 
-pub use runtime::{RuntimeConfiguration, RuntimeConfigurationError};
+pub use runtime::{AgentRuntimeConfig, RuntimeConfiguration, RuntimeConfigurationError};
 pub use service::RelayKnowledgeService;

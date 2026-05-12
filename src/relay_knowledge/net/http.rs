@@ -4,9 +4,35 @@
 //! HTTP server/client adapters must use a mature async runtime underneath this
 //! boundary and keep QoS admission in `net::qos`.
 
-use std::{error::Error, fmt, time::Duration};
+use std::{
+    convert::Infallible,
+    error::Error,
+    fmt,
+    future::{Future, IntoFuture, Ready, ready},
+    io,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    task::{Context, Poll},
+    time::Duration,
+};
 
-use crate::env::NetworkEnvOverrides;
+use axum::{
+    Router,
+    extract::Request,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    serve::{IncomingStream, Listener},
+};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tower::Service;
+
+use crate::{
+    env::NetworkEnvOverrides,
+    net::qos::{QosPermit, QosPolicy, QosRuntime, RejectReason},
+};
 
 pub const DEFAULT_HTTP_BIND: &str = "127.0.0.1:8791";
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -228,6 +254,270 @@ impl fmt::Display for HttpConfigError {
 
 impl Error for HttpConfigError {}
 
+/// Error raised while serving an event-driven HTTP adapter.
+#[derive(Debug)]
+pub enum HttpServeError {
+    Bind(std::io::Error),
+    Serve(std::io::Error),
+    ShutdownTimeout,
+}
+
+impl fmt::Display for HttpServeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bind(error) => write!(formatter, "failed to bind HTTP listener: {error}"),
+            Self::Serve(error) => write!(formatter, "HTTP server failed: {error}"),
+            Self::ShutdownTimeout => write!(formatter, "HTTP graceful shutdown timed out"),
+        }
+    }
+}
+
+impl Error for HttpServeError {}
+
+/// Stable identifier assigned to an accepted HTTP connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HttpConnectionId(u64);
+
+impl HttpConnectionId {
+    /// Returns the numeric connection identifier for request correlation.
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Starts an async HTTP server with graceful shutdown under the network boundary.
+pub async fn serve_router(
+    router: Router,
+    config: HttpConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), HttpServeError> {
+    let listener = tokio::net::TcpListener::bind(config.bind_address.to_string())
+        .await
+        .map_err(HttpServeError::Bind)?;
+
+    serve_listener(listener, router, config, shutdown).await
+}
+
+/// Starts an async HTTP server whose accepted connections consume QoS permits.
+pub async fn serve_router_with_qos(
+    router: Router,
+    config: HttpConfig,
+    qos: QosRuntime,
+    policy: QosPolicy,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), HttpServeError> {
+    let listener = tokio::net::TcpListener::bind(config.bind_address.to_string())
+        .await
+        .map_err(HttpServeError::Bind)?;
+    let listener = QosTcpListener::new(listener, qos, policy);
+
+    serve_listener(listener, router, config, shutdown).await
+}
+
+async fn serve_listener<L>(
+    listener: L,
+    router: Router,
+    config: HttpConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), HttpServeError>
+where
+    L: Listener,
+    L::Addr: fmt::Debug,
+{
+    let (shutdown_started, mut shutdown_observed) = tokio::sync::watch::channel(false);
+    let graceful_shutdown = async move {
+        shutdown.await;
+        let _ = shutdown_started.send(true);
+    };
+    let server = axum::serve(
+        listener,
+        HttpMakeService::new(router, config.request_timeout),
+    )
+    .with_graceful_shutdown(graceful_shutdown)
+    .into_future();
+
+    tokio::pin!(server);
+    tokio::select! {
+        result = &mut server => result.map_err(HttpServeError::Serve),
+        changed = shutdown_observed.changed() => {
+            let _ = changed;
+            match tokio::time::timeout(config.graceful_shutdown_timeout, &mut server).await {
+                Ok(result) => result.map_err(HttpServeError::Serve),
+                Err(_) => Err(HttpServeError::ShutdownTimeout),
+            }
+        }
+    }
+}
+
+struct HttpMakeService {
+    router: Router,
+    request_timeout: Duration,
+    next_connection_id: Arc<AtomicU64>,
+}
+
+impl HttpMakeService {
+    fn new(router: Router, request_timeout: Duration) -> Self {
+        Self {
+            router,
+            request_timeout,
+            next_connection_id: Arc::new(AtomicU64::new(1)),
+        }
+    }
+}
+
+impl<'a, L> Service<IncomingStream<'a, L>> for HttpMakeService
+where
+    L: Listener,
+{
+    type Response = HttpConnectionService<Router>;
+    type Error = Infallible;
+    type Future = Ready<Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _target: IncomingStream<'a, L>) -> Self::Future {
+        let connection_id =
+            HttpConnectionId(self.next_connection_id.fetch_add(1, Ordering::Relaxed));
+        ready(Ok(HttpConnectionService::new(
+            self.router.clone(),
+            connection_id,
+            self.request_timeout,
+        )))
+    }
+}
+
+struct HttpConnectionService<S> {
+    inner: S,
+    connection_id: HttpConnectionId,
+    request_timeout: Duration,
+}
+
+impl<S> HttpConnectionService<S> {
+    fn new(inner: S, connection_id: HttpConnectionId, request_timeout: Duration) -> Self {
+        Self {
+            inner,
+            connection_id,
+            request_timeout,
+        }
+    }
+}
+
+impl<S> Clone for HttpConnectionService<S>
+where
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            connection_id: self.connection_id,
+            request_timeout: self.request_timeout,
+        }
+    }
+}
+
+impl<S> Service<Request> for HttpConnectionService<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Send,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, mut request: Request) -> Self::Future {
+        request.extensions_mut().insert(self.connection_id);
+        let future = self.inner.call(request);
+        let request_timeout = self.request_timeout;
+        Box::pin(async move {
+            match tokio::time::timeout(request_timeout, future).await {
+                Ok(result) => result,
+                Err(_) => Ok((StatusCode::REQUEST_TIMEOUT, "request timed out").into_response()),
+            }
+        })
+    }
+}
+
+struct QosTcpListener {
+    inner: tokio::net::TcpListener,
+    qos: QosRuntime,
+    policy: QosPolicy,
+}
+
+impl QosTcpListener {
+    fn new(inner: tokio::net::TcpListener, qos: QosRuntime, policy: QosPolicy) -> Self {
+        Self { inner, qos, policy }
+    }
+}
+
+impl Listener for QosTcpListener {
+    type Io = QosTcpStream;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            match self.inner.accept().await {
+                Ok((stream, address)) => match self.qos.admit_connection(&self.policy) {
+                    Ok(permit) => {
+                        return (
+                            QosTcpStream {
+                                inner: stream,
+                                _permit: permit,
+                            },
+                            address,
+                        );
+                    }
+                    Err(RejectReason::ConnectionBudgetExceeded) => drop(stream),
+                    Err(_) => drop(stream),
+                },
+                Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            }
+        }
+    }
+
+    fn local_addr(&self) -> io::Result<Self::Addr> {
+        self.inner.local_addr()
+    }
+}
+
+struct QosTcpStream {
+    inner: tokio::net::TcpStream,
+    _permit: QosPermit,
+}
+
+impl AsyncRead for QosTcpStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(context, buffer)
+    }
+}
+
+impl AsyncWrite for QosTcpStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(context, buffer)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(context)
+    }
+}
+
 fn validate_proxy_url(value: &str) -> Result<(), HttpConfigError> {
     let Some((scheme, remainder)) = value.split_once("://") else {
         return Err(HttpConfigError::InvalidProxyUrl);
@@ -239,6 +529,17 @@ fn validate_proxy_url(value: &str) -> Result<(), HttpConfigError> {
 
     let authority = remainder.split('/').next().unwrap_or_default();
     if authority.is_empty() || authority.starts_with('@') {
+        return Err(HttpConfigError::InvalidProxyUrl);
+    }
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = if let Some(remainder) = host_port.strip_prefix('[') {
+        remainder.split_once(']').map_or("", |(host, _)| host)
+    } else {
+        host_port.split(':').next().unwrap_or_default()
+    };
+    if host.is_empty() {
         return Err(HttpConfigError::InvalidProxyUrl);
     }
 
@@ -266,6 +567,8 @@ fn parse_no_proxy_rules(value: Option<&str>) -> Result<Vec<String>, HttpConfigEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::net::qos::{QosPolicy, QosRuntime};
+    use axum::{Router, routing::get};
 
     #[test]
     fn parses_overridden_http_bind_address() {
@@ -325,15 +628,21 @@ mod tests {
 
     #[test]
     fn rejects_proxy_urls_without_supported_scheme_or_host() {
-        let overrides = NetworkEnvOverrides {
-            proxy: Some("socks5://proxy.internal:1080".to_owned()),
-            ..NetworkEnvOverrides::default()
-        };
+        for proxy in [
+            "socks5://proxy.internal:1080",
+            "http://:8080",
+            "https://user@:443",
+        ] {
+            let overrides = NetworkEnvOverrides {
+                proxy: Some(proxy.to_owned()),
+                ..NetworkEnvOverrides::default()
+            };
 
-        let error = HttpConfig::from_overrides(&overrides)
-            .expect_err("unsupported proxy scheme should fail");
+            let error =
+                HttpConfig::from_overrides(&overrides).expect_err("invalid proxy should fail");
 
-        assert_eq!(error, HttpConfigError::InvalidProxyUrl);
+            assert_eq!(error, HttpConfigError::InvalidProxyUrl);
+        }
     }
 
     #[test]
@@ -347,5 +656,133 @@ mod tests {
             HttpConfig::from_overrides(&overrides).expect_err("empty no-proxy entry should fail");
 
         assert_eq!(error, HttpConfigError::EmptyNoProxyRule);
+    }
+
+    #[tokio::test]
+    async fn serve_router_enforces_graceful_shutdown_timeout() {
+        let bind = format!("127.0.0.1:{}", unused_port());
+        let config = HttpConfig::new(
+            HttpBindAddress::parse(&bind).expect("bind should parse"),
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+            1024,
+            HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+        )
+        .expect("config should build");
+        let router = Router::new().route(
+            "/hold",
+            get(|| async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                "done"
+            }),
+        );
+        let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(serve_router(router, config, async {
+            let _ = shutdown_waiter.await;
+        }));
+
+        let stream = connect_with_retry(&bind).await;
+        let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        stream
+            .writable()
+            .await
+            .expect("stream should become writable");
+        stream.try_write(request).expect("request should write");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = shutdown.send(());
+
+        let error = server
+            .await
+            .expect("server task should join")
+            .expect_err("active request should exceed shutdown timeout");
+
+        assert!(matches!(error, HttpServeError::ShutdownTimeout));
+    }
+
+    #[tokio::test]
+    async fn serve_router_with_qos_rejects_excess_connections() {
+        let bind = format!("127.0.0.1:{}", unused_port());
+        let config = HttpConfig::new(
+            HttpBindAddress::parse(&bind).expect("bind should parse"),
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+            1024,
+            HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+        )
+        .expect("config should build");
+        let router = Router::new().route("/ok", get(|| async { "ok" }));
+        let qos = QosRuntime::default();
+        let policy = QosPolicy::new(1, 4, 4).expect("policy should build");
+        let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
+        let server_qos = qos.clone();
+        let server = tokio::spawn(serve_router_with_qos(
+            router,
+            config,
+            server_qos,
+            policy,
+            async {
+                let _ = shutdown_waiter.await;
+            },
+        ));
+
+        let first = connect_with_retry(&bind).await;
+        wait_for_connection_count(&qos, 1).await;
+        let second = connect_with_retry(&bind).await;
+
+        wait_for_peer_close(&second).await;
+
+        drop(first);
+        let _ = shutdown.send(());
+        server
+            .await
+            .expect("server task should join")
+            .expect("server should stop");
+    }
+
+    fn unused_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("listener should bind")
+            .local_addr()
+            .expect("listener should expose address")
+            .port()
+    }
+
+    async fn connect_with_retry(bind: &str) -> tokio::net::TcpStream {
+        for _ in 0..50 {
+            if let Ok(stream) = tokio::net::TcpStream::connect(bind).await {
+                return stream;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("server did not accept connections on {bind}");
+    }
+
+    async fn wait_for_connection_count(qos: &QosRuntime, expected: usize) {
+        for _ in 0..50 {
+            if qos.snapshot().connections == expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("connection count did not reach {expected}");
+    }
+
+    async fn wait_for_peer_close(stream: &tokio::net::TcpStream) {
+        let mut buffer = [0; 1024];
+        for _ in 0..50 {
+            stream.readable().await.expect("stream should be readable");
+            match stream.try_read(&mut buffer) {
+                Ok(0) => return,
+                Ok(_) => panic!("over-budget connection should close before serving data"),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => return,
+                Err(error) => panic!("response read failed: {error}"),
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("server did not close over-budget connection");
     }
 }

@@ -60,8 +60,17 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS` | QoS connection budget，默认 `1024` |
 | `RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS` | QoS in-flight request budget，默认 `256` |
 | `RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH` | QoS queue budget，默认 `512` |
+| `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED` | 是否默认启用 MCP Streamable HTTP，默认 `false` |
+| `RELAY_KNOWLEDGE_MCP_ENDPOINT` | MCP Streamable HTTP endpoint，默认 `/mcp` |
+| `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS` | 允许带 `Origin` 的 MCP HTTP caller，逗号分隔 |
+| `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` | MCP 可访问 source scope，逗号分隔 |
+| `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE` | 是否允许 MCP 请求省略 source scope，默认 `false` |
+| `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` | MCP 检索结果上限，默认 `10` |
+| `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | MCP 返回 context 文本预算，默认 `65536` |
+| `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH` | 是否暴露 `relay.refresh_indexes`，默认 `false` |
+| `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | 是否允许非本机 bind 对外服务，默认 `false` |
 
-空值会失败。数字变量必须是大于零的正整数。HTTP bind 必须能解析为 `host:port`，可以是 IP literal 或 hostname，并且端口不能是 `0`。Proxy URL 必须使用 `http://` 或 `https://` 且包含 host。No-proxy 规则会按逗号切分并 trim，空规则会失败。Proxy 值可能包含凭据，状态输出只暴露是否配置，不输出原始 proxy 字符串。`SSL_VERIFY` 默认 `true`，可用 `true/false`、`1/0`、`yes/no`、`on/off`。
+空值会失败。数字变量必须是大于零的正整数。HTTP bind 必须能解析为 `host:port`，可以是 IP literal 或 hostname，并且端口不能是 `0`。Proxy URL 必须使用 `http://` 或 `https://` 且包含 host。No-proxy 和 MCP 逗号分隔列表会 trim，空条目会失败。MCP endpoint 必须是无 query/fragment 的绝对 HTTP path。Proxy 值可能包含凭据，状态输出只暴露是否配置，不输出原始 proxy 字符串。`SSL_VERIFY` 和 MCP boolean 默认值可用 `true/false`、`1/0`、`yes/no`、`on/off`。
 
 ## 3. 路径规则
 
@@ -110,7 +119,7 @@ Windows 默认目录:
 
 ## 4. 网络和 QoS
 
-`net::http` 目前只定义配置与验证，不启动 socket、线程或后台循环。后续 HTTP server/client 必须在该边界内接入 Tokio 或同等级成熟 async runtime，并在分配连接、请求或队列资源前调用 `net::qos`。
+`net::http` 定义配置、验证和事件驱动 server 启动边界。HTTP server/client 必须在该边界内接入 Tokio 或同等级成熟 async runtime；socket 监听只能通过 `net::http::serve_router` 这类网络边界函数创建，并在分配连接、请求或队列资源前调用 `net::qos`。
 
 `net::NetworkRuntime` 是可刷新网络配置句柄。长运行进程启动时用 typed environment snapshot 构建初始配置；当环境变量或配置来源发生变化时，调用 `refresh_from_process_environment` 或 `refresh_from_environment` 会重新验证 proxy、no-proxy、TLS verification、HTTP budget 和 QoS budget，并替换 net 模块中的当前配置。HTTP client/server adapter 必须读取该句柄的 `current` 配置，不能缓存旧的环境变量字符串。
 
@@ -177,6 +186,7 @@ QoS admission 使用当前 snapshot 判断:
 - `RelayKnowledgeService::refresh_indexes`
 - `RelayKnowledgeService::health`
 - `RelayKnowledgeService::service_status`
+- `interfaces::agent::mcp::McpServer`
 - `interfaces::cli::run`
 
 存储初始化仍由 application service 编排，但数据库路径只来自 `paths.data_dir`。

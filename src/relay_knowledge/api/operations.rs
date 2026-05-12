@@ -10,7 +10,7 @@ use crate::{
     storage::GraphInspection,
 };
 
-use super::{ApiMetadata, RuntimeStatus};
+use super::{AgentProtocolStatus, ApiMetadata, RuntimeStatus};
 
 /// Evidence item supplied to the ingest API.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +116,7 @@ pub struct ServiceStatusResponse {
     pub background_enabled: bool,
     pub silent_updates_enabled: bool,
     pub service_definition_path: String,
+    pub agent_protocols: AgentProtocolStatus,
 }
 
 /// Aggregated health response for CLI/Web/service diagnostics.

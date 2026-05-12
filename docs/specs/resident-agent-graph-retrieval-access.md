@@ -153,6 +153,20 @@ protocol request
 
 MCP server 必须声明 tools、resources 和 prompts capability，并按 access policy 动态决定可见工具。
 
+当前 v1 已实现 MCP Streamable HTTP tool surface。入口是
+`relay-knowledge service run --mcp streamable-http` 或
+`RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`，默认 endpoint 为 `/mcp`。
+实现支持 `initialize`、`notifications/initialized`、`notifications/cancelled`、
+`ping`、`tools/list` 和 `tools/call`。Resources、prompts、ACP adapter 和旧 HTTP+SSE
+兼容端点仍是后续工作。
+`initialize` 必须携带匹配的 `protocolVersion`、object 形态的 `capabilities` 和
+非空 `clientInfo.name/version`，通过后返回加密随机的 server-issued
+`Mcp-Session-Id` header。客户端必须随后发送 `notifications/initialized`，并在
+后续 `ping`、tool request 和 notification 中继续携带该 session header 与
+`MCP-Protocol-Version`。缺失 session header 的非 `initialize` 请求返回 HTTP
+400；未签发、已淘汰或已终止的 session 返回 HTTP 404。Session 淘汰按最近使用
+时间执行，并且 usage history 必须有界，避免稳定 session 的长时间流量造成内存增长。
+
 ### 5.1 Tools
 
 | Tool | 默认 | Unified API 映射 |
@@ -323,7 +337,8 @@ Both protocols must preserve this semantic shape even if wire fields differ:
     "limit": 10,
     "candidate_count": 0,
     "returned_count": 0,
-    "context_bytes": 8192
+    "context_bytes": 8192,
+    "elapsed_ms": 4
   }
 }
 ```
@@ -339,6 +354,9 @@ Network rules:
 - All inbound network work passes through `net::qos`.
 - stdio transports still consume in-flight and queue budgets.
 - Request bodies and protocol frames over configured max body bytes are rejected before application service invocation.
+- MCP Streamable HTTP validates `Content-Type`、`Accept`、`MCP-Protocol-Version` and `Origin` before invoking tools. Media type matching is case-insensitive. Non-empty `Origin` must be loopback by default or match `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS`.
+- MCP request and response IDs must be strings or integers. Notifications must not include IDs; malformed notifications receive a JSON-RPC protocol error instead of a silent 202.
+- MCP normal methods are rejected until the session has completed `initialize` and `notifications/initialized`; post-initialize requests must include `MCP-Protocol-Version`; `ping` returns an empty JSON-RPC result for initialized sessions.
 
 Shutdown sequence:
 
@@ -407,11 +425,11 @@ CI expectations:
 
 ## 11. Implementation Order
 
-1. Add protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` and `AgentRetrievalResult` API types.
-2. Extend `InterfaceKind` with `Mcp` and `Acp`.
-3. Add `interfaces::agent` module with protocol-neutral validation and policy mapping.
-4. Implement MCP server adapter over the shared mapping.
-5. Implement ACP adapter over the same mapping.
-6. Add observability events and metrics.
-7. Add service status fields showing enabled protocols, bind mode and policy summary without secrets.
-8. Document install/config options once protocol listeners become user-configurable.
+1. Done: add protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` and `AgentRetrievalResult` API types.
+2. Done: extend `InterfaceKind` with `Mcp` and `Acp`.
+3. Done: add `interfaces::agent` module with protocol-neutral validation and policy mapping.
+4. Done: implement MCP Streamable HTTP tool adapter over the shared mapping.
+5. Done: add service status fields showing enabled protocols, bind mode and policy summary without secrets.
+6. Next: implement ACP adapter over the same mapping.
+7. Next: add persistent observability events and metrics exporters.
+8. Next: add MCP resources/prompts when product scope requires them.
