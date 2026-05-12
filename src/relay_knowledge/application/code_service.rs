@@ -7,14 +7,14 @@ use crate::{
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        CodeIndexError, build_index_snapshot, changed_paths_for_diff, register_repository,
-        resolve_repository_ref,
+        CodeIndexError, build_index_snapshot, changed_paths_for_diff,
+        deleted_symbol_names_for_diff, register_repository, resolve_repository_ref,
     },
     domain::{
         CodeImpactRequest, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRepositoryStatus, CodeRetrievalRequest,
+        CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
     },
-    storage::StorageError,
+    storage::{CodeImpactChanges, StorageError},
 };
 
 use super::RelayKnowledgeService;
@@ -100,6 +100,24 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryQueryResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
+        if request.freshness_policy == FreshnessPolicy::GraphOnly {
+            let graph_version = store
+                .current_graph_version()
+                .await
+                .map_err(storage_api_error)?;
+            return Ok(CodeRepositoryQueryResponse {
+                metadata: ApiMetadata::graph_only(&context, graph_version),
+                request,
+                results: Vec::new(),
+                degraded_reason: Some("graph_only freshness policy selected".to_owned()),
+            });
+        }
+        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh && status.stale {
+            return Err(ApiError::invalid_argument(format!(
+                "code repository '{}' is stale; run repo index or repo update before querying with wait_until_fresh",
+                status.alias
+            )));
+        }
         let request = retrieval_request_at_indexed_ref(request, &status).await?;
         let graph_version = store
             .current_graph_version()
@@ -137,13 +155,27 @@ impl RelayKnowledgeService {
             )));
         }
         request.repository.ref_selector = indexed_commit;
-        let root = PathBuf::from(status.root_path);
+        let root = PathBuf::from(status.root_path.clone());
         let base_ref = request.base_ref.clone();
         let head_ref = head_commit;
         let changed_paths =
             run_blocking_code(move || changed_paths_for_diff(root, &base_ref, &head_ref)).await?;
+        let registration = registration_from_status(&status);
+        let selector = request.repository.clone();
+        let base_ref = request.base_ref.clone();
+        let head_ref = request.head_ref.clone();
+        let deleted_symbol_names = run_blocking_code(move || {
+            deleted_symbol_names_for_diff(&registration, &selector, &base_ref, &head_ref)
+        })
+        .await?;
         let results = store
-            .analyze_code_impact(request.clone(), changed_paths.clone())
+            .analyze_code_impact(
+                request.clone(),
+                CodeImpactChanges {
+                    paths: changed_paths.clone(),
+                    deleted_symbol_names,
+                },
+            )
             .await
             .map_err(storage_api_error)?;
         let graph_version = store

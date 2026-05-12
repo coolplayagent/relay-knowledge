@@ -12,7 +12,7 @@ use crate::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,
         CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
     },
-    storage::{CodeRepositoryStore, StorageError, StorageFuture},
+    storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
 
 use super::SqliteGraphStore;
@@ -207,9 +207,9 @@ impl CodeRepositoryStore for SqliteGraphStore {
     fn analyze_code_impact(
         &self,
         request: CodeImpactRequest,
-        changed_paths: Vec<String>,
+        changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        self.run(move |connection| code_query::analyze_impact(connection, request, changed_paths))
+        self.run(move |connection| code_query::analyze_impact(connection, request, changes))
     }
 }
 
@@ -557,12 +557,13 @@ fn update_repository_after_snapshot(
         "code_repository_chunks",
         &snapshot.repository_id,
     )?;
-    let degraded_reason = (!snapshot.diagnostics.is_empty()).then(|| {
-        format!(
-            "{} file(s) degraded during code indexing",
-            snapshot.diagnostics.len()
-        )
-    });
+    let degraded_file_count = count_code_rows(
+        transaction,
+        "code_repository_file_diagnostics",
+        &snapshot.repository_id,
+    )?;
+    let degraded_reason = (degraded_file_count > 0)
+        .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
     transaction.execute(
         "
         UPDATE code_repositories

@@ -109,6 +109,16 @@ fn worktree_status_uses_destination_path_for_renames_and_copies() {
 }
 
 #[test]
+fn impact_paths_for_copies_only_include_destination() {
+    let paths = impact_paths_from_changes(vec![GitChange::Copied {
+        old_path: "src/source.rs".to_owned(),
+        new_path: "src/copied.rs".to_owned(),
+    }]);
+
+    assert_eq!(paths, ["src/copied.rs"]);
+}
+
+#[test]
 fn worktree_overlay_hash_tracks_modified_content() {
     let repo = TempGitRepo::create("overlay-hash");
     repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
@@ -139,6 +149,47 @@ fn worktree_overlay_hash_tracks_modified_content() {
 }
 
 #[test]
+fn clean_worktree_overlay_rebuilds_clean_commit_snapshot() {
+    let repo = TempGitRepo::create("overlay-clean");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("clean overlay should index clean commit");
+
+    assert!(snapshot.full_replace);
+    assert_eq!(snapshot.resolved_commit_sha, head);
+    assert_eq!(snapshot.files.len(), 1);
+}
+
+#[test]
+fn dirty_worktree_overlay_uses_synthetic_commit_identity() {
+    let repo = TempGitRepo::create("overlay-dirty-identity");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    repo.write("src/lib.rs", "fn value() -> u32 { 1 }\n");
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("dirty overlay should index");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("worktree:"));
+    assert!(snapshot.tree_hash.starts_with("worktree:"));
+}
+
+#[test]
 fn worktree_overlay_hash_ignores_out_of_scope_changes() {
     let repo = TempGitRepo::create("overlay-out-of-scope");
     repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
@@ -165,7 +216,8 @@ fn worktree_overlay_hash_ignores_out_of_scope_changes() {
     .expect("second overlay should index");
 
     assert_eq!(first.tree_hash, second.tree_hash);
-    assert!(first.files.is_empty());
+    assert!(!first.resolved_commit_sha.starts_with("worktree:"));
+    assert!(first.files.iter().any(|file| file.path == "src/lib.rs"));
 }
 
 #[test]
@@ -217,6 +269,47 @@ fn worktree_overlay_records_rename_source_deletions() {
 
     assert_eq!(snapshot.deleted_paths, ["src/old.rs"]);
     assert!(snapshot.files.iter().any(|file| file.path == "src/new.rs"));
+}
+
+#[test]
+fn incremental_deletions_are_limited_to_selected_scope() {
+    let repo = TempGitRepo::create("incremental-delete-scope");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("docs/out.rs", "fn out_of_scope() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    fs::remove_file(repo.path.join("docs/out.rs")).expect("out-of-scope file should delete");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "delete docs"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::incremental(base, "HEAD").expect("incremental mode should validate"),
+        Vec::new(),
+    )
+    .expect("incremental delete should index");
+
+    assert!(snapshot.deleted_paths.is_empty());
+}
+
+#[test]
+fn deleted_symbol_names_are_extracted_from_base_diff() {
+    let repo = TempGitRepo::create("deleted-symbol-seeds");
+    repo.write("src/lib.rs", "fn removed_api() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+    fs::remove_file(repo.path.join("src/lib.rs")).expect("source file should delete");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "delete api"]);
+
+    let names =
+        deleted_symbol_names_for_diff(&repo.registration(), &repo.selector(), &base, "HEAD")
+            .expect("deleted symbols should parse");
+
+    assert_eq!(names, ["removed_api"]);
 }
 
 #[test]
@@ -324,6 +417,16 @@ impl TempGitRepo {
             "git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+        let output = Command::new("git")
+            .current_dir(&self.path)
+            .args(args)
+            .output()
+            .expect("git should run");
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
         CodeImpactRequest, CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit,
         CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeRange,
     },
-    storage::StorageError,
+    storage::{CodeImpactChanges, StorageError},
 };
 
 use super::repository_status;
@@ -66,14 +66,14 @@ pub(super) fn search_code(
 pub(super) fn analyze_impact(
     connection: &mut Connection,
     request: CodeImpactRequest,
-    changed_paths: Vec<String>,
+    changes: CodeImpactChanges,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let status = required_repository(
         connection,
         &request.repository.repository,
         &request.repository.ref_selector,
     )?;
-    let changed = selected_changed_paths(connection, &status, &request, changed_paths)?;
+    let changed = selected_changed_paths(connection, &status, &request, changes.paths)?;
     let changed_modules = changed
         .iter()
         .map(|path| path_to_module_key(path))
@@ -86,6 +86,7 @@ pub(super) fn analyze_impact(
         connection,
         &status,
         &changed_symbols,
+        &changes.deleted_symbol_names,
         &request,
     )?);
     hits.extend(importers_for_modules(
@@ -530,6 +531,7 @@ fn callers_for_symbols(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     symbol_ids: &[String],
+    deleted_symbol_names: &[String],
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
@@ -560,6 +562,7 @@ fn callers_for_symbols(
         })
     })?;
     let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
+    let deleted_name_set = deleted_symbol_names.iter().collect::<BTreeSet<_>>();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -571,6 +574,8 @@ fn callers_for_symbols(
             row.callee_symbol_snapshot_id
                 .as_ref()
                 .is_some_and(|symbol_id| symbol_set.contains(symbol_id))
+                || (row.callee_symbol_snapshot_id.is_none()
+                    && deleted_name_set.contains(&row.callee_name))
         })
         .map(|row| {
             let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
@@ -767,7 +772,7 @@ fn module_import_matches(imported_module: &str, changed_module: &str) -> bool {
 
 fn module_boundary(character: Option<char>) -> bool {
     character
-        .map(|value| matches!(value, ':' | '.' | '/' | '\\' | '-'))
+        .map(|value| matches!(value, ':' | '.' | '/' | '\\'))
         .unwrap_or(true)
 }
 
@@ -824,7 +829,17 @@ fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {
     for hit in hits.drain(..) {
         let key = (hit.path.clone(), hit.line_range.start, hit.excerpt.clone());
         match best.get(&key) {
-            Some(existing) if existing.score >= hit.score => {}
+            Some(existing) if existing.score >= hit.score => {
+                let existing = best.get_mut(&key).expect("checked entry should exist");
+                merge_hit_provenance(existing, &hit);
+            }
+            Some(_) => {
+                let mut hit = hit;
+                if let Some(existing) = best.get(&key) {
+                    merge_hit_provenance(&mut hit, existing);
+                }
+                best.insert(key, hit);
+            }
             _ => {
                 best.insert(key, hit);
             }
@@ -839,6 +854,28 @@ fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {
             .then_with(|| left.line_range.start.cmp(&right.line_range.start))
     });
     hits.truncate(limit);
+}
+
+fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
+    for layer in &source.retrieval_layers {
+        if !target.retrieval_layers.contains(layer) {
+            target.retrieval_layers.push(*layer);
+        }
+    }
+    for version in &source.index_versions {
+        if !target.index_versions.contains(version) {
+            target.index_versions.push(version.clone());
+        }
+    }
+    if target.degraded_reason.is_none() {
+        target.degraded_reason = source.degraded_reason.clone();
+    }
+    if target.symbol_snapshot_id.is_none() {
+        target.symbol_snapshot_id = source.symbol_snapshot_id.clone();
+    }
+    if target.file_id.is_none() {
+        target.file_id = source.file_id.clone();
+    }
 }
 
 fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
@@ -930,6 +967,7 @@ mod tests {
         assert!(module_import_matches("foo::bar::baz", "foo::bar"));
         assert!(!module_import_matches("foo::barista", "foo::bar"));
         assert!(!module_import_matches("foo::bar_baz", "foo::bar"));
+        assert!(!module_import_matches("foo::bar-baz", "foo::bar"));
     }
 
     #[test]

@@ -12,9 +12,10 @@ use crate::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeRepositoryStore,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeReferenceSearchRequest,
+        CodeRepositoryStore, CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest,
+        GraphStore, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -159,7 +160,7 @@ impl CodeRepositoryStore for GraphOnlySearchStore {
     unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
     unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
     unsupported_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
-    unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changed_paths: Vec<String>) -> Vec<CodeRetrievalHit>);
+    unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
 
 fn unsupported<T: Send + 'static>(message: &'static str) -> StorageFuture<'static, T> {

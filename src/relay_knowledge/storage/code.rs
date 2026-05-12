@@ -7,6 +7,13 @@ use crate::domain::{
 
 use super::StorageFuture;
 
+/// Diff-derived inputs used to seed code impact expansion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeImpactChanges {
+    pub paths: Vec<String>,
+    pub deleted_symbol_names: Vec<String>,
+}
+
 /// Persisted code repository graph and retrieval contract.
 pub trait CodeRepositoryStore: Send + Sync {
     fn upsert_code_repository(
@@ -37,6 +44,6 @@ pub trait CodeRepositoryStore: Send + Sync {
     fn analyze_code_impact(
         &self,
         request: CodeImpactRequest,
-        changed_paths: Vec<String>,
+        changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>>;
 }

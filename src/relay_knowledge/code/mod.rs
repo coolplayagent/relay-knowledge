@@ -112,23 +112,68 @@ pub fn changed_paths_for_diff(
     head_ref: &str,
 ) -> Result<Vec<String>, CodeIndexError> {
     let changes = diff_changes(root_path.as_ref(), base_ref, head_ref)?;
+
+    Ok(impact_paths_from_changes(changes))
+}
+
+fn impact_paths_from_changes(changes: Vec<GitChange>) -> Vec<String> {
     let mut paths = Vec::new();
     for change in changes {
         match change {
             GitChange::AddedOrModified { path }
             | GitChange::Deleted { path }
             | GitChange::TypeChanged { path } => paths.push(path),
-            GitChange::Renamed { old_path, new_path }
-            | GitChange::Copied { old_path, new_path } => {
+            GitChange::Renamed { old_path, new_path } => {
                 paths.push(old_path);
                 paths.push(new_path);
             }
+            GitChange::Copied { new_path, .. } => paths.push(new_path),
         }
     }
     paths.sort();
     paths.dedup();
 
-    Ok(paths)
+    paths
+}
+
+/// Extracts symbol names removed by a diff so impact can include deleted APIs.
+pub fn deleted_symbol_names_for_diff(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    base_ref: &str,
+    head_ref: &str,
+) -> Result<Vec<String>, CodeIndexError> {
+    let root = PathBuf::from(&registration.root_path);
+    let base_commit = resolve_ref(&root, base_ref)?;
+    let changes = diff_changes(&root, base_ref, head_ref)?;
+    let mut names = Vec::new();
+
+    for change in changes {
+        let deleted_path = match change {
+            GitChange::Deleted { path } | GitChange::Renamed { old_path: path, .. } => path,
+            GitChange::AddedOrModified { .. }
+            | GitChange::Copied { .. }
+            | GitChange::TypeChanged { .. } => continue,
+        };
+        if !path_is_selected(&deleted_path, registration, selector) {
+            continue;
+        }
+        let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
+        let mut build = SnapshotBuild::new(
+            registration,
+            base_commit.clone(),
+            "deleted-symbol-seed".to_owned(),
+            true,
+            1,
+            0,
+        );
+        parse_indexed_file(&mut build, &deleted_path, &bytes)?;
+        names.extend(build.symbols.into_iter().map(|symbol| symbol.name));
+    }
+    names.sort();
+    names.dedup();
+
+    Ok(names)
 }
 
 /// Resolves a repository ref selector to the exact commit used by storage.
@@ -177,16 +222,22 @@ fn build_incremental_snapshot(
 
     for change in changes {
         match change {
-            GitChange::Deleted { path } => build.deleted_paths.push(path),
+            GitChange::Deleted { path } => {
+                if path_is_selected(&path, registration, selector) {
+                    build.deleted_paths.push(path);
+                }
+            }
             GitChange::Renamed { old_path, new_path } => {
-                build.deleted_paths.push(old_path.clone());
-                build.tombstones.push(CodePathTombstone {
-                    repository_id: registration.repository_id.clone(),
-                    old_path,
-                    new_path: Some(new_path.clone()),
-                    base_ref: base_ref.to_owned(),
-                    head_ref: head_ref.to_owned(),
-                });
+                if path_is_selected(&old_path, registration, selector) {
+                    build.deleted_paths.push(old_path.clone());
+                    build.tombstones.push(CodePathTombstone {
+                        repository_id: registration.repository_id.clone(),
+                        old_path,
+                        new_path: Some(new_path.clone()),
+                        base_ref: base_ref.to_owned(),
+                        head_ref: head_ref.to_owned(),
+                    });
+                }
                 parse_changed_path(
                     &mut build,
                     registration,
@@ -197,13 +248,15 @@ fn build_incremental_snapshot(
                 )?;
             }
             GitChange::Copied { old_path, new_path } => {
-                build.tombstones.push(CodePathTombstone {
-                    repository_id: registration.repository_id.clone(),
-                    old_path,
-                    new_path: Some(new_path.clone()),
-                    base_ref: base_ref.to_owned(),
-                    head_ref: head_ref.to_owned(),
-                });
+                if path_is_selected(&new_path, registration, selector) {
+                    build.tombstones.push(CodePathTombstone {
+                        repository_id: registration.repository_id.clone(),
+                        old_path,
+                        new_path: Some(new_path.clone()),
+                        base_ref: base_ref.to_owned(),
+                        head_ref: head_ref.to_owned(),
+                    });
+                }
                 parse_changed_path(
                     &mut build,
                     registration,
@@ -238,6 +291,9 @@ fn build_worktree_overlay_snapshot(
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let status = git_bytes(root, ["status", "--porcelain=v1", "-z"])?;
     let changes = worktree_changed_paths(&status);
+    if changes.is_empty() {
+        return build_full_snapshot(registration, selector, root);
+    }
     let mut overlay_hash_input = Vec::new();
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
@@ -284,11 +340,16 @@ fn build_worktree_overlay_snapshot(
         }
         files_to_parse.push((path.clone(), bytes));
     }
+    if overlay_hash_input.is_empty() {
+        return build_full_snapshot(registration, selector, root);
+    }
 
-    let tree_hash = format!("worktree:{:016x}", stable_hash64(&overlay_hash_input));
+    let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
+    let tree_hash = format!("worktree:{overlay_hash}");
+    let overlay_commit = format!("worktree:{commit}:{overlay_hash}");
     let mut build = SnapshotBuild::new(
         registration,
-        commit,
+        overlay_commit,
         tree_hash,
         false,
         changes.len(),

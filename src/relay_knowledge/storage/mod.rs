@@ -17,7 +17,7 @@ use crate::domain::{
     IndexKind, IndexStatus, RetrievalHit,
 };
 
-pub use code::CodeRepositoryStore;
+pub use code::{CodeImpactChanges, CodeRepositoryStore};
 pub use sqlite::SqliteGraphStore;
 
 pub type StorageFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 'a>>;

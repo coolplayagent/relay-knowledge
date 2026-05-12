@@ -12,9 +12,10 @@ use relay_knowledge::{
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeRepositoryStore,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeReferenceSearchRequest,
+        CodeRepositoryStore, CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest,
+        GraphStore, IndexStore, MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -317,7 +318,7 @@ impl CodeRepositoryStore for RefreshFailStore {
     unsupported_code_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
     unsupported_code_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
     unsupported_code_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
-    unsupported_code_method!(analyze_code_impact(request: CodeImpactRequest, changed_paths: Vec<String>) -> Vec<CodeRetrievalHit>);
+    unsupported_code_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {

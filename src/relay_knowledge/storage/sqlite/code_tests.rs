@@ -1,10 +1,10 @@
 use super::*;
 use crate::{
     domain::{
-        CodeCallRecord, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy, RepositoryCodeChunkRecord,
-        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-        RepositoryCodeSymbolRecord,
+        CodeCallRecord, CodeFileDiagnostic, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus,
+        CodeQueryKind, CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -84,6 +84,39 @@ async fn text_only_chunk_hits_are_marked_as_text_fallback() {
         hits[0]
             .retrieval_layers
             .contains(&CodeRetrievalLayer::TextFallback)
+    );
+}
+
+#[tokio::test]
+async fn hybrid_deduplication_preserves_retrieval_layers() {
+    let store = store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert!(
+        hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Symbol)
+    );
+    assert!(
+        hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Lexical)
     );
 }
 
@@ -169,7 +202,13 @@ async fn impact_does_not_fall_back_to_all_symbols_for_non_symbol_paths() {
     .expect("impact request should validate");
 
     let hits = store
-        .analyze_code_impact(request, vec!["README.md".to_owned()])
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["README.md".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
         .await
         .expect("impact should succeed");
 
@@ -189,7 +228,13 @@ async fn impact_callers_match_resolved_symbol_identity() {
     .expect("impact request should validate");
 
     let hits = store
-        .analyze_code_impact(request, vec!["src/a.rs".to_owned()])
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["src/a.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
         .await
         .expect("impact should succeed");
 
@@ -210,11 +255,61 @@ async fn impact_seeds_respect_request_path_filters() {
     .expect("impact request should validate");
 
     let hits = store
-        .analyze_code_impact(request, vec!["tests/out.rs".to_owned()])
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["tests/out.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
         .await
         .expect("impact should succeed");
 
     assert!(hits.is_empty());
+}
+
+#[tokio::test]
+async fn impact_callers_can_use_deleted_symbol_names() {
+    let store = store_with_repository_snapshot(snapshot_with_unresolved_caller()).await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: Vec::new(),
+                deleted_symbol_names: vec!["target".to_owned()],
+            },
+        )
+        .await
+        .expect("impact should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/caller.rs");
+}
+
+#[tokio::test]
+async fn incremental_updates_retain_existing_degraded_status() {
+    let store = store_with_repository_snapshot(snapshot_with_degraded_and_parsed_files()).await;
+    store
+        .apply_code_index_snapshot(incremental_snapshot_for_parsed_file())
+        .await
+        .expect("incremental snapshot should apply");
+
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert!(status.degraded_reason.is_some());
 }
 
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
@@ -254,12 +349,63 @@ fn snapshot_with_chunk_status(
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
-        files: vec![file("file", path, "rust", parse_status, degraded_reason)],
+        files: vec![file(
+            "file",
+            path,
+            "rust",
+            parse_status,
+            degraded_reason.clone(),
+        )],
         symbols: Vec::new(),
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
         chunks: vec![chunk("chunk", "file", path, content, None)],
+        diagnostics: degraded_reason
+            .map(|message| CodeFileDiagnostic {
+                repository_id: repository_id.to_owned(),
+                path: path.to_owned(),
+                parse_status,
+                message,
+            })
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn snapshot_with_symbol_and_matching_chunk() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "target-file",
+            "src/lib.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: vec![symbol(
+            "target-symbol",
+            "target-file",
+            "src/lib.rs",
+            "target",
+        )],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![chunk(
+            "target-chunk",
+            "target-file",
+            "src/lib.rs",
+            "fn target()",
+            Some("target-symbol"),
+        )],
         diagnostics: Vec::new(),
     }
 }
@@ -397,6 +543,89 @@ fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {
             Some("out-target"),
         )],
         chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_unresolved_caller() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "caller-file",
+            "src/caller.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![call("call", "caller-file", "src/caller.rs", None)],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_degraded_and_parsed_files() -> CodeIndexSnapshot {
+    let mut snapshot = snapshot_with_chunk_status(
+        "repo",
+        "README.txt",
+        "RetryPolicy appears in docs",
+        CodeParseStatus::TextOnly,
+        Some("tree-sitter grammar is not configured".to_owned()),
+    );
+    snapshot.files.push(file(
+        "src-file",
+        "src/lib.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    snapshot.chunks.push(chunk(
+        "src-chunk",
+        "src-file",
+        "src/lib.rs",
+        "fn kept() {}",
+        None,
+    ));
+    snapshot
+}
+
+fn incremental_snapshot_for_parsed_file() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree-2".to_owned(),
+        full_replace: false,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "src-file-2",
+            "src/lib.rs",
+            "rust",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![chunk(
+            "src-chunk-2",
+            "src-file-2",
+            "src/lib.rs",
+            "fn kept() -> u32 { 1 }",
+            None,
+        )],
         diagnostics: Vec::new(),
     }
 }
