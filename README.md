@@ -8,6 +8,7 @@
 
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
+- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、Web readiness、MCP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
@@ -15,6 +16,7 @@
 
 - [工程硬约束](docs/specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、事件驱动 HTTP、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。
 - [基础运行时层规格](docs/specs/foundational-runtime.md): `env`、`paths`、`net::http` 和 `net::qos` 的环境变量、路径默认值、网络预算、失败模式和测试策略。
+- [GraphRAG 产品与实现路线规格](docs/specs/graphrag-product-and-implementation-roadmap.md): 产品边界、当前实现基线、优化措施、分阶段路线和验收要求。
 - [安装部署与发布规格](docs/specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
 - [统一 API 层与交互层架构](docs/specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
 - [先进架构与可观测性设计](docs/specs/advanced-architecture-observability.md): 本地优先、异步优先、模块解耦和 telemetry 设计。
@@ -88,12 +90,13 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The static Web workspace renders project health, graph counts, index freshness,
-runtime budgets, and interactive operation composers for retrieval, ingestion,
-graph inspection, code repository workflows, index refresh, and service runtime
-commands. The current Web client still reads live diagnostics only from
-`/api/project/status` and `/api/health`; operation composers stage typed command
-and request previews until a Rust HTTP adapter exposes executable Web endpoints.
+The static Web workspace renders project health, GraphRAG readiness, graph
+counts, index freshness, runtime budgets, and interactive operation composers
+for retrieval, ingestion, graph inspection, code repository workflows, index
+refresh, and service runtime commands. The current Web client still reads live
+diagnostics only from `/api/project/status` and `/api/health`; operation
+composers stage typed command and request previews until a Rust HTTP adapter
+exposes executable Web endpoints.
 
 Optional local pre-commit checks:
 
