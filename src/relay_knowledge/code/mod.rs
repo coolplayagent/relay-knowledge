@@ -324,17 +324,31 @@ fn build_worktree_overlay_snapshot(
             continue;
         }
         let full_path = root.join(path);
-        if !full_path.exists() {
+        let metadata = match fs::symlink_metadata(&full_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if path_is_selected(path, registration, selector) {
+                    overlay_hash_input.extend_from_slice(b"D\0");
+                    overlay_hash_input.extend_from_slice(path.as_bytes());
+                    overlay_hash_input.push(0);
+                    deleted_paths.push(path.clone());
+                }
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
             if path_is_selected(path, registration, selector) {
-                overlay_hash_input.extend_from_slice(b"D\0");
-                overlay_hash_input.extend_from_slice(path.as_bytes());
-                overlay_hash_input.push(0);
-                deleted_paths.push(path.clone());
+                record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
-        let metadata = fs::metadata(&full_path)?;
-        if metadata.is_dir() {
+        if file_type.is_dir() {
+            if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
+                record_worktree_status_marker(path, &mut overlay_hash_input);
+                continue;
+            }
             for nested_path in worktree_directory_files(root, path)? {
                 if path_is_selected(&nested_path, registration, selector) {
                     record_worktree_file(
@@ -349,10 +363,8 @@ fn build_worktree_overlay_snapshot(
             }
             continue;
         }
-        if !metadata.is_file() {
-            overlay_hash_input.extend_from_slice(b"S\0");
-            overlay_hash_input.extend_from_slice(path.as_bytes());
-            overlay_hash_input.push(0);
+        if !file_type.is_file() {
+            record_worktree_status_marker(path, &mut overlay_hash_input);
             continue;
         }
         if path_is_selected(path, registration, selector) {
@@ -390,6 +402,12 @@ fn build_worktree_overlay_snapshot(
     Ok(build.finish())
 }
 
+fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
+    overlay_hash_input.extend_from_slice(b"S\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+}
+
 fn record_worktree_file(
     root: &Path,
     path: &str,
@@ -418,11 +436,35 @@ fn worktree_directory_files(
     root: &Path,
     relative_dir: &str,
 ) -> Result<Vec<String>, CodeIndexError> {
+    if !worktree_directory_is_expandable(root, relative_dir)? {
+        return Ok(Vec::new());
+    }
     let mut files = Vec::new();
     collect_worktree_directory_files(root, Path::new(relative_dir), &mut files)?;
     files.sort();
 
     Ok(files)
+}
+
+fn worktree_directory_is_expandable(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<bool, CodeIndexError> {
+    let full_path = root.join(relative_dir);
+    let metadata = fs::symlink_metadata(&full_path)?;
+    if !metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+
+    Ok(!contains_git_metadata(root, Path::new(relative_dir))?)
+}
+
+fn contains_git_metadata(root: &Path, relative: &Path) -> Result<bool, CodeIndexError> {
+    match fs::symlink_metadata(root.join(relative).join(".git")) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn collect_worktree_directory_files(
@@ -435,6 +477,9 @@ fn collect_worktree_directory_files(
         let path = relative.join(entry.file_name());
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
+            if entry.file_name() == ".git" || contains_git_metadata(root, &path)? {
+                continue;
+            }
             collect_worktree_directory_files(root, &path, files)?;
         } else if file_type.is_file() {
             files.push(path.to_string_lossy().replace('\\', "/"));
@@ -791,8 +836,15 @@ fn split_nul(bytes: &[u8]) -> Vec<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorktreePathChange {
+    status: String,
     path: String,
     deleted_source: Option<String>,
+}
+
+impl WorktreePathChange {
+    fn is_untracked(&self) -> bool {
+        self.status == "??"
+    }
 }
 
 fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
@@ -810,6 +862,7 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
         if (status.contains('R') || status.contains('C')) && tokens.get(index + 1).is_some() {
             let source = tokens[index + 1].clone();
             changes.push(WorktreePathChange {
+                status: status.to_owned(),
                 path,
                 deleted_source: status.contains('R').then_some(source),
             });
@@ -817,6 +870,7 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
             continue;
         }
         changes.push(WorktreePathChange {
+            status: status.to_owned(),
             path,
             deleted_source: None,
         });
