@@ -60,8 +60,9 @@ repository_id = hash(normalized_origin_url, absolute_repo_identity, install_inst
 ```
 
 同一个 remote 的不同本地 checkout 必须保持不同 `repository_id`，避免
-alias、status lookup 或本地授权范围互相混淆。以 `repo:` 开头的查询键必须
-只按 `repository_id` 查找；alias lookup 只能用于非 `repo:` 输入。
+alias、status lookup 或本地授权范围互相混淆。查询键必须先按
+`repository_id` 精确查找；未命中时再按 alias 查找，所以 alias 可使用
+`repo:` 前缀，但与 `repository_id` 冲突时必须由 `repository_id` 优先。
 
 仓库元数据至少包含:
 
@@ -300,7 +301,8 @@ ChangedPath {
 增量更新必须按顺序缩小工作集:
 
 1. 解析 Git diff/status 得到 changed paths。
-2. 按授权 scope、path filters、language filters 过滤。
+2. 按授权 scope、path filters、language filters 过滤；`.` 和 `./` path
+   filter 表示仓库根。
 3. 用 blob/content hash 跳过内容未变文件。
 4. 对删除文件产生 tombstone mutation。
 5. 对 rename/move 保留 lineage candidate。

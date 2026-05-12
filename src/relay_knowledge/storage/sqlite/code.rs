@@ -255,36 +255,21 @@ pub(super) fn repository_status(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    let lookup = if repository.starts_with("repo:") {
-        RepositoryLookup::RepositoryId
-    } else {
-        RepositoryLookup::AliasOrId
-    };
-    let query = match lookup {
-        RepositoryLookup::RepositoryId => {
-            "
-            SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                   last_indexed_commit, tree_hash,
-                   state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                   stale, degraded_reason
-            FROM code_repositories
-            WHERE repository_id = ?1
-            "
-        }
-        RepositoryLookup::AliasOrId => {
-            "
-            SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                   last_indexed_commit, tree_hash,
-                   state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                   stale, degraded_reason
-            FROM code_repositories
-            WHERE alias = ?1 OR repository_id = ?1
-            "
-        }
-    };
+    if let Some(status) =
+        repository_status_by_column(connection, repository, RepositoryLookupColumn::RepositoryId)?
+    {
+        return Ok(Some(status));
+    }
+    repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
+}
 
+fn repository_status_by_column(
+    connection: &mut Connection,
+    repository: &str,
+    column: RepositoryLookupColumn,
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
     connection
-        .query_row(query, params![repository], |row| {
+        .query_row(column.query(), params![repository], |row| {
             Ok(CodeRepositoryStatus {
                 repository_id: row.get(0)?,
                 alias: row.get(1)?,
@@ -306,9 +291,36 @@ pub(super) fn repository_status(
         .map_err(StorageError::from)
 }
 
-enum RepositoryLookup {
+enum RepositoryLookupColumn {
     RepositoryId,
-    AliasOrId,
+    Alias,
+}
+
+impl RepositoryLookupColumn {
+    fn query(&self) -> &'static str {
+        match self {
+            Self::RepositoryId => {
+                "
+                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
+                       last_indexed_commit, tree_hash,
+                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
+                       stale, degraded_reason
+                FROM code_repositories
+                WHERE repository_id = ?1
+                "
+            }
+            Self::Alias => {
+                "
+                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
+                       last_indexed_commit, tree_hash,
+                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
+                       stale, degraded_reason
+                FROM code_repositories
+                WHERE alias = ?1
+                "
+            }
+        }
+    }
 }
 
 fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {

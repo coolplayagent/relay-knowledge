@@ -157,13 +157,13 @@ impl RelayKnowledgeService {
         request.repository.ref_selector = indexed_commit;
         let root = PathBuf::from(status.root_path.clone());
         let base_ref = request.base_ref.clone();
-        let head_ref = head_commit;
+        let head_ref = head_commit.clone();
         let changed_paths =
             run_blocking_code(move || changed_paths_for_diff(root, &base_ref, &head_ref)).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
         let base_ref = request.base_ref.clone();
-        let head_ref = request.head_ref.clone();
+        let head_ref = head_commit;
         let deleted_symbol_names = run_blocking_code(move || {
             deleted_symbol_names_for_diff(&registration, &selector, &base_ref, &head_ref)
         })

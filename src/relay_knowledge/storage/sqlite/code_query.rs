@@ -442,6 +442,9 @@ pub(super) fn language_filter_allows(language_id: &str, filters: &[String]) -> b
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
     let filter = filter.trim_end_matches(['/', '\\']);
+    if filter == "." {
+        return true;
+    }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
 }
 
@@ -626,6 +629,8 @@ mod tests {
     fn path_filters_accept_trailing_slashes() {
         assert!(path_matches_filter("src/lib.rs", "src/"));
         assert!(path_matches_filter("src/lib.rs", "src"));
+        assert!(path_matches_filter("src/lib.rs", "."));
+        assert!(path_matches_filter("src/lib.rs", "./"));
         assert!(!path_matches_filter("src-other/lib.rs", "src/"));
     }
 }

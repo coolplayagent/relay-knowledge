@@ -68,6 +68,27 @@ fn selector_filters_cannot_widen_registered_scope() {
 }
 
 #[test]
+fn dot_path_filter_selects_repository_root() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let selector_dot =
+        CodeRepositorySelector::new("alias", "HEAD", vec!["./".to_owned()], Vec::new())
+            .expect("selector should validate");
+
+    assert!(path_is_selected("src/lib.rs", &registration, &selector));
+    assert!(path_is_selected("README.md", &registration, &selector));
+    assert!(path_is_selected("src/lib.rs", &registration, &selector_dot));
+}
+
+#[test]
 fn repository_id_includes_local_root_with_remote_origin() {
     let first = TempGitRepo::create("repo-id-first");
     let second = TempGitRepo::create("repo-id-second");

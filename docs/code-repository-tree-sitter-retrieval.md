@@ -28,7 +28,9 @@ cannot be confused with hybrid search.
 - Git registration resolves the repository root and derives a stable
   `repository_id` from both `remote.origin.url` and the local repository root,
   falling back to the absolute root path when no origin is configured. Status
-  lookup treats values beginning with `repo:` as repository ids, not aliases.
+  lookup checks `repository_id` first and then falls back to alias lookup, so
+  `repo:` aliases remain reachable when they do not collide with a repository
+  id.
 - Full indexing reads a clean Git tree using `git ls-tree` and `git show`.
 - Incremental indexing reads `git diff --name-status --find-renames -z` and
   only reparses changed, copied, renamed, or type-changed paths. Selected
@@ -52,7 +54,8 @@ cannot be confused with hybrid search.
   rejected before invoking Git so user-supplied ref names cannot be parsed as
   Git options.
 - Request path/language filters are intersected with the registered repository
-  scope and cannot widen ingestion, retrieval, or impact analysis.
+  scope and cannot widen ingestion, retrieval, or impact analysis. `.` and `./`
+  path filters select the repository root.
 - `wait-until-fresh` code queries reject stale repository status. `graph-only`
   returns no repository-index rows and reports that the graph-only policy was
   selected.

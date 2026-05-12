@@ -774,6 +774,9 @@ fn language_filter_allows(path: &str, filters: &[String]) -> bool {
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
     let filter = filter.trim_end_matches(['/', '\\']);
+    if filter == "." {
+        return true;
+    }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
 }
 

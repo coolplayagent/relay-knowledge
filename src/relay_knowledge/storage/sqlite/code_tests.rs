@@ -93,6 +93,33 @@ async fn repository_id_lookup_takes_precedence_over_alias_like_ids() {
 }
 
 #[tokio::test]
+async fn repo_prefixed_alias_resolves_when_repository_id_is_absent() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo:actual",
+                "repo:team-a",
+                "/tmp/actual",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+
+    let status = store
+        .code_repository_status("repo:team-a".to_owned())
+        .await
+        .expect("status should query")
+        .expect("repo-prefixed alias should resolve");
+
+    assert_eq!(status.repository_id, "repo:actual");
+    assert_eq!(status.alias, "repo:team-a");
+}
+
+#[tokio::test]
 async fn text_only_chunk_hits_are_marked_as_text_fallback() {
     let store = store_with_repository_snapshot(snapshot_with_chunk_status(
         "repo",

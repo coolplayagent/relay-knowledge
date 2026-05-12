@@ -345,6 +345,8 @@ fn collect_manual_node(
             reference.name == name
                 && reference.path == context.path
                 && reference.line_range.start == range.line_start as u32
+                && reference.byte_range.start as usize == range.byte_start
+                && reference.byte_range.end as usize == range.byte_end
         }) {
             output
                 .references
@@ -748,6 +750,47 @@ fn retry_policy() {
                 .iter()
                 .any(|chunk| chunk.content.contains("retry_policy"))
         );
+    }
+
+    #[test]
+    fn manual_call_extraction_preserves_same_line_calls() {
+        let registration =
+            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate");
+        let build = SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        );
+        let content = "fn run() { foo(); foo(); }\n";
+        let language = detect_language("src/lib.rs").expect("rust should be configured");
+        let parsed = parse_tree(language, content).expect("source should parse");
+        let context = FileParseContext {
+            build: &build,
+            path: "src/lib.rs",
+            file_id: "file",
+            language_id: language.id,
+            content,
+        };
+        let mut output = FileParseOutput {
+            symbols: Vec::new(),
+            references: Vec::new(),
+        };
+
+        collect_manual_nodes(&context, parsed.root_node(), &mut output)
+            .expect("manual extraction should succeed");
+        let foo_ranges = output
+            .references
+            .iter()
+            .filter(|reference| reference.name == "foo")
+            .map(|reference| reference.byte_range.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(foo_ranges.len(), 2);
+        assert_ne!(foo_ranges[0], foo_ranges[1]);
     }
 
     #[test]
