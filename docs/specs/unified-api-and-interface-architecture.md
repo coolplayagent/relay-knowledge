@@ -97,15 +97,18 @@ v1 已落地的最小 API:
 
 - `status`
 - `ingest --source <scope> --content <text> [--entity <label>]`
-- `query --query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]`
+- `query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]`
 - `graph inspect`
 - `index refresh [--kind bm25|semantic|vector]`
 - `health`
 - `service status|doctor`
+- `version`
+- `--version`
 
 `ingest`、`query`、`graph inspect`、`index refresh`、`health` 和 `service doctor`
 都通过统一 API contract 调用 application service，不直接访问 storage 或 index metadata。
 `query` 的可选 `source_scope` 在 application service 边界按 domain 规则验证和归一化；
+`query -- <text>` 用于表达以 `-` 开头的查询文本；
 `graph-only` freshness 路径不得读取或刷新 index metadata，这样索引元数据损坏时仍可返回图事实查询。
 未显式提供 evidence ID 时，application service 只能从已验证的 source scope 和 trim 后
 content 生成稳定 ID；哈希输入必须使用无歧义编码，不能用可出现在字段值中的分隔符拼接。

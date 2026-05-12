@@ -32,21 +32,25 @@ cargo test --all-targets --all-features
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 cargo run
 cargo run -- --format json
+cargo build
+target/debug/relay-knowledge version
+target/debug/relay-knowledge --version
 ```
 
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 
-Current CLI commands:
+Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 
 ```bash
-cargo run -- status --format json
-cargo run -- ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
-cargo run -- query --query SQLite --freshness wait-until-fresh --format json
-cargo run -- graph inspect --format json
-cargo run -- index refresh --kind bm25 --format json
-cargo run -- health --format json
-cargo run -- service doctor --format json
+relay-knowledge status --format json
+relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
+relay-knowledge query SQLite --freshness wait-until-fresh --format json
+relay-knowledge graph inspect --format json
+relay-knowledge index refresh --kind bm25 --format json
+relay-knowledge health --format json
+relay-knowledge service doctor --format json
+relay-knowledge query -- --help
 ```
 
 Web diagnostics and browser integration checks:

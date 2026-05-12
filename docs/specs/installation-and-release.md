@@ -37,6 +37,7 @@ README 中面向普通用户的安装示例应优先指向 GitHub Release:
 
 ```bash
 curl -fsSL https://github.com/coolplayagent/relay-knowledge/releases/latest/download/install.sh | sh
+relay-knowledge version
 relay-knowledge --version
 relay-knowledge service doctor
 ```
@@ -45,6 +46,7 @@ Windows 应提供 PowerShell 入口:
 
 ```powershell
 irm https://github.com/coolplayagent/relay-knowledge/releases/latest/download/install.ps1 | iex
+relay-knowledge.exe version
 relay-knowledge.exe --version
 relay-knowledge.exe service doctor
 ```
@@ -68,6 +70,7 @@ Rust 用户的安装路径:
 
 ```bash
 cargo install relay-knowledge
+relay-knowledge version
 relay-knowledge --version
 ```
 
@@ -91,6 +94,7 @@ relay-knowledge --version
 安装完成后，用户至少能执行:
 
 ```bash
+relay-knowledge version
 relay-knowledge --version
 relay-knowledge service install
 relay-knowledge service status
