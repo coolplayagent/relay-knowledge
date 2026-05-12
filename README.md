@@ -19,6 +19,7 @@
 - [Source Scope 与多模态摄取规格](docs/specs/source-scope-and-multimodal-ingestion.md): Git 分支/rebase 快照隔离、检索 scope 和文档文字/图片多模态 evidence 设计。
 - [代码仓库 Tree-sitter 检索规格](docs/specs/code-repository-tree-sitter-retrieval.md): Git 代码仓库基于 tree-sitter 的结构化解析、全量/增量更新、高并发检索、代码图和影响分析设计。
 - [开放 Agent Runtime 与混合检索架构](docs/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md): 支持外部 agent runtime 驱动 LLM 知识处理，但 core 不实现 runtime，并定义混合检索、mutation proposal 和 adapter 边界。
+- [常驻进程 Agent 图检索访问规格](docs/specs/resident-agent-graph-retrieval-access.md): 常驻进程通过 MCP server 和 Agent Client Protocol adapter 向其它 agent 暴露图检索能力，并统一权限、QoS、新鲜度、审计和测试要求。
 
 ## Development
 

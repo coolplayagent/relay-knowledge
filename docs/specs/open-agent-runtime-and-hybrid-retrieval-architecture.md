@@ -2,7 +2,7 @@
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11
-> 适用范围: 外部 Agent Runtime 集成、LLM 知识处理、混合检索、模块解耦和后续 MCP/A2A adapter 设计
+> 适用范围: 外部 Agent Runtime 集成、LLM 知识处理、混合检索、模块解耦和后续 MCP/ACP/A2A adapter 设计
 > 默认路线: 支持开放 runtime，不内置 runtime；知识图谱和检索能力通过统一 API 暴露
 
 ## 1. 设计结论
@@ -16,6 +16,9 @@
 3. **LLM 输出默认是候选事实**: 实体、关系、claim、摘要和冲突判断都先进入 proposal / validation / approval 流程，不能绕过 graph mutation contract 直接写入 accepted facts。
 4. **混合检索是 agent 可用性的基础能力**: BM25、semantic retrieval、vector retrieval 和 graph expansion 必须协同工作，才能同时覆盖精确术语、概念查询、相似内容、多跳关系和代码影响分析。
 5. **所有 agent action 可审计**: 每次检索、候选 mutation、验证、提交和索引刷新都必须携带 `trace_id`、`runtime_identity`、`source_scope`、`graph_version`、`index_versions` 和降级状态。
+
+常驻进程对其它 agent 暴露图检索能力的协议级细节，见
+[常驻进程 Agent 图检索访问规格](resident-agent-graph-retrieval-access.md)。
 
 ## 2. 外部架构洞察
 
