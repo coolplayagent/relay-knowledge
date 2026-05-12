@@ -15,6 +15,44 @@ use super::code_query::{
     path_filter_allows, required_repository,
 };
 
+const CODE_PATH_LANGUAGE_SUFFIXES: &[(&str, &str)] = &[
+    (".tsx", "tsx"),
+    (".jsx", "jsx"),
+    (".phtml", "php"),
+    (".mts", "typescript"),
+    (".cts", "typescript"),
+    (".mjs", "javascript"),
+    (".cjs", "javascript"),
+    (".pyw", "python"),
+    (".kts", "kotlin"),
+    (".scala", "scala"),
+    (".swift", "swift"),
+    (".bash", "bash"),
+    (".bats", "bash"),
+    (".java", "java"),
+    (".cpp", "cpp"),
+    (".cxx", "cpp"),
+    (".c++", "cpp"),
+    (".hpp", "cpp"),
+    (".hxx", "cpp"),
+    (".h++", "cpp"),
+    (".rs", "rust"),
+    (".py", "python"),
+    (".ts", "typescript"),
+    (".js", "javascript"),
+    (".go", "go"),
+    (".kt", "kotlin"),
+    (".sc", "scala"),
+    (".cc", "cpp"),
+    (".hh", "cpp"),
+    (".cs", "csharp"),
+    (".rb", "ruby"),
+    (".php", "php"),
+    (".sh", "bash"),
+    (".c", "c"),
+    (".h", "c"),
+];
+
 pub(super) fn analyze_impact(
     connection: &mut Connection,
     request: CodeImpactRequest,
@@ -395,6 +433,9 @@ fn module_boundary(character: Option<char>) -> bool {
                     | ')'
                     | '['
                     | ']'
+                    | '"'
+                    | '\''
+                    | '`'
                     | ' '
                     | '\t'
                     | '\n'
@@ -405,17 +446,16 @@ fn module_boundary(character: Option<char>) -> bool {
 }
 
 fn language_id_for_path(path: &str) -> Option<String> {
-    if path.ends_with(".rs") {
-        Some("rust".to_owned())
-    } else if path.ends_with(".py") {
-        Some("python".to_owned())
-    } else if path.ends_with(".tsx") {
-        Some("tsx".to_owned())
-    } else if path.ends_with(".ts") {
-        Some("typescript".to_owned())
-    } else {
-        None
+    let normalized = path.replace('\\', "/");
+    let file_name = normalized.rsplit('/').next().unwrap_or(&normalized);
+    match file_name {
+        ".bash_profile" | ".bashrc" | ".profile" | "bash_profile" | "bashrc" => {
+            return Some("bash".to_owned());
+        }
+        "Gemfile" | "Rakefile" => return Some("ruby".to_owned()),
+        _ => {}
     }
+    language_suffix_for_path(&normalized).map(|(_, language_id)| language_id.to_owned())
 }
 
 fn module_keys_for_path(path: &str) -> BTreeSet<String> {
@@ -432,13 +472,20 @@ fn module_keys_for_path(path: &str) -> BTreeSet<String> {
 }
 
 fn path_without_code_extension(path: &str) -> String {
-    for suffix in [".tsx", ".ts", ".rs", ".py"] {
-        if let Some(stem) = path.strip_suffix(suffix) {
-            return stem.to_owned();
-        }
+    if let Some((suffix, _)) = language_suffix_for_path(path) {
+        let stem_end = path.len().saturating_sub(suffix.len());
+        return path[..stem_end].to_owned();
     }
 
     path.to_owned()
+}
+
+fn language_suffix_for_path(path: &str) -> Option<(&'static str, &'static str)> {
+    let lower = path.to_ascii_lowercase();
+    CODE_PATH_LANGUAGE_SUFFIXES
+        .iter()
+        .copied()
+        .find(|(suffix, _)| lower.ends_with(suffix))
 }
 
 fn rust_crate_module_key(path_stem: &str) -> Option<String> {

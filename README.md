@@ -42,6 +42,7 @@ target/debug/relay-knowledge --version
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
+Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
 Hybrid retrieval uses the SQLite-backed BM25 read model plus graph evidence fallback, fuses candidates with reciprocal-rank fusion, and returns a context pack with retriever sources, ranking explanations, freshness, truncation, and budget metadata.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:

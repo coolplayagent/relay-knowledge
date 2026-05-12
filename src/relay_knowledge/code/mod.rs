@@ -11,6 +11,7 @@ use std::{
     process::Command,
 };
 
+mod languages;
 mod parser;
 
 #[cfg(test)]
@@ -22,7 +23,8 @@ use crate::domain::{
     RepositoryCodeSymbolRecord,
 };
 
-use parser::{language_id, parse_indexed_file};
+use languages::language_id;
+use parser::parse_indexed_file;
 
 /// Blocking code index failure.
 #[derive(Debug)]

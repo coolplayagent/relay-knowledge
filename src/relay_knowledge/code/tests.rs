@@ -28,6 +28,26 @@ fn detects_supported_languages_and_filters_paths() {
     .expect("selector should validate");
 
     assert_eq!(language_id("src/lib.rs"), Some("rust"));
+    assert_eq!(language_id("src/app.py"), Some("python"));
+    assert_eq!(language_id("src/app.js"), Some("javascript"));
+    assert_eq!(language_id("src/app.jsx"), Some("jsx"));
+    assert_eq!(language_id("src/app.ts"), Some("typescript"));
+    assert_eq!(language_id("src/app.tsx"), Some("tsx"));
+    assert_eq!(language_id("src/app.go"), Some("go"));
+    assert_eq!(language_id("src/App.java"), Some("java"));
+    assert_eq!(language_id("src/App.kt"), Some("kotlin"));
+    assert_eq!(language_id("src/App.scala"), Some("scala"));
+    assert_eq!(language_id("src/app.c"), Some("c"));
+    assert_eq!(language_id("include/app.h"), Some("c"));
+    assert_eq!(language_id("src/app.cpp"), Some("cpp"));
+    assert_eq!(language_id("include/app.hpp"), Some("cpp"));
+    assert_eq!(language_id("src/App.cs"), Some("csharp"));
+    assert_eq!(language_id("src/app.rb"), Some("ruby"));
+    assert_eq!(language_id("Gemfile"), Some("ruby"));
+    assert_eq!(language_id("src/app.php"), Some("php"));
+    assert_eq!(language_id("src/App.swift"), Some("swift"));
+    assert_eq!(language_id("scripts/app.sh"), Some("bash"));
+    assert_eq!(language_id(".bashrc"), Some("bash"));
     assert!(path_is_selected("src/lib.rs", &registration, &selector));
     assert!(path_is_selected(
         "src/lib.rs",

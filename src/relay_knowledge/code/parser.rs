@@ -1,10 +1,9 @@
 use std::{
     collections::BTreeSet,
     panic::{self, AssertUnwindSafe},
-    path::Path,
 };
 
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::domain::{
     CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeChunkRecord,
@@ -12,13 +11,13 @@ use crate::domain::{
     RepositoryCodeSymbolRecord,
 };
 
-use super::{CodeIndexError, SnapshotBuild, stable_content_hash, stable_id};
+use super::{
+    CodeIndexError, SnapshotBuild,
+    languages::{LanguageSpec, detect_language, doc_comment_text, strip_supported_extension},
+    stable_content_hash, stable_id,
+};
 
 const MAX_TEXT_FILE_BYTES: usize = 512 * 1024;
-
-pub(super) fn language_id(path: &str) -> Option<&'static str> {
-    detect_language(path).map(|language| language.id)
-}
 
 pub(super) fn parse_indexed_file(
     build: &mut SnapshotBuild,
@@ -240,40 +239,6 @@ fn tree_sitter_failure_message(stage: &str, error: &CodeIndexError) -> String {
             format!("tree-sitter {stage} failed: {message}")
         }
         _ => error.to_string(),
-    }
-}
-
-#[derive(Clone, Copy)]
-struct LanguageSpec {
-    id: &'static str,
-    language: fn() -> Language,
-    tags_query: &'static str,
-}
-
-fn detect_language(path: &str) -> Option<LanguageSpec> {
-    let extension = Path::new(path).extension()?.to_str()?;
-    match extension {
-        "rs" => Some(LanguageSpec {
-            id: "rust",
-            language: || tree_sitter_rust::LANGUAGE.into(),
-            tags_query: tree_sitter_rust::TAGS_QUERY,
-        }),
-        "py" => Some(LanguageSpec {
-            id: "python",
-            language: || tree_sitter_python::LANGUAGE.into(),
-            tags_query: tree_sitter_python::TAGS_QUERY,
-        }),
-        "ts" => Some(LanguageSpec {
-            id: "typescript",
-            language: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            tags_query: tree_sitter_typescript::TAGS_QUERY,
-        }),
-        "tsx" => Some(LanguageSpec {
-            id: "tsx",
-            language: || tree_sitter_typescript::LANGUAGE_TSX.into(),
-            tags_query: tree_sitter_typescript::TAGS_QUERY,
-        }),
-        _ => None,
     }
 }
 
@@ -543,10 +508,16 @@ fn collect_manual_node(
 fn manual_definition(content: &str, node: Node<'_>) -> Option<(String, &'static str, SyntaxRange)> {
     let kind = match node.kind() {
         "function_item" | "function_definition" | "function_declaration" => "function",
-        "method_definition" | "method_signature" => "method",
-        "struct_item" | "enum_item" | "class_definition" | "class_declaration" => "class",
-        "interface_declaration" | "trait_item" => "interface",
-        "type_item" | "type_alias_declaration" => "type",
+        "method_declaration" | "method_definition" | "method_signature" => "method",
+        "class_declaration" | "class_definition" | "enum_declaration" | "enum_definition"
+        | "enum_item" | "object_definition" | "struct_item" => "class",
+        "interface_declaration" | "protocol_declaration" | "trait_definition" | "trait_item" => {
+            "interface"
+        }
+        "namespace_definition" | "object_declaration" | "package_clause" | "package_header" => {
+            "module"
+        }
+        "type_alias_declaration" | "type_definition" | "type_item" => "type",
         _ => return None,
     };
     let name = node.child_by_field_name("name")?;
@@ -588,10 +559,7 @@ fn collect_import_node(
     node: Node<'_>,
     imports: &mut Vec<CodeImportRecord>,
 ) -> Result<(), CodeIndexError> {
-    if matches!(
-        node.kind(),
-        "use_declaration" | "import_statement" | "import_from_statement"
-    ) {
+    if is_import_node(node) {
         let module = compact_whitespace(&node_text(content, node));
         let range = syntax_range(node);
         imports.push(CodeImportRecord {
@@ -620,6 +588,20 @@ fn collect_import_node(
     }
 
     Ok(())
+}
+
+fn is_import_node(node: Node<'_>) -> bool {
+    match node.kind() {
+        "import" => node.is_named(),
+        "import_declaration"
+        | "import_from_statement"
+        | "import_statement"
+        | "namespace_use_declaration"
+        | "preproc_include"
+        | "use_declaration"
+        | "using_directive" => true,
+        _ => false,
+    }
 }
 
 fn chunks_for_symbols(
@@ -806,7 +788,12 @@ fn node_text(content: &str, node: Node<'_>) -> String {
 fn last_identifier_text(content: &str, node: Node<'_>) -> Option<String> {
     if matches!(
         node.kind(),
-        "identifier" | "field_identifier" | "property_identifier"
+        "command_name"
+            | "identifier"
+            | "field_identifier"
+            | "property_identifier"
+            | "type_identifier"
+            | "word"
     ) {
         return Some(node_text(content, node));
     }
@@ -821,11 +808,7 @@ fn compact_whitespace(value: &str) -> String {
 }
 
 fn module_path(path: &str) -> String {
-    path.trim_end_matches(".rs")
-        .trim_end_matches(".py")
-        .trim_end_matches(".ts")
-        .trim_end_matches(".tsx")
-        .replace(['/', '\\'], "::")
+    strip_supported_extension(path).replace(['/', '\\'], "::")
 }
 
 fn doc_comment_before(content: &str, line_start: usize, language_id: &str) -> Option<String> {
@@ -846,21 +829,6 @@ fn doc_comment_before(content: &str, line_start: usize, language_id: &str) -> Op
     }
     comments.reverse();
     (!comments.is_empty()).then(|| comments.join("\n"))
-}
-
-fn doc_comment_text<'a>(trimmed: &'a str, language_id: &str) -> Option<&'a str> {
-    match language_id {
-        "rust" => trimmed
-            .strip_prefix("///")
-            .or_else(|| trimmed.strip_prefix("//!"))
-            .map(str::trim),
-        "python" => trimmed.strip_prefix('#').map(str::trim),
-        "typescript" | "tsx" => trimmed
-            .strip_prefix("///")
-            .or_else(|| trimmed.strip_prefix("//"))
-            .map(str::trim),
-        _ => None,
-    }
 }
 
 fn trim_to_budget(content: &str, max_bytes: usize) -> String {

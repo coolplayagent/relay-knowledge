@@ -222,6 +222,13 @@ tree-sitter query capture 推荐命名:
 
 ### 5.3 多语言和嵌入语言
 
+当前 v1 grammar registry 必须覆盖常见服务端、前端、移动端和系统语言:
+Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、
+C++、C#、Ruby、PHP、Swift 和 Bash。每个语言条目必须显式声明
+`language_id`、扩展名、grammar crate、tags query 来源和注释抽取规则；没有
+上游 tags query 的语言必须维护受控 query 字符串，不能静默退回到“已配置但
+无结构事实”的状态。
+
 TSX、Vue、Svelte、Markdown fenced code、Jupyter notebook 和模板文件可能包含多语言区域。处理规则:
 
 - 主文件产生一个 `CodeFile`。
@@ -523,11 +530,11 @@ relay-knowledge repo status <alias> --format json
 - `repo query`: 请求 ref 必须解析到当前 indexed commit；显式 `worktree` ref 才能读取 worktree overlay。查询旧 commit、branch 或 tag 前必须先对该 ref 建索引，避免返回错误 revision 的 code context。
 - `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
 - `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
-- `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断 Rust、Python、TypeScript 或 TSX language id，再执行 language filters；`head_ref` 必须解析到当前 indexed snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
+- `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断已注册 tree-sitter language id，再执行 language filters；`head_ref` 必须解析到当前 indexed snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
 - `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
-当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。含 error node 的语法树会标记为 `partial` 并保留可靠的符号、引用、import、call 和 chunk；grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 `text_only`；parser/query 失败会写入文件级 `failed` diagnostic。上述降级均不阻塞其他文件入库。
+当前 v1 语言包覆盖 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。含 error node 的语法树会标记为 `partial` 并保留可靠的符号、引用、import、call 和 chunk；grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 `text_only`；parser/query 失败会写入文件级 `failed` diagnostic。上述降级均不阻塞其他文件入库。
 
 ## 12. 可观测性
 
@@ -605,7 +612,7 @@ Health/status 必须能回答:
 建议阶段:
 
 1. **v1 数据 contract**: 增加 code source scope、代码图实体、diff contract、scoped index metadata。当前实现已落地 tree-sitter 输出承接层: `CodeFileRecord`、`CodeSymbolRecord`、`CodeReferenceRecord`、`CodeChunkRecord`、parse status 计数、代码图存储 trait 和 SQLite 表；Git diff contract 与 scoped index metadata 仍在后续阶段。
-2. **v1 parser adapter**: 接入少量高价值语言，例如 Rust、TypeScript、Python，支持 definitions/references/imports/chunks。
+2. **v1 parser adapter**: 接入主流语言 grammar registry，支持 definitions/references/imports/chunks，并为没有上游 tags query 的语言维护受控 query。
 3. **v1 full build + BM25**: Git tracked files 全量构建，代码 chunk 和 symbol BM25 可查询。
 4. **v1 incremental update**: Git diff/status + content hash + 局部 graph/index refresh。
 5. **v1 graph queries**: 定义/引用/调用/import/impact 半径。
