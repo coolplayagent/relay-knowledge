@@ -49,7 +49,8 @@ cannot be confused with hybrid search.
   selected rename sources from the active overlay index.
 - Parser work runs behind application-level `spawn_blocking` boundaries.
   SQLite writes also remain behind the storage blocking worker.
-- Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Syntax
+- Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C,
+  C++, C#, Ruby, PHP, Swift, and Bash files use tree-sitter grammars. Syntax
   trees containing error nodes are indexed as `partial` with file diagnostics
   while retaining reliable symbols, references, imports, calls, and chunks.
   Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only
@@ -103,8 +104,8 @@ The Rust test suite covers:
 
 - selector validation and query limits,
 - Git name-status parsing for add/modify/delete/rename/copy/type-change,
-- tree-sitter symbol, reference, import, chunk extraction, and partial-parse
-  diagnostics,
+- tree-sitter symbol, reference, import, chunk extraction, mainstream language
+  grammar coverage, and partial-parse diagnostics,
 - text-only and failed-file degradation for unsupported, malformed, or parser
   failure cases,
 - SQLite code repository persistence and query retrieval,

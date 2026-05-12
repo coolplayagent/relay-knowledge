@@ -357,6 +357,42 @@ async fn impact_preserves_deleted_rust_paths_under_language_filters() {
 }
 
 #[tokio::test]
+async fn impact_preserves_deleted_go_paths_under_language_filters() {
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_deleted_go_module_importer(),
+        Vec::new(),
+        vec!["go".to_owned()],
+    )
+    .await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["go".to_owned()])
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["deleted.go".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
+        .await
+        .expect("impact should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.path == "caller.go"
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+    }));
+}
+
+#[tokio::test]
 async fn impact_does_not_fall_back_to_all_symbols_for_non_symbol_paths() {
     let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
     let request = crate::domain::CodeImpactRequest::new(
@@ -796,6 +832,37 @@ fn snapshot_with_deleted_rust_module_importer() -> CodeIndexSnapshot {
             "caller-file",
             "src/caller.rs",
             "use crate::deleted;",
+        )],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_deleted_go_module_importer() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "caller-file",
+            "caller.go",
+            "go",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![import_module(
+            "caller-import",
+            "caller-file",
+            "caller.go",
+            "import \"deleted\"",
         )],
         calls: Vec::new(),
         chunks: Vec::new(),

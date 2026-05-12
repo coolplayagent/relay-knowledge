@@ -54,6 +54,276 @@ fn retry_policy() {
 }
 
 #[test]
+fn mainstream_tree_sitter_languages_extract_symbols_imports_and_chunks() {
+    let fixtures = [
+        LanguageFixture {
+            path: "src/app.js",
+            source: br#"
+import { sleep } from "./sleep.js";
+export function retryPolicy() {
+    return sleep(1);
+}
+"#,
+            language_id: "javascript",
+            symbol_name: "retryPolicy",
+            import_fragment: Some("sleep"),
+        },
+        LanguageFixture {
+            path: "src/view.jsx",
+            source: br#"
+export function RetryButton() {
+    return <button onClick={retryPolicy}>Retry</button>;
+}
+"#,
+            language_id: "jsx",
+            symbol_name: "RetryButton",
+            import_fragment: None,
+        },
+        LanguageFixture {
+            path: "src/app.ts",
+            source: br#"
+import { sleep } from "./sleep";
+export function retryPolicy(): void {
+    sleep(1);
+}
+"#,
+            language_id: "typescript",
+            symbol_name: "retryPolicy",
+            import_fragment: Some("sleep"),
+        },
+        LanguageFixture {
+            path: "src/view.tsx",
+            source: br#"
+export function RetryView() {
+    return <span>{retryPolicy()}</span>;
+}
+"#,
+            language_id: "tsx",
+            symbol_name: "RetryView",
+            import_fragment: None,
+        },
+        LanguageFixture {
+            path: "src/app.go",
+            source: br#"
+package retry
+
+import "time"
+
+func RetryPolicy() {
+    time.Sleep(time.Second)
+}
+"#,
+            language_id: "go",
+            symbol_name: "RetryPolicy",
+            import_fragment: Some("time"),
+        },
+        LanguageFixture {
+            path: "src/RetryPolicy.java",
+            source: br#"
+package app;
+
+import java.time.Duration;
+
+class RetryPolicy {
+    void run() {
+        Duration.ofSeconds(1);
+    }
+}
+"#,
+            language_id: "java",
+            symbol_name: "RetryPolicy",
+            import_fragment: Some("java.time.Duration"),
+        },
+        LanguageFixture {
+            path: "src/retry.c",
+            source: br#"
+#include <stdio.h>
+
+void retry_policy(void) {
+    puts("retry");
+}
+"#,
+            language_id: "c",
+            symbol_name: "retry_policy",
+            import_fragment: Some("stdio"),
+        },
+        LanguageFixture {
+            path: "src/retry.cpp",
+            source: br#"
+#include <string>
+
+void retry_policy() {
+    std::string message = "retry";
+}
+"#,
+            language_id: "cpp",
+            symbol_name: "retry_policy",
+            import_fragment: Some("string"),
+        },
+        LanguageFixture {
+            path: "src/RetryPolicy.cs",
+            source: br#"
+using System;
+
+class RetryPolicy {
+    void Run() {
+        Console.WriteLine("retry");
+    }
+}
+"#,
+            language_id: "csharp",
+            symbol_name: "RetryPolicy",
+            import_fragment: Some("System"),
+        },
+        LanguageFixture {
+            path: "src/retry.rb",
+            source: br#"
+require "time"
+
+def retry_policy
+  sleep 1
+end
+"#,
+            language_id: "ruby",
+            symbol_name: "retry_policy",
+            import_fragment: None,
+        },
+        LanguageFixture {
+            path: "src/retry.php",
+            source: br#"
+<?php
+use DateTime;
+
+function retry_policy() {
+    return new DateTime();
+}
+"#,
+            language_id: "php",
+            symbol_name: "retry_policy",
+            import_fragment: Some("DateTime"),
+        },
+        LanguageFixture {
+            path: "src/RetryPolicy.kt",
+            source: br#"
+package app
+
+import kotlin.time.Duration
+
+fun retryPolicy() {
+    println("retry")
+}
+"#,
+            language_id: "kotlin",
+            symbol_name: "retryPolicy",
+            import_fragment: Some("kotlin.time.Duration"),
+        },
+        LanguageFixture {
+            path: "src/RetryPolicy.scala",
+            source: br#"
+package app
+
+import scala.concurrent.Future
+
+object RetryPolicy {
+  def run(): Unit = println("retry")
+}
+"#,
+            language_id: "scala",
+            symbol_name: "run",
+            import_fragment: Some("scala.concurrent.Future"),
+        },
+        LanguageFixture {
+            path: "src/RetryPolicy.swift",
+            source: br#"
+import Foundation
+
+func retryPolicy() {
+    print("retry")
+}
+"#,
+            language_id: "swift",
+            symbol_name: "retryPolicy",
+            import_fragment: Some("Foundation"),
+        },
+        LanguageFixture {
+            path: "scripts/retry.sh",
+            source: br#"
+retry_policy() {
+  echo retry
+}
+
+retry_policy
+"#,
+            language_id: "bash",
+            symbol_name: "retry_policy",
+            import_fragment: None,
+        },
+    ];
+
+    for fixture in fixtures {
+        let snapshot = parse_source_snapshot(fixture.path, fixture.source);
+
+        assert_eq!(
+            snapshot.files[0].language_id, fixture.language_id,
+            "{} should use the expected language id",
+            fixture.path
+        );
+        assert_eq!(
+            snapshot.files[0].parse_status,
+            CodeParseStatus::Parsed,
+            "{} should parse cleanly: {:?}",
+            fixture.path,
+            snapshot.diagnostics
+        );
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == fixture.symbol_name),
+            "{} should expose symbol {}",
+            fixture.path,
+            fixture.symbol_name
+        );
+        assert!(
+            snapshot
+                .chunks
+                .iter()
+                .any(|chunk| chunk.content.contains(fixture.symbol_name)),
+            "{} should create a retrievable chunk for {}",
+            fixture.path,
+            fixture.symbol_name
+        );
+        if let Some(import_fragment) = fixture.import_fragment {
+            assert!(
+                snapshot
+                    .imports
+                    .iter()
+                    .any(|import| import.module.contains(import_fragment)),
+                "{} should collect import fragment {}",
+                fixture.path,
+                import_fragment
+            );
+            assert!(
+                snapshot
+                    .imports
+                    .iter()
+                    .all(|import| import.module != "import"),
+                "{} should not record bare import keyword tokens",
+                fixture.path
+            );
+        }
+    }
+}
+
+struct LanguageFixture {
+    path: &'static str,
+    source: &'static [u8],
+    language_id: &'static str,
+    symbol_name: &'static str,
+    import_fragment: Option<&'static str>,
+}
+
+#[test]
 fn syntax_error_files_are_partial_and_keep_reliable_facts() {
     let snapshot = parse_source_snapshot(
         "src/lib.rs",

@@ -71,7 +71,10 @@ Agentic KG 和协议接入材料说明，`relay-knowledge` 应作为常驻知识
 
 ### 3.3 Tree-sitter 代码图: 优先产品化
 
-代码仓库检索是当前最接近可交付的能力。已有实现覆盖 Git snapshot、增量 diff、worktree overlay、Rust/Python/TypeScript/TSX tree-sitter parsing、symbol/reference/import/call/chunk 和影响分析。
+代码仓库检索是当前最接近可交付的能力。已有实现覆盖 Git
+snapshot、增量 diff、worktree overlay、Rust/Python/JavaScript/JSX/
+TypeScript/TSX/Go/Java/Kotlin/Scala/C/C++/C#/Ruby/PHP/Swift/Bash
+tree-sitter parsing、symbol/reference/import/call/chunk 和影响分析。
 
 后续应优先增强:
 
