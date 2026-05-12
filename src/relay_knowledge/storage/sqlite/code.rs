@@ -653,8 +653,9 @@ mod tests {
             .apply_code_index_snapshot(snapshot)
             .await
             .expect("snapshot should apply");
-        let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
-            .expect("selector should validate");
+        let selector =
+            CodeRepositorySelector::new("fixture", "commit", vec!["src/".to_owned()], Vec::new())
+                .expect("selector should validate");
 
         let hits = store
             .search_code(
@@ -706,9 +707,13 @@ mod tests {
     #[tokio::test]
     async fn language_filters_apply_to_references_calls_and_imports() {
         let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
-        let selector =
-            CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
-                .expect("selector should validate");
+        let selector = CodeRepositorySelector::new(
+            "fixture",
+            "commit",
+            vec!["src/".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate");
 
         for kind in [
             CodeQueryKind::References,

@@ -609,7 +609,11 @@ fn importers_for_modules(
     Ok(rows
         .into_iter()
         .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
-        .filter(|row| modules.iter().any(|module| row.module.contains(module)))
+        .filter(|row| {
+            modules
+                .iter()
+                .any(|module| module_import_matches(&row.module, module))
+        })
         .map(|row| {
             hit_from_parts(
                 status,
@@ -666,7 +670,7 @@ fn path_selected(path: &str, request: &CodeRetrievalRequest) -> bool {
             .repository
             .path_filters
             .iter()
-            .any(|filter| path == filter || path.starts_with(&format!("{filter}/")))
+            .any(|filter| path_matches_filter(path, filter))
 }
 
 fn selected_impact_row(path: &str, language_id: &str, request: &CodeImpactRequest) -> bool {
@@ -675,7 +679,7 @@ fn selected_impact_row(path: &str, language_id: &str, request: &CodeImpactReques
             .repository
             .path_filters
             .iter()
-            .any(|filter| path == filter || path.starts_with(&format!("{filter}/")));
+            .any(|filter| path_matches_filter(path, filter));
     let language_ok = request.repository.language_filters.is_empty()
         || request
             .repository
@@ -684,6 +688,27 @@ fn selected_impact_row(path: &str, language_id: &str, request: &CodeImpactReques
             .any(|filter| filter == language_id);
 
     path_ok && language_ok
+}
+
+fn path_matches_filter(path: &str, filter: &str) -> bool {
+    let filter = filter.trim_end_matches(['/', '\\']);
+    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn module_import_matches(imported_module: &str, changed_module: &str) -> bool {
+    imported_module
+        .match_indices(changed_module)
+        .any(|(start, value)| {
+            let end = start + value.len();
+            module_boundary(imported_module[..start].chars().next_back())
+                && module_boundary(imported_module[end..].chars().next())
+        })
+}
+
+fn module_boundary(character: Option<char>) -> bool {
+    character
+        .map(|value| matches!(value, ':' | '.' | '/' | '\\' | '_' | '-'))
+        .unwrap_or(true)
 }
 
 struct HitParts {
@@ -821,4 +846,23 @@ struct ChunkRow {
     byte_range: RepositoryCodeRange,
     line_range: RepositoryCodeRange,
     symbol_snapshot_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn module_import_matching_respects_boundaries() {
+        assert!(module_import_matches("crate::foo::bar", "foo::bar"));
+        assert!(module_import_matches("foo::bar::baz", "foo::bar"));
+        assert!(!module_import_matches("foo::barista", "foo::bar"));
+    }
+
+    #[test]
+    fn path_filters_accept_trailing_slashes() {
+        assert!(path_matches_filter("src/lib.rs", "src/"));
+        assert!(path_matches_filter("src/lib.rs", "src"));
+        assert!(!path_matches_filter("src-other/lib.rs", "src/"));
+    }
 }

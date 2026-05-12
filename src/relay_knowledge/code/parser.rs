@@ -417,6 +417,7 @@ fn collect_import_node(
             import_id: stable_id(
                 "import",
                 [
+                    &build.repository_id,
                     path,
                     &module,
                     &range.line_start.to_string(),
@@ -454,7 +455,15 @@ fn chunks_for_symbols(
         let excerpt = content.get(start..end).unwrap_or(&symbol.signature).trim();
         chunks.push(RepositoryCodeChunkRecord {
             repository_id: build.repository_id.clone(),
-            chunk_id: stable_id("chunk", [path, &symbol.symbol_snapshot_id, excerpt]),
+            chunk_id: stable_id(
+                "chunk",
+                [
+                    &build.repository_id,
+                    path,
+                    &symbol.symbol_snapshot_id,
+                    excerpt,
+                ],
+            ),
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             language_id: language_id.to_owned(),
@@ -499,7 +508,12 @@ fn add_file_chunk_to_vec(
         repository_id: build.repository_id.clone(),
         chunk_id: stable_id(
             "chunk",
-            [path, "file", &stable_content_hash(content.as_bytes())],
+            [
+                &build.repository_id,
+                path,
+                "file",
+                &stable_content_hash(content.as_bytes()),
+            ],
         ),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
@@ -571,6 +585,7 @@ fn reference_record(
         reference_id: stable_id(
             "reference",
             [
+                &context.build.repository_id,
                 context.path,
                 name,
                 kind,
@@ -784,6 +799,20 @@ fn retry_policy() {
     }
 
     #[test]
+    fn generated_record_ids_are_scoped_by_repository() {
+        let first = parse_fixture_snapshot("repo-a");
+        let second = parse_fixture_snapshot("repo-b");
+
+        assert_ne!(
+            first.references[0].reference_id,
+            second.references[0].reference_id
+        );
+        assert_ne!(first.imports[0].import_id, second.imports[0].import_id);
+        assert_ne!(first.chunks[0].chunk_id, second.chunks[0].chunk_id);
+        assert_ne!(first.calls[0].call_id, second.calls[0].call_id);
+    }
+
+    #[test]
     fn oversized_files_truncate_on_utf8_boundary() {
         let mut bytes = vec![b'a'; MAX_TEXT_FILE_BYTES - 1];
         bytes.extend("é".as_bytes());
@@ -802,5 +831,35 @@ fn retry_policy() {
         );
         assert_eq!(content.len(), MAX_TEXT_FILE_BYTES - 1);
         assert!(!content.contains('\u{fffd}'));
+    }
+
+    fn parse_fixture_snapshot(repository_id: &str) -> crate::domain::CodeIndexSnapshot {
+        let registration = CodeRepositoryRegistration::new(
+            repository_id,
+            "alias",
+            "/tmp/repo",
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("registration should validate");
+        let mut build = SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        );
+        let source = br#"
+use crate::retry_policy;
+
+fn run_worker() {
+    retry_policy(); retry_policy();
+}
+"#;
+
+        parse_indexed_file(&mut build, "src/main.rs", source).expect("file should parse");
+
+        build.finish()
     }
 }
