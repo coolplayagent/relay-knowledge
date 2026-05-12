@@ -143,11 +143,14 @@ CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async applica
 ## 5. Web 架构
 
 Web v1 默认采用 React + Vite + TypeScript。Web 是交互层，不是第二套业务后端。
-当前 Web diagnostics 工程位于 `web/`，使用 TypeScript 静态前端，通过前端 typed
+当前 Web workspace 工程位于 `web/`，使用 TypeScript 静态前端，通过前端 typed
 contract 复用 `ProjectStatusResponse`、`HealthResponse` 和 index status 字段形状。
 Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/health`，不得在前端
-伪造健康状态、图版本、运行时路径或索引元数据。浏览器测试只验证交互层能渲染统一
-contract，不把业务逻辑放入前端。
+伪造健康状态、图版本、运行时路径或索引元数据。当前操作工作台可以为检索、摄取、
+图检查、代码仓库、索引刷新和服务运行生成 typed request / CLI command preview，并将
+操作加入本地 staged queue；在 Rust HTTP adapter 暴露可执行 Web endpoint 前，不得把
+这些 preview 渲染成已执行的后端结果。浏览器测试只验证交互层能渲染统一 contract 和
+本地操作编排状态，不把业务逻辑放入前端。
 
 推荐目录:
 
@@ -184,5 +187,5 @@ web/
 5. 引入 HTTP/MCP 时只新增 adapter，不改变 application service 的行为语义。
 
 当前 PR CI 已拆分 Rust format、clippy、unit/integration tests、coverage、build 和
-Playwright Chromium browser integration gate。浏览器 gate 先构建 Web diagnostics，
+Playwright Chromium browser integration gate。浏览器 gate 先构建 Web workspace，
 再安装 Chromium 并运行 `tests/browser`。

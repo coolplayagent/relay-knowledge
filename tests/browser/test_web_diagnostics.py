@@ -16,14 +16,53 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
     assert web_dist.exists(), "run `npm --prefix web run build` before browser tests"
 
     with serve_directory(web_dist) as base_url:
+        requests: list[str] = []
+        page.on("request", lambda request: requests.append(request.url))
         page.goto(base_url)
 
         expect(page.get_by_role("main").get_by_text("relay-knowledge", exact=True)).to_be_visible()
         expect(page.get_by_text("Graph version 7")).to_be_visible()
-        expect(page.get_by_text("degraded")).to_be_visible()
-        expect(page.get_by_text("code files 12")).to_be_visible()
+        expect(page.get_by_text("degraded").first).to_be_visible()
+        expect(page.get_by_text("Code files")).to_be_visible()
+        expect(page.get_by_text("12", exact=True)).to_be_visible()
         expect(page.get_by_role("cell", name="bm25")).to_be_visible()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
+        expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
+        expect(page.locator("aside nav a")).to_have_count(4)
+        assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
+            "data:image/svg+xml"
+        )
+        assert f"{base_url}/favicon.ico" not in requests
+
+        first_nav_color = page.locator("aside nav a").first.evaluate(
+            "node => getComputedStyle(node).color"
+        )
+        assert first_nav_color != "rgb(0, 0, 238)"
+
+        page.get_by_label("Query").fill("graph backpressure")
+        page.get_by_label("Freshness").select_option("wait-until-fresh")
+        expect(page.locator(".command-preview")).to_contain_text(
+            "relay-knowledge query 'graph backpressure'"
+        )
+        page.get_by_test_id("stage-operation").click()
+        expect(page.locator(".staged-list").get_by_text("Retrieve context")).to_be_visible()
+
+        page.get_by_role("tab", name="Ingest").click()
+        page.get_by_label("Content").fill("Evidence changed through the Web workspace")
+        page.get_by_test_id("stage-operation").click()
+        expect(page.locator(".staged-list").get_by_text("Ingest evidence")).to_be_visible()
+
+        page.get_by_role("tab", name="Code").click()
+        page.get_by_label("Action").select_option("impact")
+        expect(page.get_by_label("Base")).to_be_visible()
+        expect(page.locator(".command-preview")).to_contain_text("repo impact core")
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        expect(page.locator("aside nav a")).to_have_count(4)
+        mobile_link_display = page.locator("aside nav a").first.evaluate(
+            "node => getComputedStyle(node).display"
+        )
+        assert mobile_link_display == "block"
 
 
 @contextlib.contextmanager
@@ -104,6 +143,9 @@ HEALTH_RESPONSE = {
         "graph_version": 7,
         "entity_count": 3,
         "evidence_count": 5,
+        "relation_count": 2,
+        "claim_count": 4,
+        "event_count": 1,
         "mutation_count": 4,
         "code_file_count": 12,
         "code_symbol_count": 48,
