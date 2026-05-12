@@ -277,7 +277,8 @@ fn records_from_captures(
             let kind = capture.capture_kind.trim_start_matches("definition.");
             let key = (
                 capture.name.clone(),
-                capture.target_node.line_start,
+                capture.target_node.byte_start,
+                capture.target_node.byte_end,
                 kind.to_owned(),
             );
             if seen_symbols.insert(key) {
@@ -292,7 +293,8 @@ fn records_from_captures(
             let kind = capture.capture_kind.trim_start_matches("reference.");
             let key = (
                 capture.name.clone(),
-                capture.name_node.line_start,
+                capture.name_node.byte_start,
+                capture.name_node.byte_end,
                 kind.to_owned(),
             );
             if seen_references.insert(key) {
@@ -806,6 +808,14 @@ fn retry_policy() {
         assert_ne!(
             first.references[0].reference_id,
             second.references[0].reference_id
+        );
+        assert_eq!(
+            first
+                .references
+                .iter()
+                .filter(|reference| reference.name == "retry_policy")
+                .count(),
+            2
         );
         assert_ne!(first.imports[0].import_id, second.imports[0].import_id);
         assert_ne!(first.chunks[0].chunk_id, second.chunks[0].chunk_id);

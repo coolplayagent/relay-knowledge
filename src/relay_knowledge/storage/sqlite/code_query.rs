@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
     domain::{
@@ -73,12 +73,12 @@ pub(super) fn analyze_impact(
         &request.repository.repository,
         &request.repository.ref_selector,
     )?;
-    let changed = changed_paths.into_iter().collect::<BTreeSet<_>>();
+    let changed = selected_changed_paths(connection, &status, &request, changed_paths)?;
     let changed_modules = changed
         .iter()
         .map(|path| path_to_module_key(path))
         .collect::<Vec<_>>();
-    let changed_symbols = symbols_for_paths(connection, &status.repository_id, &changed)?;
+    let changed_symbols = symbol_ids_for_paths(connection, &status.repository_id, &changed)?;
     let mut hits = Vec::new();
 
     hits.extend(chunks_for_paths(connection, &status, &changed, &request)?);
@@ -144,7 +144,7 @@ fn search_symbols(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.name, &row.qualified_name, &row.signature]);
             (score > 0.0).then(|| {
@@ -217,7 +217,7 @@ fn search_references(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.name, &row.kind]);
             (score > 0.0).then(|| {
@@ -249,7 +249,8 @@ fn search_calls(
     let mut statement = connection.prepare(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
-               c.caller_name, c.callee_name, c.line_start, c.line_end
+               c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
+               c.line_start, c.line_end
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
@@ -264,10 +265,11 @@ fn search_calls(
             language_id: row.get(2)?,
             caller_symbol_snapshot_id: row.get(3)?,
             caller_name: row.get(4)?,
-            callee_name: row.get(5)?,
+            callee_symbol_snapshot_id: row.get(5)?,
+            callee_name: row.get(6)?,
             line_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
+                start: row.get(7)?,
+                end: row.get(8)?,
             },
         })
     })?;
@@ -278,7 +280,7 @@ fn search_calls(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let search_fields = match request.code_query_kind {
                 CodeQueryKind::Callees => [row.caller_name.as_deref().unwrap_or(""), ""],
@@ -342,7 +344,7 @@ fn search_imports(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.module, &row.path]);
             (score > 0.0).then(|| {
@@ -373,11 +375,14 @@ fn search_chunks(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, language_id, content, byte_start, byte_end,
-               line_start, line_end, symbol_snapshot_id
-        FROM code_repository_chunks
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
+               c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
+               f.degraded_reason
+        FROM code_repository_chunks c
+        INNER JOIN code_repository_files f
+            ON f.repository_id = c.repository_id AND f.path = c.path
+        WHERE c.repository_id = ?1
+        ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
@@ -395,6 +400,8 @@ fn search_chunks(
                 end: row.get(7)?,
             },
             symbol_snapshot_id: row.get(8)?,
+            parse_status: row.get(9)?,
+            degraded_reason: row.get(10)?,
         })
     })?;
     let query = request.query.to_lowercase();
@@ -404,7 +411,7 @@ fn search_chunks(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.content, &row.path]);
             (score > 0.0).then(|| {
@@ -417,13 +424,10 @@ fn search_chunks(
                         line_range: row.line_range,
                         symbol_snapshot_id: row.symbol_snapshot_id,
                         file_id: Some(row.file_id),
-                        retrieval_layers: vec![
-                            CodeRetrievalLayer::Lexical,
-                            CodeRetrievalLayer::TextFallback,
-                        ],
+                        retrieval_layers: chunk_layers(&row.parse_status),
                         score,
                         excerpt: row.content,
-                        degraded_reason: None,
+                        degraded_reason: row.degraded_reason,
                     },
                 )
             })
@@ -431,13 +435,17 @@ fn search_chunks(
         .collect())
 }
 
-fn symbols_for_paths(
+fn symbol_ids_for_paths(
     connection: &Connection,
     repository_id: &str,
     paths: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
     let mut path_statement = connection.prepare(
-        "SELECT name FROM code_repository_symbols WHERE repository_id = ?1 AND path = ?2",
+        "
+        SELECT symbol_snapshot_id
+        FROM code_repository_symbols
+        WHERE repository_id = ?1 AND path = ?2
+        ",
     )?;
     let mut symbols = Vec::new();
     for path in paths {
@@ -461,11 +469,14 @@ fn chunks_for_paths(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, language_id, content, byte_start, byte_end,
-               line_start, line_end, symbol_snapshot_id
-        FROM code_repository_chunks
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
+               c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
+               f.degraded_reason
+        FROM code_repository_chunks c
+        INNER JOIN code_repository_files f
+            ON f.repository_id = c.repository_id AND f.path = c.path
+        WHERE c.repository_id = ?1
+        ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
@@ -483,6 +494,8 @@ fn chunks_for_paths(
                 end: row.get(7)?,
             },
             symbol_snapshot_id: row.get(8)?,
+            parse_status: row.get(9)?,
+            degraded_reason: row.get(10)?,
         })
     })?;
     let rows = rows
@@ -492,7 +505,7 @@ fn chunks_for_paths(
     Ok(rows
         .into_iter()
         .filter(|row| paths.contains(&row.path))
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
         .map(|row| {
             hit_from_parts(
                 status,
@@ -503,10 +516,10 @@ fn chunks_for_paths(
                     line_range: row.line_range,
                     symbol_snapshot_id: row.symbol_snapshot_id,
                     file_id: Some(row.file_id),
-                    retrieval_layers: vec![CodeRetrievalLayer::Lexical],
+                    retrieval_layers: chunk_layers(&row.parse_status),
                     score: 4.0,
                     excerpt: row.content,
-                    degraded_reason: None,
+                    degraded_reason: row.degraded_reason,
                 },
             )
         })
@@ -516,13 +529,14 @@ fn chunks_for_paths(
 fn callers_for_symbols(
     connection: &Connection,
     status: &CodeRepositoryStatus,
-    symbols: &[String],
+    symbol_ids: &[String],
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
-               c.caller_name, c.callee_name, c.line_start, c.line_end
+               c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
+               c.line_start, c.line_end
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
@@ -537,22 +551,27 @@ fn callers_for_symbols(
             language_id: row.get(2)?,
             caller_symbol_snapshot_id: row.get(3)?,
             caller_name: row.get(4)?,
-            callee_name: row.get(5)?,
+            callee_symbol_snapshot_id: row.get(5)?,
+            callee_name: row.get(6)?,
             line_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
+                start: row.get(7)?,
+                end: row.get(8)?,
             },
         })
     })?;
-    let symbol_set = symbols.iter().collect::<BTreeSet<_>>();
+    let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
-        .filter(|row| symbol_set.contains(&row.callee_name))
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
+        .filter(|row| {
+            row.callee_symbol_snapshot_id
+                .as_ref()
+                .is_some_and(|symbol_id| symbol_set.contains(symbol_id))
+        })
         .map(|row| {
             let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
             hit_from_parts(
@@ -608,7 +627,7 @@ fn importers_for_modules(
 
     Ok(rows
         .into_iter()
-        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
         .filter(|row| {
             modules
                 .iter()
@@ -654,40 +673,81 @@ fn required_repository(
     Ok(status)
 }
 
-fn selected_row(path: &str, language_id: &str, request: &CodeRetrievalRequest) -> bool {
-    path_selected(path, request)
-        && (request.repository.language_filters.is_empty()
-            || request
-                .repository
-                .language_filters
-                .iter()
-                .any(|filter| filter == language_id))
+fn selected_changed_paths(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeImpactRequest,
+    changed_paths: Vec<String>,
+) -> Result<BTreeSet<String>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT language_id
+        FROM code_repository_files
+        WHERE repository_id = ?1 AND path = ?2
+        ",
+    )?;
+    let mut selected = BTreeSet::new();
+    for path in changed_paths {
+        if !path_filter_allows(&path, &status.path_filters)
+            || !path_filter_allows(&path, &request.repository.path_filters)
+        {
+            continue;
+        }
+        let language_id = statement
+            .query_row(params![status.repository_id, path], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?;
+        if language_id
+            .as_deref()
+            .map(|language| {
+                language_filter_allows(language, &status.language_filters)
+                    && language_filter_allows(language, &request.repository.language_filters)
+            })
+            .unwrap_or_else(|| {
+                status.language_filters.is_empty() && request.repository.language_filters.is_empty()
+            })
+        {
+            selected.insert(path);
+        }
+    }
+
+    Ok(selected)
 }
 
-fn path_selected(path: &str, request: &CodeRetrievalRequest) -> bool {
-    request.repository.path_filters.is_empty()
-        || request
-            .repository
-            .path_filters
+fn selected_row(
+    path: &str,
+    language_id: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> bool {
+    path_filter_allows(path, &status.path_filters)
+        && path_filter_allows(path, &request.repository.path_filters)
+        && language_filter_allows(language_id, &status.language_filters)
+        && language_filter_allows(language_id, &request.repository.language_filters)
+}
+
+fn selected_impact_row(
+    path: &str,
+    language_id: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeImpactRequest,
+) -> bool {
+    path_filter_allows(path, &status.path_filters)
+        && path_filter_allows(path, &request.repository.path_filters)
+        && language_filter_allows(language_id, &status.language_filters)
+        && language_filter_allows(language_id, &request.repository.language_filters)
+}
+
+fn path_filter_allows(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
             .iter()
             .any(|filter| path_matches_filter(path, filter))
 }
 
-fn selected_impact_row(path: &str, language_id: &str, request: &CodeImpactRequest) -> bool {
-    let path_ok = request.repository.path_filters.is_empty()
-        || request
-            .repository
-            .path_filters
-            .iter()
-            .any(|filter| path_matches_filter(path, filter));
-    let language_ok = request.repository.language_filters.is_empty()
-        || request
-            .repository
-            .language_filters
-            .iter()
-            .any(|filter| filter == language_id);
-
-    path_ok && language_ok
+fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
+    filters.is_empty() || filters.iter().any(|filter| filter == language_id)
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
@@ -709,6 +769,15 @@ fn module_boundary(character: Option<char>) -> bool {
     character
         .map(|value| matches!(value, ':' | '.' | '/' | '\\' | '-'))
         .unwrap_or(true)
+}
+
+fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
+    let mut layers = vec![CodeRetrievalLayer::Lexical];
+    if parse_status != "parsed" {
+        layers.push(CodeRetrievalLayer::TextFallback);
+    }
+
+    layers
 }
 
 struct HitParts {
@@ -826,6 +895,7 @@ struct CallRow {
     language_id: String,
     caller_symbol_snapshot_id: Option<String>,
     caller_name: Option<String>,
+    callee_symbol_snapshot_id: Option<String>,
     callee_name: String,
     line_range: RepositoryCodeRange,
 }
@@ -846,6 +916,8 @@ struct ChunkRow {
     byte_range: RepositoryCodeRange,
     line_range: RepositoryCodeRange,
     symbol_snapshot_id: Option<String>,
+    parse_status: String,
+    degraded_reason: Option<String>,
 }
 
 #[cfg(test)]

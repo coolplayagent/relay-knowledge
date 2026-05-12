@@ -134,6 +134,25 @@ pub fn retry_policy_v2() -> u32 {
 
     assert!(impact.changed_paths.iter().any(|path| path == "src/lib.rs"));
     assert!(impact.results.iter().any(|hit| hit.path == "src/lib.rs"));
+
+    repo.write("src/late.rs", "pub fn late_change() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "late change"]);
+    let stale_head_error = service
+        .impact_code_repository(
+            CodeImpactRequest::new(
+                selector("fixture", &updated.summary.resolved_commit_sha),
+                &updated.summary.resolved_commit_sha,
+                "HEAD",
+                10,
+            )
+            .expect("impact request should validate"),
+            context("impact-stale-head"),
+        )
+        .await
+        .expect_err("impact head must match indexed snapshot");
+
+    assert!(stale_head_error.message.contains("impact head ref"));
 }
 
 async fn query(

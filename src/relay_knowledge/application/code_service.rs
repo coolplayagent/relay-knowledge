@@ -127,11 +127,19 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryImpactResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        request.repository.ref_selector =
+        let indexed_commit =
             indexed_commit_for_ref(&status, request.repository.ref_selector.clone()).await?;
+        let head_commit = resolve_code_ref(&status, request.head_ref.clone()).await?;
+        if head_commit != indexed_commit {
+            return Err(ApiError::invalid_argument(format!(
+                "impact head ref '{}' resolves to {}, but code repository '{}' is indexed at {}",
+                request.head_ref, head_commit, status.alias, indexed_commit
+            )));
+        }
+        request.repository.ref_selector = indexed_commit;
         let root = PathBuf::from(status.root_path);
         let base_ref = request.base_ref.clone();
-        let head_ref = request.head_ref.clone();
+        let head_ref = head_commit;
         let changed_paths =
             run_blocking_code(move || changed_paths_for_diff(root, &base_ref, &head_ref)).await?;
         let results = store
@@ -210,9 +218,7 @@ async fn indexed_commit_for_ref(
     status: &CodeRepositoryStatus,
     ref_selector: String,
 ) -> Result<String, ApiError> {
-    let root = PathBuf::from(status.root_path.clone());
-    let requested_commit =
-        run_blocking_code(move || resolve_repository_ref(root, &ref_selector)).await?;
+    let requested_commit = resolve_code_ref(status, ref_selector).await?;
     if status.last_indexed_commit.as_deref() != Some(requested_commit.as_str()) {
         return Err(ApiError::invalid_argument(format!(
             "code repository '{}' is indexed at {}, not requested ref {}",
@@ -223,6 +229,15 @@ async fn indexed_commit_for_ref(
     }
 
     Ok(requested_commit)
+}
+
+async fn resolve_code_ref(
+    status: &CodeRepositoryStatus,
+    ref_selector: String,
+) -> Result<String, ApiError> {
+    let root = PathBuf::from(status.root_path.clone());
+
+    run_blocking_code(move || resolve_repository_ref(root, &ref_selector)).await
 }
 
 async fn run_blocking_code<T, F>(operation: F) -> Result<T, ApiError>

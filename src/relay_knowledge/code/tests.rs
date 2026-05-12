@@ -39,6 +39,35 @@ fn detects_supported_languages_and_filters_paths() {
 }
 
 #[test]
+fn selector_filters_cannot_widen_registered_scope() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec!["src".to_owned()],
+        vec!["rust".to_owned()],
+    )
+    .expect("registration should validate");
+    let wider_path_selector =
+        CodeRepositorySelector::new("alias", "HEAD", vec!["tests".to_owned()], Vec::new())
+            .expect("selector should validate");
+    let wider_language_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["python".to_owned()])
+            .expect("selector should validate");
+
+    assert!(!path_is_selected(
+        "tests/lib.rs",
+        &registration,
+        &wider_path_selector
+    ));
+    assert!(!path_is_selected(
+        "src/app.py",
+        &registration,
+        &wider_language_selector
+    ));
+}
+
+#[test]
 fn parses_git_name_status_for_rename_copy_and_delete() {
     let changes =
         parse_name_status_z(b"M\0src/lib.rs\0R100\0old.rs\0new.rs\0C100\0a.py\0b.py\0D\0gone.ts\0")

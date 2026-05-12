@@ -3,6 +3,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 #[path = "code_query.rs"]
 mod code_query;
 
+#[cfg(test)]
+#[path = "code_tests.rs"]
+mod code_tests;
+
 use crate::{
     domain::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,
@@ -98,6 +102,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             path TEXT NOT NULL,
             caller_symbol_snapshot_id TEXT,
             caller_name TEXT,
+            callee_symbol_snapshot_id TEXT,
             callee_name TEXT NOT NULL,
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
@@ -139,6 +144,26 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         );
         ",
     )?;
+    ensure_code_repository_calls_target_column(connection)?;
+
+    Ok(())
+}
+
+fn ensure_code_repository_calls_target_column(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare("PRAGMA table_info(code_repository_calls)")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    if !columns
+        .iter()
+        .any(|column| column == "callee_symbol_snapshot_id")
+    {
+        connection.execute(
+            "ALTER TABLE code_repository_calls ADD COLUMN callee_symbol_snapshot_id TEXT",
+            [],
+        )?;
+    }
 
     Ok(())
 }
@@ -431,9 +456,9 @@ fn insert_imports_calls_chunks_diagnostics(
             "
             INSERT INTO code_repository_calls (
                 repository_id, call_id, file_id, path, caller_symbol_snapshot_id,
-                caller_name, callee_name, line_start, line_end
+                caller_name, callee_symbol_snapshot_id, callee_name, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ",
             params![
                 call.repository_id,
@@ -442,6 +467,7 @@ fn insert_imports_calls_chunks_diagnostics(
                 call.path,
                 call.caller_symbol_snapshot_id,
                 call.caller_name,
+                call.callee_symbol_snapshot_id,
                 call.callee_name,
                 call.line_range.start,
                 call.line_range.end,
@@ -624,291 +650,4 @@ fn count_code_rows(
             |row| row.get(0),
         )
         .map_err(StorageError::from)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        domain::{
-            CodeCallRecord, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-            CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
-            RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-        },
-        storage::SqliteGraphStore,
-    };
-
-    #[tokio::test]
-    async fn stores_code_repository_and_queries_fallback_chunks() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        let registration =
-            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        store
-            .upsert_code_repository(registration)
-            .await
-            .expect("repository should persist");
-        let snapshot = snapshot_with_chunk("repo", "src/lib.rs", "fn retry_policy() {}");
-        store
-            .apply_code_index_snapshot(snapshot)
-            .await
-            .expect("snapshot should apply");
-        let selector =
-            CodeRepositorySelector::new("fixture", "commit", vec!["src/".to_owned()], Vec::new())
-                .expect("selector should validate");
-
-        let hits = store
-            .search_code(
-                crate::domain::CodeRetrievalRequest::new(
-                    "retry_policy",
-                    selector,
-                    CodeQueryKind::Hybrid,
-                    5,
-                    FreshnessPolicy::AllowStale,
-                )
-                .expect("request should validate"),
-            )
-            .await
-            .expect("query should succeed");
-
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].path, "src/lib.rs");
-        assert_eq!(hits[0].resolved_commit_sha, "commit");
-    }
-
-    #[tokio::test]
-    async fn rejects_code_queries_for_unindexed_refs() {
-        let store = store_with_repository_snapshot(snapshot_with_chunk(
-            "repo",
-            "src/lib.rs",
-            "fn retry_policy() {}",
-        ))
-        .await;
-        let selector = CodeRepositorySelector::new("fixture", "other", Vec::new(), Vec::new())
-            .expect("selector should validate");
-
-        let error = store
-            .search_code(
-                crate::domain::CodeRetrievalRequest::new(
-                    "retry_policy",
-                    selector,
-                    CodeQueryKind::Hybrid,
-                    5,
-                    FreshnessPolicy::AllowStale,
-                )
-                .expect("request should validate"),
-            )
-            .await
-            .expect_err("stale ref should fail");
-
-        assert!(error.to_string().contains("not requested ref other"));
-    }
-
-    #[tokio::test]
-    async fn language_filters_apply_to_references_calls_and_imports() {
-        let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
-        let selector = CodeRepositorySelector::new(
-            "fixture",
-            "commit",
-            vec!["src/".to_owned()],
-            vec!["rust".to_owned()],
-        )
-        .expect("selector should validate");
-
-        for kind in [
-            CodeQueryKind::References,
-            CodeQueryKind::Callers,
-            CodeQueryKind::Imports,
-        ] {
-            let query = if kind == CodeQueryKind::Imports {
-                "module"
-            } else {
-                "target"
-            };
-            let hits = store
-                .search_code(
-                    crate::domain::CodeRetrievalRequest::new(
-                        query,
-                        selector.clone(),
-                        kind,
-                        10,
-                        FreshnessPolicy::AllowStale,
-                    )
-                    .expect("request should validate"),
-                )
-                .await
-                .expect("query should succeed");
-
-            assert_eq!(hits.len(), 1);
-            assert_eq!(hits[0].language_id, "rust");
-            assert_eq!(hits[0].path, "src/lib.rs");
-        }
-    }
-
-    #[tokio::test]
-    async fn impact_does_not_fall_back_to_all_symbols_for_non_symbol_paths() {
-        let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
-        let request = crate::domain::CodeImpactRequest::new(
-            CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
-                .expect("selector should validate"),
-            "base",
-            "commit",
-            10,
-        )
-        .expect("impact request should validate");
-
-        let hits = store
-            .analyze_code_impact(request, vec!["README.md".to_owned()])
-            .await
-            .expect("impact should succeed");
-
-        assert!(hits.is_empty());
-    }
-
-    async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        let registration =
-            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        store
-            .upsert_code_repository(registration)
-            .await
-            .expect("repository should persist");
-        store
-            .apply_code_index_snapshot(snapshot)
-            .await
-            .expect("snapshot should apply");
-
-        store
-    }
-
-    fn snapshot_with_chunk(repository_id: &str, path: &str, content: &str) -> CodeIndexSnapshot {
-        CodeIndexSnapshot {
-            repository_id: repository_id.to_owned(),
-            resolved_commit_sha: "commit".to_owned(),
-            tree_hash: "tree".to_owned(),
-            full_replace: true,
-            changed_path_count: 1,
-            skipped_unchanged_count: 0,
-            deleted_paths: Vec::new(),
-            tombstones: Vec::new(),
-            files: vec![RepositoryCodeFileRecord {
-                repository_id: repository_id.to_owned(),
-                file_id: "file".to_owned(),
-                path: path.to_owned(),
-                language_id: "rust".to_owned(),
-                blob_hash: "hash".to_owned(),
-                byte_len: content.len(),
-                line_count: 1,
-                parse_status: CodeParseStatus::Parsed,
-                degraded_reason: None,
-            }],
-            symbols: Vec::new(),
-            references: Vec::new(),
-            imports: Vec::new(),
-            calls: Vec::new(),
-            chunks: vec![RepositoryCodeChunkRecord {
-                repository_id: repository_id.to_owned(),
-                chunk_id: "chunk".to_owned(),
-                file_id: "file".to_owned(),
-                path: path.to_owned(),
-                language_id: "rust".to_owned(),
-                content: content.to_owned(),
-                byte_range: RepositoryCodeRange { start: 0, end: 20 },
-                line_range: RepositoryCodeRange { start: 1, end: 1 },
-                symbol_snapshot_id: None,
-            }],
-            diagnostics: Vec::new(),
-        }
-    }
-
-    fn snapshot_with_language_edges() -> CodeIndexSnapshot {
-        let rust_file = RepositoryCodeFileRecord {
-            repository_id: "repo".to_owned(),
-            file_id: "rust-file".to_owned(),
-            path: "src/lib.rs".to_owned(),
-            language_id: "rust".to_owned(),
-            blob_hash: "rust-hash".to_owned(),
-            byte_len: 20,
-            line_count: 1,
-            parse_status: CodeParseStatus::Parsed,
-            degraded_reason: None,
-        };
-        let python_file = RepositoryCodeFileRecord {
-            repository_id: "repo".to_owned(),
-            file_id: "python-file".to_owned(),
-            path: "py/app.py".to_owned(),
-            language_id: "python".to_owned(),
-            blob_hash: "python-hash".to_owned(),
-            byte_len: 20,
-            line_count: 1,
-            parse_status: CodeParseStatus::Parsed,
-            degraded_reason: None,
-        };
-
-        CodeIndexSnapshot {
-            repository_id: "repo".to_owned(),
-            resolved_commit_sha: "commit".to_owned(),
-            tree_hash: "tree".to_owned(),
-            full_replace: true,
-            changed_path_count: 2,
-            skipped_unchanged_count: 0,
-            deleted_paths: Vec::new(),
-            tombstones: Vec::new(),
-            files: vec![rust_file, python_file],
-            symbols: Vec::new(),
-            references: vec![
-                reference("rust-reference", "rust-file", "src/lib.rs"),
-                reference("python-reference", "python-file", "py/app.py"),
-            ],
-            imports: vec![
-                import("rust-import", "rust-file", "src/lib.rs"),
-                import("python-import", "python-file", "py/app.py"),
-            ],
-            calls: vec![
-                call("rust-call", "rust-file", "src/lib.rs"),
-                call("python-call", "python-file", "py/app.py"),
-            ],
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    }
-
-    fn reference(id: &str, file_id: &str, path: &str) -> RepositoryCodeReferenceRecord {
-        RepositoryCodeReferenceRecord {
-            repository_id: "repo".to_owned(),
-            reference_id: id.to_owned(),
-            file_id: file_id.to_owned(),
-            path: path.to_owned(),
-            name: "target".to_owned(),
-            kind: "call".to_owned(),
-            target_symbol_snapshot_id: None,
-            byte_range: RepositoryCodeRange { start: 0, end: 6 },
-            line_range: RepositoryCodeRange { start: 1, end: 1 },
-        }
-    }
-
-    fn import(id: &str, file_id: &str, path: &str) -> CodeImportRecord {
-        CodeImportRecord {
-            repository_id: "repo".to_owned(),
-            import_id: id.to_owned(),
-            file_id: file_id.to_owned(),
-            path: path.to_owned(),
-            module: "module::target".to_owned(),
-            line_range: RepositoryCodeRange { start: 1, end: 1 },
-        }
-    }
-
-    fn call(id: &str, file_id: &str, path: &str) -> CodeCallRecord {
-        CodeCallRecord {
-            repository_id: "repo".to_owned(),
-            call_id: id.to_owned(),
-            file_id: file_id.to_owned(),
-            path: path.to_owned(),
-            caller_symbol_snapshot_id: None,
-            caller_name: Some("caller".to_owned()),
-            callee_name: "target".to_owned(),
-            line_range: RepositoryCodeRange { start: 1, end: 1 },
-        }
-    }
 }

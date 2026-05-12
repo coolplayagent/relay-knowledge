@@ -317,6 +317,8 @@ pub struct CodeCallRecord {
     pub path: String,
     pub caller_symbol_snapshot_id: Option<String>,
     pub caller_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callee_symbol_snapshot_id: Option<String>,
     pub callee_name: String,
     pub line_range: RepositoryCodeRange,
 }

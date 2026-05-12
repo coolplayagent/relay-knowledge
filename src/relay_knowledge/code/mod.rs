@@ -403,6 +403,7 @@ impl SnapshotBuild {
                     reference.line_range.start,
                 )
                 .map(|symbol| symbol.name.clone()),
+                callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
                 callee_name: reference.name.clone(),
                 line_range: reference.line_range.clone(),
             })
@@ -671,26 +672,24 @@ fn path_is_selected(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> bool {
-    let path_filters = if selector.path_filters.is_empty() {
-        &registration.path_filters
-    } else {
-        &selector.path_filters
-    };
-    let language_filters = if selector.language_filters.is_empty() {
-        &registration.language_filters
-    } else {
-        &selector.language_filters
-    };
-    let path_ok = path_filters.is_empty()
-        || path_filters
-            .iter()
-            .any(|filter| path_matches_filter(path, filter));
-    let language_ok = language_filters.is_empty()
-        || language_id(path)
-            .map(|language| language_filters.iter().any(|filter| filter == language))
-            .unwrap_or(false);
+    path_filter_allows(path, &registration.path_filters)
+        && path_filter_allows(path, &selector.path_filters)
+        && language_filter_allows(path, &registration.language_filters)
+        && language_filter_allows(path, &selector.language_filters)
+}
 
-    path_ok && language_ok
+fn path_filter_allows(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| path_matches_filter(path, filter))
+}
+
+fn language_filter_allows(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || language_id(path)
+            .map(|language| filters.iter().any(|filter| filter == language))
+            .unwrap_or(false)
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
