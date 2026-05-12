@@ -77,7 +77,7 @@ requests and `notifications/cancelled` stay bound to the issued session.
 Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
 
-Web diagnostics and browser integration checks:
+Web diagnostics, operation workspace, and browser integration checks:
 
 ```bash
 npm install --prefix web
@@ -86,6 +86,13 @@ uv sync --extra dev --no-default-groups
 uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
+
+The static Web workspace renders project health, graph counts, index freshness,
+runtime budgets, and interactive operation composers for retrieval, ingestion,
+graph inspection, code repository workflows, index refresh, and service runtime
+commands. The current Web client still reads live diagnostics only from
+`/api/project/status` and `/api/health`; operation composers stage typed command
+and request previews until a Rust HTTP adapter exposes executable Web endpoints.
 
 Optional local pre-commit checks:
 
