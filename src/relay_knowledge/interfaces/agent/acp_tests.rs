@@ -30,9 +30,16 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: Some("ev-acp".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "ACP local sessions retrieve graph context".to_owned(),
                     entity_labels: vec!["ACP".to_owned()],
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
         )

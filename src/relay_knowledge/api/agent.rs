@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalHit, RetrievalMode,
-    RetrievedContextPack,
+    FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalBackendStatus, RetrievalHit,
+    RetrievalMode, RetrievedContextPack,
 };
 
 use super::{ApiMetadata, RequestContext};
@@ -203,6 +203,8 @@ pub struct AgentRetrievalResult {
     pub context_pack: RetrievedContextPack,
     pub results: Vec<RetrievalHit>,
     pub fusion: FusionDiagnostics,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub indexes: Vec<IndexStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
@@ -226,17 +228,35 @@ impl AgentRetrievalResult {
             freshness,
             results: response_results,
             fusion,
+            mut backend_statuses,
             truncated: response_truncated,
             budget_used,
             degraded_reason,
             indexes,
         } = response;
-        let mut context_bytes = 0usize;
+        let item_bytes = context_pack
+            .items
+            .iter()
+            .map(|item| (item.result_id.clone(), serialized_context_bytes(item)))
+            .collect::<HashMap<_, _>>();
+        let mut context_bytes = serialized_context_bytes(&context_pack.backend_statuses)
+            .saturating_add(serialized_context_bytes(&backend_statuses));
         let mut truncated = response_truncated;
+        if context_bytes > max_context_bytes {
+            context_pack.backend_statuses.clear();
+            backend_statuses.clear();
+            context_bytes = 0;
+            truncated = true;
+        }
         let mut results = Vec::new();
 
         for hit in response_results {
-            let hit_bytes = hit.content.len();
+            let hit_bytes = serialized_context_bytes(&hit).saturating_add(
+                item_bytes
+                    .get(hit.evidence_id.as_str())
+                    .copied()
+                    .unwrap_or_default(),
+            );
             if context_bytes.saturating_add(hit_bytes) > max_context_bytes {
                 truncated = true;
                 continue;
@@ -263,6 +283,7 @@ impl AgentRetrievalResult {
             context_pack,
             results,
             fusion,
+            backend_statuses,
             indexes,
             degraded_reason,
             truncated,
@@ -275,6 +296,12 @@ impl AgentRetrievalResult {
             },
         }
     }
+}
+
+fn serialized_context_bytes<T: Serialize>(value: &T) -> usize {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX / 4)
 }
 
 /// Runtime budget consumed by a completed agent retrieval.
@@ -301,13 +328,26 @@ mod tests {
     use crate::{
         api::InterfaceKind,
         domain::{
-            ContextPackItem, FusionDiagnostics, GraphVersion, RetrievalBudgetUsed, RetrievalHit,
-            RetrievedContextPack,
+            ContextPackItem, FusionDiagnostics, GraphVersion, RetrievalBackendState,
+            RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievedContextPack,
+            RetrieverSource,
         },
     };
 
     #[test]
     fn truncates_retrieval_results_to_context_byte_budget() {
+        let items = vec![pack_item("ev-1"), pack_item("ev-2"), pack_item("ev-3")];
+        let results = vec![
+            hit("ev-1", "abcd"),
+            hit("ev-2", "efgh"),
+            hit("ev-3", "ijkl"),
+        ];
+        let max_context_bytes = serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&Vec::<RetrievalBackendStatus>::new())
+            + serialized_context_bytes(&results[0])
+            + serialized_context_bytes(&items[0])
+            + serialized_context_bytes(&results[1])
+            + serialized_context_bytes(&items[1]);
         let response = crate::api::HybridRetrievalResponse {
             metadata: ApiMetadata {
                 trace_id: "trace".to_owned(),
@@ -322,21 +362,19 @@ mod tests {
                 source_scope: Some("docs".to_owned()),
                 freshness: FreshnessPolicy::AllowStale,
                 truncated: false,
-                items: vec![pack_item("ev-1"), pack_item("ev-2"), pack_item("ev-3")],
+                backend_statuses: Vec::new(),
+                items,
             },
             retrieval_mode: RetrievalMode::Hybrid,
             source_scope: Some("docs".to_owned()),
             freshness: FreshnessPolicy::AllowStale,
-            results: vec![
-                hit("ev-1", "abcd"),
-                hit("ev-2", "efgh"),
-                hit("ev-3", "ijkl"),
-            ],
+            results,
             fusion: FusionDiagnostics {
                 algorithm: "reciprocal_rank_fusion".to_owned(),
                 k: 60.0,
                 candidate_count: 3,
             },
+            backend_statuses: Vec::new(),
             truncated: false,
             budget_used: RetrievalBudgetUsed {
                 limit: 3,
@@ -351,7 +389,7 @@ mod tests {
         let result = AgentRetrievalResult::from_retrieval(
             response,
             RuntimeIdentity::mcp(Some("call-1".to_owned())),
-            8,
+            max_context_bytes,
             4,
         );
 
@@ -359,8 +397,68 @@ mod tests {
         assert_eq!(result.results.len(), 2);
         assert_eq!(result.context_pack.items.len(), 2);
         assert_eq!(result.budget_used.returned_count, 2);
-        assert_eq!(result.budget_used.context_bytes, 8);
+        assert_eq!(result.budget_used.context_bytes, max_context_bytes);
         assert_eq!(result.freshness, "allow-stale");
+    }
+
+    #[test]
+    fn omits_backend_metadata_when_it_exceeds_agent_context_budget() {
+        let backend_statuses = vec![RetrievalBackendStatus {
+            source: RetrieverSource::Semantic,
+            state: RetrievalBackendState::Unavailable,
+            scope_post_filter: true,
+            indexed_graph_version: Some(GraphVersion::new(1)),
+            reason: Some("semantic backend disabled by local policy".repeat(8)),
+        }];
+        let response = crate::api::HybridRetrievalResponse {
+            metadata: ApiMetadata {
+                trace_id: "trace".to_owned(),
+                request_id: "req".to_owned(),
+                graph_version: 1,
+                index_version: None,
+                indexed_graph_version: None,
+                stale: false,
+            },
+            context_pack: RetrievedContextPack {
+                graph_version: GraphVersion::new(1),
+                source_scope: Some("docs".to_owned()),
+                freshness: FreshnessPolicy::AllowStale,
+                truncated: false,
+                backend_statuses: backend_statuses.clone(),
+                items: Vec::new(),
+            },
+            retrieval_mode: RetrievalMode::Hybrid,
+            source_scope: Some("docs".to_owned()),
+            freshness: FreshnessPolicy::AllowStale,
+            results: Vec::new(),
+            fusion: FusionDiagnostics {
+                algorithm: "reciprocal_rank_fusion".to_owned(),
+                k: 60.0,
+                candidate_count: 0,
+            },
+            backend_statuses,
+            truncated: false,
+            budget_used: RetrievalBudgetUsed {
+                limit: 3,
+                candidate_count: 0,
+                returned_count: 0,
+                context_bytes: 0,
+            },
+            degraded_reason: None,
+            indexes: Vec::new(),
+        };
+
+        let result = AgentRetrievalResult::from_retrieval(
+            response,
+            RuntimeIdentity::mcp(Some("call-1".to_owned())),
+            8,
+            4,
+        );
+
+        assert!(result.truncated);
+        assert!(result.backend_statuses.is_empty());
+        assert!(result.context_pack.backend_statuses.is_empty());
+        assert!(result.budget_used.context_bytes <= 8);
     }
 
     #[test]
@@ -376,8 +474,12 @@ mod tests {
             evidence_id: evidence_id.to_owned(),
             source_scope: "docs".to_owned(),
             source_path: None,
+            source_span: None,
             content: content.to_owned(),
             entity_labels: Vec::new(),
+            entities: Vec::new(),
+            graph_facts: Vec::new(),
+            code_artifact: None,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
             score: 1.0,
@@ -389,6 +491,10 @@ mod tests {
             result_id: result_id.to_owned(),
             source_scope: "docs".to_owned(),
             source_path: None,
+            source_span: None,
+            entities: Vec::new(),
+            graph_facts: Vec::new(),
+            code_artifact: None,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
         }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::GraphVersion;
+use super::{ConfidenceScore, EvidenceSpan, FactStatus, GraphVersion, GraphVersionRange};
 
 /// RRF constant used by Phase 1 hybrid retrieval.
 pub const RECIPROCAL_RANK_FUSION_K: f64 = 60.0;
@@ -32,6 +32,28 @@ pub enum RetrieverSource {
     CodeGraph,
     Semantic,
     Vector,
+}
+
+/// Availability state for optional retrieval backends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalBackendState {
+    Available,
+    Degraded,
+    Unavailable,
+}
+
+/// Per-backend status preserved so callers can distinguish fallback from
+/// complete hybrid retrieval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetrievalBackendStatus {
+    pub source: RetrieverSource,
+    pub state: RetrievalBackendState,
+    pub scope_post_filter: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indexed_graph_version: Option<GraphVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl RetrieverSource {
@@ -95,7 +117,56 @@ pub struct RetrievedContextPack {
     pub source_scope: Option<String>,
     pub freshness: FreshnessPolicy,
     pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub items: Vec<ContextPackItem>,
+}
+
+/// Entity projection retained with each context item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextEntity {
+    pub id: String,
+    pub label: String,
+}
+
+/// Structured graph fact kind referenced from a context item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextGraphFactKind {
+    Relation,
+    Claim,
+    Event,
+}
+
+/// Structured relation, claim, or event that supports a retrieval hit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextGraphFact {
+    pub fact_id: String,
+    pub kind: ContextGraphFactKind,
+    pub subject: String,
+    pub predicate: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object: Option<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: ConfidenceScore,
+    pub status: FactStatus,
+    pub version_range: GraphVersionRange,
+}
+
+/// Code artifact category returned through the general GraphRAG context pack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeGraphArtifactKind {
+    Symbol,
+    Chunk,
+}
+
+/// Code graph artifact tied to a shared retrieval result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeGraphArtifact {
+    pub kind: CodeGraphArtifactKind,
+    pub artifact_id: String,
+    pub path: String,
 }
 
 /// Context-pack item tied to a retrieval hit.
@@ -105,6 +176,14 @@ pub struct ContextPackItem {
     pub source_scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<EvidenceSpan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<ContextEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_facts: Vec<ContextGraphFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_artifact: Option<CodeGraphArtifact>,
     pub retriever_sources: Vec<RetrieverSource>,
     pub ranking: Vec<RankingSignal>,
 }
@@ -116,8 +195,16 @@ pub struct RetrievalHit {
     pub source_scope: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<EvidenceSpan>,
     pub content: String,
     pub entity_labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<ContextEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_facts: Vec<ContextGraphFact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_artifact: Option<CodeGraphArtifact>,
     pub retriever_sources: Vec<RetrieverSource>,
     pub ranking: Vec<RankingSignal>,
     pub score: f64,

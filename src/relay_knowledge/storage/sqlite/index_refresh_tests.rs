@@ -76,8 +76,10 @@ async fn structured_fact_evidence_references_mark_evidence_scopes_stale() {
     )
     .await;
     complete_bm25_refresh(&store, GraphVersion::new(1)).await;
+    let source_scope = SourceScope::parse("docs").expect("scope should parse");
     let relation = GraphRelationRecord::new(
         "rel-scope",
+        source_scope,
         "relay-knowledge",
         "uses",
         "scoped evidence",

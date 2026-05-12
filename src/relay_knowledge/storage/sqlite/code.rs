@@ -10,6 +10,10 @@ mod code_impact;
 #[path = "code_tests.rs"]
 mod code_tests;
 
+#[cfg(test)]
+#[path = "code_metadata_tests.rs"]
+mod code_metadata_tests;
+
 use crate::{
     domain::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,

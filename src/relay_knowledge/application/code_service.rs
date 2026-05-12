@@ -88,6 +88,11 @@ impl RelayKnowledgeService {
 
         Ok(CodeRepositoryIndexResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                &status,
+                &request.repository,
+                request.repository.ref_selector.clone(),
+            ),
             summary,
             status,
         })
@@ -108,6 +113,11 @@ impl RelayKnowledgeService {
                 .map_err(storage_api_error)?;
             return Ok(CodeRepositoryQueryResponse {
                 metadata: ApiMetadata::graph_only(&context, graph_version),
+                scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                    &status,
+                    &request.repository,
+                    request.repository.ref_selector.clone(),
+                ),
                 request,
                 results: Vec::new(),
                 degraded_reason: Some("graph_only freshness policy selected".to_owned()),
@@ -119,6 +129,7 @@ impl RelayKnowledgeService {
                 status.alias
             )));
         }
+        let requested_ref = request.repository.ref_selector.clone();
         let request = retrieval_request_at_indexed_ref(request, &status).await?;
         let graph_version = store
             .current_graph_version()
@@ -132,6 +143,11 @@ impl RelayKnowledgeService {
 
         Ok(CodeRepositoryQueryResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                &status,
+                &request.repository,
+                requested_ref,
+            ),
             request,
             results,
             degraded_reason,
@@ -186,6 +202,11 @@ impl RelayKnowledgeService {
 
         Ok(CodeRepositoryImpactResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                &status,
+                &request.repository,
+                request.head_ref.clone(),
+            ),
             request,
             changed_paths,
             results,

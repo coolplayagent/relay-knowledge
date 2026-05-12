@@ -18,10 +18,11 @@ pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
     CodeRepositoryImpactResponse, CodeRepositoryIndexResponse, CodeRepositoryQueryResponse,
-    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryStatusResponse,
-    GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
-    HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestEvidence,
-    IngestRequest, IngestResponse, ServiceRecoveryReport, ServiceStatusResponse,
+    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryScopeMetadata,
+    CodeRepositoryStatusResponse, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
+    HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
+    IngestClaim, IngestEvent, IngestEvidence, IngestRelation, IngestRequest, IngestResponse,
+    ServiceRecoveryReport, ServiceStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};

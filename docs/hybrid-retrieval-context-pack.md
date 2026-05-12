@@ -10,7 +10,7 @@ list of evidence hits. The response keeps the existing `results` array for CLI
 and Web compatibility, and adds:
 
 - `context_pack`: graph version, source scope, freshness policy, truncation
-  state, and per-item source/ranking metadata.
+  state, backend availability, and per-item source/ranking metadata.
 - `fusion`: the ranking algorithm and candidate count. Phase 1 uses reciprocal
   rank fusion with `k = 60`.
 - `budget_used`: requested limit, candidate count, returned count, and packed
@@ -18,9 +18,10 @@ and Web compatibility, and adds:
 - `truncated`: whether one or more matching candidates were omitted because of
   the request limit.
 
-Each result includes `retriever_sources` and `ranking` diagnostics. `ranking`
-records the retriever source, source-local rank, raw source score, and a short
-explanation so agents can cite why an item was selected.
+Each result includes `retriever_sources`, `ranking`, entity projections,
+optional source span, supporting structured facts, and optional code artifact
+metadata. `ranking` records the retriever source, source-local rank, raw source
+score, and a short explanation so agents can cite why an item was selected.
 
 ## Retrieval Sources
 
@@ -33,8 +34,10 @@ Phase 1 uses three concrete recall paths:
   code graph into the shared BM25 read model.
 
 `semantic` and `vector` remain explicit index families in freshness metadata.
-When those backends are unavailable, BM25 plus graph evidence retrieval remains
-usable and the response still reports index freshness.
+When those backends are unavailable, `backend_statuses` records an unavailable
+state for each backend, whether scope post-filtering would have been applied,
+and the fallback reason. BM25 plus graph evidence retrieval remains usable and
+the response still reports index freshness.
 
 ## Graph Facts
 
@@ -50,6 +53,16 @@ Graph mutations now support evidence metadata and structured facts:
 Structured facts are persisted in SQLite and counted in graph inspection and
 mutation log responses. Entity cleanup preserves entities referenced by evidence,
 relations, claims, and events.
+
+The ingest API accepts structured facts alongside evidence. The basic CLI still
+writes evidence and entity labels, while API adapters can supply evidence
+`source_path`, `span`, `confidence`, `status`, and relation/claim/event records
+that reference evidence ids.
+Those structured facts must reference supporting evidence ids so they can be
+returned through retrieval. Ingest revalidates deserialized spans, confidence
+scores, and version ranges before persistence. Evidence with `rejected` or
+`superseded` status remains inspectable in the graph but is excluded from BM25
+and graph-evidence retrieval candidates.
 
 ## Freshness And Snapshot Behavior
 
@@ -79,5 +92,7 @@ relay-knowledge query SQLite \
 ```
 
 The query response contains both `results` and `context_pack`. Use `results` for
-simple display and `context_pack.items[*].ranking` when an agent needs source
-attribution or ranking explanations.
+simple display. Use `context_pack.items[*].ranking`,
+`context_pack.items[*].graph_facts`, `context_pack.items[*].source_span`, and
+`context_pack.backend_statuses` when an agent needs source attribution, fact
+provenance, or degradation handling.

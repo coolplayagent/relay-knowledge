@@ -170,9 +170,16 @@ async fn diagnostic_tools_return_structured_content() {
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: Some("ev-diagnostics".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "Diagnostic tools share application service state".to_owned(),
                     entity_labels: Vec::new(),
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
         )

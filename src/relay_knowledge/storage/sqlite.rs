@@ -15,8 +15,8 @@ mod retrieval;
 use crate::{
     domain::{
         CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
-        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalHit,
+        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, GraphVersionRange,
+        IndexKind, IndexStatus, RetrievalHit, SourceScope,
     },
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
@@ -275,14 +275,24 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
             created_graph_version INTEGER NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS graph_event_entities (
-            event_id TEXT NOT NULL,
-            entity_id TEXT NOT NULL,
-            PRIMARY KEY (event_id, entity_id),
-            FOREIGN KEY (event_id) REFERENCES graph_events(id) ON DELETE CASCADE,
-            FOREIGN KEY (entity_id) REFERENCES entities(id)
-        );
+	        CREATE TABLE IF NOT EXISTS graph_event_entities (
+	            event_id TEXT NOT NULL,
+	            entity_id TEXT NOT NULL,
+	            PRIMARY KEY (event_id, entity_id),
+	            FOREIGN KEY (event_id) REFERENCES graph_events(id) ON DELETE CASCADE,
+	            FOREIGN KEY (entity_id) REFERENCES entities(id)
+	        );
 
+	        CREATE TABLE IF NOT EXISTS graph_fact_evidence (
+	            fact_kind TEXT NOT NULL,
+	            fact_id TEXT NOT NULL,
+	            evidence_id TEXT NOT NULL,
+	            PRIMARY KEY (fact_kind, fact_id, evidence_id),
+	            FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE CASCADE
+	        );
+
+	        CREATE INDEX IF NOT EXISTS graph_fact_evidence_by_evidence
+	            ON graph_fact_evidence(evidence_id, fact_kind);
         ",
     )?;
     ensure_column(connection, "evidence", "source_path", "TEXT")?;
@@ -320,10 +330,11 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         "event_count",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
-    retrieval::initialize_schema(connection)?;
     code::initialize_code_schema(connection)?;
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
+    backfill_fact_evidence_links(connection)?;
+    retrieval::initialize_schema(connection)?;
 
     Ok(())
 }
@@ -344,6 +355,48 @@ fn ensure_column(
             &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
             [],
         )?;
+    }
+
+    Ok(())
+}
+
+fn backfill_fact_evidence_links(connection: &Connection) -> Result<(), StorageError> {
+    backfill_fact_evidence_kind(connection, "relation", "graph_relations")?;
+    backfill_fact_evidence_kind(connection, "claim", "graph_claims")?;
+    backfill_fact_evidence_kind(connection, "event", "graph_events")?;
+
+    Ok(())
+}
+
+fn backfill_fact_evidence_kind(
+    connection: &Connection,
+    fact_kind: &'static str,
+    table: &'static str,
+) -> Result<(), StorageError> {
+    let mut statement =
+        connection.prepare(&format!("SELECT id, evidence_ids_json FROM {table}"))?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let facts = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    drop(statement);
+
+    for (fact_id, evidence_json) in facts {
+        let evidence_ids: Vec<String> = serde_json::from_str(&evidence_json)
+            .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+        for evidence_id in evidence_ids {
+            connection.execute(
+                "
+                INSERT OR IGNORE INTO graph_fact_evidence (fact_kind, fact_id, evidence_id)
+                SELECT ?1, ?2, e.id
+                FROM evidence e
+                WHERE e.id = ?3
+                ",
+                params![fact_kind, fact_id, evidence_id],
+            )?;
+        }
     }
 
     Ok(())
@@ -432,19 +485,24 @@ fn commit_batch(
         }
         retrieval::replace_evidence_document(
             &transaction,
-            &evidence_id,
-            &source_scope_text,
-            source_path.as_deref(),
-            &entity_labels,
-            &content,
-            next.get(),
+            retrieval::EvidenceDocument {
+                evidence_id: &evidence_id,
+                source_scope: source_scope.as_str(),
+                source_path: source_path.as_deref(),
+                entity_labels: &entity_labels,
+                content: &content,
+                status: evidence.status,
+                graph_version: next.get(),
+            },
         )?;
     }
 
     for relation in batch.relations {
+        validate_evidence_references(&transaction, &relation.source_scope, &relation.evidence_ids)?;
         evidence_ids.extend(relation.evidence_ids.iter().cloned());
         let source_entity_id = upsert_entity(&transaction, &relation.source_entity_label, next)?;
         let target_entity_id = upsert_entity(&transaction, &relation.target_entity_label, next)?;
+        let version_range = storage_version_range(relation.version_range, next);
         affected_entity_ids.insert(source_entity_id.clone());
         affected_entity_ids.insert(target_entity_id.clone());
         transaction.execute(
@@ -465,25 +523,33 @@ fn commit_batch(
                 valid_from_graph_version = excluded.valid_from_graph_version,
                 valid_until_graph_version = excluded.valid_until_graph_version,
                 created_graph_version = excluded.created_graph_version
-            ",
+	        ",
             params![
-                relation.id,
+                relation.id.as_str(),
                 source_entity_id,
                 relation.relation_type,
                 target_entity_id,
                 evidence_ids_json(&relation.evidence_ids)?,
                 relation.confidence.basis_points,
                 relation.status.as_str(),
-                relation.version_range.valid_from.get(),
-                relation.version_range.valid_until.map(GraphVersion::get),
+                version_range.valid_from.get(),
+                version_range.valid_until.map(GraphVersion::get),
                 next.get(),
             ],
+        )?;
+        replace_fact_evidence_links(
+            &transaction,
+            "relation",
+            &relation.id,
+            &relation.evidence_ids,
         )?;
     }
 
     for claim in batch.claims {
+        validate_evidence_references(&transaction, &claim.source_scope, &claim.evidence_ids)?;
         evidence_ids.extend(claim.evidence_ids.iter().cloned());
         let subject_entity_id = upsert_entity(&transaction, &claim.subject_entity_label, next)?;
+        let version_range = storage_version_range(claim.version_range, next);
         affected_entity_ids.insert(subject_entity_id.clone());
         transaction.execute(
             "
@@ -503,24 +569,27 @@ fn commit_batch(
                 valid_from_graph_version = excluded.valid_from_graph_version,
                 valid_until_graph_version = excluded.valid_until_graph_version,
                 created_graph_version = excluded.created_graph_version
-            ",
+	        ",
             params![
-                claim.id,
+                claim.id.as_str(),
                 subject_entity_id,
                 claim.predicate,
                 claim.object,
                 evidence_ids_json(&claim.evidence_ids)?,
                 claim.confidence.basis_points,
                 claim.status.as_str(),
-                claim.version_range.valid_from.get(),
-                claim.version_range.valid_until.map(GraphVersion::get),
+                version_range.valid_from.get(),
+                version_range.valid_until.map(GraphVersion::get),
                 next.get(),
             ],
         )?;
+        replace_fact_evidence_links(&transaction, "claim", &claim.id, &claim.evidence_ids)?;
     }
 
     for event in batch.events {
+        validate_evidence_references(&transaction, &event.source_scope, &event.evidence_ids)?;
         evidence_ids.extend(event.evidence_ids.iter().cloned());
+        let version_range = storage_version_range(event.version_range, next);
         transaction.execute(
             "
             INSERT INTO graph_events (
@@ -538,19 +607,20 @@ fn commit_batch(
                 valid_from_graph_version = excluded.valid_from_graph_version,
                 valid_until_graph_version = excluded.valid_until_graph_version,
                 created_graph_version = excluded.created_graph_version
-            ",
+	        ",
             params![
-                event.id,
+                event.id.as_str(),
                 event.event_type,
                 event.occurred_at,
                 evidence_ids_json(&event.evidence_ids)?,
                 event.confidence.basis_points,
                 event.status.as_str(),
-                event.version_range.valid_from.get(),
-                event.version_range.valid_until.map(GraphVersion::get),
+                version_range.valid_from.get(),
+                version_range.valid_until.map(GraphVersion::get),
                 next.get(),
             ],
         )?;
+        replace_fact_evidence_links(&transaction, "event", &event.id, &event.evidence_ids)?;
         transaction.execute(
             "DELETE FROM graph_event_entities WHERE event_id = ?1",
             params![event.id],
@@ -709,6 +779,68 @@ fn evidence_ids_json(evidence_ids: &[String]) -> Result<String, StorageError> {
         .map_err(|error| StorageError::InvalidInput(error.to_string()))
 }
 
+fn validate_evidence_references(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &SourceScope,
+    evidence_ids: &[String],
+) -> Result<(), StorageError> {
+    for evidence_id in evidence_ids {
+        let actual_scope = transaction
+            .query_row(
+                "SELECT source_scope FROM evidence WHERE id = ?1",
+                params![evidence_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(actual_scope) = actual_scope else {
+            return Err(StorageError::InvalidInput(format!(
+                "structured fact references unknown evidence id '{evidence_id}'"
+            )));
+        };
+        if actual_scope != source_scope.as_str() {
+            return Err(StorageError::InvalidInput(format!(
+                "structured fact references evidence id '{evidence_id}' from source scope \
+                 '{actual_scope}' instead of '{}'",
+                source_scope.as_str()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn replace_fact_evidence_links(
+    transaction: &rusqlite::Transaction<'_>,
+    fact_kind: &'static str,
+    fact_id: &str,
+    evidence_ids: &[String],
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "DELETE FROM graph_fact_evidence WHERE fact_kind = ?1 AND fact_id = ?2",
+        params![fact_kind, fact_id],
+    )?;
+    for evidence_id in evidence_ids {
+        transaction.execute(
+            "INSERT OR IGNORE INTO graph_fact_evidence (fact_kind, fact_id, evidence_id)
+             VALUES (?1, ?2, ?3)",
+            params![fact_kind, fact_id, evidence_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn storage_version_range(
+    range: GraphVersionRange,
+    commit_version: GraphVersion,
+) -> GraphVersionRange {
+    if range.valid_from == GraphVersion::ZERO && range.valid_until.is_none() {
+        GraphVersionRange::open_from(commit_version)
+    } else {
+        range
+    }
+}
+
 fn count_rows(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
     let sql = format!("SELECT COUNT(*) FROM {table}");
     let count = connection.query_row(&sql, [], |row| row.get::<_, usize>(0))?;
@@ -809,6 +941,9 @@ mod metadata_tests;
 
 #[cfg(test)]
 mod graph_tests;
+
+#[cfg(test)]
+mod index_refresh_queue_tests;
 
 #[cfg(test)]
 mod index_refresh_tests;

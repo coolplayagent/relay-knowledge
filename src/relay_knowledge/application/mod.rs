@@ -2,6 +2,7 @@
 
 mod code_service;
 mod index_refresh;
+mod ingest;
 mod runtime;
 mod service;
 mod status;
