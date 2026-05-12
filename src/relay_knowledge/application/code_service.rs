@@ -250,6 +250,21 @@ async fn indexed_commit_for_ref(
     status: &CodeRepositoryStatus,
     ref_selector: String,
 ) -> Result<String, ApiError> {
+    if ref_selector == "worktree" {
+        if is_worktree_overlay(status) {
+            return status.last_indexed_commit.clone().ok_or_else(|| {
+                ApiError::invalid_argument(format!(
+                    "code repository '{}' has no active worktree overlay",
+                    status.alias
+                ))
+            });
+        }
+        return Err(ApiError::invalid_argument(format!(
+            "code repository '{}' has no active worktree overlay",
+            status.alias
+        )));
+    }
+
     let requested_commit = resolve_code_ref(status, ref_selector).await?;
     if status.last_indexed_commit.as_deref() != Some(requested_commit.as_str()) {
         return Err(ApiError::invalid_argument(format!(
@@ -261,6 +276,17 @@ async fn indexed_commit_for_ref(
     }
 
     Ok(requested_commit)
+}
+
+fn is_worktree_overlay(status: &CodeRepositoryStatus) -> bool {
+    status
+        .last_indexed_commit
+        .as_deref()
+        .is_some_and(|value| value.starts_with("worktree:"))
+        || status
+            .tree_hash
+            .as_deref()
+            .is_some_and(|value| value.starts_with("worktree:"))
 }
 
 async fn resolve_code_ref(

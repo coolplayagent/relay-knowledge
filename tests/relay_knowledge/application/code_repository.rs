@@ -155,6 +155,92 @@ pub fn retry_policy_v2() -> u32 {
     assert!(stale_head_error.message.contains("impact head ref"));
 }
 
+#[tokio::test]
+async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
+    let repo = FixtureRepo::create("code-overlay");
+    repo.write("src/lib.rs", "pub fn retry_policy() -> u32 { 3 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-overlay"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-overlay"),
+        )
+        .await
+        .expect("clean repository should index");
+
+    repo.write(
+        "src/lib.rs",
+        "pub fn retry_policy() -> u32 { 5 }\npub fn retry_policy_v2() -> u32 { retry_policy() }\n",
+    );
+    let overlay = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::WorktreeOverlay,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("overlay"),
+        )
+        .await
+        .expect("worktree overlay should index");
+
+    assert!(overlay.summary.resolved_commit_sha.starts_with("worktree:"));
+    let clean_error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "retry_policy_v2",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-clean-overlay"),
+        )
+        .await
+        .expect_err("clean commit query should not read overlay rows");
+    assert!(clean_error.message.contains("indexed at worktree:"));
+
+    let overlay_query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "retry_policy_v2",
+                selector("fixture", "worktree"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-overlay"),
+        )
+        .await
+        .expect("explicit worktree query should succeed");
+    assert!(
+        overlay_query
+            .results
+            .iter()
+            .any(|hit| hit.path == "src/lib.rs")
+    );
+}
+
 async fn query(
     service: &RelayKnowledgeService,
     query: &str,
