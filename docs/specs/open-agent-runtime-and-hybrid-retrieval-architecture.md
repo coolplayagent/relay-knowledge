@@ -263,10 +263,12 @@ HybridRetrievalRequest
 
 融合规则:
 
-- 默认使用 RRF 融合候选排名，后续可按 query intent 切换 weighted fusion。
-- 每个候选保留 `retrieval_layer`、`raw_score`、`rank`、`scope_id`、`evidence_id`、`graph_version` 和 `indexed_graph_version`。
+- 当前实现默认使用 RRF 融合候选排名，后续可按 query intent 切换 weighted fusion。
+- 每个候选保留 `retriever_sources`、`ranking.source`、`ranking.score`、`ranking.rank`、`source_scope`、`source_path`、`evidence_id`、`graph_version` 和 `indexed_graph_version`。
 - rerank 只能重排候选，不能生成新事实。
 - context packing 必须受 token、节点数、边数、evidence 数和耗时预算约束。
+
+Phase 1 已落地 SQLite FTS5 BM25 read model。该 read model 覆盖 evidence content、entity labels、source scope/path、tree-sitter code symbols 和 code chunks，并把 `created_graph_version` 写入 BM25 文档以保证 snapshot 查询不会读到未来图版本。
 
 ### 6.2 必须使用混合检索的场景
 

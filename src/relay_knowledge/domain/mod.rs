@@ -27,6 +27,12 @@ pub use entity::KnowledgeEntity;
 pub use error::DomainError;
 pub use graph_version::GraphVersion;
 pub use index::{IndexKind, IndexState, IndexStatus};
-pub use mutation::{CommitReceipt, EvidenceRecord, GraphMutationBatch};
-pub use retrieval::{FreshnessPolicy, RetrievalHit, RetrievalMode};
+pub use mutation::{
+    ClaimRecord, CommitReceipt, ConfidenceScore, EventRecord, EvidenceRecord, EvidenceSpan,
+    FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange,
+};
+pub use retrieval::{
+    ContextPackItem, FreshnessPolicy, FusionDiagnostics, RECIPROCAL_RANK_FUSION_K, RankingSignal,
+    RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
+};
 pub use source::SourceScope;

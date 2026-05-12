@@ -269,8 +269,10 @@ pub(super) fn commit_batch(
     }
 
     transaction.execute(
-        "INSERT INTO graph_mutations (graph_version, evidence_count, entity_count)
-         VALUES (?1, 0, 0)",
+        "INSERT INTO graph_mutations (
+             graph_version, evidence_count, entity_count, relation_count, claim_count, event_count
+         )
+         VALUES (?1, 0, 0, 0, 0, 0)",
         params![next.get()],
     )?;
     transaction.execute(
@@ -458,6 +460,7 @@ fn replace_file_facts(
         "DELETE FROM code_files WHERE source_scope = ?1 AND path = ?2",
         params![file.source_scope.as_str(), file.path],
     )?;
+    super::retrieval::delete_code_documents(connection, file.source_scope.as_str(), &file.path)?;
     connection.execute(
         "INSERT INTO code_files
          (source_scope, path, content_hash, language_id, parse_status, diagnostic,
@@ -492,6 +495,11 @@ fn insert_symbol(
     symbol: CodeSymbolRecord,
     graph_version: GraphVersion,
 ) -> Result<(), StorageError> {
+    let source_scope = symbol.source_scope.as_str().to_owned();
+    let path = symbol.path.clone();
+    let symbol_id = symbol.symbol_id.clone();
+    let name = symbol.name.clone();
+    let kind = symbol.kind.as_str().to_owned();
     connection.execute(
         "INSERT INTO code_symbols
          (source_scope, path, symbol_id, name, kind, start_byte, end_byte,
@@ -515,6 +523,15 @@ fn insert_symbol(
             symbol.extraction.capture_kind,
             graph_version.get()
         ],
+    )?;
+    super::retrieval::insert_code_symbol_document(
+        connection,
+        &source_scope,
+        &path,
+        &symbol_id,
+        &name,
+        &kind,
+        graph_version.get(),
     )?;
 
     Ok(())
@@ -561,6 +578,11 @@ fn insert_chunk(
     graph_version: GraphVersion,
 ) -> Result<(), StorageError> {
     let extraction = chunk.extraction.as_ref();
+    let source_scope = chunk.source_scope.as_str().to_owned();
+    let path = chunk.path.clone();
+    let chunk_id = chunk.chunk_id.clone();
+    let linked_symbol_ids = chunk.linked_symbol_ids.clone();
+    let content = chunk.content.clone();
     connection.execute(
         "INSERT INTO code_chunks
          (source_scope, path, chunk_id, content, start_byte, end_byte, start_line,
@@ -583,6 +605,15 @@ fn insert_chunk(
             extraction.map(|value| value.capture_kind.as_str()),
             graph_version.get()
         ],
+    )?;
+    super::retrieval::insert_code_chunk_document(
+        connection,
+        &source_scope,
+        &path,
+        &chunk_id,
+        &linked_symbol_ids,
+        &content,
+        graph_version.get(),
     )?;
     for symbol_id in chunk.linked_symbol_ids {
         connection.execute(

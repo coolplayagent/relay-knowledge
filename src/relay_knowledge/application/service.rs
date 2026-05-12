@@ -11,8 +11,9 @@ use crate::{
         ServiceStatusResponse,
     },
     domain::{
-        EvidenceRecord, FreshnessPolicy, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalMode, SourceScope,
+        ContextPackItem, EvidenceRecord, FreshnessPolicy, FusionDiagnostics, GraphMutationBatch,
+        GraphVersion, IndexKind, IndexStatus, RECIPROCAL_RANK_FUSION_K, RetrievalBudgetUsed,
+        RetrievalMode, RetrievedContextPack, SourceScope,
     },
     env::EnvironmentConfig,
     indexing::IndexRefreshPlan,
@@ -203,20 +204,55 @@ impl RelayKnowledgeService {
             (plan.freshness == FreshnessPolicy::AllowStale && stale)
                 .then(|| "one or more indexes are behind the graph version".to_owned())
         };
-        let results = store
+        let mut results = store
             .search(GraphSearchRequest {
-                query: plan.query,
-                source_scope: plan.source_scope,
+                query: plan.query.clone(),
+                source_scope: plan.source_scope.clone(),
                 graph_version,
-                limit: plan.limit,
+                limit: plan.limit.saturating_add(1),
             })
             .await
             .map_err(storage_api_error)?;
+        let truncated = results.len() > plan.limit;
+        results.truncate(plan.limit);
+        let budget_used = RetrievalBudgetUsed {
+            limit: plan.limit,
+            candidate_count: results.len() + usize::from(truncated),
+            returned_count: results.len(),
+            context_bytes: results.iter().map(|hit| hit.content.len()).sum(),
+        };
+        let fusion = FusionDiagnostics {
+            algorithm: "reciprocal_rank_fusion".to_owned(),
+            k: RECIPROCAL_RANK_FUSION_K,
+            candidate_count: budget_used.candidate_count,
+        };
+        let context_pack = RetrievedContextPack {
+            graph_version,
+            source_scope: plan.source_scope.clone(),
+            freshness: plan.freshness,
+            truncated,
+            items: results
+                .iter()
+                .map(|hit| ContextPackItem {
+                    result_id: hit.evidence_id.clone(),
+                    source_scope: hit.source_scope.clone(),
+                    source_path: hit.source_path.clone(),
+                    retriever_sources: hit.retriever_sources.clone(),
+                    ranking: hit.ranking.clone(),
+                })
+                .collect(),
+        };
 
         Ok(HybridRetrievalResponse {
             metadata,
+            context_pack,
             retrieval_mode,
+            source_scope: plan.source_scope,
+            freshness: plan.freshness,
             results,
+            fusion,
+            truncated,
+            budget_used,
             degraded_reason,
             indexes,
         })
@@ -633,6 +669,19 @@ mod tests {
         assert_eq!(response.metadata.trace_id, "trace-query");
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].evidence_id, "ev-1");
+        assert_eq!(response.context_pack.items.len(), 1);
+        assert_eq!(
+            response.context_pack.freshness,
+            FreshnessPolicy::WaitUntilFresh
+        );
+        assert!(!response.truncated);
+        assert_eq!(response.fusion.algorithm, "reciprocal_rank_fusion");
+        assert!(
+            response.results[0]
+                .ranking
+                .iter()
+                .any(|signal| signal.source == crate::domain::RetrieverSource::Bm25)
+        );
         assert!(!response.metadata.stale);
         assert_eq!(
             response
@@ -673,6 +722,47 @@ mod tests {
                 .iter()
                 .all(|status| status.index_version == 1)
         );
+    }
+
+    #[tokio::test]
+    async fn retrieve_context_reports_truncated_context_pack_budget() {
+        let service = service_with_memory_store().await;
+        for index in 0..3 {
+            service
+                .ingest(
+                    IngestRequest {
+                        source_scope: "docs".to_owned(),
+                        evidence: vec![IngestEvidence {
+                            id: Some(format!("ev-{index}")),
+                            content: format!("Shared BM25 retrieval candidate {index}"),
+                            entity_labels: vec!["BM25".to_owned()],
+                        }],
+                    },
+                    RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+                )
+                .await
+                .expect("ingest should succeed");
+        }
+
+        let response = service
+            .retrieve_context(
+                HybridRetrievalRequest {
+                    query: "BM25".to_owned(),
+                    source_scope: Some("docs".to_owned()),
+                    limit: 2,
+                    freshness: FreshnessPolicy::WaitUntilFresh,
+                },
+                RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
+            )
+            .await
+            .expect("query should succeed");
+
+        assert!(response.truncated);
+        assert!(response.context_pack.truncated);
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.budget_used.limit, 2);
+        assert_eq!(response.budget_used.returned_count, 2);
+        assert_eq!(response.budget_used.candidate_count, 3);
     }
 
     #[tokio::test]

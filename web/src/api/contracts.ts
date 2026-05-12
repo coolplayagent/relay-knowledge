@@ -49,6 +49,9 @@ export type HealthResponse = {
     graph_version: number;
     entity_count: number;
     evidence_count: number;
+    relation_count: number;
+    claim_count: number;
+    event_count: number;
     mutation_count: number;
     code_file_count: number;
     code_symbol_count: number;

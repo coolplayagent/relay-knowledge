@@ -62,6 +62,9 @@ impl GraphStore for GraphOnlySearchStore {
                 graph_version: GraphVersion::new(1),
                 entity_count: 1,
                 evidence_count: 1,
+                relation_count: 0,
+                claim_count: 0,
+                event_count: 0,
                 mutation_count: 1,
                 code_file_count: 0,
                 code_symbol_count: 0,
@@ -79,8 +82,11 @@ impl GraphStore for GraphOnlySearchStore {
             Ok(vec![RetrievalHit {
                 evidence_id: "ev-graph-only".to_owned(),
                 source_scope: "docs".to_owned(),
+                source_path: None,
                 content: format!("{} result", request.query),
                 entity_labels: Vec::new(),
+                retriever_sources: vec![crate::domain::RetrieverSource::GraphEvidence],
+                ranking: Vec::new(),
                 score: 1.0,
             }])
         })

@@ -4,6 +4,7 @@
 
 ## Features
 
+- [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
 
 ## Research

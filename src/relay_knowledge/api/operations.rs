@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     domain::{
         CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryStatus,
-        CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt, FreshnessPolicy, IndexKind,
-        IndexStatus, RetrievalHit, RetrievalMode,
+        CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt, FreshnessPolicy, FusionDiagnostics,
+        IndexKind, IndexStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack,
     },
     storage::GraphInspection,
 };
@@ -64,8 +65,15 @@ impl HybridRetrievalRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HybridRetrievalResponse {
     pub metadata: ApiMetadata,
+    pub context_pack: RetrievedContextPack,
     pub retrieval_mode: RetrievalMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    pub freshness: FreshnessPolicy,
     pub results: Vec<RetrievalHit>,
+    pub fusion: FusionDiagnostics,
+    pub truncated: bool,
+    pub budget_used: RetrievalBudgetUsed,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
     pub indexes: Vec<IndexStatus>,

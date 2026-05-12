@@ -8,6 +8,7 @@
 
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
+- [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
 重点架构文档:
@@ -41,6 +42,7 @@ target/debug/relay-knowledge --version
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
+Hybrid retrieval uses the SQLite-backed BM25 read model plus graph evidence fallback, fuses candidates with reciprocal-rank fusion, and returns a context pack with retriever sources, ranking explanations, freshness, truncation, and budget metadata.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 
