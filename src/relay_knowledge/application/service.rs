@@ -300,6 +300,10 @@ impl RelayKnowledgeService {
             service_definition_path,
         })
     }
+
+    pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+        self.storage.get().await
+    }
 }
 
 #[derive(Clone)]

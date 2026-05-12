@@ -2,6 +2,10 @@
 
 本目录按文档用途归档，避免研究资料、能力规格和后续设计文档混放。
 
+## Features
+
+- [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
+
 ## Research
 
 - [知识图谱技术研究总结](research/knowledge-graph-research.md): 面向 `relay-knowledge` 架构的技术研究总结。

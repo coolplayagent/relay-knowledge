@@ -8,6 +8,7 @@
 
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
+- [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
 重点架构文档:
 
@@ -47,6 +48,12 @@ Current CLI commands use the compiled `relay-knowledge` binary with git-style su
 relay-knowledge status --format json
 relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
+relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
+relay-knowledge repo index core --ref HEAD --format json
+relay-knowledge repo query core --query retry_policy --kind definition --format json
+relay-knowledge repo update core --base main --head HEAD --format json
+relay-knowledge repo impact core --base main --head HEAD --format json
+relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
 relay-knowledge health --format json

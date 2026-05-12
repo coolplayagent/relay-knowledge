@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod application;
+pub mod code;
 pub mod domain;
 pub mod env;
 pub mod indexing;

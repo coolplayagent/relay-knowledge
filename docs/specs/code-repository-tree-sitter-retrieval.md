@@ -456,7 +456,7 @@ query
 
 ## 11. API 和 CLI 落点
 
-后续统一 API 应补充这些 request/response contract。以下是规格，不是当前代码实现承诺。
+当前实现已经在统一 application service、CLI 和 SQLite storage boundary 中落地 v1 code repository API。接口仍保持可演进，但 CLI/Web/未来 HTTP adapter 必须继续通过统一 service 调用，不能绕过 API contract。
 
 ```rust
 pub struct CodeRepositorySelector {
@@ -499,6 +499,17 @@ relay-knowledge repo status <alias> --format json
 ```
 
 所有命令都必须调用统一 application service，不能绕过 API contract。
+
+当前 v1 支持:
+
+- `repo register`: 解析 Git root，持久化 `repository_id`、alias、root path、path/language filters。
+- `repo index`: 对 clean Git tree 做 full build，写入 code files、symbols、references、imports、calls 和 chunks。
+- `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 deleted/renamed old path，并记录 rename tombstone。
+- `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `impact` query kind。
+- `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
+- `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
+
+当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
 
 ## 12. 可观测性
 

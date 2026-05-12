@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    domain::{CommitReceipt, FreshnessPolicy, IndexKind, IndexStatus, RetrievalHit, RetrievalMode},
+    domain::{
+        CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryStatus,
+        CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt, FreshnessPolicy, IndexKind,
+        IndexStatus, RetrievalHit, RetrievalMode,
+    },
     storage::GraphInspection,
 };
 
@@ -114,4 +118,57 @@ pub struct HealthResponse {
     pub graph: GraphInspection,
     pub indexes: Vec<IndexStatus>,
     pub runtime: RuntimeStatus,
+}
+
+/// Code repository registration request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryRegisterRequest {
+    pub root_path: String,
+    pub alias: String,
+    #[serde(default)]
+    pub path_filters: Vec<String>,
+    #[serde(default)]
+    pub language_filters: Vec<String>,
+}
+
+/// Code repository registration response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryRegisterResponse {
+    pub metadata: ApiMetadata,
+    pub registration: CodeRepositoryRegistration,
+    pub status: CodeRepositoryStatus,
+}
+
+/// Code repository index response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryIndexResponse {
+    pub metadata: ApiMetadata,
+    pub summary: CodeIndexSummary,
+    pub status: CodeRepositoryStatus,
+}
+
+/// Code repository retrieval response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeRepositoryQueryResponse {
+    pub metadata: ApiMetadata,
+    pub request: CodeRetrievalRequest,
+    pub results: Vec<CodeRetrievalHit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Code repository impact response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeRepositoryImpactResponse {
+    pub metadata: ApiMetadata,
+    pub request: CodeImpactRequest,
+    pub changed_paths: Vec<String>,
+    pub results: Vec<CodeRetrievalHit>,
+}
+
+/// Code repository status response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryStatusResponse {
+    pub metadata: ApiMetadata,
+    pub status: CodeRepositoryStatus,
 }

@@ -4,13 +4,15 @@ use relay_knowledge::{
     api::{GraphInspectionRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
+        CodeChunkRecord, CodeFileFingerprint, CodeGraphBatch, CodeGraphCommitReceipt,
+        CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary, CodeReferenceRecord,
+        CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
         CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
         RetrievalHit,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
+        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest, CodeRepositoryStore,
         CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
         MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
     },
@@ -294,6 +296,28 @@ impl CodeGraphStore for RefreshFailStore {
     ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+}
+
+macro_rules! unsupported_code_method {
+    ($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty) => {
+        fn $name(&self, $($arg: $ty),*) -> StorageFuture<'_, $ret> {
+            $(let _ = $arg;)*
+            Box::pin(async {
+                Err(StorageError::InvalidInput(
+                    "code repository storage unavailable".to_owned(),
+                ))
+            })
+        }
+    };
+}
+
+impl CodeRepositoryStore for RefreshFailStore {
+    unsupported_code_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
+    unsupported_code_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
+    unsupported_code_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
+    unsupported_code_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+    unsupported_code_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
+    unsupported_code_method!(analyze_code_impact(request: CodeImpactRequest, changed_paths: Vec<String>) -> Vec<CodeRetrievalHit>);
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {

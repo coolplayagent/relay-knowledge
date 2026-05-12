@@ -4,6 +4,7 @@
 //! metadata, and health snapshots. Domain and interface modules must not depend
 //! on SQL or concrete database types.
 
+mod code;
 mod sqlite;
 
 use std::{error::Error, fmt, future::Future, pin::Pin};
@@ -16,6 +17,7 @@ use crate::domain::{
     IndexKind, IndexStatus, RetrievalHit,
 };
 
+pub use code::CodeRepositoryStore;
 pub use sqlite::SqliteGraphStore;
 
 pub type StorageFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 'a>>;
@@ -75,9 +77,15 @@ pub trait CodeGraphStore: Send + Sync {
 }
 
 /// Combined storage facade used by the application service.
-pub trait KnowledgeStore: GraphStore + MutationLogStore + IndexStore + CodeGraphStore {}
+pub trait KnowledgeStore:
+    GraphStore + MutationLogStore + IndexStore + CodeGraphStore + CodeRepositoryStore
+{
+}
 
-impl<T> KnowledgeStore for T where T: GraphStore + MutationLogStore + IndexStore + CodeGraphStore {}
+impl<T> KnowledgeStore for T where
+    T: GraphStore + MutationLogStore + IndexStore + CodeGraphStore + CodeRepositoryStore
+{
+}
 
 /// Bounded graph search request against an explicit graph snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
