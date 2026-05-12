@@ -3,8 +3,9 @@ use std::{collections::BTreeSet, path::Path};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::domain::{
-    RepositoryCodeChunkRecord, CodeFileDiagnostic, RepositoryCodeFileRecord, CodeImportRecord, CodeParseStatus,
-    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord,
 };
 
 use super::{CodeIndexError, SnapshotBuild, stable_content_hash, stable_id};

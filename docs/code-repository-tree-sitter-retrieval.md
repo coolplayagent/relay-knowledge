@@ -32,11 +32,15 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
   renamed paths are removed from the active index, with rename lineage kept as
   tombstones.
 - Worktree overlay mode indexes changed worktree files under a synthetic
-  `worktree:<hash>` tree id without mutating a clean commit snapshot.
+  `worktree:<hash>` tree id that includes selected changed file content hashes
+  without mutating a clean commit snapshot. Non-file status entries are skipped.
 - Parser work runs behind application-level `spawn_blocking` boundaries.
   SQLite writes also remain behind the storage blocking worker.
 - Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Unsupported,
-  binary, or oversized files degrade to text-only chunks where possible.
+  invalid UTF-8, binary, or oversized files degrade to text-only chunks where
+  possible.
+- Revision-scoped queries are served only when the requested ref resolves to the
+  currently indexed commit; callers must index another ref before querying it.
 - Retrieval hits include repository id, scope alias, resolved commit, tree hash,
   path, language id, byte and line ranges, symbol/file identifiers, retrieval
   layers, index version, stale flag, degraded reason, score, and excerpt.

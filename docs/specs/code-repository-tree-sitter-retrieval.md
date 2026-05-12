@@ -232,7 +232,7 @@ tree-sitter 可在语法错误存在时返回部分树。系统必须区分:
 | --- | --- |
 | `parsed` | AST、符号和 chunk 都可用 |
 | `partial` | 存在 error node，保留可靠 capture，标记 degraded |
-| `text_only` | grammar 缺失或二进制/超限，只有 text chunk/BM25 |
+| `text_only` | grammar 缺失、非法 UTF-8、二进制或超限，只有 text chunk/BM25 |
 | `failed` | 读取、解码或 parser 异常，写 diagnostics 和 dead-letter |
 
 解析失败不能回滚整个仓库的更新批次。失败文件必须可重试，并在 health/status 中可见。
@@ -506,10 +506,11 @@ relay-knowledge repo status <alias> --format json
 - `repo index`: 对 clean Git tree 做 full build，写入 code files、symbols、references、imports、calls 和 chunks。
 - `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 deleted/renamed old path，并记录 rename tombstone。
 - `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `impact` query kind。
+- `repo query`: 请求 ref 必须解析到当前 indexed commit；查询旧 commit、branch 或 tag 前必须先对该 ref 建索引，避免返回错误 revision 的 code context。
 - `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
-当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
+当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
 
 ## 12. 可观测性
 

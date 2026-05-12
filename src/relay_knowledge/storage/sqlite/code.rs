@@ -33,7 +33,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             degraded_reason TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS code_files (
+        CREATE TABLE IF NOT EXISTS code_repository_files (
             repository_id TEXT NOT NULL,
             file_id TEXT NOT NULL,
             path TEXT NOT NULL,
@@ -47,7 +47,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_symbols (
+        CREATE TABLE IF NOT EXISTS code_repository_symbols (
             repository_id TEXT NOT NULL,
             symbol_snapshot_id TEXT PRIMARY KEY,
             file_id TEXT NOT NULL,
@@ -65,7 +65,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_references (
+        CREATE TABLE IF NOT EXISTS code_repository_references (
             repository_id TEXT NOT NULL,
             reference_id TEXT PRIMARY KEY,
             file_id TEXT NOT NULL,
@@ -80,7 +80,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_imports (
+        CREATE TABLE IF NOT EXISTS code_repository_imports (
             repository_id TEXT NOT NULL,
             import_id TEXT PRIMARY KEY,
             file_id TEXT NOT NULL,
@@ -91,7 +91,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_calls (
+        CREATE TABLE IF NOT EXISTS code_repository_calls (
             repository_id TEXT NOT NULL,
             call_id TEXT PRIMARY KEY,
             file_id TEXT NOT NULL,
@@ -104,7 +104,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_chunks (
+        CREATE TABLE IF NOT EXISTS code_repository_chunks (
             repository_id TEXT NOT NULL,
             chunk_id TEXT PRIMARY KEY,
             file_id TEXT NOT NULL,
@@ -119,7 +119,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_file_diagnostics (
+        CREATE TABLE IF NOT EXISTS code_repository_file_diagnostics (
             repository_id TEXT NOT NULL,
             path TEXT NOT NULL,
             parse_status TEXT NOT NULL,
@@ -128,7 +128,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS code_path_tombstones (
+        CREATE TABLE IF NOT EXISTS code_repository_path_tombstones (
             repository_id TEXT NOT NULL,
             old_path TEXT NOT NULL,
             new_path TEXT,
@@ -274,7 +274,7 @@ fn file_fingerprints(
     let mut statement = connection.prepare(
         "
         SELECT path, blob_hash
-        FROM code_files
+        FROM code_repository_files
         WHERE repository_id = ?1
         ORDER BY path ASC
         ",
@@ -309,7 +309,7 @@ fn apply_snapshot(
     for file in &snapshot.files {
         transaction.execute(
             "
-            INSERT INTO code_files (
+            INSERT INTO code_repository_files (
                 repository_id, file_id, path, language_id, blob_hash, byte_len,
                 line_count, parse_status, degraded_reason
             )
@@ -331,7 +331,7 @@ fn apply_snapshot(
     for symbol in &snapshot.symbols {
         transaction.execute(
             "
-            INSERT INTO code_symbols (
+            INSERT INTO code_repository_symbols (
                 repository_id, symbol_snapshot_id, file_id, path, language_id, name,
                 qualified_name, kind, signature, doc_comment, byte_start, byte_end,
                 line_start, line_end
@@ -359,7 +359,7 @@ fn apply_snapshot(
     for reference in &snapshot.references {
         transaction.execute(
             "
-            INSERT INTO code_references (
+            INSERT INTO code_repository_references (
                 repository_id, reference_id, file_id, path, name, kind,
                 target_symbol_snapshot_id, byte_start, byte_end, line_start, line_end
             )
@@ -410,7 +410,7 @@ fn insert_imports_calls_chunks_diagnostics(
     for import in &snapshot.imports {
         transaction.execute(
             "
-            INSERT INTO code_imports (
+            INSERT INTO code_repository_imports (
                 repository_id, import_id, file_id, path, module, line_start, line_end
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -429,7 +429,7 @@ fn insert_imports_calls_chunks_diagnostics(
     for call in &snapshot.calls {
         transaction.execute(
             "
-            INSERT INTO code_calls (
+            INSERT INTO code_repository_calls (
                 repository_id, call_id, file_id, path, caller_symbol_snapshot_id,
                 caller_name, callee_name, line_start, line_end
             )
@@ -451,7 +451,7 @@ fn insert_imports_calls_chunks_diagnostics(
     for chunk in &snapshot.chunks {
         transaction.execute(
             "
-            INSERT INTO code_chunks (
+            INSERT INTO code_repository_chunks (
                 repository_id, chunk_id, file_id, path, language_id, content,
                 byte_start, byte_end, line_start, line_end, symbol_snapshot_id
             )
@@ -475,7 +475,7 @@ fn insert_imports_calls_chunks_diagnostics(
     for diagnostic in &snapshot.diagnostics {
         transaction.execute(
             "
-            INSERT OR REPLACE INTO code_file_diagnostics
+            INSERT OR REPLACE INTO code_repository_file_diagnostics
                 (repository_id, path, parse_status, message)
             VALUES (?1, ?2, ?3, ?4)
             ",
@@ -490,7 +490,7 @@ fn insert_imports_calls_chunks_diagnostics(
     for tombstone in &snapshot.tombstones {
         transaction.execute(
             "
-            INSERT OR REPLACE INTO code_path_tombstones
+            INSERT OR REPLACE INTO code_repository_path_tombstones
                 (repository_id, old_path, new_path, base_ref, head_ref)
             VALUES (?1, ?2, ?3, ?4, ?5)
             ",
@@ -511,10 +511,26 @@ fn update_repository_after_snapshot(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
-    let file_count = count_code_rows(transaction, "code_files", &snapshot.repository_id)?;
-    let symbol_count = count_code_rows(transaction, "code_symbols", &snapshot.repository_id)?;
-    let reference_count = count_code_rows(transaction, "code_references", &snapshot.repository_id)?;
-    let chunk_count = count_code_rows(transaction, "code_chunks", &snapshot.repository_id)?;
+    let file_count = count_code_rows(
+        transaction,
+        "code_repository_files",
+        &snapshot.repository_id,
+    )?;
+    let symbol_count = count_code_rows(
+        transaction,
+        "code_repository_symbols",
+        &snapshot.repository_id,
+    )?;
+    let reference_count = count_code_rows(
+        transaction,
+        "code_repository_references",
+        &snapshot.repository_id,
+    )?;
+    let chunk_count = count_code_rows(
+        transaction,
+        "code_repository_chunks",
+        &snapshot.repository_id,
+    )?;
     let degraded_reason = (!snapshot.diagnostics.is_empty()).then(|| {
         format!(
             "{} file(s) degraded during code indexing",
@@ -555,14 +571,14 @@ fn delete_repository_index(
     repository_id: &str,
 ) -> Result<(), StorageError> {
     for table in [
-        "code_path_tombstones",
-        "code_file_diagnostics",
-        "code_chunks",
-        "code_calls",
-        "code_imports",
-        "code_references",
-        "code_symbols",
-        "code_files",
+        "code_repository_path_tombstones",
+        "code_repository_file_diagnostics",
+        "code_repository_chunks",
+        "code_repository_calls",
+        "code_repository_imports",
+        "code_repository_references",
+        "code_repository_symbols",
+        "code_repository_files",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE repository_id = ?1"),
@@ -579,13 +595,13 @@ fn delete_path_index(
     path: &str,
 ) -> Result<(), StorageError> {
     for table in [
-        "code_file_diagnostics",
-        "code_chunks",
-        "code_calls",
-        "code_imports",
-        "code_references",
-        "code_symbols",
-        "code_files",
+        "code_repository_file_diagnostics",
+        "code_repository_chunks",
+        "code_repository_calls",
+        "code_repository_imports",
+        "code_repository_references",
+        "code_repository_symbols",
+        "code_repository_files",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE repository_id = ?1 AND path = ?2"),
@@ -615,8 +631,9 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
-            RepositoryCodeChunkRecord, RepositoryCodeFileRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-            RepositoryCodeRange, CodeRepositorySelector, FreshnessPolicy,
+            CodeCallRecord, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+            CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+            RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
         },
         storage::SqliteGraphStore,
     };
@@ -636,7 +653,7 @@ mod tests {
             .apply_code_index_snapshot(snapshot)
             .await
             .expect("snapshot should apply");
-        let selector = CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), Vec::new())
+        let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
             .expect("selector should validate");
 
         let hits = store
@@ -656,6 +673,108 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "src/lib.rs");
         assert_eq!(hits[0].resolved_commit_sha, "commit");
+    }
+
+    #[tokio::test]
+    async fn rejects_code_queries_for_unindexed_refs() {
+        let store = store_with_repository_snapshot(snapshot_with_chunk(
+            "repo",
+            "src/lib.rs",
+            "fn retry_policy() {}",
+        ))
+        .await;
+        let selector = CodeRepositorySelector::new("fixture", "other", Vec::new(), Vec::new())
+            .expect("selector should validate");
+
+        let error = store
+            .search_code(
+                crate::domain::CodeRetrievalRequest::new(
+                    "retry_policy",
+                    selector,
+                    CodeQueryKind::Hybrid,
+                    5,
+                    FreshnessPolicy::AllowStale,
+                )
+                .expect("request should validate"),
+            )
+            .await
+            .expect_err("stale ref should fail");
+
+        assert!(error.to_string().contains("not requested ref other"));
+    }
+
+    #[tokio::test]
+    async fn language_filters_apply_to_references_calls_and_imports() {
+        let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+        let selector =
+            CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["rust".to_owned()])
+                .expect("selector should validate");
+
+        for kind in [
+            CodeQueryKind::References,
+            CodeQueryKind::Callers,
+            CodeQueryKind::Imports,
+        ] {
+            let query = if kind == CodeQueryKind::Imports {
+                "module"
+            } else {
+                "target"
+            };
+            let hits = store
+                .search_code(
+                    crate::domain::CodeRetrievalRequest::new(
+                        query,
+                        selector.clone(),
+                        kind,
+                        10,
+                        FreshnessPolicy::AllowStale,
+                    )
+                    .expect("request should validate"),
+                )
+                .await
+                .expect("query should succeed");
+
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].language_id, "rust");
+            assert_eq!(hits[0].path, "src/lib.rs");
+        }
+    }
+
+    #[tokio::test]
+    async fn impact_does_not_fall_back_to_all_symbols_for_non_symbol_paths() {
+        let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+        let request = crate::domain::CodeImpactRequest::new(
+            CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+                .expect("selector should validate"),
+            "base",
+            "commit",
+            10,
+        )
+        .expect("impact request should validate");
+
+        let hits = store
+            .analyze_code_impact(request, vec!["README.md".to_owned()])
+            .await
+            .expect("impact should succeed");
+
+        assert!(hits.is_empty());
+    }
+
+    async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
+        let store = SqliteGraphStore::open_in_memory().expect("store should open");
+        let registration =
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate");
+        store
+            .upsert_code_repository(registration)
+            .await
+            .expect("repository should persist");
+        store
+            .apply_code_index_snapshot(snapshot)
+            .await
+            .expect("snapshot should apply");
+
+        store
     }
 
     fn snapshot_with_chunk(repository_id: &str, path: &str, content: &str) -> CodeIndexSnapshot {
@@ -695,6 +814,96 @@ mod tests {
                 symbol_snapshot_id: None,
             }],
             diagnostics: Vec::new(),
+        }
+    }
+
+    fn snapshot_with_language_edges() -> CodeIndexSnapshot {
+        let rust_file = RepositoryCodeFileRecord {
+            repository_id: "repo".to_owned(),
+            file_id: "rust-file".to_owned(),
+            path: "src/lib.rs".to_owned(),
+            language_id: "rust".to_owned(),
+            blob_hash: "rust-hash".to_owned(),
+            byte_len: 20,
+            line_count: 1,
+            parse_status: CodeParseStatus::Parsed,
+            degraded_reason: None,
+        };
+        let python_file = RepositoryCodeFileRecord {
+            repository_id: "repo".to_owned(),
+            file_id: "python-file".to_owned(),
+            path: "py/app.py".to_owned(),
+            language_id: "python".to_owned(),
+            blob_hash: "python-hash".to_owned(),
+            byte_len: 20,
+            line_count: 1,
+            parse_status: CodeParseStatus::Parsed,
+            degraded_reason: None,
+        };
+
+        CodeIndexSnapshot {
+            repository_id: "repo".to_owned(),
+            resolved_commit_sha: "commit".to_owned(),
+            tree_hash: "tree".to_owned(),
+            full_replace: true,
+            changed_path_count: 2,
+            skipped_unchanged_count: 0,
+            deleted_paths: Vec::new(),
+            tombstones: Vec::new(),
+            files: vec![rust_file, python_file],
+            symbols: Vec::new(),
+            references: vec![
+                reference("rust-reference", "rust-file", "src/lib.rs"),
+                reference("python-reference", "python-file", "py/app.py"),
+            ],
+            imports: vec![
+                import("rust-import", "rust-file", "src/lib.rs"),
+                import("python-import", "python-file", "py/app.py"),
+            ],
+            calls: vec![
+                call("rust-call", "rust-file", "src/lib.rs"),
+                call("python-call", "python-file", "py/app.py"),
+            ],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn reference(id: &str, file_id: &str, path: &str) -> RepositoryCodeReferenceRecord {
+        RepositoryCodeReferenceRecord {
+            repository_id: "repo".to_owned(),
+            reference_id: id.to_owned(),
+            file_id: file_id.to_owned(),
+            path: path.to_owned(),
+            name: "target".to_owned(),
+            kind: "call".to_owned(),
+            target_symbol_snapshot_id: None,
+            byte_range: RepositoryCodeRange { start: 0, end: 6 },
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
+        }
+    }
+
+    fn import(id: &str, file_id: &str, path: &str) -> CodeImportRecord {
+        CodeImportRecord {
+            repository_id: "repo".to_owned(),
+            import_id: id.to_owned(),
+            file_id: file_id.to_owned(),
+            path: path.to_owned(),
+            module: "module::target".to_owned(),
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
+        }
+    }
+
+    fn call(id: &str, file_id: &str, path: &str) -> CodeCallRecord {
+        CodeCallRecord {
+            repository_id: "repo".to_owned(),
+            call_id: id.to_owned(),
+            file_id: file_id.to_owned(),
+            path: path.to_owned(),
+            caller_symbol_snapshot_id: None,
+            caller_name: Some("caller".to_owned()),
+            callee_name: "target".to_owned(),
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
         }
     }
 }

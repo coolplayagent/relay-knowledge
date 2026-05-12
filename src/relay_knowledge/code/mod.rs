@@ -15,7 +15,8 @@ mod parser;
 
 use crate::domain::{
     CodeCallRecord, CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
-    RepositoryCodeReferenceRecord, CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeSymbolRecord,
+    CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord,
 };
 
 use parser::{language_id, parse_indexed_file};
@@ -127,6 +128,16 @@ pub fn changed_paths_for_diff(
     Ok(paths)
 }
 
+/// Resolves a repository ref selector to the exact commit used by storage.
+pub fn resolve_repository_ref(
+    root_path: impl AsRef<Path>,
+    ref_selector: &str,
+) -> Result<String, CodeIndexError> {
+    let root = resolve_git_root(root_path.as_ref())?;
+
+    resolve_ref(&root, ref_selector)
+}
+
 fn build_full_snapshot(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
@@ -223,32 +234,57 @@ fn build_worktree_overlay_snapshot(
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let status = git_bytes(root, ["status", "--porcelain=v1", "-z"])?;
-    let tree_hash = format!("worktree:{:016x}", stable_hash64(&status));
     let paths = worktree_changed_paths(&status);
+    let mut overlay_hash_input = status;
+    let mut deleted_paths = Vec::new();
+    let mut files_to_parse = Vec::new();
+    let mut skipped_unchanged_count = 0;
+
+    for path in &paths {
+        if !path_is_selected(path, registration, selector) {
+            continue;
+        }
+        let full_path = root.join(path);
+        if !full_path.exists() {
+            overlay_hash_input.extend_from_slice(b"D\0");
+            overlay_hash_input.extend_from_slice(path.as_bytes());
+            overlay_hash_input.push(0);
+            deleted_paths.push(path.clone());
+            continue;
+        }
+        let metadata = fs::metadata(&full_path)?;
+        if !metadata.is_file() {
+            overlay_hash_input.extend_from_slice(b"S\0");
+            overlay_hash_input.extend_from_slice(path.as_bytes());
+            overlay_hash_input.push(0);
+            continue;
+        }
+        let bytes = fs::read(&full_path)?;
+        let blob_hash = stable_content_hash(&bytes);
+        overlay_hash_input.extend_from_slice(b"F\0");
+        overlay_hash_input.extend_from_slice(path.as_bytes());
+        overlay_hash_input.push(0);
+        overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
+        overlay_hash_input.push(0);
+        if previous_hashes.get(path) == Some(&blob_hash) {
+            skipped_unchanged_count += 1;
+            continue;
+        }
+        files_to_parse.push((path.clone(), bytes));
+    }
+
+    let tree_hash = format!("worktree:{:016x}", stable_hash64(&overlay_hash_input));
     let mut build = SnapshotBuild::new(
         registration,
         commit,
         tree_hash,
         false,
         paths.len(),
-        previous_hashes.len(),
+        skipped_unchanged_count,
     );
+    build.deleted_paths = deleted_paths;
 
-    for path in paths {
-        if !path_is_selected(&path, registration, selector) {
-            continue;
-        }
-        let full_path = root.join(&path);
-        if !full_path.exists() {
-            build.deleted_paths.push(path);
-            continue;
-        }
-        let bytes = fs::read(full_path)?;
-        let blob_hash = stable_content_hash(&bytes);
-        if previous_hashes.get(&path) == Some(&blob_hash) {
-            build.skipped_unchanged_count += 1;
-            continue;
-        }
+    for (path, bytes) in files_to_parse {
         parse_indexed_file(&mut build, &path, &bytes)?;
     }
 
@@ -378,16 +414,44 @@ impl SnapshotBuild {
     }
 }
 
-fn resolve_reference_targets(symbols: &[RepositoryCodeSymbolRecord], references: &mut [RepositoryCodeReferenceRecord]) {
-    let mut by_name = BTreeMap::new();
+fn resolve_reference_targets(
+    symbols: &[RepositoryCodeSymbolRecord],
+    references: &mut [RepositoryCodeReferenceRecord],
+) {
+    let mut by_name = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
     for symbol in symbols {
-        by_name
-            .entry(symbol.name.clone())
-            .or_insert_with(|| symbol.symbol_snapshot_id.clone());
+        by_name.entry(&symbol.name).or_default().push(symbol);
     }
     for reference in references {
-        reference.target_symbol_snapshot_id = by_name.get(&reference.name).cloned();
+        reference.target_symbol_snapshot_id = resolve_reference_target(
+            reference,
+            by_name
+                .get(reference.name.as_str())
+                .map(std::vec::Vec::as_slice),
+        )
+        .map(|symbol| symbol.symbol_snapshot_id.clone());
     }
+}
+
+fn resolve_reference_target<'a>(
+    reference: &RepositoryCodeReferenceRecord,
+    candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+) -> Option<&'a RepositoryCodeSymbolRecord> {
+    let candidates = candidates?;
+    if candidates.len() == 1 {
+        return candidates.first().copied();
+    }
+
+    let same_path = candidates
+        .iter()
+        .copied()
+        .filter(|symbol| symbol.path == reference.path)
+        .collect::<Vec<_>>();
+    if same_path.len() == 1 {
+        return same_path.first().copied();
+    }
+
+    None
 }
 
 fn caller_for_line<'a>(
@@ -632,6 +696,12 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn detects_supported_languages_and_filters_paths() {
@@ -695,5 +765,180 @@ mod tests {
                 "src/lib.rs".to_owned()
             ]
         );
+    }
+
+    #[test]
+    fn worktree_overlay_hash_tracks_modified_content() {
+        let repo = TempGitRepo::create("overlay-hash");
+        repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "initial"]);
+        let registration = repo.registration();
+        let selector = repo.selector();
+
+        repo.write("src/lib.rs", "fn value() -> u32 { 1 }\n");
+        let first = build_index_snapshot(
+            &registration,
+            &selector,
+            CodeIndexMode::WorktreeOverlay,
+            Vec::new(),
+        )
+        .expect("first overlay should index");
+
+        repo.write("src/lib.rs", "fn value() -> u32 { 2 }\n");
+        let second = build_index_snapshot(
+            &registration,
+            &selector,
+            CodeIndexMode::WorktreeOverlay,
+            Vec::new(),
+        )
+        .expect("second overlay should index");
+
+        assert_ne!(first.tree_hash, second.tree_hash);
+    }
+
+    #[test]
+    fn worktree_overlay_skips_directories_and_counts_changed_path_skips() {
+        let repo = TempGitRepo::create("overlay-skip");
+        repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "initial"]);
+        let content = "fn value() -> u32 { 1 }\n";
+        repo.write("src/lib.rs", content);
+        repo.write("src/generated/temp.rs", "fn generated() {}\n");
+
+        let snapshot = build_index_snapshot(
+            &repo.registration(),
+            &repo.selector(),
+            CodeIndexMode::WorktreeOverlay,
+            vec![
+                CodeFileFingerprint {
+                    path: "src/lib.rs".to_owned(),
+                    blob_hash: stable_content_hash(content.as_bytes()),
+                },
+                CodeFileFingerprint {
+                    path: "src/old.rs".to_owned(),
+                    blob_hash: "stale".to_owned(),
+                },
+            ],
+        )
+        .expect("overlay should skip non-file paths");
+
+        assert_eq!(snapshot.skipped_unchanged_count, 1);
+        assert!(snapshot.files.is_empty());
+    }
+
+    #[test]
+    fn reference_resolution_prefers_same_path_and_leaves_ambiguous_names_unresolved() {
+        let symbols = vec![
+            symbol("sym-a", "src/a.rs", "run"),
+            symbol("sym-b", "src/b.rs", "run"),
+        ];
+        let mut references = vec![
+            reference("ref-a", "src/a.rs", "run"),
+            reference("ref-c", "src/c.rs", "run"),
+        ];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(
+            references[0].target_symbol_snapshot_id.as_deref(),
+            Some("sym-a")
+        );
+        assert_eq!(references[1].target_symbol_snapshot_id, None);
+    }
+
+    fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
+        RepositoryCodeSymbolRecord {
+            repository_id: "repo".to_owned(),
+            symbol_snapshot_id: id.to_owned(),
+            file_id: format!("file-{id}"),
+            path: path.to_owned(),
+            language_id: "rust".to_owned(),
+            name: name.to_owned(),
+            qualified_name: format!("{}::{name}", path.replace('/', "::")),
+            kind: "function".to_owned(),
+            signature: format!("fn {name}()"),
+            doc_comment: None,
+            byte_range: crate::domain::RepositoryCodeRange { start: 0, end: 8 },
+            line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+        }
+    }
+
+    fn reference(id: &str, path: &str, name: &str) -> RepositoryCodeReferenceRecord {
+        RepositoryCodeReferenceRecord {
+            repository_id: "repo".to_owned(),
+            reference_id: id.to_owned(),
+            file_id: format!("file-{id}"),
+            path: path.to_owned(),
+            name: name.to_owned(),
+            kind: "call".to_owned(),
+            target_symbol_snapshot_id: None,
+            byte_range: crate::domain::RepositoryCodeRange { start: 0, end: 8 },
+            line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
+        }
+    }
+
+    struct TempGitRepo {
+        path: PathBuf,
+    }
+
+    impl TempGitRepo {
+        fn create(name: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
+            fs::create_dir_all(path.join("src")).expect("repo directory should be created");
+            let repo = Self { path };
+            repo.git(["init"]);
+            repo.git(["config", "user.email", "relay@example.invalid"]);
+            repo.git(["config", "user.name", "Relay Test"]);
+            repo
+        }
+
+        fn registration(&self) -> CodeRepositoryRegistration {
+            CodeRepositoryRegistration::new(
+                "repo",
+                "alias",
+                self.path.display().to_string(),
+                vec!["src".to_owned()],
+                vec!["rust".to_owned()],
+            )
+            .expect("registration should validate")
+        }
+
+        fn selector(&self) -> CodeRepositorySelector {
+            CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+                .expect("selector should validate")
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("parent directory should exist");
+            }
+            fs::write(path, content).expect("fixture file should be written");
+        }
+
+        fn git<const N: usize>(&self, args: [&str; N]) {
+            let output = Command::new("git")
+                .current_dir(&self.path)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    impl Drop for TempGitRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 }

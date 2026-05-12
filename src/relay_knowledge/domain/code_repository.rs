@@ -469,8 +469,7 @@ mod tests {
 
     #[test]
     fn code_ranges_must_be_ordered() {
-        let error =
-            RepositoryCodeRange::new("line_range", 3, 2).expect_err("range should fail");
+        let error = RepositoryCodeRange::new("line_range", 3, 2).expect_err("range should fail");
 
         assert_eq!(error.field, "line_range");
     }

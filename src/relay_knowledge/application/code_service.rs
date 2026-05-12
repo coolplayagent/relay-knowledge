@@ -6,10 +6,13 @@ use crate::{
         CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
         CodeRepositoryStatusResponse, RequestContext,
     },
-    code::{CodeIndexError, build_index_snapshot, changed_paths_for_diff, register_repository},
+    code::{
+        CodeIndexError, build_index_snapshot, changed_paths_for_diff, register_repository,
+        resolve_repository_ref,
+    },
     domain::{
         CodeImpactRequest, CodeIndexRequest, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRetrievalRequest,
+        CodeRepositoryStatus, CodeRetrievalRequest,
     },
     storage::StorageError,
 };
@@ -96,6 +99,8 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<CodeRepositoryQueryResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let request = retrieval_request_at_indexed_ref(request, &status).await?;
         let graph_version = store
             .current_graph_version()
             .await
@@ -117,11 +122,13 @@ impl RelayKnowledgeService {
     /// Returns impact radius for a Git diff using the indexed code graph.
     pub async fn impact_code_repository(
         &self,
-        request: CodeImpactRequest,
+        mut request: CodeImpactRequest,
         context: RequestContext,
     ) -> Result<CodeRepositoryImpactResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
+        request.repository.ref_selector =
+            indexed_commit_for_ref(&status, request.repository.ref_selector.clone()).await?;
         let root = PathBuf::from(status.root_path);
         let base_ref = request.base_ref.clone();
         let head_ref = request.head_ref.clone();
@@ -187,6 +194,35 @@ fn registration_from_status(
         path_filters: status.path_filters.clone(),
         language_filters: status.language_filters.clone(),
     }
+}
+
+async fn retrieval_request_at_indexed_ref(
+    mut request: CodeRetrievalRequest,
+    status: &CodeRepositoryStatus,
+) -> Result<CodeRetrievalRequest, ApiError> {
+    request.repository.ref_selector =
+        indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
+
+    Ok(request)
+}
+
+async fn indexed_commit_for_ref(
+    status: &CodeRepositoryStatus,
+    ref_selector: String,
+) -> Result<String, ApiError> {
+    let root = PathBuf::from(status.root_path.clone());
+    let requested_commit =
+        run_blocking_code(move || resolve_repository_ref(root, &ref_selector)).await?;
+    if status.last_indexed_commit.as_deref() != Some(requested_commit.as_str()) {
+        return Err(ApiError::invalid_argument(format!(
+            "code repository '{}' is indexed at {}, not requested ref {}",
+            status.alias,
+            status.last_indexed_commit.as_deref().unwrap_or("nothing"),
+            requested_commit
+        )));
+    }
+
+    Ok(requested_commit)
 }
 
 async fn run_blocking_code<T, F>(operation: F) -> Result<T, ApiError>

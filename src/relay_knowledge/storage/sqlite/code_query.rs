@@ -4,8 +4,8 @@ use rusqlite::{Connection, params};
 
 use crate::{
     domain::{
-        CodeImpactRequest, CodeQueryKind, RepositoryCodeRange, CodeRepositoryStatus, CodeRetrievalHit,
-        CodeRetrievalLayer, CodeRetrievalRequest,
+        CodeImpactRequest, CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit,
+        CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeRange,
     },
     storage::StorageError,
 };
@@ -16,7 +16,11 @@ pub(super) fn search_code(
     connection: &mut Connection,
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let status = required_repository(connection, &request.repository.repository)?;
+    let status = required_repository(
+        connection,
+        &request.repository.repository,
+        &request.repository.ref_selector,
+    )?;
     let mut hits = Vec::new();
     if matches!(
         request.code_query_kind,
@@ -64,7 +68,11 @@ pub(super) fn analyze_impact(
     request: CodeImpactRequest,
     changed_paths: Vec<String>,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let status = required_repository(connection, &request.repository.repository)?;
+    let status = required_repository(
+        connection,
+        &request.repository.repository,
+        &request.repository.ref_selector,
+    )?;
     let changed = changed_paths.into_iter().collect::<BTreeSet<_>>();
     let changed_modules = changed
         .iter()
@@ -73,12 +81,18 @@ pub(super) fn analyze_impact(
     let changed_symbols = symbols_for_paths(connection, &status.repository_id, &changed)?;
     let mut hits = Vec::new();
 
-    hits.extend(chunks_for_paths(connection, &status, &changed)?);
-    hits.extend(callers_for_symbols(connection, &status, &changed_symbols)?);
+    hits.extend(chunks_for_paths(connection, &status, &changed, &request)?);
+    hits.extend(callers_for_symbols(
+        connection,
+        &status,
+        &changed_symbols,
+        &request,
+    )?);
     hits.extend(importers_for_modules(
         connection,
         &status,
         &changed_modules,
+        &request,
     )?);
     for hit in &mut hits {
         hit.retrieval_layers.push(CodeRetrievalLayer::Impact);
@@ -98,7 +112,7 @@ fn search_symbols(
         "
         SELECT symbol_snapshot_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
-        FROM code_symbols
+        FROM code_repository_symbols
         WHERE repository_id = ?1
         ORDER BY path ASC, line_start ASC
         ",
@@ -168,27 +182,31 @@ fn search_references(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, name, kind, target_symbol_snapshot_id,
-               byte_start, byte_end, line_start, line_end
-        FROM code_references
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
+               r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
+               r.line_start, r.line_end
+        FROM code_repository_references r
+        INNER JOIN code_repository_files f
+            ON f.repository_id = r.repository_id AND f.path = r.path
+        WHERE r.repository_id = ?1
+        ORDER BY r.path ASC, r.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
         Ok(ReferenceRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
-            name: row.get(2)?,
-            kind: row.get(3)?,
-            target_symbol_snapshot_id: row.get(4)?,
+            language_id: row.get(2)?,
+            name: row.get(3)?,
+            kind: row.get(4)?,
+            target_symbol_snapshot_id: row.get(5)?,
             byte_range: RepositoryCodeRange {
-                start: row.get(5)?,
-                end: row.get(6)?,
+                start: row.get(6)?,
+                end: row.get(7)?,
             },
             line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
+                start: row.get(8)?,
+                end: row.get(9)?,
             },
         })
     })?;
@@ -199,7 +217,7 @@ fn search_references(
 
     Ok(rows
         .into_iter()
-        .filter(|row| path_selected(&row.path, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.name, &row.kind]);
             (score > 0.0).then(|| {
@@ -207,7 +225,7 @@ fn search_references(
                     status,
                     HitParts {
                         path: row.path,
-                        language_id: "unknown".to_owned(),
+                        language_id: row.language_id,
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: row.target_symbol_snapshot_id,
@@ -230,23 +248,26 @@ fn search_calls(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, caller_symbol_snapshot_id, caller_name,
-               callee_name, line_start, line_end
-        FROM code_calls
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
+               c.caller_name, c.callee_name, c.line_start, c.line_end
+        FROM code_repository_calls c
+        INNER JOIN code_repository_files f
+            ON f.repository_id = c.repository_id AND f.path = c.path
+        WHERE c.repository_id = ?1
+        ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
         Ok(CallRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
-            caller_symbol_snapshot_id: row.get(2)?,
-            caller_name: row.get(3)?,
-            callee_name: row.get(4)?,
+            language_id: row.get(2)?,
+            caller_symbol_snapshot_id: row.get(3)?,
+            caller_name: row.get(4)?,
+            callee_name: row.get(5)?,
             line_range: RepositoryCodeRange {
-                start: row.get(5)?,
-                end: row.get(6)?,
+                start: row.get(6)?,
+                end: row.get(7)?,
             },
         })
     })?;
@@ -257,7 +278,7 @@ fn search_calls(
 
     Ok(rows
         .into_iter()
-        .filter(|row| path_selected(&row.path, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, request))
         .filter_map(|row| {
             let search_fields = match request.code_query_kind {
                 CodeQueryKind::Callees => [row.caller_name.as_deref().unwrap_or(""), ""],
@@ -271,7 +292,7 @@ fn search_calls(
                     status,
                     HitParts {
                         path: row.path,
-                        language_id: "unknown".to_owned(),
+                        language_id: row.language_id,
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
                         symbol_snapshot_id: row.caller_symbol_snapshot_id,
@@ -294,20 +315,23 @@ fn search_imports(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, module, line_start, line_end
-        FROM code_imports
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
+        FROM code_repository_imports i
+        INNER JOIN code_repository_files f
+            ON f.repository_id = i.repository_id AND f.path = i.path
+        WHERE i.repository_id = ?1
+        ORDER BY i.path ASC, i.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
         Ok(ImportRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
-            module: row.get(2)?,
+            language_id: row.get(2)?,
+            module: row.get(3)?,
             line_range: RepositoryCodeRange {
-                start: row.get(3)?,
-                end: row.get(4)?,
+                start: row.get(4)?,
+                end: row.get(5)?,
             },
         })
     })?;
@@ -318,7 +342,7 @@ fn search_imports(
 
     Ok(rows
         .into_iter()
-        .filter(|row| path_selected(&row.path, request))
+        .filter(|row| selected_row(&row.path, &row.language_id, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.module, &row.path]);
             (score > 0.0).then(|| {
@@ -326,7 +350,7 @@ fn search_imports(
                     status,
                     HitParts {
                         path: row.path,
-                        language_id: "unknown".to_owned(),
+                        language_id: row.language_id,
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
                         symbol_snapshot_id: None,
@@ -351,7 +375,7 @@ fn search_chunks(
         "
         SELECT file_id, path, language_id, content, byte_start, byte_end,
                line_start, line_end, symbol_snapshot_id
-        FROM code_chunks
+        FROM code_repository_chunks
         WHERE repository_id = ?1
         ORDER BY path ASC, line_start ASC
         ",
@@ -412,14 +436,9 @@ fn symbols_for_paths(
     repository_id: &str,
     paths: &BTreeSet<String>,
 ) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection
-        .prepare("SELECT name FROM code_symbols WHERE repository_id = ?1 ORDER BY name ASC")?;
-    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
-    let names = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    let mut path_statement = connection
-        .prepare("SELECT name FROM code_symbols WHERE repository_id = ?1 AND path = ?2")?;
+    let mut path_statement = connection.prepare(
+        "SELECT name FROM code_repository_symbols WHERE repository_id = ?1 AND path = ?2",
+    )?;
     let mut symbols = Vec::new();
     for path in paths {
         let rows = path_statement.query_map(params![repository_id, path], |row| row.get(0))?;
@@ -428,9 +447,8 @@ fn symbols_for_paths(
                 .map_err(StorageError::from)?,
         );
     }
-    if symbols.is_empty() {
-        symbols = names;
-    }
+    symbols.sort();
+    symbols.dedup();
 
     Ok(symbols)
 }
@@ -439,12 +457,13 @@ fn chunks_for_paths(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     paths: &BTreeSet<String>,
+    request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
         SELECT file_id, path, language_id, content, byte_start, byte_end,
                line_start, line_end, symbol_snapshot_id
-        FROM code_chunks
+        FROM code_repository_chunks
         WHERE repository_id = ?1
         ORDER BY path ASC, line_start ASC
         ",
@@ -473,6 +492,7 @@ fn chunks_for_paths(
     Ok(rows
         .into_iter()
         .filter(|row| paths.contains(&row.path))
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
         .map(|row| {
             hit_from_parts(
                 status,
@@ -497,26 +517,30 @@ fn callers_for_symbols(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     symbols: &[String],
+    request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, caller_symbol_snapshot_id, caller_name,
-               callee_name, line_start, line_end
-        FROM code_calls
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
+               c.caller_name, c.callee_name, c.line_start, c.line_end
+        FROM code_repository_calls c
+        INNER JOIN code_repository_files f
+            ON f.repository_id = c.repository_id AND f.path = c.path
+        WHERE c.repository_id = ?1
+        ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
         Ok(CallRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
-            caller_symbol_snapshot_id: row.get(2)?,
-            caller_name: row.get(3)?,
-            callee_name: row.get(4)?,
+            language_id: row.get(2)?,
+            caller_symbol_snapshot_id: row.get(3)?,
+            caller_name: row.get(4)?,
+            callee_name: row.get(5)?,
             line_range: RepositoryCodeRange {
-                start: row.get(5)?,
-                end: row.get(6)?,
+                start: row.get(6)?,
+                end: row.get(7)?,
             },
         })
     })?;
@@ -527,6 +551,7 @@ fn callers_for_symbols(
 
     Ok(rows
         .into_iter()
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
         .filter(|row| symbol_set.contains(&row.callee_name))
         .map(|row| {
             let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
@@ -534,7 +559,7 @@ fn callers_for_symbols(
                 status,
                 HitParts {
                     path: row.path,
-                    language_id: "unknown".to_owned(),
+                    language_id: row.language_id,
                     byte_range: RepositoryCodeRange { start: 0, end: 0 },
                     line_range: row.line_range,
                     symbol_snapshot_id: row.caller_symbol_snapshot_id,
@@ -553,23 +578,27 @@ fn importers_for_modules(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     modules: &[String],
+    request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT file_id, path, module, line_start, line_end
-        FROM code_imports
-        WHERE repository_id = ?1
-        ORDER BY path ASC, line_start ASC
+        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
+        FROM code_repository_imports i
+        INNER JOIN code_repository_files f
+            ON f.repository_id = i.repository_id AND f.path = i.path
+        WHERE i.repository_id = ?1
+        ORDER BY i.path ASC, i.line_start ASC
         ",
     )?;
     let rows = statement.query_map(params![status.repository_id], |row| {
         Ok(ImportRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
-            module: row.get(2)?,
+            language_id: row.get(2)?,
+            module: row.get(3)?,
             line_range: RepositoryCodeRange {
-                start: row.get(3)?,
-                end: row.get(4)?,
+                start: row.get(4)?,
+                end: row.get(5)?,
             },
         })
     })?;
@@ -579,13 +608,14 @@ fn importers_for_modules(
 
     Ok(rows
         .into_iter()
+        .filter(|row| selected_impact_row(&row.path, &row.language_id, request))
         .filter(|row| modules.iter().any(|module| row.module.contains(module)))
         .map(|row| {
             hit_from_parts(
                 status,
                 HitParts {
                     path: row.path,
-                    language_id: "unknown".to_owned(),
+                    language_id: row.language_id,
                     byte_range: RepositoryCodeRange { start: 0, end: 0 },
                     line_range: row.line_range,
                     symbol_snapshot_id: None,
@@ -603,10 +633,21 @@ fn importers_for_modules(
 fn required_repository(
     connection: &mut Connection,
     repository: &str,
+    ref_selector: &str,
 ) -> Result<CodeRepositoryStatus, StorageError> {
-    repository_status(connection, repository)?.ok_or_else(|| {
+    let status = repository_status(connection, repository)?.ok_or_else(|| {
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
-    })
+    })?;
+    let indexed_commit = status.last_indexed_commit.as_deref().ok_or_else(|| {
+        StorageError::InvalidInput(format!("code repository '{repository}' is not indexed"))
+    })?;
+    if indexed_commit != ref_selector {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository '{repository}' is indexed at {indexed_commit}, not requested ref {ref_selector}"
+        )));
+    }
+
+    Ok(status)
 }
 
 fn selected_row(path: &str, language_id: &str, request: &CodeRetrievalRequest) -> bool {
@@ -626,6 +667,23 @@ fn path_selected(path: &str, request: &CodeRetrievalRequest) -> bool {
             .path_filters
             .iter()
             .any(|filter| path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn selected_impact_row(path: &str, language_id: &str, request: &CodeImpactRequest) -> bool {
+    let path_ok = request.repository.path_filters.is_empty()
+        || request
+            .repository
+            .path_filters
+            .iter()
+            .any(|filter| path == filter || path.starts_with(&format!("{filter}/")));
+    let language_ok = request.repository.language_filters.is_empty()
+        || request
+            .repository
+            .language_filters
+            .iter()
+            .any(|filter| filter == language_id);
+
+    path_ok && language_ok
 }
 
 struct HitParts {
@@ -729,6 +787,7 @@ struct SymbolRow {
 struct ReferenceRow {
     file_id: String,
     path: String,
+    language_id: String,
     name: String,
     kind: String,
     target_symbol_snapshot_id: Option<String>,
@@ -739,6 +798,7 @@ struct ReferenceRow {
 struct CallRow {
     file_id: String,
     path: String,
+    language_id: String,
     caller_symbol_snapshot_id: Option<String>,
     caller_name: Option<String>,
     callee_name: String,
@@ -748,6 +808,7 @@ struct CallRow {
 struct ImportRow {
     file_id: String,
     path: String,
+    language_id: String,
     module: String,
     line_range: RepositoryCodeRange,
 }

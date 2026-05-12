@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use crate::{
@@ -309,7 +309,6 @@ impl RelayKnowledgeService {
 #[derive(Clone)]
 struct StorageProvider {
     path: Option<PathBuf>,
-    init_lock: Arc<Mutex<()>>,
     ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
     init_lock: Arc<tokio::sync::Mutex<()>>,
 }
@@ -318,7 +317,6 @@ impl StorageProvider {
     fn sqlite(path: PathBuf) -> Self {
         Self {
             path: Some(path),
-            init_lock: Arc::new(Mutex::new(())),
             ready: Arc::new(OnceLock::new()),
             init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -330,7 +328,6 @@ impl StorageProvider {
 
         Self {
             path: None,
-            init_lock: Arc::new(Mutex::new(())),
             ready: Arc::new(ready),
             init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -351,9 +348,7 @@ impl StorageProvider {
             ));
         };
         let ready = Arc::clone(&self.ready);
-        let init_lock = Arc::clone(&self.init_lock);
         tokio::task::spawn_blocking(move || {
-            let _guard = init_lock.lock().map_err(|_| StorageError::LockPoisoned)?;
             if let Some(store) = ready.get() {
                 return Ok(Arc::clone(store));
             }
