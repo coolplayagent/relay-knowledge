@@ -290,7 +290,17 @@ fn build_worktree_overlay_snapshot(
     previous_hashes: &BTreeMap<String, String>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
-    let status = git_bytes(root, ["status", "--porcelain=v1", "-z"])?;
+    let head_commit = resolve_ref(root, "HEAD")?;
+    if commit != head_commit {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "worktree overlay ref '{}' resolves to {}, but checked-out HEAD is {}",
+            selector.ref_selector, commit, head_commit
+        )));
+    }
+    let status = git_bytes(
+        root,
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
     let changes = worktree_changed_paths(&status);
     if changes.is_empty() {
         return build_full_snapshot(registration, selector, root);
@@ -310,36 +320,51 @@ fn build_worktree_overlay_snapshot(
             }
         }
         let path = &change.path;
-        if !path_is_selected(path, registration, selector) {
+        if !path_scope_allows(path, registration, selector) {
             continue;
         }
         let full_path = root.join(path);
         if !full_path.exists() {
-            overlay_hash_input.extend_from_slice(b"D\0");
-            overlay_hash_input.extend_from_slice(path.as_bytes());
-            overlay_hash_input.push(0);
-            deleted_paths.push(path.clone());
+            if path_is_selected(path, registration, selector) {
+                overlay_hash_input.extend_from_slice(b"D\0");
+                overlay_hash_input.extend_from_slice(path.as_bytes());
+                overlay_hash_input.push(0);
+                deleted_paths.push(path.clone());
+            }
             continue;
         }
         let metadata = fs::metadata(&full_path)?;
+        if metadata.is_dir() {
+            for nested_path in worktree_directory_files(root, path)? {
+                if path_is_selected(&nested_path, registration, selector) {
+                    record_worktree_file(
+                        root,
+                        &nested_path,
+                        previous_hashes,
+                        &mut overlay_hash_input,
+                        &mut files_to_parse,
+                        &mut skipped_unchanged_count,
+                    )?;
+                }
+            }
+            continue;
+        }
         if !metadata.is_file() {
             overlay_hash_input.extend_from_slice(b"S\0");
             overlay_hash_input.extend_from_slice(path.as_bytes());
             overlay_hash_input.push(0);
             continue;
         }
-        let bytes = fs::read(&full_path)?;
-        let blob_hash = stable_content_hash(&bytes);
-        overlay_hash_input.extend_from_slice(b"F\0");
-        overlay_hash_input.extend_from_slice(path.as_bytes());
-        overlay_hash_input.push(0);
-        overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
-        overlay_hash_input.push(0);
-        if previous_hashes.get(path) == Some(&blob_hash) {
-            skipped_unchanged_count += 1;
-            continue;
+        if path_is_selected(path, registration, selector) {
+            record_worktree_file(
+                root,
+                path,
+                previous_hashes,
+                &mut overlay_hash_input,
+                &mut files_to_parse,
+                &mut skipped_unchanged_count,
+            )?;
         }
-        files_to_parse.push((path.clone(), bytes));
     }
     if overlay_hash_input.is_empty() {
         return build_full_snapshot(registration, selector, root);
@@ -363,6 +388,60 @@ fn build_worktree_overlay_snapshot(
     }
 
     Ok(build.finish())
+}
+
+fn record_worktree_file(
+    root: &Path,
+    path: &str,
+    previous_hashes: &BTreeMap<String, String>,
+    overlay_hash_input: &mut Vec<u8>,
+    files_to_parse: &mut Vec<(String, Vec<u8>)>,
+    skipped_unchanged_count: &mut usize,
+) -> Result<(), CodeIndexError> {
+    let bytes = fs::read(root.join(path))?;
+    let blob_hash = stable_content_hash(&bytes);
+    overlay_hash_input.extend_from_slice(b"F\0");
+    overlay_hash_input.extend_from_slice(path.as_bytes());
+    overlay_hash_input.push(0);
+    overlay_hash_input.extend_from_slice(blob_hash.as_bytes());
+    overlay_hash_input.push(0);
+    if previous_hashes.get(path) == Some(&blob_hash) {
+        *skipped_unchanged_count += 1;
+        return Ok(());
+    }
+    files_to_parse.push((path.to_owned(), bytes));
+
+    Ok(())
+}
+
+fn worktree_directory_files(
+    root: &Path,
+    relative_dir: &str,
+) -> Result<Vec<String>, CodeIndexError> {
+    let mut files = Vec::new();
+    collect_worktree_directory_files(root, Path::new(relative_dir), &mut files)?;
+    files.sort();
+
+    Ok(files)
+}
+
+fn collect_worktree_directory_files(
+    root: &Path,
+    relative: &Path,
+    files: &mut Vec<String>,
+) -> Result<(), CodeIndexError> {
+    for entry in fs::read_dir(root.join(relative))? {
+        let entry = entry?;
+        let path = relative.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_worktree_directory_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_changed_path(
@@ -752,10 +831,18 @@ fn path_is_selected(
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> bool {
-    path_filter_allows(path, &registration.path_filters)
-        && path_filter_allows(path, &selector.path_filters)
+    path_scope_allows(path, registration, selector)
         && language_filter_allows(path, &registration.language_filters)
         && language_filter_allows(path, &selector.language_filters)
+}
+
+fn path_scope_allows(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    path_filter_allows(path, &registration.path_filters)
+        && path_filter_allows(path, &selector.path_filters)
 }
 
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {
@@ -773,11 +860,20 @@ fn language_filter_allows(path: &str, filters: &[String]) -> bool {
 }
 
 fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let filter = filter.trim_end_matches(['/', '\\']);
+    let filter = normalize_path_filter(filter);
     if filter == "." {
         return true;
     }
     !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
+}
+
+fn normalize_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 pub(super) fn stable_content_hash(bytes: &[u8]) -> String {

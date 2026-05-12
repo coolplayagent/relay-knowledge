@@ -156,6 +156,136 @@ pub fn retry_policy_v2() -> u32 {
 }
 
 #[tokio::test]
+async fn incremental_index_rejects_base_that_is_not_current_snapshot() {
+    let repo = FixtureRepo::create("code-incremental-base");
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let initial = repo.git_text(["rev-parse", "HEAD"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-incremental-base"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-incremental-base"),
+        )
+        .await
+        .expect("initial index should succeed");
+
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update to one"]);
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::incremental(initial.clone(), "HEAD")
+                    .expect("incremental mode should validate"),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-current-base"),
+        )
+        .await
+        .expect("first incremental index should succeed");
+
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "return to zero"]);
+    let error = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::incremental(initial, "HEAD")
+                    .expect("incremental mode should validate"),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-base"),
+        )
+        .await
+        .expect_err("stale incremental base should be rejected");
+
+    assert!(error.message.contains("incremental base ref"));
+}
+
+#[tokio::test]
+async fn callee_query_does_not_reuse_caller_symbol_identity_for_unresolved_edges() {
+    let repo = FixtureRepo::create("code-unresolved-callee");
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn caller_missing() {
+    missing_dependency();
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-unresolved-callee"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-unresolved-callee"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "caller_missing",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-unresolved-callee"),
+        )
+        .await
+        .expect("callee query should succeed");
+    let hit = response
+        .results
+        .iter()
+        .find(|hit| hit.excerpt.contains("missing_dependency"))
+        .expect("unresolved callee edge should be returned");
+
+    assert_eq!(hit.symbol_snapshot_id, None);
+}
+
+#[tokio::test]
 async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
     let repo = FixtureRepo::create("code-overlay");
     repo.write("src/lib.rs", "pub fn retry_policy() -> u32 { 3 }\n");

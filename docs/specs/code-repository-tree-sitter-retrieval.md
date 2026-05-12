@@ -277,11 +277,19 @@ commit-to-commit 更新:
 git diff --name-status -z -M {old_commit} {new_commit}
 ```
 
+增量更新复用上一版文件指纹前，`old_commit` 必须解析到当前已索引
+snapshot 的 commit；不匹配时必须拒绝本次增量更新，要求调用方先执行
+full index 或从当前 indexed commit 继续。
+
 worktree overlay 更新:
 
 ```text
-git status --porcelain=v2 -z
+git status --porcelain=v2 -z --untracked-files=all
 ```
+
+worktree overlay 必须绑定当前 checked-out `HEAD`，不能把其它 ref 标记成
+当前工作区内容。overlay 变更发现必须显式启用 untracked 文件，并把未跟踪
+目录展开为文件级变更后再应用 path/language filters。
 
 实现可以通过 Git CLI、libgit2 或 Rust Git adapter 提供统一 diff contract。无论底层实现如何，application 层只接收结构化 `ChangedPath`。
 
@@ -302,7 +310,7 @@ ChangedPath {
 
 1. 解析 Git diff/status 得到 changed paths。
 2. 按授权 scope、path filters、language filters 过滤；`.` 和 `./` path
-   filter 表示仓库根。
+   filter 表示仓库根，`./src` 等前缀必须规范化为 `src` 后匹配。
 3. 用 blob/content hash 跳过内容未变文件。
 4. 对删除文件产生 tombstone mutation。
 5. 对 rename/move 保留 lineage candidate。

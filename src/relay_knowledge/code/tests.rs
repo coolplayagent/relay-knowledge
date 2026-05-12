@@ -82,10 +82,18 @@ fn dot_path_filter_selects_repository_root() {
     let selector_dot =
         CodeRepositorySelector::new("alias", "HEAD", vec!["./".to_owned()], Vec::new())
             .expect("selector should validate");
+    let selector_relative =
+        CodeRepositorySelector::new("alias", "HEAD", vec!["./src".to_owned()], Vec::new())
+            .expect("selector should validate");
 
     assert!(path_is_selected("src/lib.rs", &registration, &selector));
     assert!(path_is_selected("README.md", &registration, &selector));
     assert!(path_is_selected("src/lib.rs", &registration, &selector_dot));
+    assert!(path_is_selected(
+        "src/lib.rs",
+        &registration,
+        &selector_relative
+    ));
 }
 
 #[test]
@@ -319,11 +327,12 @@ fn worktree_overlay_hash_ignores_out_of_scope_changes() {
 }
 
 #[test]
-fn worktree_overlay_skips_directories_and_counts_changed_path_skips() {
-    let repo = TempGitRepo::create("overlay-skip");
+fn worktree_overlay_indexes_untracked_files_under_new_directories() {
+    let repo = TempGitRepo::create("overlay-untracked-all");
     repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
+    repo.git(["config", "status.showUntrackedFiles", "no"]);
     let content = "fn value() -> u32 { 1 }\n";
     repo.write("src/lib.rs", content);
     repo.write("src/generated/temp.rs", "fn generated() {}\n");
@@ -343,10 +352,40 @@ fn worktree_overlay_skips_directories_and_counts_changed_path_skips() {
             },
         ],
     )
-    .expect("overlay should skip non-file paths");
+    .expect("overlay should index untracked files despite local status config");
 
     assert_eq!(snapshot.skipped_unchanged_count, 1);
-    assert!(snapshot.files.is_empty());
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/generated/temp.rs")
+    );
+}
+
+#[test]
+fn worktree_overlay_rejects_refs_that_are_not_checked_out() {
+    let repo = TempGitRepo::create("overlay-ref-binding");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let initial = repo.git_text(["rev-parse", "HEAD"]);
+    repo.write("src/lib.rs", "fn value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update"]);
+    repo.write("src/lib.rs", "fn value() -> u32 { 2 }\n");
+    let selector = CodeRepositorySelector::new("alias", initial, Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let error = build_index_snapshot(
+        &repo.registration(),
+        &selector,
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect_err("overlay ref should match checked-out HEAD");
+
+    assert!(error.to_string().contains("worktree overlay ref"));
 }
 
 #[test]
