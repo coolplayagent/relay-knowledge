@@ -707,7 +707,7 @@ fn module_import_matches(imported_module: &str, changed_module: &str) -> bool {
 
 fn module_boundary(character: Option<char>) -> bool {
     character
-        .map(|value| matches!(value, ':' | '.' | '/' | '\\' | '_' | '-'))
+        .map(|value| matches!(value, ':' | '.' | '/' | '\\' | '-'))
         .unwrap_or(true)
 }
 
@@ -857,6 +857,7 @@ mod tests {
         assert!(module_import_matches("crate::foo::bar", "foo::bar"));
         assert!(module_import_matches("foo::bar::baz", "foo::bar"));
         assert!(!module_import_matches("foo::barista", "foo::bar"));
+        assert!(!module_import_matches("foo::bar_baz", "foo::bar"));
     }
 
     #[test]

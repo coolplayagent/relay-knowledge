@@ -32,8 +32,9 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
   renamed paths are removed from the active index, with rename lineage kept as
   tombstones.
 - Worktree overlay mode indexes changed worktree files under a synthetic
-  `worktree:<hash>` tree id that includes selected changed file content hashes
-  without mutating a clean commit snapshot. Non-file status entries are skipped.
+  `worktree:<hash>` tree id that includes only selected changed file content
+  hashes without mutating a clean commit snapshot. Non-file status entries are
+  skipped, and rename sources are removed from the active overlay index.
 - Parser work runs behind application-level `spawn_blocking` boundaries.
   SQLite writes also remain behind the storage blocking worker.
 - Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Unsupported,
@@ -50,14 +51,14 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
 SQLite stores the active code index in dedicated tables:
 
 - `code_repositories`
-- `code_files`
-- `code_symbols`
-- `code_references`
-- `code_imports`
-- `code_calls`
-- `code_chunks`
-- `code_file_diagnostics`
-- `code_path_tombstones`
+- `code_repository_files`
+- `code_repository_symbols`
+- `code_repository_references`
+- `code_repository_imports`
+- `code_repository_calls`
+- `code_repository_chunks`
+- `code_repository_file_diagnostics`
+- `code_repository_path_tombstones`
 
 The storage boundary exposes code repository methods through
 `CodeRepositoryStore`; CLI and application code do not access SQLite directly.

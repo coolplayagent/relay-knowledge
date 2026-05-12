@@ -504,10 +504,11 @@ relay-knowledge repo status <alias> --format json
 
 - `repo register`: 解析 Git root，持久化 `repository_id`、alias、root path、path/language filters。
 - `repo index`: 对 clean Git tree 做 full build，写入 code files、symbols、references、imports、calls 和 chunks。
-- `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 deleted/renamed old path，并记录 rename tombstone。
+- `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 deleted/renamed old path，并记录 rename tombstone。worktree overlay 必须删除 rename source path，且 synthetic tree hash 只由 selector 范围内的 changed path/content 计算。
 - `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `impact` query kind。
 - `repo query`: 请求 ref 必须解析到当前 indexed commit；查询旧 commit、branch 或 tag 前必须先对该 ref 建索引，避免返回错误 revision 的 code context。
 - `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
+- `repo impact`: import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面。
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
 当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
