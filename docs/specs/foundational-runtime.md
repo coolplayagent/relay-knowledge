@@ -160,6 +160,8 @@ QoS admission 使用当前 snapshot 判断:
 ```
 
 `--format streaming-json` 的 `item` event 同样包含 `runtime` 字段。启动配置无效时，CLI 退出码为 `1`，并输出 `failed to load runtime configuration: ...`。
+`relay-knowledge version` 和标准 `relay-knowledge --version` alias 只输出包版本，不加载 runtime 配置。
+`version --format json` 输出机器可读版本对象；`streaming-json` 对 version 不适用并返回参数错误。
 
 当前已落地的 application 和 CLI 边界是 async:
 

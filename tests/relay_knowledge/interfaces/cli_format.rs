@@ -109,6 +109,54 @@ fn binary_outputs_streaming_json_as_ndjson_events() {
 }
 
 #[test]
+fn binary_outputs_version_without_runtime_configuration() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["version"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("relay-knowledge {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn binary_outputs_version_json_from_flag_alias() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["--version", "--format", "json"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stdout).expect("version JSON");
+
+    assert_eq!(value["project_name"], "relay-knowledge");
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn binary_rejects_streaming_json_version_format() {
+    let output = relay_command()
+        .args(["version", "--format", "streaming-json"])
+        .output()
+        .expect("binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim(),
+        "version does not support --format streaming-json"
+    );
+}
+
+#[test]
 fn binary_ingests_queries_and_inspects_isolated_graph() {
     let home = isolated_home("binary-ingests-queries");
     let ingest = relay_command()
@@ -138,7 +186,6 @@ fn binary_ingests_queries_and_inspects_isolated_graph() {
         .env(RELAY_KNOWLEDGE_HOME, &home)
         .args([
             "query",
-            "--query",
             "SQLite",
             "--source",
             "docs",
@@ -170,6 +217,64 @@ fn binary_ingests_queries_and_inspects_isolated_graph() {
 }
 
 #[test]
+fn binary_queries_dash_prefixed_text_after_delimiter() {
+    let output = relay_command()
+        .args(["--format", "json", "query", "--", "--help"])
+        .output()
+        .expect("query command should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stdout).expect("query JSON");
+
+    assert_eq!(value["metadata"]["graph_version"], 0);
+    assert_eq!(value["results"].as_array().expect("results").len(), 0);
+}
+
+#[test]
+fn binary_queries_dash_prefixed_text_with_trailing_global_format() {
+    let output = relay_command()
+        .args(["query", "--", "--help", "--format", "json"])
+        .output()
+        .expect("query command should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stdout).expect("query JSON");
+
+    assert_eq!(value["metadata"]["graph_version"], 0);
+    assert_eq!(value["results"].as_array().expect("results").len(), 0);
+}
+
+#[test]
+fn binary_ingests_dash_prefixed_content_value() {
+    let home = isolated_home("binary-ingests-dash-prefixed-content");
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args([
+            "ingest",
+            "--source",
+            "docs",
+            "--content",
+            "--version",
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("ingest command should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stdout).expect("ingest JSON");
+
+    assert_eq!(value["metadata"]["graph_version"], 1);
+    assert_eq!(value["receipt"]["evidence_count"], 1);
+}
+
+#[test]
 fn binary_reports_health_and_service_status() {
     let home = isolated_home("binary-health-service");
 
@@ -194,6 +299,29 @@ fn binary_reports_health_and_service_status() {
     let service_json: Value = serde_json::from_slice(&service.stdout).expect("service JSON");
     assert_eq!(service_json["service_name"], "relay-knowledge");
     assert_eq!(service_json["mode"], "disabled");
+}
+
+#[test]
+fn binary_rejects_flag_style_actions_and_extra_command_words() {
+    let flag_action = relay_command()
+        .args(["--ingest", "--source", "docs", "--content", "x"])
+        .output()
+        .expect("binary should run");
+    let extra = relay_command()
+        .args(["status", "health"])
+        .output()
+        .expect("binary should run");
+
+    assert_eq!(flag_action.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&flag_action.stderr).trim(),
+        "unexpected argument '--ingest'"
+    );
+    assert_eq!(extra.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&extra.stderr).trim(),
+        "unexpected argument 'health'"
+    );
 }
 
 fn relay_command() -> Command {
