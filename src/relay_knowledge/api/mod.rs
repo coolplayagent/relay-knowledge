@@ -11,6 +11,8 @@ pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
+    CodeRepositoryImpactResponse, CodeRepositoryIndexResponse, CodeRepositoryQueryResponse,
+    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryStatusResponse,
     GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
     HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestEvidence,
     IngestRequest, IngestResponse, ServiceStatusResponse,

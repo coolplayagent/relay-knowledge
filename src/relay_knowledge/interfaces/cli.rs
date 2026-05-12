@@ -1,5 +1,8 @@
 //! CLI adapter for the shared application service.
 
+#[path = "repo_cli.rs"]
+mod repo_cli;
+
 use std::{error::Error, fmt};
 
 use crate::{
@@ -128,14 +131,34 @@ impl CliCommand {
 fn option_consumes_value(option: &str) -> bool {
     matches!(
         option,
-        "--source" | "--content" | "--entity" | "--limit" | "--freshness" | "--kind"
+        "--source"
+            | "--content"
+            | "--entity"
+            | "--limit"
+            | "--freshness"
+            | "--kind"
+            | "--alias"
+            | "--path"
+            | "--language"
+            | "--ref"
+            | "--base"
+            | "--head"
+            | "--query"
     )
 }
 
 fn is_command_word(token: &str) -> bool {
     matches!(
         token,
-        "status" | "ingest" | "query" | "graph" | "index" | "health" | "service" | "version"
+        "status"
+            | "ingest"
+            | "query"
+            | "repo"
+            | "graph"
+            | "index"
+            | "health"
+            | "service"
+            | "version"
     )
 }
 
@@ -158,6 +181,7 @@ pub enum CliAction {
     IndexRefresh {
         kinds: Vec<IndexKind>,
     },
+    Repo(repo_cli::RepoCommand),
     Health,
     ServiceStatus,
     Version,
@@ -167,6 +191,7 @@ pub enum CliAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
     InvalidFormat(String),
+    InvalidCodeQueryKind(String),
     InvalidFreshness(String),
     InvalidIndexKind(String),
     InvalidLimit(String),
@@ -188,6 +213,7 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::InvalidFormat(_)
+            | Self::InvalidCodeQueryKind(_)
             | Self::InvalidFreshness(_)
             | Self::InvalidIndexKind(_)
             | Self::InvalidLimit(_)
@@ -206,6 +232,10 @@ impl fmt::Display for CliError {
             Self::InvalidFormat(format) => write!(
                 formatter,
                 "invalid --format value '{format}', expected text, json, or streaming-json"
+            ),
+            Self::InvalidCodeQueryKind(value) => write!(
+                formatter,
+                "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, or imports"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,
@@ -267,6 +297,7 @@ pub async fn run_with_service(
     command: CliCommand,
     context: RequestContext,
 ) -> Result<String, CliError> {
+    let format = command.format;
     match command.action {
         CliAction::Status => {
             let response = service
@@ -274,7 +305,7 @@ pub async fn run_with_service(
                 .await
                 .map_err(|error| CliError::ApiFailed(error.message))?;
 
-            render_project_status(&response, command.format)
+            render_project_status(&response, format)
         }
         CliAction::Ingest {
             source_scope,
@@ -300,7 +331,7 @@ pub async fn run_with_service(
                 "knowledge.ingest",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
         CliAction::Query {
@@ -326,7 +357,7 @@ pub async fn run_with_service(
                 "knowledge.retrieve_context",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
         CliAction::GraphInspect => {
@@ -339,7 +370,7 @@ pub async fn run_with_service(
                 "graph.inspect",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
         CliAction::IndexRefresh { kinds } => {
@@ -352,9 +383,10 @@ pub async fn run_with_service(
                 "index.refresh",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
+        CliAction::Repo(command) => repo_cli::run_repo(service, command, context, format).await,
         CliAction::Health => {
             let response = service
                 .health(context)
@@ -365,7 +397,7 @@ pub async fn run_with_service(
                 "service.health",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
         CliAction::ServiceStatus => {
@@ -378,7 +410,7 @@ pub async fn run_with_service(
                 "service.status",
                 response.metadata.clone(),
                 &response,
-                command.format,
+                format,
             )
         }
         CliAction::Version => render_version(command.format),
@@ -394,6 +426,13 @@ pub fn help_text() -> &'static str {
         "  ingest --source <scope> --content <text> [--entity <label>]\n",
         "  query <text> [--source <scope>] [--limit <n>] ",
         "[--freshness allow-stale|wait-until-fresh|graph-only]\n",
+        "  repo register <path> --alias <name> [--path <filter>] [--language <id>]\n",
+        "  repo index <alias> [--ref <ref>]\n",
+        "  repo update <alias> --base <ref> --head <ref>\n",
+        "  repo query <alias> --query <text> ",
+        "[--kind hybrid|symbol|definition|references|callers|callees|imports]\n",
+        "  repo impact <alias> --base <ref> --head <ref>\n",
+        "  repo status <alias>\n",
         "  graph inspect\n",
         "  index refresh [--kind bm25|semantic|vector]\n",
         "  health\n",
@@ -446,6 +485,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         )),
         "ingest" => parse_ingest(&tokens[1..]),
         "query" => parse_query(&tokens[1..]),
+        "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
         "graph" => parse_graph(&tokens[1..]),
         "index" => parse_index(&tokens[1..]),
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
@@ -581,14 +621,18 @@ fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
     ))
 }
 
-fn value_after(tokens: &[String], index: usize, flag: &'static str) -> Result<String, CliError> {
+pub(super) fn value_after(
+    tokens: &[String],
+    index: usize,
+    flag: &'static str,
+) -> Result<String, CliError> {
     tokens
         .get(index + 1)
         .cloned()
         .ok_or(CliError::MissingValue(flag))
 }
 
-fn parse_freshness(value: &str) -> Result<FreshnessPolicy, CliError> {
+pub(super) fn parse_freshness(value: &str) -> Result<FreshnessPolicy, CliError> {
     match value {
         "allow-stale" => Ok(FreshnessPolicy::AllowStale),
         "wait-until-fresh" => Ok(FreshnessPolicy::WaitUntilFresh),
@@ -606,7 +650,7 @@ fn parse_index_kind(value: &str) -> Result<IndexKind, CliError> {
     }
 }
 
-fn render_response<T>(
+pub(super) fn render_response<T>(
     operation: &str,
     metadata: ApiMetadata,
     response: &T,

@@ -4,15 +4,18 @@ use super::*;
 use crate::{
     api::{HybridRetrievalRequest, InterfaceKind, RequestContext},
     domain::{
-        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
+        CodeChunkRecord, CodeFileFingerprint, CodeGraphBatch, CodeGraphCommitReceipt,
+        CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary, CodeReferenceRecord,
+        CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
         CodeSymbolRecord, CommitReceipt, FreshnessPolicy, GraphMutationBatch, GraphVersion,
         IndexKind, IndexStatus, RetrievalHit, RetrievalMode,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
-        KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        CodeChunkSearchRequest, CodeGraphStore, CodeImpactChanges, CodeReferenceSearchRequest,
+        CodeRepositoryStore, CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest,
+        GraphStore, IndexStore, KnowledgeStore, MutationLogEntry, MutationLogStore, StorageError,
+        StorageFuture,
     },
 };
 
@@ -140,6 +143,24 @@ impl CodeGraphStore for GraphOnlySearchStore {
     ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
         unsupported("graph-only fixture does not search code chunks")
     }
+}
+
+macro_rules! unsupported_code_repository_method {
+    ($name:ident($($arg:ident: $ty:ty),*) -> $ret:ty) => {
+        fn $name(&self, $($arg: $ty),*) -> StorageFuture<'_, $ret> {
+            $(let _ = $arg;)*
+            unsupported("code repository storage is unavailable")
+        }
+    };
+}
+
+impl CodeRepositoryStore for GraphOnlySearchStore {
+    unsupported_code_repository_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
+    unsupported_code_repository_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
+    unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
+    unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
+    unsupported_code_repository_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
+    unsupported_code_repository_method!(analyze_code_impact(request: CodeImpactRequest, changes: CodeImpactChanges) -> Vec<CodeRetrievalHit>);
 }
 
 fn unsupported<T: Send + 'static>(message: &'static str) -> StorageFuture<'static, T> {

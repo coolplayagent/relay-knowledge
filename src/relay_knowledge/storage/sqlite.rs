@@ -4,6 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod code;
+
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod code_graph;
@@ -191,6 +193,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         );
         ",
     )?;
+    code::initialize_code_schema(connection)?;
 
     for kind in IndexKind::ALL {
         connection.execute(

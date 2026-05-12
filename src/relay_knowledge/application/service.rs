@@ -300,6 +300,10 @@ impl RelayKnowledgeService {
             service_definition_path,
         })
     }
+
+    pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+        self.storage.get().await
+    }
 }
 
 #[derive(Clone)]
@@ -343,18 +347,16 @@ impl StorageProvider {
                 "storage provider was not initialized".to_owned(),
             ));
         };
-        let store = tokio::task::spawn_blocking(move || {
-            SqliteGraphStore::open(path).map(|store| Arc::new(store) as Arc<dyn KnowledgeStore>)
+        let ready = Arc::clone(&self.ready);
+        tokio::task::spawn_blocking(move || {
+            if let Some(store) = ready.get() {
+                return Ok(Arc::clone(store));
+            }
+            let store = Arc::new(SqliteGraphStore::open(path)?) as Arc<dyn KnowledgeStore>;
+            let _ = ready.set(Arc::clone(&store));
+            Ok(store)
         })
-        .await??;
-
-        if self.ready.set(Arc::clone(&store)).is_ok() {
-            return Ok(store);
-        }
-
-        self.ready.get().cloned().ok_or_else(|| {
-            StorageError::InvalidInput("storage provider was not initialized".to_owned())
-        })
+        .await?
     }
 }
 

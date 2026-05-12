@@ -56,8 +56,13 @@ interfaces / agent_adapter
 每个仓库注册后产生稳定 `repository_id`。推荐来源:
 
 ```text
-repository_id = hash(normalized_origin_url or absolute_repo_identity, install_instance_salt)
+repository_id = hash(normalized_origin_url, absolute_repo_identity, install_instance_salt)
 ```
+
+同一个 remote 的不同本地 checkout 必须保持不同 `repository_id`，避免
+alias、status lookup 或本地授权范围互相混淆。查询键必须先按
+`repository_id` 精确查找；未命中时再按 alias 查找，所以 alias 可使用
+`repo:` 前缀，但与 `repository_id` 冲突时必须由 `repository_id` 优先。
 
 仓库元数据至少包含:
 
@@ -89,10 +94,10 @@ CodeSnapshotScope {
 
 规则:
 
-- branch、tag、HEAD、PR ref 和 worktree selector 必须先解析为 commit/tree，再构造 scope。
+- branch、tag、HEAD、PR ref 和 worktree selector 必须先解析为 commit/tree，再构造 scope。用户输入的 ref 不能以 `-` 开头，必须在调用 Git 前拒绝，避免被解释为 Git 选项。
 - 同一 tree hash 可复用索引分区，即使来自不同 branch 名。
 - rebase 后的新 head 必须产生新 scope；旧 scope 只能用于历史审计或显式 diff。
-- dirty worktree 必须显式建模为 `git_changeset` 或 `worktree_overlay`，不能混入 clean snapshot。
+- dirty worktree 必须显式建模为 `git_changeset` 或 `worktree_overlay`，不能混入 clean snapshot。`worktree_overlay` 必须有显式 overlay identity；查询 clean commit ref 时不能返回 overlay 内容。
 
 ### 3.3 Changeset scope
 
@@ -232,7 +237,7 @@ tree-sitter 可在语法错误存在时返回部分树。系统必须区分:
 | --- | --- |
 | `parsed` | AST、符号和 chunk 都可用 |
 | `partial` | 存在 error node，保留可靠 capture，标记 degraded |
-| `text_only` | grammar 缺失或二进制/超限，只有 text chunk/BM25 |
+| `text_only` | grammar 缺失、非法 UTF-8、二进制或超限，只有 text chunk/BM25 |
 | `failed` | 读取、解码或 parser 异常，写 diagnostics 和 dead-letter |
 
 解析失败不能回滚整个仓库的更新批次。失败文件必须可重试，并在 health/status 中可见。
@@ -296,7 +301,8 @@ ChangedPath {
 增量更新必须按顺序缩小工作集:
 
 1. 解析 Git diff/status 得到 changed paths。
-2. 按授权 scope、path filters、language filters 过滤。
+2. 按授权 scope、path filters、language filters 过滤；`.` 和 `./` path
+   filter 表示仓库根。
 3. 用 blob/content hash 跳过内容未变文件。
 4. 对删除文件产生 tombstone mutation。
 5. 对 rename/move 保留 lineage candidate。
@@ -456,7 +462,7 @@ query
 
 ## 11. API 和 CLI 落点
 
-后续统一 API 应补充这些 request/response contract。以下是规格，不是当前代码实现承诺。
+当前实现已经在统一 application service、CLI 和 SQLite storage boundary 中落地 v1 code repository API。接口仍保持可演进，但 CLI/Web/未来 HTTP adapter 必须继续通过统一 service 调用，不能绕过 API contract。
 
 ```rust
 pub struct CodeRepositorySelector {
@@ -499,6 +505,21 @@ relay-knowledge repo status <alias> --format json
 ```
 
 所有命令都必须调用统一 application service，不能绕过 API contract。
+
+当前 v1 支持:
+
+- `repo register`: 解析 Git root，持久化 `repository_id`、alias、root path、path/language filters。
+- `repo index`: 对 clean Git tree 做 full build，写入 code files、symbols、references、imports、calls 和 chunks。
+- `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 selected deleted/renamed old path，并记录 rename tombstone。copy source path 不能作为 impact changed seed。worktree overlay 必须删除 selected rename source path，synthetic tree hash 只由 selector 范围内的 changed path/content 计算；clean 或 out-of-scope-only overlay 必须回到 clean snapshot，不得重标记旧数据。
+- `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees` 和 `imports` query kind。`impact` 不是普通查询模式，必须通过 `repo impact` 执行。
+- `repo query`: 请求 ref 必须解析到当前 indexed commit；显式 `worktree` ref 才能读取 worktree overlay。查询旧 commit、branch 或 tag 前必须先对该 ref 建索引，避免返回错误 revision 的 code context。
+- `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
+- `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
+- `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断 Rust、Python、TypeScript 或 TSX language id，再执行 language filters；`head_ref` 必须解析到当前 indexed snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
+- `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。
+- `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
+
+当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
 
 ## 12. 可观测性
 
@@ -560,7 +581,7 @@ Health/status 必须能回答:
 - 小型 fixture 仓库 full build 后可查询定义、引用和 import 依赖。
 - 修改一个文件后只更新 changed + affected files。
 - rename 保留旧路径 tombstone 和 lineage candidate。
-- dirty worktree overlay 不污染 clean snapshot。
+- dirty worktree overlay 不污染 clean snapshot，必须通过显式 overlay ref 查询。
 - parser failure 不阻塞其他文件入库。
 - vector/semantic 不可用时 BM25 + graph 查询继续可用。
 
