@@ -198,6 +198,9 @@ impl GraphStore for RefreshFailStore {
                 graph_version: GraphVersion::new(*version),
                 evidence_count: batch.evidence.len(),
                 entity_count: 0,
+                relation_count: batch.relations.len(),
+                claim_count: batch.claims.len(),
+                event_count: batch.events.len(),
             })
         })
     }
@@ -212,6 +215,9 @@ impl GraphStore for RefreshFailStore {
                 graph_version: GraphVersion::new(version),
                 entity_count: 0,
                 evidence_count: 0,
+                relation_count: 0,
+                claim_count: 0,
+                event_count: 0,
                 mutation_count: usize::from(version > 0),
                 code_file_count: 0,
                 code_symbol_count: 0,

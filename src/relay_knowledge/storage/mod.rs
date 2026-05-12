@@ -133,6 +133,9 @@ pub struct GraphInspection {
     pub graph_version: GraphVersion,
     pub entity_count: usize,
     pub evidence_count: usize,
+    pub relation_count: usize,
+    pub claim_count: usize,
+    pub event_count: usize,
     pub mutation_count: usize,
     pub code_file_count: usize,
     pub code_symbol_count: usize,
@@ -147,6 +150,9 @@ pub struct MutationLogEntry {
     pub graph_version: GraphVersion,
     pub evidence_count: usize,
     pub entity_count: usize,
+    pub relation_count: usize,
+    pub claim_count: usize,
+    pub event_count: usize,
 }
 
 /// Storage health surfaced to diagnostics.

@@ -9,6 +9,7 @@ mod code;
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod code_graph;
+mod retrieval;
 
 use crate::{
     domain::{
@@ -82,7 +83,7 @@ impl GraphStore for SqliteGraphStore {
     }
 
     fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-        self.run(move |connection| search_graph(connection, request))
+        self.run(move |connection| retrieval::search_graph(connection, request))
     }
 
     fn current_graph_version(&self) -> StorageFuture<'_, GraphVersion> {
@@ -166,7 +167,14 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         CREATE TABLE IF NOT EXISTS evidence (
             id TEXT PRIMARY KEY,
             source_scope TEXT NOT NULL,
+            source_path TEXT,
+            span_start_byte INTEGER,
+            span_end_byte INTEGER,
+            span_start_line INTEGER,
+            span_end_line INTEGER,
             content TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL DEFAULT 10000,
+            status TEXT NOT NULL DEFAULT 'accepted',
             created_graph_version INTEGER NOT NULL
         );
 
@@ -181,7 +189,59 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         CREATE TABLE IF NOT EXISTS graph_mutations (
             graph_version INTEGER PRIMARY KEY,
             evidence_count INTEGER NOT NULL,
-            entity_count INTEGER NOT NULL
+            entity_count INTEGER NOT NULL,
+            relation_count INTEGER NOT NULL DEFAULT 0,
+            claim_count INTEGER NOT NULL DEFAULT 0,
+            event_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_relations (
+            id TEXT PRIMARY KEY,
+            source_entity_id TEXT NOT NULL,
+            relation_type TEXT NOT NULL,
+            target_entity_id TEXT NOT NULL,
+            evidence_ids_json TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            valid_from_graph_version INTEGER NOT NULL,
+            valid_until_graph_version INTEGER,
+            created_graph_version INTEGER NOT NULL,
+            FOREIGN KEY (source_entity_id) REFERENCES entities(id),
+            FOREIGN KEY (target_entity_id) REFERENCES entities(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_claims (
+            id TEXT PRIMARY KEY,
+            subject_entity_id TEXT NOT NULL,
+            predicate TEXT NOT NULL,
+            object TEXT NOT NULL,
+            evidence_ids_json TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            valid_from_graph_version INTEGER NOT NULL,
+            valid_until_graph_version INTEGER,
+            created_graph_version INTEGER NOT NULL,
+            FOREIGN KEY (subject_entity_id) REFERENCES entities(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_events (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            occurred_at TEXT,
+            evidence_ids_json TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            valid_from_graph_version INTEGER NOT NULL,
+            valid_until_graph_version INTEGER,
+            created_graph_version INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_event_entities (
+            event_id TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            PRIMARY KEY (event_id, entity_id),
+            FOREIGN KEY (event_id) REFERENCES graph_events(id) ON DELETE CASCADE,
+            FOREIGN KEY (entity_id) REFERENCES entities(id)
         );
 
         CREATE TABLE IF NOT EXISTS index_status (
@@ -193,6 +253,42 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         );
         ",
     )?;
+    ensure_column(connection, "evidence", "source_path", "TEXT")?;
+    ensure_column(connection, "evidence", "span_start_byte", "INTEGER")?;
+    ensure_column(connection, "evidence", "span_end_byte", "INTEGER")?;
+    ensure_column(connection, "evidence", "span_start_line", "INTEGER")?;
+    ensure_column(connection, "evidence", "span_end_line", "INTEGER")?;
+    ensure_column(
+        connection,
+        "evidence",
+        "confidence_basis_points",
+        "INTEGER NOT NULL DEFAULT 10000",
+    )?;
+    ensure_column(
+        connection,
+        "evidence",
+        "status",
+        "TEXT NOT NULL DEFAULT 'accepted'",
+    )?;
+    ensure_column(
+        connection,
+        "graph_mutations",
+        "relation_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        connection,
+        "graph_mutations",
+        "claim_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        connection,
+        "graph_mutations",
+        "event_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    retrieval::initialize_schema(connection)?;
     code::initialize_code_schema(connection)?;
 
     for kind in IndexKind::ALL {
@@ -208,6 +304,27 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     Ok(())
 }
 
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    if !columns.iter().any(|existing| existing == column) {
+        connection.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
 fn commit_batch(
     connection: &mut Connection,
     batch: GraphMutationBatch,
@@ -216,56 +333,224 @@ fn commit_batch(
     let current = current_graph_version_in_transaction(&transaction)?;
     let next = GraphVersion::new(current.get() + 1);
     let evidence_count = batch.evidence.len();
+    let relation_count = batch.relations.len();
+    let claim_count = batch.claims.len();
+    let event_count = batch.events.len();
     let mut affected_entity_ids = BTreeSet::new();
 
     for evidence in batch.evidence {
+        let evidence_id = evidence.id;
+        let source_scope = evidence.source_scope;
+        let source_path = evidence.source_path;
+        let span = evidence.span;
+        let content = evidence.content;
+        let entity_labels = evidence.entity_labels;
         transaction.execute(
-            "INSERT INTO evidence (id, source_scope, content, created_graph_version)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO evidence (
+                 id, source_scope, source_path, span_start_byte, span_end_byte,
+                 span_start_line, span_end_line, content, confidence_basis_points,
+                 status, created_graph_version
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                  source_scope = excluded.source_scope,
+                 source_path = excluded.source_path,
+                 span_start_byte = excluded.span_start_byte,
+                 span_end_byte = excluded.span_end_byte,
+                 span_start_line = excluded.span_start_line,
+                 span_end_line = excluded.span_end_line,
                  content = excluded.content,
+                 confidence_basis_points = excluded.confidence_basis_points,
+                 status = excluded.status,
                  created_graph_version = excluded.created_graph_version",
             params![
-                evidence.id,
-                evidence.source_scope.as_str(),
-                evidence.content,
+                evidence_id,
+                source_scope.as_str(),
+                source_path.as_deref(),
+                span.map(|value| value.start_byte),
+                span.map(|value| value.end_byte),
+                span.map(|value| value.start_line),
+                span.map(|value| value.end_line),
+                content,
+                evidence.confidence.basis_points,
+                evidence.status.as_str(),
                 next.get()
             ],
         )?;
 
         transaction.execute(
             "DELETE FROM evidence_entities WHERE evidence_id = ?1",
-            params![evidence.id],
+            params![evidence_id],
         )?;
 
-        for label in evidence.entity_labels {
-            let entity_id = stable_id("entity", &label);
-            transaction.execute(
-                "INSERT OR IGNORE INTO entities (id, label, created_graph_version)
-                 VALUES (?1, ?2, ?3)",
-                params![entity_id, label, next.get()],
-            )?;
+        for label in &entity_labels {
+            let entity_id = upsert_entity(&transaction, label, next)?;
             transaction.execute(
                 "INSERT OR IGNORE INTO evidence_entities (evidence_id, entity_id)
                  VALUES (?1, ?2)",
-                params![evidence.id, entity_id],
+                params![evidence_id, entity_id],
             )?;
             affected_entity_ids.insert(entity_id);
+        }
+        retrieval::replace_evidence_document(
+            &transaction,
+            &evidence_id,
+            source_scope.as_str(),
+            source_path.as_deref(),
+            &entity_labels,
+            &content,
+            next.get(),
+        )?;
+    }
+
+    for relation in batch.relations {
+        let source_entity_id = upsert_entity(&transaction, &relation.source_entity_label, next)?;
+        let target_entity_id = upsert_entity(&transaction, &relation.target_entity_label, next)?;
+        affected_entity_ids.insert(source_entity_id.clone());
+        affected_entity_ids.insert(target_entity_id.clone());
+        transaction.execute(
+            "
+            INSERT INTO graph_relations (
+                id, source_entity_id, relation_type, target_entity_id,
+                evidence_ids_json, confidence_basis_points, status,
+                valid_from_graph_version, valid_until_graph_version, created_graph_version
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(id) DO UPDATE SET
+                source_entity_id = excluded.source_entity_id,
+                relation_type = excluded.relation_type,
+                target_entity_id = excluded.target_entity_id,
+                evidence_ids_json = excluded.evidence_ids_json,
+                confidence_basis_points = excluded.confidence_basis_points,
+                status = excluded.status,
+                valid_from_graph_version = excluded.valid_from_graph_version,
+                valid_until_graph_version = excluded.valid_until_graph_version,
+                created_graph_version = excluded.created_graph_version
+            ",
+            params![
+                relation.id,
+                source_entity_id,
+                relation.relation_type,
+                target_entity_id,
+                evidence_ids_json(&relation.evidence_ids)?,
+                relation.confidence.basis_points,
+                relation.status.as_str(),
+                relation.version_range.valid_from.get(),
+                relation.version_range.valid_until.map(GraphVersion::get),
+                next.get(),
+            ],
+        )?;
+    }
+
+    for claim in batch.claims {
+        let subject_entity_id = upsert_entity(&transaction, &claim.subject_entity_label, next)?;
+        affected_entity_ids.insert(subject_entity_id.clone());
+        transaction.execute(
+            "
+            INSERT INTO graph_claims (
+                id, subject_entity_id, predicate, object, evidence_ids_json,
+                confidence_basis_points, status, valid_from_graph_version,
+                valid_until_graph_version, created_graph_version
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(id) DO UPDATE SET
+                subject_entity_id = excluded.subject_entity_id,
+                predicate = excluded.predicate,
+                object = excluded.object,
+                evidence_ids_json = excluded.evidence_ids_json,
+                confidence_basis_points = excluded.confidence_basis_points,
+                status = excluded.status,
+                valid_from_graph_version = excluded.valid_from_graph_version,
+                valid_until_graph_version = excluded.valid_until_graph_version,
+                created_graph_version = excluded.created_graph_version
+            ",
+            params![
+                claim.id,
+                subject_entity_id,
+                claim.predicate,
+                claim.object,
+                evidence_ids_json(&claim.evidence_ids)?,
+                claim.confidence.basis_points,
+                claim.status.as_str(),
+                claim.version_range.valid_from.get(),
+                claim.version_range.valid_until.map(GraphVersion::get),
+                next.get(),
+            ],
+        )?;
+    }
+
+    for event in batch.events {
+        transaction.execute(
+            "
+            INSERT INTO graph_events (
+                id, event_type, occurred_at, evidence_ids_json,
+                confidence_basis_points, status, valid_from_graph_version,
+                valid_until_graph_version, created_graph_version
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                event_type = excluded.event_type,
+                occurred_at = excluded.occurred_at,
+                evidence_ids_json = excluded.evidence_ids_json,
+                confidence_basis_points = excluded.confidence_basis_points,
+                status = excluded.status,
+                valid_from_graph_version = excluded.valid_from_graph_version,
+                valid_until_graph_version = excluded.valid_until_graph_version,
+                created_graph_version = excluded.created_graph_version
+            ",
+            params![
+                event.id,
+                event.event_type,
+                event.occurred_at,
+                evidence_ids_json(&event.evidence_ids)?,
+                event.confidence.basis_points,
+                event.status.as_str(),
+                event.version_range.valid_from.get(),
+                event.version_range.valid_until.map(GraphVersion::get),
+                next.get(),
+            ],
+        )?;
+        transaction.execute(
+            "DELETE FROM graph_event_entities WHERE event_id = ?1",
+            params![event.id],
+        )?;
+        for label in event.entity_labels {
+            let entity_id = upsert_entity(&transaction, &label, next)?;
+            affected_entity_ids.insert(entity_id.clone());
+            transaction.execute(
+                "INSERT OR IGNORE INTO graph_event_entities (event_id, entity_id)
+                 VALUES (?1, ?2)",
+                params![event.id, entity_id],
+            )?;
         }
     }
 
     transaction.execute(
-        "DELETE FROM entities
-         WHERE id NOT IN (SELECT entity_id FROM evidence_entities)",
+        "
+        DELETE FROM entities
+        WHERE id NOT IN (SELECT entity_id FROM evidence_entities)
+          AND id NOT IN (SELECT source_entity_id FROM graph_relations)
+          AND id NOT IN (SELECT target_entity_id FROM graph_relations)
+          AND id NOT IN (SELECT subject_entity_id FROM graph_claims)
+          AND id NOT IN (SELECT entity_id FROM graph_event_entities)
+        ",
         [],
     )?;
 
     let entity_count = affected_entity_ids.len();
     transaction.execute(
-        "INSERT INTO graph_mutations (graph_version, evidence_count, entity_count)
-         VALUES (?1, ?2, ?3)",
-        params![next.get(), evidence_count, entity_count],
+        "INSERT INTO graph_mutations (
+             graph_version, evidence_count, entity_count, relation_count, claim_count, event_count
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            next.get(),
+            evidence_count,
+            entity_count,
+            relation_count,
+            claim_count,
+            event_count
+        ],
     )?;
     transaction.execute(
         "UPDATE graph_state SET graph_version = ?1 WHERE id = 1",
@@ -278,6 +563,9 @@ fn commit_batch(
         graph_version: next,
         evidence_count,
         entity_count,
+        relation_count,
+        claim_count,
+        event_count,
     })
 }
 
@@ -286,6 +574,9 @@ fn inspect_graph(connection: &mut Connection) -> Result<GraphInspection, Storage
         graph_version: current_graph_version(connection)?,
         entity_count: count_rows(connection, "entities")?,
         evidence_count: count_rows(connection, "evidence")?,
+        relation_count: count_rows(connection, "graph_relations")?,
+        claim_count: count_rows(connection, "graph_claims")?,
+        event_count: count_rows(connection, "graph_events")?,
         mutation_count: count_rows(connection, "graph_mutations")?,
         code_file_count: count_rows(connection, "code_files")?,
         code_symbol_count: count_rows(connection, "code_symbols")?,
@@ -311,91 +602,31 @@ fn current_graph_version_in_transaction(
     Ok(GraphVersion::new(value))
 }
 
+fn upsert_entity(
+    transaction: &rusqlite::Transaction<'_>,
+    label: &str,
+    graph_version: GraphVersion,
+) -> Result<String, StorageError> {
+    let entity_id = stable_id("entity", label);
+    transaction.execute(
+        "INSERT OR IGNORE INTO entities (id, label, created_graph_version)
+         VALUES (?1, ?2, ?3)",
+        params![entity_id, label, graph_version.get()],
+    )?;
+
+    Ok(entity_id)
+}
+
+fn evidence_ids_json(evidence_ids: &[String]) -> Result<String, StorageError> {
+    serde_json::to_string(evidence_ids)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
+
 fn count_rows(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
     let sql = format!("SELECT COUNT(*) FROM {table}");
     let count = connection.query_row(&sql, [], |row| row.get::<_, usize>(0))?;
 
     Ok(count)
-}
-
-fn search_graph(
-    connection: &mut Connection,
-    request: GraphSearchRequest,
-) -> Result<Vec<RetrievalHit>, StorageError> {
-    if request.limit == 0 {
-        return Err(StorageError::InvalidInput(
-            "search limit must be greater than zero".to_owned(),
-        ));
-    }
-
-    let mut statement = connection.prepare(
-        "
-        SELECT
-            e.id,
-            e.source_scope,
-            e.content
-        FROM evidence e
-        WHERE (?1 IS NULL OR e.source_scope = ?1)
-          AND e.created_graph_version <= ?2
-        ORDER BY e.created_graph_version DESC, e.id ASC
-        ",
-    )?;
-    let scope = request.source_scope.as_deref();
-    let rows = statement.query_map(params![scope, request.graph_version.get()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    let evidence_rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    drop(statement);
-
-    let mut hits = Vec::new();
-    for (evidence_id, source_scope, content) in evidence_rows {
-        let mut hit = RetrievalHit {
-            entity_labels: entity_labels_for_evidence(connection, &evidence_id)?,
-            evidence_id,
-            source_scope,
-            content,
-            score: 0.0,
-        };
-        hit.score = score_hit(&request.query, &hit);
-        if hit.score > 0.0 {
-            hits.push(hit);
-        }
-    }
-
-    hits.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.evidence_id.cmp(&right.evidence_id))
-    });
-    hits.truncate(request.limit);
-
-    Ok(hits)
-}
-
-fn entity_labels_for_evidence(
-    connection: &Connection,
-    evidence_id: &str,
-) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT ent.label
-        FROM evidence_entities ee
-        INNER JOIN entities ent ON ent.id = ee.entity_id
-        WHERE ee.evidence_id = ?1
-        ORDER BY ent.label ASC, ent.id ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![evidence_id], |row| row.get::<_, String>(0))?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
 }
 
 fn read_mutations_after(
@@ -411,7 +642,8 @@ fn read_mutations_after(
 
     let mut statement = connection.prepare(
         "
-        SELECT graph_version, evidence_count, entity_count
+        SELECT graph_version, evidence_count, entity_count,
+               relation_count, claim_count, event_count
         FROM graph_mutations
         WHERE graph_version > ?1
         ORDER BY graph_version ASC
@@ -423,6 +655,9 @@ fn read_mutations_after(
             graph_version: GraphVersion::new(row.get(0)?),
             evidence_count: row.get(1)?,
             entity_count: row.get(2)?,
+            relation_count: row.get(3)?,
+            claim_count: row.get(4)?,
+            event_count: row.get(5)?,
         })
     })?;
 
@@ -592,22 +827,6 @@ fn invalid_index_metadata(message: String) -> StorageError {
     StorageError::InvalidInput(format!("{message} in storage metadata"))
 }
 
-fn score_hit(query: &str, hit: &RetrievalHit) -> f64 {
-    let haystack = format!(
-        "{} {}",
-        hit.content.to_lowercase(),
-        hit.entity_labels.join(" ").to_lowercase()
-    );
-    let mut score = 0.0;
-    for token in query.to_lowercase().split_whitespace() {
-        if haystack.contains(token) {
-            score += 1.0;
-        }
-    }
-
-    score
-}
-
 fn stable_id(prefix: &str, value: &str) -> String {
     let normalized = value.to_lowercase();
 
@@ -631,333 +850,4 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 mod metadata_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::{EvidenceRecord, SourceScope};
-
-    #[tokio::test]
-    async fn commits_graph_batch_and_marks_indexes_stale() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        let scope = SourceScope::parse("repo").expect("scope should parse");
-        let evidence = EvidenceRecord::new(
-            "ev-1",
-            scope,
-            "Rust uses ownership",
-            vec!["Rust".to_owned()],
-        )
-        .expect("evidence should validate");
-        let batch = GraphMutationBatch::new(vec![evidence]).expect("batch should validate");
-
-        let receipt = store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-        let inspection = store.inspect_graph().await.expect("inspection should load");
-        let statuses = store.index_statuses().await.expect("statuses should load");
-
-        assert_eq!(receipt.graph_version, GraphVersion::new(1));
-        assert_eq!(inspection.entity_count, 1);
-        assert_eq!(inspection.evidence_count, 1);
-        assert!(
-            statuses
-                .iter()
-                .all(|status| status.is_stale_for(GraphVersion::new(1)))
-        );
-    }
-
-    #[tokio::test]
-    async fn searches_evidence_by_query_token() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        let scope = SourceScope::parse("docs").expect("scope should parse");
-        let evidence = EvidenceRecord::new("ev-1", scope, "Hybrid retrieval uses BM25", Vec::new())
-            .expect("evidence should validate");
-        let batch = GraphMutationBatch::new(vec![evidence]).expect("batch should validate");
-        store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-
-        let hits = store
-            .search(GraphSearchRequest {
-                query: "BM25".to_owned(),
-                source_scope: None,
-                graph_version: GraphVersion::new(1),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].evidence_id, "ev-1");
-    }
-
-    #[tokio::test]
-    async fn marks_index_refresh_complete_at_graph_version() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-
-        let status = store
-            .mark_refresh_complete(IndexKind::Vector, GraphVersion::new(7))
-            .await
-            .expect("refresh should update metadata");
-
-        assert_eq!(status.kind, IndexKind::Vector);
-        assert_eq!(status.index_version, 1);
-        assert_eq!(status.indexed_graph_version, GraphVersion::new(7));
-        assert_eq!(status.state, IndexState::Fresh);
-    }
-
-    #[tokio::test]
-    async fn reads_mutation_log_after_version() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        commit_evidence(&store, "ev-1", "docs", "Rust async storage").await;
-        commit_evidence(&store, "ev-2", "docs", "SQLite graph storage").await;
-
-        let entries = store
-            .read_after(GraphVersion::new(1), 10)
-            .await
-            .expect("mutation log should load");
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].graph_version, GraphVersion::new(2));
-        assert_eq!(entries[0].evidence_count, 1);
-    }
-
-    #[tokio::test]
-    async fn commit_receipt_counts_unique_affected_entities() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        let scope = SourceScope::parse("docs").expect("scope should parse");
-        let first = EvidenceRecord::new(
-            "ev-1",
-            scope.clone(),
-            "Rust async storage",
-            vec!["Rust".to_owned()],
-        )
-        .expect("evidence should validate");
-        let second = EvidenceRecord::new(
-            "ev-2",
-            scope,
-            "Rust graph retrieval",
-            vec!["rust".to_owned()],
-        )
-        .expect("evidence should validate");
-        let batch = GraphMutationBatch::new(vec![first, second]).expect("batch should validate");
-
-        let receipt = store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-        let entries = store
-            .read_after(GraphVersion::ZERO, 10)
-            .await
-            .expect("mutation log should load");
-
-        assert_eq!(receipt.entity_count, 1);
-        assert_eq!(entries[0].entity_count, 1);
-    }
-
-    #[tokio::test]
-    async fn rejects_zero_limits_for_search_and_mutation_log() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-
-        let search_error = store
-            .search(GraphSearchRequest {
-                query: "Rust".to_owned(),
-                source_scope: None,
-                graph_version: GraphVersion::ZERO,
-                limit: 0,
-            })
-            .await
-            .expect_err("zero search limit should fail");
-        let log_error = store
-            .read_after(GraphVersion::ZERO, 0)
-            .await
-            .expect_err("zero log limit should fail");
-
-        assert_eq!(
-            search_error.to_string(),
-            "invalid storage input: search limit must be greater than zero"
-        );
-        assert_eq!(
-            log_error.to_string(),
-            "invalid storage input: mutation log limit must be greater than zero"
-        );
-    }
-
-    #[tokio::test]
-    async fn search_filters_by_source_scope_and_sorts_by_score() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        commit_evidence(&store, "ev-1", "docs", "Rust Rust SQLite").await;
-        commit_evidence(&store, "ev-2", "repo", "Rust").await;
-
-        let docs = store
-            .search(GraphSearchRequest {
-                query: "Rust SQLite".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(2),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-        let all = store
-            .search(GraphSearchRequest {
-                query: "Rust".to_owned(),
-                source_scope: None,
-                graph_version: GraphVersion::new(2),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-
-        assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0].source_scope, "docs");
-        assert_eq!(all.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn search_considers_matches_beyond_newest_candidates() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        commit_evidence(
-            &store,
-            "ev-old",
-            "docs",
-            "Needle evidence remains searchable after newer writes",
-        )
-        .await;
-
-        let scope = SourceScope::parse("docs").expect("scope should parse");
-        let newer = (0..500)
-            .map(|index| {
-                EvidenceRecord::new(
-                    format!("ev-new-{index}"),
-                    scope.clone(),
-                    format!("Unrelated graph maintenance record {index}"),
-                    Vec::new(),
-                )
-                .expect("evidence should validate")
-            })
-            .collect::<Vec<_>>();
-        let batch = GraphMutationBatch::new(newer).expect("batch should validate");
-        let receipt = store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-
-        let hits = store
-            .search(GraphSearchRequest {
-                query: "Needle".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: receipt.graph_version,
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].evidence_id, "ev-old");
-    }
-
-    #[tokio::test]
-    async fn search_respects_graph_version_snapshot() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        commit_evidence(&store, "ev-1", "docs", "Snapshot only sees Rust").await;
-        commit_evidence(&store, "ev-2", "docs", "Future vector token").await;
-
-        let before_future = store
-            .search(GraphSearchRequest {
-                query: "Future".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(1),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-        let after_future = store
-            .search(GraphSearchRequest {
-                query: "Future".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(2),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-
-        assert!(before_future.is_empty());
-        assert_eq!(after_future.len(), 1);
-        assert_eq!(after_future[0].evidence_id, "ev-2");
-    }
-
-    #[tokio::test]
-    async fn search_snapshot_excludes_updated_evidence_from_future_version() {
-        let store = SqliteGraphStore::open_in_memory().expect("store should open");
-        commit_evidence(&store, "ev-1", "docs", "Original graph token").await;
-        commit_evidence(&store, "ev-1", "docs", "Future graph token").await;
-
-        let before_update = store
-            .search(GraphSearchRequest {
-                query: "Future".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(1),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-        let after_update = store
-            .search(GraphSearchRequest {
-                query: "Future".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(2),
-                limit: 5,
-            })
-            .await
-            .expect("search should succeed");
-
-        assert!(before_update.is_empty());
-        assert_eq!(after_update.len(), 1);
-        assert_eq!(after_update[0].evidence_id, "ev-1");
-    }
-
-    #[test]
-    fn stable_entity_ids_are_deterministic() {
-        assert_eq!(stable_id("entity", "Rust"), "entity:bffedf1f6f66c727");
-        assert_eq!(stable_id("entity", "Rust"), stable_id("entity", "rust"));
-    }
-
-    #[tokio::test]
-    async fn open_creates_parent_database_directory() {
-        let path = std::env::temp_dir()
-            .join(format!("relay-knowledge-storage-{}", std::process::id()))
-            .join("nested")
-            .join("graph.sqlite");
-        let _ = std::fs::remove_file(&path);
-
-        let store = SqliteGraphStore::open(&path).expect("store should open");
-        let version = store
-            .current_graph_version()
-            .await
-            .expect("version should load");
-
-        assert_eq!(version, GraphVersion::ZERO);
-        assert!(path.exists());
-    }
-
-    async fn commit_evidence(
-        store: &SqliteGraphStore,
-        id: &str,
-        source_scope: &str,
-        content: &str,
-    ) {
-        let evidence = EvidenceRecord::new(
-            id,
-            SourceScope::parse(source_scope).expect("scope should parse"),
-            content,
-            vec!["Rust".to_owned()],
-        )
-        .expect("evidence should validate");
-        let batch = GraphMutationBatch::new(vec![evidence]).expect("batch should validate");
-
-        store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-    }
-}
+mod graph_tests;

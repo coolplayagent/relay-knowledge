@@ -303,14 +303,27 @@ Both protocols must preserve this semantic shape even if wire fields differ:
   "source_scope": "docs",
   "freshness": "allow-stale",
   "retrieval_mode": "hybrid",
+  "context_pack": {
+    "graph_version": 42,
+    "source_scope": "docs",
+    "freshness": "allow-stale",
+    "truncated": false,
+    "items": []
+  },
   "results": [],
+  "fusion": {
+    "algorithm": "reciprocal_rank_fusion",
+    "k": 60.0,
+    "candidate_count": 0
+  },
   "indexes": [],
   "degraded_reason": null,
   "truncated": false,
   "budget_used": {
     "limit": 10,
-    "context_bytes": 8192,
-    "elapsed_ms": 37
+    "candidate_count": 0,
+    "returned_count": 0,
+    "context_bytes": 8192
   }
 }
 ```
