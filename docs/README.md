@@ -8,6 +8,7 @@
 - [arXiv 知识图谱论文深度洞察](research/arxiv-knowledge-graph-paper-insights.md): 以 arXiv 论文为主的论文归档与工程洞察。
 - [代码仓库 Tree-sitter 检索研究材料](research/code-repository-tree-sitter-retrieval-research.md): tree-sitter、Git 增量、代码知识图谱和高性能检索的资料依据与工程取舍。
 - [Agent 协议图检索接入研究](research/agent-protocol-graph-retrieval-research.md): MCP server 与 Agent Client Protocol adapter 暴露常驻图检索能力的协议研究和取舍。
+- [relay-knowledge 实现借鉴落地路线](research/relay-knowledge-implementation-reference.md): 结合 docs/PDF 研究材料和当前 Rust 实现的阶段性落地路线。
 
 ## Specs
 
