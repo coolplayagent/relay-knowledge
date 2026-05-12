@@ -527,7 +527,7 @@ relay-knowledge repo status <alias> --format json
 - `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
-当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 text-only 或 diagnostic，不阻塞其他文件入库。
+当前 v1 语言包覆盖 Rust、Python、TypeScript 和 TSX。含 error node 的语法树会标记为 `partial` 并保留可靠的符号、引用、import、call 和 chunk；grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 `text_only`；parser/query 失败会写入文件级 `failed` diagnostic。上述降级均不阻塞其他文件入库。
 
 ## 12. 可观测性
 
