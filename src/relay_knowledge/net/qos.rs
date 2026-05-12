@@ -3,7 +3,11 @@
 //! The policy keeps future HTTP, indexing, and background network tasks inside
 //! explicit resource budgets before they can allocate unbounded work.
 
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use crate::env::NetworkEnvOverrides;
 
@@ -71,7 +75,7 @@ impl QosPolicy {
 }
 
 /// Point-in-time network resource usage for QoS decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QosSnapshot {
     pub connections: usize,
     pub in_flight_requests: usize,
@@ -91,6 +95,118 @@ pub enum RejectReason {
     ConnectionBudgetExceeded,
     RequestBudgetExceeded,
     QueueBudgetExceeded,
+}
+
+/// Runtime QoS counters used by inbound protocol adapters.
+#[derive(Debug, Clone, Default)]
+pub struct QosRuntime {
+    usage: Arc<Mutex<QosSnapshot>>,
+}
+
+impl QosRuntime {
+    /// Reserves space in the bounded request queue before active admission.
+    pub fn reserve_queue(&self, policy: &QosPolicy) -> Result<QosPermit, RejectReason> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if usage.queued_requests >= policy.max_queue_depth {
+            return Err(RejectReason::QueueBudgetExceeded);
+        }
+
+        usage.queued_requests += 1;
+        Ok(QosPermit {
+            runtime: self.clone(),
+            kind: QosPermitKind::Queue,
+            released: false,
+        })
+    }
+
+    /// Attempts to admit one inbound request and returns a release-on-drop permit.
+    pub fn admit_request(&self, policy: &QosPolicy) -> Result<QosPermit, RejectReason> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if usage.in_flight_requests >= policy.max_in_flight_requests {
+            return Err(RejectReason::RequestBudgetExceeded);
+        }
+
+        usage.in_flight_requests += 1;
+        Ok(QosPermit {
+            runtime: self.clone(),
+            kind: QosPermitKind::Request,
+            released: false,
+        })
+    }
+
+    /// Attempts to admit one open network connection.
+    pub fn admit_connection(&self, policy: &QosPolicy) -> Result<QosPermit, RejectReason> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if usage.connections >= policy.max_connections {
+            return Err(RejectReason::ConnectionBudgetExceeded);
+        }
+
+        usage.connections += 1;
+        Ok(QosPermit {
+            runtime: self.clone(),
+            kind: QosPermitKind::Connection,
+            released: false,
+        })
+    }
+
+    /// Returns the current request budget snapshot for diagnostics and tests.
+    pub fn snapshot(&self) -> QosSnapshot {
+        *self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn release(&self, kind: QosPermitKind) {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match kind {
+            QosPermitKind::Connection => {
+                usage.connections = usage.connections.saturating_sub(1);
+            }
+            QosPermitKind::Request => {
+                usage.in_flight_requests = usage.in_flight_requests.saturating_sub(1);
+            }
+            QosPermitKind::Queue => {
+                usage.queued_requests = usage.queued_requests.saturating_sub(1);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum QosPermitKind {
+    Connection,
+    Request,
+    Queue,
+}
+
+/// Admission permit that releases its QoS budget on drop.
+#[derive(Debug)]
+pub struct QosPermit {
+    runtime: QosRuntime,
+    kind: QosPermitKind,
+    released: bool,
+}
+
+impl Drop for QosPermit {
+    fn drop(&mut self) {
+        if !self.released {
+            self.runtime.release(self.kind);
+            self.released = true;
+        }
+    }
 }
 
 /// QoS policy validation error.
@@ -190,5 +306,79 @@ mod tests {
                 field: "max_connections"
             }
         );
+    }
+
+    #[test]
+    fn permit_releases_in_flight_budget_on_drop() {
+        let runtime = QosRuntime::default();
+        let policy = QosPolicy::new(2, 1, 1).expect("policy should build");
+        let permit = runtime
+            .admit_request(&policy)
+            .expect("first request should enter");
+
+        assert_eq!(runtime.snapshot().in_flight_requests, 1);
+        assert_eq!(
+            runtime
+                .admit_request(&policy)
+                .expect_err("second request should fail"),
+            RejectReason::RequestBudgetExceeded
+        );
+
+        drop(permit);
+
+        assert_eq!(runtime.snapshot().in_flight_requests, 0);
+        assert!(runtime.admit_request(&policy).is_ok());
+    }
+
+    #[test]
+    fn connection_and_request_permits_update_independent_budgets() {
+        let runtime = QosRuntime::default();
+        let policy = QosPolicy::new(1, 1, 1).expect("policy should build");
+        let connection = runtime
+            .admit_connection(&policy)
+            .expect("connection should enter");
+
+        assert_eq!(runtime.snapshot().connections, 1);
+        assert_eq!(runtime.snapshot().in_flight_requests, 0);
+        assert_eq!(
+            runtime
+                .admit_connection(&policy)
+                .expect_err("second connection should fail"),
+            RejectReason::ConnectionBudgetExceeded
+        );
+
+        let request = runtime
+            .admit_request(&policy)
+            .expect("request on existing connection should enter");
+
+        assert_eq!(runtime.snapshot().connections, 1);
+        assert_eq!(runtime.snapshot().in_flight_requests, 1);
+
+        drop(request);
+        assert_eq!(runtime.snapshot().connections, 1);
+        assert_eq!(runtime.snapshot().in_flight_requests, 0);
+
+        drop(connection);
+        assert_eq!(runtime.snapshot().connections, 0);
+    }
+
+    #[test]
+    fn queue_permit_tracks_waiting_budget_independently() {
+        let runtime = QosRuntime::default();
+        let policy = QosPolicy::new(1, 1, 1).expect("policy should build");
+        let queued = runtime
+            .reserve_queue(&policy)
+            .expect("first queued request should enter");
+
+        assert_eq!(runtime.snapshot().queued_requests, 1);
+        assert_eq!(
+            runtime
+                .reserve_queue(&policy)
+                .expect_err("second queued request should fail"),
+            RejectReason::QueueBudgetExceeded
+        );
+
+        drop(queued);
+        assert_eq!(runtime.snapshot().queued_requests, 0);
     }
 }

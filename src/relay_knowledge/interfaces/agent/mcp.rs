@@ -1,0 +1,909 @@
+use std::{
+    error::Error,
+    fmt,
+    future::Future,
+    time::{Duration, Instant},
+};
+
+mod state;
+
+mod http_contract;
+
+use axum::{
+    Router,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
+    routing::post,
+};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use tokio::sync::watch;
+use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
+
+use http_contract::{
+    ensure_remote_bind_allowed, validate_http_headers, validate_protocol_version_header,
+};
+use state::{CancellationRegistry, SessionCreateError, SessionLookupError, SessionRegistry};
+
+use crate::{
+    api::{
+        AgentAccessPolicy, AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest,
+        HybridRetrievalRequest, IndexRefreshRequest, InterfaceKind, RequestContext,
+        RuntimeIdentity, freshness_label,
+    },
+    application::{AgentRuntimeConfig, RelayKnowledgeService},
+    domain::{FreshnessPolicy, IndexKind},
+    net::{
+        NetworkRuntime,
+        http::HttpServeError,
+        qos::{QosPermit, QosRuntime, RejectReason},
+    },
+    project::PROJECT_NAME,
+};
+
+use super::{AgentAdapterError, AgentAdapterErrorKind, authorize_limit, authorize_scope};
+
+pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+
+/// MCP Streamable HTTP server state shared by route handlers.
+#[derive(Clone)]
+pub struct McpServer {
+    service: RelayKnowledgeService,
+    network: NetworkRuntime,
+    agent: AgentRuntimeConfig,
+    qos: QosRuntime,
+    cancellations: CancellationRegistry,
+    sessions: SessionRegistry,
+}
+
+impl McpServer {
+    /// Creates MCP server state from validated runtime boundaries.
+    pub fn new(
+        service: RelayKnowledgeService,
+        network: NetworkRuntime,
+        agent: AgentRuntimeConfig,
+    ) -> Self {
+        Self {
+            service,
+            network,
+            agent,
+            qos: QosRuntime::default(),
+            cancellations: CancellationRegistry::default(),
+            sessions: SessionRegistry::default(),
+        }
+    }
+
+    /// Builds the Streamable HTTP router without opening sockets.
+    pub fn router(self) -> Router {
+        let config = self.network.current();
+        let endpoint = self.agent.mcp_endpoint.clone();
+        let body_limit = usize::try_from(config.http.max_request_body_bytes).unwrap_or(usize::MAX);
+
+        Router::new()
+            .route(&endpoint, post(handle_mcp_post))
+            .with_state(self)
+            .layer(TraceLayer::new_for_http())
+            .layer(RequestBodyLimitLayer::new(body_limit))
+    }
+
+    /// Starts the MCP HTTP listener through `net::http`.
+    pub async fn serve_until_shutdown(
+        self,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<(), McpServeError> {
+        if !self.agent.mcp_streamable_http_enabled {
+            return Err(McpServeError::Disabled);
+        }
+        let network_config = self.network.current();
+        let config = network_config.http;
+        let qos_policy = network_config.qos;
+        ensure_remote_bind_allowed(&config, &self.agent.access_policy)?;
+        let qos = self.qos.clone();
+        let router = self.router();
+
+        crate::net::http::serve_router_with_qos(router, config, qos, qos_policy, shutdown)
+            .await
+            .map_err(McpServeError::Http)
+    }
+
+    #[cfg(test)]
+    pub fn qos_snapshot(&self) -> crate::net::qos::QosSnapshot {
+        self.qos.snapshot()
+    }
+}
+
+/// MCP server startup error.
+#[derive(Debug)]
+pub enum McpServeError {
+    Disabled,
+    RemoteBindDisabled,
+    Http(HttpServeError),
+}
+
+impl fmt::Display for McpServeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Disabled => write!(formatter, "MCP Streamable HTTP is not enabled"),
+            Self::RemoteBindDisabled => {
+                write!(
+                    formatter,
+                    "MCP remote bind requires allow_remote_clients=true"
+                )
+            }
+            Self::Http(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl Error for McpServeError {}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcRequest {
+    jsonrpc: Option<String>,
+    id: Option<Value>,
+    method: Option<String>,
+    #[serde(default)]
+    params: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct InitializeParams {
+    #[serde(rename = "protocolVersion")]
+    protocol_version: String,
+    capabilities: Value,
+    #[serde(rename = "clientInfo")]
+    client_info: InitializeClientInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct InitializeClientInfo {
+    name: String,
+    version: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallParams {
+    name: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct RetrieveContextArgs {
+    query: String,
+    #[serde(default)]
+    source_scope: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    freshness: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InspectGraphArgs {
+    #[serde(default)]
+    source_scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshIndexesArgs {
+    #[serde(default)]
+    kinds: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelParams {
+    #[serde(rename = "requestId")]
+    request_id: Value,
+}
+
+async fn handle_mcp_post(
+    State(server): State<McpServer>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(status) = validate_http_headers(&server, &headers) {
+        return status.into_response();
+    }
+    if body.len() as u64 > server.network.current().http.max_request_body_bytes {
+        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    }
+
+    let payload = match serde_json::from_slice::<Value>(&body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return json_rpc_error(Value::Null, -32700, format!("parse error: {error}"));
+        }
+    };
+    if payload.is_array() {
+        return json_rpc_error(Value::Null, -32600, "batch requests are not supported");
+    }
+    let request = match serde_json::from_value::<JsonRpcRequest>(payload.clone()) {
+        Ok(request) => request,
+        Err(error) => {
+            return json_rpc_error(Value::Null, -32600, format!("invalid request: {error}"));
+        }
+    };
+    let id = request.id.clone().unwrap_or(Value::Null);
+    if request.jsonrpc.as_deref() != Some("2.0") {
+        return json_rpc_error(id, -32600, "jsonrpc must be 2.0");
+    }
+    let Some(method) = request.method.as_deref() else {
+        if is_valid_json_rpc_response(&payload) {
+            if let Err(status) = validate_protocol_version_header(&headers, true) {
+                return status.into_response();
+            }
+            return response_message_session_response(&server, &headers);
+        }
+        if payload
+            .as_object()
+            .is_some_and(|object| object.contains_key("result") || object.contains_key("error"))
+        {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        return json_rpc_error(id, -32600, "method is required");
+    };
+
+    if method == "initialize" {
+        let Some(id) = request.id else {
+            return json_rpc_error(Value::Null, -32600, "requests must include an id");
+        };
+        if !is_json_rpc_id(&id) {
+            return invalid_request_id_response();
+        }
+        if let Err(message) = validate_initialize_params(request.params) {
+            return json_rpc_error(id, -32602, message);
+        }
+        let Ok(permit) = admit_mcp_request(&server) else {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        };
+        let session_id = match server.sessions.create_session() {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                drop(permit);
+                return session_create_error(id, error);
+            }
+        };
+        drop(permit);
+        return json_rpc_success_with_session(id, initialize_result(), &session_id);
+    }
+
+    if let Err(status) = validate_protocol_version_header(&headers, true) {
+        return status.into_response();
+    }
+
+    let session = match server.sessions.require_session(&headers) {
+        Ok(session) => session,
+        Err(error) => return session_lookup_error_response(error),
+    };
+
+    if method == "notifications/initialized" {
+        if request.id.is_some() {
+            return json_rpc_error(id, -32600, "notifications must not include an id");
+        }
+        let Ok(permit) = admit_mcp_request(&server) else {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        };
+        if let Err(error) = server.sessions.mark_initialized(session.session_id()) {
+            drop(permit);
+            return session_lookup_error_response(error);
+        }
+        drop(permit);
+        return StatusCode::ACCEPTED.into_response();
+    }
+
+    if !session.initialized {
+        return uninitialized_session_response(request.id);
+    }
+
+    let namespace = session.namespace();
+    if method.starts_with("notifications/") {
+        if request.id.is_some() {
+            return json_rpc_error(id, -32600, "notifications must not include an id");
+        }
+        let Ok(permit) = admit_mcp_request(&server) else {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        };
+        handle_notification(&server, method, request.params, &namespace);
+        drop(permit);
+        return StatusCode::ACCEPTED.into_response();
+    }
+
+    let Some(id) = request.id else {
+        return json_rpc_error(Value::Null, -32600, "requests must include an id");
+    };
+    let Some(request_id) = request_id_key(&namespace, &id) else {
+        return invalid_request_id_response();
+    };
+    let permit = match admit_mcp_request(&server) {
+        Ok(permit) => permit,
+        Err(reason) => {
+            let error =
+                AgentAdapterError::new(AgentAdapterErrorKind::QosRejected, qos_message(reason));
+            return if method == "tools/call" {
+                json_rpc_success(id, tool_error_result(error))
+            } else {
+                json_rpc_error(id, -32000, error.to_string())
+            };
+        }
+    };
+
+    let result = match method {
+        "ping" => json!({}),
+        "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
+        "tools/call" => {
+            let params = match serde_json::from_value::<ToolCallParams>(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return json_rpc_error(
+                        id,
+                        -32602,
+                        format!("invalid tools/call params: {error}"),
+                    );
+                }
+            };
+            if !is_known_tool(&params.name) {
+                return json_rpc_error(id, -32602, "unknown tool name");
+            }
+            run_cancellable_tool_call(&server, params, request_id).await
+        }
+        _ => return json_rpc_error(id, -32601, "method not found"),
+    };
+
+    drop(permit);
+    json_rpc_success(id, result)
+}
+
+fn is_known_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "relay.retrieve_context"
+            | "relay.inspect_graph"
+            | "relay.health"
+            | "relay.service_status"
+            | "relay.index_status"
+            | "relay.refresh_indexes"
+    )
+}
+
+fn is_valid_json_rpc_response(payload: &Value) -> bool {
+    let Some(object) = payload.as_object() else {
+        return false;
+    };
+    let has_result = object.contains_key("result");
+    let has_error = object.contains_key("error");
+    if has_result == has_error {
+        return false;
+    }
+
+    object.get("id").is_some_and(is_json_rpc_id)
+}
+
+fn validate_initialize_params(params: Value) -> Result<(), String> {
+    let params = serde_json::from_value::<InitializeParams>(params)
+        .map_err(|error| format!("invalid initialize params: {error}"))?;
+    if params.protocol_version != MCP_PROTOCOL_VERSION {
+        return Err(format!(
+            "unsupported MCP protocol version '{}'",
+            params.protocol_version
+        ));
+    }
+    if !params.capabilities.is_object() {
+        return Err("initialize capabilities must be an object".to_owned());
+    }
+    if params.client_info.name.trim().is_empty() || params.client_info.version.trim().is_empty() {
+        return Err("initialize clientInfo requires name and version".to_owned());
+    }
+
+    Ok(())
+}
+
+fn response_message_session_response(server: &McpServer, headers: &HeaderMap) -> Response {
+    match server.sessions.require_session(headers) {
+        Ok(session) if session.initialized => StatusCode::ACCEPTED.into_response(),
+        Ok(_) => StatusCode::BAD_REQUEST.into_response(),
+        Err(error) => session_lookup_error_response(error),
+    }
+}
+
+fn session_lookup_error_response(error: SessionLookupError) -> Response {
+    match error {
+        SessionLookupError::Missing | SessionLookupError::InvalidHeader => {
+            StatusCode::BAD_REQUEST.into_response()
+        }
+        SessionLookupError::Unknown => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn uninitialized_session_response(id: Option<Value>) -> Response {
+    let Some(id) = id else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if is_json_rpc_id(&id) {
+        json_rpc_error(id, -32002, "MCP session is not initialized")
+    } else {
+        invalid_request_id_response()
+    }
+}
+
+fn invalid_request_id_response() -> Response {
+    json_rpc_error(Value::Null, -32600, "request id must be a string or number")
+}
+
+fn session_create_error(id: Value, error: SessionCreateError) -> Response {
+    json_rpc_error(id, -32603, format!("failed to create MCP session: {error}"))
+}
+
+fn handle_notification(server: &McpServer, method: &str, params: Value, namespace: &str) {
+    if method == "notifications/cancelled" {
+        if let Ok(cancel) = serde_json::from_value::<CancelParams>(params) {
+            if let Some(request_id) = request_id_key(namespace, &cancel.request_id) {
+                server.cancellations.cancel(&request_id);
+            }
+        }
+    }
+}
+
+fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {
+    let policy = server.network.current().qos;
+    let queued = server.qos.reserve_queue(&policy)?;
+    let permit = server.qos.admit_request(&policy);
+    drop(queued);
+    permit
+}
+
+async fn run_cancellable_tool_call(
+    server: &McpServer,
+    params: ToolCallParams,
+    request_id: String,
+) -> Value {
+    let (mut cancellation, _registration) = server.cancellations.register(request_id.clone());
+    let timeout = Duration::from_millis(server.agent.access_policy.max_runtime_ms);
+    let tool = run_tool_call(server, params, request_id.clone());
+
+    let result = tokio::select! {
+        result = tokio::time::timeout(timeout, tool) => match result {
+            Ok(value) => value,
+            Err(_) => tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::Timeout,
+                "MCP tool call exceeded max_runtime_ms",
+            )),
+        },
+        _ = wait_for_cancellation(&mut cancellation) => {
+            tool_error_result(AgentAdapterError::new(
+                AgentAdapterErrorKind::Cancelled,
+                "MCP tool call was cancelled",
+            ))
+        }
+    };
+
+    result
+}
+
+async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {
+    while cancellation.changed().await.is_ok() {
+        if *cancellation.borrow() {
+            return;
+        }
+    }
+
+    std::future::pending::<()>().await;
+}
+
+async fn run_tool_call(server: &McpServer, params: ToolCallParams, request_id: String) -> Value {
+    match params.name.as_str() {
+        "relay.retrieve_context" => {
+            retrieve_context_tool(server, params.arguments, request_id).await
+        }
+        "relay.inspect_graph" => inspect_graph_tool(server, params.arguments, request_id).await,
+        "relay.health" => health_tool(server, request_id).await,
+        "relay.service_status" => service_status_tool(server, request_id).await,
+        "relay.index_status" => index_status_tool(server, request_id).await,
+        "relay.refresh_indexes" => refresh_indexes_tool(server, params.arguments, request_id).await,
+        _ => json!({
+            "content": [{"type": "text", "text": "unknown MCP tool"}],
+            "isError": true
+        }),
+    }
+}
+
+async fn retrieve_context_tool(server: &McpServer, arguments: Value, request_id: String) -> Value {
+    let started = Instant::now();
+    let args = match serde_json::from_value::<RetrieveContextArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    let policy = &server.agent.access_policy;
+    let limit = match authorize_limit(args.limit, policy) {
+        Ok(limit) => limit,
+        Err(error) => return tool_error_result(error),
+    };
+    let source_scope = match authorize_scope(args.source_scope, policy) {
+        Ok(scope) => scope,
+        Err(error) => return tool_error_result(error),
+    };
+    let freshness = match parse_freshness(args.freshness.as_deref()) {
+        Ok(freshness) => freshness,
+        Err(error) => return tool_error_result(error),
+    };
+    let context = request_context(request_id.clone());
+    let identity = RuntimeIdentity::mcp(Some(request_id));
+
+    match server
+        .service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: args.query,
+                source_scope: source_scope.clone(),
+                limit,
+                freshness,
+            },
+            context,
+        )
+        .await
+    {
+        Ok(response) => {
+            let elapsed_ms = elapsed_millis(started);
+            let result = AgentRetrievalResult::from_retrieval(
+                response,
+                identity,
+                policy.max_context_bytes,
+                elapsed_ms,
+            );
+            tool_success_result(
+                format!(
+                    "retrieved {} result(s), graph_version={}, freshness={}",
+                    result.results.len(),
+                    result.metadata.graph_version,
+                    freshness_label(freshness)
+                ),
+                json!(result),
+            )
+        }
+        Err(error) => api_error_result(error),
+    }
+}
+
+async fn inspect_graph_tool(server: &McpServer, arguments: Value, request_id: String) -> Value {
+    let args = match serde_json::from_value::<InspectGraphArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    let source_scope = match authorize_scope(args.source_scope, &server.agent.access_policy) {
+        Ok(scope) => scope,
+        Err(error) => return tool_error_result(error),
+    };
+
+    match server
+        .service
+        .inspect_graph(
+            GraphInspectionRequest { source_scope },
+            request_context(request_id),
+        )
+        .await
+    {
+        Ok(response) => tool_success_result("graph inspection completed", json!(response)),
+        Err(error) => api_error_result(error),
+    }
+}
+
+async fn health_tool(server: &McpServer, request_id: String) -> Value {
+    match server.service.health(request_context(request_id)).await {
+        Ok(response) => tool_success_result(
+            format!(
+                "health={}",
+                if response.healthy { "ok" } else { "degraded" }
+            ),
+            json!(response),
+        ),
+        Err(error) => api_error_result(error),
+    }
+}
+
+async fn service_status_tool(server: &McpServer, request_id: String) -> Value {
+    match server
+        .service
+        .service_status(request_context(request_id))
+        .await
+    {
+        Ok(response) => tool_success_result("service status loaded", json!(response)),
+        Err(error) => api_error_result(error),
+    }
+}
+
+async fn index_status_tool(server: &McpServer, request_id: String) -> Value {
+    match server.service.health(request_context(request_id)).await {
+        Ok(response) => tool_success_result(
+            "index status loaded",
+            json!({
+                "metadata": response.metadata,
+                "indexes": response.indexes,
+            }),
+        ),
+        Err(error) => api_error_result(error),
+    }
+}
+
+async fn refresh_indexes_tool(server: &McpServer, arguments: Value, request_id: String) -> Value {
+    if !server.agent.access_policy.allow_index_refresh {
+        return tool_error_result(AgentAdapterError::new(
+            AgentAdapterErrorKind::PermissionDenied,
+            "relay.refresh_indexes is disabled by MCP access policy",
+        ));
+    }
+    let args = match serde_json::from_value::<RefreshIndexesArgs>(arguments) {
+        Ok(args) => args,
+        Err(error) => return tool_error_result(invalid_arguments(error)),
+    };
+    let kinds = match parse_index_kinds(&args.kinds) {
+        Ok(kinds) => kinds,
+        Err(error) => return tool_error_result(error),
+    };
+
+    match server
+        .service
+        .refresh_indexes(IndexRefreshRequest { kinds }, request_context(request_id))
+        .await
+    {
+        Ok(response) => tool_success_result("indexes refreshed", json!(response)),
+        Err(error) => api_error_result(error),
+    }
+}
+
+fn initialize_result() -> Value {
+    json!({
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {
+            "tools": {}
+        },
+        "serverInfo": {
+            "name": PROJECT_NAME,
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    })
+}
+
+fn tools_list_result(policy: &AgentAccessPolicy) -> Value {
+    let mut tools = vec![
+        retrieve_context_tool_definition(),
+        inspect_graph_tool_definition(),
+        no_argument_tool(
+            "relay.health",
+            "Return relay-knowledge health and freshness status.",
+        ),
+        no_argument_tool("relay.service_status", "Return resident service status."),
+        no_argument_tool(
+            "relay.index_status",
+            "Return derived retrieval index status.",
+        ),
+    ];
+    if policy.allow_index_refresh {
+        tools.push(refresh_indexes_tool_definition());
+    }
+
+    json!({ "tools": tools })
+}
+
+fn retrieve_context_tool_definition() -> Value {
+    json!({
+        "name": "relay.retrieve_context",
+        "description": "Retrieve grounded graph context for a query.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1},
+                "source_scope": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1},
+                "freshness": {
+                    "type": "string",
+                    "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
+                }
+            },
+            "required": ["query"]
+        }
+    })
+}
+
+fn inspect_graph_tool_definition() -> Value {
+    json!({
+        "name": "relay.inspect_graph",
+        "description": "Inspect graph metadata and aggregate counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_scope": {"type": "string"}
+            }
+        }
+    })
+}
+
+fn refresh_indexes_tool_definition() -> Value {
+    json!({
+        "name": "relay.refresh_indexes",
+        "description": "Refresh derived retrieval indexes when policy permits it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["bm25", "semantic", "vector"]
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn no_argument_tool(name: &str, description: &str) -> Value {
+    json!({
+        "name": name,
+        "description": description,
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
+    })
+}
+
+fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {
+    match value.unwrap_or("allow-stale") {
+        "allow-stale" => Ok(FreshnessPolicy::AllowStale),
+        "wait-until-fresh" => Ok(FreshnessPolicy::WaitUntilFresh),
+        "graph-only" => Ok(FreshnessPolicy::GraphOnly),
+        other => Err(AgentAdapterError::new(
+            AgentAdapterErrorKind::InvalidArgument,
+            format!("invalid freshness '{other}'"),
+        )),
+    }
+}
+
+fn parse_index_kinds(values: &[String]) -> Result<Vec<IndexKind>, AgentAdapterError> {
+    values
+        .iter()
+        .map(|value| match value.as_str() {
+            "bm25" => Ok(IndexKind::Bm25),
+            "semantic" => Ok(IndexKind::Semantic),
+            "vector" => Ok(IndexKind::Vector),
+            other => Err(AgentAdapterError::new(
+                AgentAdapterErrorKind::InvalidArgument,
+                format!("invalid index kind '{other}'"),
+            )),
+        })
+        .collect()
+}
+
+fn tool_success_result(summary: impl Into<String>, structured_content: Value) -> Value {
+    json!({
+        "content": [{"type": "text", "text": summary.into()}],
+        "structuredContent": structured_content,
+        "isError": false
+    })
+}
+
+fn api_error_result(error: ApiError) -> Value {
+    tool_error_result(AgentAdapterError::new(
+        agent_error_kind(error.error_kind),
+        error.message,
+    ))
+}
+
+fn agent_error_kind(kind: ErrorKind) -> AgentAdapterErrorKind {
+    match kind {
+        ErrorKind::InvalidArgument => AgentAdapterErrorKind::InvalidArgument,
+        ErrorKind::StorageUnavailable => AgentAdapterErrorKind::StorageUnavailable,
+        ErrorKind::Timeout => AgentAdapterErrorKind::Timeout,
+        ErrorKind::Internal => AgentAdapterErrorKind::Internal,
+    }
+}
+
+fn tool_error_result(error: AgentAdapterError) -> Value {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": format!("{}: {}", error.kind.as_str(), error.message)
+        }],
+        "structuredContent": {
+            "error_kind": error.kind.as_str(),
+            "message": error.message,
+        },
+        "isError": true
+    })
+}
+
+fn invalid_arguments(error: serde_json::Error) -> AgentAdapterError {
+    AgentAdapterError::new(
+        AgentAdapterErrorKind::InvalidArgument,
+        format!("invalid tool arguments: {error}"),
+    )
+}
+
+fn json_rpc_success(id: Value, result: Value) -> Response {
+    json_response(
+        StatusCode::OK,
+        json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+    )
+}
+
+fn json_rpc_success_with_session(id: Value, result: Value, session_id: &str) -> Response {
+    let mut response = json_rpc_success(id, result);
+    response.headers_mut().insert(
+        MCP_SESSION_ID_HEADER,
+        HeaderValue::from_str(session_id).expect("generated MCP session id is a valid header"),
+    );
+    response
+}
+
+fn json_rpc_error(id: Value, code: i64, message: impl Into<String>) -> Response {
+    json_response(
+        StatusCode::OK,
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": code,
+                "message": message.into()
+            }
+        }),
+    )
+}
+
+fn json_response(status: StatusCode, value: Value) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        value.to_string(),
+    )
+        .into_response()
+}
+
+fn request_context(request_id: String) -> RequestContext {
+    RequestContext::with_ids(
+        InterfaceKind::Mcp,
+        format!("mcp-{request_id}"),
+        format!("trace-mcp-{request_id}"),
+    )
+}
+
+fn request_id_key(namespace: &str, value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(format!("{namespace}|string:{value}")),
+        Value::Number(value) if value.is_i64() || value.is_u64() => {
+            Some(format!("{namespace}|number:{value}"))
+        }
+        _ => None,
+    }
+}
+
+fn is_json_rpc_id(value: &Value) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::Number(number) => number.is_i64() || number.is_u64(),
+        _ => false,
+    }
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn qos_message(reason: RejectReason) -> &'static str {
+    match reason {
+        RejectReason::ConnectionBudgetExceeded => "connection budget exhausted",
+        RejectReason::RequestBudgetExceeded => "request budget exhausted",
+        RejectReason::QueueBudgetExceeded => "queue budget exhausted",
+    }
+}
+
+#[cfg(test)]
+#[path = "mcp_test_support.rs"]
+mod mcp_test_support;
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod mcp_tests;

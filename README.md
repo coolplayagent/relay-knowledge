@@ -60,8 +60,22 @@ relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --mcp streamable-http
 relay-knowledge query -- --help
 ```
+
+`service run --mcp streamable-http` starts the resident MCP Streamable HTTP
+adapter on the configured local HTTP bind, defaulting to
+`http://127.0.0.1:8791/mcp`. It is disabled unless requested by the command or
+`RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
+`RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
+`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured.
+The adapter validates `initialize` params, then issues an unpredictable
+`Mcp-Session-Id`. Clients must send `notifications/initialized`, then include
+that session header and `MCP-Protocol-Version` on later calls so `ping`, tool
+requests and `notifications/cancelled` stay bound to the issued session.
+Missing session headers are rejected with HTTP 400; unknown or evicted session
+IDs are rejected with HTTP 404.
 
 Web diagnostics and browser integration checks:
 

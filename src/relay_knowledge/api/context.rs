@@ -12,6 +12,10 @@ pub enum InterfaceKind {
     Web,
     /// Future HTTP or RPC API adapter.
     Api,
+    /// Model Context Protocol adapter.
+    Mcp,
+    /// Agent Client Protocol adapter.
+    Acp,
 }
 
 /// Request-scoped identity propagated through application services.

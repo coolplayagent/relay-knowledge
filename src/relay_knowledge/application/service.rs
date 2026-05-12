@@ -22,7 +22,10 @@ use crate::{
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
 };
 
-use super::{RuntimeConfiguration, RuntimeConfigurationError, status::runtime_status};
+use super::{
+    RuntimeConfiguration, RuntimeConfigurationError,
+    status::{agent_protocol_status, runtime_status},
+};
 
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
@@ -334,6 +337,7 @@ impl RelayKnowledgeService {
             background_enabled: false,
             silent_updates_enabled: false,
             service_definition_path,
+            agent_protocols: agent_protocol_status(&self.runtime),
         })
     }
 

@@ -32,6 +32,18 @@ pub const RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS: &str = "RELAY_KNOWLEDGE_QOS_MAX_C
 pub const RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS: &str =
     "RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS";
 pub const RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH: &str = "RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH";
+pub const RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED: &str =
+    "RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED";
+pub const RELAY_KNOWLEDGE_MCP_ENDPOINT: &str = "RELAY_KNOWLEDGE_MCP_ENDPOINT";
+pub const RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS: &str = "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS";
+pub const RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES: &str = "RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES";
+pub const RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE: &str =
+    "RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE";
+pub const RELAY_KNOWLEDGE_MCP_MAX_LIMIT: &str = "RELAY_KNOWLEDGE_MCP_MAX_LIMIT";
+pub const RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES: &str = "RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES";
+pub const RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH: &str = "RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH";
+pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
+    "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -123,12 +135,27 @@ pub struct NetworkEnvOverrides {
     pub qos_max_queue_depth: Option<usize>,
 }
 
+/// Agent protocol settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentEnvOverrides {
+    pub mcp_streamable_http_enabled: Option<bool>,
+    pub mcp_endpoint: Option<String>,
+    pub mcp_allowed_origins: Option<String>,
+    pub mcp_allowed_scopes: Option<String>,
+    pub mcp_allow_unspecified_scope: Option<bool>,
+    pub mcp_max_limit: Option<usize>,
+    pub mcp_max_context_bytes: Option<usize>,
+    pub mcp_allow_index_refresh: Option<bool>,
+    pub mcp_allow_remote_clients: Option<bool>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
     pub platform: PlatformEnvironment,
     pub paths: PathEnvOverrides,
     pub network: NetworkEnvOverrides,
+    pub agent: AgentEnvOverrides,
 }
 
 impl EnvironmentConfig {
@@ -216,6 +243,32 @@ impl EnvironmentConfig {
                 qos_max_queue_depth: positive_usize_var(
                     &values,
                     RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH,
+                )?,
+            },
+            agent: AgentEnvOverrides {
+                mcp_streamable_http_enabled: bool_var(
+                    &values,
+                    RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED,
+                )?,
+                mcp_endpoint: string_var(&values, RELAY_KNOWLEDGE_MCP_ENDPOINT)?,
+                mcp_allowed_origins: string_var(&values, RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS)?,
+                mcp_allowed_scopes: string_var(&values, RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES)?,
+                mcp_allow_unspecified_scope: bool_var(
+                    &values,
+                    RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE,
+                )?,
+                mcp_max_limit: positive_usize_var(&values, RELAY_KNOWLEDGE_MCP_MAX_LIMIT)?,
+                mcp_max_context_bytes: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES,
+                )?,
+                mcp_allow_index_refresh: bool_var(
+                    &values,
+                    RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH,
+                )?,
+                mcp_allow_remote_clients: bool_var(
+                    &values,
+                    RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS,
                 )?,
             },
         })
@@ -470,6 +523,15 @@ mod tests {
                 (NO_PROXY, "localhost,.internal"),
                 (SSL_VERIFY, "false"),
                 (RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS, "512"),
+                (RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED, "true"),
+                (RELAY_KNOWLEDGE_MCP_ENDPOINT, "/mcp"),
+                (RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS, "http://localhost:8791"),
+                (RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES, "docs,src"),
+                (RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE, "true"),
+                (RELAY_KNOWLEDGE_MCP_MAX_LIMIT, "5"),
+                (RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES, "8192"),
+                (RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH, "true"),
+                (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
             ],
         )
         .expect("environment should parse");
@@ -489,6 +551,18 @@ mod tests {
         );
         assert_eq!(config.network.ssl_verify, Some(false));
         assert_eq!(config.network.qos_max_connections, Some(512));
+        assert_eq!(config.agent.mcp_streamable_http_enabled, Some(true));
+        assert_eq!(config.agent.mcp_endpoint, Some("/mcp".to_owned()));
+        assert_eq!(
+            config.agent.mcp_allowed_origins,
+            Some("http://localhost:8791".to_owned())
+        );
+        assert_eq!(config.agent.mcp_allowed_scopes, Some("docs,src".to_owned()));
+        assert_eq!(config.agent.mcp_allow_unspecified_scope, Some(true));
+        assert_eq!(config.agent.mcp_max_limit, Some(5));
+        assert_eq!(config.agent.mcp_max_context_bytes, Some(8192));
+        assert_eq!(config.agent.mcp_allow_index_refresh, Some(true));
+        assert_eq!(config.agent.mcp_allow_remote_clients, Some(false));
     }
 
     #[test]

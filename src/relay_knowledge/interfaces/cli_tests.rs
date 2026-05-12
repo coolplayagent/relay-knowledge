@@ -126,6 +126,8 @@ fn parses_index_and_service_actions() {
     let index = CliCommand::parse(["index", "refresh", "--kind", "bm25"])
         .expect("index command should parse");
     let service = CliCommand::parse(["service", "doctor"]).expect("service command should parse");
+    let run = CliCommand::parse(["service", "run", "--mcp", "streamable-http"])
+        .expect("service run should parse");
 
     assert_eq!(
         index.action,
@@ -134,6 +136,12 @@ fn parses_index_and_service_actions() {
         }
     );
     assert_eq!(service.action, CliAction::ServiceStatus);
+    assert_eq!(
+        run.action,
+        CliAction::ServiceRun {
+            mcp: ServiceMcpTransport::StreamableHttp,
+        }
+    );
 }
 
 #[test]

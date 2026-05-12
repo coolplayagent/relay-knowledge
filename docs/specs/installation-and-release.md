@@ -104,6 +104,9 @@ relay-knowledge service uninstall
 
 当前 CLI 已先落地 `relay-knowledge service status|doctor` 的统一 API 输出，
 用于报告服务名、默认 disabled 模式、后台更新默认关闭和平台服务定义路径。
+当前 CLI 也提供 `relay-knowledge service run --mcp streamable-http` 前台服务入口，
+安装后的平台 service template 应复用该入口来启动 MCP Streamable HTTP 工具能力，
+而不是用 unmanaged shell loop 包装普通 CLI 命令。
 后续真正注册 systemd、Windows Service 或 launchd 时必须复用同一 application service，
 不能在 installer 或 CLI adapter 中重新实现路径规则。
 
@@ -158,10 +161,19 @@ relay-knowledge service doctor
 服务模板必须记录:
 
 - 二进制绝对路径。
+- 前台服务命令，例如 `relay-knowledge service run --mcp streamable-http`。
 - 配置、数据、缓存和日志目录。
 - 重启策略和 watchdog 或等价健康检查。
 - 环境变量白名单。
 - 资源预算入口，例如 CPU、并发、磁盘和维护窗口配置。
+
+MCP 相关环境变量属于服务配置面，安装器必须在 dry-run 和 doctor 输出中说明其有效值:
+
+- `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED`
+- `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`
+- `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS`
+- `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS`
+- `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH`
 
 ## 5. 升级、回滚和卸载
 
