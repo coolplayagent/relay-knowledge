@@ -8,7 +8,7 @@ use crate::{
         ApiError, ApiMetadata, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
         HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
         IngestRequest, IngestResponse, ProjectStatusResponse, RequestContext,
-        ServiceStatusResponse,
+        ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
         ContextPackItem, EvidenceRecord, FreshnessPolicy, FusionDiagnostics, GraphMutationBatch,
@@ -312,6 +312,51 @@ impl RelayKnowledgeService {
         })
     }
 
+    /// Reconciles derived index cursors before resident service work starts.
+    pub async fn reconcile_startup_indexes(
+        &self,
+        context: RequestContext,
+    ) -> Result<ServiceRecoveryReport, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let before = store.index_statuses().await.map_err(storage_api_error)?;
+        let stale_index_kinds = before
+            .iter()
+            .filter(|status| status.is_stale_for(graph_version))
+            .map(|status| status.kind)
+            .collect::<Vec<_>>();
+        let index_lag_max = before
+            .iter()
+            .map(|status| {
+                graph_version
+                    .get()
+                    .saturating_sub(status.indexed_graph_version.get())
+            })
+            .max()
+            .unwrap_or(0);
+        let refreshed = refresh_index_kinds(&store, stale_index_kinds.clone(), graph_version)
+            .await?
+            .into_iter()
+            .map(|status| status.kind)
+            .collect::<Vec<_>>();
+        let after = store.index_statuses().await.map_err(storage_api_error)?;
+        let metadata = metadata_for_indexes(&context, graph_version, &after);
+
+        Ok(ServiceRecoveryReport {
+            metadata,
+            graph_version: graph_version.get(),
+            stale_index_kinds,
+            refreshed_index_kinds: refreshed,
+            index_lag_max,
+            task_queue_depth: 0,
+            dead_letter_count: 0,
+            heartbeat_state: "ready".to_owned(),
+        })
+    }
+
     /// Returns the managed background service definition location and defaults.
     pub async fn service_status(
         &self,
@@ -495,15 +540,16 @@ mod id_tests;
 mod graph_only_tests;
 
 #[cfg(test)]
+mod recovery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         api::{IngestEvidence, InterfaceKind},
-        domain::{
-            EvidenceRecord, FreshnessPolicy, GraphMutationBatch, IndexKind, IndexState, SourceScope,
-        },
+        domain::{FreshnessPolicy, IndexKind, IndexState},
         env::PlatformKind,
-        storage::{GraphStore, KnowledgeStore, SqliteGraphStore},
+        storage::{KnowledgeStore, SqliteGraphStore},
     };
 
     #[tokio::test]
@@ -767,37 +813,6 @@ mod tests {
         assert_eq!(response.budget_used.limit, 2);
         assert_eq!(response.budget_used.returned_count, 2);
         assert_eq!(response.budget_used.candidate_count, 3);
-    }
-
-    #[tokio::test]
-    async fn health_metadata_preserves_stale_index_state() {
-        let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-        let service = service_with_store(store.clone()).await;
-        let evidence = EvidenceRecord::new(
-            "ev-stale",
-            SourceScope::parse("docs").expect("scope should parse"),
-            "Direct storage writes leave indexes stale",
-            vec!["Index".to_owned()],
-        )
-        .expect("evidence should validate");
-        let batch = GraphMutationBatch::new(vec![evidence]).expect("batch should validate");
-        store
-            .commit_mutation_batch(batch)
-            .await
-            .expect("commit should succeed");
-
-        let health = service
-            .health(RequestContext::with_ids(
-                InterfaceKind::Cli,
-                "req-health",
-                "trace-health",
-            ))
-            .await
-            .expect("health should load");
-
-        assert!(!health.healthy);
-        assert!(health.metadata.stale);
-        assert_eq!(health.metadata.graph_version, 1);
     }
 
     #[tokio::test]

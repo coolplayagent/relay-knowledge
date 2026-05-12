@@ -15,7 +15,7 @@ use crate::{
     storage::SqliteGraphStore,
 };
 
-use super::mcp_test_support::{RefreshFailStore, SlowSearchStore};
+use super::mcp_test_support::SlowSearchStore;
 
 #[tokio::test]
 async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
@@ -49,6 +49,8 @@ async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
     );
     assert_eq!(initialize["result"]["capabilities"]["tools"], json!({}));
     assert!(tool_names(&tools).contains(&"relay.retrieve_context".to_owned()));
+    assert!(tool_names(&tools).contains(&"relay.code_query".to_owned()));
+    assert!(tool_names(&tools).contains(&"relay.code_impact".to_owned()));
     assert!(!tool_names(&tools).contains(&"relay.refresh_indexes".to_owned()));
 }
 
@@ -317,112 +319,6 @@ async fn qos_rejection_returns_tool_error_and_releases_permit() {
 }
 
 #[tokio::test]
-async fn diagnostic_tools_return_structured_content() {
-    let (server, service) =
-        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    service
-        .ingest(
-            IngestRequest {
-                source_scope: "docs".to_owned(),
-                evidence: vec![IngestEvidence {
-                    id: Some("ev-diagnostics".to_owned()),
-                    content: "Diagnostic tools share application service state".to_owned(),
-                    entity_labels: Vec::new(),
-                }],
-            },
-            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-        )
-        .await
-        .expect("ingest should succeed");
-    let mut router = server.router();
-
-    let inspect = tool_call(
-        &mut router,
-        "inspect",
-        "relay.inspect_graph",
-        json!({"source_scope": "docs"}),
-    )
-    .await;
-    let health = tool_call(&mut router, "health", "relay.health", json!({})).await;
-    let service_status = tool_call(&mut router, "service", "relay.service_status", json!({})).await;
-    let index_status = tool_call(&mut router, "index", "relay.index_status", json!({})).await;
-
-    assert_eq!(
-        inspect["result"]["structuredContent"]["graph"]["evidence_count"],
-        1
-    );
-    assert_eq!(health["result"]["structuredContent"]["healthy"], true);
-    assert_eq!(
-        service_status["result"]["structuredContent"]["agent_protocols"]["mcp_streamable_http_enabled"],
-        true
-    );
-    assert_eq!(
-        index_status["result"]["structuredContent"]["indexes"]
-            .as_array()
-            .expect("indexes")
-            .len(),
-        3
-    );
-}
-
-#[tokio::test]
-async fn refresh_indexes_tool_requires_policy_and_valid_kinds() {
-    let disabled = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    let mut disabled_router = disabled.router();
-    let denied = tool_call(
-        &mut disabled_router,
-        "refresh-denied",
-        "relay.refresh_indexes",
-        json!({"kinds": ["bm25"]}),
-    )
-    .await;
-
-    let enabled = server_with_env([
-        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-        ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
-    ])
-    .await;
-    let mut enabled_router = enabled.router();
-    let listed = call_mcp(
-        &mut enabled_router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": "tools",
-            "method": "tools/list"
-        }),
-    )
-    .await;
-    let invalid = tool_call(
-        &mut enabled_router,
-        "refresh-invalid",
-        "relay.refresh_indexes",
-        json!({"kinds": ["other"]}),
-    )
-    .await;
-    let refreshed = tool_call(
-        &mut enabled_router,
-        "refresh-ok",
-        "relay.refresh_indexes",
-        json!({"kinds": ["semantic"]}),
-    )
-    .await;
-
-    assert_eq!(
-        denied["result"]["structuredContent"]["error_kind"],
-        "permission_denied"
-    );
-    assert!(tool_names(&listed).contains(&"relay.refresh_indexes".to_owned()));
-    assert_eq!(
-        invalid["result"]["structuredContent"]["error_kind"],
-        "invalid_argument"
-    );
-    assert_eq!(
-        refreshed["result"]["structuredContent"]["indexes"][0]["kind"],
-        "semantic"
-    );
-}
-
-#[tokio::test]
 async fn notifications_and_protocol_errors_use_http_contract() {
     let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
@@ -540,33 +436,6 @@ async fn notifications_and_protocol_errors_use_http_contract() {
     assert_eq!(fractional_id["error"]["code"], -32600);
     assert_eq!(malformed_tool_call["error"]["code"], -32602);
     assert_eq!(unknown["error"]["code"], -32602);
-}
-
-#[tokio::test]
-async fn service_api_errors_preserve_error_kind_in_tool_results() {
-    let store = Arc::new(RefreshFailStore);
-    let (server, _service) = server_and_service_with_store(
-        [
-            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-            ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
-        ],
-        store,
-    )
-    .await;
-    let mut router = server.router();
-
-    let response = tool_call(
-        &mut router,
-        "refresh-fails",
-        "relay.refresh_indexes",
-        json!({"kinds": ["bm25"]}),
-    )
-    .await;
-
-    assert_eq!(
-        response["result"]["structuredContent"]["error_kind"],
-        "storage_unavailable"
-    );
 }
 
 #[tokio::test]

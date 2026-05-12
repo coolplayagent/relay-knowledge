@@ -79,6 +79,16 @@ that session header and `MCP-Protocol-Version` on later calls so `ping`, tool
 requests and `notifications/cancelled` stay bound to the issued session.
 Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
+The MCP tool surface includes graph retrieval, graph inspection, health,
+service status, index status, authorized code graph queries, and authorized
+code impact analysis. `relay.refresh_indexes` remains hidden unless
+`RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` is explicitly configured.
+Agent requests write bounded in-process audit events with runtime identity,
+scope, freshness, QoS decision, budget, truncation, result count, and status.
+The local ACP session adapter exposes the same retrieval contract for
+agent-client sessions, including progress updates, cancellation, and context
+artifacts. Foreground service startup runs a recovery pass that refreshes stale
+index cursors before accepting resident adapter work.
 
 Web diagnostics, operation workspace, and browser integration checks:
 

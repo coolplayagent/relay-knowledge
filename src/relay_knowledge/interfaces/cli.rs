@@ -842,11 +842,19 @@ async fn run_service(mcp: ServiceMcpTransport) -> Result<String, CliError> {
     }
 
     let service = RelayKnowledgeService::new(runtime.clone());
-    let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
-    server
-        .serve_until_shutdown(service_shutdown_signal())
+    service
+        .reconcile_startup_indexes(RequestContext::for_interface(InterfaceKind::Cli))
         .await
-        .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+        .map_err(|error| CliError::ServiceRunFailed(error.message))?;
+    if runtime.agent.mcp_streamable_http_enabled {
+        let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
+        server
+            .serve_until_shutdown(service_shutdown_signal())
+            .await
+            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+    } else {
+        service_shutdown_signal().await;
+    }
 
     Ok(String::new())
 }

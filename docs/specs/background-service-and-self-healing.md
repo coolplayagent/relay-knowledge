@@ -292,6 +292,14 @@ relay-knowledge index resume --kind vector
 
 Web 界面可以调用同一组 application service 展示状态，但不能私自读取数据库或索引目录。
 
+当前前台 `service run` 在接受 resident adapter work 前会执行 startup recovery pass:
+读取当前 graph version 与 index cursors，计算最大 index lag，并刷新所有 stale v1
+index kind。该最小 reconciler 不替代后续持久化 task lease、dead-letter 和平台
+service manager 集成；它保证 crash 后 graph 已提交但 index cursor 落后时，常驻
+进程启动会先恢复派生索引新鲜度再接收 MCP/ACP 请求。无 MCP transport 启用时，
+`service run` 仍保持前台进程并等待平台 shutdown signal，便于 systemd、Windows
+Service 或 launchd 管理进程生命周期。
+
 ## 7. 可观测性和告警
 
 后台服务至少暴露这些 metrics:

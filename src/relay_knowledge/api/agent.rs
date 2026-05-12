@@ -53,6 +53,27 @@ impl RuntimeIdentity {
             tool_call_id,
         }
     }
+
+    /// Creates the local ACP adapter identity for one session request.
+    pub fn acp(
+        client_name: Option<String>,
+        client_version: Option<String>,
+        actor_id: Option<String>,
+        session_id: String,
+        request_id: Option<String>,
+    ) -> Self {
+        Self {
+            protocol: AgentProtocolKind::Acp,
+            adapter_name: "relay-knowledge-acp-local".to_owned(),
+            adapter_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            client_name,
+            client_version,
+            host_name: None,
+            actor_id,
+            session_id: Some(session_id),
+            tool_call_id: request_id,
+        }
+    }
 }
 
 /// Unified API context plus agent protocol identity and policy provenance.

@@ -21,7 +21,7 @@ pub use operations::{
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryStatusResponse,
     GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
     HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestEvidence,
-    IngestRequest, IngestResponse, ServiceStatusResponse,
+    IngestRequest, IngestResponse, ServiceRecoveryReport, ServiceStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};
