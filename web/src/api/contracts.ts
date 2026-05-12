@@ -50,6 +50,16 @@ export type HealthResponse = {
     entity_count: number;
     evidence_count: number;
     mutation_count: number;
+    code_file_count: number;
+    code_symbol_count: number;
+    code_reference_count: number;
+    code_chunk_count: number;
+    code_parse_status_counts: {
+      parsed: number;
+      partial: number;
+      text_only: number;
+      failed: number;
+    };
   };
   indexes: IndexStatus[];
   runtime: RuntimeStatus;

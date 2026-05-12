@@ -39,6 +39,7 @@ target/debug/relay-knowledge --version
 
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
+The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 

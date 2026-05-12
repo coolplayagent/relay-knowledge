@@ -306,6 +306,7 @@ impl RelayKnowledgeService {
 struct StorageProvider {
     path: Option<PathBuf>,
     ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
+    init_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl StorageProvider {
@@ -313,6 +314,7 @@ impl StorageProvider {
         Self {
             path: Some(path),
             ready: Arc::new(OnceLock::new()),
+            init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -323,10 +325,15 @@ impl StorageProvider {
         Self {
             path: None,
             ready: Arc::new(ready),
+            init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
     async fn get(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+        if let Some(store) = self.ready.get() {
+            return Ok(Arc::clone(store));
+        }
+        let _guard = self.init_lock.lock().await;
         if let Some(store) = self.ready.get() {
             return Ok(Arc::clone(store));
         }
@@ -443,19 +450,18 @@ fn service_definition_filename() -> &'static str {
 mod id_tests;
 
 #[cfg(test)]
+mod graph_only_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         api::{IngestEvidence, InterfaceKind},
         domain::{
-            CommitReceipt, EvidenceRecord, FreshnessPolicy, GraphMutationBatch, GraphVersion,
-            IndexKind, IndexState, IndexStatus, RetrievalHit, SourceScope,
+            EvidenceRecord, FreshnessPolicy, GraphMutationBatch, IndexKind, IndexState, SourceScope,
         },
         env::PlatformKind,
-        storage::{
-            GraphInspection, GraphSearchRequest, GraphStore, IndexStore, KnowledgeStore,
-            MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
-        },
+        storage::{GraphStore, KnowledgeStore, SqliteGraphStore},
     };
 
     #[tokio::test]
@@ -634,33 +640,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             IndexKind::ALL
         );
-    }
-
-    #[tokio::test]
-    async fn graph_only_retrieval_bypasses_index_metadata() {
-        let service = service_with_store(Arc::new(GraphOnlySearchStore)).await;
-
-        let response = service
-            .retrieve_context(
-                HybridRetrievalRequest {
-                    query: "Rust".to_owned(),
-                    source_scope: Some(" docs ".to_owned()),
-                    limit: 5,
-                    freshness: FreshnessPolicy::GraphOnly,
-                },
-                RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
-            )
-            .await
-            .expect("graph-only query should not require index metadata");
-
-        assert_eq!(response.retrieval_mode, RetrievalMode::GraphOnly);
-        assert_eq!(
-            response.degraded_reason.as_deref(),
-            Some("graph_only freshness policy selected")
-        );
-        assert!(response.indexes.is_empty());
-        assert_eq!(response.metadata.index_version, None);
-        assert_eq!(response.results[0].source_scope, "docs");
     }
 
     #[tokio::test]
@@ -844,74 +823,6 @@ mod tests {
 
         let first = stores.first().expect("stores should exist");
         assert!(stores.iter().all(|store| Arc::ptr_eq(first, store)));
-    }
-
-    struct GraphOnlySearchStore;
-
-    impl GraphStore for GraphOnlySearchStore {
-        fn commit_mutation_batch(
-            &self,
-            _batch: GraphMutationBatch,
-        ) -> StorageFuture<'_, CommitReceipt> {
-            unsupported("graph-only fixture does not commit")
-        }
-
-        fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
-            Box::pin(async {
-                Ok(GraphInspection {
-                    graph_version: GraphVersion::new(1),
-                    entity_count: 1,
-                    evidence_count: 1,
-                    mutation_count: 1,
-                })
-            })
-        }
-
-        fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-            Box::pin(async move {
-                assert_eq!(request.source_scope.as_deref(), Some("docs"));
-
-                Ok(vec![RetrievalHit {
-                    evidence_id: "ev-graph-only".to_owned(),
-                    source_scope: "docs".to_owned(),
-                    content: format!("{} result", request.query),
-                    entity_labels: Vec::new(),
-                    score: 1.0,
-                }])
-            })
-        }
-
-        fn current_graph_version(&self) -> StorageFuture<'_, GraphVersion> {
-            Box::pin(async { Ok(GraphVersion::new(1)) })
-        }
-    }
-
-    impl MutationLogStore for GraphOnlySearchStore {
-        fn read_after(
-            &self,
-            _graph_version: GraphVersion,
-            _limit: usize,
-        ) -> StorageFuture<'_, Vec<MutationLogEntry>> {
-            unsupported("graph-only fixture does not read mutations")
-        }
-    }
-
-    impl IndexStore for GraphOnlySearchStore {
-        fn index_statuses(&self) -> StorageFuture<'_, Vec<IndexStatus>> {
-            unsupported("index metadata is unavailable")
-        }
-
-        fn mark_refresh_complete(
-            &self,
-            _kind: IndexKind,
-            _graph_version: GraphVersion,
-        ) -> StorageFuture<'_, IndexStatus> {
-            unsupported("index metadata is unavailable")
-        }
-    }
-
-    fn unsupported<T: Send + 'static>(message: &'static str) -> StorageFuture<'static, T> {
-        Box::pin(async move { Err(StorageError::InvalidInput(message.to_owned())) })
     }
 
     async fn service_with_memory_store() -> RelayKnowledgeService {

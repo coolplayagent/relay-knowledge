@@ -21,6 +21,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_role("main").get_by_text("relay-knowledge", exact=True)).to_be_visible()
         expect(page.get_by_text("Graph version 7")).to_be_visible()
         expect(page.get_by_text("degraded")).to_be_visible()
+        expect(page.get_by_text("code files 12")).to_be_visible()
         expect(page.get_by_role("cell", name="bm25")).to_be_visible()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
 
@@ -104,6 +105,16 @@ HEALTH_RESPONSE = {
         "entity_count": 3,
         "evidence_count": 5,
         "mutation_count": 4,
+        "code_file_count": 12,
+        "code_symbol_count": 48,
+        "code_reference_count": 125,
+        "code_chunk_count": 37,
+        "code_parse_status_counts": {
+            "parsed": 10,
+            "partial": 1,
+            "text_only": 1,
+            "failed": 0,
+        },
     },
     "indexes": [
         {
