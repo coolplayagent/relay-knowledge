@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+#[path = "code_query_support.rs"]
+mod code_query_support;
+
 use crate::{
     domain::{
         CodeImpactRequest, CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit,
@@ -11,11 +14,20 @@ use crate::{
 };
 
 use super::repository_status;
+use code_query_support::{
+    chunk_layers, language_id_for_path, module_import_matches, path_matches_filter,
+    path_to_module_keys, score_text,
+};
 
 pub(super) fn search_code(
     connection: &mut Connection,
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    if request.code_query_kind == CodeQueryKind::Impact {
+        return Err(StorageError::InvalidInput(
+            "code query kind 'impact' requires the repo impact command".to_owned(),
+        ));
+    }
     let status = required_repository(
         connection,
         &request.repository.repository,
@@ -74,10 +86,12 @@ pub(super) fn analyze_impact(
         &request.repository.ref_selector,
     )?;
     let changed = selected_changed_paths(connection, &status, &request, changes.paths)?;
-    let changed_modules = changed
-        .iter()
-        .map(|path| path_to_module_key(path))
-        .collect::<Vec<_>>();
+    let changed_modules = module_seeds_for_paths(
+        connection,
+        &status.repository_id,
+        &changed,
+        &changes.deleted_symbol_names,
+    )?;
     let changed_symbols = symbol_ids_for_paths(connection, &status.repository_id, &changed)?;
     let mut hits = Vec::new();
 
@@ -462,6 +476,49 @@ fn symbol_ids_for_paths(
     Ok(symbols)
 }
 
+fn module_seeds_for_paths(
+    connection: &Connection,
+    repository_id: &str,
+    paths: &BTreeSet<String>,
+    deleted_symbol_names: &[String],
+) -> Result<Vec<String>, StorageError> {
+    let mut seeds = deleted_symbol_names.to_vec();
+    let mut symbol_statement = connection.prepare(
+        "
+        SELECT name, qualified_name
+        FROM code_repository_symbols
+        WHERE repository_id = ?1 AND path = ?2
+        ",
+    )?;
+    let mut import_statement = connection.prepare(
+        "
+        SELECT module
+        FROM code_repository_imports
+        WHERE repository_id = ?1 AND path = ?2
+        ",
+    )?;
+    for path in paths {
+        seeds.extend(path_to_module_keys(path));
+        let symbol_rows = symbol_statement.query_map(params![repository_id, path], |row| {
+            Ok([row.get::<_, String>(0)?, row.get::<_, String>(1)?])
+        })?;
+        for row in symbol_rows {
+            seeds.extend(row?);
+        }
+        let import_rows =
+            import_statement.query_map(params![repository_id, path], |row| row.get(0))?;
+        seeds.extend(
+            import_rows
+                .collect::<Result<Vec<String>, _>>()
+                .map_err(StorageError::from)?,
+        );
+    }
+    seeds.sort();
+    seeds.dedup();
+
+    Ok(seeds)
+}
+
 fn chunks_for_paths(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -705,6 +762,7 @@ fn selected_changed_paths(
             .optional()?;
         if language_id
             .as_deref()
+            .or_else(|| language_id_for_path(&path))
             .map(|language| {
                 language_filter_allows(language, &status.language_filters)
                     && language_filter_allows(language, &request.repository.language_filters)
@@ -753,36 +811,6 @@ fn path_filter_allows(path: &str, filters: &[String]) -> bool {
 
 fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
     filters.is_empty() || filters.iter().any(|filter| filter == language_id)
-}
-
-fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let filter = filter.trim_end_matches(['/', '\\']);
-    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
-}
-
-fn module_import_matches(imported_module: &str, changed_module: &str) -> bool {
-    imported_module
-        .match_indices(changed_module)
-        .any(|(start, value)| {
-            let end = start + value.len();
-            module_boundary(imported_module[..start].chars().next_back())
-                && module_boundary(imported_module[end..].chars().next())
-        })
-}
-
-fn module_boundary(character: Option<char>) -> bool {
-    character
-        .map(|value| matches!(value, ':' | '.' | '/' | '\\'))
-        .unwrap_or(true)
-}
-
-fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
-    let mut layers = vec![CodeRetrievalLayer::Lexical];
-    if parse_status != "parsed" {
-        layers.push(CodeRetrievalLayer::TextFallback);
-    }
-
-    layers
 }
 
 struct HitParts {
@@ -876,30 +904,6 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
     if target.file_id.is_none() {
         target.file_id = source.file_id.clone();
     }
-}
-
-fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
-    let haystack = fields
-        .into_iter()
-        .map(|field| field.as_ref().to_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let mut score = 0.0;
-    for token in query.split_whitespace() {
-        if haystack.contains(token) {
-            score += 1.0;
-        }
-    }
-
-    score
-}
-
-fn path_to_module_key(path: &str) -> String {
-    path.trim_end_matches(".rs")
-        .trim_end_matches(".py")
-        .trim_end_matches(".ts")
-        .trim_end_matches(".tsx")
-        .replace(['/', '\\'], "::")
 }
 
 struct SymbolRow {

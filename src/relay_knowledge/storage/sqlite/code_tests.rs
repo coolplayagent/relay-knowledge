@@ -149,6 +149,74 @@ async fn rejects_code_queries_for_unindexed_refs() {
 }
 
 #[tokio::test]
+async fn rejects_impact_kind_in_plain_code_search() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn retry_policy() {}",
+    ))
+    .await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let error = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "retry_policy",
+                selector,
+                CodeQueryKind::Impact,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect_err("impact query kind should be rejected");
+
+    assert!(error.to_string().contains("repo impact"));
+}
+
+#[tokio::test]
+async fn repository_id_lookup_wins_over_conflicting_alias() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo:actual",
+                "actual",
+                "/tmp/actual",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("actual repo should persist");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo:other",
+                "repo:actual",
+                "/tmp/other",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("registration should validate"),
+        )
+        .await
+        .expect("alias repo should persist");
+
+    let status = store
+        .code_repository_status("repo:actual".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert_eq!(status.repository_id, "repo:actual");
+    assert_eq!(status.alias, "actual");
+}
+
+#[tokio::test]
 async fn language_filters_apply_to_references_calls_and_imports() {
     let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
     let selector = CodeRepositorySelector::new(
@@ -293,6 +361,32 @@ async fn impact_callers_can_use_deleted_symbol_names() {
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "src/caller.rs");
+}
+
+#[tokio::test]
+async fn impact_imports_use_changed_symbol_names_as_module_seeds() {
+    let store = store_with_repository_snapshot(snapshot_with_import_dependent()).await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["src/lib.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
+        .await
+        .expect("impact should succeed");
+
+    assert!(hits.iter().any(|hit| hit.path == "src/main.rs"));
 }
 
 #[tokio::test]
@@ -542,6 +636,53 @@ fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {
             "src/caller.rs",
             Some("out-target"),
         )],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_import_dependent() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "lib-file",
+                "src/lib.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "main-file",
+                "src/main.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![symbol(
+            "retry-symbol",
+            "lib-file",
+            "src/lib.rs",
+            "retry_policy",
+        )],
+        references: Vec::new(),
+        imports: vec![CodeImportRecord {
+            repository_id: "repo".to_owned(),
+            import_id: "main-import".to_owned(),
+            file_id: "main-file".to_owned(),
+            path: "src/main.rs".to_owned(),
+            module: "crate::retry_policy".to_owned(),
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
+        }],
+        calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

@@ -64,7 +64,8 @@ pub fn register_repository(
     let root = resolve_git_root(path.as_ref())?;
     let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?
         .unwrap_or_else(|| root.display().to_string());
-    let repository_id = format!("repo:{:016x}", stable_hash64(origin.as_bytes()));
+    let root_identity = root.display().to_string();
+    let repository_id = stable_id("repo", [origin.as_str(), root_identity.as_str()]);
 
     CodeRepositoryRegistration::new(
         repository_id,
@@ -561,6 +562,7 @@ fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
 }
 
 fn resolve_ref(root: &Path, ref_selector: &str) -> Result<String, CodeIndexError> {
+    validate_git_ref_argument(ref_selector)?;
     git_text(root, ["rev-parse", "--verify", ref_selector])
 }
 
@@ -579,6 +581,8 @@ fn diff_changes(
     base_ref: &str,
     head_ref: &str,
 ) -> Result<Vec<GitChange>, CodeIndexError> {
+    validate_git_ref_argument(base_ref)?;
+    validate_git_ref_argument(head_ref)?;
     let bytes = git_bytes(
         root,
         [
@@ -592,6 +596,16 @@ fn diff_changes(
     )?;
 
     parse_name_status_z(&bytes)
+}
+
+fn validate_git_ref_argument(ref_selector: &str) -> Result<(), CodeIndexError> {
+    if ref_selector.starts_with('-') {
+        return Err(CodeIndexError::InvalidInput(
+            "git ref selectors must not start with '-'".to_owned(),
+        ));
+    }
+
+    Ok(())
 }
 
 fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, CodeIndexError> {

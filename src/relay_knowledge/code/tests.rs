@@ -68,6 +68,47 @@ fn selector_filters_cannot_widen_registered_scope() {
 }
 
 #[test]
+fn repository_id_includes_local_root_with_remote_origin() {
+    let first = TempGitRepo::create("repo-id-first");
+    let second = TempGitRepo::create("repo-id-second");
+    first.git([
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repo.git",
+    ]);
+    second.git([
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repo.git",
+    ]);
+
+    let first_registration =
+        register_repository(&first.path, "first", Vec::new(), Vec::new()).expect("first repo");
+    let second_registration =
+        register_repository(&second.path, "second", Vec::new(), Vec::new()).expect("second repo");
+
+    assert_ne!(
+        first_registration.repository_id,
+        second_registration.repository_id
+    );
+}
+
+#[test]
+fn diff_refs_reject_dash_prefixed_values() {
+    let repo = TempGitRepo::create("dash-ref");
+    repo.write("src/lib.rs", "fn value() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    let error = changed_paths_for_diff(&repo.path, "--cached", "HEAD")
+        .expect_err("dash-prefixed refs should be rejected");
+
+    assert!(error.to_string().contains("must not start"));
+}
+
+#[test]
 fn parses_git_name_status_for_rename_copy_and_delete() {
     let changes =
         parse_name_status_z(b"M\0src/lib.rs\0R100\0old.rs\0new.rs\0C100\0a.py\0b.py\0D\0gone.ts\0")

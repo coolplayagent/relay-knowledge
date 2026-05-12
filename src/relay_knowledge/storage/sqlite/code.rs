@@ -252,17 +252,31 @@ pub(super) fn repository_status(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<Option<CodeRepositoryStatus>, StorageError> {
+    if let Some(status) = repository_status_by_column(connection, "repository_id", repository)? {
+        return Ok(Some(status));
+    }
+
+    repository_status_by_column(connection, "alias", repository)
+}
+
+fn repository_status_by_column(
+    connection: &mut Connection,
+    column: &'static str,
+    value: &str,
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
     connection
         .query_row(
-            "
+            &format!(
+                "
             SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
                    last_indexed_commit, tree_hash,
                    state, indexed_file_count, symbol_count, reference_count, chunk_count,
                    stale, degraded_reason
             FROM code_repositories
-            WHERE repository_id = ?1 OR alias = ?1
+            WHERE {column} = ?1
             ",
-            params![repository],
+            ),
+            params![value],
             |row| {
                 Ok(CodeRepositoryStatus {
                     repository_id: row.get(0)?,
