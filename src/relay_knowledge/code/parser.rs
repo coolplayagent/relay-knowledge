@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    panic::{self, AssertUnwindSafe},
+    path::Path,
+};
 
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
@@ -26,61 +30,178 @@ pub(super) fn parse_indexed_file(
     let language = detect_language(path);
     let line_count = count_lines(bytes);
     let (parse_status, degraded_reason, content) = validate_text_content(path, bytes, language)?;
-    build.files.push(RepositoryCodeFileRecord {
-        repository_id: build.repository_id.clone(),
-        file_id: file_id.clone(),
-        path: path.to_owned(),
-        language_id: language.map_or("unknown", |spec| spec.id).to_owned(),
-        blob_hash,
-        byte_len: bytes.len(),
-        line_count,
-        parse_status,
-        degraded_reason: degraded_reason.clone(),
-    });
-
-    if let Some(message) = degraded_reason {
-        build.diagnostics.push(CodeFileDiagnostic {
-            repository_id: build.repository_id.clone(),
-            path: path.to_owned(),
-            parse_status,
-            message,
-        });
-    }
 
     let Some(content) = content else {
+        record_file_status(
+            build,
+            FileStatusInput {
+                path,
+                file_id: &file_id,
+                language_id: language.map_or("unknown", |spec| spec.id),
+                blob_hash: &blob_hash,
+                byte_len: bytes.len(),
+                line_count,
+                parse_status,
+                degraded_reason,
+            },
+        );
         return Ok(());
     };
     let Some(language) = language else {
+        record_file_status(
+            build,
+            FileStatusInput {
+                path,
+                file_id: &file_id,
+                language_id: "unknown",
+                blob_hash: &blob_hash,
+                byte_len: bytes.len(),
+                line_count,
+                parse_status,
+                degraded_reason,
+            },
+        );
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
         return Ok(());
     };
     if parse_status == CodeParseStatus::TextOnly {
+        record_file_status(
+            build,
+            FileStatusInput {
+                path,
+                file_id: &file_id,
+                language_id: language.id,
+                blob_hash: &blob_hash,
+                byte_len: bytes.len(),
+                line_count,
+                parse_status,
+                degraded_reason,
+            },
+        );
         add_file_chunk(build, path, &file_id, language.id, &content)?;
         return Ok(());
     }
 
-    let parsed = parse_tree(language, &content)?;
-    let captures = extract_tag_captures(language, parsed.root_node(), &content)?;
+    parse_syntax_file(
+        build,
+        SyntaxFileInput {
+            path,
+            file_id: &file_id,
+            language,
+            blob_hash: &blob_hash,
+            byte_len: bytes.len(),
+            line_count,
+            content: &content,
+        },
+    )
+}
+
+struct FileStatusInput<'a> {
+    path: &'a str,
+    file_id: &'a str,
+    language_id: &'a str,
+    blob_hash: &'a str,
+    byte_len: usize,
+    line_count: usize,
+    parse_status: CodeParseStatus,
+    degraded_reason: Option<String>,
+}
+
+fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInput<'_>) {
+    build.files.push(RepositoryCodeFileRecord {
+        repository_id: build.repository_id.clone(),
+        file_id: input.file_id.to_owned(),
+        path: input.path.to_owned(),
+        language_id: input.language_id.to_owned(),
+        blob_hash: input.blob_hash.to_owned(),
+        byte_len: input.byte_len,
+        line_count: input.line_count,
+        parse_status: input.parse_status,
+        degraded_reason: input.degraded_reason.clone(),
+    });
+
+    if let Some(message) = input.degraded_reason {
+        build.diagnostics.push(CodeFileDiagnostic {
+            repository_id: build.repository_id.clone(),
+            path: input.path.to_owned(),
+            parse_status: input.parse_status,
+            message,
+        });
+    }
+}
+
+struct SyntaxFileInput<'a> {
+    path: &'a str,
+    file_id: &'a str,
+    language: LanguageSpec,
+    blob_hash: &'a str,
+    byte_len: usize,
+    line_count: usize,
+    content: &'a str,
+}
+
+fn parse_syntax_file(
+    build: &mut SnapshotBuild,
+    input: SyntaxFileInput<'_>,
+) -> Result<(), CodeIndexError> {
+    let parsed = match parse_tree_safely(input.language, input.content) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            record_tree_sitter_failure(build, &input, "parse", &error);
+            return Ok(());
+        }
+    };
+    let root = parsed.root_node();
+    let captures = match extract_tag_captures_safely(input.language, root, input.content) {
+        Ok(captures) => captures,
+        Err(error) => {
+            record_tree_sitter_failure(build, &input, "query", &error);
+            return Ok(());
+        }
+    };
+    let (parse_status, degraded_reason) = if root.has_error() {
+        (
+            CodeParseStatus::Partial,
+            Some(
+                "tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned(),
+            ),
+        )
+    } else {
+        (CodeParseStatus::Parsed, None)
+    };
+    record_file_status(
+        build,
+        FileStatusInput {
+            path: input.path,
+            file_id: input.file_id,
+            language_id: input.language.id,
+            blob_hash: input.blob_hash,
+            byte_len: input.byte_len,
+            line_count: input.line_count,
+            parse_status,
+            degraded_reason,
+        },
+    );
     let context = FileParseContext {
         build,
-        path,
-        file_id: &file_id,
-        language_id: language.id,
-        content: &content,
+        path: input.path,
+        file_id: input.file_id,
+        language_id: input.language.id,
+        content: input.content,
     };
     let mut output = FileParseOutput {
         symbols: Vec::new(),
         references: Vec::new(),
     };
     records_from_captures(&context, captures, &mut output)?;
-    collect_manual_nodes(&context, parsed.root_node(), &mut output)?;
-    let imports = collect_imports(build, path, &file_id, &content, parsed.root_node())?;
+    collect_manual_nodes(&context, root, &mut output)?;
+    let imports = collect_imports(build, input.path, input.file_id, input.content, root)?;
     let chunks = chunks_for_symbols(
         build,
-        path,
-        &file_id,
-        language.id,
-        &content,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
         &output.symbols,
     )?;
 
@@ -90,6 +211,36 @@ pub(super) fn parse_indexed_file(
     build.chunks.extend(chunks);
 
     Ok(())
+}
+
+fn record_tree_sitter_failure(
+    build: &mut SnapshotBuild,
+    input: &SyntaxFileInput<'_>,
+    stage: &str,
+    error: &CodeIndexError,
+) {
+    record_file_status(
+        build,
+        FileStatusInput {
+            path: input.path,
+            file_id: input.file_id,
+            language_id: input.language.id,
+            blob_hash: input.blob_hash,
+            byte_len: input.byte_len,
+            line_count: input.line_count,
+            parse_status: CodeParseStatus::Failed,
+            degraded_reason: Some(tree_sitter_failure_message(stage, error)),
+        },
+    );
+}
+
+fn tree_sitter_failure_message(stage: &str, error: &CodeIndexError) -> String {
+    match error {
+        CodeIndexError::TreeSitter(message) => {
+            format!("tree-sitter {stage} failed: {message}")
+        }
+        _ => error.to_string(),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -192,6 +343,18 @@ fn parse_tree(language: LanguageSpec, content: &str) -> Result<tree_sitter::Tree
         .ok_or_else(|| CodeIndexError::TreeSitter("parser returned no tree".to_owned()))
 }
 
+fn parse_tree_safely(
+    language: LanguageSpec,
+    content: &str,
+) -> Result<tree_sitter::Tree, CodeIndexError> {
+    match panic::catch_unwind(AssertUnwindSafe(|| parse_tree(language, content))) {
+        Ok(result) => result,
+        Err(_) => Err(CodeIndexError::TreeSitter(
+            "parser panicked while parsing file".to_owned(),
+        )),
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TagCapture {
     name: String,
@@ -263,6 +426,21 @@ fn extract_tag_captures(
     }
 
     Ok(captures)
+}
+
+fn extract_tag_captures_safely(
+    language: LanguageSpec,
+    root: Node<'_>,
+    content: &str,
+) -> Result<Vec<TagCapture>, CodeIndexError> {
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        extract_tag_captures(language, root, content)
+    })) {
+        Ok(result) => result,
+        Err(_) => Err(CodeIndexError::TreeSitter(
+            "query extraction panicked while parsing file".to_owned(),
+        )),
+    }
 }
 
 fn records_from_captures(
@@ -706,275 +884,5 @@ fn count_lines(bytes: &[u8]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
-
-    use super::*;
-
-    #[test]
-    fn tree_sitter_captures_symbols_references_imports_and_chunks() {
-        let registration =
-            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        let mut build = SnapshotBuild::new(
-            &registration,
-            "commit".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        );
-        let source = br#"
-use std::time::Duration;
-
-/// Runs retries.
-fn retry_policy() {
-    sleep(Duration::from_secs(1));
-}
-"#;
-
-        parse_indexed_file(&mut build, "src/lib.rs", source).expect("file should parse");
-        let snapshot = build.finish();
-
-        assert!(
-            snapshot
-                .symbols
-                .iter()
-                .any(|symbol| symbol.name == "retry_policy")
-        );
-        assert!(
-            snapshot
-                .references
-                .iter()
-                .any(|reference| reference.name == "sleep")
-        );
-        assert!(
-            snapshot
-                .imports
-                .iter()
-                .any(|import| import.module.contains("std::time"))
-        );
-        assert!(
-            snapshot
-                .chunks
-                .iter()
-                .any(|chunk| chunk.content.contains("retry_policy"))
-        );
-    }
-
-    #[test]
-    fn manual_call_extraction_preserves_same_line_calls() {
-        let registration =
-            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        let build = SnapshotBuild::new(
-            &registration,
-            "commit".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        );
-        let content = "fn run() { foo(); foo(); }\n";
-        let language = detect_language("src/lib.rs").expect("rust should be configured");
-        let parsed = parse_tree(language, content).expect("source should parse");
-        let context = FileParseContext {
-            build: &build,
-            path: "src/lib.rs",
-            file_id: "file",
-            language_id: language.id,
-            content,
-        };
-        let mut output = FileParseOutput {
-            symbols: Vec::new(),
-            references: Vec::new(),
-        };
-
-        collect_manual_nodes(&context, parsed.root_node(), &mut output)
-            .expect("manual extraction should succeed");
-        let foo_ranges = output
-            .references
-            .iter()
-            .filter(|reference| reference.name == "foo")
-            .map(|reference| reference.byte_range.clone())
-            .collect::<Vec<_>>();
-
-        assert_eq!(foo_ranges.len(), 2);
-        assert_ne!(foo_ranges[0], foo_ranges[1]);
-    }
-
-    #[test]
-    fn rust_attributes_are_not_doc_comments() {
-        let snapshot = parse_source_snapshot(
-            "src/lib.rs",
-            br#"
-#[derive(Debug)]
-pub struct Settings;
-"#,
-        );
-        let settings = snapshot
-            .symbols
-            .iter()
-            .find(|symbol| symbol.name == "Settings")
-            .expect("struct symbol should be extracted");
-
-        assert_eq!(settings.doc_comment, None);
-    }
-
-    #[test]
-    fn python_hash_comments_are_doc_comments() {
-        let snapshot = parse_source_snapshot(
-            "src/app.py",
-            br#"
-# Runs the worker.
-def run_worker():
-    pass
-"#,
-        );
-        let worker = snapshot
-            .symbols
-            .iter()
-            .find(|symbol| symbol.name == "run_worker")
-            .expect("function symbol should be extracted");
-
-        assert_eq!(worker.doc_comment.as_deref(), Some("Runs the worker."));
-    }
-
-    #[test]
-    fn text_only_files_keep_bm25_fallback_chunks() {
-        let registration =
-            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        let mut build = SnapshotBuild::new(
-            &registration,
-            "commit".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        );
-
-        parse_indexed_file(&mut build, "README.txt", b"RetryPolicy appears in docs")
-            .expect("file should index as text");
-        let snapshot = build.finish();
-
-        assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::TextOnly);
-        assert_eq!(snapshot.chunks.len(), 1);
-        assert!(snapshot.diagnostics[0].message.contains("grammar"));
-    }
-
-    #[test]
-    fn invalid_utf8_files_degrade_to_lossy_text_chunks() {
-        let registration =
-            CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate");
-        let mut build = SnapshotBuild::new(
-            &registration,
-            "commit".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        );
-
-        parse_indexed_file(
-            &mut build,
-            "src/lib.rs",
-            b"fn retry_policy() {}\n\xff\nfn caller() {}",
-        )
-        .expect("invalid utf8 should degrade instead of failing");
-        let snapshot = build.finish();
-
-        assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::TextOnly);
-        assert!(snapshot.diagnostics[0].message.contains("not valid UTF-8"));
-        assert!(snapshot.chunks[0].content.contains("retry_policy"));
-    }
-
-    #[test]
-    fn generated_record_ids_are_scoped_by_repository() {
-        let first = parse_fixture_snapshot("repo-a");
-        let second = parse_fixture_snapshot("repo-b");
-
-        assert_ne!(
-            first.references[0].reference_id,
-            second.references[0].reference_id
-        );
-        assert_eq!(
-            first
-                .references
-                .iter()
-                .filter(|reference| reference.name == "retry_policy")
-                .count(),
-            2
-        );
-        assert_ne!(first.imports[0].import_id, second.imports[0].import_id);
-        assert_ne!(first.chunks[0].chunk_id, second.chunks[0].chunk_id);
-        assert_ne!(first.calls[0].call_id, second.calls[0].call_id);
-    }
-
-    #[test]
-    fn oversized_files_truncate_on_utf8_boundary() {
-        let mut bytes = vec![b'a'; MAX_TEXT_FILE_BYTES - 1];
-        bytes.extend("é".as_bytes());
-        bytes.extend(b"tail");
-
-        let (status, reason, content) =
-            validate_text_content("src/lib.rs", &bytes, detect_language("src/lib.rs"))
-                .expect("oversized utf8 should degrade");
-        let content = content.expect("oversized file should keep fallback content");
-
-        assert_eq!(status, CodeParseStatus::TextOnly);
-        assert!(
-            reason
-                .expect("reason should explain budget")
-                .contains("exceeds")
-        );
-        assert_eq!(content.len(), MAX_TEXT_FILE_BYTES - 1);
-        assert!(!content.contains('\u{fffd}'));
-    }
-
-    fn parse_fixture_snapshot(repository_id: &str) -> crate::domain::CodeIndexSnapshot {
-        parse_source_snapshot_for_repository(
-            repository_id,
-            "src/main.rs",
-            br#"
-use crate::retry_policy;
-
-fn run_worker() {
-    retry_policy(); retry_policy();
-}
-"#,
-        )
-    }
-
-    fn parse_source_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
-        parse_source_snapshot_for_repository("repo", path, source)
-    }
-
-    fn parse_source_snapshot_for_repository(
-        repository_id: &str,
-        path: &str,
-        source: &[u8],
-    ) -> crate::domain::CodeIndexSnapshot {
-        let registration = CodeRepositoryRegistration::new(
-            repository_id,
-            "alias",
-            "/tmp/repo",
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("registration should validate");
-        let mut build = SnapshotBuild::new(
-            &registration,
-            "commit".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        );
-
-        parse_indexed_file(&mut build, path, source).expect("file should parse");
-
-        build.finish()
-    }
-}
+#[path = "parser_tests.rs"]
+mod tests;

@@ -49,9 +49,12 @@ cannot be confused with hybrid search.
   selected rename sources from the active overlay index.
 - Parser work runs behind application-level `spawn_blocking` boundaries.
   SQLite writes also remain behind the storage blocking worker.
-- Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Unsupported,
-  invalid UTF-8, binary, or oversized files degrade to text-only chunks where
-  possible.
+- Rust, Python, TypeScript, and TSX files use tree-sitter grammars. Syntax
+  trees containing error nodes are indexed as `partial` with file diagnostics
+  while retaining reliable symbols, references, imports, calls, and chunks.
+  Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only
+  chunks where possible. Parser or query failures are isolated to the affected
+  file as `failed` diagnostics so one bad file cannot abort a repository batch.
 - Revision-scoped queries are served only when the requested ref resolves to the
   currently indexed commit or to the explicit `worktree` overlay ref; callers
   must index another ref before querying it. Refs beginning with `-` are
@@ -100,8 +103,10 @@ The Rust test suite covers:
 
 - selector validation and query limits,
 - Git name-status parsing for add/modify/delete/rename/copy/type-change,
-- tree-sitter symbol, reference, import, and chunk extraction,
-- text-only degradation for unsupported files,
+- tree-sitter symbol, reference, import, chunk extraction, and partial-parse
+  diagnostics,
+- text-only and failed-file degradation for unsupported, malformed, or parser
+  failure cases,
 - SQLite code repository persistence and query retrieval,
 - worktree overlay scope, freshness policy, provenance, and impact-analysis
   edge cases,
