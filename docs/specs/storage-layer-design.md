@@ -20,8 +20,9 @@ v1 建议采用 **SQLite-first**:
 
 当前实现已经落地 SQLite-first 的最小生产路径:
 
-- `storage` 模块定义 `GraphStore`、`MutationLogStore`、`IndexStore` 和 `KnowledgeStore` contract。
+- `storage` 模块定义 `GraphStore`、`MutationLogStore`、`IndexStore`、`CodeGraphStore` 和 `KnowledgeStore` contract。
 - `SqliteGraphStore` 负责 evidence、entity、mutation log、graph version 和 index metadata。
+- `SqliteGraphStore` 同时承接 tree-sitter 解析输出的代码文件、符号、引用、chunk 和 parse status 诊断。
 - `indexing` 模块负责 index refresh plan 和 index family 去重选择。
 - `retrieval` 模块负责 query 文本、limit 和 freshness policy 的检索计划校验。
 - application service 默认在 `paths.data_dir/relay-knowledge.sqlite` 打开 SQLite 数据库。
@@ -279,6 +280,30 @@ CREATE TABLE fact_evidence (
 - `fact_table` 只允许 `entities`、`relations`、`claims`。
 - `role` 支持 `supporting`、`contradicting`、`source`、`derived_from`。
 - 后续如需更强约束，可拆成三张关联表；v1 优先保持写入路径简单。
+
+### 4.2.1 当前代码图 v1 表
+
+当前 SQLite 实现已为 tree-sitter 输出增加专用表，而不是把代码结构塞入通用 evidence:
+
+```sql
+CREATE TABLE code_files (
+    source_scope TEXT NOT NULL,
+    path TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    language_id TEXT NOT NULL,
+    parse_status TEXT NOT NULL,
+    diagnostic TEXT,
+    created_graph_version INTEGER NOT NULL,
+    PRIMARY KEY (source_scope, path)
+);
+
+CREATE TABLE code_symbols (...);
+CREATE TABLE code_references (...);
+CREATE TABLE code_chunks (...);
+CREATE TABLE code_chunk_symbols (...);
+```
+
+这些表记录版本化的 repository-relative path、syntax-level symbol/reference/chunk、extractor metadata 和 parse status。对同一 `source_scope + path` 的新解析结果在事务内替换旧代码事实，并推进 graph version、追加 mutation log、标记派生索引 stale。启动时如发现早期实验性 `code_*` 表缺少 v1 必需列，SQLite adapter 会先把整组旧表重命名为 `*_legacy_N`，再创建当前 v1 表，避免旧本地状态阻塞服务启动。
 
 ### 4.3 版本和变更日志
 

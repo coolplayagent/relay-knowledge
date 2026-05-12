@@ -4,12 +4,15 @@ use relay_knowledge::{
     api::{GraphInspectionRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, RetrievalHit,
+        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
+        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
+        RetrievalHit,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        GraphInspection, GraphSearchRequest, GraphStore, IndexStore, MutationLogEntry,
-        MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
+        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
+        MutationLogEntry, MutationLogStore, SqliteGraphStore, StorageError, StorageFuture,
     },
 };
 
@@ -207,6 +210,11 @@ impl GraphStore for RefreshFailStore {
                 entity_count: 0,
                 evidence_count: 0,
                 mutation_count: usize::from(version > 0),
+                code_file_count: 0,
+                code_symbol_count: 0,
+                code_reference_count: 0,
+                code_chunk_count: 0,
+                code_parse_status_counts: Default::default(),
             })
         })
     }
@@ -251,6 +259,40 @@ impl IndexStore for RefreshFailStore {
                 "index metadata unavailable".to_owned(),
             ))
         })
+    }
+}
+
+impl CodeGraphStore for RefreshFailStore {
+    fn commit_code_graph_batch(
+        &self,
+        _batch: CodeGraphBatch,
+    ) -> StorageFuture<'_, CodeGraphCommitReceipt> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "code graph storage unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn search_code_symbols(
+        &self,
+        _request: CodeSymbolSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeSymbolRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn search_code_references(
+        &self,
+        _request: CodeReferenceSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeReferenceRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn search_code_chunks(
+        &self,
+        _request: CodeChunkSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
     }
 }
 

@@ -11,7 +11,9 @@ use std::{error::Error, fmt, future::Future, pin::Pin};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus, RetrievalHit,
+    CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeParseStatusCounts,
+    CodeReferenceRecord, CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion,
+    IndexKind, IndexStatus, RetrievalHit,
 };
 
 pub use sqlite::SqliteGraphStore;
@@ -49,16 +51,70 @@ pub trait IndexStore: Send + Sync {
     ) -> StorageFuture<'_, IndexStatus>;
 }
 
-/// Combined storage facade used by the application service.
-pub trait KnowledgeStore: GraphStore + MutationLogStore + IndexStore {}
+/// Code graph fact persistence and query contract for tree-sitter output.
+pub trait CodeGraphStore: Send + Sync {
+    fn commit_code_graph_batch(
+        &self,
+        batch: CodeGraphBatch,
+    ) -> StorageFuture<'_, CodeGraphCommitReceipt>;
 
-impl<T> KnowledgeStore for T where T: GraphStore + MutationLogStore + IndexStore {}
+    fn search_code_symbols(
+        &self,
+        request: CodeSymbolSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeSymbolRecord>>;
+
+    fn search_code_references(
+        &self,
+        request: CodeReferenceSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeReferenceRecord>>;
+
+    fn search_code_chunks(
+        &self,
+        request: CodeChunkSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeChunkRecord>>;
+}
+
+/// Combined storage facade used by the application service.
+pub trait KnowledgeStore: GraphStore + MutationLogStore + IndexStore + CodeGraphStore {}
+
+impl<T> KnowledgeStore for T where T: GraphStore + MutationLogStore + IndexStore + CodeGraphStore {}
 
 /// Bounded graph search request against an explicit graph snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphSearchRequest {
     pub query: String,
     pub source_scope: Option<String>,
+    pub graph_version: GraphVersion,
+    pub limit: usize,
+}
+
+/// Bounded code symbol search against an explicit graph snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSymbolSearchRequest {
+    pub source_scope: Option<String>,
+    pub path: Option<String>,
+    pub name: Option<String>,
+    pub graph_version: GraphVersion,
+    pub limit: usize,
+}
+
+/// Bounded code reference search against an explicit graph snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeReferenceSearchRequest {
+    pub source_scope: Option<String>,
+    pub path: Option<String>,
+    pub symbol_text: Option<String>,
+    pub target_symbol_id: Option<String>,
+    pub graph_version: GraphVersion,
+    pub limit: usize,
+}
+
+/// Bounded code chunk search against an explicit graph snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeChunkSearchRequest {
+    pub source_scope: Option<String>,
+    pub path: Option<String>,
+    pub query: Option<String>,
     pub graph_version: GraphVersion,
     pub limit: usize,
 }
@@ -70,6 +126,11 @@ pub struct GraphInspection {
     pub entity_count: usize,
     pub evidence_count: usize,
     pub mutation_count: usize,
+    pub code_file_count: usize,
+    pub code_symbol_count: usize,
+    pub code_reference_count: usize,
+    pub code_chunk_count: usize,
+    pub code_parse_status_counts: CodeParseStatusCounts,
 }
 
 /// Mutation log entry returned for replay and index refresh planning.

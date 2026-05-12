@@ -645,10 +645,12 @@ where
             )
         }
         "graph.inspect" => format!(
-            "graph_version={} entities={} evidence={}",
+            "graph_version={} entities={} evidence={} code_files={} code_symbols={}",
             value["graph"]["graph_version"].as_u64().unwrap_or(0),
             value["graph"]["entity_count"].as_u64().unwrap_or(0),
-            value["graph"]["evidence_count"].as_u64().unwrap_or(0)
+            value["graph"]["evidence_count"].as_u64().unwrap_or(0),
+            value["graph"]["code_file_count"].as_u64().unwrap_or(0),
+            value["graph"]["code_symbol_count"].as_u64().unwrap_or(0)
         ),
         "index.refresh" => format!(
             "refreshed_indexes={}",

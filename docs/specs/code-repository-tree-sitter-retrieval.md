@@ -575,7 +575,7 @@ Health/status 必须能回答:
 
 建议阶段:
 
-1. **v1 数据 contract**: 增加 code source scope、代码图实体、diff contract、scoped index metadata。
+1. **v1 数据 contract**: 增加 code source scope、代码图实体、diff contract、scoped index metadata。当前实现已落地 tree-sitter 输出承接层: `CodeFileRecord`、`CodeSymbolRecord`、`CodeReferenceRecord`、`CodeChunkRecord`、parse status 计数、代码图存储 trait 和 SQLite 表；Git diff contract 与 scoped index metadata 仍在后续阶段。
 2. **v1 parser adapter**: 接入少量高价值语言，例如 Rust、TypeScript、Python，支持 definitions/references/imports/chunks。
 3. **v1 full build + BM25**: Git tracked files 全量构建，代码 chunk 和 symbol BM25 可查询。
 4. **v1 incremental update**: Git diff/status + content hash + 局部 graph/index refresh。

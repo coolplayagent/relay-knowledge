@@ -95,7 +95,9 @@ function statusSection(health: HealthResponse): HTMLElement {
     icon("health-icon"),
     textElement("span", undefined, health.healthy ? "healthy" : "degraded"),
     textElement("span", undefined, `entities ${health.graph.entity_count}`),
-    textElement("span", undefined, `evidence ${health.graph.evidence_count}`)
+    textElement("span", undefined, `evidence ${health.graph.evidence_count}`),
+    textElement("span", undefined, `code files ${health.graph.code_file_count}`),
+    textElement("span", undefined, `symbols ${health.graph.code_symbol_count}`)
   );
   section.append(line);
 

@@ -6,14 +6,18 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+mod code_graph;
+
 use crate::{
     domain::{
-        CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexState, IndexStatus,
-        RetrievalHit,
+        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
+        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexState,
+        IndexStatus, RetrievalHit,
     },
     storage::{
-        GraphInspection, GraphSearchRequest, GraphStore, IndexStore, MutationLogEntry,
-        MutationLogStore, StorageError, StorageFuture,
+        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
+        MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
     },
 };
 
@@ -108,6 +112,36 @@ impl IndexStore for SqliteGraphStore {
     }
 }
 
+impl CodeGraphStore for SqliteGraphStore {
+    fn commit_code_graph_batch(
+        &self,
+        batch: CodeGraphBatch,
+    ) -> StorageFuture<'_, CodeGraphCommitReceipt> {
+        self.run(move |connection| code_graph::commit_batch(connection, batch))
+    }
+
+    fn search_code_symbols(
+        &self,
+        request: CodeSymbolSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeSymbolRecord>> {
+        self.run(move |connection| code_graph::search_symbols(connection, request))
+    }
+
+    fn search_code_references(
+        &self,
+        request: CodeReferenceSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeReferenceRecord>> {
+        self.run(move |connection| code_graph::search_references(connection, request))
+    }
+
+    fn search_code_chunks(
+        &self,
+        request: CodeChunkSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
+        self.run(move |connection| code_graph::search_chunks(connection, request))
+    }
+}
+
 fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
@@ -166,6 +200,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
             params![kind.as_str()],
         )?;
     }
+    code_graph::initialize_schema(connection)?;
 
     Ok(())
 }
@@ -249,6 +284,11 @@ fn inspect_graph(connection: &mut Connection) -> Result<GraphInspection, Storage
         entity_count: count_rows(connection, "entities")?,
         evidence_count: count_rows(connection, "evidence")?,
         mutation_count: count_rows(connection, "graph_mutations")?,
+        code_file_count: count_rows(connection, "code_files")?,
+        code_symbol_count: count_rows(connection, "code_symbols")?,
+        code_reference_count: count_rows(connection, "code_references")?,
+        code_chunk_count: count_rows(connection, "code_chunks")?,
+        code_parse_status_counts: code_graph::parse_status_counts(connection)?,
     })
 }
 
