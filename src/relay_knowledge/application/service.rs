@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use crate::{
@@ -309,6 +309,7 @@ impl RelayKnowledgeService {
 #[derive(Clone)]
 struct StorageProvider {
     path: Option<PathBuf>,
+    init_lock: Arc<Mutex<()>>,
     ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
     init_lock: Arc<tokio::sync::Mutex<()>>,
 }
@@ -317,6 +318,7 @@ impl StorageProvider {
     fn sqlite(path: PathBuf) -> Self {
         Self {
             path: Some(path),
+            init_lock: Arc::new(Mutex::new(())),
             ready: Arc::new(OnceLock::new()),
             init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -328,6 +330,7 @@ impl StorageProvider {
 
         Self {
             path: None,
+            init_lock: Arc::new(Mutex::new(())),
             ready: Arc::new(ready),
             init_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -347,18 +350,18 @@ impl StorageProvider {
                 "storage provider was not initialized".to_owned(),
             ));
         };
-        let store = tokio::task::spawn_blocking(move || {
-            SqliteGraphStore::open(path).map(|store| Arc::new(store) as Arc<dyn KnowledgeStore>)
+        let ready = Arc::clone(&self.ready);
+        let init_lock = Arc::clone(&self.init_lock);
+        tokio::task::spawn_blocking(move || {
+            let _guard = init_lock.lock().map_err(|_| StorageError::LockPoisoned)?;
+            if let Some(store) = ready.get() {
+                return Ok(Arc::clone(store));
+            }
+            let store = Arc::new(SqliteGraphStore::open(path)?) as Arc<dyn KnowledgeStore>;
+            let _ = ready.set(Arc::clone(&store));
+            Ok(store)
         })
-        .await??;
-
-        if self.ready.set(Arc::clone(&store)).is_ok() {
-            return Ok(store);
-        }
-
-        self.ready.get().cloned().ok_or_else(|| {
-            StorageError::InvalidInput("storage provider was not initialized".to_owned())
-        })
+        .await?
     }
 }
 
