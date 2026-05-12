@@ -7,6 +7,8 @@ use std::{
 
 mod state;
 
+mod audit_bridge;
+mod code_tools;
 mod http_contract;
 
 use axum::{
@@ -43,7 +45,12 @@ use crate::{
     project::PROJECT_NAME,
 };
 
-use super::{AgentAdapterError, AgentAdapterErrorKind, authorize_limit, authorize_scope};
+use super::{
+    AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, authorize_limit,
+    authorize_scope,
+};
+use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
+use code_tools::{code_impact_tool_definition, code_query_tool_definition, run_code_tool};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -56,6 +63,7 @@ pub struct McpServer {
     network: NetworkRuntime,
     agent: AgentRuntimeConfig,
     qos: QosRuntime,
+    audit: AgentAuditLog,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
 }
@@ -72,6 +80,7 @@ impl McpServer {
             network,
             agent,
             qos: QosRuntime::default(),
+            audit: AgentAuditLog::default(),
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
         }
@@ -113,6 +122,11 @@ impl McpServer {
     #[cfg(test)]
     pub fn qos_snapshot(&self) -> crate::net::qos::QosSnapshot {
         self.qos.snapshot()
+    }
+
+    #[cfg(test)]
+    pub fn audit_snapshot(&self) -> Vec<AgentAuditEvent> {
+        self.audit.snapshot()
     }
 }
 
@@ -324,6 +338,7 @@ async fn handle_mcp_post(
         Err(reason) => {
             let error =
                 AgentAdapterError::new(AgentAdapterErrorKind::QosRejected, qos_message(reason));
+            record_mcp_qos_rejection(&server, method, &id, error.kind.as_str());
             return if method == "tools/call" {
                 json_rpc_success(id, tool_error_result(error))
             } else {
@@ -366,6 +381,8 @@ fn is_known_tool(name: &str) -> bool {
             | "relay.health"
             | "relay.service_status"
             | "relay.index_status"
+            | "relay.code_query"
+            | "relay.code_impact"
             | "relay.refresh_indexes"
     )
 }
@@ -461,6 +478,8 @@ async fn run_cancellable_tool_call(
     params: ToolCallParams,
     request_id: String,
 ) -> Value {
+    let started = Instant::now();
+    let operation = params.name.clone();
     let (mut cancellation, _registration) = server.cancellations.register(request_id.clone());
     let timeout = Duration::from_millis(server.agent.access_policy.max_runtime_ms);
     let tool = run_tool_call(server, params, request_id.clone());
@@ -481,6 +500,13 @@ async fn run_cancellable_tool_call(
         }
     };
 
+    record_mcp_tool_audit(
+        server,
+        &operation,
+        &request_id,
+        &result,
+        elapsed_millis(started),
+    );
     result
 }
 
@@ -503,6 +529,9 @@ async fn run_tool_call(server: &McpServer, params: ToolCallParams, request_id: S
         "relay.health" => health_tool(server, request_id).await,
         "relay.service_status" => service_status_tool(server, request_id).await,
         "relay.index_status" => index_status_tool(server, request_id).await,
+        "relay.code_query" | "relay.code_impact" => {
+            run_code_tool(server, params.name.as_str(), params.arguments, request_id).await
+        }
         "relay.refresh_indexes" => refresh_indexes_tool(server, params.arguments, request_id).await,
         _ => json!({
             "content": [{"type": "text", "text": "unknown MCP tool"}],
@@ -680,6 +709,8 @@ fn tools_list_result(policy: &AgentAccessPolicy) -> Value {
             "relay.index_status",
             "Return derived retrieval index status.",
         ),
+        code_query_tool_definition(),
+        code_impact_tool_definition(),
     ];
     if policy.allow_index_refresh {
         tools.push(refresh_indexes_tool_definition());
@@ -823,6 +854,10 @@ fn invalid_arguments(error: serde_json::Error) -> AgentAdapterError {
     )
 }
 
+fn domain_argument_error(error: impl fmt::Display) -> AgentAdapterError {
+    AgentAdapterError::new(AgentAdapterErrorKind::InvalidArgument, error.to_string())
+}
+
 fn json_rpc_success(id: Value, result: Value) -> Response {
     json_response(
         StatusCode::OK,
@@ -907,3 +942,7 @@ mod mcp_test_support;
 #[cfg(test)]
 #[path = "mcp_tests.rs"]
 mod mcp_tests;
+
+#[cfg(test)]
+#[path = "mcp_tool_tests.rs"]
+mod mcp_tool_tests;

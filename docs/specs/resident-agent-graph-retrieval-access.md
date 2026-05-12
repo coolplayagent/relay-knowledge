@@ -157,8 +157,10 @@ MCP server 必须声明 tools、resources 和 prompts capability，并按 access
 `relay-knowledge service run --mcp streamable-http` 或
 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`，默认 endpoint 为 `/mcp`。
 实现支持 `initialize`、`notifications/initialized`、`notifications/cancelled`、
-`ping`、`tools/list` 和 `tools/call`。Resources、prompts、ACP adapter 和旧 HTTP+SSE
-兼容端点仍是后续工作。
+`ping`、`tools/list` 和 `tools/call`。MCP tools 已覆盖通用图检索、诊断、
+索引状态、授权 code graph query 和授权 code impact。Resources、prompts 和旧
+HTTP+SSE 兼容端点仍是后续工作。ACP 已提供本地会话 adapter，用于 agent client
+会话入口；它不是通用网络 server，也不提供文件编辑、终端或代码修改能力。
 `initialize` 必须携带匹配的 `protocolVersion`、object 形态的 `capabilities` 和
 非空 `clientInfo.name/version`，通过后返回加密随机的 server-issued
 `Mcp-Session-Id` header。客户端必须随后发送 `notifications/initialized`，并在
@@ -176,6 +178,8 @@ MCP server 必须声明 tools、resources 和 prompts capability，并按 access
 | `relay.health` | enabled | `health` |
 | `relay.service_status` | enabled | `service_status` |
 | `relay.index_status` | enabled | `health` response 中的 index status projection |
+| `relay.code_query` | enabled | `CodeRetrievalRequest` -> `query_code_repository` |
+| `relay.code_impact` | enabled | `CodeImpactRequest` -> `impact_code_repository` |
 | `relay.refresh_indexes` | disabled | `IndexRefreshRequest` -> `refresh_indexes` |
 
 `relay.retrieve_context` input schema:
@@ -230,6 +234,9 @@ Prompt text must instruct hosts to treat returned context as evidence with citat
 ## 6. ACP Adapter Contract
 
 ACP adapter exposes `relay-knowledge` as a knowledge retrieval agent-facing endpoint, not as a general coding agent.
+当前实现提供本地 ACP session adapter，供常驻进程或宿主在进程内桥接 ACP 会话。
+该 adapter 复用 unified application service、agent access policy、QoS runtime、
+cancellation token 和 bounded audit log；不直接访问 SQLite、Git 或索引实现。
 
 ### 6.1 Initialize
 
@@ -294,6 +301,19 @@ ACP progress updates:
 - release QoS in-flight budget.
 - emit audit event with `cancelled`.
 - avoid returning partial context as completed unless explicitly marked `cancelled`.
+
+## 6.5 Audit Log
+
+MCP 和本地 ACP adapter 都记录 bounded in-process audit events。事件字段至少包含:
+
+- protocol、operation、request_id、trace_id 和 runtime_identity。
+- QoS decision: admitted 或 rejected。
+- source_scope、freshness、limit、result_count、truncated。
+- completed、failed 或 cancelled 状态以及 stable error_kind。
+
+Audit event 不保存原始 prompt、完整检索内容、secret、完整本地路径或未授权 scope
+列表。宿主需要持久审计时，应从该 bounded event surface 接入自己的日志/telemetry
+pipeline。
 
 ## 7. Canonical Result Shape
 

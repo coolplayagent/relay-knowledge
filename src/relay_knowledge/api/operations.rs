@@ -119,6 +119,19 @@ pub struct ServiceStatusResponse {
     pub agent_protocols: AgentProtocolStatus,
 }
 
+/// Startup recovery report for resident service mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceRecoveryReport {
+    pub metadata: ApiMetadata,
+    pub graph_version: u64,
+    pub stale_index_kinds: Vec<IndexKind>,
+    pub refreshed_index_kinds: Vec<IndexKind>,
+    pub index_lag_max: u64,
+    pub task_queue_depth: usize,
+    pub dead_letter_count: usize,
+    pub heartbeat_state: String,
+}
+
 /// Aggregated health response for CLI/Web/service diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HealthResponse {
