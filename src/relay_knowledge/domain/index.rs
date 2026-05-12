@@ -33,6 +33,31 @@ impl fmt::Display for IndexKind {
     }
 }
 
+/// Source modality covered by a derived index cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexModality {
+    Text,
+}
+
+impl IndexModality {
+    /// The v1 evidence modality refreshed by BM25, semantic, and vector indexes.
+    pub const TEXT: Self = Self::Text;
+
+    /// Stable storage and API representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+        }
+    }
+}
+
+impl fmt::Display for IndexModality {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// Operational state of a derived index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,6 +66,18 @@ pub enum IndexState {
     Stale,
     Failed,
     Paused,
+}
+
+impl IndexState {
+    /// Stable storage and API representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Failed => "failed",
+            Self::Paused => "paused",
+        }
+    }
 }
 
 /// Versioned status for a derived index.
@@ -87,5 +124,18 @@ mod tests {
         assert_eq!(IndexKind::Bm25.to_string(), "bm25");
         assert_eq!(IndexKind::Semantic.to_string(), "semantic");
         assert_eq!(IndexKind::Vector.to_string(), "vector");
+    }
+
+    #[test]
+    fn index_modality_has_stable_display_values() {
+        assert_eq!(IndexModality::Text.to_string(), "text");
+    }
+
+    #[test]
+    fn index_state_has_stable_storage_values() {
+        assert_eq!(IndexState::Fresh.as_str(), "fresh");
+        assert_eq!(IndexState::Stale.as_str(), "stale");
+        assert_eq!(IndexState::Failed.as_str(), "failed");
+        assert_eq!(IndexState::Paused.as_str(), "paused");
     }
 }

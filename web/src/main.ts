@@ -162,6 +162,7 @@ function statusSection(status: ProjectStatusResponse, health: HealthResponse): H
     icon(health.healthy ? "health-icon" : "warn-icon"),
     textElement("span", undefined, health.healthy ? "healthy" : "degraded"),
     textElement("span", undefined, `index lag ${lag}`),
+    textElement("span", undefined, `queue ${health.index_refresh.queue_depth}`),
     textElement("span", undefined, `mutations ${health.graph.mutation_count}`)
   );
 
@@ -235,6 +236,12 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
       health.healthy ? "ready" : "degraded",
       health.healthy ? "good" : "warn",
       `${status.runtime.qos_max_in_flight_requests} in-flight / ${status.runtime.qos_max_queue_depth} queue`
+    ),
+    readinessItem(
+      "Refresh recovery",
+      health.index_refresh.dead_letter_count > 0 ? "failed" : "ready",
+      health.index_refresh.dead_letter_count > 0 ? "bad" : "good",
+      `${health.index_refresh.queue_depth} queued / ${health.index_refresh.dead_letter_count} dead-letter`
     )
   );
   section.append(grid);

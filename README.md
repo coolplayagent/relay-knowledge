@@ -46,6 +46,7 @@ SQLite storage is opened through the storage boundary, and blocking database wor
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
 Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
 Hybrid retrieval uses the SQLite-backed BM25 read model plus graph evidence fallback, fuses candidates with reciprocal-rank fusion, and returns a context pack with retriever sources, ranking explanations, freshness, truncation, and budget metadata.
+Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, while explicit refresh paths surface queue-cap failures instead of reporting false freshness.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 
@@ -101,7 +102,7 @@ uv run --extra dev pytest tests/browser
 ```
 
 The static Web workspace renders project health, GraphRAG readiness, graph
-counts, index freshness, runtime budgets, and interactive operation composers
+counts, scoped index freshness, refresh queue diagnostics, runtime budgets, and interactive operation composers
 for retrieval, ingestion, graph inspection, code repository workflows, index
 refresh, and service runtime commands. The current Web client still reads live
 diagnostics only from `/api/project/status` and `/api/health`; operation

@@ -95,9 +95,30 @@ Extracted facts
 - 索引失败不能回滚图写入，但必须记录 stale 状态和失败原因。
 - 写入 API 接收批次，避免每条事实单独开事务。
 
-当前最小实现中，evidence 写入、entity upsert、mutation log 追加和 graph version bump
-在同一个 SQLite transaction 内完成。提交会把全部 index metadata 标记为 stale；
-`refresh_indexes` 和 `ingest` 后置刷新会把指定 index family 标记到当前 graph version。
+当前实现中，evidence 写入、entity upsert、mutation log 追加、affected
+scope/entity/evidence/source-hash 记录和 graph version bump 在同一个 SQLite
+transaction 内完成。提交会把受影响 scope 的 kind/scope/modality cursor 和
+聚合 index metadata 标记为 stale；affected scope 包括新增 evidence scope、已有
+evidence 被移动前的旧 scope，以及 relation/claim/event 引用的 evidence id 所属
+scope，避免结构化事实更新漏掉 scoped cursor。`refresh_indexes`、`ingest` 后置刷新和
+`wait-until-fresh` 查询会通过 bounded refresh queue、lease、retry backoff 和
+mutation-log replay 把指定 index family 推进到目标 graph version。应用层从小的
+初始 queue budget 开始补发 refresh work，遇到更大的 scoped backlog 时按 bounded
+capacity 增长；达到上限时 health/service diagnostics 返回 stale 和 queue lag，而不把
+诊断端点变成 storage unavailable；显式 `refresh_indexes` 和 `wait-until-fresh`
+在必要 refresh work 无法入队时返回可重试错误，不能把 stale index 当作成功。
+queue capacity 检查和 task upsert 必须处于同一个 SQLite immediate transaction，
+保证跨进程 enqueue 也不能越过 bounded queue 上限。任务完成和失败转换必须匹配 active
+`lease_owner`、`attempt_count` 和未过期 lease；lease 过期恢复达到 attempt 预算后会进入
+dead-letter 并标记 cursor failed。health/service 这类诊断 reconciler 不会自动复活
+dead-letter task，只有显式 refresh/retry 路径可以重置 dead-letter。运行中的 task
+保持被 worker claim 时的 target graph version；如果完成期间同 scope 又出现更新，
+completion 会把 cursor 留在 stale 状态、重置普通 retry attempt 预算并补发后续
+refresh，而不会错误标记 fresh。升级或部分迁移状态下如果 aggregate `index_status`
+已经存在但 scoped cursor 尚未生成，fallback refresh task 必须从
+`index_status.indexed_graph_version` 开始，而不是从 graph version 0 全量重放。
+Health 和 service diagnostics 会暴露 queue depth、
+oldest task age、dead-letter count 和 per-kind index lag。
 
 ### 2.3 读取路径
 

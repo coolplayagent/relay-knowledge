@@ -57,10 +57,12 @@ GraphRAG 能力必须保持可解释:
 
 ### 3.4 索引刷新与后台恢复
 
-- `refresh_indexes` 需要从 metadata 更新升级为真实 read model 刷新或刷新任务调度。
-- index cursor 必须按 kind、scope、modality、model 和 graph version 记录，不能只用全局 freshness 代表所有快照。
-- 后台服务必须使用 bounded queues、retry backoff、lease、dead-letter、startup reconciler 和 stale diagnostics。
-- 启动时如果 graph version 领先 index cursor，reconciler 必须补发刷新或报告 degraded。
+- v1 已经把 `refresh_indexes`、ingest 后置刷新和 `wait-until-fresh` 查询接到
+  bounded refresh queue、persistent task lease、retry backoff、mutation-log
+  replay 和 scoped cursor 更新路径。
+- index cursor 必须按 kind、scope、modality、model 和 graph version 记录，不能只用全局 freshness 代表所有快照；当前 Rust 实现已覆盖 kind/scope/text modality，后续 semantic/vector backend 接入时必须补 model/dimension 元数据。
+- 后台服务必须使用 bounded queues、retry backoff、lease、dead-letter、startup reconciler 和 stale diagnostics；当前 foreground service path 已暴露 queue depth、oldest task age、dead-letter count 和 per-kind lag。
+- 启动时如果 graph version 领先 index cursor，reconciler 必须补发刷新或报告 degraded；当前 health/service status 会补发缺失 refresh task，显式 `refresh_indexes` 负责 drain。
 
 ### 3.5 Agent 与服务化
 
@@ -90,7 +92,7 @@ GraphRAG 能力必须保持可解释:
 
 - 设计 scoped index cursor schema，记录 kind、scope、modality、model、indexed graph version 和 last error。
 - mutation log 增加 affected scope、evidence id、entity id、source hash 和 code path hints。
-- 增加 bounded index refresh queue、lease、retry backoff、dead-letter 和 startup reconciler。
+- 增加 bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler。
 - health/service doctor 返回 queue depth、oldest task age、dead-letter count、index lag 和 stale reason。
 
 ### Phase 3: Agent 与常驻服务

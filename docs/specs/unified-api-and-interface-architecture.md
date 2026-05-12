@@ -144,12 +144,13 @@ CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async applica
 
 Web v1 默认采用 React + Vite + TypeScript。Web 是交互层，不是第二套业务后端。
 当前 Web workspace 工程位于 `web/`，使用 TypeScript 静态前端，通过前端 typed
-contract 复用 `ProjectStatusResponse`、`HealthResponse` 和 index status 字段形状。
+contract 复用 `ProjectStatusResponse`、`HealthResponse`、index status、
+scoped index cursor 和 index refresh diagnostics 字段形状。
 Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/health`，不得在前端
 伪造健康状态、图版本、运行时路径或索引元数据。当前 Web 页面从这两个 contract 派生
 Status、GraphRAG readiness、Indexes、Runtime 和操作工作台状态；GraphRAG readiness 只
-展示 evidence graph、BM25 read model、semantic cursor、vector cursor、code graph 和
-runtime budgets 的诊断投影，不在前端执行索引、检索或图谱变更。当前操作工作台可以为
+展示 evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、
+refresh recovery 和 runtime budgets 的诊断投影，不在前端执行索引、检索或图谱变更。当前操作工作台可以为
 检索、摄取、图检查、代码仓库、索引刷新和服务运行生成 typed request / CLI command
 preview，并将操作加入本地 staged queue；在 Rust HTTP adapter 暴露可执行 Web endpoint
 前，不得把这些 preview 渲染成已执行的后端结果。浏览器测试只验证交互层能渲染统一

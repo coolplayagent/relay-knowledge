@@ -238,7 +238,12 @@ last_error_message
 
 ```
 
-任务开始时获取 lease，定期续租并写入进度。进程崩溃后，新进程可以把 lease 过期的 `running` 任务恢复为 `retrying`。任务必须以 `input_fingerprint` 和稳定 ID 保证幂等。
+任务开始时获取 lease，定期续租并写入进度。完成或失败上报必须携带当前
+`lease_owner` 和 `attempt_count`，并只允许仍处于 `running` 且 lease 未过期的
+拥有者推进状态，避免过期 worker 覆盖已重领或已完成的任务。进程崩溃后，新进程
+可以把 lease 过期的 `running` 任务恢复为 `retrying`；超过 attempt 预算的过期
+lease 必须进入 `dead_letter` 并把相关 cursor 标记为 failed。任务必须以
+`input_fingerprint` 和稳定 ID 保证幂等。
 
 ### 5.4 Reconciler
 
@@ -350,14 +355,25 @@ Service 或 launchd 管理进程生命周期。
 
 - `service_status_reports_silent_update_configuration`
 - `background_queue_rejects_when_capacity_is_exceeded`
+- `health_queues_scoped_backlogs_larger_than_initial_budget`
+- `refresh_indexes_drains_scoped_backlogs_larger_than_single_page`
 - `index_refresh_resumes_after_process_restart`
 - `expired_task_lease_is_requeued_once`
+- `expired_task_lease_dead_letters_after_attempt_budget`
 - `reconciler_replays_missing_index_refresh_after_graph_commit`
 - `failed_vector_index_does_not_block_bm25_refresh`
 - `query_reports_stale_when_index_lags`
 - `maintenance_checkpoint_does_not_block_query_runtime`
 - `dead_letter_records_repeated_non_retryable_failure`
 - `resource_budget_pauses_low_priority_tasks`
+
+当前 Rust v1 主路径已经覆盖 bounded index refresh queue、超过初始容量的 scoped
+backlog 诊断降级、显式 refresh 的 queue-cap 错误、跨进程 enqueue 原子容量检查、
+active lease/attempt 守卫、running task target 保护、superseded refresh attempt
+重置、lease 过期恢复和 dead-letter、diagnostics reconciler
+保留 dead-letter 隔离、mutation-log replay、scoped cursor freshness、
+health/service stale diagnostics 和 foreground `refresh_indexes` drain。后续 service manager、silent update 配置、
+maintenance checkpoint、资源预算暂停和完整 dead-letter operator 流程仍需按上表补齐。
 
 验收标准:
 
