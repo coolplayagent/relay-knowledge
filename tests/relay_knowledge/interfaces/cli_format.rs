@@ -370,6 +370,7 @@ fn relay_command() -> Command {
     ] {
         command.env_remove(variable);
     }
+    command.env(RELAY_KNOWLEDGE_HOME, isolated_home("relay-command"));
 
     command
 }
