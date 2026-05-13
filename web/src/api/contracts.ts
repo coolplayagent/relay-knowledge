@@ -51,6 +51,15 @@ export type IndexCursor = IndexStatus & {
   model_dimension?: number;
 };
 
+export type IndexStalenessReason = {
+  kind: "bm25" | "semantic" | "vector";
+  source_scope?: string;
+  modality?: "text" | "image" | "layout" | "table";
+  reason: string;
+  lag_versions: number;
+  last_error?: string;
+};
+
 export type IndexRefreshDiagnostics = {
   queue_depth: number;
   running_count: number;
@@ -63,6 +72,7 @@ export type IndexRefreshDiagnostics = {
   }>;
   max_index_lag_versions: number;
   stale_index_count: number;
+  stale_reasons: IndexStalenessReason[];
 };
 
 export type HealthResponse = {

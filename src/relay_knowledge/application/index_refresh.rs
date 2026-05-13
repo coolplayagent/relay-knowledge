@@ -391,6 +391,7 @@ mod tests {
                     index_lag_by_kind: Vec::new(),
                     max_index_lag_versions: 1,
                     stale_index_count: 1,
+                    stale_reasons: Vec::new(),
                 })
             })
         }

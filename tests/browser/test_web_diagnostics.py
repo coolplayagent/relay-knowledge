@@ -29,6 +29,8 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("BM25 read model")).to_be_visible()
         expect(page.get_by_text("Semantic cursor")).to_be_visible()
         expect(page.get_by_text("version 3 / lag 1")).to_be_visible()
+        expect(page.get_by_text("Stale reasons")).to_be_visible()
+        expect(page.get_by_text("bm25 / docs: scoped cursor lags graph version")).to_be_visible()
         expect(page.get_by_role("cell", name="bm25")).to_be_visible()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
@@ -222,6 +224,20 @@ HEALTH_RESPONSE = {
         ],
         "max_index_lag_versions": 1,
         "stale_index_count": 1,
+        "stale_reasons": [
+            {
+                "kind": "bm25",
+                "reason": "index family lags graph version",
+                "lag_versions": 1,
+            },
+            {
+                "kind": "bm25",
+                "source_scope": "docs",
+                "modality": "text",
+                "reason": "scoped cursor lags graph version",
+                "lag_versions": 1,
+            },
+        ],
     },
     "runtime": RUNTIME,
 }

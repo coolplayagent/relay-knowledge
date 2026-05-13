@@ -15,7 +15,8 @@ use crate::{
     storage::{
         DEFAULT_INDEX_SOURCE_SCOPE, IndexCursor, IndexLag, IndexRefreshClaimRequest,
         IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
-        IndexRefreshQueueRequest, IndexRefreshTask, IndexRefreshTaskState, StorageError,
+        IndexRefreshQueueRequest, IndexRefreshTask, IndexRefreshTaskState, IndexStalenessReason,
+        StorageError,
     },
 };
 
@@ -378,6 +379,7 @@ pub(super) fn diagnostics(
         .iter()
         .filter(|status| status.is_stale_for(graph_version))
         .count();
+    let stale_reasons = stale_reasons(connection, graph_version, &statuses)?;
 
     Ok(IndexRefreshDiagnostics {
         queue_depth,
@@ -388,7 +390,110 @@ pub(super) fn diagnostics(
         index_lag_by_kind,
         max_index_lag_versions,
         stale_index_count,
+        stale_reasons,
     })
+}
+
+fn stale_reasons(
+    connection: &Connection,
+    graph_version: GraphVersion,
+    statuses: &[IndexStatus],
+) -> Result<Vec<IndexStalenessReason>, StorageError> {
+    let mut reasons = statuses
+        .iter()
+        .filter(|status| status.is_stale_for(graph_version) || status.last_error.is_some())
+        .map(|status| {
+            let lag = graph_version
+                .get()
+                .saturating_sub(status.indexed_graph_version.get());
+
+            IndexStalenessReason {
+                kind: status.kind,
+                source_scope: None,
+                modality: None,
+                reason: index_status_reason(status.state, lag, status.last_error.is_some())
+                    .to_owned(),
+                lag_versions: lag,
+                last_error: status.last_error.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    reasons.extend(stale_cursor_reasons(connection, graph_version)?);
+
+    Ok(reasons)
+}
+
+fn stale_cursor_reasons(
+    connection: &Connection,
+    graph_version: GraphVersion,
+) -> Result<Vec<IndexStalenessReason>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT kind, source_scope, modality, indexed_graph_version, state, last_error
+        FROM index_cursors
+        WHERE state != 'fresh'
+           OR indexed_graph_version < ?1
+           OR last_error IS NOT NULL
+        ORDER BY kind ASC, source_scope ASC, modality ASC
+        ",
+    )?;
+    let rows = statement.query_map(params![graph_version.get()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, u64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+        ))
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(
+            |(kind, source_scope, modality, indexed_graph_version, state, last_error)| {
+                let state = parse_index_state(&state)?;
+                let lag = graph_version.get().saturating_sub(indexed_graph_version);
+
+                Ok(IndexStalenessReason {
+                    kind: parse_index_kind(&kind)?,
+                    source_scope: Some(source_scope),
+                    modality: Some(parse_index_modality(&modality)?),
+                    reason: index_cursor_reason(state, lag, last_error.is_some()).to_owned(),
+                    lag_versions: lag,
+                    last_error,
+                })
+            },
+        )
+        .collect()
+}
+
+fn index_status_reason(state: IndexState, lag: u64, has_error: bool) -> &'static str {
+    if state == IndexState::Failed {
+        "index family failed"
+    } else if lag > 0 {
+        "index family lags graph version"
+    } else if state != IndexState::Fresh {
+        "index family is not fresh"
+    } else if has_error {
+        "index family reports last error"
+    } else {
+        "index family is fresh"
+    }
+}
+
+fn index_cursor_reason(state: IndexState, lag: u64, has_error: bool) -> &'static str {
+    if state == IndexState::Failed {
+        "scoped cursor failed"
+    } else if lag > 0 {
+        "scoped cursor lags graph version"
+    } else if state != IndexState::Fresh {
+        "scoped cursor is not fresh"
+    } else if has_error {
+        "scoped cursor reports last error"
+    } else {
+        "scoped cursor is fresh"
+    }
 }
 
 pub(super) fn parse_json_array(value: String) -> Result<Vec<String>, StorageError> {

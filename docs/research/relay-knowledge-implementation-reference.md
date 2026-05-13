@@ -7,7 +7,7 @@
 
 ## 1. 执行结论
 
-`relay-knowledge` 当前已经具备一个可继续演进的知识图谱底座: 统一 API、异步 application service、SQLite 图状态、图版本、结构化事实、索引新鲜度元数据、带 source hash/backend cursor/model metadata 的 scoped index cursor、bounded refresh queue、task lease/reconciler 诊断、FTS5 BM25 read model、local semantic/vector read model、schema path/temporal/community retrieval、RRF context pack、Tree-sitter 代码仓库索引、多模态 evidence schema、MCP Streamable HTTP、本地 ACP session adapter、CLI/Web 入口、`env`/`paths`/`net` 基础边界和 QoS 配置。它还不是完整外部后端 GraphRAG 系统，当前差距集中在外部 embedding/OCR/vision worker、安装后的 service manager/silent update operator、proposal/conflict lifecycle、持久 audit sink 和 extractor 产品化。
+`relay-knowledge` 当前已经具备一个可继续演进的知识图谱底座: 统一 API、异步 application service、SQLite 图状态、图版本、结构化事实、索引新鲜度元数据、带 source hash/backend cursor/model metadata 的 scoped index cursor、bounded refresh queue、task lease/reconciler 诊断、结构化 stale reasons、FTS5 BM25 read model、local semantic/vector read model、schema path/temporal/community retrieval、RRF context pack、Tree-sitter 代码仓库索引、多模态 evidence schema、MCP Streamable HTTP、本地 ACP session adapter、CLI/Web 入口、`env`/`paths`/`net` 基础边界和 QoS 配置。它还不是完整外部后端 GraphRAG 系统，当前差距集中在外部 embedding/OCR/vision worker、安装后的 service manager/silent update operator、proposal/conflict lifecycle、持久 audit sink 和 extractor 产品化。
 
 基于现有材料，后续路线不应追求复制某个 GraphRAG 框架，而应把项目定位为 **knowledge substrate**:
 
@@ -40,7 +40,7 @@
 - `retrieve_context` 已经使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents、local semantic token read model、local hashed-vector ANN read model、schema path、temporal event、community summary 和 RRF context pack；context item 会携带 structured facts、由 facts 派生的一跳 `graph_paths`、source span、code artifact 和 backend availability metadata。外部 embedding backend 与真实 graph expansion worker 尚未接入。
 - `index_status` 记录了 BM25、semantic、vector 等索引家族的聚合新鲜度；scoped cursor 按 kind/scope/modality 记录 graph version、source hash、backend cursor，并允许 semantic/vector worker 在完成任务时写入 model name/dimension。`refresh_indexes` 会调度持久化 task、获取 lease、replay mutation log 并更新 cursor。BM25 文档随 evidence/code graph 写入更新，并为 entity labels 与 code symbols 记录生成式 lexical alias 字段；semantic/vector read model 随 evidence 写入记录 model、dimension、source hash、scope 和 graph version metadata。
 - 通用知识图谱已经从 evidence/entity 扩展到 typed relation、claim/event、confidence、source span、status 和 version-range validation；valid time、conflict state 和 proposal lifecycle 仍未形成完整产品闭环。
-- 后台服务状态已暴露为 API，foreground `service run` 启动时会执行最小 startup index reconciler；foreground refresh 主路径已具备任务表、leases、retry、dead-letter 计数、reconciler 补发和 stale diagnostics。service manager 安装、silent update 配置、维护任务和 operator 工作流仍主要停留在规格。
+- 后台服务状态已暴露为 API，foreground `service run` 启动时会执行最小 startup index reconciler；foreground refresh 主路径已具备任务表、leases、retry、dead-letter 计数、reconciler 补发、stale diagnostics 和按索引族/scope 归因的 stale reasons。service manager 安装、silent update 配置、维护任务和 operator 工作流仍主要停留在规格。
 - MCP Streamable HTTP 和本地 ACP session adapter 已经可用，并已有 access policy、QoS、bounded audit log、code graph query/impact tools；MCP resources/prompts、持久 audit sink 和旧 HTTP+SSE 兼容端点仍待实现。
 
 ## 3. 可借鉴方向
@@ -147,6 +147,7 @@ model 增加独立 `entity_aliases` 字段以支持 entity/code symbol lexical a
 目标是让 graph mutation 和 derived indexes 形成可恢复闭环:
 
 - 巩固 mutation log、affected scope/source hash、scoped cursor、bounded refresh queue、active lease/attempt guard、retry/dead-letter 和 stale diagnostics 的已落地主路径。
+- 保持 health、service doctor、index refresh 和 Web readiness 暴露结构化 stale reasons；reason 应说明 index family 或 scoped cursor 的 failed、lag、not-fresh 或 last-error 状态。
 - 保持 semantic/vector 接入所需的 model、dimension、source hash 和 backend-specific cursor 元数据已落地路径: refresh completion 可写入 model name/dimension，cursor 诊断返回 source hash 和 backend cursor。
 - 保持 startup/diagnostics reconciler 行为: graph version 领先 index cursor 时补发 refresh 或报告 degraded；显式 refresh/wait-until-fresh 在 queue cap 阻止必要入队时返回错误。
 - 保持 running refresh task 的 claimed target 不被后续 enqueue 覆盖；如果完成期间同 scope 出现新 mutation，则完成路径重置普通 attempt 计数并重新排队后续 refresh。
@@ -164,8 +165,8 @@ model 增加独立 `entity_aliases` 字段以支持 entity/code symbol lexical a
 
 当前 Phase 2 已落地 mutation log affected metadata、scoped cursor source hash/backend
 cursor、semantic/vector model metadata contract、bounded refresh queue、lease/attempt
-guard、retry/dead-letter、startup reconciler、queue-cap 错误和 dead-letter 隔离。真实
-semantic/vector read model 仍留在 Phase 4。
+guard、retry/dead-letter、startup reconciler、queue-cap 错误、dead-letter 隔离和
+结构化 stale reasons。真实 semantic/vector read model 仍留在 Phase 4。
 
 当前 Phase 3 已落地 MCP code graph/impact tools、本地 ACP session adapter、bounded
 audit log、adapter QoS admission 和 `service run` startup index reconciler。剩余项主要是

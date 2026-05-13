@@ -63,6 +63,8 @@ relay-knowledge index refresh --kind semantic --kind vector --format json
 ```
 
 不传 `--kind` 时刷新当前服务认为需要处理的索引族。刷新路径使用 bounded refresh queue、lease、retry、dead-letter 和 stale diagnostics，显式刷新失败时不会伪装成已新鲜。
+JSON 响应里的 `diagnostics.stale_reasons` 会列出仍未新鲜或失败的索引族和 scoped cursor；
+字段包含 kind、source scope、modality、reason、lag versions 和 last error。
 
 ## 3.4 结构化事实说明
 
