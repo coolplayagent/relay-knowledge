@@ -94,6 +94,6 @@ relay-knowledge index refresh [--kind bm25|semantic|vector]
 relay-knowledge health
 relay-knowledge service status
 relay-knowledge service doctor
-relay-knowledge service run [--mcp streamable-http]
+relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge version
 ```

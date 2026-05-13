@@ -127,7 +127,7 @@ Web operation composer 当前用于生成和暂存 typed command/request preview
 
 ```bash
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
-relay-knowledge service run --mcp streamable-http
+relay-knowledge service run --web --mcp streamable-http
 ```
 
 默认地址:
@@ -199,7 +199,7 @@ lag versions 和 last error；排障时先看 failed/dead-letter reason，再看
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
-npm run build --prefix web
+./build.sh
 uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```

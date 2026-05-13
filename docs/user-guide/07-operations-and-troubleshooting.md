@@ -87,8 +87,7 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 Web 和浏览器集成测试:
 
 ```bash
-npm install --prefix web
-npm run build --prefix web
+./build.sh
 uv sync --extra dev --no-default-groups
 uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser

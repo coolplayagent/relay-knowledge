@@ -114,7 +114,7 @@ v1 已落地的最小 API:
 - `index refresh [--kind bm25|semantic|vector]`
 - `health`
 - `service status|doctor`
-- `service run [--mcp streamable-http]`
+- `service run [--web] [--mcp streamable-http]`
 - `version`
 - `--version`
 

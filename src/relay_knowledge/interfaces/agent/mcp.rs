@@ -104,19 +104,25 @@ impl McpServer {
         self,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), McpServeError> {
-        if !self.agent.mcp_streamable_http_enabled {
-            return Err(McpServeError::Disabled);
-        }
         let network_config = self.network.current();
         let config = network_config.http;
         let qos_policy = network_config.qos;
-        ensure_remote_bind_allowed(&config, &self.agent.access_policy)?;
         let qos = self.qos.clone();
-        let router = self.router();
+        let router = self.checked_router()?;
 
         crate::net::http::serve_router_with_qos(router, config, qos, qos_policy, shutdown)
             .await
             .map_err(McpServeError::Http)
+    }
+
+    /// Builds the Streamable HTTP router after validating listener policy.
+    pub fn checked_router(self) -> Result<Router, McpServeError> {
+        if !self.agent.mcp_streamable_http_enabled {
+            return Err(McpServeError::Disabled);
+        }
+        ensure_remote_bind_allowed(&self.network.current().http, &self.agent.access_policy)?;
+
+        Ok(self.router())
     }
 
     #[cfg(test)]

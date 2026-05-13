@@ -140,6 +140,29 @@ fn parses_index_and_service_actions() {
         run.action,
         CliAction::ServiceRun {
             mcp: ServiceMcpTransport::StreamableHttp,
+            web: false,
+        }
+    );
+}
+
+#[test]
+fn parses_service_run_with_web_and_mcp() {
+    let web = CliCommand::parse(["service", "run", "--web"]).expect("web service should parse");
+    let combined = CliCommand::parse(["service", "run", "--web", "--mcp", "streamable-http"])
+        .expect("combined service should parse");
+
+    assert_eq!(
+        web.action,
+        CliAction::ServiceRun {
+            mcp: ServiceMcpTransport::Configured,
+            web: true,
+        }
+    );
+    assert_eq!(
+        combined.action,
+        CliAction::ServiceRun {
+            mcp: ServiceMcpTransport::StreamableHttp,
+            web: true,
         }
     );
 }

@@ -5,9 +5,22 @@
 本仓库使用 Rust 2024 edition，`rust-toolchain.toml` 固定到兼容工具链。推荐通过 `rustup` 安装 Rust，然后在仓库根目录运行:
 
 ```bash
-cargo build
-cargo test --all-targets --all-features
+./setup.sh
 ```
+
+`setup.sh` 只准备开发环境、Rust 组件和 hooks，不构建产物、不启动服务、不跑完整质量门。
+
+常用脚本按职责拆分:
+
+```bash
+./build.sh
+./run.sh start --port 8791 --daemon
+./run.sh status
+./run.sh stop --force
+./check.sh
+```
+
+`build.sh` 构建 `target/release/relay-knowledge` 和 `web/dist`。`run.sh` 只管理本地服务进程，发现缺少产物会提示先运行 `./build.sh`。`check.sh` 执行 fmt、clippy、测试、覆盖率、Web build 和可用时的浏览器集成门。
 
 开发环境还包含一个静态 Web 工作区和浏览器集成测试。需要验证 Web 时安装 Node.js、npm、Python 和 uv，然后运行第 7 章中的验证命令。
 
@@ -29,6 +42,22 @@ cargo run -- query -- --help
 ```
 
 `relay-knowledge` 启动 Tokio runtime，CLI、Web、MCP 和本地 agent adapter 都通过共享 application service 进入核心能力。
+
+同端口 Web 服务:
+
+```bash
+./build.sh
+./run.sh start --port 8791 --daemon
+curl http://127.0.0.1:8791/api/health
+./run.sh stop --force
+```
+
+底层入口是:
+
+```bash
+RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
+  target/release/relay-knowledge service run --web --mcp streamable-http
+```
 
 ## 1.3 运行时目录
 

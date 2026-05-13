@@ -9,13 +9,28 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
 relay-knowledge service run --mcp streamable-http
 ```
 
+启动同端口 Web/API/MCP 服务:
+
+```bash
+./build.sh
+./run.sh start --port 8791 --daemon
+```
+
+对应的底层命令是:
+
+```bash
+RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
+target/release/relay-knowledge service run --web --mcp streamable-http
+```
+
 默认监听:
 
 ```text
 http://127.0.0.1:8791/mcp
 ```
 
-`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务。没有启用 MCP 时，命令仍会作为前台服务等待 shutdown signal。
+`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
 ## 6.2 MCP 权限变量
 
