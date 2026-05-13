@@ -111,6 +111,12 @@ Freshness policies are unchanged:
 - `wait_until_fresh`: refresh stale index metadata before querying.
 - `graph_only`: bypass index metadata and return graph-only degraded context.
 
+When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` or
+`RELAY_KNOWLEDGE_VECTOR_BACKEND` is `disabled`, that retriever is excluded from
+candidate execution and its read-model refresh work is not scheduled. Semantic
+and vector cursor model metadata is derived from the documents that were indexed,
+not from runtime override labels.
+
 ## CLI Example
 
 ```bash

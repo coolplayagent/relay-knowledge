@@ -40,7 +40,7 @@ GraphRAG 能力必须保持可解释:
 - BM25 字段质量优先覆盖 evidence content、entity label、source path、code symbol、code chunk 和 doc comment。
 - RRF 融合必须保留每个 retriever 的 rank、score 和 explanation。
 - graph expansion 必须限制深度、节点数、时间和输出字节，超限时返回 `truncated=true` 和原因。
-- semantic/vector 默认使用确定性的本地 token/hash read model，已在 ranking explanation 和 cursor diagnostics 中记录 model、dimension、source hash、scope、backend cursor 和 graph version；runtime backend mode 支持 `local`、`external` 和 `disabled`，外部 embedding worker 必须保持同一 metadata contract 和 scope post-filter。
+- semantic/vector 默认使用确定性的本地 token/hash read model，已在 ranking explanation 和 cursor diagnostics 中记录 model、dimension、source hash、scope、backend cursor 和 graph version；runtime backend mode 支持 `local`、`external` 和 `disabled`，`disabled` 会跳过对应 retriever 与 refresh，外部 embedding worker 必须保持同一 metadata contract 和 scope post-filter。
 
 ### 3.2 事实模型
 
@@ -96,7 +96,7 @@ GraphRAG 能力必须保持可解释:
 ### Phase 2: 可恢复索引刷新
 
 - 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
-- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；refresh worker 完成任务时写入 model/dimension 并由 cursor 诊断返回。
+- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；refresh worker 完成任务时从已索引文档推导 model/dimension 并由 cursor 诊断返回。
 - health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和结构化 stale reasons；每条 reason 必须能指向索引族或 scoped cursor，并携带 lag versions 和 last error。
 
 ### Phase 3: Agent 与常驻服务
@@ -109,7 +109,7 @@ GraphRAG 能力必须保持可解释:
 ### Phase 4: 高级 GraphRAG
 
 - 已接入 local semantic retrieval 和 hashed-vector ANN read model，支持 model、dimension、source hash、scope 和 graph version metadata。
-- 已接入 semantic/vector backend runtime contract，支持 `local`、`external` 和 `disabled` 状态以及 refresh cursor model metadata。
+- 已接入 semantic/vector backend runtime contract，支持 `local`、`external` 和 `disabled` 状态、disabled execution gate 以及 refresh cursor model metadata。
 - 已增加 path retrieval、schema-guided traversal、community summary 和 temporal query。
 - 已增加 multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality、parent evidence grouping 和 maintenance worker 输出提交边界。
 - 已建立 evaluation harness 和 CI fixture gate，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。

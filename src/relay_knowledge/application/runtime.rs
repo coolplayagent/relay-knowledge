@@ -2,7 +2,10 @@ use std::{error::Error, fmt, time::Duration};
 
 use crate::{
     api::{AgentAccessPolicy, AgentPolicyError},
-    env::{EnvError, EnvironmentConfig, RetrievalEnvOverrides},
+    env::{
+        EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL,
+        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
+    },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     paths::{PathError, RuntimePaths},
     retrieval::{
@@ -163,6 +166,7 @@ impl Error for RuntimeConfigurationError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetrievalRuntimeConfigError {
     InvalidBackend(ReadModelBackendModeError),
+    EmptyModelName(&'static str),
     DimensionTooLarge(usize),
 }
 
@@ -170,6 +174,9 @@ impl fmt::Display for RetrievalRuntimeConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBackend(error) => write!(formatter, "{error}"),
+            Self::EmptyModelName(variable) => {
+                write!(formatter, "{variable} must not be blank")
+            }
             Self::DimensionTooLarge(value) => {
                 write!(formatter, "embedding dimension {value} does not fit in u32")
             }
@@ -187,18 +194,21 @@ fn retrieval_config_from_environment(
             .map_err(|_| RetrievalRuntimeConfigError::DimensionTooLarge(value))?,
         None => LOCAL_VECTOR_DIMENSION,
     };
-    let text_model = overrides
-        .text_embedding_model
-        .clone()
-        .unwrap_or_else(|| LOCAL_VECTOR_MODEL.to_owned());
-    let semantic_model = overrides
-        .text_embedding_model
-        .clone()
-        .unwrap_or_else(|| LOCAL_SEMANTIC_MODEL.to_owned());
-    let image_model = overrides
-        .image_embedding_model
-        .clone()
-        .unwrap_or_else(|| "relay-local-image-hash-v1".to_owned());
+    let text_model = model_name_override(
+        overrides.text_embedding_model.as_deref(),
+        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        LOCAL_VECTOR_MODEL,
+    )?;
+    let semantic_model = model_name_override(
+        overrides.text_embedding_model.as_deref(),
+        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        LOCAL_SEMANTIC_MODEL,
+    )?;
+    let image_model = model_name_override(
+        overrides.image_embedding_model.as_deref(),
+        RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL,
+        "relay-local-image-hash-v1",
+    )?;
 
     Ok(ReadModelBackendConfig {
         semantic_mode: parse_backend_mode(overrides.semantic_backend.as_deref())?,
@@ -216,6 +226,24 @@ fn retrieval_config_from_environment(
             dimension,
         },
     })
+}
+
+fn model_name_override(
+    value: Option<&str>,
+    variable: &'static str,
+    default: &'static str,
+) -> Result<String, RetrievalRuntimeConfigError> {
+    match value {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Err(RetrievalRuntimeConfigError::EmptyModelName(variable))
+            } else {
+                Ok(trimmed.to_owned())
+            }
+        }
+        None => Ok(default.to_owned()),
+    }
 }
 
 fn parse_backend_mode(
@@ -338,6 +366,26 @@ mod tests {
         assert_eq!(runtime.retrieval.vector_model.name, "text-embed-3-small");
         assert_eq!(runtime.retrieval.image_model.name, "clip-vit-b32");
         assert_eq!(runtime.retrieval.vector_model.dimension, 1536);
+    }
+
+    #[tokio::test]
+    async fn rejects_blank_retrieval_model_overrides() {
+        let environment = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "   ")],
+        )
+        .expect("environment should parse");
+
+        let error = RuntimeConfiguration::from_environment(&environment)
+            .await
+            .expect_err("blank model name should fail");
+
+        assert!(matches!(
+            error,
+            RuntimeConfigurationError::Retrieval(RetrievalRuntimeConfigError::EmptyModelName(
+                RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL
+            ))
+        ));
     }
 
     #[tokio::test]

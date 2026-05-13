@@ -102,7 +102,9 @@ relay-knowledge index refresh --kind semantic --kind vector --format json
 接受 `local`、`external` 或 `disabled`。`retrieve_context` 的
 `backend_statuses` 会报告 configured backend、model、dimension、scope
 post-filter 和 indexed graph version；refresh cursor completion 会把
-semantic/vector 的 model name/dimension 写入 `index_cursors`。
+semantic/vector 已索引文档中的 model name/dimension 写入 `index_cursors`。
+`disabled` 模式不会运行对应 semantic/vector retriever，也不会调度对应 read
+model refresh。模型名只接受 trim 后非空的值。
 
 ## 3. Web 工作区
 

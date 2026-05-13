@@ -76,7 +76,7 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_EMBEDDING_DIMENSION` | embedding dimension metadata，默认 `16` |
 
 空值会失败。数字变量必须是大于零的正整数。HTTP bind 必须能解析为 `host:port`，可以是 IP literal 或 hostname，并且端口不能是 `0`。Proxy URL 必须使用 `http://` 或 `https://` 且包含 host。No-proxy 和 MCP 逗号分隔列表会 trim，空条目会失败。MCP endpoint 必须是无 query/fragment 的绝对 HTTP path。Proxy 值可能包含凭据，状态输出只暴露是否配置，不输出原始 proxy 字符串。`SSL_VERIFY` 和 MCP boolean 默认值可用 `true/false`、`1/0`、`yes/no`、`on/off`。
-semantic/vector backend mode 只接受 `local`、`external` 或 `disabled`。这些变量只配置 read model metadata 和 backend status；具体 provider worker 仍必须通过后台或 maintenance 边界写入派生 read model，不能在查询热路径运行。
+semantic/vector backend mode 只接受 `local`、`external` 或 `disabled`。Embedding model 名称会 trim，trim 后为空会在 runtime 配置阶段失败。这些变量只配置 read model metadata 和 backend status；具体 provider worker 仍必须通过后台或 maintenance 边界写入派生 read model，不能在查询热路径运行。`disabled` 会阻止对应 semantic/vector retriever 执行，并跳过对应 read model refresh。
 
 ## 3. 路径规则
 

@@ -53,6 +53,7 @@ async fn searches_evidence_by_query_token() {
             source_scope: None,
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -84,6 +85,7 @@ async fn bm25_matches_generated_entity_aliases_without_returning_aliases_as_labe
             source_scope: Some("docs".to_owned()),
             graph_version: receipt.graph_version,
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -231,6 +233,7 @@ async fn commits_structured_relation_claim_and_event_facts() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -325,6 +328,7 @@ async fn initialization_backfills_fact_evidence_links_for_existing_facts() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -373,6 +377,7 @@ async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
             source_scope: Some("repo".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -423,6 +428,7 @@ async fn search_excludes_rejected_and_superseded_evidence() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -432,6 +438,7 @@ async fn search_excludes_rejected_and_superseded_evidence() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -451,6 +458,7 @@ async fn rejects_zero_limits_for_search_and_mutation_log() {
             source_scope: None,
             graph_version: GraphVersion::ZERO,
             limit: 0,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect_err("zero search limit should fail");
@@ -481,6 +489,7 @@ async fn search_filters_by_source_scope_and_sorts_by_score() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(2),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -490,6 +499,7 @@ async fn search_filters_by_source_scope_and_sorts_by_score() {
             source_scope: None,
             graph_version: GraphVersion::new(2),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -534,6 +544,7 @@ async fn search_considers_matches_beyond_newest_candidates() {
             source_scope: Some("docs".to_owned()),
             graph_version: receipt.graph_version,
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -554,6 +565,7 @@ async fn search_respects_graph_version_snapshot() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -563,6 +575,7 @@ async fn search_respects_graph_version_snapshot() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(2),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -584,6 +597,7 @@ async fn search_snapshot_excludes_updated_evidence_from_future_version() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(1),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -593,6 +607,7 @@ async fn search_snapshot_excludes_updated_evidence_from_future_version() {
             source_scope: Some("docs".to_owned()),
             graph_version: GraphVersion::new(2),
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");

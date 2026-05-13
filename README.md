@@ -85,7 +85,10 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 ```
 
 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` and
-`RELAY_KNOWLEDGE_VECTOR_BACKEND` also accept `local` and `disabled`.
+`RELAY_KNOWLEDGE_VECTOR_BACKEND` also accept `local` and `disabled`. Disabled
+read-model backends are excluded from semantic/vector retrieval execution and
+refresh scheduling; blank embedding model names fail during runtime
+configuration.
 
 The CLI ingest command writes evidence plus entity labels. The shared API also
 accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source

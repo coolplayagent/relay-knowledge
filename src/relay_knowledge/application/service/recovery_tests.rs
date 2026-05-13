@@ -82,6 +82,40 @@ async fn startup_reconciler_refreshes_stale_index_cursors() {
     assert!(!health.metadata.stale);
 }
 
+#[tokio::test]
+async fn startup_reconciler_excludes_disabled_read_model_lag() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let environment = disabled_read_model_environment();
+    let service = service_with_environment_and_store(&environment, store.clone()).await;
+    let evidence = EvidenceRecord::new(
+        "ev-disabled-startup",
+        SourceScope::parse("docs").expect("scope should parse"),
+        "Startup recovery ignores disabled read model lag",
+        vec!["Recovery".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(
+            GraphMutationBatch::new(vec![evidence]).expect("batch should validate"),
+        )
+        .await
+        .expect("commit should succeed");
+
+    let report = service
+        .reconcile_startup_indexes(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-disabled-reconcile",
+            "trace-reconcile",
+        ))
+        .await
+        .expect("reconciler should refresh enabled indexes");
+
+    assert_eq!(report.stale_index_kinds, vec![IndexKind::Bm25]);
+    assert_eq!(report.refreshed_index_kinds, vec![IndexKind::Bm25]);
+    assert!(report.index_lag_max > 0);
+    assert!(!report.metadata.stale);
+}
+
 async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
@@ -92,9 +126,31 @@ async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeSer
         ],
     )
     .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
+
+    service_with_environment_and_store(&environment, store).await
+}
+
+async fn service_with_environment_and_store(
+    environment: &EnvironmentConfig,
+    store: Arc<dyn KnowledgeStore>,
+) -> RelayKnowledgeService {
+    let runtime = RuntimeConfiguration::from_environment(environment)
         .await
         .expect("runtime should compose");
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+fn disabled_read_model_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "disabled"),
+            ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "disabled"),
+        ],
+    )
+    .expect("environment should parse")
 }

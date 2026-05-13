@@ -92,32 +92,55 @@ async fn refresh_index_kinds_with_policy(
     queue_policy: QueuePolicy,
     read_models: &ReadModelBackendConfig,
 ) -> Result<IndexRefreshOutcome, ApiError> {
-    let kinds = IndexRefreshPlan::from_requested(kinds.into_iter().collect()).into_kinds();
-    queue_index_refreshes(store.as_ref(), kinds.clone(), graph_version, queue_policy).await?;
-    drain_index_refresh_queue(store, read_models).await?;
+    let requested_kinds =
+        IndexRefreshPlan::from_requested(kinds.into_iter().collect()).into_kinds();
+    let refreshable_kinds = requested_kinds
+        .iter()
+        .copied()
+        .filter(|kind| read_models.refreshes_index(*kind))
+        .collect::<Vec<_>>();
+    if !refreshable_kinds.is_empty() {
+        queue_index_refreshes(
+            store.as_ref(),
+            refreshable_kinds.clone(),
+            graph_version,
+            queue_policy,
+        )
+        .await?;
+        drain_index_refresh_queue(store).await?;
+    }
 
-    let mut outcome = index_refresh_outcome(store).await?;
-    outcome
-        .indexes
-        .retain(|status| kinds.contains(&status.kind));
-    outcome
-        .cursors
-        .retain(|cursor| kinds.contains(&cursor.kind));
+    let outcome = index_refresh_outcome(store).await?;
 
-    Ok(outcome)
+    Ok(filter_outcome_to_kinds(outcome, &refreshable_kinds))
 }
 
 pub(super) async fn reconcile_index_refreshes(
     store: &Arc<dyn KnowledgeStore>,
     graph_version: GraphVersion,
+    read_models: &ReadModelBackendConfig,
 ) -> Result<IndexRefreshDiagnostics, ApiError> {
-    queue_index_refreshes(
+    let refreshable_kinds = IndexKind::ALL
+        .into_iter()
+        .filter(|kind| read_models.refreshes_index(*kind))
+        .collect::<Vec<_>>();
+    if refreshable_kinds.is_empty() {
+        return store
+            .index_refresh_diagnostics(now_millis())
+            .await
+            .map(|diagnostics| filter_diagnostics_to_kinds(diagnostics, &refreshable_kinds))
+            .map_err(storage_api_error);
+    }
+
+    let diagnostics = queue_index_refreshes(
         store.as_ref(),
-        IndexKind::ALL,
+        refreshable_kinds.clone(),
         graph_version,
         DIAGNOSTIC_RECONCILE_QUEUE,
     )
-    .await
+    .await?;
+
+    Ok(filter_diagnostics_to_kinds(diagnostics, &refreshable_kinds))
 }
 
 pub(super) async fn index_refresh_outcome(
@@ -158,6 +181,69 @@ pub(super) fn metadata_for_indexes(
         lowest_indexed_graph_version,
         stale,
     )
+}
+
+pub(super) fn filter_outcome_to_read_models(
+    outcome: IndexRefreshOutcome,
+    read_models: &ReadModelBackendConfig,
+) -> IndexRefreshOutcome {
+    let refreshable_kinds = active_index_kinds(read_models);
+
+    filter_outcome_to_kinds(outcome, &refreshable_kinds)
+}
+
+fn active_index_kinds(read_models: &ReadModelBackendConfig) -> Vec<IndexKind> {
+    IndexKind::ALL
+        .into_iter()
+        .filter(|kind| read_models.refreshes_index(*kind))
+        .collect()
+}
+
+fn filter_outcome_to_kinds(
+    mut outcome: IndexRefreshOutcome,
+    refreshable_kinds: &[IndexKind],
+) -> IndexRefreshOutcome {
+    outcome
+        .indexes
+        .retain(|status| refreshable_kinds.contains(&status.kind));
+    outcome
+        .cursors
+        .retain(|cursor| refreshable_kinds.contains(&cursor.kind));
+    outcome.diagnostics = filter_diagnostics_to_kinds(outcome.diagnostics, refreshable_kinds);
+
+    outcome
+}
+
+fn filter_diagnostics_to_kinds(
+    mut diagnostics: IndexRefreshDiagnostics,
+    refreshable_kinds: &[IndexKind],
+) -> IndexRefreshDiagnostics {
+    diagnostics
+        .index_lag_by_kind
+        .retain(|lag| refreshable_kinds.contains(&lag.kind));
+    diagnostics.max_index_lag_versions = diagnostics
+        .index_lag_by_kind
+        .iter()
+        .map(|lag| lag.lag_versions)
+        .max()
+        .unwrap_or(0);
+    diagnostics
+        .stale_reasons
+        .retain(|reason| refreshable_kinds.contains(&reason.kind));
+    diagnostics.stale_index_count = diagnostics
+        .stale_reasons
+        .iter()
+        .filter(|reason| reason.source_scope.is_none() && reason.modality.is_none())
+        .map(|reason| reason.kind)
+        .fold(Vec::new(), |mut kinds, kind| {
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+            kinds
+        })
+        .len();
+
+    diagnostics
 }
 
 fn storage_api_error(error: StorageError) -> ApiError {
@@ -202,10 +288,7 @@ async fn queue_index_refreshes(
     }
 }
 
-async fn drain_index_refresh_queue(
-    store: &Arc<dyn KnowledgeStore>,
-    read_models: &ReadModelBackendConfig,
-) -> Result<(), ApiError> {
+async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<(), ApiError> {
     let lease_owner = format!("foreground-refresh-{}", std::process::id());
     let mut first_failure = None;
     loop {
@@ -251,15 +334,14 @@ async fn drain_index_refresh_queue(
             continue;
         }
 
-        let model_metadata = read_models.metadata_for_index(task.kind);
         store
             .complete_index_refresh_task(IndexRefreshCompletion {
                 task_id: task.task_id,
                 lease_owner: lease_owner.clone(),
                 attempt_count: task.attempt_count,
                 indexed_graph_version: task.target_graph_version,
-                model_name: model_metadata.map(|metadata| metadata.name.clone()),
-                model_dimension: model_metadata.map(|metadata| metadata.dimension),
+                model_name: None,
+                model_dimension: None,
                 now_ms: now_millis(),
             })
             .await

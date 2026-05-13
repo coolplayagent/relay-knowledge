@@ -1,7 +1,13 @@
 use super::*;
 use crate::{
-    api::{IngestEvidence, IngestEvidenceExtraction, InterfaceKind, MultimodalExtractionRequest},
-    domain::{EvidenceModality, FreshnessPolicy, IndexKind, IndexState},
+    api::{
+        IndexRefreshRequest, IngestEvidence, IngestEvidenceExtraction, InterfaceKind,
+        MultimodalExtractionRequest,
+    },
+    domain::{
+        EvidenceModality, FreshnessPolicy, IndexKind, IndexState, RetrievalBackendState,
+        RetrieverSource,
+    },
     env::PlatformKind,
     storage::{KnowledgeStore, SqliteGraphStore},
 };
@@ -236,6 +242,114 @@ async fn retrieve_context_reports_results_and_index_freshness() {
             .collect::<Vec<_>>(),
         IndexKind::ALL
     );
+}
+
+#[tokio::test]
+async fn disabled_read_model_backends_do_not_run_retriever_sources() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "disabled"),
+            ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "disabled"),
+        ],
+    )
+    .expect("environment should parse");
+    let service = service_with_environment(&environment).await;
+    service
+        .ingest(
+            ingest_request(vec![ingest_evidence(
+                "ev-disabled",
+                "Disabled read models still allow BM25 fallback retrieval",
+                vec!["BM25".to_owned()],
+            )]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+
+    let response = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "read models".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 5,
+                freshness: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
+        )
+        .await
+        .expect("query should succeed");
+
+    assert!(!response.results.is_empty());
+    assert!(response.backend_statuses.iter().all(|status| {
+        matches!(
+            status.source,
+            RetrieverSource::Semantic | RetrieverSource::Vector
+        ) && status.state == RetrievalBackendState::Unavailable
+    }));
+    assert!(response.results.iter().all(|hit| {
+        !hit.retriever_sources.contains(&RetrieverSource::Semantic)
+            && !hit.retriever_sources.contains(&RetrieverSource::Vector)
+    }));
+}
+
+#[tokio::test]
+async fn index_refresh_cursors_use_indexed_document_model_metadata() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "external"),
+            ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+            ("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "runtime-model"),
+            ("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", "1536"),
+        ],
+    )
+    .expect("environment should parse");
+    let service = service_with_environment(&environment).await;
+    let mut evidence = ingest_evidence(
+        "ev-model",
+        "Model provenance should come from indexed document metadata",
+        vec!["Model".to_owned()],
+    );
+    evidence.extraction = Some(IngestEvidenceExtraction {
+        embedding_model: Some("stored-doc-model".to_owned()),
+        embedding_dimension: Some(384),
+        ..text_extraction()
+    });
+    service
+        .ingest(
+            ingest_request(vec![evidence]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+
+    let response = service
+        .refresh_indexes(
+            IndexRefreshRequest {
+                kinds: vec![IndexKind::Semantic, IndexKind::Vector],
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-refresh", "trace-refresh"),
+        )
+        .await
+        .expect("refresh should succeed");
+
+    let read_model_cursors = response
+        .index_cursors
+        .iter()
+        .filter(|cursor| matches!(cursor.kind, IndexKind::Semantic | IndexKind::Vector))
+        .collect::<Vec<_>>();
+    assert_eq!(read_model_cursors.len(), 2);
+    assert!(read_model_cursors.iter().all(|cursor| {
+        cursor.model_name.as_deref() == Some("stored-doc-model")
+            && cursor.model_dimension == Some(384)
+    }));
 }
 
 #[tokio::test]

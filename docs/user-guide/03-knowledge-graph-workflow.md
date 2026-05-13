@@ -99,4 +99,5 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 支持 `local`、`external` 和 `disabled`。
 查询响应的 `backend_statuses` 会显示 configured backend、model、dimension、
 scope post-filter 和 indexed graph version；`index refresh`/`health` 的
-`index_cursors` 会显示 refresh worker 写入的 model name/dimension。
+`index_cursors` 会显示已索引文档推导出的 model name/dimension。`disabled`
+会跳过对应 semantic/vector retriever 和 read model refresh。

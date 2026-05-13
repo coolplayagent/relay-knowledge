@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{
     CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeParseStatusCounts,
     CodeReferenceRecord, CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion,
-    IndexKind, IndexModality, IndexStatus, RetrievalHit,
+    IndexKind, IndexModality, IndexStatus, RetrievalHit, RetrieverSource,
 };
 
 pub use code::{CodeImpactChanges, CodeRepositoryStore};
@@ -160,6 +160,14 @@ pub struct GraphSearchRequest {
     pub source_scope: Option<String>,
     pub graph_version: GraphVersion,
     pub limit: usize,
+    pub disabled_retriever_sources: Vec<RetrieverSource>,
+}
+
+impl GraphSearchRequest {
+    /// Returns whether storage may execute a retriever family for this request.
+    pub fn allows_retriever_source(&self, source: RetrieverSource) -> bool {
+        !self.disabled_retriever_sources.contains(&source)
+    }
 }
 
 /// Bounded code symbol search against an explicit graph snapshot.

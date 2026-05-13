@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::{EvidenceRecord, IndexState, SourceScope};
+use crate::domain::{EvidenceRecord, GraphRelationRecord, IndexState, SourceScope};
 use crate::storage::{
     IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshFailure,
     IndexRefreshQueueRequest, IndexRefreshTaskState,
@@ -350,7 +350,7 @@ async fn completing_refresh_task_advances_cursor_and_clears_queue() {
 }
 
 #[tokio::test]
-async fn completing_refresh_task_records_backend_cursor_metadata() {
+async fn completing_refresh_task_prefers_indexed_model_metadata() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(
         &store,
@@ -405,8 +405,94 @@ async fn completing_refresh_task_records_backend_cursor_metadata() {
             .as_deref()
             .is_some_and(|value| value.starts_with("vector:text:"))
     );
-    assert_eq!(cursor.model_name.as_deref(), Some("text-embedding-3-small"));
-    assert_eq!(cursor.model_dimension, Some(1536));
+    assert_eq!(
+        cursor.model_name.as_deref(),
+        Some("relay-local-hash-ann-v1")
+    );
+    assert_eq!(cursor.model_dimension, Some(16));
+}
+
+#[tokio::test]
+async fn completing_refresh_task_preserves_model_metadata_without_new_documents() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-vector-preserve", "docs", "Rust async storage").await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Vector],
+            target_graph_version: GraphVersion::new(1),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 100,
+        })
+        .await
+        .expect("initial vector task should queue");
+    let initial = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 110,
+        })
+        .await
+        .expect("claim should load")
+        .expect("initial task should be claimed");
+    store
+        .complete_index_refresh_task(IndexRefreshCompletion {
+            task_id: initial.task_id,
+            lease_owner: "worker-a".to_owned(),
+            attempt_count: initial.attempt_count,
+            indexed_graph_version: GraphVersion::new(1),
+            model_name: None,
+            model_dimension: None,
+            now_ms: 120,
+        })
+        .await
+        .expect("initial vector task should complete");
+
+    commit_relation(&store, "rel-vector-preserve", "docs", "ev-vector-preserve").await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Vector],
+            target_graph_version: GraphVersion::new(2),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 130,
+        })
+        .await
+        .expect("relation-only vector task should queue");
+    let relation_only = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker-b".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 140,
+        })
+        .await
+        .expect("claim should load")
+        .expect("relation-only task should be claimed");
+    store
+        .complete_index_refresh_task(IndexRefreshCompletion {
+            task_id: relation_only.task_id,
+            lease_owner: "worker-b".to_owned(),
+            attempt_count: relation_only.attempt_count,
+            indexed_graph_version: GraphVersion::new(2),
+            model_name: None,
+            model_dimension: None,
+            now_ms: 150,
+        })
+        .await
+        .expect("relation-only vector task should preserve metadata");
+    let cursors = store.index_cursors().await.expect("cursors should load");
+    let cursor = cursors
+        .iter()
+        .find(|cursor| cursor.kind == IndexKind::Vector && cursor.source_scope == "docs")
+        .expect("vector cursor should exist");
+
+    assert_eq!(
+        cursor.model_name.as_deref(),
+        Some("relay-local-hash-ann-v1")
+    );
+    assert_eq!(cursor.model_dimension, Some(16));
 }
 
 #[tokio::test]
@@ -732,4 +818,27 @@ async fn commit_evidence(store: &SqliteGraphStore, id: &str, source_scope: &str,
         .commit_mutation_batch(batch)
         .await
         .expect("commit should succeed");
+}
+
+async fn commit_relation(
+    store: &SqliteGraphStore,
+    relation_id: &str,
+    source_scope: &str,
+    evidence_id: &str,
+) {
+    let relation = GraphRelationRecord::new(
+        relation_id,
+        SourceScope::parse(source_scope).expect("scope should parse"),
+        "relay-knowledge",
+        "references",
+        "cursor metadata preservation",
+        vec![evidence_id.to_owned()],
+    )
+    .expect("relation should validate");
+    let batch = GraphMutationBatch::with_facts(Vec::new(), vec![relation], Vec::new(), Vec::new())
+        .expect("batch should validate");
+    store
+        .commit_mutation_batch(batch)
+        .await
+        .expect("relation commit should succeed");
 }

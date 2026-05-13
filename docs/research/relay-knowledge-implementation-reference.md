@@ -38,7 +38,7 @@
 需要明确的是，当前实现仍是 v1 底座，不是完整产品形态:
 
 - `retrieve_context` 已经使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents、local semantic token read model、local hashed-vector ANN read model、schema path、temporal event、community summary 和 RRF context pack；context item 会携带 structured facts、由 facts 派生的一跳 `graph_paths`、source span、code artifact 和 backend availability metadata。semantic/vector backend status 现在由 read model cursor 与 runtime backend 配置生成，支持 `local`、`external` 和 `disabled` 模式。
-- `index_status` 记录了 BM25、semantic、vector 等索引家族的聚合新鲜度；scoped cursor 按 kind/scope/modality 记录 graph version、source hash、backend cursor，并允许 semantic/vector worker 在完成任务时写入 model name/dimension。`refresh_indexes` 会调度持久化 task、获取 lease、replay mutation log 并更新 cursor；semantic/vector refresh completion 会按 runtime read-model 配置写入模型元数据。BM25 文档随 evidence/code graph 写入更新，并为 entity labels 与 code symbols 记录生成式 lexical alias 字段；semantic/vector read model 随 evidence 写入记录 model、dimension、source hash、scope 和 graph version metadata。
+- `index_status` 记录了 BM25、semantic、vector 等索引家族的聚合新鲜度；scoped cursor 按 kind/scope/modality 记录 graph version、source hash、backend cursor，并允许 semantic/vector worker 在完成任务时写入 model name/dimension。`refresh_indexes` 会调度持久化 task、获取 lease、replay mutation log 并更新 cursor；semantic/vector refresh completion 会从已索引文档推导模型元数据，避免 runtime label 与实际 read model provenance 分离。BM25 文档随 evidence/code graph 写入更新，并为 entity labels 与 code symbols 记录生成式 lexical alias 字段；semantic/vector read model 随 evidence 写入记录 model、dimension、source hash、scope 和 graph version metadata。
 - 通用知识图谱已经从 evidence/entity 扩展到 typed relation、claim/event、confidence、source span、status 和 version-range validation；valid time、conflict state 和 proposal lifecycle 仍未形成完整产品闭环。
 - 后台服务状态已暴露为 API，foreground `service run` 启动时会执行最小 startup index reconciler；foreground refresh 主路径已具备任务表、leases、retry、dead-letter 计数、reconciler 补发、stale diagnostics 和按索引族/scope 归因的 stale reasons。service manager 安装、silent update 配置、维护任务和 operator 工作流仍主要停留在规格。
 - MCP Streamable HTTP 和本地 ACP session adapter 已经可用，并已有 access policy、QoS、bounded audit log、code graph query/impact tools；MCP resources/prompts、持久 audit sink 和旧 HTTP+SSE 兼容端点仍待实现。
@@ -178,7 +178,7 @@ MCP resources/prompts 和持久审计 sink。
 目标是增强复杂问答、全局理解和多模态来源:
 
 - 已引入 local semantic retrieval 和 hashed-vector ANN read model，记录 model、dimension、source hash、scope 和 graph version。
-- 已把 semantic/vector backend 配置接到 read model contract: `local`、`external` 和 `disabled` 模式从 `env` 进入 runtime，retrieval backend status 和 refresh cursor completion 会携带配置的 model/dimension。
+- 已把 semantic/vector backend 配置接到 read model contract: `local`、`external` 和 `disabled` 模式从 `env` 进入 runtime，retrieval backend status 会携带配置的 model/dimension；`disabled` 会阻止对应 retriever 执行和 read model refresh 调度，refresh cursor completion 会携带已索引文档的 model/dimension。
 - 已增加 path retrieval、schema-guided traversal、`as_of`/年份 temporal query 和 community summary。
 - 已增加 multimodal evidence schema，支持 OCR、caption、image embedding、table、layout region、extractor diagnostics 和 parent evidence grouping；后台或 maintenance worker 可通过 `commit_multimodal_extraction` 提交派生 evidence，查询热路径不运行 OCR/caption/table/layout 工作。
 - 已增加 evaluation harness 和 fixture CI gate，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。

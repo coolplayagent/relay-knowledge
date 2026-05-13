@@ -110,17 +110,26 @@ impl ReadModelBackendConfig {
         }
     }
 
-    /// Returns worker completion metadata for an index kind.
-    pub fn metadata_for_index(&self, kind: IndexKind) -> Option<&ReadModelMetadata> {
+    /// Returns whether local index refresh should maintain an index family.
+    pub fn refreshes_index(&self, kind: IndexKind) -> bool {
         match kind {
-            IndexKind::Semantic if self.semantic_mode != ReadModelBackendMode::Disabled => {
-                Some(&self.semantic_model)
-            }
-            IndexKind::Vector if self.vector_mode != ReadModelBackendMode::Disabled => {
-                Some(&self.vector_model)
-            }
-            _ => None,
+            IndexKind::Bm25 => true,
+            IndexKind::Semantic => self.semantic_mode != ReadModelBackendMode::Disabled,
+            IndexKind::Vector => self.vector_mode != ReadModelBackendMode::Disabled,
         }
+    }
+
+    /// Returns read-model retrievers that must not execute for a request.
+    pub fn disabled_retriever_sources(&self) -> Vec<RetrieverSource> {
+        let mut disabled = Vec::new();
+        if self.semantic_mode == ReadModelBackendMode::Disabled {
+            disabled.push(RetrieverSource::Semantic);
+        }
+        if self.vector_mode == ReadModelBackendMode::Disabled {
+            disabled.push(RetrieverSource::Vector);
+        }
+
+        disabled
     }
 }
 

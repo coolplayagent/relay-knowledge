@@ -15,7 +15,7 @@ use crate::{
     domain::{
         ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind,
         RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-        RetrievalMode, RetrievedContextPack, SourceScope,
+        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
     project::PROJECT_NAME,
@@ -26,8 +26,8 @@ use crate::{
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     index_refresh::{
-        index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
-        recover_index_kinds, refresh_index_kinds,
+        filter_outcome_to_read_models, index_refresh_outcome, metadata_for_indexes,
+        reconcile_index_refreshes, recover_index_kinds, refresh_index_kinds,
     },
     ingest::mutation_batch_from_request,
     multimodal::extraction_ingest_request,
@@ -214,8 +214,13 @@ impl RelayKnowledgeService {
             Vec::new()
         } else {
             indexes = store.index_statuses().await.map_err(storage_api_error)?;
+            let mut active_indexes = indexes
+                .iter()
+                .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+                .cloned()
+                .collect::<Vec<_>>();
             if plan.freshness == FreshnessPolicy::WaitUntilFresh {
-                let stale_kinds = indexes
+                let stale_kinds = active_indexes
                     .iter()
                     .filter(|status| status.is_stale_for(graph_version))
                     .map(|status| status.kind)
@@ -229,13 +234,18 @@ impl RelayKnowledgeService {
                     )
                     .await?;
                     indexes = store.index_statuses().await.map_err(storage_api_error)?;
+                    active_indexes = indexes
+                        .iter()
+                        .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+                        .cloned()
+                        .collect();
                 }
             }
 
-            let stale = indexes
+            let stale = active_indexes
                 .iter()
                 .any(|status| status.is_stale_for(graph_version));
-            metadata = metadata_for_indexes(&context, graph_version, &indexes);
+            metadata = metadata_for_indexes(&context, graph_version, &active_indexes);
             if plan.freshness == FreshnessPolicy::AllowStale && stale {
                 degraded_reasons
                     .push("one or more indexes are behind the graph version".to_owned());
@@ -252,12 +262,21 @@ impl RelayKnowledgeService {
             );
         }
         let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
+        let mut disabled_retriever_sources = self.runtime.retrieval.disabled_retriever_sources();
+        if plan.freshness == FreshnessPolicy::GraphOnly {
+            for source in [RetrieverSource::Semantic, RetrieverSource::Vector] {
+                if !disabled_retriever_sources.contains(&source) {
+                    disabled_retriever_sources.push(source);
+                }
+            }
+        }
         let mut results = store
             .search(GraphSearchRequest {
                 query: plan.query.clone(),
                 source_scope: plan.source_scope.clone(),
                 graph_version,
                 limit: plan.limit.saturating_add(1),
+                disabled_retriever_sources,
             })
             .await
             .map_err(storage_api_error)?;
@@ -364,8 +383,11 @@ impl RelayKnowledgeService {
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
-        reconcile_index_refreshes(&store, graph.graph_version).await?;
-        let outcome = index_refresh_outcome(&store).await?;
+        reconcile_index_refreshes(&store, graph.graph_version, &self.runtime.retrieval).await?;
+        let outcome = filter_outcome_to_read_models(
+            index_refresh_outcome(&store).await?,
+            &self.runtime.retrieval,
+        );
         let healthy = outcome
             .indexes
             .iter()
@@ -393,12 +415,17 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         let before = store.index_statuses().await.map_err(storage_api_error)?;
-        let stale_index_kinds = before
+        let active_before = before
+            .iter()
+            .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+            .cloned()
+            .collect::<Vec<_>>();
+        let stale_index_kinds = active_before
             .iter()
             .filter(|status| status.is_stale_for(graph_version))
             .map(|status| status.kind)
             .collect::<Vec<_>>();
-        let index_lag_max = before
+        let index_lag_max = active_before
             .iter()
             .map(|status| {
                 graph_version
@@ -427,7 +454,12 @@ impl RelayKnowledgeService {
             .map(|status| status.kind)
             .collect::<Vec<_>>();
         let after = outcome.indexes;
-        let metadata = metadata_for_indexes(&context, graph_version, &after);
+        let active_after = after
+            .iter()
+            .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+            .cloned()
+            .collect::<Vec<_>>();
+        let metadata = metadata_for_indexes(&context, graph_version, &active_after);
 
         Ok(ServiceRecoveryReport {
             metadata,
@@ -451,7 +483,8 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let index_refresh = reconcile_index_refreshes(&store, graph_version).await?;
+        let index_refresh =
+            reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?;
         let service_definition_path = self
             .runtime
             .paths

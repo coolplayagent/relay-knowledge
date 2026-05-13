@@ -505,6 +505,7 @@ async fn search_at(
             source_scope,
             graph_version,
             limit: 10,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed")

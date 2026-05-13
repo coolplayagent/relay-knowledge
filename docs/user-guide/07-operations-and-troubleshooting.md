@@ -58,6 +58,9 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 路径配置错误: `RELAY_KNOWLEDGE_*_DIR` 和 `RELAY_KNOWLEDGE_HOME` 必须是绝对路径，且不能包含 `..`。
 
+`RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL must not be blank` 或
+`RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL must not be blank`: 模型名环境变量不能只包含空白字符；删除该变量可回到默认本地 deterministic model。
+
 ## 7.4 隔离复现
 
 排查用户数据或开发机污染时，用独立 runtime home:
