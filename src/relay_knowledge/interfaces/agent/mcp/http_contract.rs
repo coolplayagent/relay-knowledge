@@ -132,9 +132,13 @@ fn accepts_media_type(ranges: &[AcceptRange<'_>], type_name: &str, subtype: &str
         .is_some_and(|(_, quality)| quality > 0.0)
 }
 
-fn validate_origin(server: &McpServer, headers: &HeaderMap) -> Result<(), StatusCode> {
+pub(super) fn validate_origin(server: &McpServer, headers: &HeaderMap) -> Result<(), StatusCode> {
     let Some(origin) = headers.get(header::ORIGIN) else {
-        return Ok(());
+        return if server.agent.mcp_allowed_origins.is_empty() {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        };
     };
     let Ok(origin) = origin.to_str() else {
         return Err(StatusCode::FORBIDDEN);

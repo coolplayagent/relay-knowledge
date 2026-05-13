@@ -10,6 +10,11 @@ mod state;
 mod audit_bridge;
 mod code_tools;
 mod http_contract;
+mod legacy_http;
+mod metrics;
+mod prompts;
+mod resources;
+mod tool_registry;
 
 use axum::{
     Router,
@@ -17,7 +22,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -31,9 +36,8 @@ use state::{CancellationRegistry, SessionCreateError, SessionLookupError, Sessio
 
 use crate::{
     api::{
-        AgentAccessPolicy, AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest,
-        HybridRetrievalRequest, IndexRefreshRequest, InterfaceKind, RequestContext,
-        RuntimeIdentity, freshness_label,
+        AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest, HybridRetrievalRequest,
+        IndexRefreshRequest, InterfaceKind, RequestContext, RuntimeIdentity, freshness_label,
     },
     application::{AgentRuntimeConfig, RelayKnowledgeService},
     domain::{FreshnessPolicy, IndexKind},
@@ -46,11 +50,12 @@ use crate::{
 };
 
 use super::{
-    AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, authorize_limit,
-    authorize_scope,
+    AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, AgentAuditSink,
+    authorize_limit, authorize_scope,
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
-use code_tools::{code_impact_tool_definition, code_query_tool_definition, run_code_tool};
+use code_tools::run_code_tool;
+use tool_registry::{is_known_tool, tools_list_result};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -66,6 +71,7 @@ pub struct McpServer {
     audit: AgentAuditLog,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
+    legacy_sse: legacy_http::LegacySseRegistry,
 }
 
 impl McpServer {
@@ -75,14 +81,23 @@ impl McpServer {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let audit = if agent.audit_sink_enabled {
+            AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
+                .map(AgentAuditLog::with_sink)
+                .unwrap_or_default()
+        } else {
+            AgentAuditLog::default()
+        };
+
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
-            audit: AgentAuditLog::default(),
+            audit,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
+            legacy_sse: legacy_http::LegacySseRegistry::default(),
         }
     }
 
@@ -90,10 +105,22 @@ impl McpServer {
     pub fn router(self) -> Router {
         let config = self.network.current();
         let endpoint = self.agent.mcp_endpoint.clone();
+        let legacy_sse_endpoint = legacy_http::sse_endpoint(&endpoint);
+        let legacy_message_endpoint = legacy_http::message_endpoint(&endpoint);
+        let metrics_endpoint = metrics::metrics_endpoint(&endpoint);
         let body_limit = usize::try_from(config.http.max_request_body_bytes).unwrap_or(usize::MAX);
 
         Router::new()
             .route(&endpoint, post(handle_mcp_post))
+            .route(
+                &legacy_sse_endpoint,
+                get(legacy_http::handle_legacy_sse_get),
+            )
+            .route(
+                &legacy_message_endpoint,
+                post(legacy_http::handle_legacy_message_post),
+            )
+            .route(&metrics_endpoint, get(metrics::handle_metrics_get))
             .with_state(self)
             .layer(TraceLayer::new_for_http())
             .layer(RequestBodyLimitLayer::new(body_limit))
@@ -221,6 +248,59 @@ struct CancelParams {
     request_id: Value,
 }
 
+pub(super) struct McpMethodError {
+    code: i64,
+    kind: &'static str,
+    message: String,
+}
+
+impl McpMethodError {
+    fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: -32602,
+            kind: "invalid_argument",
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            code: -32603,
+            kind: "internal",
+            message: message.into(),
+        }
+    }
+
+    fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            code: -32000,
+            kind: "timeout",
+            message: message.into(),
+        }
+    }
+
+    fn api(error: ApiError) -> Self {
+        Self {
+            code: -32000,
+            kind: match error.error_kind {
+                ErrorKind::InvalidArgument => "invalid_argument",
+                ErrorKind::StorageUnavailable => "storage_unavailable",
+                ErrorKind::Timeout => "timeout",
+                ErrorKind::Internal => "internal",
+            },
+            message: error.message,
+        }
+    }
+
+    fn adapter(error: AgentAdapterError) -> Self {
+        Self {
+            code: -32000,
+            kind: error.kind.as_str(),
+            message: error.message,
+        }
+    }
+}
+
 async fn handle_mcp_post(
     State(server): State<McpServer>,
     headers: HeaderMap,
@@ -281,11 +361,18 @@ async fn handle_mcp_post(
         let Ok(permit) = admit_mcp_request(&server) else {
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         };
-        let session_id = match server.sessions.create_session() {
-            Ok(session_id) => session_id,
+        let session_id = match server.sessions.require_session(&headers) {
+            Ok(session) => session.session_id().to_owned(),
+            Err(SessionLookupError::Missing) => match server.sessions.create_session() {
+                Ok(session_id) => session_id,
+                Err(error) => {
+                    drop(permit);
+                    return session_create_error(id, error);
+                }
+            },
             Err(error) => {
                 drop(permit);
-                return session_create_error(id, error);
+                return session_lookup_error_response(error);
             }
         };
         drop(permit);
@@ -356,6 +443,19 @@ async fn handle_mcp_post(
     let result = match method {
         "ping" => json!({}),
         "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
+        "resources/list" => resources::list_resources(&server),
+        "resources/read" => {
+            match resources::read_resource_with_timeout(&server, request.params, &request_id).await
+            {
+                Ok(result) => result,
+                Err(error) => return json_rpc_error(id, error.code, error.message),
+            }
+        }
+        "prompts/list" => prompts::list_prompts(),
+        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id) {
+            Ok(result) => result,
+            Err(error) => return json_rpc_error(id, error.code, error.message),
+        },
         "tools/call" => {
             let params = match serde_json::from_value::<ToolCallParams>(request.params) {
                 Ok(params) => params,
@@ -377,20 +477,6 @@ async fn handle_mcp_post(
 
     drop(permit);
     json_rpc_success(id, result)
-}
-
-fn is_known_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "relay.retrieve_context"
-            | "relay.inspect_graph"
-            | "relay.health"
-            | "relay.service_status"
-            | "relay.index_status"
-            | "relay.code_query"
-            | "relay.code_impact"
-            | "relay.refresh_indexes"
-    )
 }
 
 fn is_valid_json_rpc_response(payload: &Value) -> bool {
@@ -693,97 +779,13 @@ fn initialize_result() -> Value {
     json!({
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {
-            "tools": {}
+            "tools": {},
+            "resources": {"listChanged": false},
+            "prompts": {"listChanged": false}
         },
         "serverInfo": {
             "name": PROJECT_NAME,
             "version": env!("CARGO_PKG_VERSION")
-        }
-    })
-}
-
-fn tools_list_result(policy: &AgentAccessPolicy) -> Value {
-    let mut tools = vec![
-        retrieve_context_tool_definition(),
-        inspect_graph_tool_definition(),
-        no_argument_tool(
-            "relay.health",
-            "Return relay-knowledge health and freshness status.",
-        ),
-        no_argument_tool("relay.service_status", "Return resident service status."),
-        no_argument_tool(
-            "relay.index_status",
-            "Return derived retrieval index status.",
-        ),
-        code_query_tool_definition(),
-        code_impact_tool_definition(),
-    ];
-    if policy.allow_index_refresh {
-        tools.push(refresh_indexes_tool_definition());
-    }
-
-    json!({ "tools": tools })
-}
-
-fn retrieve_context_tool_definition() -> Value {
-    json!({
-        "name": "relay.retrieve_context",
-        "description": "Retrieve grounded graph context for a query.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 1},
-                "source_scope": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1},
-                "freshness": {
-                    "type": "string",
-                    "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
-                }
-            },
-            "required": ["query"]
-        }
-    })
-}
-
-fn inspect_graph_tool_definition() -> Value {
-    json!({
-        "name": "relay.inspect_graph",
-        "description": "Inspect graph metadata and aggregate counts.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "source_scope": {"type": "string"}
-            }
-        }
-    })
-}
-
-fn refresh_indexes_tool_definition() -> Value {
-    json!({
-        "name": "relay.refresh_indexes",
-        "description": "Refresh derived retrieval indexes when policy permits it.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "kinds": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["bm25", "semantic", "vector"]
-                    }
-                }
-            }
-        }
-    })
-}
-
-fn no_argument_tool(name: &str, description: &str) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "inputSchema": {
-            "type": "object",
-            "properties": {}
         }
     })
 }
@@ -909,6 +911,14 @@ fn request_context(request_id: String) -> RequestContext {
         format!("mcp-{request_id}"),
         format!("trace-mcp-{request_id}"),
     )
+}
+
+fn endpoint_child(endpoint: &str, child: &str) -> String {
+    if endpoint == "/" {
+        format!("/{child}")
+    } else {
+        format!("{}/{child}", endpoint.trim_end_matches('/'))
+    }
 }
 
 fn request_id_key(namespace: &str, value: &Value) -> Option<String> {

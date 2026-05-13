@@ -134,9 +134,13 @@ pub struct AgentRuntimeConfig {
     pub mcp_endpoint: String,
     pub mcp_allowed_origins: Vec<String>,
     pub access_policy: AgentAccessPolicy,
+    pub audit_sink_enabled: bool,
+    pub audit_queue_depth: usize,
 }
 
 impl AgentRuntimeConfig {
+    pub const DEFAULT_AUDIT_QUEUE_DEPTH: usize = 1024;
+
     /// Builds agent protocol config from typed environment overrides.
     pub fn from_environment(
         environment: &EnvironmentConfig,
@@ -173,6 +177,11 @@ impl AgentRuntimeConfig {
             )?,
             mcp_allowed_origins: split_csv(environment.agent.mcp_allowed_origins.as_deref())?,
             access_policy,
+            audit_sink_enabled: environment.agent.audit_sink_enabled.unwrap_or(false),
+            audit_queue_depth: environment
+                .agent
+                .audit_queue_depth
+                .unwrap_or(Self::DEFAULT_AUDIT_QUEUE_DEPTH),
         })
     }
 
@@ -527,6 +536,8 @@ mod tests {
                 ("RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES", "4096"),
                 ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
                 ("RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS", "true"),
+                ("RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED", "true"),
+                ("RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH", "128"),
             ],
         )
         .expect("environment should parse");
@@ -544,6 +555,8 @@ mod tests {
         assert_eq!(runtime.agent.access_policy.max_context_bytes, 4096);
         assert!(runtime.agent.access_policy.allow_index_refresh);
         assert!(runtime.agent.access_policy.allow_remote_clients);
+        assert!(runtime.agent.audit_sink_enabled);
+        assert_eq!(runtime.agent.audit_queue_depth, 128);
     }
 
     #[tokio::test]

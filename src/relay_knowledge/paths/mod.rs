@@ -86,6 +86,11 @@ impl RuntimePaths {
         validate_all(&resolved)?;
         Ok(resolved)
     }
+
+    /// Returns the JSONL audit log owned by resident agent protocol adapters.
+    pub fn agent_audit_log_file(&self) -> PathBuf {
+        self.log_dir.join("agent-audit.jsonl")
+    }
 }
 
 /// Directory category attached to path validation failures.

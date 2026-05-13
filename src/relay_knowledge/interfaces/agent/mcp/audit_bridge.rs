@@ -70,6 +70,36 @@ pub(super) fn record_mcp_tool_audit(
     });
 }
 
+pub(super) struct McpMethodAudit<'a> {
+    pub(super) operation: &'a str,
+    pub(super) request_id: &'a str,
+    pub(super) status: AgentAuditStatus,
+    pub(super) source_scope: Option<String>,
+    pub(super) result_count: Option<usize>,
+    pub(super) elapsed_ms: u64,
+    pub(super) error_kind: Option<&'a str>,
+}
+
+pub(super) fn record_mcp_method_audit(server: &McpServer, input: McpMethodAudit<'_>) {
+    server.audit.record(AgentAuditEvent {
+        sequence: 0,
+        protocol: AgentProtocolKind::Mcp,
+        operation: input.operation.to_owned(),
+        request_id: input.request_id.to_owned(),
+        trace_id: format!("trace-mcp-{}", input.request_id),
+        runtime_identity: RuntimeIdentity::mcp(Some(input.request_id.to_owned())),
+        qos_decision: AgentAuditQosDecision::Admitted,
+        status: input.status,
+        source_scope: input.source_scope,
+        freshness: None,
+        limit: None,
+        result_count: input.result_count,
+        truncated: false,
+        elapsed_ms: input.elapsed_ms,
+        error_kind: input.error_kind.map(str::to_owned),
+    });
+}
+
 fn audit_source_scope(structured: &Value) -> Option<String> {
     structured["source_scope"]
         .as_str()

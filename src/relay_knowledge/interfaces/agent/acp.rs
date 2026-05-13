@@ -24,7 +24,7 @@ use crate::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog,
-    AgentAuditQosDecision, AgentAuditStatus, authorize_limit, authorize_scope,
+    AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus, authorize_limit, authorize_scope,
 };
 
 /// Local ACP session adapter for resident relay-knowledge processes.
@@ -45,12 +45,20 @@ impl LocalAcpSessionAdapter {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let audit = if agent.audit_sink_enabled {
+            AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
+                .map(AgentAuditLog::with_sink)
+                .unwrap_or_default()
+        } else {
+            AgentAuditLog::default()
+        };
+
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
-            audit: AgentAuditLog::default(),
+            audit,
             sessions: AcpSessionRegistry::default(),
         }
     }

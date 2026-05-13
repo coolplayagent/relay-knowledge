@@ -108,6 +108,10 @@ relay-knowledge service uninstall
 可在同一端口提供 Web 诊断、`/api/*` 和 MCP Streamable HTTP 工具能力。
 安装后的平台 service template 应复用该入口或不带 `--web` 的 MCP-only 入口，
 而不是用 unmanaged shell loop 包装普通 CLI 命令。
+当前 MCP service surface 还包括 `/mcp/metrics` Prometheus text exporter、`/mcp/sse`
+和 `/mcp/message` 旧 HTTP+SSE 兼容入口，以及可选 `logs/agent-audit.jsonl` 持久审计
+sink。安装器和 service template 必须把这些路径当作同一个前台服务进程的一部分，
+不要额外启动未受 service manager 管理的 sidecar loop。
 后续真正注册 systemd、Windows Service 或 launchd 时必须复用同一 application service，
 不能在 installer 或 CLI adapter 中重新实现路径规则。
 
@@ -179,6 +183,11 @@ MCP 相关环境变量属于服务配置面，安装器必须在 dry-run 和 doc
 - `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES`
 - `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS`
 - `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH`
+- `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED`
+- `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH`
+
+开启持久 audit sink 时，service manager 模板必须确保 log 目录可写，并把
+`agent-audit.jsonl` 与普通日志、metrics 和 health diagnostics 一起纳入排障说明。
 
 ## 5. 升级、回滚和卸载
 

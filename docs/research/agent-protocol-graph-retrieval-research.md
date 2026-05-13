@@ -8,7 +8,7 @@
 
 ## 1. 背景
 
-`relay-knowledge` 已经把 CLI、Web、MCP、本地 ACP 和未来 HTTP API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。当前实现已提供 MCP Streamable HTTP tool adapter 和本地 ACP session adapter；后续重点是 MCP resources/prompts、持久审计、metrics exporter、旧 HTTP+SSE 兼容端点和平台 service manager 集成。
+`relay-knowledge` 已经把 CLI、Web、MCP、本地 ACP 和未来 HTTP API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。当前实现已提供 MCP Streamable HTTP tool/resource/prompt adapter、本地 ACP session adapter、可选 JSONL 持久审计、Prometheus metrics exporter 和旧 HTTP+SSE 兼容端点；后续重点是平台 service manager 集成、silent update operator、跨进程 worker orchestration 和更完整的远程 ACP adapter。
 
 本研究把用户提到的 ACP 明确为 **Agent Client Protocol**。这里不把 ACP 解释为 Agent Communication Protocol 或 Agent Control Protocol。
 

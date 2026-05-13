@@ -135,6 +135,7 @@ impl GraphStore for SlowSearchStore {
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
         Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
             Ok(GraphInspection {
                 graph_version: GraphVersion::new(1),
                 entity_count: 0,

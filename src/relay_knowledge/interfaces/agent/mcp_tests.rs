@@ -12,6 +12,7 @@ use crate::{
     api::{IngestEvidence, IngestRequest},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     env::{EnvironmentConfig, PlatformKind},
+    interfaces::agent::AgentAuditStatus,
     storage::SqliteGraphStore,
 };
 
@@ -424,6 +425,50 @@ async fn tool_timeout_returns_json_rpc_tool_error() {
     );
 }
 
+#[tokio::test]
+async fn resources_and_metrics_respect_runtime_timeout() {
+    let store = Arc::new(SlowSearchStore);
+    let (server, _service) = server_and_service_with_store(
+        [
+            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+            ("RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS", "10"),
+        ],
+        store,
+    )
+    .await;
+    let mut router = server.clone().router();
+
+    let resource = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "slow-health-resource",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/health"}
+        }),
+    )
+    .await;
+    let metrics = raw_custom_request(&mut router, "GET", "/mcp/metrics", "", []).await;
+
+    assert_eq!(resource["error"]["code"], -32000);
+    assert!(
+        resource["error"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("max_runtime_ms")
+    );
+    assert_eq!(metrics.0, StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
+
+    let audit = server.audit_snapshot();
+    let resource_audit = audit
+        .iter()
+        .find(|event| event.operation == "resources/read")
+        .expect("resources/read audit event");
+    assert_eq!(resource_audit.status, AgentAuditStatus::Failed);
+    assert_eq!(resource_audit.error_kind.as_deref(), Some("timeout"));
+}
+
 #[test]
 fn request_id_keys_preserve_json_rpc_id_type() {
     assert_ne!(
@@ -509,7 +554,7 @@ async fn server_and_service<const N: usize>(
     server_and_service_with_store(pairs, store).await
 }
 
-async fn server_and_service_with_store<const N: usize>(
+pub(super) async fn server_and_service_with_store<const N: usize>(
     pairs: [(&str, &str); N],
     store: Arc<dyn crate::storage::KnowledgeStore>,
 ) -> (McpServer, RelayKnowledgeService) {
@@ -654,7 +699,7 @@ pub(super) async fn raw_mcp_response<const N: usize>(
     raw_custom_response(router, "POST", "/mcp", &payload.to_string(), headers).await
 }
 
-async fn raw_custom_request<const N: usize>(
+pub(super) async fn raw_custom_request<const N: usize>(
     router: &mut Router,
     method: &str,
     uri: &str,
@@ -664,7 +709,7 @@ async fn raw_custom_request<const N: usize>(
     raw_custom_request_with_defaults(router, method, uri, body, headers, true, true).await
 }
 
-async fn raw_custom_response<const N: usize>(
+pub(super) async fn raw_custom_response<const N: usize>(
     router: &mut Router,
     method: &str,
     uri: &str,
