@@ -115,6 +115,7 @@ relay-knowledge
 
 - 使用 OTLP HTTP/protobuf 上报 trace 和 metrics；当前 Rust 实现默认指向
   `http://127.0.0.1:4318`，traces 使用 `/v1/traces`，metrics 使用 `/v1/metrics`。
+  配置 signal-specific endpoint 时，另一个 signal 必须路由到同级 OTLP path。
 - OpenTelemetry Collector 负责转发、采样、批处理和协议转换。
 - Prometheus 抓取 Collector 或应用暴露的 metrics endpoint。
 - Grafana 读取 Prometheus 和 trace backend，用统一 dashboard 观察图写入、索引延迟和检索质量。
@@ -247,7 +248,9 @@ pub enum LogFormat {
 | `RELAY_OTEL_SERVICE_ENVIRONMENT` | `deployment.environment` resource attribute |
 | `RELAY_METRICS_ADDR` | Prometheus metrics endpoint 监听地址 |
 
-当前 Rust 实现已提供 OTLP traces/metrics exporter 和进程内 diagnostics snapshot。
+当前 Rust 实现已提供 OTLP traces/metrics exporter、shutdown flush 和进程内 diagnostics snapshot。
+单个 signal exporter 初始化失败只记录 diagnostics，不能阻断另一个 signal；trace export
+不可用时保持本地 tracing fallback。
 Prometheus 应优先从 Collector 抓取或转换；应用内独立 Prometheus endpoint 仍可作为后续补充。
 
 ## 6. 健康检查和诊断

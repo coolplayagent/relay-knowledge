@@ -123,7 +123,7 @@ RELAY_OTEL_EXPORT_TIMEOUT_MS
 RELAY_OTEL_SERVICE_ENVIRONMENT
 ```
 
-默认 endpoint 是 `http://127.0.0.1:4318`。启用 traces 后使用 `/v1/traces`，启用 metrics 后使用 `/v1/metrics`。`RELAY_OTEL_EXPORT_TIMEOUT_MS` 默认 5000。建议先让 Collector 在本机监听，再开启:
+默认 endpoint 是 `http://127.0.0.1:4318`。启用 traces 后使用 `/v1/traces`，启用 metrics 后使用 `/v1/metrics`；当 endpoint 已经包含其中一个 signal path，另一个 signal 会改写到同级 path。`RELAY_OTEL_EXPORT_TIMEOUT_MS` 默认 5000，并用于服务停止时 flush OTLP providers。建议先让 Collector 在本机监听，再开启:
 
 ```bash
 RELAY_OTEL_ENDPOINT=http://127.0.0.1:4318 \
@@ -132,7 +132,7 @@ RELAY_OTEL_METRICS=true \
 relay-knowledge service run --web --mcp streamable-http
 ```
 
-Exporter 初始化或导出失败不会阻止服务启动；错误会作为 telemetry diagnostics 暴露。
+Exporter 初始化或导出失败不会阻止服务启动；错误会作为 telemetry diagnostics 暴露。单个 signal 失败不会阻断另一个 signal，trace exporter 失败时仍保留本地 tracing fallback。
 
 ## 8.7 Worker、Silent Updates 与 Audit
 

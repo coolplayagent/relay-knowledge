@@ -63,7 +63,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 OTLP Collector 不可用: `service doctor --format json` 的 `runtime.telemetry.last_error` 会记录最近 exporter 初始化或导出错误。该错误只影响 observability，不表示 graph retrieval 不可用。先确认 `RELAY_OTEL_ENDPOINT` 是否指向 Collector OTLP HTTP 端口，默认是 `http://127.0.0.1:4318`。
 
-MCP resource 读取返回 404 或 session unknown: 客户端可能已经发送 `DELETE /mcp`，或 session 被淘汰。重新执行 `initialize` 并发送 `notifications/initialized`。
+MCP resource 读取返回 404 或 session unknown: 客户端可能已经发送 `DELETE /mcp`，或 session 被淘汰。`DELETE /mcp` 也受 Origin allow-list、protocol version 和 QoS admission 约束；若返回 403 或 429，分别检查 `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS` 和 QoS budget。重新执行 `initialize` 并发送 `notifications/initialized`。
 
 `version does not support --format streaming-json`: `version` 按 CLI 帮助公开支持 `text` 和 `json`。
 

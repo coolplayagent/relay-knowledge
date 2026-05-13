@@ -434,6 +434,125 @@ async fn resources_prompts_and_delete_session_are_supported() {
 }
 
 #[tokio::test]
+async fn delete_session_enforces_origin_allowlist() {
+    let server = server_with_env([
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        (
+            "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS",
+            "https://trusted.example",
+        ),
+    ])
+    .await;
+    let mut router = server.router();
+    let (init_status, init_headers, init_response) = raw_mcp_response(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": initialize_params()
+        }),
+        [("origin", "https://trusted.example")],
+    )
+    .await;
+    assert_eq!(init_status, StatusCode::OK);
+    assert_eq!(
+        init_response["result"]["protocolVersion"],
+        MCP_PROTOCOL_VERSION
+    );
+    let session_id = init_headers
+        .get(MCP_SESSION_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .expect("initialize should issue a session")
+        .to_owned();
+    let initialized = raw_mcp_request(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://trusted.example"),
+        ],
+    )
+    .await;
+    let rejected_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://attacker.example"),
+        ],
+    )
+    .await;
+    let still_active = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://trusted.example"),
+        ],
+    )
+    .await;
+
+    assert_eq!(initialized.0, StatusCode::ACCEPTED);
+    assert_eq!(rejected_delete.0, StatusCode::FORBIDDEN);
+    assert_eq!(still_active.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_session_uses_qos_admission_and_releases_permit() {
+    let server = server_with_env([
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
+    ])
+    .await;
+    let session_id = {
+        let mut setup_router = server.clone().router();
+        initialize_session(&mut setup_router).await
+    };
+    let policy = server.network.current().qos;
+    let occupied = server
+        .qos
+        .admit_request(&policy)
+        .expect("test should occupy budget");
+    let mut router = server.clone().router();
+
+    let rejected_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    drop(occupied);
+    let still_active = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    let accepted_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+
+    assert_eq!(rejected_delete.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(still_active.0, StatusCode::OK);
+    assert_eq!(accepted_delete.0, StatusCode::ACCEPTED);
+    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
+}
+
+#[tokio::test]
 async fn http_headers_and_body_budget_are_enforced() {
     let server = server_with_env([
         ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),

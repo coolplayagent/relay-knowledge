@@ -161,7 +161,7 @@ RELAY_OTEL_SERVICE_ENVIRONMENT=local \
 relay-knowledge service run --web --mcp streamable-http
 ```
 
-默认 endpoint 是 `http://127.0.0.1:4318`，traces 发送到 `/v1/traces`，metrics 发送到 `/v1/metrics`。Collector 不可用时，检索和协议响应不会失败；错误会出现在 service diagnostics 的 telemetry 状态中。
+默认 endpoint 是 `http://127.0.0.1:4318`，traces 发送到 `/v1/traces`，metrics 发送到 `/v1/metrics`。如果配置了 signal-specific endpoint，另一个 signal 会自动使用同级路径。Collector 不可用时，检索和协议响应不会失败；错误会出现在 service diagnostics 的 telemetry 状态中。服务停止时会按 `RELAY_OTEL_EXPORT_TIMEOUT_MS` flush 已安装的 OTLP exporters。
 
 ## 6.9 ACP 本地 adapter
 

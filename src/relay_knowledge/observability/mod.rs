@@ -71,6 +71,8 @@ pub struct ObservabilityRuntime {
 struct ObservabilityState {
     trace_initialized: bool,
     metrics_initialized: bool,
+    trace_provider: Option<SdkTracerProvider>,
+    metrics_provider: Option<SdkMeterProvider>,
     last_error: Option<String>,
 }
 
@@ -93,6 +95,8 @@ impl ObservabilityRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.trace_initialized = initialized.trace_initialized;
         state.metrics_initialized = initialized.metrics_initialized;
+        state.trace_provider = initialized.trace_provider;
+        state.metrics_provider = initialized.metrics_provider;
         state.last_error = initialized.last_error;
     }
 
@@ -122,9 +126,22 @@ impl ObservabilityRuntime {
 
     /// Flushes telemetry before shutdown when SDK providers are installed.
     pub fn shutdown(&self) {
-        // Providers are installed in the OpenTelemetry global registry. The Rust
-        // API exposes shutdown on provider handles; this runtime keeps exporter
-        // failures best-effort and leaves process teardown to flush remaining work.
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(provider) = state.trace_provider.take() {
+            if let Err(error) = provider.shutdown_with_timeout(self.config.export_timeout) {
+                state.push_error(format!("trace shutdown: {error}"));
+            }
+            state.trace_initialized = false;
+        }
+        if let Some(provider) = state.metrics_provider.take() {
+            if let Err(error) = provider.shutdown_with_timeout(self.config.export_timeout) {
+                state.push_error(format!("metrics shutdown: {error}"));
+            }
+            state.metrics_initialized = false;
+        }
     }
 
     fn try_initialize(&self) -> InitializedTelemetry {
@@ -152,7 +169,8 @@ impl ObservabilityRuntime {
                         .with_resource(resource.clone())
                         .with_reader(reader)
                         .build();
-                    global::set_meter_provider(provider);
+                    global::set_meter_provider(provider.clone());
+                    initialized.metrics_provider = Some(provider);
                     initialized.metrics_initialized = true;
                 }
                 Err(error) => initialized.push_error(format!("metrics exporter: {error}")),
@@ -172,26 +190,22 @@ impl ObservabilityRuntime {
                         .with_batch_exporter(exporter)
                         .build();
                     let tracer = provider.tracer(PROJECT_NAME.to_owned());
-                    global::set_tracer_provider(provider);
-                    let filter = EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info"));
-                    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let _ = tracing_subscriber::registry()
-                        .with(filter)
-                        .with(tracing_subscriber::fmt::layer())
-                        .with(otel_layer)
-                        .try_init();
-                    initialized.trace_initialized = true;
+                    global::set_tracer_provider(provider.clone());
+                    match install_otel_subscriber(tracer) {
+                        Ok(()) => {
+                            initialized.trace_provider = Some(provider);
+                            initialized.trace_initialized = true;
+                        }
+                        Err(error) => initialized.push_error(format!("trace subscriber: {error}")),
+                    }
                 }
-                Err(error) => initialized.push_error(format!("trace exporter: {error}")),
+                Err(error) => {
+                    initialized.push_error(format!("trace exporter: {error}"));
+                    install_fallback_subscriber(&mut initialized);
+                }
             }
         } else {
-            let filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-            let _ = tracing_subscriber::registry()
-                .with(filter)
-                .with(tracing_subscriber::fmt::layer())
-                .try_init();
+            install_fallback_subscriber(&mut initialized);
         }
 
         initialized
@@ -202,6 +216,8 @@ impl ObservabilityRuntime {
 struct InitializedTelemetry {
     trace_initialized: bool,
     metrics_initialized: bool,
+    trace_provider: Option<SdkTracerProvider>,
+    metrics_provider: Option<SdkMeterProvider>,
     last_error: Option<String>,
 }
 
@@ -214,6 +230,41 @@ impl InitializedTelemetry {
             }
             None => self.last_error = Some(error),
         }
+    }
+}
+
+impl ObservabilityState {
+    fn push_error(&mut self, error: String) {
+        match &mut self.last_error {
+            Some(existing) => {
+                existing.push_str("; ");
+                existing.push_str(&error);
+            }
+            None => self.last_error = Some(error),
+        }
+    }
+}
+
+fn install_otel_subscriber(
+    tracer: opentelemetry_sdk::trace::SdkTracer,
+) -> Result<(), tracing_subscriber::util::TryInitError> {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(otel_layer)
+        .try_init()
+}
+
+fn install_fallback_subscriber(initialized: &mut InitializedTelemetry) {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    if let Err(error) = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .try_init()
+    {
+        initialized.push_error(format!("fallback subscriber: {error}"));
     }
 }
 
@@ -511,6 +562,19 @@ mod tests {
         assert_eq!(
             initialized.last_error.as_deref(),
             Some("metrics exporter: invalid endpoint; trace exporter: invalid endpoint")
+        );
+    }
+
+    #[test]
+    fn observability_state_accumulates_shutdown_errors() {
+        let mut state = ObservabilityState::default();
+
+        state.push_error("trace shutdown: timed out".to_owned());
+        state.push_error("metrics shutdown: already shut down".to_owned());
+
+        assert_eq!(
+            state.last_error.as_deref(),
+            Some("trace shutdown: timed out; metrics shutdown: already shut down")
         );
     }
 }

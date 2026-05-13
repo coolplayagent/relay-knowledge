@@ -30,7 +30,8 @@ use tokio::sync::watch;
 use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 
 use http_contract::{
-    ensure_remote_bind_allowed, validate_http_headers, validate_protocol_version_header,
+    ensure_remote_bind_allowed, validate_http_headers, validate_origin,
+    validate_protocol_version_header,
 };
 use state::{CancellationRegistry, SessionCreateError, SessionLookupError, SessionRegistry};
 
@@ -446,6 +447,7 @@ async fn handle_mcp_post(
         }
     };
 
+    let mut pending_tool_audit = None;
     let result = match method {
         "ping" => json!({}),
         "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
@@ -476,22 +478,48 @@ async fn handle_mcp_post(
             if !is_known_tool(&params.name) {
                 return json_rpc_error(id, -32602, "unknown tool name");
             }
-            run_cancellable_tool_call(&server, params, request_id).await
+            let outcome = run_cancellable_tool_call(&server, params, request_id).await;
+            pending_tool_audit = Some((
+                outcome.operation,
+                outcome.request_id,
+                outcome.result.clone(),
+                outcome.duration_ms,
+            ));
+            outcome.result
         }
         _ => return json_rpc_error(id, -32601, "method not found"),
     };
 
     drop(permit);
+    if let Some((operation, request_id, result, duration_ms)) = pending_tool_audit {
+        record_mcp_tool_audit(&server, &operation, &request_id, &result, duration_ms).await;
+    }
     json_rpc_success(id, result)
 }
 
 async fn handle_mcp_delete(State(server): State<McpServer>, headers: HeaderMap) -> Response {
+    if let Err(status) = validate_origin(&server, &headers) {
+        return status.into_response();
+    }
     if let Err(status) = validate_protocol_version_header(&headers, true) {
         return status.into_response();
     }
+    let permit = match admit_mcp_request(&server) {
+        Ok(permit) => permit,
+        Err(_) => {
+            server.metrics.record_rejection("mcp", "qos_rejected");
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+    };
     match server.sessions.terminate_session(&headers) {
-        Ok(()) => StatusCode::ACCEPTED.into_response(),
-        Err(error) => session_lookup_error_response(error),
+        Ok(()) => {
+            drop(permit);
+            StatusCode::ACCEPTED.into_response()
+        }
+        Err(error) => {
+            drop(permit);
+            session_lookup_error_response(error)
+        }
     }
 }
 
@@ -585,7 +613,7 @@ async fn run_cancellable_tool_call(
     server: &McpServer,
     params: ToolCallParams,
     request_id: String,
-) -> Value {
+) -> ToolCallOutcome {
     let started = Instant::now();
     let operation = params.name.clone();
     let (mut cancellation, _registration) = server.cancellations.register(request_id.clone());
@@ -608,15 +636,19 @@ async fn run_cancellable_tool_call(
         }
     };
 
-    record_mcp_tool_audit(
-        server,
-        &operation,
-        &request_id,
-        &result,
-        elapsed_millis(started),
-    )
-    .await;
-    result
+    ToolCallOutcome {
+        operation,
+        request_id,
+        result,
+        duration_ms: elapsed_millis(started),
+    }
+}
+
+struct ToolCallOutcome {
+    operation: String,
+    request_id: String,
+    result: Value,
+    duration_ms: u64,
 }
 
 async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {
