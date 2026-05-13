@@ -89,6 +89,12 @@ v1 已落地的最小 API:
 - async `RelayKnowledgeService::refresh_indexes`
 - async `RelayKnowledgeService::health`
 - async `RelayKnowledgeService::service_status`
+- async `RelayKnowledgeService::reconcile_startup_indexes`
+- async `RelayKnowledgeService::register_code_repository`
+- async `RelayKnowledgeService::index_code_repository`
+- async `RelayKnowledgeService::query_code_repository`
+- async `RelayKnowledgeService::impact_code_repository`
+- async `RelayKnowledgeService::code_repository_status`
 - CLI `--format text`
 - CLI `--format json`
 - CLI `--format streaming-json`
@@ -98,14 +104,21 @@ v1 已落地的最小 API:
 - `status`
 - `ingest --source <scope> --content <text> [--entity <label>]`
 - `query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]`
+- `repo register <path> --alias <name> [--path <filter>] [--language <id>]`
+- `repo index <alias> [--ref <ref>]`
+- `repo update <alias> --base <ref> --head <ref>`
+- `repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports] [--limit <n>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness allow-stale|wait-until-fresh|graph-only]`
+- `repo impact <alias> --base <ref> --head <ref> [--limit <n>]`
+- `repo status <alias>`
 - `graph inspect`
 - `index refresh [--kind bm25|semantic|vector]`
 - `health`
 - `service status|doctor`
+- `service run [--mcp streamable-http]`
 - `version`
 - `--version`
 
-`ingest`、`query`、`graph inspect`、`index refresh`、`health` 和 `service doctor`
+`ingest`、`query`、`repo *`、`graph inspect`、`index refresh`、`health` 和 `service doctor`
 都通过统一 API contract 调用 application service，不直接访问 storage 或 index metadata。
 `query` 的可选 `source_scope` 在 application service 边界按 domain 规则验证和归一化；
 `query -- <text>` 用于表达以 `-` 开头的查询文本；

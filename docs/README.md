@@ -4,7 +4,7 @@
 
 ## Features
 
-- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、Web readiness、MCP 接入和 freshness/truncation 行为说明。
+- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
 
@@ -14,7 +14,7 @@
 - [arXiv 知识图谱论文深度洞察](research/arxiv-knowledge-graph-paper-insights.md): 以 arXiv 论文为主的论文归档与工程洞察。
 - [代码仓库 Tree-sitter 检索研究材料](research/code-repository-tree-sitter-retrieval-research.md): tree-sitter、Git 增量、代码知识图谱和高性能检索的资料依据与工程取舍。
 - [Agent 协议图检索接入研究](research/agent-protocol-graph-retrieval-research.md): MCP server 与 Agent Client Protocol adapter 暴露常驻图检索能力的协议研究和取舍。
-- [relay-knowledge 实现借鉴落地路线](research/relay-knowledge-implementation-reference.md): 结合 docs/PDF 研究材料和当前 Rust 实现的阶段性落地路线。
+- [relay-knowledge 实现借鉴落地路线](research/relay-knowledge-implementation-reference.md): 结合 docs/PDF 研究材料和当前 Rust 实现的已落地基线、剩余差距和阶段性路线。
 
 ## Specs
 

@@ -8,7 +8,7 @@
 
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
-- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、Web readiness、MCP 接入和 freshness/truncation 行为说明。
+- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
@@ -56,7 +56,7 @@ relay-knowledge ingest --source docs --content "Rust async services isolate bloc
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
 relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --format json
+relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
