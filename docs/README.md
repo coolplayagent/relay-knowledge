@@ -19,7 +19,7 @@
 - [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local/external semantic/vector backend contract、schema path、temporal/community、多模态 evidence maintenance、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为。
 - [Semantic/Vector Provider Backend](semantic-vector-provider-backend.md): 远端 OpenAI-compatible embedding provider 配置、脱敏诊断、Web Providers 面板和降级行为。
-- [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
+- [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、`canonical_symbol_id`、edge resolution/confidence metadata、检索返回字段和测试覆盖。
 
 ## Research
 

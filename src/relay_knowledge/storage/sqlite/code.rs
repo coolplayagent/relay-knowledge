@@ -1,10 +1,16 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 #[path = "code_query.rs"]
 mod code_query;
 
 #[path = "code_impact.rs"]
 mod code_impact;
+
+#[path = "code_schema.rs"]
+mod code_schema;
+
+#[path = "code_status.rs"]
+mod code_status;
 
 #[cfg(test)]
 #[path = "code_tests.rs"]
@@ -25,283 +31,10 @@ use crate::{
 };
 
 use super::SqliteGraphStore;
+use code_status::{canonical_filter_values, canonical_path_filters, parse_json_list};
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
-    migrate_legacy_code_scope_schema(connection)?;
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS code_repositories (
-            repository_id TEXT PRIMARY KEY,
-            alias TEXT NOT NULL UNIQUE,
-            root_path TEXT NOT NULL,
-            path_filters_json TEXT NOT NULL,
-            language_filters_json TEXT NOT NULL,
-            last_indexed_scope_id TEXT,
-            last_indexed_commit TEXT,
-            tree_hash TEXT,
-            state TEXT NOT NULL,
-            indexed_file_count INTEGER NOT NULL,
-            symbol_count INTEGER NOT NULL,
-            reference_count INTEGER NOT NULL,
-            chunk_count INTEGER NOT NULL,
-            stale INTEGER NOT NULL,
-            degraded_reason TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_scopes (
-            source_scope TEXT PRIMARY KEY,
-            repository_id TEXT NOT NULL,
-            resolved_commit_sha TEXT NOT NULL,
-            tree_hash TEXT NOT NULL,
-            path_filters_json TEXT NOT NULL,
-            language_filters_json TEXT NOT NULL,
-            indexed_file_count INTEGER NOT NULL,
-            symbol_count INTEGER NOT NULL,
-            reference_count INTEGER NOT NULL,
-            chunk_count INTEGER NOT NULL,
-            stale INTEGER NOT NULL,
-            degraded_reason TEXT,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_files (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            blob_hash TEXT NOT NULL,
-            byte_len INTEGER NOT NULL,
-            line_count INTEGER NOT NULL,
-            parse_status TEXT NOT NULL,
-            degraded_reason TEXT,
-            PRIMARY KEY (source_scope, path),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_symbols (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            symbol_snapshot_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            qualified_name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            signature TEXT NOT NULL,
-            doc_comment TEXT,
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            PRIMARY KEY (source_scope, symbol_snapshot_id),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_references (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            reference_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            target_symbol_snapshot_id TEXT,
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            PRIMARY KEY (source_scope, reference_id),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_imports (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            import_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            module TEXT NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            PRIMARY KEY (source_scope, import_id),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_calls (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            call_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            caller_symbol_snapshot_id TEXT,
-            caller_name TEXT,
-            callee_symbol_snapshot_id TEXT,
-            callee_name TEXT NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            PRIMARY KEY (source_scope, call_id),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_chunks (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            chunk_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            symbol_snapshot_id TEXT,
-            PRIMARY KEY (source_scope, chunk_id),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_file_diagnostics (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            path TEXT NOT NULL,
-            parse_status TEXT NOT NULL,
-            message TEXT NOT NULL,
-            PRIMARY KEY (source_scope, path, message),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_path_tombstones (
-            repository_id TEXT NOT NULL,
-            source_scope TEXT NOT NULL,
-            old_path TEXT NOT NULL,
-            new_path TEXT,
-            base_ref TEXT NOT NULL,
-            head_ref TEXT NOT NULL,
-            PRIMARY KEY (source_scope, old_path, base_ref, head_ref),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
-            ON code_repository_symbols(source_scope, name, qualified_name, path);
-        CREATE INDEX IF NOT EXISTS code_repository_references_lookup
-            ON code_repository_references(source_scope, name, kind, path);
-        CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
-            ON code_repository_calls(source_scope, callee_name, caller_name, path);
-        CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
-            ON code_repository_imports(source_scope, module, path);
-        CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
-            ON code_repository_chunks(source_scope, path);
-        CREATE INDEX IF NOT EXISTS code_repository_scopes_lookup
-            ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
-        ",
-    )?;
-    ensure_code_repository_calls_target_column(connection)?;
-
-    Ok(())
-}
-
-fn migrate_legacy_code_scope_schema(connection: &Connection) -> Result<(), StorageError> {
-    if !table_exists(connection, "code_repositories")? {
-        return Ok(());
-    }
-    let repository_columns = table_columns(connection, "code_repositories")?;
-    let files_columns = table_columns(connection, "code_repository_files")?;
-    if repository_columns
-        .iter()
-        .any(|column| column == "last_indexed_scope_id")
-        && files_columns.iter().any(|column| column == "source_scope")
-    {
-        return Ok(());
-    }
-    let suffix = legacy_suffix(connection)?;
-    for table in [
-        "code_repository_path_tombstones",
-        "code_repository_scopes",
-        "code_repository_file_diagnostics",
-        "code_repository_chunks",
-        "code_repository_calls",
-        "code_repository_imports",
-        "code_repository_references",
-        "code_repository_symbols",
-        "code_repository_files",
-        "code_repositories",
-    ] {
-        if table_exists(connection, table)? {
-            connection.execute(
-                &format!("ALTER TABLE {table} RENAME TO {table}_legacy_{suffix}"),
-                [],
-            )?;
-        }
-    }
-    drop_renamed_legacy_lookup_indexes(connection)?;
-
-    Ok(())
-}
-
-fn drop_renamed_legacy_lookup_indexes(connection: &Connection) -> Result<(), StorageError> {
-    for index in [
-        "code_repository_symbols_lookup",
-        "code_repository_references_lookup",
-        "code_repository_calls_lookup",
-        "code_repository_imports_lookup",
-        "code_repository_chunks_lookup",
-        "code_repository_scopes_lookup",
-    ] {
-        connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
-    }
-
-    Ok(())
-}
-
-fn legacy_suffix(connection: &Connection) -> Result<u64, StorageError> {
-    let mut suffix = 1;
-    loop {
-        let name = format!("code_repositories_legacy_{suffix}");
-        if !table_exists(connection, &name)? {
-            return Ok(suffix);
-        }
-        suffix += 1;
-    }
-}
-
-fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-            params![table],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|exists| exists != 0)
-        .map_err(StorageError::from)
-}
-
-fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn ensure_code_repository_calls_target_column(connection: &Connection) -> Result<(), StorageError> {
-    let mut statement = connection.prepare("PRAGMA table_info(code_repository_calls)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let columns = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    if !columns
-        .iter()
-        .any(|column| column == "callee_symbol_snapshot_id")
-    {
-        connection.execute(
-            "ALTER TABLE code_repository_calls ADD COLUMN callee_symbol_snapshot_id TEXT",
-            [],
-        )?;
-    }
-
-    Ok(())
+    code_schema::initialize_code_schema(connection)
 }
 
 impl CodeRepositoryStore for SqliteGraphStore {
@@ -309,14 +42,14 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         registration: CodeRepositoryRegistration,
     ) -> StorageFuture<'_, CodeRepositoryStatus> {
-        self.run(move |connection| upsert_repository(connection, registration))
+        self.run(move |connection| code_status::upsert_repository(connection, registration))
     }
 
     fn code_repository_status(
         &self,
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        self.run(move |connection| repository_status(connection, &repository))
+        self.run(move |connection| code_status::repository_status(connection, &repository))
     }
 
     fn code_repository_scope_status(
@@ -327,7 +60,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         language_filters: Vec<String>,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
         self.run(move |connection| {
-            repository_scope_status(
+            code_status::repository_scope_status(
                 connection,
                 &repository,
                 &resolved_commit_sha,
@@ -376,227 +109,6 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, CodeRepositoryReport> {
         self.run(move |connection| repository_report(connection, &repository))
     }
-}
-
-fn upsert_repository(
-    connection: &mut Connection,
-    registration: CodeRepositoryRegistration,
-) -> Result<CodeRepositoryStatus, StorageError> {
-    connection.execute(
-        "
-        INSERT INTO code_repositories (
-            repository_id, alias, root_path, path_filters_json, language_filters_json,
-            state, indexed_file_count, symbol_count, reference_count, chunk_count,
-            stale, degraded_reason
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, 'registered', 0, 0, 0, 0, 1, NULL)
-        ON CONFLICT(repository_id) DO UPDATE SET
-            alias = excluded.alias,
-            root_path = excluded.root_path,
-            path_filters_json = excluded.path_filters_json,
-            language_filters_json = excluded.language_filters_json,
-            stale = 1
-        ",
-        params![
-            registration.repository_id,
-            registration.alias,
-            registration.root_path,
-            serde_json::to_string(&registration.path_filters)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
-            serde_json::to_string(&registration.language_filters)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
-        ],
-    )?;
-
-    repository_status(connection, &registration.repository_id)?.ok_or_else(|| {
-        StorageError::InvalidInput("registered code repository was not persisted".to_owned())
-    })
-}
-
-pub(super) fn repository_status(
-    connection: &mut Connection,
-    repository: &str,
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    if let Some(status) =
-        repository_status_by_column(connection, repository, RepositoryLookupColumn::RepositoryId)?
-    {
-        return Ok(Some(status));
-    }
-    repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
-}
-
-pub(super) fn repository_scope_status(
-    connection: &mut Connection,
-    repository: &str,
-    resolved_commit_sha: &str,
-    path_filters: &[String],
-    language_filters: &[String],
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    let base = repository_status(connection, repository)?;
-    let Some(base) = base else {
-        return Ok(None);
-    };
-    let path_filters_json = serde_json::to_string(path_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(language_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let requested_path_filters = canonical_path_filters(path_filters);
-    let requested_language_filters = canonical_filter_values(language_filters);
-    let mut statement = connection.prepare(
-        "
-        SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
-               reference_count, chunk_count, stale, degraded_reason,
-               path_filters_json, language_filters_json
-        FROM code_repository_scopes
-        WHERE repository_id = ?1
-          AND resolved_commit_sha = ?2
-        ORDER BY
-          CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
-          source_scope ASC
-        ",
-    )?;
-    let rows = statement.query_map(
-        params![
-            base.repository_id,
-            resolved_commit_sha,
-            path_filters_json,
-            language_filters_json
-        ],
-        |row| {
-            let stored_path_filters = parse_json_list(row.get::<_, String>(8)?)?;
-            let stored_language_filters = parse_json_list(row.get::<_, String>(9)?)?;
-            Ok((
-                CodeRepositoryStatus {
-                    repository_id: base.repository_id.clone(),
-                    alias: base.alias.clone(),
-                    root_path: base.root_path.clone(),
-                    path_filters: stored_path_filters.clone(),
-                    language_filters: stored_language_filters.clone(),
-                    last_indexed_scope_id: Some(row.get(0)?),
-                    last_indexed_commit: Some(resolved_commit_sha.to_owned()),
-                    tree_hash: Some(row.get(1)?),
-                    state: "fresh".to_owned(),
-                    indexed_file_count: row.get(2)?,
-                    symbol_count: row.get(3)?,
-                    reference_count: row.get(4)?,
-                    chunk_count: row.get(5)?,
-                    stale: row.get::<_, i64>(6)? != 0,
-                    degraded_reason: row.get(7)?,
-                },
-                stored_path_filters,
-                stored_language_filters,
-            ))
-        },
-    )?;
-    for row in rows {
-        let (status, stored_path_filters, stored_language_filters) = row?;
-        if canonical_path_filters(&stored_path_filters) == requested_path_filters
-            && canonical_filter_values(&stored_language_filters) == requested_language_filters
-        {
-            return Ok(Some(status));
-        }
-    }
-
-    Ok(None)
-}
-
-fn repository_status_by_column(
-    connection: &mut Connection,
-    repository: &str,
-    column: RepositoryLookupColumn,
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    connection
-        .query_row(column.query(), params![repository], |row| {
-            Ok(CodeRepositoryStatus {
-                repository_id: row.get(0)?,
-                alias: row.get(1)?,
-                root_path: row.get(2)?,
-                path_filters: parse_json_list(row.get::<_, String>(3)?)?,
-                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
-                last_indexed_scope_id: row.get(5)?,
-                last_indexed_commit: row.get(6)?,
-                tree_hash: row.get(7)?,
-                state: row.get(8)?,
-                indexed_file_count: row.get(9)?,
-                symbol_count: row.get(10)?,
-                reference_count: row.get(11)?,
-                chunk_count: row.get(12)?,
-                stale: row.get::<_, i64>(13)? != 0,
-                degraded_reason: row.get(14)?,
-            })
-        })
-        .optional()
-        .map_err(StorageError::from)
-}
-
-enum RepositoryLookupColumn {
-    RepositoryId,
-    Alias,
-}
-
-impl RepositoryLookupColumn {
-    fn query(&self) -> &'static str {
-        match self {
-            Self::RepositoryId => {
-                "
-                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_scope_id, last_indexed_commit, tree_hash,
-                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                       stale, degraded_reason
-                FROM code_repositories
-                WHERE repository_id = ?1
-                "
-            }
-            Self::Alias => {
-                "
-                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_scope_id, last_indexed_commit, tree_hash,
-                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                       stale, degraded_reason
-                FROM code_repositories
-                WHERE alias = ?1
-                "
-            }
-        }
-    }
-}
-
-fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {
-    serde_json::from_str(&value).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
-    })
-}
-
-fn canonical_path_filters(filters: &[String]) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for filter in filters {
-        let value = normalize_path_filter(filter).to_owned();
-        if !normalized.contains(&value) {
-            normalized.push(value);
-        }
-    }
-
-    normalized
-}
-
-fn canonical_filter_values(filters: &[String]) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for filter in filters {
-        if !normalized.contains(filter) {
-            normalized.push(filter.clone());
-        }
-    }
-
-    normalized
-}
-
-fn normalize_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
 }
 
 fn file_fingerprints(
@@ -669,16 +181,18 @@ fn apply_snapshot(
         transaction.execute(
             "
             INSERT INTO code_repository_symbols (
-                repository_id, source_scope, symbol_snapshot_id, file_id, path, language_id, name,
+                repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
+                file_id, path, language_id, name,
                 qualified_name, kind, signature, doc_comment, byte_start, byte_end,
                 line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ",
             params![
                 symbol.repository_id,
                 symbol.source_scope,
                 symbol.symbol_snapshot_id,
+                symbol.canonical_symbol_id,
                 symbol.file_id,
                 symbol.path,
                 symbol.language_id,
@@ -699,9 +213,11 @@ fn apply_snapshot(
             "
             INSERT INTO code_repository_references (
                 repository_id, source_scope, reference_id, file_id, path, name, kind,
-                target_symbol_snapshot_id, byte_start, byte_end, line_start, line_end
+                target_symbol_snapshot_id, target_hint, resolution_state,
+                confidence_basis_points, confidence_tier,
+                byte_start, byte_end, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ",
             params![
                 reference.repository_id,
@@ -712,6 +228,10 @@ fn apply_snapshot(
                 reference.name,
                 reference.kind,
                 reference.target_symbol_snapshot_id,
+                reference.target_hint,
+                reference.resolution_state,
+                reference.confidence_basis_points,
+                reference.confidence_tier,
                 reference.byte_range.start,
                 reference.byte_range.end,
                 reference.line_range.start,
@@ -723,9 +243,10 @@ fn apply_snapshot(
     update_repository_after_snapshot(&transaction, &snapshot)?;
     transaction.commit()?;
 
-    let status = repository_status(connection, &snapshot.repository_id)?.ok_or_else(|| {
-        StorageError::InvalidInput("code repository status is missing after index".to_owned())
-    })?;
+    let status =
+        code_status::repository_status(connection, &snapshot.repository_id)?.ok_or_else(|| {
+            StorageError::InvalidInput("code repository status is missing after index".to_owned())
+        })?;
 
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id,
@@ -832,28 +353,28 @@ fn clone_active_scope_for_incremental(
     clone_code_table(
         transaction,
         "code_repository_symbols",
-        "repository_id, source_scope, symbol_snapshot_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
+        "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
         &previous_scope,
         &snapshot.source_scope,
     )?;
     clone_code_table(
         transaction,
         "code_repository_references",
-        "repository_id, source_scope, reference_id, file_id, path, name, kind, target_symbol_snapshot_id, byte_start, byte_end, line_start, line_end",
+        "repository_id, source_scope, reference_id, file_id, path, name, kind, target_symbol_snapshot_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
         &previous_scope,
         &snapshot.source_scope,
     )?;
     clone_code_table(
         transaction,
         "code_repository_imports",
-        "repository_id, source_scope, import_id, file_id, path, module, line_start, line_end",
+        "repository_id, source_scope, import_id, file_id, path, module, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
         &previous_scope,
         &snapshot.source_scope,
     )?;
     clone_code_table(
         transaction,
         "code_repository_calls",
-        "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, line_start, line_end",
+        "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
         &previous_scope,
         &snapshot.source_scope,
     )?;
@@ -908,12 +429,13 @@ fn repository_report(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<CodeRepositoryReport, StorageError> {
-    let status = repository_status(connection, repository)?.ok_or_else(|| {
+    let status = code_status::repository_status(connection, repository)?.ok_or_else(|| {
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
     })?;
     let scope = status.last_indexed_scope_id.as_deref().unwrap_or_default();
     let degradation_summary = repository_diagnostics(connection, scope)?;
     let degraded_file_count = repository_degraded_file_count(connection, scope)?;
+    let edge_counts = repository_edge_resolution_counts(connection, scope)?;
     let representative_queries = representative_queries(connection, scope)?;
     let freshness_state = if status.stale {
         "stale"
@@ -935,6 +457,9 @@ fn repository_report(
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count,
+        resolved_edge_count: edge_counts.resolved,
+        ambiguous_edge_count: edge_counts.ambiguous,
+        unresolved_edge_count: edge_counts.unresolved,
         degradation_summary,
         representative_queries,
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
@@ -957,6 +482,46 @@ fn repository_degraded_file_count(
             |row| row.get::<_, usize>(0),
         )
         .map_err(StorageError::from)
+}
+
+#[derive(Debug, Default)]
+struct EdgeResolutionCounts {
+    resolved: usize,
+    ambiguous: usize,
+    unresolved: usize,
+}
+
+fn repository_edge_resolution_counts(
+    connection: &Connection,
+    source_scope: &str,
+) -> Result<EdgeResolutionCounts, StorageError> {
+    let mut counts = EdgeResolutionCounts::default();
+    for (table, column) in [
+        ("code_repository_references", "resolution_state"),
+        ("code_repository_imports", "resolution_state"),
+    ] {
+        let mut statement = connection.prepare(&format!(
+            "
+            SELECT {column}, COUNT(*)
+            FROM {table}
+            WHERE source_scope = ?1
+            GROUP BY {column}
+            "
+        ))?;
+        let rows = statement.query_map(params![source_scope], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })?;
+        for row in rows {
+            let (state, count) = row?;
+            match state.as_str() {
+                "resolved" => counts.resolved += count,
+                "ambiguous" => counts.ambiguous += count,
+                _ => counts.unresolved += count,
+            }
+        }
+    }
+
+    Ok(counts)
 }
 
 fn repository_diagnostics(
@@ -1020,9 +585,10 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT INTO code_repository_imports (
-                repository_id, source_scope, import_id, file_id, path, module, line_start, line_end
+                repository_id, source_scope, import_id, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ",
             params![
                 import.repository_id,
@@ -1031,6 +597,10 @@ fn insert_imports_calls_chunks_diagnostics(
                 import.file_id,
                 import.path,
                 import.module,
+                import.target_hint,
+                import.resolution_state,
+                import.confidence_basis_points,
+                import.confidence_tier,
                 import.line_range.start,
                 import.line_range.end,
             ],
@@ -1041,9 +611,10 @@ fn insert_imports_calls_chunks_diagnostics(
             "
             INSERT INTO code_repository_calls (
                 repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
-                caller_name, callee_symbol_snapshot_id, callee_name, line_start, line_end
+                caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
+                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ",
             params![
                 call.repository_id,
@@ -1055,6 +626,10 @@ fn insert_imports_calls_chunks_diagnostics(
                 call.caller_name,
                 call.callee_symbol_snapshot_id,
                 call.callee_name,
+                call.target_hint,
+                call.resolution_state,
+                call.confidence_basis_points,
+                call.confidence_tier,
                 call.line_range.start,
                 call.line_range.end,
             ],

@@ -11,6 +11,7 @@ use std::{
     process::Command,
 };
 
+mod identity;
 mod languages;
 mod parser;
 mod scope;
@@ -30,6 +31,9 @@ use scope::{
     path_scope_overlaps, selection_exclusion_reason,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+
+#[cfg(test)]
+use identity::resolve_reference_targets;
 
 #[cfg(test)]
 use languages::language_id;
@@ -656,7 +660,11 @@ impl SnapshotBuild {
     }
 
     fn finish(mut self) -> CodeIndexSnapshot {
-        resolve_reference_targets(&self.symbols, &mut self.references);
+        identity::enrich_symbol_identities(&self.repository_id, &mut self.symbols);
+        identity::resolve_reference_targets(&self.symbols, &mut self.references);
+        for import in &mut self.imports {
+            import.target_hint = Some(import.module.clone());
+        }
         self.calls = self
             .references
             .iter()
@@ -691,6 +699,10 @@ impl SnapshotBuild {
                 .map(|symbol| symbol.name.clone()),
                 callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
                 callee_name: reference.name.clone(),
+                target_hint: reference.target_hint.clone(),
+                resolution_state: reference.resolution_state.clone(),
+                confidence_basis_points: reference.confidence_basis_points,
+                confidence_tier: reference.confidence_tier.clone(),
                 line_range: reference.line_range.clone(),
             })
             .collect();
@@ -716,46 +728,6 @@ impl SnapshotBuild {
             diagnostics: self.diagnostics,
         }
     }
-}
-
-fn resolve_reference_targets(
-    symbols: &[RepositoryCodeSymbolRecord],
-    references: &mut [RepositoryCodeReferenceRecord],
-) {
-    let mut by_name = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
-    for symbol in symbols {
-        by_name.entry(&symbol.name).or_default().push(symbol);
-    }
-    for reference in references {
-        reference.target_symbol_snapshot_id = resolve_reference_target(
-            reference,
-            by_name
-                .get(reference.name.as_str())
-                .map(std::vec::Vec::as_slice),
-        )
-        .map(|symbol| symbol.symbol_snapshot_id.clone());
-    }
-}
-
-fn resolve_reference_target<'a>(
-    reference: &RepositoryCodeReferenceRecord,
-    candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
-) -> Option<&'a RepositoryCodeSymbolRecord> {
-    let candidates = candidates?;
-    if candidates.len() == 1 {
-        return candidates.first().copied();
-    }
-
-    let same_path = candidates
-        .iter()
-        .copied()
-        .filter(|symbol| symbol.path == reference.path)
-        .collect::<Vec<_>>();
-    if same_path.len() == 1 {
-        return same_path.first().copied();
-    }
-
-    None
 }
 
 fn caller_for_line<'a>(

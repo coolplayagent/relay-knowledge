@@ -581,6 +581,10 @@ fn render_markdown_report(response: &CodeRepositoryReportResponse) -> Result<Str
         report.chunk_count,
         report.degraded_file_count
     ));
+    output.push_str(&format!(
+        "- Edge resolution: resolved={}, ambiguous={}, unresolved={}\n",
+        report.resolved_edge_count, report.ambiguous_edge_count, report.unresolved_edge_count
+    ));
     output.push_str(&format!("- Freshness: `{}`\n\n", report.freshness_state));
     output.push_str("## Scope\n\n");
     output.push_str(&format!(

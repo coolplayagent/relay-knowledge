@@ -162,6 +162,13 @@ v1 必须支持的边:
 
 如果目标符号无法唯一解析，边必须保留 `target_hint`、`resolution_state=unresolved|ambiguous|resolved` 和候选列表。不能把猜测写成确定调用。
 
+当前实现已经把该约束落到代码仓库索引读模型: `RepositoryCodeSymbolRecord`
+持久化 `canonical_symbol_id` 与 `symbol_snapshot_id`，SQLite 中的
+reference/call/import 行持久化 `target_hint`、`resolution_state`、
+`confidence_basis_points` 和 `confidence_tier`。`repo query`、Web operation
+和 MCP `relay.code_query` 返回的 `CodeRetrievalHit` 会透出这些 edge metadata；
+无法唯一解析的调用保持 `ambiguous` 或 `unresolved`，不会升级成 resolved。
+
 ## 5. Tree-sitter 解析与抽取
 
 ### 5.1 语言注册
@@ -612,11 +619,11 @@ Health/status 必须能回答:
 
 建议阶段:
 
-1. **v1 数据 contract**: 增加 code source scope、代码图实体、diff contract、scoped index metadata。当前实现已落地 tree-sitter 输出承接层: `CodeFileRecord`、`CodeSymbolRecord`、`CodeReferenceRecord`、`CodeChunkRecord`、parse status 计数、代码图存储 trait 和 SQLite 表；Git diff contract 与 scoped index metadata 仍在后续阶段。
-2. **v1 parser adapter**: 接入主流语言 grammar registry，支持 definitions/references/imports/chunks，并为没有上游 tags query 的语言维护受控 query。
-3. **v1 full build + BM25**: Git tracked files 全量构建，代码 chunk 和 symbol BM25 可查询。
-4. **v1 incremental update**: Git diff/status + content hash + 局部 graph/index refresh。
-5. **v1 graph queries**: 定义/引用/调用/import/impact 半径。
+1. **v1 数据 contract**: 已落地 code repository registration、Git snapshot/worktree scope、代码图实体、`canonical_symbol_id` / `symbol_snapshot_id` 分离、edge resolution/confidence metadata、parse status 计数、代码图存储 trait 和 SQLite 兼容迁移。
+2. **v1 parser adapter**: 已接入主流语言 grammar registry，支持 definitions/references/imports/chunks、doc comment 和降级 diagnostics；没有上游 tags query 的语言使用受控 query。
+3. **v1 full build + BM25**: 已支持 Git tracked files 全量构建，代码 chunk 和 symbol 写入 BM25、local semantic 和 local vector read model。
+4. **v1 incremental update**: 已支持 Git diff/status、content hash skip、delete/rename tombstone 和局部 graph/index refresh。
+5. **v1 graph queries**: 已支持定义、引用、调用、import、impact 半径和 report 级 edge resolution 诊断。
 6. **v2 hybrid retrieval**: semantic/vector、rerank、context pack、跨仓库检索。
 7. **v2 background service**: watch、leases、自愈、dead-letter、维护窗口和用户可控静默更新。
 
