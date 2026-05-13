@@ -10,6 +10,7 @@ use std::{
     fmt,
     future::{Future, IntoFuture, Ready, ready},
     io,
+    net::IpAddr,
     pin::Pin,
     sync::{
         Arc,
@@ -111,6 +112,11 @@ impl fmt::Display for HttpBindAddress {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.value)
     }
+}
+
+/// Returns whether a listener may accept non-local clients under the access policy.
+pub fn remote_clients_allowed(config: &HttpConfig, allow_remote_clients: bool) -> bool {
+    allow_remote_clients || is_local_bind(&config.bind_address.to_string())
 }
 
 /// Outbound HTTP proxy and TLS verification policy.
@@ -729,6 +735,29 @@ fn parse_no_proxy_rules(value: Option<&str>) -> Result<Vec<String>, HttpConfigEr
         .unwrap_or_else(|| Ok(Vec::new()))
 }
 
+fn is_local_bind(bind: &str) -> bool {
+    is_loopback_host(authority_host(bind))
+}
+
+fn authority_host(authority: &str) -> &str {
+    if let Some(remainder) = authority.strip_prefix('[') {
+        return remainder
+            .find(']')
+            .map_or(authority, |index| &remainder[..index]);
+    }
+
+    authority
+        .rsplit_once(':')
+        .map_or(authority, |(host, _)| host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,11 +910,16 @@ mod tests {
             HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
         )
         .expect("config should build");
+        let handler_started = Arc::new(tokio::sync::Notify::new());
+        let route_handler_started = handler_started.clone();
         let router = Router::new().route(
             "/hold",
-            get(|| async {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                "done"
+            get(move || {
+                let handler_started = route_handler_started.clone();
+                async move {
+                    handler_started.notify_one();
+                    std::future::pending::<&'static str>().await
+                }
             }),
         );
         let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
@@ -900,7 +934,9 @@ mod tests {
             .await
             .expect("stream should become writable");
         stream.try_write(request).expect("request should write");
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::timeout(Duration::from_secs(1), handler_started.notified())
+            .await
+            .expect("handler should start before shutdown");
         let _ = shutdown.send(());
 
         let error = server

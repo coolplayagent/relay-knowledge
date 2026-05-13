@@ -979,6 +979,7 @@ name = "relay-knowledge"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "getrandom 0.2.17",
  "opentelemetry",
  "opentelemetry-otlp",

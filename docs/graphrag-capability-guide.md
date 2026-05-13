@@ -17,14 +17,17 @@
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
 - index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors 持久化 kind/scope/modality freshness、source hash、backend cursor，以及 semantic/vector worker 可回传的 model name/dimension；bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
 - diagnostics: graph inspect、index status、health、service doctor 和 Web readiness；`service status` 与 `service doctor` 当前复用同一统一 API 输出，报告 disabled service mode、后台更新状态、service definition path、agent protocol status、refresh queue diagnostics 和结构化 stale reasons。
-- resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission 和 bounded audit events。
+- resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；MCP resources 暴露 service/health/index/metrics 只读上下文，policy-gated graph summary 只在允许 unspecified scope 时暴露，MCP prompts 提供 retrieval 和 code-impact 调用模板，并保留旧 HTTP+SSE 兼容入口；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission、bounded audit events 和可选 JSONL 持久 audit sink。
 - evaluation harness: 纯 Rust harness 和 CI fixture gate 覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact 观测。
 - operational productization: ingest 后按 evidence modality 写入 embedding/OCR/vision/extractor worker task；`worker run-once` 通过外部 HTTP worker contract 或 deterministic fallback 生成人工审批 proposal；proposal accept/reject/supersede、持久 audit query、service manager definition plan/write 和 silent-update operator status/pause/resume 都通过统一 application API 暴露给 CLI/Web。
 
 规划中能力:
 
-- MCP resources/prompts、旧 HTTP+SSE 兼容端点和更完整的 ACP 远程 adapter。
-- 真实生产模型 worker 的完整响应适配、metrics exporter 和 release diagnostics。
+- 具体外部 embedding/OCR/vision provider、认证、限流、模型并存刷新策略和生产 worker 响应适配；当前实现已有 runtime/read-model/worker contract。
+- proposal lifecycle、事实冲突处理和审批流产品化。
+- service manager install/upgrade/uninstall、silent update operator、跨进程 worker/watchdog 和 release diagnostics 产品化。
+- 更完整的 ACP 远程 adapter。
+- 真实 OCR/caption/table/layout worker、image embedding backend 和 extractor 产品化。
 
 ## 2. CLI 工作流
 
@@ -110,16 +113,19 @@ Web workspace 从同源服务读取:
 
 - `/api/project/status`
 - `/api/health`
+- `/api/web/operations/execute`
 
 当前 Web 页面展示:
 
 - Status: graph version、health、index lag、mutation count 和图谱计数。
 - GraphRAG readiness: evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、runtime budgets、refresh recovery 和 stale reasons。
-- Operations: retrieve、ingest、graph、code、index 和 service 操作的命令与 payload 预览。
+- Operations: retrieve、ingest、graph、code、index 和 service 操作的命令与 payload 预览，以及同源执行结果。
 - Indexes: BM25、semantic、vector 的 index version、indexed graph version、state 和 lag。
 - Runtime: HTTP bind、数据目录、状态目录、缓存目录、日志目录和 QoS budgets。
 
-Web operation composer 当前用于生成和暂存 typed command/request preview。执行型 Web endpoint 仍待 Rust HTTP API adapter 提供。
+Web operation composer 可以生成、暂存并执行 typed command/request preview。执行时页面把当前 snapshot 发送到 `/api/web/operations/execute`，Rust Web adapter 复用 application service 完成实际 retrieve、ingest、graph inspect、index refresh、code repository workflow 或 service status/run snapshot，并把 result JSON 回显到页面。
+
+`relay-knowledge service run` 会挂载 Web endpoints；如果加上 `--mcp streamable-http`，MCP 和 Web routes 会共用配置的 HTTP listener 与 QoS budget。
 
 ## 4. MCP 工作流
 
@@ -204,4 +210,4 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG readiness、operation composer、index table、runtime panel 和移动端布局。
+浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG readiness、operation composer、同源执行结果、index table、runtime panel 和移动端布局。

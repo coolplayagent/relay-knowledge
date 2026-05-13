@@ -25,7 +25,10 @@ pub(super) fn parse_indexed_file(
     bytes: &[u8],
 ) -> Result<(), CodeIndexError> {
     let blob_hash = stable_content_hash(bytes);
-    let file_id = stable_id("file", [&build.repository_id, path, &blob_hash]);
+    let file_id = stable_id(
+        "file",
+        [&build.repository_id, &build.source_scope, path, &blob_hash],
+    );
     let language = detect_language(path);
     let line_count = count_lines(bytes);
     let (parse_status, degraded_reason, content) = validate_text_content(path, bytes, language)?;
@@ -109,6 +112,7 @@ struct FileStatusInput<'a> {
 fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInput<'_>) {
     build.files.push(RepositoryCodeFileRecord {
         repository_id: build.repository_id.clone(),
+        source_scope: build.source_scope.clone(),
         file_id: input.file_id.to_owned(),
         path: input.path.to_owned(),
         language_id: input.language_id.to_owned(),
@@ -122,6 +126,7 @@ fn record_file_status(build: &mut SnapshotBuild, input: FileStatusInput<'_>) {
     if let Some(message) = input.degraded_reason {
         build.diagnostics.push(CodeFileDiagnostic {
             repository_id: build.repository_id.clone(),
+            source_scope: build.source_scope.clone(),
             path: input.path.to_owned(),
             parse_status: input.parse_status,
             message,
@@ -564,10 +569,12 @@ fn collect_import_node(
         let range = syntax_range(node);
         imports.push(CodeImportRecord {
             repository_id: build.repository_id.clone(),
+            source_scope: build.source_scope.clone(),
             import_id: stable_id(
                 "import",
                 [
                     &build.repository_id,
+                    &build.source_scope,
                     path,
                     &module,
                     &range.line_start.to_string(),
@@ -619,10 +626,12 @@ fn chunks_for_symbols(
         let excerpt = content.get(start..end).unwrap_or(&symbol.signature).trim();
         chunks.push(RepositoryCodeChunkRecord {
             repository_id: build.repository_id.clone(),
+            source_scope: build.source_scope.clone(),
             chunk_id: stable_id(
                 "chunk",
                 [
                     &build.repository_id,
+                    &build.source_scope,
                     path,
                     &symbol.symbol_snapshot_id,
                     excerpt,
@@ -670,10 +679,12 @@ fn add_file_chunk_to_vec(
     let line_end = count_lines(content.as_bytes()).max(1);
     chunks.push(RepositoryCodeChunkRecord {
         repository_id: build.repository_id.clone(),
+        source_scope: build.source_scope.clone(),
         chunk_id: stable_id(
             "chunk",
             [
                 &build.repository_id,
+                &build.source_scope,
                 path,
                 "file",
                 &stable_content_hash(content.as_bytes()),
@@ -713,6 +724,7 @@ fn symbol_record(
         "symbol",
         [
             &context.build.repository_id,
+            &context.build.source_scope,
             context.path,
             &qualified_name,
             &range.byte_start.to_string(),
@@ -722,6 +734,7 @@ fn symbol_record(
 
     Ok(RepositoryCodeSymbolRecord {
         repository_id: context.build.repository_id.clone(),
+        source_scope: context.build.source_scope.clone(),
         symbol_snapshot_id,
         file_id: context.file_id.to_owned(),
         path: context.path.to_owned(),
@@ -750,6 +763,7 @@ fn reference_record(
             "reference",
             [
                 &context.build.repository_id,
+                &context.build.source_scope,
                 context.path,
                 name,
                 kind,
@@ -757,6 +771,7 @@ fn reference_record(
                 &range.byte_end.to_string(),
             ],
         ),
+        source_scope: context.build.source_scope.clone(),
         file_id: context.file_id.to_owned(),
         path: context.path.to_owned(),
         name: name.to_owned(),

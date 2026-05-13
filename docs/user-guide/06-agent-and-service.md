@@ -32,11 +32,27 @@ http://127.0.0.1:8791/mcp
 
 `service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
+Web 页面中的 service run 操作只通过 `/api/web/operations/execute` 返回当前 service runtime snapshot，用于检查即将运行的配置和 MCP 状态；实际常驻服务必须由 CLI、`run.sh` 或平台 service manager 启动。
+
 ## 6.2 MCP 权限变量
 
-默认 policy 要求配置允许 scope。未设置允许 scope 时，graph tools 会拒绝 unspecified scope，除非显式开启 unspecified scope。远程 bind 默认被拒绝，非本机监听也需要显式开启。
+```text
+RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED
+RELAY_KNOWLEDGE_MCP_ENDPOINT
+RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES
+RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE
+RELAY_KNOWLEDGE_MCP_MAX_LIMIT
+RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES
+RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH
+RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
+RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
+RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
+```
 
-`relay.refresh_indexes` 默认隐藏，只有显式允许 index refresh 后才会出现在 tool list 中。完整 MCP policy 变量见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
+默认 policy 要求配置允许 scope。未设置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
+
+`relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。完整 MCP policy 变量见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
 
 ## 6.3 Worker、Proposal 与 Audit
 
@@ -89,7 +105,7 @@ Linux 输出 systemd user service 计划，macOS 输出 launchd plist 计划，W
 
 缺失 session header 会返回 HTTP 400。未知或已淘汰 session id 会返回 HTTP 404。工具请求、`ping` 和 `notifications/cancelled` 都绑定到服务端签发的 session。
 
-## 6.6 Tool 面
+## 6.6 Tools、Resources 和 Prompts
 
 MCP tool surface 当前包括:
 
@@ -102,21 +118,30 @@ MCP tool surface 当前包括:
 - authorized code impact analysis
 - permission-gated index refresh
 
-Agent 请求会写入 bounded in-process audit events；CLI/Web/service operation 还写入持久 audit sink，可通过 `audit query` 检查最近操作。
+MCP resource surface 当前包括:
 
-## 6.7 MCP Resources、Prompts 与 Session 结束
-
-MCP `initialize` 会声明 `tools`、`resources` 和 `prompts` capability。已支持的 resource URI:
-
-- `relay://graph/metadata`
-- `relay://graph/schema`
-- `relay://scopes`
+- `relay://service/status`
+- `relay://service/health`
 - `relay://indexes/status`
-- `relay://diagnostics/current`
+- `relay://graph/summary`，仅在 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` 时暴露
+- `relay://metrics/prometheus`
 
-`relay://scopes` 只返回当前 policy 授权的 scope；diagnostics 会隐藏 service definition 的完整本地目录，只保留可排障的文件名提示。Prompt helper 包括 `relay-context-planning`、`relay-grounded-answer-drafting` 和 `relay-graph-debugging`。这些 prompt 只提供使用模板，不能改变权限或放宽 policy。
+MCP prompt surface 当前包括:
 
-客户端结束会话时可向 `/mcp` 发送 `DELETE`，并携带 `Mcp-Session-Id` 和 `MCP-Protocol-Version`。终止后同一 session id 会返回 HTTP 404。GET/SSE resumability 当前返回稳定未实现错误。
+- `relay.retrieve-context`
+- `relay.code-impact`
+
+Resources 和 prompts 只提供只读诊断、上下文和调用模板，不能绕过 access policy，也不会开启 mutation 或 index refresh 权限。
+
+## 6.7 Metrics、兼容端点和审计
+
+`GET /mcp/metrics` 返回 Prometheus text 格式快照，覆盖当前 graph version、index refresh queue depth、dead-letter count、QoS in-flight/queued request count 和每个 index 的 stale 状态。该 endpoint 仍通过 MCP router 和 QoS admission 进入服务。
+
+旧 HTTP+SSE 客户端可使用 `GET /mcp/sse` 获取 server-issued session id 和 message endpoint，并保持 SSE stream 打开以接收后续 `message` events；再向 `/mcp/message?sessionId=<id>` 发送 JSON-RPC。新集成应优先使用 Streamable HTTP `/mcp`。
+
+Agent 请求会写入 bounded in-process audit events，包含 runtime identity、scope、freshness、QoS decision、budget、truncation、result count 和 status。设置 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，MCP 和本地 ACP audit events 会通过有界 async queue 写入 `logs/agent-audit.jsonl`。`RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` 控制持久 sink 的排队深度，并在运行时限制到最多 65536；队列满时持久镜像可丢弃事件，但内存 audit log 仍保留最近事件。
+
+CLI/Web/service operation 还写入持久 audit sink，可通过 `audit query` 检查最近操作。
 
 ## 6.8 OTLP Telemetry
 

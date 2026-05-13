@@ -44,6 +44,9 @@ pub const RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES: &str = "RELAY_KNOWLEDGE_MCP_MAX
 pub const RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH: &str = "RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH";
 pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
+pub const RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED: &str =
+    "RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED";
+pub const RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH: &str = "RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH";
 pub const RELAY_KNOWLEDGE_SEMANTIC_BACKEND: &str = "RELAY_KNOWLEDGE_SEMANTIC_BACKEND";
 pub const RELAY_KNOWLEDGE_VECTOR_BACKEND: &str = "RELAY_KNOWLEDGE_VECTOR_BACKEND";
 pub const RELAY_KNOWLEDGE_LLM_PROVIDER: &str = "RELAY_KNOWLEDGE_LLM_PROVIDER";
@@ -172,6 +175,8 @@ pub struct AgentEnvOverrides {
     pub mcp_max_context_bytes: Option<usize>,
     pub mcp_allow_index_refresh: Option<bool>,
     pub mcp_allow_remote_clients: Option<bool>,
+    pub audit_sink_enabled: Option<bool>,
+    pub audit_queue_depth: Option<usize>,
 }
 
 /// Retrieval backend settings read from relay-specific environment variables.
@@ -334,6 +339,11 @@ impl EnvironmentConfig {
                 mcp_allow_remote_clients: bool_var(
                     &values,
                     RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS,
+                )?,
+                audit_sink_enabled: bool_var(&values, RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED)?,
+                audit_queue_depth: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH,
                 )?,
             },
             retrieval: RetrievalEnvOverrides {
@@ -637,6 +647,8 @@ mod tests {
                 (RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES, "8192"),
                 (RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH, "true"),
                 (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
+                (RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED, "true"),
+                (RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH, "256"),
                 (RELAY_KNOWLEDGE_SEMANTIC_BACKEND, "external"),
                 (RELAY_KNOWLEDGE_VECTOR_BACKEND, "external"),
                 (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
@@ -673,6 +685,8 @@ mod tests {
         assert_eq!(config.agent.mcp_max_context_bytes, Some(8192));
         assert_eq!(config.agent.mcp_allow_index_refresh, Some(true));
         assert_eq!(config.agent.mcp_allow_remote_clients, Some(false));
+        assert_eq!(config.agent.audit_sink_enabled, Some(true));
+        assert_eq!(config.agent.audit_queue_depth, Some(256));
         assert_eq!(
             config.retrieval.semantic_backend,
             Some("external".to_owned())

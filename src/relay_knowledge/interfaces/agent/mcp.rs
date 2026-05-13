@@ -8,11 +8,13 @@ use std::{
 mod state;
 
 mod audit_bridge;
-mod catalog;
 mod code_tools;
 mod http_contract;
+mod legacy_http;
+mod metrics;
 mod prompts;
 mod resources;
+mod tool_registry;
 
 use axum::{
     Router,
@@ -45,17 +47,16 @@ use crate::{
         qos::{QosPermit, QosRuntime, RejectReason},
     },
     observability::AgentProtocolMetrics,
+    project::PROJECT_NAME,
 };
 
 use super::{
-    AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, authorize_limit,
-    authorize_scope,
+    AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, AgentAuditSink,
+    authorize_limit, authorize_scope,
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
-use catalog::{initialize_result, is_known_tool, tools_list_result};
 use code_tools::run_code_tool;
-use prompts::{prompt_get_result, prompts_list_result};
-use resources::{ResourceReadParams, read_resource, resources_list_result};
+use tool_registry::{is_known_tool, tools_list_result};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -72,6 +73,7 @@ pub struct McpServer {
     metrics: AgentProtocolMetrics,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
+    legacy_sse: legacy_http::LegacySseRegistry,
 }
 
 impl McpServer {
@@ -82,15 +84,24 @@ impl McpServer {
         agent: AgentRuntimeConfig,
     ) -> Self {
         let metrics = service.observability().agent_metrics();
+        let audit = if agent.audit_sink_enabled {
+            AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
+                .map(AgentAuditLog::with_sink)
+                .unwrap_or_default()
+        } else {
+            AgentAuditLog::default()
+        };
+
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
-            audit: AgentAuditLog::default(),
+            audit,
             metrics,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
+            legacy_sse: legacy_http::LegacySseRegistry::default(),
         }
     }
 
@@ -98,11 +109,23 @@ impl McpServer {
     pub fn router(self) -> Router {
         let config = self.network.current();
         let endpoint = self.agent.mcp_endpoint.clone();
+        let legacy_sse_endpoint = legacy_http::sse_endpoint(&endpoint);
+        let legacy_message_endpoint = legacy_http::message_endpoint(&endpoint);
+        let metrics_endpoint = metrics::metrics_endpoint(&endpoint);
         let body_limit = usize::try_from(config.http.max_request_body_bytes).unwrap_or(usize::MAX);
 
         Router::new()
             .route(&endpoint, post(handle_mcp_post))
-            .route(&endpoint, get(handle_mcp_get).delete(handle_mcp_delete))
+            .route(&endpoint, axum::routing::delete(handle_mcp_delete))
+            .route(
+                &legacy_sse_endpoint,
+                get(legacy_http::handle_legacy_sse_get),
+            )
+            .route(
+                &legacy_message_endpoint,
+                post(legacy_http::handle_legacy_message_post),
+            )
+            .route(&metrics_endpoint, get(metrics::handle_metrics_get))
             .with_state(self)
             .layer(TraceLayer::new_for_http())
             .layer(RequestBodyLimitLayer::new(body_limit))
@@ -202,11 +225,6 @@ struct ToolCallParams {
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct PromptGetParams {
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct RetrieveContextArgs {
     query: String,
     #[serde(default)]
@@ -233,6 +251,59 @@ struct RefreshIndexesArgs {
 struct CancelParams {
     #[serde(rename = "requestId")]
     request_id: Value,
+}
+
+pub(super) struct McpMethodError {
+    code: i64,
+    kind: &'static str,
+    message: String,
+}
+
+impl McpMethodError {
+    fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: -32602,
+            kind: "invalid_argument",
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            code: -32603,
+            kind: "internal",
+            message: message.into(),
+        }
+    }
+
+    fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            code: -32000,
+            kind: "timeout",
+            message: message.into(),
+        }
+    }
+
+    fn api(error: ApiError) -> Self {
+        Self {
+            code: -32000,
+            kind: match error.error_kind {
+                ErrorKind::InvalidArgument => "invalid_argument",
+                ErrorKind::StorageUnavailable => "storage_unavailable",
+                ErrorKind::Timeout => "timeout",
+                ErrorKind::Internal => "internal",
+            },
+            message: error.message,
+        }
+    }
+
+    fn adapter(error: AgentAdapterError) -> Self {
+        Self {
+            code: -32000,
+            kind: error.kind.as_str(),
+            message: error.message,
+        }
+    }
 }
 
 async fn handle_mcp_post(
@@ -295,11 +366,18 @@ async fn handle_mcp_post(
         let Ok(permit) = admit_mcp_request(&server) else {
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         };
-        let session_id = match server.sessions.create_session() {
-            Ok(session_id) => session_id,
+        let session_id = match server.sessions.require_session(&headers) {
+            Ok(session) => session.session_id().to_owned(),
+            Err(SessionLookupError::Missing) => match server.sessions.create_session() {
+                Ok(session_id) => session_id,
+                Err(error) => {
+                    drop(permit);
+                    return session_create_error(id, error);
+                }
+            },
             Err(error) => {
                 drop(permit);
-                return session_create_error(id, error);
+                return session_lookup_error_response(error);
             }
         };
         drop(permit);
@@ -371,39 +449,19 @@ async fn handle_mcp_post(
     let result = match method {
         "ping" => json!({}),
         "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
-        "resources/list" => resources_list_result(&server.agent.access_policy),
+        "resources/list" => resources::list_resources(&server),
         "resources/read" => {
-            let params = match serde_json::from_value::<ResourceReadParams>(request.params) {
-                Ok(params) => params,
-                Err(error) => {
-                    return json_rpc_error(
-                        id,
-                        -32602,
-                        format!("invalid resources/read params: {error}"),
-                    );
-                }
-            };
-            read_resource(&server, params, request_id).await
+            match resources::read_resource_with_timeout(&server, request.params, &request_id).await
+            {
+                Ok(result) => result,
+                Err(error) => return json_rpc_error(id, error.code, error.message),
+            }
         }
-        "prompts/list" => prompts_list_result(),
-        "prompts/get" => {
-            let params = match serde_json::from_value::<PromptGetParams>(request.params) {
-                Ok(params) => params,
-                Err(error) => {
-                    return json_rpc_error(
-                        id,
-                        -32602,
-                        format!("invalid prompts/get params: {error}"),
-                    );
-                }
-            };
-            prompt_get_result(&params.name).unwrap_or_else(|| {
-                json!({
-                    "description": "unknown prompt",
-                    "messages": [],
-                })
-            })
-        }
+        "prompts/list" => prompts::list_prompts(),
+        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id) {
+            Ok(result) => result,
+            Err(error) => return json_rpc_error(id, error.code, error.message),
+        },
         "tools/call" => {
             let params = match serde_json::from_value::<ToolCallParams>(request.params) {
                 Ok(params) => params,
@@ -425,21 +483,6 @@ async fn handle_mcp_post(
 
     drop(permit);
     json_rpc_success(id, result)
-}
-
-async fn handle_mcp_get(State(server): State<McpServer>, headers: HeaderMap) -> Response {
-    if let Err(status) = validate_protocol_version_header(&headers, true) {
-        return status.into_response();
-    }
-    if let Err(error) = server.sessions.require_session(&headers) {
-        return session_lookup_error_response(error);
-    }
-
-    json_rpc_error(
-        Value::Null,
-        -32004,
-        "MCP GET/SSE resumability is not implemented by this server",
-    )
 }
 
 async fn handle_mcp_delete(State(server): State<McpServer>, headers: HeaderMap) -> Response {
@@ -749,6 +792,21 @@ async fn refresh_indexes_tool(server: &McpServer, arguments: Value, request_id: 
     }
 }
 
+fn initialize_result() -> Value {
+    json!({
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {
+            "tools": {},
+            "resources": {"listChanged": false},
+            "prompts": {"listChanged": false}
+        },
+        "serverInfo": {
+            "name": PROJECT_NAME,
+            "version": env!("CARGO_PKG_VERSION")
+        }
+    })
+}
+
 fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {
     match value.unwrap_or("allow-stale") {
         "allow-stale" => Ok(FreshnessPolicy::AllowStale),
@@ -870,6 +928,14 @@ fn request_context(request_id: String) -> RequestContext {
         format!("mcp-{request_id}"),
         format!("trace-mcp-{request_id}"),
     )
+}
+
+fn endpoint_child(endpoint: &str, child: &str) -> String {
+    if endpoint == "/" {
+        format!("/{child}")
+    } else {
+        format!("{}/{child}", endpoint.trim_end_matches('/'))
+    }
 }
 
 fn request_id_key(namespace: &str, value: &Value) -> Option<String> {

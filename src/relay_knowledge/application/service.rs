@@ -646,6 +646,11 @@ impl RelayKnowledgeService {
     pub(super) async fn store(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
         self.storage.get().await
     }
+
+    /// Returns the persistent agent audit log path resolved by the path boundary.
+    pub fn agent_audit_log_path(&self) -> PathBuf {
+        self.runtime.paths.agent_audit_log_file()
+    }
 }
 
 /// Durable audit event input accepted from resident agent adapters.

@@ -14,8 +14,8 @@ use crate::{
         AgentProtocolKind, AgentRetrievalResult, ErrorKind, HybridRetrievalRequest, InterfaceKind,
         RequestContext, RuntimeIdentity,
     },
-    application::{AgentDurableAuditInput, AgentRuntimeConfig, RelayKnowledgeService},
-    domain::{AuditStatus, FreshnessPolicy},
+    application::{AgentRuntimeConfig, RelayKnowledgeService},
+    domain::FreshnessPolicy,
     net::{
         NetworkRuntime,
         qos::{QosPermit, QosRuntime, RejectReason},
@@ -25,7 +25,7 @@ use crate::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog,
-    AgentAuditQosDecision, AgentAuditStatus, authorize_limit, authorize_scope,
+    AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus, authorize_limit, authorize_scope,
 };
 
 /// Local ACP session adapter for resident relay-knowledge processes.
@@ -48,12 +48,20 @@ impl LocalAcpSessionAdapter {
         agent: AgentRuntimeConfig,
     ) -> Self {
         let metrics = service.observability().agent_metrics();
+        let audit = if agent.audit_sink_enabled {
+            AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
+                .map(AgentAuditLog::with_sink)
+                .unwrap_or_default()
+        } else {
+            AgentAuditLog::default()
+        };
+
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
-            audit: AgentAuditLog::default(),
+            audit,
             metrics,
             sessions: AcpSessionRegistry::default(),
         }
@@ -387,29 +395,6 @@ impl LocalAcpSessionAdapter {
         if event.status == AgentAuditStatus::Cancelled {
             self.metrics.record_cancelled("acp");
         }
-        let service = self.service.clone();
-        tokio::spawn(async move {
-            let detail_json = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
-            let status = match event.status {
-                AgentAuditStatus::Completed => AuditStatus::Completed,
-                AgentAuditStatus::Failed => AuditStatus::Failed,
-                AgentAuditStatus::Cancelled => AuditStatus::Cancelled,
-            };
-            let _ = service
-                .record_agent_audit(AgentDurableAuditInput {
-                    operation: event.operation,
-                    interface: "acp".to_owned(),
-                    request_id: event.request_id,
-                    trace_id: event.trace_id,
-                    status,
-                    actor: event.runtime_identity.actor_id,
-                    source_scope: event.source_scope,
-                    graph_version: 0,
-                    detail_json,
-                    message: event.error_kind,
-                })
-                .await;
-        });
     }
 }
 

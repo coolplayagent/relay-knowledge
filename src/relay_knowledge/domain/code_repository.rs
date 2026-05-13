@@ -2,6 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use super::{CodeParseStatus, DomainError, FreshnessPolicy, error::required_text};
 
+/// Builds the stable source scope id for a Git snapshot partition.
+pub fn code_snapshot_scope_id(
+    repository_id: &str,
+    tree_hash: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> String {
+    let mut input = Vec::new();
+    append_hash_part(&mut input, "git_snapshot");
+    append_hash_part(&mut input, repository_id);
+    append_hash_part(&mut input, tree_hash);
+    append_hash_list(&mut input, path_filters);
+    append_hash_list(&mut input, language_filters);
+
+    format!("git_snapshot:{:016x}", stable_hash64(&input))
+}
+
 /// Inclusive byte or line range for repository code index rows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeRange {
@@ -230,6 +247,8 @@ pub struct CodeRepositoryStatus {
     pub root_path: String,
     pub path_filters: Vec<String>,
     pub language_filters: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_indexed_scope_id: Option<String>,
     pub last_indexed_commit: Option<String>,
     pub tree_hash: Option<String>,
     pub state: String,
@@ -246,6 +265,7 @@ pub struct CodeRepositoryStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeFileRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub file_id: String,
     pub path: String,
     pub language_id: String,
@@ -268,6 +288,7 @@ pub struct CodeFileFingerprint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeSymbolRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub symbol_snapshot_id: String,
     pub file_id: String,
     pub path: String,
@@ -286,6 +307,7 @@ pub struct RepositoryCodeSymbolRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeReferenceRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub reference_id: String,
     pub file_id: String,
     pub path: String,
@@ -301,6 +323,7 @@ pub struct RepositoryCodeReferenceRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeImportRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub import_id: String,
     pub file_id: String,
     pub path: String,
@@ -312,6 +335,7 @@ pub struct CodeImportRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeCallRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub call_id: String,
     pub file_id: String,
     pub path: String,
@@ -327,6 +351,7 @@ pub struct CodeCallRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryCodeChunkRecord {
     pub repository_id: String,
+    pub source_scope: String,
     pub chunk_id: String,
     pub file_id: String,
     pub path: String,
@@ -341,6 +366,7 @@ pub struct RepositoryCodeChunkRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeFileDiagnostic {
     pub repository_id: String,
+    pub source_scope: String,
     pub path: String,
     pub parse_status: CodeParseStatus,
     pub message: String,
@@ -350,6 +376,7 @@ pub struct CodeFileDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodePathTombstone {
     pub repository_id: String,
+    pub source_scope: String,
     pub old_path: String,
     pub new_path: Option<String>,
     pub base_ref: String,
@@ -360,8 +387,11 @@ pub struct CodePathTombstone {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexSnapshot {
     pub repository_id: String,
+    pub source_scope: String,
     pub resolved_commit_sha: String,
     pub tree_hash: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
     pub full_replace: bool,
     pub changed_path_count: usize,
     pub skipped_unchanged_count: usize,
@@ -391,6 +421,7 @@ pub struct CodeIndexProgressSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexSummary {
     pub repository_id: String,
+    pub source_scope: String,
     pub resolved_commit_sha: String,
     pub tree_hash: String,
     pub indexed_file_count: usize,
@@ -533,6 +564,31 @@ fn checked_u32(field: &'static str, value: usize) -> Result<u32, DomainError> {
     u32::try_from(value).map_err(|_| DomainError::invalid(field, "must fit in u32"))
 }
 
+fn append_hash_list(input: &mut Vec<u8>, values: &[String]) {
+    input.extend_from_slice(&(values.len() as u64).to_le_bytes());
+    for value in values {
+        append_hash_part(input, value);
+    }
+}
+
+fn append_hash_part(input: &mut Vec<u8>, value: &str) {
+    input.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    input.extend_from_slice(value.as_bytes());
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,6 +607,32 @@ mod tests {
         assert_eq!(selector.ref_selector, "HEAD");
         assert_eq!(selector.path_filters, ["src"]);
         assert_eq!(selector.language_filters, ["rust"]);
+    }
+
+    #[test]
+    fn snapshot_scope_id_tracks_tree_and_filters() {
+        let scope = code_snapshot_scope_id(
+            "repo-1",
+            "tree-a",
+            &["src".to_owned()],
+            &["rust".to_owned()],
+        );
+        let same = code_snapshot_scope_id(
+            "repo-1",
+            "tree-a",
+            &["src".to_owned()],
+            &["rust".to_owned()],
+        );
+        let different_tree = code_snapshot_scope_id(
+            "repo-1",
+            "tree-b",
+            &["src".to_owned()],
+            &["rust".to_owned()],
+        );
+
+        assert_eq!(scope, same);
+        assert_ne!(scope, different_tree);
+        assert!(scope.starts_with("git_snapshot:"));
     }
 
     #[test]

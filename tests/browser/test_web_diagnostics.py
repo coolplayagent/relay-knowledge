@@ -54,6 +54,9 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".command-preview")).to_contain_text(
             "relay-knowledge query 'graph backpressure'"
         )
+        page.get_by_test_id("run-operation").click()
+        expect(page.locator(".operation-result")).to_contain_text("Retrieve context")
+        expect(page.locator(".result-preview")).to_contain_text("graph backpressure")
         page.get_by_test_id("stage-operation").click()
         expect(page.locator(".staged-list").get_by_text("Retrieve context")).to_be_visible()
 
@@ -66,6 +69,11 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         page.get_by_label("Action").select_option("impact")
         expect(page.get_by_label("Base")).to_be_visible()
         expect(page.locator(".command-preview")).to_contain_text("repo impact core")
+
+        page.get_by_role("tab", name="Workers").click()
+        page.get_by_test_id("run-operation").click()
+        expect(page.locator(".operation-result")).to_contain_text("Worker status")
+        expect(page.locator(".result-preview")).to_contain_text("worker.status")
 
         page.set_viewport_size({"width": 390, "height": 844})
         expect(page.locator("aside nav a")).to_have_count(6)
@@ -99,6 +107,35 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
             self.write_json(HEALTH_RESPONSE)
         else:
             super().do_GET()
+
+    def do_POST(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path == "/api/web/operations/execute":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            request = json.loads(body.decode("utf-8"))
+            payload = request["snapshot"]["payload"]
+            self.write_json(
+                {
+                    "metadata": {
+                        "trace_id": "trace-web-operation",
+                        "request_id": "req-web-operation",
+                        "graph_version": 7,
+                        "indexed_graph_version": 7,
+                        "stale": False,
+                    },
+                    "operation": payload["operation"],
+                    "name": request["snapshot"]["name"],
+                    "command": request["snapshot"]["command"],
+                    "result": {
+                        "accepted": True,
+                        "query": payload.get("query"),
+                        "source_scope": payload.get("source_scope"),
+                    },
+                }
+            )
+        else:
+            self.send_error(404)
 
     def write_json(self, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")

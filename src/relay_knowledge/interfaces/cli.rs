@@ -800,7 +800,12 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.message))?;
     if web_enabled {
-        let mut router = web::router(service.clone());
+        let network_config = runtime.network.current();
+        ensure_web_remote_bind_allowed(
+            &network_config.http,
+            runtime.agent.access_policy.allow_remote_clients,
+        )?;
+        let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
         if runtime.agent.mcp_streamable_http_enabled {
             let mcp_router = McpServer::new(
                 service.clone(),
@@ -811,7 +816,6 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
             .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
             router = router.merge(mcp_router);
         }
-        let network_config = runtime.network.current();
         crate::net::http::serve_router_with_qos(
             router,
             network_config.http,
@@ -833,6 +837,19 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
     runtime.observability.shutdown();
 
     Ok(String::new())
+}
+
+fn ensure_web_remote_bind_allowed(
+    config: &crate::net::http::HttpConfig,
+    allow_remote_clients: bool,
+) -> Result<(), CliError> {
+    if crate::net::http::remote_clients_allowed(config, allow_remote_clients) {
+        Ok(())
+    } else {
+        Err(CliError::ServiceRunFailed(
+            "Web remote bind requires allow_remote_clients=true".to_owned(),
+        ))
+    }
 }
 
 async fn service_shutdown_signal() {

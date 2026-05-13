@@ -165,11 +165,15 @@ Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/heal
 伪造健康状态、图版本、运行时路径或索引元数据。当前 Web 页面从这两个 contract 派生
 Status、GraphRAG readiness、Indexes、Runtime 和操作工作台状态；GraphRAG readiness 只
 展示 evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、
-refresh recovery 和 runtime budgets 的诊断投影，不在前端执行索引、检索或图谱变更。当前操作工作台可以为
-检索、摄取、图检查、代码仓库、索引刷新和服务运行生成 typed request / CLI command
-preview，并将操作加入本地 staged queue；在 Rust HTTP adapter 暴露可执行 Web endpoint
-前，不得把这些 preview 渲染成已执行的后端结果。浏览器测试只验证交互层能渲染统一
-contract 和本地操作编排状态，不把业务逻辑放入前端。
+refresh recovery 和 runtime budgets 的诊断投影。操作工作台可以为检索、摄取、图检查、
+代码仓库、索引刷新和服务运行生成 typed request / CLI command preview，并将操作加入
+本地 staged queue；执行操作时必须调用同源 `/api/web/operations/execute`，由 Rust Web
+HTTP adapter 解析 snapshot、调用 application service、返回 result JSON。`service run --web`
+必须挂载 Web endpoints；同时启用 MCP Streamable HTTP 时，MCP routes 和 Web routes 必须共用
+同一 `net::http` listener 和 QoS budget。Web execute route 必须使用配置的 HTTP body
+budget，非 loopback bind 必须遵守 remote-client access policy，前端不得对长运行操作套用
+短诊断请求超时。浏览器测试验证
+统一 contract、同源执行结果和本地操作编排状态，不把业务逻辑放入前端。
 
 推荐目录:
 
@@ -197,13 +201,17 @@ web/
 - React Testing Library 覆盖组件渲染状态。
 - Playwright 只覆盖关键用户路径，不替代单元测试。
 
-## 6. 后续实施顺序
+## 6. 当前落地状态与验收门禁
 
-1. 扩展 `api` 模块，补 ingest、query、retrieval、health 的 request / response / stream event。
-2. 把 storage、indexing、event runtime、observability 接入 application service builder。
-3. 增加真实 CLI 子命令，并保持所有子命令支持 `--format`。
-4. 新增 Web 工程时使用轻量 TypeScript 前端，并从共享 API contract 生成或手写 typed client。
-5. 引入 HTTP/MCP 时只新增 adapter，不改变 application service 的行为语义。
+当前统一 API 后续实施项已经落地到 CLI、Web、HTTP 和 MCP/ACP adapter:
+
+1. `api` 模块已经提供 ingest、hybrid retrieval、graph inspect、index refresh、health、service status、worker、proposal、audit、provider 和 code repository 的 request / response contract；`ApiStreamEvent` 继续作为 CLI `streaming-json` 和未来 HTTP streaming 的统一 NDJSON 事件形状。
+2. `RelayKnowledgeService` 是唯一 application service 入口。storage lazy init、index refresh queue、retrieval runtime、worker/proposal/audit/service diagnostics 和 runtime config 都通过 service constructor 接入；测试使用 deterministic environment 或 `with_store` 注入。
+3. CLI 子命令已经接入真实 application service，并保持 `--format text|json|streaming-json` 输出协议；`version` 只支持 `text|json`。
+4. Web 工程使用轻量 TypeScript 静态前端和手写 typed client。Web Operations 的 `Run` 调用同源 `/api/web/operations/execute`，由 Rust Web adapter 分发到同一 application service。
+5. HTTP/Web/MCP 都是外层 adapter；新增 route 或 tool 不改变 application service 的行为语义。Web 与 MCP 同时启用时共用同一 `net::http` listener、QoS budget 和配置的 request body budget。
+
+`/api/web/operations/execute` 当前支持 retrieve context、ingest evidence、graph inspect、index refresh、provider probe、worker status/run-once、proposal list/show/accept/reject/supersede、audit query、code repository register/index/update/query/impact/status，以及 service status/run snapshot。`service.run.streamable_http` 在 Web 中返回服务状态快照，不从浏览器启动常驻 loop。
 
 当前 PR CI 已拆分 Rust format、clippy、unit/integration tests、coverage、build 和
 Playwright Chromium browser integration gate。浏览器 gate 先构建 Web workspace，

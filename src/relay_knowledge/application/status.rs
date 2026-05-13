@@ -69,13 +69,21 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
 
 pub(super) fn agent_protocol_status(runtime: &RuntimeConfiguration) -> AgentProtocolStatus {
     let network = runtime.network.current();
+    let mcp_enabled = runtime.agent.mcp_streamable_http_enabled;
 
     AgentProtocolStatus {
-        mcp_streamable_http_enabled: runtime.agent.mcp_streamable_http_enabled,
+        mcp_streamable_http_enabled: mcp_enabled,
         mcp_endpoint: runtime.agent.mcp_endpoint.clone(),
+        mcp_legacy_http_sse_endpoint: endpoint_child(&runtime.agent.mcp_endpoint, "sse"),
+        mcp_resources_enabled: mcp_enabled,
+        mcp_prompts_enabled: mcp_enabled,
+        metrics_endpoint: endpoint_child(&runtime.agent.mcp_endpoint, "metrics"),
         http_bind: network.http.bind_address.to_string(),
         allowed_origin_count: runtime.agent.mcp_allowed_origins.len(),
         policy: runtime.agent.access_policy.summary(),
+        audit_sink_enabled: runtime.agent.audit_sink_enabled,
+        audit_log_path: path_string(&runtime.paths.agent_audit_log_file()),
+        audit_queue_depth: runtime.agent.audit_queue_depth,
     }
 }
 
@@ -85,4 +93,12 @@ fn path_string(path: &Path) -> String {
 
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn endpoint_child(endpoint: &str, child: &str) -> String {
+    if endpoint == "/" {
+        format!("/{child}")
+    } else {
+        format!("{}/{child}", endpoint.trim_end_matches('/'))
+    }
 }

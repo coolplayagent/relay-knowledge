@@ -16,6 +16,7 @@ path = "src/relay_knowledge/main.rs"
 
 [dependencies]
 axum = "0.8.9"
+futures-util = "0.3"
 getrandom = "0.2"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
