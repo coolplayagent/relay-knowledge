@@ -268,7 +268,7 @@ HybridRetrievalRequest
 - rerank 只能重排候选，不能生成新事实。
 - context packing 必须受 token、节点数、边数、evidence 数和耗时预算约束。
 
-Phase 1 已落地 SQLite FTS5 BM25 read model。该 read model 覆盖 evidence content、entity labels、source scope/path、tree-sitter code symbols 和 code chunks，并把 `created_graph_version` 写入 BM25 文档以保证 snapshot 查询不会读到未来图版本。
+Phase 1 已落地 SQLite FTS5 BM25 read model。该 read model 覆盖 evidence content、entity labels、生成式 entity/code symbol lexical aliases、source scope/path、tree-sitter code symbols 和 code chunks，并把 `created_graph_version` 写入 BM25 文档以保证 snapshot 查询不会读到未来图版本。`HybridRetrievalResponse.context_pack.items[*]` 同时保留 structured facts 和由 facts 派生的一跳 `graph_paths`，供 agent 直接引用关系、claim 或 event path provenance。
 
 ### 6.2 必须使用混合检索的场景
 

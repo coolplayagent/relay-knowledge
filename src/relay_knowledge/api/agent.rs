@@ -494,6 +494,7 @@ mod tests {
             source_span: None,
             entities: Vec::new(),
             graph_facts: Vec::new(),
+            graph_paths: Vec::new(),
             code_artifact: None,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),

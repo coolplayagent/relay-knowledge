@@ -28,7 +28,12 @@ pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bo
     let columns = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
-    let required = ["created_graph_version", "parent_evidence_id", "modality"];
+    let required = [
+        "created_graph_version",
+        "parent_evidence_id",
+        "modality",
+        "entity_aliases",
+    ];
     if required
         .iter()
         .any(|required_column| !columns.iter().any(|column| column == required_column))

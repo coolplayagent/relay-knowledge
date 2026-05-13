@@ -17,6 +17,9 @@ use crate::{
 #[path = "retrieval_migration.rs"]
 mod migration;
 
+#[path = "retrieval_aliases.rs"]
+mod aliases;
+
 const LABEL_SEPARATOR: char = '\u{1f}';
 const FACT_LOOKUP_CHUNK_SIZE: usize = 250;
 const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
@@ -37,6 +40,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             source_scope,
             source_path,
             entity_labels,
+            entity_aliases,
             content
         );
 
@@ -119,9 +123,9 @@ pub(super) fn replace_evidence_document(
         INSERT INTO graph_bm25 (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version,
-            source_scope, source_path, entity_labels, content
+            source_scope, source_path, entity_labels, entity_aliases, content
         )
-        VALUES (?1, 'evidence', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        VALUES (?1, 'evidence', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         ",
         params![
             document_id,
@@ -132,6 +136,7 @@ pub(super) fn replace_evidence_document(
             input.source_scope,
             input.source_path,
             join_labels(input.entity_labels),
+            aliases_from_strings(input.entity_labels),
             input.content,
         ],
     )?;
@@ -220,14 +225,15 @@ pub(super) fn insert_code_symbol_document(
 ) -> Result<(), StorageError> {
     let document_id = code_document_id("symbol", source_scope, path, symbol_id);
     let content = format!("{name} {kind} {path} {symbol_id}");
+    let entity_aliases = aliases::lexical_aliases(&[name, kind, path, symbol_id]);
     connection.execute(
         "
         INSERT INTO graph_bm25 (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version,
-            source_scope, source_path, entity_labels, content
+            source_scope, source_path, entity_labels, entity_aliases, content
         )
-        VALUES (?1, 'code_symbol', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, 'code_symbol', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7, ?8)
         ",
         params![
             document_id,
@@ -236,6 +242,7 @@ pub(super) fn insert_code_symbol_document(
             source_scope,
             path,
             join_labels(&[name.to_owned()]),
+            entity_aliases,
             content
         ],
     )?;
@@ -253,14 +260,19 @@ pub(super) fn insert_code_chunk_document(
     graph_version: u64,
 ) -> Result<(), StorageError> {
     let document_id = code_document_id("chunk", source_scope, path, chunk_id);
+    let linked_symbols = linked_symbol_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let entity_aliases = aliases::lexical_aliases(&linked_symbols);
     connection.execute(
         "
         INSERT INTO graph_bm25 (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version,
-            source_scope, source_path, entity_labels, content
+            source_scope, source_path, entity_labels, entity_aliases, content
         )
-        VALUES (?1, 'code_chunk', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, 'code_chunk', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7, ?8)
         ",
         params![
             document_id,
@@ -269,6 +281,7 @@ pub(super) fn insert_code_chunk_document(
             source_scope,
             path,
             join_labels(linked_symbol_ids),
+            entity_aliases,
             content
         ],
     )?;
@@ -1418,6 +1431,11 @@ fn sort_scored_hits(hits: &mut [ScoredHit]) {
             .total_cmp(&left.source_score)
             .then_with(|| left.hit.evidence_id.cmp(&right.hit.evidence_id))
     });
+}
+
+fn aliases_from_strings(values: &[String]) -> String {
+    let values = values.iter().map(String::as_str).collect::<Vec<_>>();
+    aliases::lexical_aliases(&values)
 }
 
 fn split_labels(labels: String) -> Vec<String> {

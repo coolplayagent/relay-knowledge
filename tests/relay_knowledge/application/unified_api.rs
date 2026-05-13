@@ -361,6 +361,9 @@ async fn structured_facts_and_backend_statuses_reach_context_pack() {
     assert!(item.entities.iter().any(|entity| entity.label == "BM25"));
     assert_eq!(item.graph_facts[0].kind, ContextGraphFactKind::Relation);
     assert_eq!(item.graph_facts[0].predicate, "uses");
+    assert_eq!(item.graph_paths[0].nodes, ["relay-knowledge", "BM25"]);
+    assert_eq!(item.graph_paths[0].edges[0].fact_id, "rel-rich");
+    assert_eq!(item.graph_paths[0].edges[0].evidence_ids, ["ev-rich"]);
     let claim = item
         .graph_facts
         .iter()

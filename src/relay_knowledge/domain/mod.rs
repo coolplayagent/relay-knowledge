@@ -38,8 +38,9 @@ pub use mutation::{
 };
 pub use retrieval::{
     CodeGraphArtifact, CodeGraphArtifactKind, ContextEntity, ContextGraphFact,
-    ContextGraphFactKind, ContextPackItem, FreshnessPolicy, FusionDiagnostics,
-    RECIPROCAL_RANK_FUSION_K, RankingSignal, RetrievalBackendState, RetrievalBackendStatus,
-    RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
+    ContextGraphFactKind, ContextGraphPath, ContextGraphPathEdge, ContextPackItem, FreshnessPolicy,
+    FusionDiagnostics, RECIPROCAL_RANK_FUSION_K, RankingSignal, RetrievalBackendState,
+    RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack,
+    RetrieverSource,
 };
 pub use source::SourceScope;

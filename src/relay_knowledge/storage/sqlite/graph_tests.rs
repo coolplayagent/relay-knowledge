@@ -63,6 +63,38 @@ async fn searches_evidence_by_query_token() {
 }
 
 #[tokio::test]
+async fn bm25_matches_generated_entity_aliases_without_returning_aliases_as_labels() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-alias",
+        scope,
+        "Alias-only evidence body",
+        vec!["GraphRAGContextPack".to_owned()],
+    )
+    .expect("evidence should validate");
+    let receipt = store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![evidence]).expect("batch"))
+        .await
+        .expect("commit should succeed");
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "context pack".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: receipt.graph_version,
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].evidence_id, "ev-alias");
+    assert_eq!(hits[0].entity_labels, ["GraphRAGContextPack"]);
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Bm25));
+}
+
+#[tokio::test]
 async fn reads_mutation_log_after_version() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(&store, "ev-1", "docs", "Rust async storage").await;

@@ -86,9 +86,9 @@ GraphRAG 能力必须保持可解释:
 
 - 保持 typed relation、claim/event、source span 和 confidence 的 domain/storage/API 规格可回归测试。
 - 对 ingest 边界重新验证反序列化后的 span、confidence 和 version range；结构化 facts 必须引用 supporting evidence ids。
-- 让 context pack 覆盖 evidence、entity、code symbol、code chunk、source span、structured graph facts 和 graph path evidence。
+- 让 context pack 覆盖 evidence、entity、code symbol、code chunk、source span、structured graph facts 和 direct graph path evidence；当前实现已从 structured relation/claim/event 派生 `graph_paths`。
 - 检索候选只使用 `accepted`/`proposed` evidence，`rejected`/`superseded` evidence 保留为可检查图状态但不作为 grounding context。
-- 增强 BM25/lexical 文档构建字段，覆盖 source path、code symbol、code chunk 和 doc comment，并补充 ranking explanation 测试。
+- 增强 BM25/lexical 文档构建字段，覆盖 source path、entity/code symbol lexical aliases、code symbol、code chunk 和 doc comment，并补充 ranking explanation 测试；当前 SQLite FTS5 read model 已为 entity labels 和 code symbols 写入独立 alias 字段。
 - 为 semantic/vector 保留 adapter trait、backend status metadata 和 scope post-filter metadata，但默认允许 unavailable/degraded。
 - Web readiness 继续从 health/status 显示 BM25、semantic cursor、vector cursor、code graph、runtime budgets 和 index lag。
 

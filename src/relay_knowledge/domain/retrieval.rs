@@ -93,6 +93,28 @@ mod tests {
             "community_summary"
         );
     }
+
+    #[test]
+    fn graph_path_preserves_fact_provenance() {
+        let fact = ContextGraphFact {
+            fact_id: "rel-1".to_owned(),
+            kind: ContextGraphFactKind::Relation,
+            subject: "relay-knowledge".to_owned(),
+            predicate: "uses".to_owned(),
+            object: Some("BM25".to_owned()),
+            evidence_ids: vec!["ev-1".to_owned()],
+            confidence: ConfidenceScore { basis_points: 9000 },
+            status: FactStatus::Accepted,
+            version_range: GraphVersionRange::open_from(GraphVersion::new(1)),
+        };
+
+        let path = ContextGraphPath::from_fact(&fact);
+
+        assert_eq!(path.path_id, "path:rel-1");
+        assert_eq!(path.nodes, ["relay-knowledge", "BM25"]);
+        assert_eq!(path.edges[0].evidence_ids, ["ev-1"]);
+        assert_eq!(path.edges[0].confidence.basis_points, 9000);
+    }
 }
 
 /// Per-retriever ranking signal preserved after fusion.
@@ -165,6 +187,57 @@ pub struct ContextGraphFact {
     pub version_range: GraphVersionRange,
 }
 
+/// Direct graph path evidence derived from a structured graph fact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextGraphPath {
+    pub path_id: String,
+    pub nodes: Vec<String>,
+    pub edges: Vec<ContextGraphPathEdge>,
+}
+
+/// One edge in a graph path returned through the context pack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextGraphPathEdge {
+    pub fact_id: String,
+    pub kind: ContextGraphFactKind,
+    pub from: String,
+    pub predicate: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    pub evidence_ids: Vec<String>,
+    pub confidence: ConfidenceScore,
+    pub status: FactStatus,
+    pub version_range: GraphVersionRange,
+}
+
+impl ContextGraphPath {
+    /// Builds a one-hop path from a persisted structured fact.
+    pub fn from_fact(fact: &ContextGraphFact) -> Self {
+        let mut nodes = vec![fact.subject.clone()];
+        if let Some(object) = &fact.object
+            && !nodes.contains(object)
+        {
+            nodes.push(object.clone());
+        }
+
+        Self {
+            path_id: format!("path:{}", fact.fact_id),
+            nodes,
+            edges: vec![ContextGraphPathEdge {
+                fact_id: fact.fact_id.clone(),
+                kind: fact.kind,
+                from: fact.subject.clone(),
+                predicate: fact.predicate.clone(),
+                to: fact.object.clone(),
+                evidence_ids: fact.evidence_ids.clone(),
+                confidence: fact.confidence,
+                status: fact.status,
+                version_range: fact.version_range,
+            }],
+        }
+    }
+}
+
 /// Code artifact category returned through the general GraphRAG context pack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -194,6 +267,8 @@ pub struct ContextPackItem {
     pub entities: Vec<ContextEntity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub graph_facts: Vec<ContextGraphFact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_paths: Vec<ContextGraphPath>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_artifact: Option<CodeGraphArtifact>,
     pub retriever_sources: Vec<RetrieverSource>,
