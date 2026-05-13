@@ -1,5 +1,10 @@
-import type { HealthResponse, IndexStatus, ProjectStatusResponse } from "./api/contracts";
-import { loadHealth, loadProjectStatus } from "./api/client.js";
+import type {
+  HealthResponse,
+  IndexStatus,
+  ProjectStatusResponse,
+  ServiceStatusResponse
+} from "./api/contracts";
+import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.js";
 import {
   INDEX_KINDS,
   OPERATIONS,
@@ -14,12 +19,15 @@ import {
   type AppState,
   type CodeAction,
   type CodeQueryKind,
-  type Freshness
+  type Freshness,
+  type ProposalAction,
+  type WorkerKind
 } from "./operations.js";
 
 type Diagnostics = {
   status: ProjectStatusResponse;
   health: HealthResponse;
+  service: ServiceStatusResponse | null;
 };
 
 type Tone = "good" | "warn" | "bad";
@@ -34,9 +42,13 @@ async function renderApp() {
 
   root.replaceChildren(loadingShell());
   try {
-    const [status, health] = await Promise.all([loadProjectStatus(), loadHealth()]);
-    currentDiagnostics = { status, health };
-    root.replaceChildren(shell(status, health));
+    const [status, health, service] = await Promise.all([
+      loadProjectStatus(),
+      loadHealth(),
+      loadServiceStatus().catch(() => null)
+    ]);
+    currentDiagnostics = { status, health, service };
+    root.replaceChildren(shell(status, health, service));
   } catch (error) {
     root.replaceChildren(errorShell(error));
   }
@@ -48,7 +60,9 @@ function rerenderFromState() {
     return;
   }
 
-  root.replaceChildren(shell(currentDiagnostics.status, currentDiagnostics.health));
+  root.replaceChildren(
+    shell(currentDiagnostics.status, currentDiagnostics.health, currentDiagnostics.service)
+  );
 }
 
 function loadingShell(): HTMLElement {
@@ -60,9 +74,13 @@ function loadingShell(): HTMLElement {
   return container;
 }
 
-function shell(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function shell(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const container = element("div", "shell");
-  container.append(sidebar(), content(status, health));
+  container.append(sidebar(), content(status, health, service));
 
   return container;
 }
@@ -92,15 +110,19 @@ function navLink(label: string, href: string): HTMLAnchorElement {
   return link;
 }
 
-function content(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function content(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const main = element("main", "content");
   main.append(
     toolbar(status, health),
     statusSection(status, health),
-    readinessSection(status, health),
+    readinessSection(status, health, service),
     operationsSection(status, health),
     indexesSection(health.indexes, health.metadata.graph_version),
-    runtimeSection(status)
+    runtimeSection(status, service)
   );
 
   return main;
@@ -189,7 +211,11 @@ function metricItem(label: string, value: number): HTMLElement {
   return item;
 }
 
-function readinessSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function readinessSection(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const section = sectionShell("readiness", "GraphRAG readiness");
   const grid = element("div", "readiness-grid");
   const graph = health.graph;
@@ -239,6 +265,14 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
       `${status.runtime.qos_max_in_flight_requests} in-flight / ${status.runtime.qos_max_queue_depth} queue`
     ),
     readinessItem(
+      "Service manager",
+      service?.mode ?? "unknown",
+      serviceTone(service),
+      service
+        ? `${service.workers.length} workers / ${service.proposal_backlog} proposals`
+        : "service status endpoint unavailable"
+    ),
+    readinessItem(
       "Refresh recovery",
       health.index_refresh.dead_letter_count > 0 ? "failed" : "ready",
       health.index_refresh.dead_letter_count > 0 ? "bad" : "good",
@@ -254,6 +288,21 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
   section.append(grid);
 
   return section;
+}
+
+function serviceTone(service: ServiceStatusResponse | null): Tone {
+  if (!service || service.operator.state === "failed") {
+    return "bad";
+  }
+  if (
+    service.operator.state === "paused" ||
+    service.operator.state === "degraded" ||
+    service.proposal_backlog > 0
+  ) {
+    return "warn";
+  }
+
+  return "good";
 }
 
 function readinessItem(label: string, value: string, tone: Tone, detail: string): HTMLElement {
@@ -374,6 +423,22 @@ function operationForm(): HTMLElement {
       break;
     case "indexes":
       form.append(indexKindControls());
+      break;
+    case "worker":
+      form.append(workerControls());
+      break;
+    case "proposal":
+      form.append(proposalControls());
+      break;
+    case "audit":
+      form.append(
+        inputControl("Operation", appState.audit.operation, (value) => {
+          appState.audit.operation = value;
+        }),
+        numberControl("Limit", appState.audit.limit, (value) => {
+          appState.audit.limit = positiveInt(value, 50);
+        })
+      );
       break;
     case "service":
       form.append(
@@ -500,6 +565,100 @@ function indexKindControls(): HTMLElement {
   return group;
 }
 
+function workerControls(): HTMLElement {
+  const group = element("div", "field-grid");
+  group.append(
+    selectControl(
+      "Action",
+      appState.worker.action,
+      [
+        ["status", "status"],
+        ["run-once", "run-once"]
+      ],
+      (value) => {
+        appState.worker.action = value as AppState["worker"]["action"];
+        updatePreview();
+      }
+    ),
+    selectControl(
+      "Kind",
+      appState.worker.kind,
+      [
+        ["embedding", "embedding"],
+        ["ocr", "ocr"],
+        ["vision", "vision"],
+        ["extractor", "extractor"]
+      ],
+      (value) => {
+        appState.worker.kind = value as WorkerKind;
+        updatePreview();
+      }
+    )
+  );
+
+  return group;
+}
+
+function proposalControls(): HTMLElement {
+  const group = element("div", "field-grid");
+  group.append(
+    selectControl(
+      "Action",
+      appState.proposal.action,
+      [
+        ["list", "list"],
+        ["show", "show"],
+        ["accept", "accept"],
+        ["reject", "reject"],
+        ["supersede", "supersede"]
+      ],
+      (value) => {
+        appState.proposal.action = value as ProposalAction;
+        rerenderFromState();
+      }
+    )
+  );
+  if (appState.proposal.action === "list") {
+    group.append(
+      selectControl(
+        "State",
+        appState.proposal.state,
+        [
+          ["proposed", "proposed"],
+          ["accepted", "accepted"],
+          ["rejected", "rejected"],
+          ["superseded", "superseded"]
+        ],
+        (value) => {
+          appState.proposal.state = value as AppState["proposal"]["state"];
+          updatePreview();
+        }
+      ),
+      numberControl("Limit", appState.proposal.limit, (value) => {
+        appState.proposal.limit = positiveInt(value, 25);
+      })
+    );
+  } else {
+    group.append(
+      inputControl("Proposal", appState.proposal.proposalId, (value) => {
+        appState.proposal.proposalId = value;
+      })
+    );
+    if (appState.proposal.action !== "show") {
+      group.append(
+        inputControl("Actor", appState.proposal.actor, (value) => {
+          appState.proposal.actor = value;
+        }),
+        inputControl("Reason", appState.proposal.reason, (value) => {
+          appState.proposal.reason = value;
+        })
+      );
+    }
+  }
+
+  return group;
+}
+
 function operationPreview(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
   const snapshot = currentOperationSnapshot(status, health);
   const preview = element("div", "operation-preview");
@@ -605,7 +764,10 @@ function tableState(state: IndexStatus["state"]): HTMLTableCellElement {
   return cell;
 }
 
-function runtimeSection(status: ProjectStatusResponse): HTMLElement {
+function runtimeSection(
+  status: ProjectStatusResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const section = sectionShell("runtime", "Runtime");
   const list = element("dl", "runtime-list");
   list.append(
@@ -618,6 +780,15 @@ function runtimeSection(status: ProjectStatusResponse): HTMLElement {
     runtimeItem("In-flight", String(status.runtime.qos_max_in_flight_requests)),
     runtimeItem("Queue depth", String(status.runtime.qos_max_queue_depth))
   );
+  if (service) {
+    list.append(
+      runtimeItem("Service mode", service.mode),
+      runtimeItem("Definition", service.service_definition_path),
+      runtimeItem("Worker families", String(service.workers.length)),
+      runtimeItem("Proposal backlog", String(service.proposal_backlog)),
+      runtimeItem("Audit events", String(service.audit_sink.event_count))
+    );
+  }
   section.append(list);
 
   return section;

@@ -37,7 +37,47 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 `relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。
 
-## 6.3 MCP 会话流程
+## 6.3 Worker、Proposal 与 Audit
+
+多模态 evidence 写入后会进入持久 worker 队列。可配置外部 HTTP worker endpoint:
+
+```text
+RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT
+RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED
+```
+
+常用命令:
+
+```bash
+relay-knowledge worker status --format json
+relay-knowledge worker run-once --kind ocr --format json
+relay-knowledge proposal list --state proposed --format json
+relay-knowledge proposal show <proposal-id> --format json
+relay-knowledge proposal accept <proposal-id> --by <actor> --reason "reviewed"
+relay-knowledge audit query --limit 50 --format json
+```
+
+未配置外部 endpoint 时，worker run-once 使用 deterministic fallback 生成 proposal，不阻塞 BM25、graph retrieval 或 ingest。proposal 必须人工 accept 后才会通过 graph mutation pipeline 写入 accepted facts。
+
+## 6.4 Service Manager 与 Silent Update Operator
+
+service manager v1 生成平台定义和命令预览，不自动执行需要权限的安装命令:
+
+```bash
+relay-knowledge service plan install --format json
+relay-knowledge service definition write --format json
+relay-knowledge service operator status --format json
+relay-knowledge service operator pause
+relay-knowledge service operator resume
+```
+
+Linux 输出 systemd user service 计划，macOS 输出 launchd plist 计划，Windows 输出 service XML/PowerShell 计划。runtime state、graph database、indexes、audit 和 worker 队列仍使用 `paths` 解析后的 platform data/state/log/cache 目录，不写入 release extraction directory。
+
+## 6.5 MCP 会话流程
 
 客户端需要按 MCP Streamable HTTP 会话顺序调用:
 
@@ -48,7 +88,7 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 缺失 session header 会返回 HTTP 400。未知或已淘汰 session id 会返回 HTTP 404。工具请求、`ping` 和 `notifications/cancelled` 都绑定到服务端签发的 session。
 
-## 6.4 Tool 面
+## 6.6 Tool 面
 
 MCP tool surface 当前包括:
 
@@ -61,8 +101,8 @@ MCP tool surface 当前包括:
 - authorized code impact analysis
 - permission-gated index refresh
 
-Agent 请求会写入 bounded in-process audit events，包含 runtime identity、scope、freshness、QoS decision、budget、truncation、result count 和 status。
+Agent 请求会写入 bounded in-process audit events；CLI/Web/service operation 还写入持久 audit sink，可通过 `audit query` 检查最近操作。
 
-## 6.5 ACP 本地 adapter
+## 6.7 ACP 本地 adapter
 
 本地 ACP session adapter 暴露相同的检索 contract，支持 progress updates、cancellation 和 context artifact。ACP 适合 agent-client 会话入口，MCP 更适合作为其它 agent runtime 的工具服务入口。两者都复用统一 API 和核心服务，不复制检索逻辑。

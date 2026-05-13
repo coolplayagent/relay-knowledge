@@ -1,0 +1,929 @@
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use serde_json::json;
+
+use crate::{
+    api::{
+        ApiError, ApiMetadata, AuditQueryApiRequest, AuditQueryResponse, IngestEvidence,
+        IngestEvidenceExtraction, IngestRequest, InterfaceKind, ProposalDecisionApiRequest,
+        ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse,
+        ProposalShowResponse, RequestContext, ServiceDefinitionWriteResponse,
+        ServiceOperatorResponse, ServicePlanRequest, ServicePlanResponse, WorkerRunRequest,
+        WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
+    },
+    domain::{
+        AuditStatus, EvidenceModality, EvidenceRecord, ExtractionDiagnostic, ExtractionStatus,
+        FactStatus, GraphVersion, ProposalKind, ProposalState, ServiceDefinitionPlan,
+        ServiceManagerAction, ServiceOperatorState, WorkerBackendState, WorkerKind, WorkerStatus,
+        WorkerTaskRecord, normalize_actor,
+    },
+    project::PROJECT_NAME,
+    storage::{
+        AuditQueryRequest, KnowledgeStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, ServiceOperatorUpdate, StorageError, WorkerTaskClaimRequest,
+        WorkerTaskCompletion, WorkerTaskSeed,
+    },
+};
+
+use super::{
+    index_refresh::{metadata_for_indexes, refresh_index_kinds},
+    ingest::mutation_batch_from_request,
+    service::RelayKnowledgeService,
+};
+
+const WORKER_LEASE_MS: u64 = 30_000;
+const WORKER_MAX_ATTEMPTS: u32 = 3;
+const PROPOSAL_LIST_LIMIT: usize = 50;
+const AUDIT_QUERY_LIMIT: usize = 100;
+
+struct AuditRecordInput<'a> {
+    operation: &'static str,
+    context: &'a RequestContext,
+    status: AuditStatus,
+    actor: Option<String>,
+    source_scope: Option<String>,
+    graph_version: GraphVersion,
+    detail: serde_json::Value,
+}
+
+impl RelayKnowledgeService {
+    /// Returns worker queue and backend readiness status.
+    pub async fn worker_status(
+        &self,
+        request: WorkerStatusRequest,
+        context: RequestContext,
+    ) -> Result<WorkerStatusResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let mut workers = overlay_worker_runtime(
+            store.worker_statuses().await.map_err(storage_api_error)?,
+            &self.runtime.workers,
+        );
+        if let Some(kind) = request.kind {
+            workers.retain(|status| status.kind == kind);
+        }
+        self.record_audit(
+            &store,
+            AuditRecordInput {
+                operation: "worker.status",
+                context: &context,
+                status: AuditStatus::Completed,
+                actor: None,
+                source_scope: None,
+                graph_version,
+                detail: json!({"worker_count": workers.len()}),
+            },
+        )
+        .await;
+
+        Ok(WorkerStatusResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            workers,
+        })
+    }
+
+    /// Runs one bounded worker task in the foreground.
+    pub async fn run_worker_once(
+        &self,
+        request: WorkerRunRequest,
+        context: RequestContext,
+    ) -> Result<WorkerRunResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let lease_owner = format!("worker-run-once-{}", std::process::id());
+        let Some(task) = store
+            .claim_worker_task(WorkerTaskClaimRequest {
+                kind: request.kind,
+                lease_owner: lease_owner.clone(),
+                lease_duration_ms: WORKER_LEASE_MS,
+                max_attempts: WORKER_MAX_ATTEMPTS,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?
+        else {
+            let workers = overlay_worker_runtime(
+                store.worker_statuses().await.map_err(storage_api_error)?,
+                &self.runtime.workers,
+            );
+            return Ok(WorkerRunResponse {
+                metadata: ApiMetadata::graph_only(&context, graph_version),
+                task: None,
+                proposals: Vec::new(),
+                workers,
+                degraded_reason: None,
+            });
+        };
+
+        let (proposal, degraded_reason) = self.proposal_from_worker_task(&task).await?;
+        let proposal = store
+            .insert_proposal(proposal)
+            .await
+            .map_err(storage_api_error)?;
+        let completed = store
+            .complete_worker_task(WorkerTaskCompletion {
+                task_id: task.task_id.clone(),
+                lease_owner,
+                attempt_count: task.attempt_count,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?;
+        let workers = overlay_worker_runtime(
+            store.worker_statuses().await.map_err(storage_api_error)?,
+            &self.runtime.workers,
+        );
+        self.record_audit(
+            &store,
+            AuditRecordInput {
+                operation: "worker.run_once",
+                context: &context,
+                status: AuditStatus::Completed,
+                actor: None,
+                source_scope: Some(task.source_scope.clone()),
+                graph_version,
+                detail: json!({"task_id": task.task_id, "proposal_id": proposal.proposal_id}),
+            },
+        )
+        .await;
+
+        Ok(WorkerRunResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            task: Some(completed),
+            proposals: vec![proposal],
+            workers,
+            degraded_reason,
+        })
+    }
+
+    /// Lists proposals awaiting or past manual lifecycle decisions.
+    pub async fn list_proposals(
+        &self,
+        request: ProposalListApiRequest,
+        context: RequestContext,
+    ) -> Result<ProposalListResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let proposals = store
+            .list_proposals(ProposalListRequest {
+                state: request.state,
+                limit: bounded_limit(request.limit, PROPOSAL_LIST_LIMIT),
+            })
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(ProposalListResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            proposals,
+        })
+    }
+
+    /// Shows one proposal and its conflict details.
+    pub async fn show_proposal(
+        &self,
+        proposal_id: String,
+        context: RequestContext,
+    ) -> Result<ProposalShowResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let proposal = store
+            .proposal_by_id(proposal_id.clone())
+            .await
+            .map_err(storage_api_error)?
+            .ok_or_else(|| {
+                ApiError::invalid_argument(format!("proposal '{proposal_id}' not found"))
+            })?;
+        let conflicts = store
+            .proposal_conflicts(proposal_id)
+            .await
+            .map_err(storage_api_error)?;
+        let payload = proposal.payload_value();
+
+        Ok(ProposalShowResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            proposal,
+            conflicts,
+            payload,
+        })
+    }
+
+    /// Accepts a proposal by committing its payload through the graph pipeline.
+    pub async fn accept_proposal(
+        &self,
+        proposal_id: String,
+        request: ProposalDecisionApiRequest,
+        context: RequestContext,
+    ) -> Result<ProposalDecisionResponse, ApiError> {
+        let actor = normalize_actor(request.actor)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let proposal = store
+            .proposal_by_id(proposal_id.clone())
+            .await
+            .map_err(storage_api_error)?
+            .ok_or_else(|| {
+                ApiError::invalid_argument(format!("proposal '{proposal_id}' not found"))
+            })?;
+        let ingest = serde_json::from_str::<IngestRequest>(&proposal.payload_json)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let batch = mutation_batch_from_request(ingest)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let evidence = batch.evidence.clone();
+        let receipt = store
+            .commit_mutation_batch(batch)
+            .await
+            .map_err(storage_api_error)?;
+        self.queue_worker_tasks_for_evidence(&store, &evidence, receipt.graph_version)
+            .await?;
+        let decided = store
+            .decide_proposal(ProposalDecision {
+                proposal_id,
+                next_state: ProposalState::Accepted,
+                actor,
+                reason: request.reason,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?;
+        let (metadata, index_refresh_error) = match refresh_index_kinds(
+            &store,
+            crate::domain::IndexKind::ALL,
+            receipt.graph_version,
+            &self.runtime.retrieval,
+        )
+        .await
+        {
+            Ok(outcome) => (
+                metadata_for_indexes(&context, receipt.graph_version, &outcome.indexes),
+                None,
+            ),
+            Err(error) => (
+                ApiMetadata::indexed(&context, receipt.graph_version, None, None, true),
+                Some(error.message),
+            ),
+        };
+
+        Ok(ProposalDecisionResponse {
+            metadata,
+            proposal: decided,
+            receipt: Some(receipt),
+            index_refresh_error,
+        })
+    }
+
+    /// Rejects or supersedes a proposal without mutating graph facts.
+    pub async fn decide_proposal_without_commit(
+        &self,
+        proposal_id: String,
+        next_state: ProposalState,
+        request: ProposalDecisionApiRequest,
+        context: RequestContext,
+    ) -> Result<ProposalDecisionResponse, ApiError> {
+        if next_state == ProposalState::Accepted {
+            return Err(ApiError::invalid_argument(
+                "accept decisions must use accept_proposal".to_owned(),
+            ));
+        }
+        let actor = normalize_actor(request.actor)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let proposal = store
+            .decide_proposal(ProposalDecision {
+                proposal_id,
+                next_state,
+                actor,
+                reason: request.reason,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(ProposalDecisionResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            proposal,
+            receipt: None,
+            index_refresh_error: None,
+        })
+    }
+
+    /// Queries the durable audit sink.
+    pub async fn query_audit(
+        &self,
+        request: AuditQueryApiRequest,
+        context: RequestContext,
+    ) -> Result<AuditQueryResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let events = store
+            .query_audit_events(AuditQueryRequest {
+                operation: request.operation,
+                limit: bounded_limit(request.limit, AUDIT_QUERY_LIMIT),
+            })
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(AuditQueryResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            events,
+        })
+    }
+
+    /// Generates a service-manager plan without executing privileged commands.
+    pub async fn service_plan(
+        &self,
+        request: ServicePlanRequest,
+        context: RequestContext,
+    ) -> Result<ServicePlanResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let plan = self.render_service_plan(request.action);
+
+        Ok(ServicePlanResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            plan,
+        })
+    }
+
+    /// Writes the generated service definition into the service directory.
+    pub async fn write_service_definition(
+        &self,
+        context: RequestContext,
+    ) -> Result<ServiceDefinitionWriteResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let plan = self.render_service_plan(ServiceManagerAction::Install);
+        let path = PathBuf::from(&plan.definition_path);
+        let contents = plan.definition.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, contents)
+        })
+        .await
+        .map_err(|error| ApiError::storage_unavailable(error.to_string()))?
+        .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+
+        Ok(ServiceDefinitionWriteResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            plan,
+            written: true,
+        })
+    }
+
+    /// Returns persisted silent-update operator status.
+    pub async fn service_operator_status(
+        &self,
+        context: RequestContext,
+    ) -> Result<ServiceOperatorResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let operator = store
+            .service_operator_status()
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(ServiceOperatorResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            operator,
+        })
+    }
+
+    /// Pauses or resumes the silent-update operator.
+    pub async fn set_service_operator_state(
+        &self,
+        state: ServiceOperatorState,
+        context: RequestContext,
+    ) -> Result<ServiceOperatorResponse, ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let current = store
+            .service_operator_status()
+            .await
+            .map_err(storage_api_error)?;
+        let operator = store
+            .update_service_operator(ServiceOperatorUpdate {
+                state,
+                silent_updates_enabled: self.runtime.workers.silent_updates_enabled,
+                allowed_scopes: current.allowed_scopes,
+                last_error: current.last_error,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(ServiceOperatorResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            operator,
+        })
+    }
+
+    pub(super) async fn queue_worker_tasks_for_evidence(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+        evidence: &[EvidenceRecord],
+        graph_version: GraphVersion,
+    ) -> Result<(), ApiError> {
+        let now_ms = now_millis();
+        let seeds = evidence
+            .iter()
+            .flat_map(|record| worker_task_seeds(record, graph_version, now_ms))
+            .collect::<Vec<_>>();
+        if seeds.is_empty() {
+            return Ok(());
+        }
+        store
+            .queue_worker_tasks(seeds)
+            .await
+            .map(|_| ())
+            .map_err(storage_api_error)
+    }
+
+    async fn proposal_from_worker_task(
+        &self,
+        task: &WorkerTaskRecord,
+    ) -> Result<(NewProposal, Option<String>), ApiError> {
+        let fallback = fallback_proposal(task).map_err(ApiError::invalid_argument)?;
+        let Some(endpoint) = self.runtime.workers.endpoint_for(task.kind) else {
+            return Ok((fallback, None));
+        };
+        let payload = json!({
+            "contract_version": 1,
+            "task": task,
+        });
+        let response =
+            crate::net::http::post_json(&self.runtime.network.current().http, endpoint, &payload)
+                .await;
+        match response {
+            Ok(value) => match proposal_from_worker_response(task, value) {
+                Ok(proposal) => Ok((proposal, None)),
+                Err(_) => Ok((
+                    fallback,
+                    Some(
+                        "worker response did not match proposal contract; deterministic fallback used"
+                            .to_owned(),
+                    ),
+                )),
+            },
+            Err(error) => Ok((
+                fallback,
+                Some(format!("external worker unavailable: {error}; deterministic fallback used")),
+            )),
+        }
+    }
+
+    async fn record_audit(&self, store: &Arc<dyn KnowledgeStore>, input: AuditRecordInput<'_>) {
+        let detail_json = serde_json::to_string(&input.detail).unwrap_or_else(|_| "{}".to_owned());
+        let _ = store
+            .insert_audit_event(NewAuditEvent {
+                operation: input.operation.to_owned(),
+                interface: interface_label(input.context.interface).to_owned(),
+                request_id: input.context.request_id.clone(),
+                trace_id: input.context.trace_id.clone(),
+                status: input.status,
+                actor: input.actor,
+                source_scope: input.source_scope,
+                graph_version: input.graph_version.get(),
+                detail_json,
+                message: None,
+                now_ms: now_millis(),
+            })
+            .await;
+    }
+
+    fn render_service_plan(&self, action: ServiceManagerAction) -> ServiceDefinitionPlan {
+        let definition_path = self
+            .runtime
+            .paths
+            .service_dir
+            .join(service_definition_filename())
+            .display()
+            .to_string();
+        let executable = std::env::current_exe()
+            .ok()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "relay-knowledge".to_owned());
+        let platform = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "linux"
+        }
+        .to_owned();
+        let definition = service_definition(
+            &platform,
+            &executable,
+            &self.runtime.paths.data_dir.display().to_string(),
+        );
+        let checksum = format!("{:016x}", stable_hash64(definition.as_bytes()));
+
+        ServiceDefinitionPlan {
+            action,
+            platform: platform.clone(),
+            service_name: PROJECT_NAME.to_owned(),
+            definition_path,
+            install_command: install_command(&platform),
+            uninstall_command: uninstall_command(&platform),
+            start_command: start_command(&platform),
+            stop_command: stop_command(&platform),
+            definition,
+            checksum,
+        }
+    }
+}
+
+fn worker_task_seeds(
+    record: &EvidenceRecord,
+    graph_version: GraphVersion,
+    now_ms: u64,
+) -> Vec<WorkerTaskSeed> {
+    let kinds = match record.extraction.modality {
+        EvidenceModality::TextSpan | EvidenceModality::OcrText | EvidenceModality::Caption => {
+            vec![WorkerKind::Embedding, WorkerKind::Extractor]
+        }
+        EvidenceModality::ImageAsset => {
+            vec![WorkerKind::Ocr, WorkerKind::Vision, WorkerKind::Embedding]
+        }
+        EvidenceModality::ImageEmbedding => Vec::new(),
+        EvidenceModality::Table | EvidenceModality::LayoutRegion => vec![WorkerKind::Extractor],
+    };
+
+    kinds
+        .into_iter()
+        .map(|kind| {
+            let payload = json!({
+                "evidence_id": record.id,
+                "source_scope": record.source_scope.as_str(),
+                "modality": record.extraction.modality.as_str(),
+                "source_path": record.source_path.as_deref(),
+                "source_uri": record.extraction.source_uri.as_deref(),
+                "source_hash": record.extraction.source_hash.as_deref(),
+                "media_hash": record.extraction.media_hash.as_deref(),
+            });
+            WorkerTaskSeed {
+                kind,
+                source_scope: record.source_scope.as_str().to_owned(),
+                evidence_id: Some(record.id.clone()),
+                target_graph_version: graph_version,
+                input_fingerprint: format!(
+                    "{}:{}:{}",
+                    kind.as_str(),
+                    record.id,
+                    graph_version.get()
+                ),
+                payload_json: serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_owned()),
+                now_ms,
+            }
+        })
+        .collect()
+}
+
+fn fallback_proposal(task: &WorkerTaskRecord) -> Result<NewProposal, String> {
+    let evidence_id = task
+        .evidence_id
+        .clone()
+        .unwrap_or_else(|| task.task_id.clone());
+    let derived_id = format!(
+        "derived:{}:{:016x}",
+        task.kind.as_str(),
+        stable_hash64(task.task_id.as_bytes())
+    );
+    let modality = match task.kind {
+        WorkerKind::Embedding => EvidenceModality::ImageEmbedding,
+        WorkerKind::Ocr => EvidenceModality::OcrText,
+        WorkerKind::Vision => EvidenceModality::Caption,
+        WorkerKind::Extractor => EvidenceModality::LayoutRegion,
+    };
+    let extraction = IngestEvidenceExtraction {
+        modality,
+        source_uri: None,
+        source_hash: None,
+        media_hash: None,
+        extractor: Some(format!("{}-fallback", task.kind.as_str())),
+        extractor_version: Some("1".to_owned()),
+        observed_at: Some(format!("{}", now_millis())),
+        parent_evidence_id: Some(evidence_id.clone()),
+        layout_region: (modality == EvidenceModality::LayoutRegion).then_some(
+            crate::domain::LayoutRegion {
+                page_number: 1,
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+        ),
+        embedding_model: (modality == EvidenceModality::ImageEmbedding)
+            .then_some("deterministic-fallback-v1".to_owned()),
+        embedding_dimension: (modality == EvidenceModality::ImageEmbedding).then_some(16),
+        diagnostic: Some(ExtractionDiagnostic {
+            status: ExtractionStatus::Degraded,
+            message: Some(
+                "deterministic fallback proposal; external backend not required".to_owned(),
+            ),
+        }),
+    };
+    let request = IngestRequest {
+        source_scope: task.source_scope.clone(),
+        evidence: vec![IngestEvidence {
+            id: Some(derived_id),
+            source_path: None,
+            span: None,
+            confidence: None,
+            status: Some(FactStatus::Accepted),
+            content: format!(
+                "{} fallback output for parent evidence {}",
+                task.kind.as_str(),
+                evidence_id
+            ),
+            entity_labels: Vec::new(),
+            extraction: Some(extraction),
+        }],
+        relations: Vec::new(),
+        claims: Vec::new(),
+        events: Vec::new(),
+    };
+    let payload_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+
+    Ok(NewProposal {
+        proposal_id: format!(
+            "proposal:{}:{:016x}",
+            task.kind.as_str(),
+            stable_hash64(task.task_id.as_bytes())
+        ),
+        source_scope: task.source_scope.clone(),
+        kind: ProposalKind::Evidence,
+        title: format!("{} worker proposal", task.kind.as_str()),
+        summary: format!("Derived evidence proposal for parent evidence {evidence_id}"),
+        payload_json,
+        origin: format!("worker:{}", task.kind.as_str()),
+        confidence_basis_points: 5_000,
+        conflicts: Vec::new(),
+        now_ms: now_millis(),
+    })
+}
+
+fn proposal_from_worker_response(
+    task: &WorkerTaskRecord,
+    value: serde_json::Value,
+) -> Result<NewProposal, String> {
+    let ingest = value
+        .get("ingest_request")
+        .cloned()
+        .ok_or_else(|| "missing ingest_request".to_owned())?;
+    let payload_json = serde_json::to_string(&ingest).map_err(|error| error.to_string())?;
+    serde_json::from_value::<IngestRequest>(ingest).map_err(|error| error.to_string())?;
+    let title = value
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("External worker proposal")
+        .to_owned();
+    let summary = value
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("External worker returned a graph mutation proposal")
+        .to_owned();
+    let confidence = value
+        .get("confidence_basis_points")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .unwrap_or(7_500);
+
+    Ok(NewProposal {
+        proposal_id: format!(
+            "proposal:{}:{:016x}",
+            task.kind.as_str(),
+            stable_hash64(payload_json.as_bytes())
+        ),
+        source_scope: task.source_scope.clone(),
+        kind: ProposalKind::Evidence,
+        title,
+        summary,
+        payload_json,
+        origin: format!("worker:{}", task.kind.as_str()),
+        confidence_basis_points: confidence.min(10_000),
+        conflicts: Vec::new(),
+        now_ms: now_millis(),
+    })
+}
+
+pub(super) fn overlay_worker_runtime(
+    mut statuses: Vec<WorkerStatus>,
+    runtime: &super::WorkerRuntimeConfig,
+) -> Vec<WorkerStatus> {
+    if statuses.is_empty() {
+        statuses = WorkerKind::ALL
+            .into_iter()
+            .map(|kind| WorkerStatus {
+                kind,
+                backend_state: WorkerBackendState::Fallback,
+                endpoint_configured: false,
+                queue_depth: 0,
+                running_count: 0,
+                retrying_count: 0,
+                dead_letter_count: 0,
+                last_error: None,
+            })
+            .collect();
+    }
+    for status in &mut statuses {
+        status.endpoint_configured = runtime.endpoint_for(status.kind).is_some();
+        status.backend_state = if status.dead_letter_count > 0 {
+            WorkerBackendState::Degraded
+        } else if status.endpoint_configured {
+            WorkerBackendState::Configured
+        } else {
+            WorkerBackendState::Fallback
+        };
+    }
+
+    statuses
+}
+
+fn bounded_limit(value: usize, default_limit: usize) -> usize {
+    if value == 0 {
+        default_limit
+    } else {
+        value.min(default_limit)
+    }
+}
+
+fn storage_api_error(error: StorageError) -> ApiError {
+    ApiError::storage_unavailable(error.to_string())
+}
+
+fn interface_label(interface: InterfaceKind) -> &'static str {
+    match interface {
+        InterfaceKind::Cli => "cli",
+        InterfaceKind::Web => "web",
+        InterfaceKind::Api => "api",
+        InterfaceKind::Mcp => "mcp",
+        InterfaceKind::Acp => "acp",
+    }
+}
+
+fn service_definition_filename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "relay-knowledge-service.xml"
+    } else if cfg!(target_os = "macos") {
+        "com.coolplayagent.relay-knowledge.plist"
+    } else {
+        "relay-knowledge.service"
+    }
+}
+
+fn service_definition(platform: &str, executable: &str, data_dir: &str) -> String {
+    match platform {
+        "windows" => format!(
+            "<service><id>relay-knowledge</id><name>relay-knowledge</name><executable>{executable}</executable><arguments>service run --mcp streamable-http</arguments><env name=\"RELAY_KNOWLEDGE_DATA_DIR\" value=\"{data_dir}\"/></service>\n"
+        ),
+        "macos" => format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.coolplayagent.relay-knowledge</string><key>ProgramArguments</key><array><string>{executable}</string><string>service</string><string>run</string><string>--mcp</string><string>streamable-http</string></array><key>RunAtLoad</key><true/></dict></plist>\n"
+        ),
+        _ => format!(
+            "[Unit]\nDescription=relay-knowledge background service\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart={executable} service run --mcp streamable-http\nEnvironment=RELAY_KNOWLEDGE_DATA_DIR={data_dir}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
+        ),
+    }
+}
+
+fn install_command(platform: &str) -> Vec<String> {
+    match platform {
+        "windows" => vec![
+            "powershell".to_owned(),
+            "New-Service".to_owned(),
+            "relay-knowledge".to_owned(),
+        ],
+        "macos" => vec![
+            "launchctl".to_owned(),
+            "load".to_owned(),
+            "<definition_path>".to_owned(),
+        ],
+        _ => vec![
+            "systemctl".to_owned(),
+            "--user".to_owned(),
+            "enable".to_owned(),
+            "--now".to_owned(),
+            "relay-knowledge.service".to_owned(),
+        ],
+    }
+}
+
+fn uninstall_command(platform: &str) -> Vec<String> {
+    match platform {
+        "windows" => vec![
+            "powershell".to_owned(),
+            "Remove-Service".to_owned(),
+            "relay-knowledge".to_owned(),
+        ],
+        "macos" => vec![
+            "launchctl".to_owned(),
+            "unload".to_owned(),
+            "<definition_path>".to_owned(),
+        ],
+        _ => vec![
+            "systemctl".to_owned(),
+            "--user".to_owned(),
+            "disable".to_owned(),
+            "--now".to_owned(),
+            "relay-knowledge.service".to_owned(),
+        ],
+    }
+}
+
+fn start_command(platform: &str) -> Vec<String> {
+    match platform {
+        "windows" => vec![
+            "powershell".to_owned(),
+            "Start-Service".to_owned(),
+            "relay-knowledge".to_owned(),
+        ],
+        "macos" => vec![
+            "launchctl".to_owned(),
+            "start".to_owned(),
+            "com.coolplayagent.relay-knowledge".to_owned(),
+        ],
+        _ => vec![
+            "systemctl".to_owned(),
+            "--user".to_owned(),
+            "start".to_owned(),
+            "relay-knowledge.service".to_owned(),
+        ],
+    }
+}
+
+fn stop_command(platform: &str) -> Vec<String> {
+    match platform {
+        "windows" => vec![
+            "powershell".to_owned(),
+            "Stop-Service".to_owned(),
+            "relay-knowledge".to_owned(),
+        ],
+        "macos" => vec![
+            "launchctl".to_owned(),
+            "stop".to_owned(),
+            "com.coolplayagent.relay-knowledge".to_owned(),
+        ],
+        _ => vec![
+            "systemctl".to_owned(),
+            "--user".to_owned(),
+            "stop".to_owned(),
+            "relay-knowledge.service".to_owned(),
+        ],
+    }
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    hash
+}

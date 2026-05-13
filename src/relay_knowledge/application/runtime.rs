@@ -2,6 +2,7 @@ use std::{error::Error, fmt, time::Duration};
 
 use crate::{
     api::{AgentAccessPolicy, AgentPolicyError},
+    domain::WorkerKind,
     env::{
         EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL,
         RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
@@ -21,6 +22,7 @@ pub struct RuntimeConfiguration {
     pub network: NetworkRuntime,
     pub agent: AgentRuntimeConfig,
     pub retrieval: ReadModelBackendConfig,
+    pub workers: WorkerRuntimeConfig,
 }
 
 impl RuntimeConfiguration {
@@ -42,6 +44,8 @@ impl RuntimeConfiguration {
             .map_err(RuntimeConfigurationError::Agent)?;
         let retrieval = retrieval_config_from_environment(&environment.retrieval)
             .map_err(RuntimeConfigurationError::Retrieval)?;
+        let workers = WorkerRuntimeConfig::from_environment(environment)
+            .map_err(RuntimeConfigurationError::Workers)?;
 
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
@@ -49,9 +53,75 @@ impl RuntimeConfiguration {
             network: NetworkRuntime::from_config(network),
             agent,
             retrieval,
+            workers,
         })
     }
 }
+
+/// External worker runtime configuration and deterministic fallback policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerRuntimeConfig {
+    pub embedding_endpoint: Option<String>,
+    pub ocr_endpoint: Option<String>,
+    pub vision_endpoint: Option<String>,
+    pub extractor_endpoint: Option<String>,
+    pub max_in_flight: usize,
+    pub silent_updates_enabled: bool,
+}
+
+impl WorkerRuntimeConfig {
+    pub const DEFAULT_MAX_IN_FLIGHT: usize = 2;
+
+    /// Builds worker config from typed environment overrides.
+    pub fn from_environment(
+        environment: &EnvironmentConfig,
+    ) -> Result<Self, WorkerRuntimeConfigError> {
+        Ok(Self {
+            embedding_endpoint: validate_worker_endpoint(
+                environment.workers.embedding_endpoint.clone(),
+            )?,
+            ocr_endpoint: validate_worker_endpoint(environment.workers.ocr_endpoint.clone())?,
+            vision_endpoint: validate_worker_endpoint(environment.workers.vision_endpoint.clone())?,
+            extractor_endpoint: validate_worker_endpoint(
+                environment.workers.extractor_endpoint.clone(),
+            )?,
+            max_in_flight: environment
+                .workers
+                .max_in_flight
+                .unwrap_or(Self::DEFAULT_MAX_IN_FLIGHT),
+            silent_updates_enabled: environment.workers.silent_updates_enabled.unwrap_or(false),
+        })
+    }
+
+    /// Returns the configured endpoint for a worker kind.
+    pub fn endpoint_for(&self, kind: WorkerKind) -> Option<&str> {
+        match kind {
+            WorkerKind::Embedding => self.embedding_endpoint.as_deref(),
+            WorkerKind::Ocr => self.ocr_endpoint.as_deref(),
+            WorkerKind::Vision => self.vision_endpoint.as_deref(),
+            WorkerKind::Extractor => self.extractor_endpoint.as_deref(),
+        }
+    }
+}
+
+/// Worker runtime configuration validation error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkerRuntimeConfigError {
+    InvalidEndpoint(String),
+}
+
+impl fmt::Display for WorkerRuntimeConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEndpoint(value) => write!(
+                formatter,
+                "worker endpoint '{value}' must use http:// and include a host"
+            ),
+        }
+    }
+}
+
+impl Error for WorkerRuntimeConfigError {}
 
 /// Resident agent protocol runtime configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +215,7 @@ pub enum RuntimeConfigurationError {
     NetworkRuntime(NetworkRuntimeError),
     Agent(AgentRuntimeConfigError),
     Retrieval(RetrievalRuntimeConfigError),
+    Workers(WorkerRuntimeConfigError),
 }
 
 impl fmt::Display for RuntimeConfigurationError {
@@ -156,6 +227,7 @@ impl fmt::Display for RuntimeConfigurationError {
             Self::NetworkRuntime(error) => write!(formatter, "{error}"),
             Self::Agent(error) => write!(formatter, "{error}"),
             Self::Retrieval(error) => write!(formatter, "{error}"),
+            Self::Workers(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -267,6 +339,38 @@ fn validate_endpoint(value: &str) -> Result<String, AgentRuntimeConfigError> {
     }
 
     Ok(trimmed.to_owned())
+}
+
+fn validate_worker_endpoint(
+    value: Option<String>,
+) -> Result<Option<String>, WorkerRuntimeConfigError> {
+    value
+        .map(|endpoint| {
+            let trimmed = endpoint.trim();
+            if is_valid_worker_http_endpoint(trimmed) {
+                Ok(trimmed.to_owned())
+            } else {
+                Err(WorkerRuntimeConfigError::InvalidEndpoint(endpoint))
+            }
+        })
+        .transpose()
+}
+
+fn is_valid_worker_http_endpoint(value: &str) -> bool {
+    let Some(remainder) = value.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = remainder
+        .split_once('/')
+        .map_or(remainder, |(authority, _)| authority);
+    if authority.is_empty() || authority.contains(char::is_whitespace) {
+        return false;
+    }
+    if let Some((host, port)) = authority.rsplit_once(':') {
+        return !host.is_empty() && port.parse::<u16>().is_ok_and(|port| port > 0);
+    }
+
+    !authority.is_empty()
 }
 
 fn split_csv(value: Option<&str>) -> Result<Vec<String>, AgentRuntimeConfigError> {
@@ -404,5 +508,25 @@ mod tests {
             error,
             RuntimeConfigurationError::Agent(AgentRuntimeConfigError::InvalidEndpoint(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn rejects_worker_endpoint_without_http_host() {
+        for endpoint in ["https://worker.local", "http://", "http://:8792"] {
+            let environment = EnvironmentConfig::from_pairs(
+                PlatformKind::Unix,
+                [("RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT", endpoint)],
+            )
+            .expect("environment should parse");
+
+            let error = RuntimeConfiguration::from_environment(&environment)
+                .await
+                .expect_err("invalid worker endpoint should fail");
+
+            assert!(matches!(
+                error,
+                RuntimeConfigurationError::Workers(WorkerRuntimeConfigError::InvalidEndpoint(_))
+            ));
+        }
     }
 }

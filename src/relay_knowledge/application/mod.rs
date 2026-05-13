@@ -4,12 +4,13 @@ mod code_service;
 mod index_refresh;
 mod ingest;
 mod multimodal;
+mod operations;
 mod runtime;
 mod service;
 mod status;
 
 pub use runtime::{
     AgentRuntimeConfig, RetrievalRuntimeConfigError, RuntimeConfiguration,
-    RuntimeConfigurationError,
+    RuntimeConfigurationError, WorkerRuntimeConfig,
 };
 pub use service::RelayKnowledgeService;

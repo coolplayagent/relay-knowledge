@@ -107,6 +107,12 @@ mod tests {
                 qos_max_connections: 1,
                 qos_max_in_flight_requests: 1,
                 qos_max_queue_depth: 1,
+                worker_embedding_endpoint_configured: false,
+                worker_ocr_endpoint_configured: false,
+                worker_vision_endpoint_configured: false,
+                worker_extractor_endpoint_configured: false,
+                worker_max_in_flight: 2,
+                silent_updates_enabled: false,
             },
         };
 

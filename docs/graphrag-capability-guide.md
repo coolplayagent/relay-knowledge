@@ -19,14 +19,12 @@
 - diagnostics: graph inspect、index status、health、service doctor 和 Web readiness；`service status` 与 `service doctor` 当前复用同一统一 API 输出，报告 disabled service mode、后台更新状态、service definition path、agent protocol status、refresh queue diagnostics 和结构化 stale reasons。
 - resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission 和 bounded audit events。
 - evaluation harness: 纯 Rust harness 和 CI fixture gate 覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact 观测。
+- operational productization: ingest 后按 evidence modality 写入 embedding/OCR/vision/extractor worker task；`worker run-once` 通过外部 HTTP worker contract 或 deterministic fallback 生成人工审批 proposal；proposal accept/reject/supersede、持久 audit query、service manager definition plan/write 和 silent-update operator status/pause/resume 都通过统一 application API 暴露给 CLI/Web。
 
 规划中能力:
 
-- 具体外部 embedding/OCR/vision provider、认证、限流和模型并存刷新策略；当前实现已有 runtime/read-model contract。
-- proposal lifecycle、事实冲突处理和审批流。
-- service manager install/upgrade/uninstall、silent update operator 和持久 audit sink。
 - MCP resources/prompts、旧 HTTP+SSE 兼容端点和更完整的 ACP 远程 adapter。
-- 真实 OCR/caption/table/layout worker、image embedding provider 和 extractor 产品化。
+- 真实生产模型 worker 的完整响应适配、metrics exporter 和 release diagnostics。
 
 ## 2. CLI 工作流
 

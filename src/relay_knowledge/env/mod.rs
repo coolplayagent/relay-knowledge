@@ -49,6 +49,14 @@ pub const RELAY_KNOWLEDGE_VECTOR_BACKEND: &str = "RELAY_KNOWLEDGE_VECTOR_BACKEND
 pub const RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_EMBEDDING_DIMENSION: &str = "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION";
+pub const RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT: &str =
+    "RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT: &str =
+    "RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT: &str = "RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT";
+pub const RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED: &str = "RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -164,6 +172,17 @@ pub struct RetrievalEnvOverrides {
     pub embedding_dimension: Option<usize>,
 }
 
+/// Worker and service-operator settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkerEnvOverrides {
+    pub embedding_endpoint: Option<String>,
+    pub ocr_endpoint: Option<String>,
+    pub vision_endpoint: Option<String>,
+    pub extractor_endpoint: Option<String>,
+    pub max_in_flight: Option<usize>,
+    pub silent_updates_enabled: Option<bool>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
@@ -172,6 +191,7 @@ pub struct EnvironmentConfig {
     pub network: NetworkEnvOverrides,
     pub agent: AgentEnvOverrides,
     pub retrieval: RetrievalEnvOverrides,
+    pub workers: WorkerEnvOverrides,
 }
 
 impl EnvironmentConfig {
@@ -296,6 +316,14 @@ impl EnvironmentConfig {
                     &values,
                     RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
                 )?,
+            },
+            workers: WorkerEnvOverrides {
+                embedding_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT)?,
+                ocr_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT)?,
+                vision_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT)?,
+                extractor_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT)?,
+                max_in_flight: positive_usize_var(&values, RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT)?,
+                silent_updates_enabled: bool_var(&values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
             },
         })
     }
