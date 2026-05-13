@@ -15,6 +15,8 @@ relay-knowledge ingest \
 
 `--source` 用于隔离来源范围，例如 `docs`、`repo:core` 或某个产品域。`--entity` 可以重复，用于给 evidence 绑定实体标签。写入成功后会产生新的 `graph_version`，并驱动 BM25、semantic 和 vector 等派生索引的新鲜度状态。
 
+写入命令只接受普通文本 evidence。需要提交 source span、confidence、claim、event、typed relation 或 multimodal extraction metadata 的集成，应走共享 API 或 adapter 层；这些入口会复用同一 graph mutation、index refresh 和 audit 路径。
+
 ## 3.2 查询 context pack
 
 普通查询:
@@ -45,7 +47,9 @@ relay-knowledge query "SQLite graph state" \
   --format json
 ```
 
-JSON 响应同时包含兼容展示用的 `results` 和面向 agent 的 `context_pack`。需要可审计引用时，优先读取 `context_pack.items[*].ranking`、`graph_facts`、`source_span`、`backend_statuses`、`budget_used`、`truncated` 和 `degraded_reason`。
+JSON 响应同时包含兼容展示用的 `results` 和面向 agent 的 `context_pack`。需要可审计引用时，优先读取 `context_pack.items[*].ranking`、`graph_facts`、`graph_paths`、`source_span`、`backend_statuses`、`budget_used`、`truncated` 和 `degraded_reason`。
+
+混合检索会融合 BM25、本地 semantic signatures、本地 hashed-vector ANN、结构化图事实、schema path、temporal/community context、code graph documents 和可配置 provider backend metadata。候选通过 reciprocal-rank fusion 排序；entity lexical aliases 可帮助召回，但不会替换 canonical label。
 
 ## 3.3 检查图状态
 
@@ -62,7 +66,7 @@ relay-knowledge index refresh --kind bm25 --format json
 relay-knowledge index refresh --kind semantic --kind vector --format json
 ```
 
-不传 `--kind` 时刷新当前服务认为需要处理的索引族。刷新路径使用 bounded refresh queue、lease、retry、dead-letter 和 stale diagnostics，显式刷新失败时不会伪装成已新鲜。
+不传 `--kind` 时刷新当前服务认为需要处理的索引族。刷新路径使用 bounded refresh queue、lease、retry、dead-letter 和 stale diagnostics，显式刷新失败时不会伪装成已新鲜。查询使用 `wait-until-fresh` 时，也会经过同一显式刷新路径，而不是在查询热路径中无界重建索引。
 JSON 响应里的 `diagnostics.stale_reasons` 会列出仍未新鲜或失败的索引族和 scoped cursor；
 字段包含 kind、source scope、modality、reason、lag versions 和 last error。
 
@@ -101,3 +105,12 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 scope post-filter 和 indexed graph version；`index refresh`/`health` 的
 `index_cursors` 会显示已索引文档推导出的 model name/dimension。`disabled`
 会跳过对应 semantic/vector retriever 和 read model refresh。
+
+接入外部 embedding worker 后，可先运行:
+
+```bash
+relay-knowledge provider probe --format json
+relay-knowledge index refresh --kind semantic --kind vector --format json
+```
+
+`provider probe` 用于验证配置和脱敏诊断；真正的 read model freshness 仍以 `health`、`index refresh` 和查询响应中的 cursor/backend metadata 为准。
