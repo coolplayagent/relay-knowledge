@@ -56,9 +56,10 @@ target/debug/relay-knowledge health --format json
 
 ## Documentation
 
-- [使用指南](docs/user-guide/README.md): default local usage first, then CLI,
-  knowledge graph, code repository, Web, agent service, troubleshooting, and
-  advanced configuration.
+- [使用指南](docs/user-guide/README.md): executable local workflows for
+  install/runtime directories, CLI output modes, GraphRAG, code repository
+  indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
+  and advanced configuration.
 - [2026 行业能力快照](docs/research/industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.

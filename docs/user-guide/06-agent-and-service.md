@@ -54,6 +54,8 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 
 `relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。完整 MCP policy 变量见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
 
+允许远程客户端前应同时确认 HTTP bind、origin allow-list、scope allow-list、QoS budget 和审计策略。不要用远程 bind 加 unspecified scope 作为默认配置。
+
 ## 6.3 Worker、Proposal 与 Audit
 
 多模态 evidence 写入后会进入持久 worker 队列。可配置外部 HTTP worker endpoint:
@@ -79,6 +81,8 @@ relay-knowledge audit query --limit 50 --format json
 ```
 
 未配置外部 endpoint 时，worker run-once 使用 deterministic fallback 生成 proposal，不阻塞 BM25、graph retrieval 或 ingest。proposal 必须人工 accept 后才会通过 graph mutation pipeline 写入 accepted facts。
+
+worker endpoint 负责 CPU-heavy 或 I/O-heavy 工作，例如 embedding、OCR、视觉 caption、表格/layout 抽取。worker 结果先进入 proposal 或 multimodal extraction commit path，不在查询热路径里同步调用外部服务。
 
 ## 6.4 Service Manager 与 Silent Update Operator
 
@@ -133,6 +137,8 @@ MCP prompt surface 当前包括:
 
 Resources 和 prompts 只提供只读诊断、上下文和调用模板，不能绕过 access policy，也不会开启 mutation 或 index refresh 权限。
 
+工具调用的写权限边界由 tool 本身和 policy 共同控制。默认 graph retrieval、inspection、health、service status、index status、code query 和 code impact 是主要暴露面；index refresh 需要显式开启。mutation 类能力应通过受控 CLI/Web/API workflow 执行，并保留 audit。
+
 ## 6.7 Metrics、兼容端点和审计
 
 `GET /mcp/metrics` 返回 Prometheus text 格式快照，覆盖当前 graph version、index refresh queue depth、dead-letter count、QoS in-flight/queued request count 和每个 index 的 stale 状态。该 endpoint 仍通过 MCP router 和 QoS admission 进入服务。
@@ -160,3 +166,16 @@ relay-knowledge service run --web --mcp streamable-http
 ## 6.9 ACP 本地 adapter
 
 本地 ACP session adapter 暴露相同的检索 contract，支持 progress updates、cancellation 和 context artifact。ACP 适合 agent-client 会话入口，MCP 更适合作为其它 agent runtime 的工具服务入口。两者都复用统一 API 和核心服务，不复制检索逻辑。
+
+## 6.9 服务运行建议
+
+开发机临时验证优先使用前台命令或 `run.sh`:
+
+```bash
+./build.sh
+./run.sh start --port 8791 --daemon
+./run.sh status
+./run.sh stop --force
+```
+
+长期后台运行应使用 `service plan` 和 `service definition write` 生成平台 service manager 配置，再由用户或安装器执行需要权限的安装动作。不要用未受管 CLI 循环替代 systemd、Windows Service 或 launchd。运行时数据、日志、缓存、worker 队列和 dead-letter 数据必须留在 `paths` 管理的目录中，而不是 release 解压目录或仓库目录。
