@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
-        CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt,
-        ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
+        CodeImpactPathGroups, CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration,
+        CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector,
+        CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+        CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
         ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
         IndexKind, IndexStatus, LayoutRegion, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack,
@@ -235,6 +236,7 @@ pub struct GraphInspectionRequest {
 pub struct GraphInspectionResponse {
     pub metadata: ApiMetadata,
     pub graph: GraphInspection,
+    pub repository_code_totals: CodeRepositoryTotals,
 }
 
 /// Index refresh request. Empty `kinds` means all v1 index families.
@@ -285,6 +287,7 @@ pub struct HealthResponse {
     pub metadata: ApiMetadata,
     pub healthy: bool,
     pub graph: GraphInspection,
+    pub repository_code_totals: CodeRepositoryTotals,
     pub indexes: Vec<IndexStatus>,
     pub index_cursors: Vec<IndexCursor>,
     pub index_refresh: IndexRefreshDiagnostics,
@@ -317,6 +320,14 @@ pub struct CodeRepositoryIndexResponse {
     pub scope: CodeRepositoryScopeMetadata,
     pub summary: CodeIndexSummary,
     pub status: CodeRepositoryStatus,
+}
+
+/// Code repository scope preview response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryScopePreviewResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub preview: CodeRepositoryScopePreview,
 }
 
 /// Code repository scope and index metadata attached to code responses.
@@ -375,6 +386,7 @@ pub struct CodeRepositoryImpactResponse {
     pub scope: CodeRepositoryScopeMetadata,
     pub request: CodeImpactRequest,
     pub changed_paths: Vec<String>,
+    pub path_groups: CodeImpactPathGroups,
     pub results: Vec<CodeRetrievalHit>,
 }
 
@@ -383,6 +395,14 @@ pub struct CodeRepositoryImpactResponse {
 pub struct CodeRepositoryStatusResponse {
     pub metadata: ApiMetadata,
     pub status: CodeRepositoryStatus,
+}
+
+/// Code repository operations report response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeRepositoryReportResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub report: CodeRepositoryReport,
 }
 
 fn merged_filters(base: &[String], request: &[String]) -> Vec<String> {

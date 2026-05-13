@@ -94,6 +94,10 @@ Follow-up improvements from this run:
   totals, degradation summary, representative queries, latency samples, and
   freshness state.
 
+The v2 implementation specification for these follow-ups and the local
+deterministic semantic/vector retrieval baseline is maintained in
+[`docs/specs/code-repository-retrieval-v2-optimization.md`](specs/code-repository-retrieval-v2-optimization.md).
+
 ## Implementation
 
 - Git registration resolves the repository root and derives a stable

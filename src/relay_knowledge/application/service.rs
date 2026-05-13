@@ -344,10 +344,15 @@ impl RelayKnowledgeService {
     ) -> Result<GraphInspectionResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
+        let repository_code_totals = store
+            .code_repository_totals()
+            .await
+            .map_err(storage_api_error)?;
 
         Ok(GraphInspectionResponse {
             metadata: ApiMetadata::graph_only(&context, graph.graph_version),
             graph,
+            repository_code_totals,
         })
     }
 
@@ -383,6 +388,10 @@ impl RelayKnowledgeService {
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
+        let repository_code_totals = store
+            .code_repository_totals()
+            .await
+            .map_err(storage_api_error)?;
         reconcile_index_refreshes(&store, graph.graph_version, &self.runtime.retrieval).await?;
         let outcome = filter_outcome_to_read_models(
             index_refresh_outcome(&store).await?,
@@ -397,6 +406,7 @@ impl RelayKnowledgeService {
             metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
             healthy,
             graph,
+            repository_code_totals,
             indexes: outcome.indexes,
             index_cursors: outcome.cursors,
             index_refresh: outcome.diagnostics,

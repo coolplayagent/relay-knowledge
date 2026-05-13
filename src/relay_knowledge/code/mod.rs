@@ -13,6 +13,7 @@ use std::{
 
 mod languages;
 mod parser;
+mod scope;
 
 #[cfg(test)]
 mod tests;
@@ -23,8 +24,18 @@ use crate::domain::{
     RepositoryCodeSymbolRecord,
 };
 
-use languages::language_id;
 use parser::parse_indexed_file;
+use scope::{
+    load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
+    path_scope_overlaps, selection_exclusion_reason,
+};
+pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+
+#[cfg(test)]
+use languages::language_id;
+
+#[cfg(test)]
+use scope::{path_is_selected, path_scope_allows};
 
 /// Blocking code index failure.
 #[derive(Debug)]
@@ -148,7 +159,9 @@ pub fn deleted_symbol_names_for_diff(
 ) -> Result<Vec<String>, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let base_commit = resolve_ref(&root, base_ref)?;
+    let head_commit = resolve_ref(&root, head_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
+    let ignore_rules = load_ignore_rules_from_commit(&root, &head_commit)?;
     let mut names = Vec::new();
 
     for change in changes {
@@ -158,7 +171,7 @@ pub fn deleted_symbol_names_for_diff(
             | GitChange::Copied { .. }
             | GitChange::TypeChanged { .. } => continue,
         };
-        if !path_is_selected(&deleted_path, registration, selector) {
+        if !path_is_selected_with_rules(&deleted_path, registration, selector, &ignore_rules) {
             continue;
         }
         let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
@@ -196,9 +209,12 @@ fn build_full_snapshot(
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(root, &commit)?;
+    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let paths = tracked_paths(root, &commit)?
         .into_iter()
-        .filter(|path| path_is_selected(path, registration, selector))
+        .filter(|path| {
+            selection_exclusion_reason(path, registration, selector, &ignore_rules).is_none()
+        })
         .collect::<Vec<_>>();
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, true, paths.len(), 0);
 
@@ -218,20 +234,28 @@ fn build_incremental_snapshot(
     head_ref: &str,
     previous_hashes: &BTreeMap<String, String>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    let base_commit = resolve_ref(root, base_ref)?;
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
+    let base_ignore_rules = load_ignore_rules_from_commit(root, &base_commit)?;
+    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, false, changes.len(), 0);
 
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
-                if path_is_selected(&path, registration, selector) {
+                if path_is_selected_with_rules(&path, registration, selector, &base_ignore_rules) {
                     build.deleted_paths.push(path);
                 }
             }
             GitChange::Renamed { old_path, new_path } => {
-                if path_is_selected(&old_path, registration, selector) {
+                if path_is_selected_with_rules(
+                    &old_path,
+                    registration,
+                    selector,
+                    &base_ignore_rules,
+                ) {
                     build.deleted_paths.push(old_path.clone());
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
@@ -248,10 +272,11 @@ fn build_incremental_snapshot(
                     root,
                     &new_path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
             GitChange::Copied { old_path, new_path } => {
-                if path_is_selected(&new_path, registration, selector) {
+                if path_is_selected_with_rules(&new_path, registration, selector, &ignore_rules) {
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
                         old_path,
@@ -267,6 +292,7 @@ fn build_incremental_snapshot(
                     root,
                     &new_path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
@@ -277,6 +303,7 @@ fn build_incremental_snapshot(
                     root,
                     &path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
         }
@@ -311,10 +338,11 @@ fn build_worktree_overlay_snapshot(
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
+    let ignore_rules = load_ignore_rules(root)?;
 
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            if path_is_selected(deleted_path, registration, selector) {
+            if path_is_selected_with_rules(deleted_path, registration, selector, &ignore_rules) {
                 overlay_hash_input.extend_from_slice(b"D\0");
                 overlay_hash_input.extend_from_slice(deleted_path.as_bytes());
                 overlay_hash_input.push(0);
@@ -329,7 +357,7 @@ fn build_worktree_overlay_snapshot(
         let metadata = match fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if path_is_selected(path, registration, selector) {
+                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                     overlay_hash_input.extend_from_slice(b"D\0");
                     overlay_hash_input.extend_from_slice(path.as_bytes());
                     overlay_hash_input.push(0);
@@ -341,20 +369,21 @@ fn build_worktree_overlay_snapshot(
         };
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            if path_is_selected(path, registration, selector) {
+            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
         if file_type.is_dir() {
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                if path_is_selected(path, registration, selector) {
+                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                     record_worktree_status_marker(path, &mut overlay_hash_input);
                 }
                 continue;
             }
             for nested_path in worktree_directory_files(root, path)? {
-                if path_is_selected(&nested_path, registration, selector) {
+                if path_is_selected_with_rules(&nested_path, registration, selector, &ignore_rules)
+                {
                     record_worktree_file(
                         root,
                         &nested_path,
@@ -368,12 +397,12 @@ fn build_worktree_overlay_snapshot(
             continue;
         }
         if !file_type.is_file() {
-            if path_is_selected(path, registration, selector) {
+            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
-        if path_is_selected(path, registration, selector) {
+        if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
             record_worktree_file(
                 root,
                 path,
@@ -502,8 +531,9 @@ fn parse_changed_path(
     root: &Path,
     path: &str,
     previous_hashes: &BTreeMap<String, String>,
+    ignore_rules: &[scope::IgnoreRule],
 ) -> Result<(), CodeIndexError> {
-    if !path_is_selected(path, registration, selector) {
+    if !path_is_selected_with_rules(path, registration, selector, ignore_rules) {
         return Ok(());
     }
     let object = format!("{}:{path}", build.commit);
@@ -783,6 +813,16 @@ fn git_bytes<const N: usize>(root: &Path, args: [&str; N]) -> Result<Vec<u8>, Co
     })
 }
 
+fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "-e", object])
+        .output()?;
+
+    Ok(output.status.success())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GitChange {
     AddedOrModified { path: String },
@@ -884,86 +924,6 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
     }
 
     changes
-}
-
-fn path_is_selected(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_scope_allows(path, registration, selector)
-        && language_filter_allows(path, &registration.language_filters)
-        && language_filter_allows(path, &selector.language_filters)
-}
-
-fn path_scope_allows(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_filter_allows(path, &registration.path_filters)
-        && path_filter_allows(path, &selector.path_filters)
-}
-
-fn path_scope_overlaps(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_filter_overlaps(path, &registration.path_filters)
-        && path_filter_overlaps(path, &selector.path_filters)
-}
-
-fn path_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || filters
-            .iter()
-            .any(|filter| path_matches_filter(path, filter))
-}
-
-fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || filters
-            .iter()
-            .any(|filter| path_overlaps_filter(path, filter))
-}
-
-fn language_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || language_id(path)
-            .map(|language| filters.iter().any(|filter| filter == language))
-            .unwrap_or(false)
-}
-
-fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_path_filter(path);
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
-}
-
-fn path_overlaps_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_path_filter(path);
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !path.is_empty()
-        && !filter.is_empty()
-        && (path == filter
-            || path.starts_with(&format!("{filter}/"))
-            || filter.starts_with(&format!("{path}/")))
-}
-
-fn normalize_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
 }
 
 pub(super) fn stable_content_hash(bytes: &[u8]) -> String {

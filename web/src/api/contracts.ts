@@ -97,6 +97,14 @@ export type HealthResponse = {
       failed: number;
     };
   };
+  repository_code_totals: {
+    repository_count: number;
+    indexed_file_count: number;
+    symbol_count: number;
+    reference_count: number;
+    chunk_count: number;
+    degraded_file_count: number;
+  };
   indexes: IndexStatus[];
   index_cursors: IndexCursor[];
   index_refresh: IndexRefreshDiagnostics;

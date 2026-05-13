@@ -22,6 +22,7 @@ pub enum OutputFormat {
     #[default]
     Text,
     Json,
+    Markdown,
     StreamingJson,
 }
 
@@ -30,6 +31,7 @@ impl OutputFormat {
         match self {
             Self::Text => "text",
             Self::Json => "json",
+            Self::Markdown => "markdown",
             Self::StreamingJson => "streaming-json",
         }
     }
@@ -39,6 +41,7 @@ impl OutputFormat {
         match value {
             "text" => Ok(Self::Text),
             "json" => Ok(Self::Json),
+            "markdown" => Ok(Self::Markdown),
             "streaming-json" => Ok(Self::StreamingJson),
             other => Err(CliError::invalid_format(other)),
         }
@@ -247,7 +250,7 @@ impl fmt::Display for CliError {
         match self {
             Self::InvalidFormat(format) => write!(
                 formatter,
-                "invalid --format value '{format}', expected text, json, or streaming-json"
+                "invalid --format value '{format}', expected text, json, markdown, or streaming-json"
             ),
             Self::InvalidCodeQueryKind(value) => write!(
                 formatter,
@@ -451,18 +454,20 @@ pub async fn run_with_service(
 /// Returns the CLI help text.
 pub fn help_text() -> &'static str {
     concat!(
-        "Usage: relay-knowledge [status] [--format text|json|streaming-json]\n",
+        "Usage: relay-knowledge [status] [--format text|json|markdown|streaming-json]\n",
         "Commands:\n",
         "  status\n",
         "  ingest --source <scope> --content <text> [--entity <label>]\n",
         "  query <text> [--source <scope>] [--limit <n>] ",
         "[--freshness allow-stale|wait-until-fresh|graph-only]\n",
         "  repo register <path> --alias <name> [--path <filter>] [--language <id>]\n",
-        "  repo index <alias> [--ref <ref>]\n",
+        "  repo index <alias> [--ref <ref>] [--dry-run]\n",
+        "  repo scope preview <alias> [--ref <ref>]\n",
         "  repo update <alias> --base <ref> --head <ref>\n",
         "  repo query <alias> --query <text> ",
         "[--kind hybrid|symbol|definition|references|callers|callees|imports]\n",
         "  repo impact <alias> --base <ref> --head <ref>\n",
+        "  repo report <alias> [--format markdown|json]\n",
         "  repo status <alias>\n",
         "  graph inspect\n",
         "  index refresh [--kind bm25|semantic|vector]\n",
@@ -487,6 +492,7 @@ fn render_version(format: OutputFormat) -> Result<String, CliError> {
             project_name: "relay-knowledge",
             version: env!("CARGO_PKG_VERSION"),
         }),
+        OutputFormat::Markdown => Ok(format!("relay-knowledge {}\n", env!("CARGO_PKG_VERSION"))),
         OutputFormat::StreamingJson => Err(CliError::UnsupportedVersionFormat(format)),
     }
 }
@@ -499,6 +505,7 @@ pub fn render_project_status(
     match format {
         OutputFormat::Text => render_text("project.status", response),
         OutputFormat::Json => serialize_line(response),
+        OutputFormat::Markdown => render_text("project.status", response),
         OutputFormat::StreamingJson => render_streaming_project_status(response),
     }
 }
@@ -717,6 +724,7 @@ where
     match format {
         OutputFormat::Text => render_text(operation, response),
         OutputFormat::Json => serialize_line(response),
+        OutputFormat::Markdown => render_text(operation, response),
         OutputFormat::StreamingJson => render_streaming_response(operation, metadata, response),
     }
 }
@@ -744,22 +752,88 @@ where
             )
         }
         "graph.inspect" => format!(
-            "graph_version={} entities={} evidence={} code_files={} code_symbols={}",
+            "graph_version={} entities={} evidence={} code_files={} code_symbols={} repo_code_files={} repo_code_symbols={}",
             value["graph"]["graph_version"].as_u64().unwrap_or(0),
             value["graph"]["entity_count"].as_u64().unwrap_or(0),
             value["graph"]["evidence_count"].as_u64().unwrap_or(0),
             value["graph"]["code_file_count"].as_u64().unwrap_or(0),
-            value["graph"]["code_symbol_count"].as_u64().unwrap_or(0)
+            value["graph"]["code_symbol_count"].as_u64().unwrap_or(0),
+            value["repository_code_totals"]["indexed_file_count"]
+                .as_u64()
+                .unwrap_or(0),
+            value["repository_code_totals"]["symbol_count"]
+                .as_u64()
+                .unwrap_or(0)
         ),
         "index.refresh" => format!(
             "refreshed_indexes={}",
             value["indexes"].as_array().map_or(0, Vec::len)
         ),
-        "service.health" => format!("healthy={}", value["healthy"].as_bool().unwrap_or(false)),
+        "service.health" => format!(
+            "healthy={} repo_code_files={} repo_code_symbols={}",
+            value["healthy"].as_bool().unwrap_or(false),
+            value["repository_code_totals"]["indexed_file_count"]
+                .as_u64()
+                .unwrap_or(0),
+            value["repository_code_totals"]["symbol_count"]
+                .as_u64()
+                .unwrap_or(0)
+        ),
         "service.status" => format!(
             "service={} mode={}",
             value["service_name"].as_str().unwrap_or("relay-knowledge"),
             value["mode"].as_str().unwrap_or("disabled")
+        ),
+        "code.repo.index" => format!(
+            "indexed files={} symbols={} references={} chunks={} degraded={}",
+            value["summary"]["indexed_file_count"].as_u64().unwrap_or(0),
+            value["summary"]["symbol_count"].as_u64().unwrap_or(0),
+            value["summary"]["reference_count"].as_u64().unwrap_or(0),
+            value["summary"]["chunk_count"].as_u64().unwrap_or(0),
+            value["summary"]["degraded_file_count"]
+                .as_u64()
+                .unwrap_or(0)
+        ),
+        "code.repo.scope_preview" => format!(
+            "preview files={} bytes={} unsupported={} expected_degraded={}",
+            value["preview"]["selected_file_count"]
+                .as_u64()
+                .unwrap_or(0),
+            value["preview"]["selected_byte_count"]
+                .as_u64()
+                .unwrap_or(0),
+            value["preview"]["unsupported_file_count"]
+                .as_u64()
+                .unwrap_or(0),
+            value["preview"]["expected_degraded_file_count"]
+                .as_u64()
+                .unwrap_or(0)
+        ),
+        "code.repo.query" => format!(
+            "results={}",
+            value["results"].as_array().map_or(0, Vec::len)
+        ),
+        "code.repo.impact" => format!(
+            "changed_in_scope={} results={}",
+            value["path_groups"]["in_scope_changed_paths"]
+                .as_array()
+                .map_or(0, Vec::len),
+            value["results"].as_array().map_or(0, Vec::len)
+        ),
+        "code.repo.status" => format!(
+            "repo={} files={} symbols={} stale={}",
+            value["status"]["alias"].as_str().unwrap_or(""),
+            value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
+            value["status"]["symbol_count"].as_u64().unwrap_or(0),
+            value["status"]["stale"].as_bool().unwrap_or(true)
+        ),
+        "code.repo.report" => format!(
+            "repo={} files={} freshness={}",
+            value["report"]["alias"].as_str().unwrap_or(""),
+            value["report"]["indexed_file_count"].as_u64().unwrap_or(0),
+            value["report"]["freshness_state"]
+                .as_str()
+                .unwrap_or("unknown")
         ),
         _ => operation.to_owned(),
     };

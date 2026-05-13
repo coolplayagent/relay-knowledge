@@ -97,6 +97,125 @@ async fn bm25_matches_generated_entity_aliases_without_returning_aliases_as_labe
 }
 
 #[tokio::test]
+async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(
+        &store,
+        "ev-retry",
+        "docs",
+        "Retry policy controls the runtime budget",
+    )
+    .await;
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "retry_policy".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].evidence_id, "ev-retry");
+    assert!(
+        hits[0]
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+            || hits[0].retriever_sources.contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
+async fn derived_retrieval_scores_older_documents_before_truncating() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(
+        &store,
+        "ev-older-match",
+        "docs",
+        "AncientNeedle policy controls runtime budget",
+    )
+    .await;
+    for index in 0..45 {
+        commit_evidence(
+            &store,
+            &format!("ev-filler-{index}"),
+            "docs",
+            &format!("Recent filler document {index}"),
+        )
+        .await;
+    }
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "ancientneedle".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(46),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+    let hit = hits
+        .iter()
+        .find(|hit| hit.evidence_id == "ev-older-match")
+        .expect("older matching document should be retained");
+
+    assert!(
+        hit.retriever_sources.contains(&RetrieverSource::Semantic)
+            || hit.retriever_sources.contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
+async fn code_read_model_hits_merge_with_bm25_document() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .commit_code_graph_batch(
+            CodeGraphBatch::new(vec![parsed_code_file("repo", "src/lib.rs", "sym-main")])
+                .expect("batch should validate"),
+        )
+        .await
+        .expect("code graph commit should succeed");
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "main".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+    let symbol_hit = hits
+        .iter()
+        .find(|hit| {
+            hit.code_artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.artifact_id == "sym-main")
+        })
+        .expect("symbol hit should be present");
+
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::CodeGraph)
+    );
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+    );
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
 async fn reads_mutation_log_after_version() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(&store, "ev-1", "docs", "Rust async storage").await;
@@ -383,6 +502,99 @@ async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
         .expect("search should succeed");
 
     assert!(hits.iter().any(|hit| hit.code_artifact.is_some()));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn initialization_backfills_empty_semantic_and_vector_documents() {
+    let path = temp_db_path("derived-backfill");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-retry-backfill",
+            "docs",
+            "Retry policy controls runtime budget",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DELETE FROM graph_semantic_documents", [])
+            .expect("semantic rows should delete");
+        guard
+            .execute("DELETE FROM graph_vector_documents", [])
+            .expect("vector rows should delete");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "retry_policy".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.retriever_sources.contains(&RetrieverSource::Semantic)
+            || hit.retriever_sources.contains(&RetrieverSource::Vector)
+    }));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn initialization_rebuilds_partially_populated_retrieval_documents() {
+    let path = temp_db_path("partial-derived-backfill");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-partial-keep",
+            "docs",
+            "Partial rebuild keeps one existing row",
+        )
+        .await;
+        commit_evidence(
+            &store,
+            "ev-partial-missing",
+            "docs",
+            "SecondPartialNeedle should be rebuilt",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        for table in [
+            "graph_bm25",
+            "graph_semantic_documents",
+            "graph_vector_documents",
+        ] {
+            guard
+                .execute(
+                    &format!("DELETE FROM {table} WHERE evidence_id = ?1"),
+                    ["ev-partial-missing"],
+                )
+                .expect("partial rows should delete");
+        }
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "SecondPartialNeedle".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(2),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+
+    assert!(
+        hits.iter()
+            .any(|hit| hit.evidence_id == "ev-partial-missing")
+    );
     let _ = std::fs::remove_file(path);
 }
 

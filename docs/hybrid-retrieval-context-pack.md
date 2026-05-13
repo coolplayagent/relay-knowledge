@@ -62,6 +62,14 @@ a configured backend worker supplies them. The same diagnostics include
 `stale_reasons`, a structured list of index-family and scoped-cursor reasons
 that explain failed state, graph-version lag, and last-error conditions.
 
+`semantic` and `vector` are explicit index families in freshness metadata.
+The current v2 baseline uses local deterministic SQLite read models: semantic
+documents store normalized concept tokens, while vector documents store hashed
+token and character n-gram weights. If a future backend is unavailable,
+`backend_statuses` still records the unavailable state and fallback reason.
+BM25 plus graph evidence retrieval remains usable and the response still
+reports index freshness.
+
 ## Graph Facts
 
 Graph mutations now support evidence metadata and structured facts:
