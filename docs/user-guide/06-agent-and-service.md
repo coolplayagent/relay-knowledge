@@ -2,7 +2,7 @@
 
 ## 6.1 前台常驻服务
 
-启动前台服务并启用 MCP Streamable HTTP:
+启动前台服务并启用 MCP Streamable HTTP。默认只建议允许明确的 source scope:
 
 ```bash
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
@@ -34,23 +34,9 @@ http://127.0.0.1:8791/mcp
 
 ## 6.2 MCP 权限变量
 
-常用 MCP 配置:
+默认 policy 要求配置允许 scope。未设置允许 scope 时，graph tools 会拒绝 unspecified scope，除非显式开启 unspecified scope。远程 bind 默认被拒绝，非本机监听也需要显式开启。
 
-```text
-RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED
-RELAY_KNOWLEDGE_MCP_ENDPOINT
-RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS
-RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES
-RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE
-RELAY_KNOWLEDGE_MCP_MAX_LIMIT
-RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES
-RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH
-RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
-```
-
-默认 policy 要求配置允许 scope。未设置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
-
-`relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。
+`relay.refresh_indexes` 默认隐藏，只有显式允许 index refresh 后才会出现在 tool list 中。完整 MCP policy 变量见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
 
 ## 6.3 Worker、Proposal 与 Audit
 

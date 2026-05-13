@@ -12,6 +12,7 @@
 - [第 5 章 Web 工作区](user-guide/05-web-workspace.md)
 - [第 6 章 Agent 与常驻服务](user-guide/06-agent-and-service.md)
 - [第 7 章 运维与排障](user-guide/07-operations-and-troubleshooting.md)
+- [第 8 章 高级配置参考](user-guide/08-advanced-configuration.md)
 
 ## Features
 
@@ -27,6 +28,7 @@
 - [代码仓库 Tree-sitter 检索研究材料](research/code-repository-tree-sitter-retrieval-research.md): tree-sitter、Git 增量、代码知识图谱和高性能检索的资料依据与工程取舍。
 - [Agent 协议图检索接入研究](research/agent-protocol-graph-retrieval-research.md): MCP server 与 Agent Client Protocol adapter 暴露常驻图检索能力的协议研究和取舍。
 - [relay-knowledge 实现借鉴落地路线](research/relay-knowledge-implementation-reference.md): 结合 docs/PDF 研究材料和当前 Rust 实现的已落地基线、剩余差距和阶段性路线。
+- [2026 行业能力快照与差距分析](research/industry-capability-snapshot-2026.md): GraphRAG、MCP、A2A、托管检索和图谱 agent 生态的当前信号，以及 relay-knowledge 的产品差距。
 
 ## Specs
 

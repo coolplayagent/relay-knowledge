@@ -56,7 +56,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `source_scope is not authorized for this MCP policy`: 请求 scope 不在 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 中。
 
-路径配置错误: `RELAY_KNOWLEDGE_*_DIR` 和 `RELAY_KNOWLEDGE_HOME` 必须是绝对路径，且不能包含 `..`。
+路径配置错误: 高级目录覆盖和 `RELAY_KNOWLEDGE_HOME` 必须是绝对路径，且不能包含 `..`。完整变量清单见 [第 8 章](08-advanced-configuration.md)。
 
 `RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL must not be blank` 或
 `RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL must not be blank`: 模型名环境变量不能只包含空白字符；删除该变量可回到默认本地 deterministic model。
