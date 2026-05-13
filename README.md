@@ -46,7 +46,7 @@ The binary starts a Tokio runtime, and the shared application service exposes as
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
 Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
-Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, code artifacts, backend availability, freshness, truncation, and budget metadata.
+Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
 Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, and retrieval groups those hits by parent to avoid duplicate context items.
 The `evaluation` module provides a pure GraphRAG harness for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
 Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, while explicit refresh paths surface queue-cap failures instead of reporting false freshness.
@@ -76,7 +76,10 @@ accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source
 `span`, confidence, lifecycle status, typed relations, claims, and events that
 reference evidence ids. Structured facts must cite supporting evidence, supplied
 confidence, span, and version-range fields are revalidated after deserialization,
-and retrieval only uses `accepted` or `proposed` evidence as context.
+and retrieval only uses `accepted` or `proposed` evidence as context. Context
+pack items now expose direct `graph_paths` derived from those structured facts
+so agent callers can cite one-hop relation, claim, or event paths alongside raw
+fact provenance.
 
 `service run --mcp streamable-http` starts the resident MCP Streamable HTTP
 adapter on the configured local HTTP bind, defaulting to

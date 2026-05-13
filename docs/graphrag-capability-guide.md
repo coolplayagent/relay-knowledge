@@ -12,7 +12,7 @@
 
 - evidence ingest: 写入 source-scoped evidence 和 entity label，提交后产生新的 `graph_version`。
 - structured fact ingest: API 可写入 evidence source path、span、confidence、status、typed relation、claim 和 event；结构化 facts 必须引用 supporting evidence ids，反序列化后的 span、confidence 和 version range 会重新验证。
-- hybrid retrieval: 使用 SQLite FTS5 BM25、local semantic token read model、local hashed-vector ANN read model、graph evidence fallback、code graph documents、schema path、temporal event、community summary 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
+- hybrid retrieval: 使用 SQLite FTS5 BM25、local semantic token read model、local hashed-vector ANN read model、graph evidence fallback、code graph documents、schema path、temporal event、community summary 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、direct graph path evidence、code artifact 和 backend 状态；BM25 会索引 entity/code symbol 的生成式 lexical alias 但不把 alias 当成 canonical label 返回；`rejected`/`superseded` evidence 不会作为检索上下文返回。
 - multimodal evidence: evidence 可记录 `text_span`、`image_asset`、`ocr_text`、`caption`、`image_embedding`、`table` 和 `layout_region` 抽取元数据；派生 OCR/caption/image embedding 按 parent evidence 合并为一个 context item。
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
 - index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors 持久化 kind/scope/modality freshness、source hash、backend cursor，以及 semantic/vector worker 可回传的 model name/dimension；bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
@@ -142,6 +142,11 @@ http://127.0.0.1:8791/mcp
 - budget exceeded: 检索结果或 agent context 超过 limit/context bytes，返回 `truncated=true`。
 - backend unavailable: semantic/vector 后端未启用时，BM25 和 graph evidence 仍可工作。
 - local semantic/vector degraded: 当前 semantic/vector 使用本地确定性 read model；外部 embedding、OCR 或视觉模型不可用不会阻塞 BM25、graph path 或 temporal retrieval。
+
+`context_pack.items[*].graph_paths` 是从同一 item 的 structured facts 派生的
+一跳路径视图。每条 path 保留节点标签、edge fact id、predicate、supporting
+evidence ids、confidence、status 和 version range，方便 agent 在引用关系或
+事件链时使用路径结构而不是重新解析自然语言片段。
 
 ## 6. Context Pack 字段
 

@@ -19,16 +19,18 @@ and Web compatibility, and adds:
   the request limit.
 
 Each result includes `retriever_sources`, `ranking`, entity projections,
-optional source span, supporting structured facts, and optional code artifact
-metadata. `ranking` records the retriever source, source-local rank, raw source
-score, and a short explanation so agents can cite why an item was selected.
+optional source span, supporting structured facts, direct graph path evidence,
+and optional code artifact metadata. `ranking` records the retriever source,
+source-local rank, raw source score, and a short explanation so agents can cite
+why an item was selected.
 
 ## Retrieval Sources
 
 The retrieval layer uses these concrete recall paths:
 
-- `bm25`: SQLite FTS5 BM25 over evidence content, entity labels, source scope,
-  source path, code symbols, and code chunks.
+- `bm25`: SQLite FTS5 BM25 over evidence content, entity labels, generated
+  entity-label aliases, source scope, source path, code symbols, generated code
+  symbol aliases, and code chunks.
 - `graph_evidence`: deterministic graph evidence/entity term overlap fallback.
 - `code_graph`: code symbol and chunk documents inserted from the tree-sitter
   code graph into the shared BM25 read model.
@@ -73,6 +75,10 @@ Graph mutations now support evidence metadata and structured facts:
 Structured facts are persisted in SQLite and counted in graph inspection and
 mutation log responses. Entity cleanup preserves entities referenced by evidence,
 relations, claims, and events.
+Retrieval context items also expose direct `graph_paths` derived from those
+facts. Each path keeps the participating node labels, the relation/claim/event
+edge, supporting evidence ids, confidence, lifecycle status, and graph-version
+validity range.
 
 The ingest API accepts structured facts alongside evidence. The basic CLI still
 writes evidence and entity labels, while API adapters can supply evidence
@@ -117,6 +123,6 @@ relay-knowledge query SQLite \
 
 The query response contains both `results` and `context_pack`. Use `results` for
 simple display. Use `context_pack.items[*].ranking`,
-`context_pack.items[*].graph_facts`, `context_pack.items[*].source_span`, and
-`context_pack.backend_statuses` when an agent needs source attribution, fact
-provenance, or degradation handling.
+`context_pack.items[*].graph_facts`, `context_pack.items[*].graph_paths`,
+`context_pack.items[*].source_span`, and `context_pack.backend_statuses` when an
+agent needs source attribution, fact/path provenance, or degradation handling.

@@ -13,9 +13,9 @@ use crate::{
         ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
-        ContextPackItem, FreshnessPolicy, FusionDiagnostics, GraphVersion, IndexKind,
-        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-        RetrievalMode, RetrievedContextPack, SourceScope,
+        ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, GraphVersion,
+        IndexKind, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed,
+        RetrievalHit, RetrievalMode, RetrievedContextPack, SourceScope,
     },
     env::EnvironmentConfig,
     project::PROJECT_NAME,
@@ -244,6 +244,11 @@ impl RelayKnowledgeService {
                     source_span: hit.source_span,
                     entities: hit.entities.clone(),
                     graph_facts: hit.graph_facts.clone(),
+                    graph_paths: hit
+                        .graph_facts
+                        .iter()
+                        .map(ContextGraphPath::from_fact)
+                        .collect(),
                     code_artifact: hit.code_artifact.clone(),
                     retriever_sources: hit.retriever_sources.clone(),
                     ranking: hit.ranking.clone(),
