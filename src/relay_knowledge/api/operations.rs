@@ -161,6 +161,26 @@ pub struct IngestResponse {
     pub index_refresh_error: Option<String>,
 }
 
+/// Maintenance-worker output for derived OCR, caption, table, layout, or image embeddings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultimodalExtractionRequest {
+    pub source_scope: String,
+    pub parent_evidence_id: String,
+    pub derived_evidence: Vec<IngestEvidence>,
+}
+
+/// Commit result for a bounded multimodal maintenance batch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultimodalExtractionResponse {
+    pub metadata: ApiMetadata,
+    pub parent_evidence_id: String,
+    pub derived_evidence_count: usize,
+    pub receipt: CommitReceipt,
+    pub indexes: Vec<IndexStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_refresh_error: Option<String>,
+}
+
 /// Hybrid retrieval request over graph facts and derived indexes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HybridRetrievalRequest {

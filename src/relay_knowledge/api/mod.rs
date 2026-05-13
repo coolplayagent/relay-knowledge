@@ -21,7 +21,8 @@ pub use operations::{
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryScopeMetadata,
     CodeRepositoryStatusResponse, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
     HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
-    IngestClaim, IngestEvent, IngestEvidence, IngestRelation, IngestRequest, IngestResponse,
+    IngestClaim, IngestEvent, IngestEvidence, IngestEvidenceExtraction, IngestRelation,
+    IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
     ServiceRecoveryReport, ServiceStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};

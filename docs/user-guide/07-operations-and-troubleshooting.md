@@ -77,6 +77,7 @@ Rust 质量门禁:
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 

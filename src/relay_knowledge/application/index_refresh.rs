@@ -7,6 +7,7 @@ use crate::{
     api::{ApiError, ApiMetadata, RequestContext},
     domain::{GraphVersion, IndexKind, IndexStatus},
     indexing::IndexRefreshPlan,
+    retrieval::ReadModelBackendConfig,
     storage::{
         DEFAULT_INDEX_SOURCE_SCOPE, IndexCursor, IndexRefreshClaimRequest, IndexRefreshCompletion,
         IndexRefreshDiagnostics, IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask,
@@ -56,16 +57,32 @@ pub(super) async fn refresh_index_kinds(
     store: &Arc<dyn KnowledgeStore>,
     kinds: impl IntoIterator<Item = IndexKind>,
     graph_version: GraphVersion,
+    read_models: &ReadModelBackendConfig,
 ) -> Result<IndexRefreshOutcome, ApiError> {
-    refresh_index_kinds_with_policy(store, kinds, graph_version, EXPLICIT_REFRESH_QUEUE).await
+    refresh_index_kinds_with_policy(
+        store,
+        kinds,
+        graph_version,
+        EXPLICIT_REFRESH_QUEUE,
+        read_models,
+    )
+    .await
 }
 
 pub(super) async fn recover_index_kinds(
     store: &Arc<dyn KnowledgeStore>,
     kinds: impl IntoIterator<Item = IndexKind>,
     graph_version: GraphVersion,
+    read_models: &ReadModelBackendConfig,
 ) -> Result<IndexRefreshOutcome, ApiError> {
-    refresh_index_kinds_with_policy(store, kinds, graph_version, RECOVERY_REFRESH_QUEUE).await
+    refresh_index_kinds_with_policy(
+        store,
+        kinds,
+        graph_version,
+        RECOVERY_REFRESH_QUEUE,
+        read_models,
+    )
+    .await
 }
 
 async fn refresh_index_kinds_with_policy(
@@ -73,10 +90,11 @@ async fn refresh_index_kinds_with_policy(
     kinds: impl IntoIterator<Item = IndexKind>,
     graph_version: GraphVersion,
     queue_policy: QueuePolicy,
+    read_models: &ReadModelBackendConfig,
 ) -> Result<IndexRefreshOutcome, ApiError> {
     let kinds = IndexRefreshPlan::from_requested(kinds.into_iter().collect()).into_kinds();
     queue_index_refreshes(store.as_ref(), kinds.clone(), graph_version, queue_policy).await?;
-    drain_index_refresh_queue(store).await?;
+    drain_index_refresh_queue(store, read_models).await?;
 
     let mut outcome = index_refresh_outcome(store).await?;
     outcome
@@ -184,7 +202,10 @@ async fn queue_index_refreshes(
     }
 }
 
-async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<(), ApiError> {
+async fn drain_index_refresh_queue(
+    store: &Arc<dyn KnowledgeStore>,
+    read_models: &ReadModelBackendConfig,
+) -> Result<(), ApiError> {
     let lease_owner = format!("foreground-refresh-{}", std::process::id());
     let mut first_failure = None;
     loop {
@@ -230,14 +251,15 @@ async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<()
             continue;
         }
 
+        let model_metadata = read_models.metadata_for_index(task.kind);
         store
             .complete_index_refresh_task(IndexRefreshCompletion {
                 task_id: task.task_id,
                 lease_owner: lease_owner.clone(),
                 attempt_count: task.attempt_count,
                 indexed_graph_version: task.target_graph_version,
-                model_name: None,
-                model_dimension: None,
+                model_name: model_metadata.map(|metadata| metadata.name.clone()),
+                model_dimension: model_metadata.map(|metadata| metadata.dimension),
                 now_ms: now_millis(),
             })
             .await

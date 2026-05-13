@@ -2,9 +2,13 @@ use std::{error::Error, fmt, time::Duration};
 
 use crate::{
     api::{AgentAccessPolicy, AgentPolicyError},
-    env::{EnvError, EnvironmentConfig},
+    env::{EnvError, EnvironmentConfig, RetrievalEnvOverrides},
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     paths::{PathError, RuntimePaths},
+    retrieval::{
+        LOCAL_SEMANTIC_MODEL, LOCAL_VECTOR_DIMENSION, LOCAL_VECTOR_MODEL, ReadModelBackendConfig,
+        ReadModelBackendMode, ReadModelBackendModeError, ReadModelMetadata,
+    },
 };
 
 /// Resolved foundation configuration shared by all interfaces.
@@ -13,6 +17,7 @@ pub struct RuntimeConfiguration {
     pub paths: RuntimePaths,
     pub network: NetworkRuntime,
     pub agent: AgentRuntimeConfig,
+    pub retrieval: ReadModelBackendConfig,
 }
 
 impl RuntimeConfiguration {
@@ -32,12 +37,15 @@ impl RuntimeConfiguration {
             .map_err(RuntimeConfigurationError::Network)?;
         let agent = AgentRuntimeConfig::from_environment(environment, network.http.request_timeout)
             .map_err(RuntimeConfigurationError::Agent)?;
+        let retrieval = retrieval_config_from_environment(&environment.retrieval)
+            .map_err(RuntimeConfigurationError::Retrieval)?;
 
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
                 .map_err(RuntimeConfigurationError::Paths)?,
             network: NetworkRuntime::from_config(network),
             agent,
+            retrieval,
         })
     }
 }
@@ -133,6 +141,7 @@ pub enum RuntimeConfigurationError {
     Network(NetworkConfigError),
     NetworkRuntime(NetworkRuntimeError),
     Agent(AgentRuntimeConfigError),
+    Retrieval(RetrievalRuntimeConfigError),
 }
 
 impl fmt::Display for RuntimeConfigurationError {
@@ -143,11 +152,81 @@ impl fmt::Display for RuntimeConfigurationError {
             Self::Network(error) => write!(formatter, "{error}"),
             Self::NetworkRuntime(error) => write!(formatter, "{error}"),
             Self::Agent(error) => write!(formatter, "{error}"),
+            Self::Retrieval(error) => write!(formatter, "{error}"),
         }
     }
 }
 
 impl Error for RuntimeConfigurationError {}
+
+/// Retrieval runtime configuration validation error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RetrievalRuntimeConfigError {
+    InvalidBackend(ReadModelBackendModeError),
+    DimensionTooLarge(usize),
+}
+
+impl fmt::Display for RetrievalRuntimeConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidBackend(error) => write!(formatter, "{error}"),
+            Self::DimensionTooLarge(value) => {
+                write!(formatter, "embedding dimension {value} does not fit in u32")
+            }
+        }
+    }
+}
+
+impl Error for RetrievalRuntimeConfigError {}
+
+fn retrieval_config_from_environment(
+    overrides: &RetrievalEnvOverrides,
+) -> Result<ReadModelBackendConfig, RetrievalRuntimeConfigError> {
+    let dimension = match overrides.embedding_dimension {
+        Some(value) => u32::try_from(value)
+            .map_err(|_| RetrievalRuntimeConfigError::DimensionTooLarge(value))?,
+        None => LOCAL_VECTOR_DIMENSION,
+    };
+    let text_model = overrides
+        .text_embedding_model
+        .clone()
+        .unwrap_or_else(|| LOCAL_VECTOR_MODEL.to_owned());
+    let semantic_model = overrides
+        .text_embedding_model
+        .clone()
+        .unwrap_or_else(|| LOCAL_SEMANTIC_MODEL.to_owned());
+    let image_model = overrides
+        .image_embedding_model
+        .clone()
+        .unwrap_or_else(|| "relay-local-image-hash-v1".to_owned());
+
+    Ok(ReadModelBackendConfig {
+        semantic_mode: parse_backend_mode(overrides.semantic_backend.as_deref())?,
+        vector_mode: parse_backend_mode(overrides.vector_backend.as_deref())?,
+        semantic_model: ReadModelMetadata {
+            name: semantic_model,
+            dimension,
+        },
+        vector_model: ReadModelMetadata {
+            name: text_model,
+            dimension,
+        },
+        image_model: ReadModelMetadata {
+            name: image_model,
+            dimension,
+        },
+    })
+}
+
+fn parse_backend_mode(
+    value: Option<&str>,
+) -> Result<ReadModelBackendMode, RetrievalRuntimeConfigError> {
+    value
+        .map(ReadModelBackendMode::parse)
+        .transpose()
+        .map_err(RetrievalRuntimeConfigError::InvalidBackend)
+        .map(|mode| mode.unwrap_or(ReadModelBackendMode::Local))
+}
 
 fn validate_endpoint(value: &str) -> Result<String, AgentRuntimeConfigError> {
     let trimmed = value.trim();
@@ -228,6 +307,37 @@ mod tests {
         assert_eq!(runtime.agent.access_policy.max_context_bytes, 4096);
         assert!(runtime.agent.access_policy.allow_index_refresh);
         assert!(runtime.agent.access_policy.allow_remote_clients);
+    }
+
+    #[tokio::test]
+    async fn resolves_retrieval_read_model_runtime_from_environment() {
+        let environment = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [
+                ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "external"),
+                ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+                ("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "text-embed-3-small"),
+                ("RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL", "clip-vit-b32"),
+                ("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", "1536"),
+            ],
+        )
+        .expect("environment should parse");
+
+        let runtime = RuntimeConfiguration::from_environment(&environment)
+            .await
+            .expect("runtime should compose");
+
+        assert_eq!(
+            runtime.retrieval.semantic_mode,
+            ReadModelBackendMode::External
+        );
+        assert_eq!(
+            runtime.retrieval.vector_mode,
+            ReadModelBackendMode::External
+        );
+        assert_eq!(runtime.retrieval.vector_model.name, "text-embed-3-small");
+        assert_eq!(runtime.retrieval.image_model.name, "clip-vit-b32");
+        assert_eq!(runtime.retrieval.vector_model.dimension, 1536);
     }
 
     #[tokio::test]

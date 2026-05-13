@@ -69,8 +69,14 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | MCP 返回 context 文本预算，默认 `65536` |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH` | 是否暴露 `relay.refresh_indexes`，默认 `false` |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | 是否允许非本机 bind 对外服务，默认 `false` |
+| `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` | semantic read model backend mode: `local`、`external` 或 `disabled`，默认 `local` |
+| `RELAY_KNOWLEDGE_VECTOR_BACKEND` | vector read model backend mode: `local`、`external` 或 `disabled`，默认 `local` |
+| `RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL` | semantic/vector text embedding model name，默认本地 deterministic model 名称 |
+| `RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL` | image embedding model name，默认本地 deterministic image model 名称 |
+| `RELAY_KNOWLEDGE_EMBEDDING_DIMENSION` | embedding dimension metadata，默认 `16` |
 
 空值会失败。数字变量必须是大于零的正整数。HTTP bind 必须能解析为 `host:port`，可以是 IP literal 或 hostname，并且端口不能是 `0`。Proxy URL 必须使用 `http://` 或 `https://` 且包含 host。No-proxy 和 MCP 逗号分隔列表会 trim，空条目会失败。MCP endpoint 必须是无 query/fragment 的绝对 HTTP path。Proxy 值可能包含凭据，状态输出只暴露是否配置，不输出原始 proxy 字符串。`SSL_VERIFY` 和 MCP boolean 默认值可用 `true/false`、`1/0`、`yes/no`、`on/off`。
+semantic/vector backend mode 只接受 `local`、`external` 或 `disabled`。这些变量只配置 read model metadata 和 backend status；具体 provider worker 仍必须通过后台或 maintenance 边界写入派生 read model，不能在查询热路径运行。
 
 ## 3. 路径规则
 
@@ -194,6 +200,10 @@ SQLite 是当前默认本地后端，所有 SQLite 调用通过 `storage` 边界
 `tokio::task::spawn_blocking`，不能直接在 async executor 上执行阻塞数据库工作。
 `indexing` 和 `retrieval` 模块分别承载 index refresh plan 与 retrieval plan 校验，
 application service 只编排这些 contract，不把策略留在 CLI/Web adapter 中。
+`retrieval` runtime config 从 typed env snapshot 进入 application service；semantic/vector
+refresh completion 会把配置的 model name/dimension 写入 `index_cursors`，
+`retrieve_context` 会把 configured backend mode、model、dimension、scope post-filter
+和 indexed graph version 写入 `backend_statuses`。
 
 ## 6. 测试策略
 

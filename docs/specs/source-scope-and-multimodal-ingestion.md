@@ -212,6 +212,11 @@ pub struct RetrievalMetadata {
   caption 重复出现在 context pack 中。
 - `image_asset` 必须提供 `media_hash` 或 `source_hash`，便于后续 extractor 和
   embedding worker 做幂等刷新。
+- 后台或 maintenance extractor 通过 `commit_multimodal_extraction` 提交派生
+  evidence；该边界校验 parent evidence、派生 modality 和 extractor identity，
+  然后复用普通 ingest、bounded index refresh 和 cursor metadata 路径。查询热路径
+  只读取已提交 evidence/read model，不运行 OCR、caption、table/layout 或 vision
+  抽取。
 
 ## 6. 可观测性
 
