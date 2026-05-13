@@ -72,6 +72,7 @@ fn run_worker() {
     assert!(indexed.summary.symbol_count >= 2);
 
     let definitions = query(&service, "retry_policy", CodeQueryKind::Definition).await;
+    let doc_comment = query(&service, "budget", CodeQueryKind::Definition).await;
     let references = query(&service, "retry_policy", CodeQueryKind::References).await;
     let imports = query(&service, "crate::retry_policy", CodeQueryKind::Imports).await;
 
@@ -80,6 +81,21 @@ fn run_worker() {
             .results
             .iter()
             .any(|hit| hit.path == "src/lib.rs")
+    );
+    assert!(
+        doc_comment
+            .results
+            .iter()
+            .any(|hit| hit.path == "src/lib.rs")
+    );
+    assert_eq!(doc_comment.scope.resolved_commit_sha, first_commit.as_str());
+    assert_eq!(doc_comment.scope.path_filters, ["src"]);
+    assert!(
+        doc_comment
+            .scope
+            .index_versions
+            .iter()
+            .any(|version| version.starts_with("code:"))
     );
     assert!(
         references

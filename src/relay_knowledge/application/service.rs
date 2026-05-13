@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use serde::Serialize;
+
 use crate::{
     api::{
         ApiError, ApiMetadata, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
@@ -11,13 +13,13 @@ use crate::{
         ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
-        ContextPackItem, EvidenceRecord, FreshnessPolicy, FusionDiagnostics, GraphMutationBatch,
-        IndexKind, RECIPROCAL_RANK_FUSION_K, RetrievalBudgetUsed, RetrievalMode,
-        RetrievedContextPack, SourceScope,
+        ContextPackItem, FreshnessPolicy, FusionDiagnostics, GraphVersion, IndexKind,
+        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
+        RetrievalMode, RetrievedContextPack, SourceScope,
     },
     env::EnvironmentConfig,
     project::PROJECT_NAME,
-    retrieval::RetrievalPlan,
+    retrieval::{DerivedRetrievalAdapter, DerivedRetrievalRequest, RetrievalPlan},
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
 };
 
@@ -27,8 +29,12 @@ use super::{
         index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
         recover_index_kinds, refresh_index_kinds,
     },
+    ingest::mutation_batch_from_request,
     status::{agent_protocol_status, runtime_status},
 };
+
+#[cfg(test)]
+use super::ingest::generated_evidence_id;
 
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
@@ -119,21 +125,7 @@ impl RelayKnowledgeService {
         request: IngestRequest,
         context: RequestContext,
     ) -> Result<IngestResponse, ApiError> {
-        let source_scope = SourceScope::parse(request.source_scope)
-            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-        let mut records = Vec::with_capacity(request.evidence.len());
-        for evidence in request.evidence {
-            let content = evidence.content.trim().to_owned();
-            let id = evidence
-                .id
-                .unwrap_or_else(|| generated_evidence_id(source_scope.as_str(), &content));
-            let record =
-                EvidenceRecord::new(id, source_scope.clone(), content, evidence.entity_labels)
-                    .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-            records.push(record);
-        }
-
-        let batch = GraphMutationBatch::new(records)
+        let batch = mutation_batch_from_request(request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let receipt = store
@@ -187,9 +179,11 @@ impl RelayKnowledgeService {
         let mut retrieval_mode = RetrievalMode::Hybrid;
         let mut indexes = Vec::new();
         let mut metadata = ApiMetadata::graph_only(&context, graph_version);
-        let degraded_reason = if plan.freshness == FreshnessPolicy::GraphOnly {
+        let mut degraded_reasons = Vec::new();
+        let backend_statuses = if plan.freshness == FreshnessPolicy::GraphOnly {
             retrieval_mode = RetrievalMode::GraphOnly;
-            Some("graph_only freshness policy selected".to_owned())
+            degraded_reasons.push("graph_only freshness policy selected".to_owned());
+            Vec::new()
         } else {
             indexes = store.index_statuses().await.map_err(storage_api_error)?;
             if plan.freshness == FreshnessPolicy::WaitUntilFresh {
@@ -208,9 +202,22 @@ impl RelayKnowledgeService {
                 .iter()
                 .any(|status| status.is_stale_for(graph_version));
             metadata = metadata_for_indexes(&context, graph_version, &indexes);
-            (plan.freshness == FreshnessPolicy::AllowStale && stale)
-                .then(|| "one or more indexes are behind the graph version".to_owned())
+            if plan.freshness == FreshnessPolicy::AllowStale && stale {
+                degraded_reasons
+                    .push("one or more indexes are behind the graph version".to_owned());
+            }
+            derived_backend_statuses(&plan, graph_version).await
         };
+        if backend_statuses
+            .iter()
+            .any(|status| status.state == crate::domain::RetrievalBackendState::Unavailable)
+        {
+            degraded_reasons.push(
+                "semantic/vector retrieval backends unavailable; using bm25, graph evidence, and code graph fallback"
+                    .to_owned(),
+            );
+        }
+        let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
         let mut results = store
             .search(GraphSearchRequest {
                 query: plan.query.clone(),
@@ -222,32 +229,37 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let truncated = results.len() > plan.limit;
         results.truncate(plan.limit);
-        let budget_used = RetrievalBudgetUsed {
-            limit: plan.limit,
-            candidate_count: results.len() + usize::from(truncated),
-            returned_count: results.len(),
-            context_bytes: results.iter().map(|hit| hit.content.len()).sum(),
-        };
-        let fusion = FusionDiagnostics {
-            algorithm: "reciprocal_rank_fusion".to_owned(),
-            k: RECIPROCAL_RANK_FUSION_K,
-            candidate_count: budget_used.candidate_count,
-        };
         let context_pack = RetrievedContextPack {
             graph_version,
             source_scope: plan.source_scope.clone(),
             freshness: plan.freshness,
             truncated,
+            backend_statuses: backend_statuses.clone(),
             items: results
                 .iter()
                 .map(|hit| ContextPackItem {
                     result_id: hit.evidence_id.clone(),
                     source_scope: hit.source_scope.clone(),
                     source_path: hit.source_path.clone(),
+                    source_span: hit.source_span,
+                    entities: hit.entities.clone(),
+                    graph_facts: hit.graph_facts.clone(),
+                    code_artifact: hit.code_artifact.clone(),
                     retriever_sources: hit.retriever_sources.clone(),
                     ranking: hit.ranking.clone(),
                 })
                 .collect(),
+        };
+        let budget_used = RetrievalBudgetUsed {
+            limit: plan.limit,
+            candidate_count: results.len() + usize::from(truncated),
+            returned_count: results.len(),
+            context_bytes: retrieval_context_bytes(&results, &context_pack, &backend_statuses),
+        };
+        let fusion = FusionDiagnostics {
+            algorithm: "reciprocal_rank_fusion".to_owned(),
+            k: RECIPROCAL_RANK_FUSION_K,
+            candidate_count: budget_used.candidate_count,
         };
 
         Ok(HybridRetrievalResponse {
@@ -258,6 +270,7 @@ impl RelayKnowledgeService {
             freshness: plan.freshness,
             results,
             fusion,
+            backend_statuses,
             truncated,
             budget_used,
             degraded_reason,
@@ -481,27 +494,48 @@ fn normalize_optional_source_scope(value: Option<String>) -> Result<Option<Strin
         .transpose()
 }
 
-fn generated_evidence_id(scope: &str, content: &str) -> String {
-    let mut input = Vec::with_capacity(scope.len() + content.len() + 16);
-    input.extend_from_slice(&(scope.len() as u64).to_le_bytes());
-    input.extend_from_slice(scope.as_bytes());
-    input.extend_from_slice(&(content.len() as u64).to_le_bytes());
-    input.extend_from_slice(content.as_bytes());
-
-    format!("evidence:{:016x}", stable_hash64(&input))
+fn retrieval_context_bytes(
+    results: &[RetrievalHit],
+    context_pack: &RetrievedContextPack,
+    backend_statuses: &[RetrievalBackendStatus],
+) -> usize {
+    serialized_context_bytes(&context_pack.backend_statuses)
+        .saturating_add(serialized_context_bytes(backend_statuses))
+        .saturating_add(results.iter().map(serialized_context_bytes).sum::<usize>())
+        .saturating_add(
+            context_pack
+                .items
+                .iter()
+                .map(serialized_context_bytes)
+                .sum::<usize>(),
+        )
 }
 
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
+fn serialized_context_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX / 4)
+}
 
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+async fn derived_backend_statuses(
+    plan: &RetrievalPlan,
+    graph_version: GraphVersion,
+) -> Vec<crate::domain::RetrievalBackendStatus> {
+    let request = DerivedRetrievalRequest {
+        query: plan.query.clone(),
+        source_scope: plan.source_scope.clone(),
+        graph_version,
+        limit: plan.limit,
+    };
+    let mut statuses = Vec::new();
+    for adapter in crate::retrieval::phase1_unavailable_adapters() {
+        match adapter.search(request.clone()).await {
+            Ok(outcome) => statuses.push(outcome.status),
+            Err(error) => statuses.push(error.status),
+        }
     }
 
-    hash
+    statuses
 }
 
 fn service_definition_filename() -> &'static str {
@@ -525,6 +559,9 @@ mod recovery_tests;
 
 #[cfg(test)]
 mod refresh_tests;
+
+#[cfg(test)]
+mod storage_tests;
 
 #[cfg(test)]
 mod tests {
@@ -610,14 +647,11 @@ mod tests {
         let service = service_with_memory_store().await;
         service
             .ingest(
-                IngestRequest {
-                    source_scope: "docs".to_owned(),
-                    evidence: vec![IngestEvidence {
-                        id: Some("ev-status".to_owned()),
-                        content: "Project status tracks graph versions".to_owned(),
-                        entity_labels: Vec::new(),
-                    }],
-                },
+                ingest_request(vec![ingest_evidence(
+                    "ev-status",
+                    "Project status tracks graph versions",
+                    Vec::new(),
+                )]),
                 RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
             )
             .await
@@ -643,14 +677,11 @@ mod tests {
 
         let response = service
             .ingest(
-                IngestRequest {
-                    source_scope: "docs".to_owned(),
-                    evidence: vec![IngestEvidence {
-                        id: Some("ev-1".to_owned()),
-                        content: "Hybrid retrieval uses BM25 and vector indexes".to_owned(),
-                        entity_labels: vec!["BM25".to_owned(), "Vector".to_owned()],
-                    }],
-                },
+                ingest_request(vec![ingest_evidence(
+                    "ev-1",
+                    "Hybrid retrieval uses BM25 and vector indexes",
+                    vec!["BM25".to_owned(), "Vector".to_owned()],
+                )]),
                 context,
             )
             .await
@@ -674,14 +705,11 @@ mod tests {
         let context = RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest");
         service
             .ingest(
-                IngestRequest {
-                    source_scope: "docs".to_owned(),
-                    evidence: vec![IngestEvidence {
-                        id: Some("ev-1".to_owned()),
-                        content: "Rust async services isolate blocking SQLite work".to_owned(),
-                        entity_labels: vec!["Rust".to_owned()],
-                    }],
-                },
+                ingest_request(vec![ingest_evidence(
+                    "ev-1",
+                    "Rust async services isolate blocking SQLite work",
+                    vec!["Rust".to_owned()],
+                )]),
                 context,
             )
             .await
@@ -732,14 +760,11 @@ mod tests {
         let service = service_with_memory_store().await;
         service
             .ingest(
-                IngestRequest {
-                    source_scope: "docs".to_owned(),
-                    evidence: vec![IngestEvidence {
-                        id: Some("ev-fresh".to_owned()),
-                        content: "Fresh indexes should not refresh on read".to_owned(),
-                        entity_labels: vec!["Index".to_owned()],
-                    }],
-                },
+                ingest_request(vec![ingest_evidence(
+                    "ev-fresh",
+                    "Fresh indexes should not refresh on read",
+                    vec!["Index".to_owned()],
+                )]),
                 RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
             )
             .await
@@ -764,14 +789,11 @@ mod tests {
         for index in 0..3 {
             service
                 .ingest(
-                    IngestRequest {
-                        source_scope: "docs".to_owned(),
-                        evidence: vec![IngestEvidence {
-                            id: Some(format!("ev-{index}")),
-                            content: format!("Shared BM25 retrieval candidate {index}"),
-                            entity_labels: vec!["BM25".to_owned()],
-                        }],
-                    },
+                    ingest_request(vec![ingest_evidence(
+                        format!("ev-{index}"),
+                        format!("Shared BM25 retrieval candidate {index}"),
+                        vec!["BM25".to_owned()],
+                    )]),
                     RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
                 )
                 .await
@@ -804,14 +826,11 @@ mod tests {
         let service = service_with_memory_store().await;
         service
             .ingest(
-                IngestRequest {
-                    source_scope: "docs".to_owned(),
-                    evidence: vec![IngestEvidence {
-                        id: Some("ev-service".to_owned()),
-                        content: "Service status tracks graph versions".to_owned(),
-                        entity_labels: Vec::new(),
-                    }],
-                },
+                ingest_request(vec![ingest_evidence(
+                    "ev-service",
+                    "Service status tracks graph versions",
+                    Vec::new(),
+                )]),
                 RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
             )
             .await
@@ -875,51 +894,6 @@ mod tests {
         assert!(root.join("data").join("relay-knowledge.sqlite").exists());
     }
 
-    #[tokio::test]
-    async fn concurrent_storage_initialization_returns_canonical_store() {
-        let root = std::env::temp_dir().join(format!(
-            "relay-knowledge-storage-race-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", "/home/alice"),
-                ("TMPDIR", "/tmp"),
-                (
-                    "RELAY_KNOWLEDGE_HOME",
-                    root.to_str().expect("temp path is UTF-8"),
-                ),
-            ],
-        )
-        .expect("environment should parse");
-        let service = Arc::new(
-            RelayKnowledgeService::from_environment(&environment)
-                .await
-                .expect("service should compose"),
-        );
-        let mut tasks = Vec::new();
-        for _ in 0..16 {
-            let service = Arc::clone(&service);
-            tasks.push(tokio::spawn(async move {
-                service
-                    .storage
-                    .get()
-                    .await
-                    .expect("store should initialize")
-            }));
-        }
-
-        let mut stores = Vec::new();
-        for task in tasks {
-            stores.push(task.await.expect("task should join"));
-        }
-
-        let first = stores.first().expect("stores should exist");
-        assert!(stores.iter().all(|store| Arc::ptr_eq(first, store)));
-    }
-
     async fn service_with_memory_store() -> RelayKnowledgeService {
         let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
@@ -955,6 +929,32 @@ mod tests {
             .expect("runtime should compose");
 
         RelayKnowledgeService::with_store(runtime, store)
+    }
+
+    fn ingest_request(evidence: Vec<IngestEvidence>) -> IngestRequest {
+        IngestRequest {
+            source_scope: "docs".to_owned(),
+            evidence,
+            relations: Vec::new(),
+            claims: Vec::new(),
+            events: Vec::new(),
+        }
+    }
+
+    fn ingest_evidence(
+        id: impl Into<String>,
+        content: impl Into<String>,
+        entity_labels: Vec<String>,
+    ) -> IngestEvidence {
+        IngestEvidence {
+            id: Some(id.into()),
+            source_path: None,
+            span: None,
+            confidence: None,
+            status: None,
+            content: content.into(),
+            entity_labels,
+        }
     }
 
     async fn retrieve_wait_until_fresh(

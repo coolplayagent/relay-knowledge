@@ -32,7 +32,9 @@ pub use mutation::{
     FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange,
 };
 pub use retrieval::{
-    ContextPackItem, FreshnessPolicy, FusionDiagnostics, RECIPROCAL_RANK_FUSION_K, RankingSignal,
+    CodeGraphArtifact, CodeGraphArtifactKind, ContextEntity, ContextGraphFact,
+    ContextGraphFactKind, ContextPackItem, FreshnessPolicy, FusionDiagnostics,
+    RECIPROCAL_RANK_FUSION_K, RankingSignal, RetrievalBackendState, RetrievalBackendStatus,
     RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
 };
 pub use source::SourceScope;

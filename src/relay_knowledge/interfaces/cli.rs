@@ -338,9 +338,16 @@ pub async fn run_with_service(
                         source_scope,
                         evidence: vec![IngestEvidence {
                             id: None,
+                            source_path: None,
+                            span: None,
+                            confidence: None,
+                            status: None,
                             content,
                             entity_labels,
                         }],
+                        relations: Vec::new(),
+                        claims: Vec::new(),
+                        events: Vec::new(),
                     },
                     context,
                 )

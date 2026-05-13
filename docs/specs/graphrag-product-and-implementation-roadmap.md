@@ -23,13 +23,13 @@ GraphRAG 能力必须保持可解释:
 
 - 统一 API: ingest、hybrid retrieval、graph inspection、index refresh、health、service status 和 code repository API。
 - 异步 application service: CLI、Web、MCP adapter 共用 `RelayKnowledgeService`，阻塞 SQLite 和 Git/tree-sitter 工作被隔离到边界内。
-- SQLite 图状态: evidence/entity、graph mutation log、graph version、index status 和 code graph tables。
-- 混合检索雏形: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、RRF 融合和 context pack。
+- SQLite 图状态: evidence/entity、typed relation、claim、event、graph mutation log、graph version、index status 和 code graph tables。
+- 混合检索雏形: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、RRF 融合、source span/structured fact context pack 和 semantic/vector backend availability metadata。
 - 代码仓库能力: Git 仓库注册、full/incremental index、worktree overlay、tree-sitter 多语言解析、symbol/reference/chunk 查询和 diff impact。
 - Agent 接入基础: MCP Streamable HTTP server、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status 和 index refresh。
 - Web 诊断面: `/api/project/status` 和 `/api/health` 驱动的 health、index、runtime、operation composer 和 GraphRAG readiness 视图。
 
-这些能力仍是 v1 底座。semantic/vector 后端、typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、多模态 evidence 和 temporal query 仍属于后续实现。
+这些能力仍是 v1 底座。semantic/vector 真实后端、proposal lifecycle、scoped index cursor、后台 task lease/reconciler/dead-letter、多模态 evidence 和 temporal query 仍属于后续实现。
 
 ## 3. 优化措施
 
@@ -43,7 +43,7 @@ GraphRAG 能力必须保持可解释:
 
 ### 3.2 事实模型
 
-- 通用图从 evidence/entity 扩展到 typed relation、claim、event、confidence、source span、status 和 proposal lifecycle。
+- 通用图已从 evidence/entity 扩展到 typed relation、claim、event、confidence、source span 和 status；proposal lifecycle 仍需后续补齐。
 - `graph_version` 表示系统提交版本，用于 replay、index cursor 和 stale 判断。
 - 事实有效时间使用 `valid_from`、`valid_to`、`observed_at` 和 `source_published_at`，不得用 `graph_version` 替代。
 - 冲突事实不能静默覆盖，应通过 status、confidence、source span 和 proposal/approval 流程表达。
@@ -82,10 +82,12 @@ GraphRAG 能力必须保持可解释:
 
 ### Phase 1: 真实检索闭环
 
-- 补齐 typed relation、claim/event、source span 和 confidence 的 domain/storage/API 规格。
-- 让 context pack 覆盖 evidence、entity、code symbol、code chunk 和 graph path evidence。
-- 增强 BM25 文档构建字段，并补充 ranking explanation 测试。
-- 为 semantic/vector 保留 adapter trait 和 metadata，但默认允许 unavailable/degraded。
+- 保持 typed relation、claim/event、source span 和 confidence 的 domain/storage/API 规格可回归测试。
+- 对 ingest 边界重新验证反序列化后的 span、confidence 和 version range；结构化 facts 必须引用 supporting evidence ids。
+- 让 context pack 覆盖 evidence、entity、code symbol、code chunk、source span、structured graph facts 和 graph path evidence。
+- 检索候选只使用 `accepted`/`proposed` evidence，`rejected`/`superseded` evidence 保留为可检查图状态但不作为 grounding context。
+- 增强 BM25/lexical 文档构建字段，覆盖 source path、code symbol、code chunk 和 doc comment，并补充 ranking explanation 测试。
+- 为 semantic/vector 保留 adapter trait、backend status metadata 和 scope post-filter metadata，但默认允许 unavailable/degraded。
 - Web readiness 继续从 health/status 显示 BM25、semantic cursor、vector cursor、code graph、runtime budgets 和 index lag。
 
 ### Phase 2: 可恢复索引刷新

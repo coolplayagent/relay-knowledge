@@ -1,11 +1,8 @@
 use super::*;
 use crate::domain::{
-    ClaimRecord, EventRecord, EvidenceRecord, GraphRelationRecord, IndexState, RetrieverSource,
-    SourceScope,
-};
-use crate::storage::{
-    IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshFailure,
-    IndexRefreshQueueRequest, IndexRefreshTaskState,
+    ClaimRecord, CodeChunkRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord,
+    CodeGraphBatch, CodeParseStatus, CodeRange, CodeSymbolKind, CodeSymbolRecord, ConfidenceScore,
+    EventRecord, EvidenceRecord, FactStatus, GraphRelationRecord, RetrieverSource, SourceScope,
 };
 
 #[tokio::test]
@@ -102,580 +99,6 @@ async fn mutation_log_records_affected_entities_and_source_hashes() {
 }
 
 #[tokio::test]
-async fn background_queue_rejects_when_capacity_is_exceeded() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-queue", "docs", "Rust async storage").await;
-
-    let error = store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: IndexKind::ALL.to_vec(),
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 2,
-            reset_dead_letter_tasks: false,
-            now_ms: 100,
-        })
-        .await
-        .expect_err("three index tasks should exceed capacity two");
-
-    assert!(
-        error
-            .to_string()
-            .contains("index refresh queue capacity exceeded")
-    );
-}
-
-#[tokio::test]
-async fn background_queue_rejects_zero_capacity_and_invalid_claims() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-invalid-queue", "docs", "Rust async storage").await;
-
-    let capacity_error = store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 0,
-            reset_dead_letter_tasks: false,
-            now_ms: 10,
-        })
-        .await
-        .expect_err("zero queue capacity should fail");
-    let owner_error = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "  ".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 3,
-            now_ms: 10,
-        })
-        .await
-        .expect_err("blank lease owner should fail");
-    let duration_error = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker".to_owned(),
-            lease_duration_ms: 0,
-            max_attempts: 3,
-            now_ms: 10,
-        })
-        .await
-        .expect_err("zero lease duration should fail");
-    let attempts_error = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 0,
-            now_ms: 10,
-        })
-        .await
-        .expect_err("zero max attempts should fail");
-
-    assert!(
-        capacity_error
-            .to_string()
-            .contains("queue capacity must be greater than zero")
-    );
-    assert!(
-        owner_error
-            .to_string()
-            .contains("lease owner must not be empty")
-    );
-    assert!(
-        duration_error
-            .to_string()
-            .contains("lease duration must be greater than zero")
-    );
-    assert!(
-        attempts_error
-            .to_string()
-            .contains("max attempts must be greater than zero")
-    );
-}
-
-#[tokio::test]
-async fn expired_task_lease_is_requeued_once() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-lease", "docs", "Rust async storage").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 10,
-        })
-        .await
-        .expect("task should queue");
-    let first = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-a".to_owned(),
-            lease_duration_ms: 5,
-            max_attempts: 3,
-            now_ms: 10,
-        })
-        .await
-        .expect("claim should load")
-        .expect("task should be claimed");
-
-    let recovered = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 5,
-            max_attempts: 3,
-            now_ms: 16,
-        })
-        .await
-        .expect("expired lease should recover")
-        .expect("task should be reclaimed");
-
-    assert_eq!(first.task_id, recovered.task_id);
-    assert_eq!(recovered.state, IndexRefreshTaskState::Running);
-    assert_eq!(recovered.lease_owner.as_deref(), Some("worker-b"));
-    assert_eq!(recovered.attempt_count, 2);
-    assert_eq!(recovered.last_error_kind.as_deref(), Some("lease_expired"));
-
-    let stale_complete = store
-        .complete_index_refresh_task(IndexRefreshCompletion {
-            task_id: first.task_id.clone(),
-            lease_owner: "worker-a".to_owned(),
-            attempt_count: first.attempt_count,
-            indexed_graph_version: GraphVersion::new(1),
-            now_ms: 17,
-        })
-        .await
-        .expect_err("stale lease completion should fail");
-    let stale_failure = store
-        .fail_index_refresh_task(IndexRefreshFailure {
-            task_id: first.task_id.clone(),
-            lease_owner: "worker-a".to_owned(),
-            attempt_count: first.attempt_count,
-            error_kind: "indexer".to_owned(),
-            error_message: "stale worker failed late".to_owned(),
-            retry_backoff_ms: 10,
-            max_attempts: 3,
-            now_ms: 17,
-        })
-        .await
-        .expect_err("stale lease failure should fail");
-    let completed = store
-        .complete_index_refresh_task(IndexRefreshCompletion {
-            task_id: recovered.task_id,
-            lease_owner: "worker-b".to_owned(),
-            attempt_count: recovered.attempt_count,
-            indexed_graph_version: GraphVersion::new(1),
-            now_ms: 18,
-        })
-        .await
-        .expect("current lease owner should complete");
-
-    assert!(
-        stale_complete
-            .to_string()
-            .contains("not held by an active lease")
-    );
-    assert!(
-        stale_failure
-            .to_string()
-            .contains("not held by an active lease")
-    );
-    assert_eq!(completed.state, IndexRefreshTaskState::Succeeded);
-}
-
-#[tokio::test]
-async fn expired_task_lease_dead_letters_after_attempt_budget() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(
-        &store,
-        "ev-expired-dead-letter",
-        "docs",
-        "Rust async storage",
-    )
-    .await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 10,
-        })
-        .await
-        .expect("task should queue");
-    store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-a".to_owned(),
-            lease_duration_ms: 5,
-            max_attempts: 1,
-            now_ms: 10,
-        })
-        .await
-        .expect("claim should load")
-        .expect("task should be claimed");
-
-    let reclaimed = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 5,
-            max_attempts: 1,
-            now_ms: 16,
-        })
-        .await
-        .expect("expired lease recovery should load");
-    let statuses = store.index_statuses().await.expect("statuses should load");
-    let diagnostics = store
-        .index_refresh_diagnostics(17)
-        .await
-        .expect("diagnostics should load");
-    let bm25 = statuses
-        .iter()
-        .find(|status| status.kind == IndexKind::Bm25)
-        .expect("bm25 status should exist");
-
-    assert_eq!(reclaimed, None);
-    assert_eq!(diagnostics.queue_depth, 0);
-    assert_eq!(diagnostics.dead_letter_count, 1);
-    assert_eq!(bm25.state, IndexState::Failed);
-    assert_eq!(
-        bm25.last_error.as_deref(),
-        Some("index refresh task lease expired")
-    );
-}
-
-#[tokio::test]
-async fn completing_refresh_task_advances_cursor_and_clears_queue() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-complete", "docs", "Rust async storage").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 100,
-        })
-        .await
-        .expect("task should queue");
-
-    let task = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-a".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 3,
-            now_ms: 110,
-        })
-        .await
-        .expect("claim should load")
-        .expect("task should be claimed");
-    let completed = store
-        .complete_index_refresh_task(IndexRefreshCompletion {
-            task_id: task.task_id.clone(),
-            lease_owner: "worker-a".to_owned(),
-            attempt_count: task.attempt_count,
-            indexed_graph_version: GraphVersion::new(1),
-            now_ms: 120,
-        })
-        .await
-        .expect("task should complete");
-    let cursors = store.index_cursors().await.expect("cursors should load");
-    let statuses = store.index_statuses().await.expect("statuses should load");
-    let diagnostics = store
-        .index_refresh_diagnostics(130)
-        .await
-        .expect("diagnostics should load");
-
-    assert_eq!(completed.state, IndexRefreshTaskState::Succeeded);
-    assert_eq!(completed.cursor_after, Some(GraphVersion::new(1)));
-    assert_eq!(completed.lease_owner, None);
-    let bm25_cursor = cursors
-        .iter()
-        .find(|cursor| cursor.kind == IndexKind::Bm25 && cursor.source_scope == "docs")
-        .expect("bm25 cursor should exist");
-    assert_eq!(bm25_cursor.state, IndexState::Fresh);
-    assert_eq!(bm25_cursor.indexed_graph_version, GraphVersion::new(1));
-    let bm25_status = statuses
-        .iter()
-        .find(|status| status.kind == IndexKind::Bm25)
-        .expect("bm25 status should exist");
-    assert_eq!(bm25_status.state, IndexState::Fresh);
-    assert_eq!(bm25_status.indexed_graph_version, GraphVersion::new(1));
-    assert_eq!(diagnostics.queue_depth, 0);
-    assert_eq!(diagnostics.running_count, 0);
-
-    let repeated = store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 140,
-        })
-        .await
-        .expect("fresh completed work should remain out of the queue");
-    assert_eq!(repeated.queue_depth, 0);
-
-    commit_evidence(&store, "ev-complete-next", "docs", "Rust async indexing").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(2),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 150,
-        })
-        .await
-        .expect("newer graph version should reset completed task");
-    let reset = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 3,
-            now_ms: 160,
-        })
-        .await
-        .expect("reset task should load")
-        .expect("reset task should be claimed");
-
-    assert_eq!(reset.task_id, task.task_id);
-    assert_eq!(reset.target_graph_version, GraphVersion::new(2));
-    assert_eq!(reset.cursor_before, GraphVersion::new(1));
-    assert_eq!(reset.cursor_after, None);
-    assert_eq!(reset.last_error_kind, None);
-}
-
-#[tokio::test]
-async fn completing_superseded_running_task_requeues_follow_up_refresh() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-running-v1", "docs", "Rust async storage").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 100,
-        })
-        .await
-        .expect("task should queue");
-    let running = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-a".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 3,
-            now_ms: 110,
-        })
-        .await
-        .expect("claim should load")
-        .expect("task should be claimed");
-
-    commit_evidence(&store, "ev-running-v2", "docs", "Rust async indexing").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Bm25],
-            target_graph_version: GraphVersion::new(2),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 120,
-        })
-        .await
-        .expect("running task should preserve claimed target");
-    let partial = store
-        .complete_index_refresh_task(IndexRefreshCompletion {
-            task_id: running.task_id.clone(),
-            lease_owner: "worker-a".to_owned(),
-            attempt_count: running.attempt_count,
-            indexed_graph_version: GraphVersion::new(1),
-            now_ms: 130,
-        })
-        .await
-        .expect("superseded completion should requeue follow-up");
-    let follow_up = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 3,
-            now_ms: 131,
-        })
-        .await
-        .expect("follow-up claim should load")
-        .expect("follow-up task should be claimed");
-
-    assert_eq!(partial.state, IndexRefreshTaskState::Queued);
-    assert_eq!(partial.attempt_count, 0);
-    assert_eq!(partial.target_graph_version, GraphVersion::new(2));
-    assert_eq!(partial.cursor_before, GraphVersion::new(1));
-    assert_eq!(partial.cursor_after, None);
-    assert_eq!(follow_up.task_id, running.task_id);
-    assert_eq!(follow_up.attempt_count, 1);
-    assert_eq!(follow_up.target_graph_version, GraphVersion::new(2));
-    assert_eq!(follow_up.cursor_before, GraphVersion::new(1));
-
-    store
-        .complete_index_refresh_task(IndexRefreshCompletion {
-            task_id: follow_up.task_id,
-            lease_owner: "worker-b".to_owned(),
-            attempt_count: follow_up.attempt_count,
-            indexed_graph_version: GraphVersion::new(2),
-            now_ms: 132,
-        })
-        .await
-        .expect("follow-up completion should succeed");
-    let cursors = store.index_cursors().await.expect("cursors should load");
-    let diagnostics = store
-        .index_refresh_diagnostics(133)
-        .await
-        .expect("diagnostics should load");
-    let bm25_cursor = cursors
-        .iter()
-        .find(|cursor| cursor.kind == IndexKind::Bm25 && cursor.source_scope == "docs")
-        .expect("bm25 cursor should exist");
-
-    assert_eq!(bm25_cursor.state, IndexState::Fresh);
-    assert_eq!(bm25_cursor.indexed_graph_version, GraphVersion::new(2));
-    assert_eq!(diagnostics.queue_depth, 0);
-}
-
-#[tokio::test]
-async fn failed_refresh_task_retries_then_dead_letters() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-fail", "docs", "Rust async storage").await;
-    store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Vector],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 100,
-        })
-        .await
-        .expect("task should queue");
-    let first = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-a".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 2,
-            now_ms: 100,
-        })
-        .await
-        .expect("claim should load")
-        .expect("task should be claimed");
-
-    let retrying = store
-        .fail_index_refresh_task(IndexRefreshFailure {
-            task_id: first.task_id.clone(),
-            lease_owner: "worker-a".to_owned(),
-            attempt_count: first.attempt_count,
-            error_kind: "indexer".to_owned(),
-            error_message: "embedding worker unavailable".to_owned(),
-            retry_backoff_ms: 25,
-            max_attempts: 2,
-            now_ms: 105,
-        })
-        .await
-        .expect("first failure should retry");
-    let not_ready = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 2,
-            now_ms: 129,
-        })
-        .await
-        .expect("claim before retry time should load");
-    let second = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-b".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 2,
-            now_ms: 130,
-        })
-        .await
-        .expect("retry claim should load")
-        .expect("retry task should be claimed");
-    let dead_letter = store
-        .fail_index_refresh_task(IndexRefreshFailure {
-            task_id: first.task_id.clone(),
-            lease_owner: "worker-b".to_owned(),
-            attempt_count: second.attempt_count,
-            error_kind: "indexer".to_owned(),
-            error_message: "embedding worker still unavailable".to_owned(),
-            retry_backoff_ms: 25,
-            max_attempts: 2,
-            now_ms: 135,
-        })
-        .await
-        .expect("second failure should dead-letter");
-    let statuses = store.index_statuses().await.expect("statuses should load");
-    let diagnostics = store
-        .index_refresh_diagnostics(140)
-        .await
-        .expect("diagnostics should load");
-
-    assert_eq!(retrying.state, IndexRefreshTaskState::Retrying);
-    assert_eq!(retrying.next_retry_at_ms, 130);
-    assert_eq!(retrying.last_error_kind.as_deref(), Some("indexer"));
-    assert_eq!(not_ready, None);
-    assert_eq!(second.attempt_count, 2);
-    assert_eq!(dead_letter.state, IndexRefreshTaskState::DeadLetter);
-    let vector_status = statuses
-        .iter()
-        .find(|status| status.kind == IndexKind::Vector)
-        .expect("vector status should exist");
-    assert_eq!(vector_status.state, IndexState::Failed);
-    assert_eq!(
-        vector_status.last_error.as_deref(),
-        Some("embedding worker still unavailable")
-    );
-    assert_eq!(diagnostics.queue_depth, 0);
-    assert_eq!(diagnostics.dead_letter_count, 1);
-
-    let preserved = store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Vector],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: false,
-            now_ms: 150,
-        })
-        .await
-        .expect("diagnostic queue should preserve dead-lettered task");
-    let skipped = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-c".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 2,
-            now_ms: 151,
-        })
-        .await
-        .expect("preserved dead-letter claim should load");
-    let reset = store
-        .queue_index_refreshes(IndexRefreshQueueRequest {
-            kinds: vec![IndexKind::Vector],
-            target_graph_version: GraphVersion::new(1),
-            max_queue_depth: 4,
-            reset_dead_letter_tasks: true,
-            now_ms: 160,
-        })
-        .await
-        .expect("dead-lettered task should be reset by explicit requeue");
-    let reclaimed = store
-        .claim_index_refresh_task(IndexRefreshClaimRequest {
-            lease_owner: "worker-c".to_owned(),
-            lease_duration_ms: 100,
-            max_attempts: 2,
-            now_ms: 161,
-        })
-        .await
-        .expect("reset task should load")
-        .expect("reset task should be claimed");
-
-    assert_eq!(preserved.queue_depth, 0);
-    assert_eq!(preserved.dead_letter_count, 1);
-    assert_eq!(skipped, None);
-    assert_eq!(reset.queue_depth, 1);
-    assert_eq!(reclaimed.task_id, first.task_id);
-    assert_eq!(reclaimed.attempt_count, 1);
-    assert_eq!(reclaimed.last_error_kind, None);
-    assert_eq!(reclaimed.last_error_message, None);
-}
-
-#[tokio::test]
 async fn commit_receipt_counts_unique_affected_entities() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let scope = SourceScope::parse("docs").expect("scope should parse");
@@ -711,32 +134,43 @@ async fn commit_receipt_counts_unique_affected_entities() {
 #[tokio::test]
 async fn commits_structured_relation_claim_and_event_facts() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-structured",
+        scope.clone(),
+        "relay-knowledge implements BM25 retrieval",
+        vec!["relay-knowledge".to_owned()],
+    )
+    .expect("evidence should validate");
     let relation = GraphRelationRecord::new(
         "rel-1",
+        scope.clone(),
         "relay-knowledge",
         "implements",
         "BM25 retrieval",
-        Vec::new(),
+        vec!["ev-structured".to_owned()],
     )
     .expect("relation should validate");
     let claim = ClaimRecord::new(
         "claim-1",
+        scope.clone(),
         "relay-knowledge",
         "retrieval",
         "uses reciprocal-rank fusion",
-        Vec::new(),
+        vec!["ev-structured".to_owned()],
     )
     .expect("claim should validate");
     let event = EventRecord::new(
         "event-1",
+        scope,
         "index_refreshed",
         vec!["relay-knowledge".to_owned()],
         Some("2026-05-12".to_owned()),
-        Vec::new(),
+        vec!["ev-structured".to_owned()],
     )
     .expect("event should validate");
     let batch =
-        GraphMutationBatch::with_facts(Vec::new(), vec![relation], vec![claim], vec![event])
+        GraphMutationBatch::with_facts(vec![evidence], vec![relation], vec![claim], vec![event])
             .expect("structured graph facts should validate");
 
     let receipt = store
@@ -758,6 +192,221 @@ async fn commits_structured_relation_claim_and_event_facts() {
     assert_eq!(entries[0].relation_count, 1);
     assert_eq!(entries[0].claim_count, 1);
     assert_eq!(entries[0].event_count, 1);
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "BM25".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+    assert_eq!(hits[0].graph_facts.len(), 3);
+    assert!(
+        hits[0]
+            .graph_facts
+            .iter()
+            .all(|fact| fact.version_range.valid_from == GraphVersion::new(1))
+    );
+}
+
+#[tokio::test]
+async fn structured_fact_references_must_match_fact_source_scope() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-docs", "docs", "Docs evidence for scoped facts").await;
+    commit_evidence(
+        &store,
+        "ev-notes",
+        "notes",
+        "Notes evidence must stay scoped",
+    )
+    .await;
+
+    let relation = GraphRelationRecord::new(
+        "rel-cross-scope",
+        SourceScope::parse("docs").expect("scope should parse"),
+        "relay-knowledge",
+        "uses",
+        "scoped evidence",
+        vec!["ev-notes".to_owned()],
+    )
+    .expect("relation should validate");
+    let batch = GraphMutationBatch::with_facts(Vec::new(), vec![relation], Vec::new(), Vec::new())
+        .expect("batch should validate");
+    let error = store
+        .commit_mutation_batch(batch)
+        .await
+        .expect_err("cross-scope evidence reference should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("from source scope 'notes' instead of 'docs'")
+    );
+}
+
+#[tokio::test]
+async fn initialization_backfills_fact_evidence_links_for_existing_facts() {
+    let path = temp_db_path("fact-links");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        let scope = SourceScope::parse("docs").expect("scope should parse");
+        let evidence = EvidenceRecord::new(
+            "ev-backfill",
+            scope.clone(),
+            "Backfilled structured facts remain retrievable",
+            vec!["relay-knowledge".to_owned()],
+        )
+        .expect("evidence should validate");
+        let relation = GraphRelationRecord::new(
+            "rel-backfill",
+            scope,
+            "relay-knowledge",
+            "keeps",
+            "structured context",
+            vec!["ev-backfill".to_owned()],
+        )
+        .expect("relation should validate");
+        store
+            .commit_mutation_batch(
+                GraphMutationBatch::with_facts(
+                    vec![evidence],
+                    vec![relation],
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .expect("batch should validate"),
+            )
+            .await
+            .expect("commit should succeed");
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DELETE FROM graph_fact_evidence", [])
+            .expect("legacy link gap should be simulated");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "Backfilled".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].graph_facts[0].fact_id, "rel-backfill");
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
+    let path = temp_db_path("bm25-rebuild");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        store
+            .commit_code_graph_batch(
+                CodeGraphBatch::new(vec![parsed_code_file("repo", "src/lib.rs", "sym-main")])
+                    .expect("batch should validate"),
+            )
+            .await
+            .expect("code graph commit should succeed");
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DROP TABLE graph_bm25", [])
+            .expect("current bm25 table should drop");
+        guard
+            .execute_batch(
+                "
+                CREATE VIRTUAL TABLE graph_bm25 USING fts5(
+                    document_id UNINDEXED,
+                    document_kind UNINDEXED,
+                    evidence_id UNINDEXED,
+                    source_scope,
+                    source_path,
+                    entity_labels,
+                    content
+                );
+                ",
+            )
+            .expect("legacy bm25 table should be simulated");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "main".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert!(hits.iter().any(|hit| hit.code_artifact.is_some()));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn search_excludes_rejected_and_superseded_evidence() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let accepted = EvidenceRecord::new(
+        "ev-accepted",
+        scope.clone(),
+        "Lifecycle retrieval keeps accepted context",
+        Vec::new(),
+    )
+    .expect("evidence should validate");
+    let rejected = EvidenceRecord::new(
+        "ev-rejected",
+        scope.clone(),
+        "Lifecycle rejected context must not retrieve",
+        Vec::new(),
+    )
+    .expect("evidence should validate")
+    .with_metadata(None, None, ConfidenceScore::CERTAIN, FactStatus::Rejected)
+    .expect("metadata should validate");
+    let superseded = EvidenceRecord::new(
+        "ev-superseded",
+        scope,
+        "Lifecycle superseded context must not retrieve",
+        Vec::new(),
+    )
+    .expect("evidence should validate")
+    .with_metadata(None, None, ConfidenceScore::CERTAIN, FactStatus::Superseded)
+    .expect("metadata should validate");
+    let batch = GraphMutationBatch::new(vec![accepted, rejected, superseded])
+        .expect("batch should validate");
+    store
+        .commit_mutation_batch(batch)
+        .await
+        .expect("commit should succeed");
+
+    let lifecycle_hits = store
+        .search(GraphSearchRequest {
+            query: "Lifecycle".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+    let rejected_hits = store
+        .search(GraphSearchRequest {
+            query: "rejected superseded".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(lifecycle_hits.len(), 1);
+    assert_eq!(lifecycle_hits[0].evidence_id, "ev-accepted");
+    assert!(rejected_hits.is_empty());
 }
 
 #[tokio::test]
@@ -959,4 +608,72 @@ async fn commit_evidence(store: &SqliteGraphStore, id: &str, source_scope: &str,
         .commit_mutation_batch(batch)
         .await
         .expect("commit should succeed");
+}
+
+fn parsed_code_file(scope: &str, path: &str, symbol_id: &str) -> CodeFileRecord {
+    let source_scope = SourceScope::parse(scope).expect("scope should parse");
+    let extraction = code_extraction();
+    let symbol = CodeSymbolRecord::new(
+        symbol_id,
+        source_scope.clone(),
+        path,
+        "main",
+        CodeSymbolKind::Function,
+        code_range(),
+        extraction.clone(),
+    )
+    .expect("symbol should validate");
+    let chunk = CodeChunkRecord::new(
+        format!("chunk-{symbol_id}"),
+        source_scope.clone(),
+        path,
+        "fn main() {}",
+        code_range(),
+        vec![symbol_id.to_owned()],
+        Some(extraction),
+    )
+    .expect("chunk should validate");
+
+    CodeFileRecord::new(CodeFileFields {
+        source_scope,
+        path: path.to_owned(),
+        content_hash: format!("hash-{symbol_id}"),
+        language_id: "rust".to_owned(),
+        parse_status: CodeParseStatus::Parsed,
+        diagnostic: None,
+        symbols: vec![symbol],
+        references: Vec::new(),
+        chunks: vec![chunk],
+    })
+    .expect("file should validate")
+}
+
+fn code_extraction() -> CodeExtractionMetadata {
+    CodeExtractionMetadata::new(
+        "tree-sitter-rust@0.23",
+        "rust-tags",
+        "v1",
+        "function_item",
+        "definition.function",
+    )
+    .expect("extraction metadata should validate")
+}
+
+fn code_range() -> CodeRange {
+    CodeRange::new(0, 12, 1, 1).expect("range should validate")
+}
+
+fn temp_db_path(test_name: &str) -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    path.push(format!(
+        "relay-knowledge-{test_name}-{}-{unique}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    path
 }

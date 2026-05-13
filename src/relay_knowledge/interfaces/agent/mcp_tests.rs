@@ -18,142 +18,6 @@ use crate::{
 use super::mcp_test_support::SlowSearchStore;
 
 #[tokio::test]
-async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
-    let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    let mut router = server.router();
-
-    let initialize = call_mcp(
-        &mut router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": "init",
-            "method": "initialize",
-            "params": initialize_params()
-        }),
-    )
-    .await;
-    let tools = call_mcp(
-        &mut router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": "tools",
-            "method": "tools/list",
-            "params": {}
-        }),
-    )
-    .await;
-
-    assert_eq!(
-        initialize["result"]["protocolVersion"],
-        MCP_PROTOCOL_VERSION
-    );
-    assert_eq!(initialize["result"]["capabilities"]["tools"], json!({}));
-    assert!(tool_names(&tools).contains(&"relay.retrieve_context".to_owned()));
-    assert!(tool_names(&tools).contains(&"relay.code_query".to_owned()));
-    assert!(tool_names(&tools).contains(&"relay.code_impact".to_owned()));
-    assert!(!tool_names(&tools).contains(&"relay.refresh_indexes".to_owned()));
-}
-
-#[tokio::test]
-async fn session_lifecycle_requires_initialized_session_and_supports_ping() {
-    let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    let mut router = server.router();
-
-    let missing_session = raw_mcp_request(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"}),
-        [],
-    )
-    .await;
-    let unknown_session = raw_mcp_request(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"}),
-        [(MCP_SESSION_ID_HEADER, "rk-unknown")],
-    )
-    .await;
-    let invalid_initialize_id = raw_mcp_request(
-        &mut router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": {},
-            "method": "initialize",
-            "params": initialize_params()
-        }),
-        [],
-    )
-    .await;
-    let invalid_initialize = raw_mcp_request(
-        &mut router,
-        json!({
-            "jsonrpc": "2.0",
-            "id": "bad-init",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "0.1.0"}
-            }
-        }),
-        [],
-    )
-    .await;
-    let (initialize_status, initialize_headers, _) = raw_mcp_response(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": initialize_params()}),
-        [],
-    )
-    .await;
-    let session_id = initialize_headers
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .expect("initialize should issue session")
-        .to_owned();
-    let before_initialized = raw_mcp_request(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"}),
-        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
-    )
-    .await;
-    let initialized = raw_mcp_request(
-        &mut router,
-        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
-    )
-    .await;
-    let invalid_request_id = raw_mcp_request(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": {}, "method": "tools/list"}),
-        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
-    )
-    .await;
-    let missing_protocol = raw_mcp_request_without_protocol(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "tools", "method": "tools/list"}),
-        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
-    )
-    .await;
-    let ping = call_mcp_with_session(
-        &mut router,
-        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
-        &session_id,
-    )
-    .await;
-
-    assert_eq!(missing_session.0, StatusCode::BAD_REQUEST);
-    assert_eq!(unknown_session.0, StatusCode::NOT_FOUND);
-    assert_eq!(invalid_initialize_id.1["id"], Value::Null);
-    assert_eq!(invalid_initialize_id.1["error"]["code"], -32600);
-    assert_eq!(invalid_initialize.1["error"]["code"], -32602);
-    assert_eq!(initialize_status, StatusCode::OK);
-    assert_eq!(before_initialized.1["error"]["code"], -32002);
-    assert_eq!(initialized.0, StatusCode::ACCEPTED);
-    assert_eq!(invalid_request_id.1["id"], Value::Null);
-    assert_eq!(invalid_request_id.1["error"]["code"], -32600);
-    assert_eq!(missing_protocol.0, StatusCode::BAD_REQUEST);
-    assert_eq!(ping["result"], json!({}));
-}
-
-#[tokio::test]
 async fn retrieve_context_returns_canonical_structured_content() {
     let (server, service) =
         server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
@@ -163,9 +27,16 @@ async fn retrieve_context_returns_canonical_structured_content() {
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: Some("ev-mcp".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "MCP Streamable HTTP retrieves graph context".to_owned(),
                     entity_labels: vec!["MCP".to_owned()],
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
         )
@@ -625,7 +496,7 @@ async fn serve_until_shutdown_rejects_disabled_or_remote_bind_before_listening()
     assert!(loopback_allowed.is_ok());
 }
 
-async fn server_with_env<const N: usize>(pairs: [(&str, &str); N]) -> McpServer {
+pub(super) async fn server_with_env<const N: usize>(pairs: [(&str, &str); N]) -> McpServer {
     server_and_service(pairs).await.0
 }
 
@@ -663,7 +534,7 @@ async fn server_and_service_with_store<const N: usize>(
     (server, service)
 }
 
-async fn call_mcp(router: &mut Router, payload: Value) -> Value {
+pub(super) async fn call_mcp(router: &mut Router, payload: Value) -> Value {
     if payload.get("method").and_then(Value::as_str) == Some("initialize") {
         let (status, value) = raw_mcp_request(router, payload, []).await;
         assert_eq!(status, StatusCode::OK);
@@ -674,7 +545,11 @@ async fn call_mcp(router: &mut Router, payload: Value) -> Value {
     call_mcp_with_session(router, payload, &session_id).await
 }
 
-async fn call_mcp_with_session(router: &mut Router, payload: Value, session_id: &str) -> Value {
+pub(super) async fn call_mcp_with_session(
+    router: &mut Router,
+    payload: Value,
+    session_id: &str,
+) -> Value {
     let (status, value) =
         raw_mcp_request(router, payload, [(MCP_SESSION_ID_HEADER, session_id)]).await;
     assert_eq!(status, StatusCode::OK);
@@ -697,7 +572,7 @@ async fn tool_call(router: &mut Router, id: &str, name: &str, arguments: Value) 
     .await
 }
 
-async fn raw_mcp_request<const N: usize>(
+pub(super) async fn raw_mcp_request<const N: usize>(
     router: &mut Router,
     payload: Value,
     headers: [(&str, &str); N],
@@ -705,7 +580,7 @@ async fn raw_mcp_request<const N: usize>(
     raw_custom_request(router, "POST", "/mcp", &payload.to_string(), headers).await
 }
 
-async fn raw_mcp_request_without_protocol<const N: usize>(
+pub(super) async fn raw_mcp_request_without_protocol<const N: usize>(
     router: &mut Router,
     payload: Value,
     headers: [(&str, &str); N],
@@ -759,7 +634,7 @@ async fn initialize_session(router: &mut Router) -> String {
     session_id
 }
 
-fn initialize_params() -> Value {
+pub(super) fn initialize_params() -> Value {
     json!({
         "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": {},
@@ -770,7 +645,7 @@ fn initialize_params() -> Value {
     })
 }
 
-async fn raw_mcp_response<const N: usize>(
+pub(super) async fn raw_mcp_response<const N: usize>(
     router: &mut Router,
     payload: Value,
     headers: [(&str, &str); N],
@@ -907,7 +782,7 @@ async fn raw_custom_response_with_protocol_default<const N: usize>(
     (status, headers, value)
 }
 
-fn tool_names(response: &Value) -> Vec<String> {
+pub(super) fn tool_names(response: &Value) -> Vec<String> {
     response["result"]["tools"]
         .as_array()
         .expect("tools should be an array")

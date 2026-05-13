@@ -102,7 +102,16 @@ fn search_symbols(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(&query, [&row.name, &row.qualified_name, &row.signature]);
+            let score = score_text(
+                &query,
+                [
+                    row.name.as_str(),
+                    row.qualified_name.as_str(),
+                    row.signature.as_str(),
+                    row.doc_comment.as_deref().unwrap_or_default(),
+                    row.path.as_str(),
+                ],
+            );
             (score > 0.0).then(|| {
                 let mut excerpt = row.signature.clone();
                 if let Some(doc) = &row.doc_comment {

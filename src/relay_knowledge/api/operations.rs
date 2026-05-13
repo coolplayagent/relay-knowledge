@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
-        CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryStatus,
-        CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt, FreshnessPolicy, FusionDiagnostics,
-        IndexKind, IndexStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
-        RetrievedContextPack,
+        CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositorySelector,
+        CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt,
+        ConfidenceScore, EvidenceSpan, FactStatus, FreshnessPolicy, FusionDiagnostics,
+        GraphVersionRange, IndexKind, IndexStatus, RetrievalBackendStatus, RetrievalBudgetUsed,
+        RetrievalHit, RetrievalMode, RetrievedContextPack,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -17,16 +18,84 @@ use super::{AgentProtocolStatus, ApiMetadata, RuntimeStatus};
 pub struct IngestEvidence {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<EvidenceSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<ConfidenceScore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<FactStatus>,
     pub content: String,
     #[serde(default)]
     pub entity_labels: Vec<String>,
+}
+
+/// Structured relation supplied to the ingest API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestRelation {
+    pub id: String,
+    pub source_entity_label: String,
+    pub relation_type: String,
+    pub target_entity_label: String,
+    #[serde(default)]
+    pub evidence_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<ConfidenceScore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<FactStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_range: Option<GraphVersionRange>,
+}
+
+/// Structured claim supplied to the ingest API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestClaim {
+    pub id: String,
+    pub subject_entity_label: String,
+    pub predicate: String,
+    pub object: String,
+    #[serde(default)]
+    pub evidence_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<ConfidenceScore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<FactStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_range: Option<GraphVersionRange>,
+}
+
+/// Structured event supplied to the ingest API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestEvent {
+    pub id: String,
+    pub event_type: String,
+    #[serde(default)]
+    pub entity_labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(default)]
+    pub evidence_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<ConfidenceScore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<FactStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_range: Option<GraphVersionRange>,
 }
 
 /// Ingest request shared by CLI, Web, HTTP, and future agent adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngestRequest {
     pub source_scope: String,
+    #[serde(default)]
     pub evidence: Vec<IngestEvidence>,
+    #[serde(default)]
+    pub relations: Vec<IngestRelation>,
+    #[serde(default)]
+    pub claims: Vec<IngestClaim>,
+    #[serde(default)]
+    pub events: Vec<IngestEvent>,
 }
 
 /// Ingest response with committed graph and refreshed index versions.
@@ -72,6 +141,8 @@ pub struct HybridRetrievalResponse {
     pub freshness: FreshnessPolicy,
     pub results: Vec<RetrievalHit>,
     pub fusion: FusionDiagnostics,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub truncated: bool,
     pub budget_used: RetrievalBudgetUsed,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,14 +241,54 @@ pub struct CodeRepositoryRegisterResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryIndexResponse {
     pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
     pub summary: CodeIndexSummary,
     pub status: CodeRepositoryStatus,
+}
+
+/// Code repository scope and index metadata attached to code responses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryScopeMetadata {
+    pub repository_id: String,
+    pub alias: String,
+    pub requested_ref: String,
+    pub resolved_commit_sha: String,
+    pub tree_hash: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
+    pub index_versions: Vec<String>,
+    pub stale: bool,
+}
+
+impl CodeRepositoryScopeMetadata {
+    /// Builds stable scope metadata from the selected repository snapshot.
+    pub fn from_status(
+        status: &CodeRepositoryStatus,
+        selector: &CodeRepositorySelector,
+        requested_ref: impl Into<String>,
+    ) -> Self {
+        Self {
+            repository_id: status.repository_id.clone(),
+            alias: status.alias.clone(),
+            requested_ref: requested_ref.into(),
+            resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
+            tree_hash: status.tree_hash.clone().unwrap_or_default(),
+            path_filters: merged_filters(&status.path_filters, &selector.path_filters),
+            language_filters: merged_filters(&status.language_filters, &selector.language_filters),
+            index_versions: vec![format!(
+                "code:{}",
+                status.tree_hash.as_deref().unwrap_or("unindexed")
+            )],
+            stale: status.stale,
+        }
+    }
 }
 
 /// Code repository retrieval response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeRepositoryQueryResponse {
     pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
     pub request: CodeRetrievalRequest,
     pub results: Vec<CodeRetrievalHit>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,6 +299,7 @@ pub struct CodeRepositoryQueryResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeRepositoryImpactResponse {
     pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
     pub request: CodeImpactRequest,
     pub changed_paths: Vec<String>,
     pub results: Vec<CodeRetrievalHit>,
@@ -198,4 +310,15 @@ pub struct CodeRepositoryImpactResponse {
 pub struct CodeRepositoryStatusResponse {
     pub metadata: ApiMetadata,
     pub status: CodeRepositoryStatus,
+}
+
+fn merged_filters(base: &[String], request: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in base.iter().chain(request.iter()) {
+        if !merged.contains(value) {
+            merged.push(value.clone());
+        }
+    }
+
+    merged
 }

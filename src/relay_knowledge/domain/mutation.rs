@@ -24,6 +24,17 @@ impl FactStatus {
             Self::Superseded => "superseded",
         }
     }
+
+    /// Parses the stable storage and API representation.
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "proposed" => Ok(Self::Proposed),
+            "accepted" => Ok(Self::Accepted),
+            "rejected" => Ok(Self::Rejected),
+            "superseded" => Ok(Self::Superseded),
+            _ => Err(DomainError::invalid("fact_status", "unknown fact status")),
+        }
+    }
 }
 
 /// Confidence score in basis points so it remains sortable and exact.
@@ -49,6 +60,18 @@ impl ConfidenceScore {
         Ok(Self {
             basis_points: (value * 10_000.0).round() as u16,
         })
+    }
+
+    /// Revalidates scores that may have been deserialized from public fields.
+    pub fn validate(self) -> Result<Self, DomainError> {
+        if self.basis_points > 10_000 {
+            return Err(DomainError::invalid(
+                "confidence",
+                "must be between 0 and 10000 basis points",
+            ));
+        }
+
+        Ok(self)
     }
 }
 
@@ -181,8 +204,8 @@ impl EvidenceRecord {
         self.source_path = source_path
             .map(|path| required_text("source_path", path))
             .transpose()?;
-        self.span = span;
-        self.confidence = confidence;
+        self.span = span.map(validate_span).transpose()?;
+        self.confidence = confidence.validate()?;
         self.status = status;
 
         Ok(self)
@@ -193,6 +216,7 @@ impl EvidenceRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphRelationRecord {
     pub id: String,
+    pub source_scope: SourceScope,
     pub source_entity_label: String,
     pub relation_type: String,
     pub target_entity_label: String,
@@ -206,6 +230,7 @@ pub struct GraphRelationRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimRecord {
     pub id: String,
+    pub source_scope: SourceScope,
     pub subject_entity_label: String,
     pub predicate: String,
     pub object: String,
@@ -219,6 +244,7 @@ pub struct ClaimRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventRecord {
     pub id: String,
+    pub source_scope: SourceScope,
     pub event_type: String,
     pub entity_labels: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -233,6 +259,7 @@ impl GraphRelationRecord {
     /// Validates a typed relation and its supporting evidence references.
     pub fn new(
         id: impl Into<String>,
+        source_scope: SourceScope,
         source_entity_label: impl Into<String>,
         relation_type: impl Into<String>,
         target_entity_label: impl Into<String>,
@@ -240,14 +267,29 @@ impl GraphRelationRecord {
     ) -> Result<Self, DomainError> {
         Ok(Self {
             id: required_text("relation_id", id)?,
+            source_scope,
             source_entity_label: required_text("source_entity_label", source_entity_label)?,
             relation_type: required_text("relation_type", relation_type)?,
             target_entity_label: required_text("target_entity_label", target_entity_label)?,
-            evidence_ids: normalize_text_list("evidence_id", evidence_ids)?,
+            evidence_ids: normalize_evidence_ids(evidence_ids)?,
             confidence: ConfidenceScore::CERTAIN,
             status: FactStatus::Accepted,
             version_range: GraphVersionRange::open_from(GraphVersion::ZERO),
         })
+    }
+
+    /// Applies quality and lifecycle metadata after structural validation.
+    pub fn with_metadata(
+        mut self,
+        confidence: ConfidenceScore,
+        status: FactStatus,
+        version_range: GraphVersionRange,
+    ) -> Result<Self, DomainError> {
+        self.confidence = confidence.validate()?;
+        self.status = status;
+        self.version_range = validate_version_range(version_range)?;
+
+        Ok(self)
     }
 }
 
@@ -255,6 +297,7 @@ impl ClaimRecord {
     /// Validates a claim and its supporting evidence references.
     pub fn new(
         id: impl Into<String>,
+        source_scope: SourceScope,
         subject_entity_label: impl Into<String>,
         predicate: impl Into<String>,
         object: impl Into<String>,
@@ -262,14 +305,29 @@ impl ClaimRecord {
     ) -> Result<Self, DomainError> {
         Ok(Self {
             id: required_text("claim_id", id)?,
+            source_scope,
             subject_entity_label: required_text("subject_entity_label", subject_entity_label)?,
             predicate: required_text("claim_predicate", predicate)?,
             object: required_text("claim_object", object)?,
-            evidence_ids: normalize_text_list("evidence_id", evidence_ids)?,
+            evidence_ids: normalize_evidence_ids(evidence_ids)?,
             confidence: ConfidenceScore::CERTAIN,
             status: FactStatus::Accepted,
             version_range: GraphVersionRange::open_from(GraphVersion::ZERO),
         })
+    }
+
+    /// Applies quality and lifecycle metadata after structural validation.
+    pub fn with_metadata(
+        mut self,
+        confidence: ConfidenceScore,
+        status: FactStatus,
+        version_range: GraphVersionRange,
+    ) -> Result<Self, DomainError> {
+        self.confidence = confidence.validate()?;
+        self.status = status;
+        self.version_range = validate_version_range(version_range)?;
+
+        Ok(self)
     }
 }
 
@@ -277,6 +335,7 @@ impl EventRecord {
     /// Validates an event fact, linked entities, and supporting evidence.
     pub fn new(
         id: impl Into<String>,
+        source_scope: SourceScope,
         event_type: impl Into<String>,
         entity_labels: Vec<String>,
         occurred_at: Option<String>,
@@ -292,16 +351,31 @@ impl EventRecord {
 
         Ok(Self {
             id: required_text("event_id", id)?,
+            source_scope,
             event_type: required_text("event_type", event_type)?,
             entity_labels,
             occurred_at: occurred_at
                 .map(|value| required_text("occurred_at", value))
                 .transpose()?,
-            evidence_ids: normalize_text_list("evidence_id", evidence_ids)?,
+            evidence_ids: normalize_evidence_ids(evidence_ids)?,
             confidence: ConfidenceScore::CERTAIN,
             status: FactStatus::Accepted,
             version_range: GraphVersionRange::open_from(GraphVersion::ZERO),
         })
+    }
+
+    /// Applies quality and lifecycle metadata after structural validation.
+    pub fn with_metadata(
+        mut self,
+        confidence: ConfidenceScore,
+        status: FactStatus,
+        version_range: GraphVersionRange,
+    ) -> Result<Self, DomainError> {
+        self.confidence = confidence.validate()?;
+        self.status = status;
+        self.version_range = validate_version_range(version_range)?;
+
+        Ok(self)
     }
 }
 
@@ -343,6 +417,27 @@ impl GraphMutationBatch {
         )?;
         validate_unique_ids("claim_id", claims.iter().map(|record| record.id.as_str()))?;
         validate_unique_ids("event_id", events.iter().map(|record| record.id.as_str()))?;
+        for record in &evidence {
+            if let Some(span) = record.span {
+                validate_span(span)?;
+            }
+            record.confidence.validate()?;
+        }
+        for record in &relations {
+            validate_evidence_ids_present(&record.evidence_ids)?;
+            record.confidence.validate()?;
+            validate_version_range(record.version_range)?;
+        }
+        for record in &claims {
+            validate_evidence_ids_present(&record.evidence_ids)?;
+            record.confidence.validate()?;
+            validate_version_range(record.version_range)?;
+        }
+        for record in &events {
+            validate_evidence_ids_present(&record.evidence_ids)?;
+            record.confidence.validate()?;
+            validate_version_range(record.version_range)?;
+        }
 
         Ok(Self {
             evidence,
@@ -366,6 +461,37 @@ pub struct CommitReceipt {
 
 fn normalize_entity_labels(labels: Vec<String>) -> Result<Vec<String>, DomainError> {
     normalize_text_list("entity_label", labels)
+}
+
+fn normalize_evidence_ids(ids: Vec<String>) -> Result<Vec<String>, DomainError> {
+    let ids = normalize_text_list("evidence_id", ids)?;
+    validate_evidence_ids_present(&ids)?;
+
+    Ok(ids)
+}
+
+fn validate_evidence_ids_present(ids: &[String]) -> Result<(), DomainError> {
+    if ids.is_empty() {
+        return Err(DomainError::invalid(
+            "evidence_id",
+            "structured facts must reference supporting evidence",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_span(span: EvidenceSpan) -> Result<EvidenceSpan, DomainError> {
+    EvidenceSpan::new(
+        span.start_byte,
+        span.end_byte,
+        span.start_line,
+        span.end_line,
+    )
+}
+
+fn validate_version_range(range: GraphVersionRange) -> Result<GraphVersionRange, DomainError> {
+    GraphVersionRange::new(range.valid_from, range.valid_until)
 }
 
 fn normalize_text_list(
@@ -460,15 +586,48 @@ mod tests {
         assert_eq!(evidence.source_path.as_deref(), Some("docs/spec.md"));
         assert_eq!(evidence.confidence.basis_points, 8750);
         assert_eq!(evidence.status, FactStatus::Proposed);
+
+        let invalid = EvidenceRecord::new(
+            "ev-invalid",
+            SourceScope::parse("repo").expect("scope should parse"),
+            "GraphRAG context packing",
+            Vec::new(),
+        )
+        .expect("evidence should validate")
+        .with_metadata(
+            None,
+            Some(EvidenceSpan {
+                start_byte: 8,
+                end_byte: 2,
+                start_line: 0,
+                end_line: 0,
+            }),
+            ConfidenceScore {
+                basis_points: 10_001,
+            },
+            FactStatus::Accepted,
+        )
+        .expect_err("invalid deserialized metadata should fail");
+        assert_eq!(invalid.field, "evidence_span");
     }
 
     #[test]
     fn structured_facts_validate_ids_and_version_ranges() {
-        let relation =
-            GraphRelationRecord::new("rel-1", "Rust", "uses", "SQLite", vec!["ev-1".to_owned()])
-                .expect("relation should validate");
+        let missing_evidence =
+            GraphRelationRecord::new("rel-empty", scope(), "Rust", "uses", "SQLite", Vec::new())
+                .expect_err("structured facts require evidence references");
+        let relation = GraphRelationRecord::new(
+            "rel-1",
+            scope(),
+            "Rust",
+            "uses",
+            "SQLite",
+            vec!["ev-1".to_owned()],
+        )
+        .expect("relation should validate");
         let claim = ClaimRecord::new(
             "claim-1",
+            scope(),
             "Rust",
             "supports",
             "async service boundaries",
@@ -477,6 +636,7 @@ mod tests {
         .expect("claim should validate");
         let event = EventRecord::new(
             "event-1",
+            scope(),
             "indexed",
             vec!["Rust".to_owned()],
             Some("2026-05-12".to_owned()),
@@ -485,14 +645,47 @@ mod tests {
         .expect("event should validate");
         let range_error = GraphVersionRange::new(GraphVersion::new(2), Some(GraphVersion::new(1)))
             .expect_err("reversed range should fail");
+        let metadata_error = relation
+            .clone()
+            .with_metadata(
+                ConfidenceScore {
+                    basis_points: 10_001,
+                },
+                FactStatus::Accepted,
+                GraphVersionRange {
+                    valid_from: GraphVersion::new(2),
+                    valid_until: Some(GraphVersion::new(1)),
+                },
+            )
+            .expect_err("deserialized metadata should be revalidated");
 
         let batch =
             GraphMutationBatch::with_facts(Vec::new(), vec![relation], vec![claim], vec![event])
                 .expect("structured fact batch should validate");
 
+        assert_eq!(missing_evidence.field, "evidence_id");
         assert_eq!(range_error.field, "version_range");
+        assert_eq!(metadata_error.field, "confidence");
         assert_eq!(batch.relations.len(), 1);
         assert_eq!(batch.claims.len(), 1);
         assert_eq!(batch.events.len(), 1);
+    }
+
+    #[test]
+    fn parses_fact_status_wire_values() {
+        assert_eq!(
+            FactStatus::parse("accepted").expect("status"),
+            FactStatus::Accepted
+        );
+        assert_eq!(
+            FactStatus::parse("mystery")
+                .expect_err("unknown status should fail")
+                .field,
+            "fact_status"
+        );
+    }
+
+    fn scope() -> SourceScope {
+        SourceScope::parse("repo").expect("scope should parse")
     }
 }

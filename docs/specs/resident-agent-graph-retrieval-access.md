@@ -124,6 +124,11 @@ pub struct AgentAccessPolicy {
 | `require_permission_for_refresh` | `true` |
 | `allow_remote_clients` | `false` |
 
+`max_context_bytes` applies to the serialized context payload retained for the
+agent result, including retrieval hits, context-pack items, graph facts, source
+spans, code artifact metadata, and backend status metadata. It is not limited to
+raw evidence text bytes.
+
 准入流程:
 
 ```text
@@ -342,7 +347,24 @@ Both protocols must preserve this semantic shape even if wire fields differ:
     "source_scope": "docs",
     "freshness": "allow-stale",
     "truncated": false,
-    "items": []
+    "backend_statuses": [],
+    "items": [
+      {
+        "result_id": "ev-1",
+        "source_scope": "docs",
+        "source_path": "docs/phase-1.md",
+        "source_span": {
+          "start_byte": 0,
+          "end_byte": 42,
+          "start_line": 1,
+          "end_line": 1
+        },
+        "entities": [],
+        "graph_facts": [],
+        "retriever_sources": ["bm25"],
+        "ranking": []
+      }
+    ]
   },
   "results": [],
   "fusion": {
@@ -350,6 +372,7 @@ Both protocols must preserve this semantic shape even if wire fields differ:
     "k": 60.0,
     "candidate_count": 0
   },
+  "backend_statuses": [],
   "indexes": [],
   "degraded_reason": null,
   "truncated": false,

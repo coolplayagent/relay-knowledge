@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use relay_knowledge::{
-    api::{GraphInspectionRequest, IngestEvidence, IngestRequest, InterfaceKind, RequestContext},
+    api::{
+        GraphInspectionRequest, HybridRetrievalRequest, IngestClaim, IngestEvent, IngestEvidence,
+        IngestRelation, IngestRequest, InterfaceKind, RequestContext,
+    },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeChunkRecord, CodeFileFingerprint, CodeGraphBatch, CodeGraphCommitReceipt,
         CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary, CodeReferenceRecord,
         CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
-        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalHit,
+        CodeSymbolRecord, CommitReceipt, ConfidenceScore, ContextGraphFactKind, EvidenceSpan,
+        FactStatus, FreshnessPolicy, GraphMutationBatch, GraphVersion, GraphVersionRange,
+        IndexKind, IndexStatus, RetrievalBackendState, RetrievalHit, RetrieverSource,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
@@ -40,9 +44,16 @@ async fn cli_and_web_can_use_the_same_application_service() {
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: Some("ev-unified".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "Unified API status reports shared graph version".to_owned(),
                     entity_labels: Vec::new(),
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
         )
@@ -80,15 +91,26 @@ async fn fallback_evidence_id_does_not_depend_on_batch_position() {
                 evidence: vec![
                     IngestEvidence {
                         id: None,
+                        source_path: None,
+                        span: None,
+                        confidence: None,
+                        status: None,
                         content: "Alpha evidence".to_owned(),
                         entity_labels: Vec::new(),
                     },
                     IngestEvidence {
                         id: None,
+                        source_path: None,
+                        span: None,
+                        confidence: None,
+                        status: None,
                         content: "Beta evidence".to_owned(),
                         entity_labels: Vec::new(),
                     },
                 ],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-batch", "trace-batch"),
         )
@@ -100,9 +122,16 @@ async fn fallback_evidence_id_does_not_depend_on_batch_position() {
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: None,
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "Beta evidence".to_owned(),
                     entity_labels: Vec::new(),
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-single", "trace-single"),
         )
@@ -131,9 +160,16 @@ async fn fallback_evidence_id_uses_trimmed_content() {
                     source_scope: "docs".to_owned(),
                     evidence: vec![IngestEvidence {
                         id: None,
+                        source_path: None,
+                        span: None,
+                        confidence: None,
+                        status: None,
                         content: content.to_owned(),
                         entity_labels: Vec::new(),
                     }],
+                    relations: Vec::new(),
+                    claims: Vec::new(),
+                    events: Vec::new(),
                 },
                 RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
             )
@@ -154,6 +190,53 @@ async fn fallback_evidence_id_uses_trimmed_content() {
 }
 
 #[tokio::test]
+async fn fallback_evidence_id_includes_source_location_when_present() {
+    let service = service_with_memory_store().await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![
+                    IngestEvidence {
+                        id: None,
+                        source_path: Some("docs/a.md".to_owned()),
+                        span: Some(EvidenceSpan::new(0, 12, 1, 1).expect("span")),
+                        confidence: None,
+                        status: None,
+                        content: "Repeated evidence".to_owned(),
+                        entity_labels: Vec::new(),
+                    },
+                    IngestEvidence {
+                        id: None,
+                        source_path: Some("docs/b.md".to_owned()),
+                        span: Some(EvidenceSpan::new(0, 12, 1, 1).expect("span")),
+                        confidence: None,
+                        status: None,
+                        content: "Repeated evidence".to_owned(),
+                        entity_labels: Vec::new(),
+                    },
+                ],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("same content with different source locations should ingest");
+
+    let graph = service
+        .inspect_graph(
+            GraphInspectionRequest { source_scope: None },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-graph", "trace-graph"),
+        )
+        .await
+        .expect("graph should inspect");
+
+    assert_eq!(graph.graph.evidence_count, 2);
+}
+
+#[tokio::test]
 async fn ingest_reports_partial_success_when_index_refresh_fails_after_commit() {
     let service = service_with_memory_store_type(Arc::new(RefreshFailStore::default())).await;
 
@@ -163,9 +246,16 @@ async fn ingest_reports_partial_success_when_index_refresh_fails_after_commit() 
                 source_scope: "docs".to_owned(),
                 evidence: vec![IngestEvidence {
                     id: Some("ev-partial".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
                     content: "Committed before refresh failure".to_owned(),
                     entity_labels: Vec::new(),
                 }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
         )
@@ -178,6 +268,124 @@ async fn ingest_reports_partial_success_when_index_refresh_fails_after_commit() 
     assert_eq!(
         response.index_refresh_error.as_deref(),
         Some("invalid storage input: index refresh task storage is unavailable")
+    );
+}
+
+#[tokio::test]
+async fn structured_facts_and_backend_statuses_reach_context_pack() {
+    let service = service_with_memory_store().await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-rich".to_owned()),
+                    source_path: Some("docs/phase-1.md".to_owned()),
+                    span: Some(EvidenceSpan::new(0, 31, 1, 1).expect("span")),
+                    confidence: Some(ConfidenceScore::from_ratio(0.95).expect("confidence")),
+                    status: Some(FactStatus::Proposed),
+                    content: "relay-knowledge uses BM25 retrieval".to_owned(),
+                    entity_labels: vec!["relay-knowledge".to_owned(), "BM25".to_owned()],
+                }],
+                relations: vec![IngestRelation {
+                    id: "rel-rich".to_owned(),
+                    source_entity_label: "relay-knowledge".to_owned(),
+                    relation_type: "uses".to_owned(),
+                    target_entity_label: "BM25".to_owned(),
+                    evidence_ids: vec!["ev-rich".to_owned()],
+                    confidence: Some(ConfidenceScore::from_ratio(0.9).expect("confidence")),
+                    status: Some(FactStatus::Accepted),
+                    version_range: Some(
+                        GraphVersionRange::new(GraphVersion::new(1), None).expect("range"),
+                    ),
+                }],
+                claims: vec![IngestClaim {
+                    id: "claim-rich".to_owned(),
+                    subject_entity_label: "relay-knowledge".to_owned(),
+                    predicate: "retrieval_layer".to_owned(),
+                    object: "BM25".to_owned(),
+                    evidence_ids: vec!["ev-rich".to_owned()],
+                    confidence: Some(ConfidenceScore::from_ratio(0.82).expect("confidence")),
+                    status: Some(FactStatus::Superseded),
+                    version_range: Some(
+                        GraphVersionRange::new(GraphVersion::new(1), None).expect("range"),
+                    ),
+                }],
+                events: vec![IngestEvent {
+                    id: "event-rich".to_owned(),
+                    event_type: "indexed".to_owned(),
+                    entity_labels: vec!["relay-knowledge".to_owned(), "BM25".to_owned()],
+                    occurred_at: Some("2026-05-12T00:00:00Z".to_owned()),
+                    evidence_ids: vec!["ev-rich".to_owned()],
+                    confidence: Some(ConfidenceScore::from_ratio(0.75).expect("confidence")),
+                    status: Some(FactStatus::Rejected),
+                    version_range: Some(
+                        GraphVersionRange::new(GraphVersion::new(1), None).expect("range"),
+                    ),
+                }],
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-rich", "trace-rich"),
+        )
+        .await
+        .expect("ingest should succeed");
+
+    let response = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "BM25".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 5,
+                freshness: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::with_ids(InterfaceKind::Web, "req-query", "trace-query"),
+        )
+        .await
+        .expect("query should succeed");
+
+    let item = response
+        .context_pack
+        .items
+        .first()
+        .expect("context item should exist");
+    assert_eq!(item.source_path.as_deref(), Some("docs/phase-1.md"));
+    assert!(item.source_span.is_some());
+    assert!(item.entities.iter().any(|entity| entity.label == "BM25"));
+    assert_eq!(item.graph_facts[0].kind, ContextGraphFactKind::Relation);
+    assert_eq!(item.graph_facts[0].predicate, "uses");
+    let claim = item
+        .graph_facts
+        .iter()
+        .find(|fact| fact.fact_id == "claim-rich")
+        .expect("claim fact should be attached");
+    assert_eq!(claim.kind, ContextGraphFactKind::Claim);
+    assert_eq!(claim.status, FactStatus::Superseded);
+    assert_eq!(claim.confidence.basis_points, 8_200);
+    let event = item
+        .graph_facts
+        .iter()
+        .find(|fact| fact.fact_id == "event-rich")
+        .expect("event fact should be attached");
+    assert_eq!(event.kind, ContextGraphFactKind::Event);
+    assert_eq!(event.subject, "BM25, relay-knowledge");
+    assert_eq!(event.object.as_deref(), Some("2026-05-12T00:00:00Z"));
+    assert!(response.backend_statuses.iter().any(|status| {
+        status.source == RetrieverSource::Semantic
+            && status.state == RetrievalBackendState::Unavailable
+            && status.scope_post_filter
+    }));
+    assert!(
+        response.budget_used.context_bytes
+            > response
+                .results
+                .iter()
+                .map(|hit| hit.content.len())
+                .sum::<usize>()
+    );
+    assert!(
+        response
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("semantic/vector"))
     );
 }
 

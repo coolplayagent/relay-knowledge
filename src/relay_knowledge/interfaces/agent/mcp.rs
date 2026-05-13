@@ -946,3 +946,7 @@ mod mcp_tests;
 #[cfg(test)]
 #[path = "mcp_tool_tests.rs"]
 mod mcp_tool_tests;
+
+#[cfg(test)]
+#[path = "mcp_protocol_tests.rs"]
+mod mcp_protocol_tests;

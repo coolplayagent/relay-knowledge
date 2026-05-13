@@ -11,14 +11,15 @@
 当前可用能力:
 
 - evidence ingest: 写入 source-scoped evidence 和 entity label，提交后产生新的 `graph_version`。
-- hybrid retrieval: 使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents 和 RRF 返回 context pack。
+- structured fact ingest: API 可写入 evidence source path、span、confidence、status、typed relation、claim 和 event；结构化 facts 必须引用 supporting evidence ids，反序列化后的 span、confidence 和 version range 会重新验证。
+- hybrid retrieval: 使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
 - diagnostics: graph inspect、index status、health、service doctor 和 Web readiness。
 - resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status 和受权限控制的 index refresh。
 
 规划中能力:
 
-- typed relation、claim、event、confidence、source span 和 proposal lifecycle。
+- proposal lifecycle 和冲突处理。
 - semantic/vector 后端和 ANN read model。
 - scoped index refresh queue、lease、dead-letter 和 startup reconciler。
 - ACP adapter、多模态 evidence、temporal query 和 community summary。
@@ -138,7 +139,8 @@ http://127.0.0.1:8791/mcp
 - `source_scope`: source filter。
 - `freshness`: 调用方请求的 freshness policy。
 - `results`: evidence、code symbol 或 code chunk 命中。
-- `context_pack.items`: 可审计 context item，包含 retriever sources 和 ranking signals。
+- `context_pack.backend_statuses`: semantic/vector 等后端可用性、scope post-filter 和降级原因。
+- `context_pack.items`: 可审计 context item，包含 retriever sources、ranking signals、entities、source span、structured graph facts 和 code artifact。
 - `fusion`: RRF 算法、k 值和 candidate count。
 - `budget_used`: limit、candidate count、returned count 和 context bytes。
 - `degraded_reason`: stale、graph-only、backend unavailable 或其它降级原因。
