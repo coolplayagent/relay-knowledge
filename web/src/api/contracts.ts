@@ -45,6 +45,10 @@ export type IndexStatus = {
 export type IndexCursor = IndexStatus & {
   source_scope: string;
   modality: "text" | "image" | "layout" | "table";
+  source_hash?: string;
+  backend_cursor?: string;
+  model_name?: string;
+  model_dimension?: number;
 };
 
 export type IndexRefreshDiagnostics = {

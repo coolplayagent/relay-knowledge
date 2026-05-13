@@ -53,6 +53,9 @@ BM25, semantic, vector, graph path, temporal, and community hits are fused with
 RRF. Semantic/vector are local read models, not external embedding services; the
 metadata is present so a future external backend can coexist without changing
 the context-pack contract.
+Health and index-refresh diagnostics also expose scoped cursor metadata for
+these index families: source hash, backend cursor, and model name/dimension when
+a configured backend worker supplies them.
 
 ## Graph Facts
 

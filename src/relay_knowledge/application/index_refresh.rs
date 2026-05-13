@@ -236,6 +236,8 @@ async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<()
                 lease_owner: lease_owner.clone(),
                 attempt_count: task.attempt_count,
                 indexed_graph_version: task.target_graph_version,
+                model_name: None,
+                model_dimension: None,
                 now_ms: now_millis(),
             })
             .await

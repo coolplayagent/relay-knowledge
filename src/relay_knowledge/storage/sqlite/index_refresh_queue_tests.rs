@@ -141,6 +141,8 @@ async fn expired_task_lease_is_requeued_once() {
             lease_owner: "worker-a".to_owned(),
             attempt_count: first.attempt_count,
             indexed_graph_version: GraphVersion::new(1),
+            model_name: None,
+            model_dimension: None,
             now_ms: 17,
         })
         .await
@@ -164,6 +166,8 @@ async fn expired_task_lease_is_requeued_once() {
             lease_owner: "worker-b".to_owned(),
             attempt_count: recovered.attempt_count,
             indexed_graph_version: GraphVersion::new(1),
+            model_name: None,
+            model_dimension: None,
             now_ms: 18,
         })
         .await
@@ -273,6 +277,8 @@ async fn completing_refresh_task_advances_cursor_and_clears_queue() {
             lease_owner: "worker-a".to_owned(),
             attempt_count: task.attempt_count,
             indexed_graph_version: GraphVersion::new(1),
+            model_name: None,
+            model_dimension: None,
             now_ms: 120,
         })
         .await
@@ -344,6 +350,124 @@ async fn completing_refresh_task_advances_cursor_and_clears_queue() {
 }
 
 #[tokio::test]
+async fn completing_refresh_task_records_backend_cursor_metadata() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(
+        &store,
+        "ev-vector-metadata",
+        "docs",
+        "Vector index cursor metadata tracks source hashes",
+    )
+    .await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Vector],
+            target_graph_version: GraphVersion::new(1),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 100,
+        })
+        .await
+        .expect("vector task should queue");
+    let task = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 110,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should be claimed");
+
+    store
+        .complete_index_refresh_task(IndexRefreshCompletion {
+            task_id: task.task_id,
+            lease_owner: "worker-a".to_owned(),
+            attempt_count: task.attempt_count,
+            indexed_graph_version: GraphVersion::new(1),
+            model_name: Some("text-embedding-3-small".to_owned()),
+            model_dimension: Some(1536),
+            now_ms: 120,
+        })
+        .await
+        .expect("model metadata should complete");
+    let cursors = store.index_cursors().await.expect("cursors should load");
+    let cursor = cursors
+        .iter()
+        .find(|cursor| cursor.kind == IndexKind::Vector && cursor.source_scope == "docs")
+        .expect("vector cursor should exist");
+
+    assert_eq!(cursor.source_hash.as_deref().map(str::len), Some(16));
+    assert!(
+        cursor
+            .backend_cursor
+            .as_deref()
+            .is_some_and(|value| value.starts_with("vector:text:"))
+    );
+    assert_eq!(cursor.model_name.as_deref(), Some("text-embedding-3-small"));
+    assert_eq!(cursor.model_dimension, Some(1536));
+}
+
+#[tokio::test]
+async fn completing_refresh_task_rejects_incomplete_backend_model_metadata() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-bad-model", "docs", "Rust async storage").await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Semantic],
+            target_graph_version: GraphVersion::new(1),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 100,
+        })
+        .await
+        .expect("semantic task should queue");
+    let task = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 110,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should be claimed");
+
+    let error = store
+        .complete_index_refresh_task(IndexRefreshCompletion {
+            task_id: task.task_id.clone(),
+            lease_owner: "worker-a".to_owned(),
+            attempt_count: task.attempt_count,
+            indexed_graph_version: GraphVersion::new(1),
+            model_name: Some("semantic-model".to_owned()),
+            model_dimension: None,
+            now_ms: 120,
+        })
+        .await
+        .expect_err("model metadata must be complete");
+    let still_running = store
+        .complete_index_refresh_task(IndexRefreshCompletion {
+            task_id: task.task_id,
+            lease_owner: "worker-a".to_owned(),
+            attempt_count: task.attempt_count,
+            indexed_graph_version: GraphVersion::new(1),
+            model_name: Some("semantic-model".to_owned()),
+            model_dimension: Some(384),
+            now_ms: 121,
+        })
+        .await
+        .expect("valid metadata should still complete with active lease");
+
+    assert!(
+        error
+            .to_string()
+            .contains("model name and dimension must be supplied together")
+    );
+    assert_eq!(still_running.state, IndexRefreshTaskState::Succeeded);
+}
+
+#[tokio::test]
 async fn completing_superseded_running_task_requeues_follow_up_refresh() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(&store, "ev-running-v1", "docs", "Rust async storage").await;
@@ -385,6 +509,8 @@ async fn completing_superseded_running_task_requeues_follow_up_refresh() {
             lease_owner: "worker-a".to_owned(),
             attempt_count: running.attempt_count,
             indexed_graph_version: GraphVersion::new(1),
+            model_name: None,
+            model_dimension: None,
             now_ms: 130,
         })
         .await
@@ -416,6 +542,8 @@ async fn completing_superseded_running_task_requeues_follow_up_refresh() {
             lease_owner: "worker-b".to_owned(),
             attempt_count: follow_up.attempt_count,
             indexed_graph_version: GraphVersion::new(2),
+            model_name: None,
+            model_dimension: None,
             now_ms: 132,
         })
         .await
