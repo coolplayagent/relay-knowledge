@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{
@@ -88,10 +90,10 @@ pub(super) fn claim_index_refresh_task(
 
     recover_expired_leases(connection, request.now_ms, request.max_attempts)?;
     loop {
-        let task_id = connection
+        let candidate = connection
             .query_row(
                 "
-                SELECT task_id
+                SELECT task_id, target_graph_version
                 FROM index_refresh_tasks
                 WHERE state = 'queued'
                    OR (state = 'retrying' AND next_retry_at_ms <= ?1)
@@ -99,11 +101,11 @@ pub(super) fn claim_index_refresh_task(
                 LIMIT 1
                 ",
                 params![request.now_ms],
-                |row| row.get::<_, String>(0),
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
             )
             .optional()?;
 
-        let Some(task_id) = task_id else {
+        let Some((task_id, expected_target)) = candidate else {
             return Ok(None);
         };
         let updated = connection.execute(
@@ -119,12 +121,14 @@ pub(super) fn claim_index_refresh_task(
                   state = 'queued'
                   OR (state = 'retrying' AND next_retry_at_ms <= ?4)
               )
+              AND target_graph_version = ?5
             ",
             params![
                 task_id,
                 lease_owner,
                 request.now_ms.saturating_add(request.lease_duration_ms),
-                request.now_ms
+                request.now_ms,
+                expected_target
             ],
         )?;
 
@@ -304,8 +308,30 @@ fn planned_tasks(
 ) -> Result<Vec<PlannedTask>, StorageError> {
     let mut planned = Vec::new();
     for kind in &request.kinds {
+        let missing_scopes = super::missing_cursor_scopes(connection, *kind)?;
+        let missing_scope_set = missing_scopes.iter().cloned().collect::<BTreeSet<_>>();
+        for scope in missing_scopes {
+            super::ensure_cursor(
+                connection,
+                *kind,
+                &scope,
+                super::TEXT_MODALITY,
+                IndexState::Stale,
+            )?;
+            planned.push(PlannedTask {
+                kind: *kind,
+                source_scope: scope,
+                modality: super::TEXT_MODALITY,
+                target_graph_version: request.target_graph_version,
+                cursor_before: GraphVersion::ZERO,
+            });
+        }
         let cursors = stale_cursors_for_kind(connection, *kind)?;
-        if cursors.is_empty() {
+        let stale_cursors = cursors
+            .into_iter()
+            .filter(|cursor| !missing_scope_set.contains(&cursor.source_scope))
+            .collect::<Vec<_>>();
+        if stale_cursors.is_empty() && missing_scope_set.is_empty() {
             if let Some(cursor_before) =
                 fallback_cursor_before(connection, *kind, request.target_graph_version)?
             {
@@ -325,7 +351,7 @@ fn planned_tasks(
                 });
             }
         } else {
-            planned.extend(cursors.into_iter().map(|cursor| PlannedTask {
+            planned.extend(stale_cursors.into_iter().map(|cursor| PlannedTask {
                 kind: cursor.kind,
                 source_scope: cursor.source_scope,
                 modality: cursor.modality,
@@ -418,55 +444,65 @@ fn upsert_task(
         task.modality,
         task.target_graph_version,
     );
-    let existing = read_task(connection, &task_id)?;
-    match existing {
-        None => insert_task(connection, task, task_id, input_fingerprint, now_ms),
-        Some(existing) if existing.state == IndexRefreshTaskState::Succeeded => {
-            if existing
-                .cursor_after
-                .is_some_and(|version| version >= task.target_graph_version)
-            {
-                Ok(())
-            } else {
-                reset_task(connection, task, task_id, input_fingerprint, now_ms)
+    loop {
+        let existing = read_task(connection, &task_id)?;
+        match existing {
+            None => return insert_task(connection, &task, &task_id, &input_fingerprint, now_ms),
+            Some(existing) if existing.state == IndexRefreshTaskState::Succeeded => {
+                if existing
+                    .cursor_after
+                    .is_some_and(|version| version >= task.target_graph_version)
+                {
+                    return Ok(());
+                }
+                if reset_task(
+                    connection,
+                    &task,
+                    &task_id,
+                    &input_fingerprint,
+                    now_ms,
+                    existing.state,
+                )? {
+                    return Ok(());
+                }
             }
-        }
-        Some(existing) if existing.state == IndexRefreshTaskState::DeadLetter => {
-            if !reset_dead_letter_tasks {
-                return Ok(());
+            Some(existing) if existing.state == IndexRefreshTaskState::DeadLetter => {
+                if !reset_dead_letter_tasks {
+                    return Ok(());
+                }
+                if reset_task(
+                    connection,
+                    &task,
+                    &task_id,
+                    &input_fingerprint,
+                    now_ms,
+                    existing.state,
+                )? {
+                    return Ok(());
+                }
             }
-            reset_task(connection, task, task_id, input_fingerprint, now_ms)
-        }
-        Some(existing) if existing.state == IndexRefreshTaskState::Running => Ok(()),
-        Some(existing) => {
-            let target = existing.target_graph_version.max(task.target_graph_version);
-            connection.execute(
-                "
-                UPDATE index_refresh_tasks
-                SET target_graph_version = ?2,
-                    input_fingerprint = ?3,
-                    cursor_before = MIN(cursor_before, ?4),
-                    updated_at_ms = ?5
-                WHERE task_id = ?1
-                ",
-                params![
-                    task_id,
-                    target.get(),
-                    input_fingerprint,
-                    task.cursor_before.get(),
-                    now_ms
-                ],
-            )?;
-            Ok(())
+            Some(existing) if existing.state == IndexRefreshTaskState::Running => return Ok(()),
+            Some(existing) => {
+                if extend_claimable_task(
+                    connection,
+                    &task,
+                    &task_id,
+                    &input_fingerprint,
+                    now_ms,
+                    &existing,
+                )? {
+                    return Ok(());
+                }
+            }
         }
     }
 }
 
 fn insert_task(
     connection: &Connection,
-    task: PlannedTask,
-    task_id: String,
-    input_fingerprint: String,
+    task: &PlannedTask,
+    task_id: &str,
+    input_fingerprint: &str,
     now_ms: u64,
 ) -> Result<(), StorageError> {
     connection.execute(
@@ -498,12 +534,13 @@ fn insert_task(
 
 fn reset_task(
     connection: &Connection,
-    task: PlannedTask,
-    task_id: String,
-    input_fingerprint: String,
+    task: &PlannedTask,
+    task_id: &str,
+    input_fingerprint: &str,
     now_ms: u64,
-) -> Result<(), StorageError> {
-    connection.execute(
+    expected_state: IndexRefreshTaskState,
+) -> Result<bool, StorageError> {
+    let updated = connection.execute(
         "
         UPDATE index_refresh_tasks
         SET target_graph_version = ?2,
@@ -519,6 +556,7 @@ fn reset_task(
             last_error_message = NULL,
             updated_at_ms = ?6
         WHERE task_id = ?1
+          AND state = ?7
         ",
         params![
             task_id,
@@ -526,11 +564,44 @@ fn reset_task(
             now_ms,
             input_fingerprint,
             task.cursor_before.get(),
-            now_ms
+            now_ms,
+            expected_state.as_str()
         ],
     )?;
 
-    Ok(())
+    Ok(updated == 1)
+}
+
+fn extend_claimable_task(
+    connection: &Connection,
+    task: &PlannedTask,
+    task_id: &str,
+    input_fingerprint: &str,
+    now_ms: u64,
+    existing: &IndexRefreshTask,
+) -> Result<bool, StorageError> {
+    let target = existing.target_graph_version.max(task.target_graph_version);
+    let updated = connection.execute(
+        "
+        UPDATE index_refresh_tasks
+        SET target_graph_version = ?2,
+            input_fingerprint = ?3,
+            cursor_before = MIN(cursor_before, ?4),
+            updated_at_ms = ?5
+        WHERE task_id = ?1
+          AND state = ?6
+        ",
+        params![
+            task_id,
+            target.get(),
+            input_fingerprint,
+            task.cursor_before.get(),
+            now_ms,
+            existing.state.as_str()
+        ],
+    )?;
+
+    Ok(updated == 1)
 }
 
 fn task_needs_enqueue(task: &IndexRefreshTask, reset_dead_letter_tasks: bool) -> bool {

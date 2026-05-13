@@ -186,6 +186,7 @@ async fn queue_index_refreshes(
 
 async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<(), ApiError> {
     let lease_owner = format!("foreground-refresh-{}", std::process::id());
+    let mut first_failure = None;
     loop {
         let now_ms = now_millis();
         let Some(task) = store
@@ -198,7 +199,10 @@ async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<()
             .await
             .map_err(storage_api_error)?
         else {
-            return Ok(());
+            return match first_failure {
+                Some(error) => Err(error),
+                None => Ok(()),
+            };
         };
 
         if let Err(error) = replay_mutations_for_task(store, &task).await {
@@ -215,12 +219,15 @@ async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<()
                 })
                 .await
                 .map_err(storage_api_error)?;
-            return Err(ApiError::storage_unavailable(format!(
-                "index refresh task {} failed in state {}: {}",
-                failure.task_id,
-                failure.state.as_str(),
-                error.message
-            )));
+            first_failure.get_or_insert_with(|| {
+                ApiError::storage_unavailable(format!(
+                    "index refresh task {} failed in state {}: {}",
+                    failure.task_id,
+                    failure.state.as_str(),
+                    error.message
+                ))
+            });
+            continue;
         }
 
         store

@@ -152,6 +152,123 @@ async fn fallback_refresh_task_uses_status_cursor_when_scoped_cursors_are_missin
     assert_eq!(task.target_graph_version, GraphVersion::new(6));
 }
 
+#[tokio::test]
+async fn partial_cursor_loss_marks_status_stale_and_requeues_from_zero() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-missing-docs", "docs", "Rust async storage").await;
+    commit_evidence(&store, "ev-missing-repo", "repo", "Rust graph indexing").await;
+    store
+        .run(|connection| {
+            connection.execute(
+                "
+                UPDATE index_cursors
+                SET state = 'fresh', indexed_graph_version = 2
+                WHERE kind = 'bm25'
+                ",
+                [],
+            )?;
+            connection.execute(
+                "
+                UPDATE index_status
+                SET index_version = 3,
+                    indexed_graph_version = 2,
+                    state = 'fresh',
+                    last_error = NULL
+                WHERE kind = 'bm25'
+                ",
+                [],
+            )?;
+            connection.execute(
+                "
+                DELETE FROM index_cursors
+                WHERE kind = 'bm25' AND source_scope = 'docs'
+                ",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("partial cursor loss fixture should be applied");
+
+    let statuses = store.index_statuses().await.expect("statuses should load");
+    let bm25 = statuses
+        .iter()
+        .find(|status| status.kind == IndexKind::Bm25)
+        .expect("bm25 status should exist");
+    assert_eq!(bm25.state, IndexState::Stale);
+    assert_eq!(
+        bm25.last_error.as_deref(),
+        Some("1 scoped index cursor(s) missing")
+    );
+
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Bm25],
+            target_graph_version: GraphVersion::new(2),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 10,
+        })
+        .await
+        .expect("missing cursor should queue recovery work");
+    let task = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 11,
+        })
+        .await
+        .expect("claim should load")
+        .expect("missing cursor task should be claimed");
+
+    assert_eq!(task.source_scope, "docs");
+    assert_eq!(task.cursor_before, GraphVersion::ZERO);
+    assert_eq!(task.target_graph_version, GraphVersion::new(2));
+}
+
+#[tokio::test]
+async fn queued_task_claim_uses_latest_target_after_extension() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(&store, "ev-queued-v1", "docs", "Rust async storage").await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Bm25],
+            target_graph_version: GraphVersion::new(1),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 10,
+        })
+        .await
+        .expect("initial task should queue");
+
+    commit_evidence(&store, "ev-queued-v2", "docs", "Rust graph indexing").await;
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Bm25],
+            target_graph_version: GraphVersion::new(2),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 11,
+        })
+        .await
+        .expect("queued task should extend to newer target");
+    let task = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 12,
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should be claimed");
+
+    assert_eq!(task.source_scope, "docs");
+    assert_eq!(task.cursor_before, GraphVersion::ZERO);
+    assert_eq!(task.target_graph_version, GraphVersion::new(2));
+}
+
 async fn commit_evidence(store: &SqliteGraphStore, id: &str, source_scope: &str, content: &str) {
     let evidence = EvidenceRecord::new(
         id,

@@ -117,7 +117,12 @@ completion 会把 cursor 留在 stale 状态、重置普通 retry attempt 预算
 refresh，而不会错误标记 fresh。升级或部分迁移状态下如果 aggregate `index_status`
 已经存在但 scoped cursor 尚未生成，fallback refresh task 必须从
 `index_status.indexed_graph_version` 开始，而不是从 graph version 0 全量重放。
-Health 和 service diagnostics 会暴露 queue depth、
+每次 mutation 还会维护 `index_scope_manifest`，用于记录应当存在 scoped cursor 的
+scope；如果部分 cursor metadata 丢失，status/diagnostics 必须降级为 stale，且
+refresh queue 会为缺失 scope 从 graph version 0 重新排队，避免把未追踪的分片误报为
+fresh。claim queued/retrying task 时必须同时校验 state 和 target graph version；
+扩展已有 queued/retrying task 时也必须带 state guard，避免并发 claim 后覆盖 running
+task 的目标版本。Health 和 service diagnostics 会暴露 queue depth、
 oldest task age、dead-letter count 和 per-kind index lag。
 
 ### 2.3 读取路径
