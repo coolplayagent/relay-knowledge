@@ -274,7 +274,7 @@ pub(super) fn ensure_code_repository_compat_columns(
         "confidence_tier",
         "TEXT NOT NULL DEFAULT 'ambiguous'",
     )?;
-    should_rebuild_symbol_identities |= !symbol_identity_v1_migration_recorded(connection)?;
+    should_rebuild_symbol_identities |= !symbol_identity_v1_nested_migration_recorded(connection)?;
     should_rebuild_symbol_identities |= symbol_identities_have_direct_stale_ids(connection)?;
     if should_rebuild_symbol_identities {
         rebuild_code_repository_symbol_identities(connection)?;
@@ -374,7 +374,7 @@ fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<
     transaction.execute(
         "
         INSERT OR IGNORE INTO code_repository_schema_migrations (name)
-        VALUES ('symbol_identity_v1')
+        VALUES ('symbol_identity_v1_nested')
         ",
         [],
     )?;
@@ -383,14 +383,16 @@ fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<
     Ok(())
 }
 
-fn symbol_identity_v1_migration_recorded(connection: &Connection) -> Result<bool, StorageError> {
+fn symbol_identity_v1_nested_migration_recorded(
+    connection: &Connection,
+) -> Result<bool, StorageError> {
     connection
         .query_row(
             "
             SELECT EXISTS(
                 SELECT 1
                 FROM code_repository_schema_migrations
-                WHERE name = 'symbol_identity_v1'
+                WHERE name = 'symbol_identity_v1_nested'
             )
             ",
             [],
@@ -613,7 +615,7 @@ mod tests {
             "repo://repo/src::lib.rs::outer_b.inner"
         );
         assert!(
-            symbol_identity_v1_migration_recorded(&connection)
+            symbol_identity_v1_nested_migration_recorded(&connection)
                 .expect("rebuilt identities should be recorded")
         );
         assert!(
