@@ -99,6 +99,45 @@ class RetryPolicy {
 }
 
 #[test]
+fn nested_functions_are_canonical_symbol_containers() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+    let source = br#"
+def outer_a():
+    def inner():
+        return 1
+    return inner()
+
+def outer_b():
+    def inner():
+        return 2
+    return inner()
+"#;
+
+    parse_indexed_file(&mut build, "src/nested.py", source).expect("file should parse");
+    let snapshot = build.finish();
+    let inner_names = snapshot
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.name == "inner")
+        .map(|symbol| symbol.canonical_symbol_id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(inner_names.len(), 2);
+    assert!(inner_names.contains(&"repo://repo/src::nested::outer_a.inner"));
+    assert!(inner_names.contains(&"repo://repo/src::nested::outer_b.inner"));
+}
+
+#[test]
 fn mainstream_tree_sitter_languages_extract_symbols_imports_and_chunks() {
     let fixtures = [
         LanguageFixture {

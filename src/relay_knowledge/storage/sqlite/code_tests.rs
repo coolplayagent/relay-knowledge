@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     domain::{
-        CodeFileDiagnostic, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+        CodeCallRecord, CodeFileDiagnostic, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy,
     },
     storage::SqliteGraphStore,
@@ -231,6 +231,49 @@ async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() {
 }
 
 #[tokio::test]
+async fn call_graph_hits_include_resolved_symbol_canonical_identity() {
+    let store = store_with_repository_snapshot(snapshot_with_duplicate_callee_names()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let caller_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector.clone(),
+                CodeQueryKind::Callers,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+    let callee_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "caller",
+                selector,
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("callee query should succeed");
+
+    assert!(caller_hits.iter().any(|hit| {
+        hit.symbol_snapshot_id.as_deref() == Some("caller-a")
+            && hit.canonical_symbol_id.as_deref() == Some("repo://repo/src::caller_a.rs::caller")
+    }));
+    assert!(callee_hits.iter().any(|hit| {
+        hit.symbol_snapshot_id.as_deref() == Some("target-a")
+            && hit.canonical_symbol_id.as_deref() == Some("repo://repo/src::a.rs::target")
+    }));
+}
+
+#[tokio::test]
 async fn reference_hits_include_resolved_target_canonical_identity() {
     let store = store_with_repository_snapshot(snapshot_with_resolved_reference()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -417,6 +460,10 @@ async fn impact_callers_match_resolved_symbol_identity() {
 
     assert!(hits.iter().any(|hit| hit.path == "src/caller_a.rs"));
     assert!(!hits.iter().any(|hit| hit.path == "src/caller_b.rs"));
+    assert!(hits.iter().any(|hit| {
+        hit.symbol_snapshot_id.as_deref() == Some("caller-a")
+            && hit.canonical_symbol_id.as_deref() == Some("repo://repo/src::caller_a.rs::caller")
+    }));
 }
 
 #[tokio::test]
@@ -812,26 +859,42 @@ fn snapshot_with_duplicate_callee_names() -> CodeIndexSnapshot {
         symbols: vec![
             symbol("target-a", "a-file", "src/a.rs", "target"),
             symbol("target-b", "b-file", "src/b.rs", "target"),
+            symbol("caller-a", "caller-a-file", "src/caller_a.rs", "caller"),
+            symbol("caller-b", "caller-b-file", "src/caller_b.rs", "caller"),
         ],
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![
-            call(
+            call_with_caller(
                 "call-a",
                 "caller-a-file",
                 "src/caller_a.rs",
+                "caller-a",
                 Some("target-a"),
             ),
-            call(
+            call_with_caller(
                 "call-b",
                 "caller-b-file",
                 "src/caller_b.rs",
+                "caller-b",
                 Some("target-b"),
             ),
         ],
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
+}
+
+fn call_with_caller(
+    id: &str,
+    file_id: &str,
+    path: &str,
+    caller_symbol_snapshot_id: &str,
+    callee_symbol_snapshot_id: Option<&str>,
+) -> CodeCallRecord {
+    let mut record = call(id, file_id, path, callee_symbol_snapshot_id);
+    record.caller_symbol_snapshot_id = Some(caller_symbol_snapshot_id.to_owned());
+    record
 }
 
 fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {

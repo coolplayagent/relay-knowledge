@@ -147,5 +147,8 @@ fn path_prefix(qualified_name: &str) -> &str {
 }
 
 fn container_kind(kind: &str) -> bool {
-    matches!(kind, "class" | "interface" | "module" | "type")
+    matches!(
+        kind,
+        "class" | "constructor" | "function" | "interface" | "method" | "module" | "type"
+    )
 }

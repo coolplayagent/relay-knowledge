@@ -235,10 +235,13 @@ fn callers_for_symbols(
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
-               c.confidence_basis_points, c.confidence_tier
+               c.confidence_basis_points, c.confidence_tier, caller.canonical_symbol_id
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
+        LEFT JOIN code_repository_symbols caller
+            ON caller.source_scope = c.source_scope
+           AND caller.symbol_snapshot_id = c.caller_symbol_snapshot_id
         WHERE c.source_scope = ?1
         ORDER BY c.path ASC, c.line_start ASC
         ",
@@ -260,6 +263,7 @@ fn callers_for_symbols(
             resolution_state: row.get(10)?,
             confidence_basis_points: row.get(11)?,
             confidence_tier: row.get(12)?,
+            caller_canonical_symbol_id: row.get(13)?,
         })
     })?;
     let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
@@ -288,7 +292,7 @@ fn callers_for_symbols(
                     byte_range: RepositoryCodeRange { start: 0, end: 0 },
                     line_range: row.line_range,
                     symbol_snapshot_id: row.caller_symbol_snapshot_id,
-                    canonical_symbol_id: None,
+                    canonical_symbol_id: row.caller_canonical_symbol_id,
                     file_id: Some(row.file_id),
                     retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                     score: 2.5,
@@ -565,6 +569,7 @@ struct ImpactCallRow {
     resolution_state: String,
     confidence_basis_points: u16,
     confidence_tier: String,
+    caller_canonical_symbol_id: Option<String>,
 }
 
 struct ImpactImportRow {

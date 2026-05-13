@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rusqlite::{Connection, params};
 
 use crate::storage::StorageError;
@@ -268,16 +270,123 @@ pub(super) fn ensure_code_repository_compat_columns(
         "confidence_tier",
         "TEXT NOT NULL DEFAULT 'ambiguous'",
     )?;
-    connection.execute(
-        "
-        UPDATE code_repository_symbols
-        SET canonical_symbol_id = 'repo://' || repository_id || '/' || qualified_name
-        WHERE canonical_symbol_id = '' OR canonical_symbol_id = symbol_snapshot_id
-        ",
-        [],
-    )?;
+    rebuild_code_repository_symbol_identities(connection)?;
 
     Ok(())
+}
+
+fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT source_scope, symbol_snapshot_id, repository_id, path, name, kind,
+               line_start, line_end, qualified_name
+        FROM code_repository_symbols
+        ORDER BY source_scope ASC, path ASC, line_start ASC, line_end DESC, name ASC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(SymbolIdentityRow {
+            source_scope: row.get(0)?,
+            symbol_snapshot_id: row.get(1)?,
+            repository_id: row.get(2)?,
+            path: row.get(3)?,
+            name: row.get(4)?,
+            kind: row.get(5)?,
+            line_start: row.get(6)?,
+            line_end: row.get(7)?,
+            prefix: symbol_path_prefix(&row.get::<_, String>(8)?).to_owned(),
+        })
+    })?;
+    let rows = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)?;
+    let mut by_scope_path = BTreeMap::<(&str, &str), Vec<usize>>::new();
+    for (index, row) in rows.iter().enumerate() {
+        by_scope_path
+            .entry((row.source_scope.as_str(), row.path.as_str()))
+            .or_default()
+            .push(index);
+    }
+    let mut updates = Vec::new();
+    for row_indices in by_scope_path.values_mut() {
+        row_indices.sort_by(|left, right| {
+            let left = &rows[*left];
+            let right = &rows[*right];
+            left.line_start
+                .cmp(&right.line_start)
+                .then_with(|| right.line_end.cmp(&left.line_end))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        let mut container_stack = Vec::<usize>::new();
+        for row_index in row_indices {
+            let row = &rows[*row_index];
+            while container_stack
+                .last()
+                .is_some_and(|ancestor| rows[*ancestor].line_end < row.line_end)
+            {
+                container_stack.pop();
+            }
+            let mut segments = container_stack
+                .iter()
+                .map(|ancestor| rows[*ancestor].name.clone())
+                .collect::<Vec<_>>();
+            segments.push(row.name.clone());
+            let qualified_name = format!("{}::{}", row.prefix, segments.join("."));
+            let canonical_symbol_id = format!("repo://{}/{}", row.repository_id, qualified_name);
+            updates.push((
+                row.source_scope.clone(),
+                row.symbol_snapshot_id.clone(),
+                qualified_name,
+                canonical_symbol_id,
+            ));
+            if symbol_container_kind(&row.kind) {
+                container_stack.push(*row_index);
+            }
+        }
+    }
+    let mut update = connection.prepare(
+        "
+        UPDATE code_repository_symbols
+        SET qualified_name = ?3,
+            canonical_symbol_id = ?4
+        WHERE source_scope = ?1 AND symbol_snapshot_id = ?2
+        ",
+    )?;
+    for (source_scope, symbol_snapshot_id, qualified_name, canonical_symbol_id) in updates {
+        update.execute(params![
+            source_scope,
+            symbol_snapshot_id,
+            qualified_name,
+            canonical_symbol_id,
+        ])?;
+    }
+
+    Ok(())
+}
+
+struct SymbolIdentityRow {
+    source_scope: String,
+    symbol_snapshot_id: String,
+    repository_id: String,
+    path: String,
+    name: String,
+    kind: String,
+    line_start: u32,
+    line_end: u32,
+    prefix: String,
+}
+
+fn symbol_path_prefix(qualified_name: &str) -> &str {
+    qualified_name
+        .rsplit_once("::")
+        .map_or(qualified_name, |(prefix, _)| prefix)
+}
+
+fn symbol_container_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class" | "constructor" | "function" | "interface" | "method" | "module" | "type"
+    )
 }
 
 fn migrate_legacy_code_scope_schema(connection: &Connection) -> Result<(), StorageError> {
@@ -394,13 +503,21 @@ mod tests {
                     symbol_snapshot_id TEXT NOT NULL,
                     path TEXT NOT NULL,
                     name TEXT NOT NULL,
+                    kind TEXT NOT NULL,
                     qualified_name TEXT NOT NULL,
+                    line_start INTEGER NOT NULL,
+                    line_end INTEGER NOT NULL,
                     PRIMARY KEY (source_scope, symbol_snapshot_id)
                 );
                 INSERT INTO code_repository_symbols (
-                    repository_id, source_scope, symbol_snapshot_id, path, name, qualified_name
+                    repository_id, source_scope, symbol_snapshot_id, path, name, kind,
+                    qualified_name, line_start, line_end
                 )
-                VALUES ('repo', 'scope', 'snapshot-id', 'src/lib.rs', 'target', 'src::lib.rs::target');
+                VALUES
+                    ('repo', 'scope', 'outer-a', 'src/lib.rs', 'outer_a', 'function', 'src::lib.rs::outer_a', 1, 5),
+                    ('repo', 'scope', 'inner-a', 'src/lib.rs', 'inner', 'function', 'src::lib.rs::inner', 2, 3),
+                    ('repo', 'scope', 'outer-b', 'src/lib.rs', 'outer_b', 'function', 'src::lib.rs::outer_b', 6, 10),
+                    ('repo', 'scope', 'inner-b', 'src/lib.rs', 'inner', 'function', 'src::lib.rs::inner', 7, 8);
                 ",
             )
             .expect("legacy-compatible fixture should build");
@@ -412,12 +529,15 @@ mod tests {
                 "
                 SELECT canonical_symbol_id
                 FROM code_repository_symbols
-                WHERE symbol_snapshot_id = 'snapshot-id'
+                WHERE symbol_snapshot_id = 'inner-b'
                 ",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .expect("canonical id should load");
-        assert_eq!(canonical_symbol_id, "repo://repo/src::lib.rs::target");
+        assert_eq!(
+            canonical_symbol_id,
+            "repo://repo/src::lib.rs::outer_b.inner"
+        );
     }
 }

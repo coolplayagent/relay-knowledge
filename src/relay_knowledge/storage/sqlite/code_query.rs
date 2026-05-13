@@ -274,10 +274,17 @@ fn search_calls(
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
-               c.confidence_basis_points, c.confidence_tier
+               c.confidence_basis_points, c.confidence_tier,
+               caller.canonical_symbol_id, callee.canonical_symbol_id
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
+        LEFT JOIN code_repository_symbols caller
+            ON caller.source_scope = c.source_scope
+           AND caller.symbol_snapshot_id = c.caller_symbol_snapshot_id
+        LEFT JOIN code_repository_symbols callee
+            ON callee.source_scope = c.source_scope
+           AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
         WHERE c.source_scope = ?
           AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
@@ -306,6 +313,8 @@ fn search_calls(
                 resolution_state: row.get(10)?,
                 confidence_basis_points: row.get(11)?,
                 confidence_tier: row.get(12)?,
+                caller_canonical_symbol_id: row.get(13)?,
+                callee_canonical_symbol_id: row.get(14)?,
             })
         },
     )?;
@@ -326,11 +335,18 @@ fn search_calls(
             let score = score_text(&query, search_fields);
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
-                let symbol_snapshot_id = if request.code_query_kind == CodeQueryKind::Callees {
-                    row.callee_symbol_snapshot_id
-                } else {
-                    row.caller_symbol_snapshot_id
-                };
+                let (symbol_snapshot_id, canonical_symbol_id) =
+                    if request.code_query_kind == CodeQueryKind::Callees {
+                        (
+                            row.callee_symbol_snapshot_id,
+                            row.callee_canonical_symbol_id,
+                        )
+                    } else {
+                        (
+                            row.caller_symbol_snapshot_id,
+                            row.caller_canonical_symbol_id,
+                        )
+                    };
                 hit_from_parts(
                     status,
                     HitParts {
@@ -339,7 +355,7 @@ fn search_calls(
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
                         symbol_snapshot_id,
-                        canonical_symbol_id: None,
+                        canonical_symbol_id,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                         score: score + 1.25,
@@ -435,7 +451,6 @@ fn search_imports(
         })
         .collect())
 }
-
 fn search_chunks(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -846,6 +861,8 @@ struct CallRow {
     resolution_state: String,
     confidence_basis_points: u16,
     confidence_tier: String,
+    caller_canonical_symbol_id: Option<String>,
+    callee_canonical_symbol_id: Option<String>,
 }
 
 struct ImportRow {
