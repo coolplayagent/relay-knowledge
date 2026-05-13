@@ -46,9 +46,16 @@ pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
 pub const RELAY_KNOWLEDGE_SEMANTIC_BACKEND: &str = "RELAY_KNOWLEDGE_SEMANTIC_BACKEND";
 pub const RELAY_KNOWLEDGE_VECTOR_BACKEND: &str = "RELAY_KNOWLEDGE_VECTOR_BACKEND";
+pub const RELAY_KNOWLEDGE_LLM_PROVIDER: &str = "RELAY_KNOWLEDGE_LLM_PROVIDER";
+pub const RELAY_KNOWLEDGE_EMBEDDING_BASE_URL: &str = "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL";
+pub const RELAY_KNOWLEDGE_EMBEDDING_API_KEY: &str = "RELAY_KNOWLEDGE_EMBEDDING_API_KEY";
 pub const RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_EMBEDDING_DIMENSION: &str = "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION";
+pub const RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE: &str = "RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE";
+pub const RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY: &str =
+    "RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY";
 pub const RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT: &str =
     "RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT";
 pub const RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT";
@@ -167,9 +174,15 @@ pub struct AgentEnvOverrides {
 pub struct RetrievalEnvOverrides {
     pub semantic_backend: Option<String>,
     pub vector_backend: Option<String>,
+    pub llm_provider: Option<String>,
+    pub embedding_base_url: Option<String>,
+    pub embedding_api_key: Option<String>,
     pub text_embedding_model: Option<String>,
     pub image_embedding_model: Option<String>,
     pub embedding_dimension: Option<usize>,
+    pub embedding_batch_size: Option<usize>,
+    pub embedding_timeout_ms: Option<u64>,
+    pub embedding_max_concurrency: Option<usize>,
 }
 
 /// Worker and service-operator settings read from relay-specific environment variables.
@@ -310,11 +323,26 @@ impl EnvironmentConfig {
             retrieval: RetrievalEnvOverrides {
                 semantic_backend: string_var(&values, RELAY_KNOWLEDGE_SEMANTIC_BACKEND)?,
                 vector_backend: string_var(&values, RELAY_KNOWLEDGE_VECTOR_BACKEND)?,
+                llm_provider: string_var(&values, RELAY_KNOWLEDGE_LLM_PROVIDER)?,
+                embedding_base_url: string_var(&values, RELAY_KNOWLEDGE_EMBEDDING_BASE_URL)?,
+                embedding_api_key: string_var(&values, RELAY_KNOWLEDGE_EMBEDDING_API_KEY)?,
                 text_embedding_model: string_var(&values, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL)?,
                 image_embedding_model: string_var(&values, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL)?,
                 embedding_dimension: positive_usize_var(
                     &values,
                     RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+                )?,
+                embedding_batch_size: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE,
+                )?,
+                embedding_timeout_ms: positive_u64_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS,
+                )?,
+                embedding_max_concurrency: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY,
                 )?,
             },
             workers: WorkerEnvOverrides {

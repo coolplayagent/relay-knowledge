@@ -160,6 +160,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--by"
             | "--reason"
             | "--operation"
+            | "--input"
     )
 }
 
@@ -175,6 +176,7 @@ fn is_command_word(token: &str) -> bool {
             | "worker"
             | "proposal"
             | "audit"
+            | "provider"
             | "health"
             | "service"
             | "version"
@@ -232,6 +234,7 @@ pub enum CliAction {
         operation: Option<String>,
         limit: usize,
     },
+    ProviderProbe,
     Repo(repo_cli::RepoCommand),
     Health,
     ServiceStatus,
@@ -508,6 +511,19 @@ pub async fn run_with_service(
                 format,
             )
         }
+        CliAction::ProviderProbe => {
+            let response = service
+                .probe_embedding_provider(context)
+                .await
+                .map_err(|error| CliError::ApiFailed(error.message))?;
+
+            render_response(
+                "provider.embedding.probe",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
         CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
             "service run requires process runtime".to_owned(),
         )),
@@ -556,6 +572,7 @@ pub fn help_text() -> &'static str {
         "  proposal show <id>\n",
         "  proposal accept|reject|supersede <id> --by <actor> [--reason <text>]\n",
         "  audit query [--operation <name>] [--limit <n>]\n",
+        "  provider probe\n",
         "  health\n",
         "  service status|doctor\n",
         "  service plan install|uninstall\n",
@@ -605,11 +622,25 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "worker" => ops_cli::parse_worker(&tokens[1..]),
         "proposal" => ops_cli::parse_proposal(&tokens[1..]),
         "audit" => ops_cli::parse_audit(&tokens[1..]),
+        "provider" => parse_provider(&tokens[1..]),
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
         "service" => ops_cli::parse_service(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
         other => Err(CliError::UnexpectedArgument(other.to_owned())),
     }
+}
+
+fn parse_provider(tokens: &[String]) -> Result<CliAction, CliError> {
+    if tokens == ["probe"] {
+        return Ok(CliAction::ProviderProbe);
+    }
+
+    Err(CliError::UnexpectedArgument(
+        tokens
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "provider".to_owned()),
+    ))
 }
 
 fn parse_ingest(tokens: &[String]) -> Result<CliAction, CliError> {

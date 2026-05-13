@@ -4,14 +4,18 @@ use crate::{
     api::{AgentAccessPolicy, AgentPolicyError},
     domain::WorkerKind,
     env::{
-        EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL,
-        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
+        EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_EMBEDDING_API_KEY,
+        RELAY_KNOWLEDGE_EMBEDDING_BASE_URL, RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+        RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        RetrievalEnvOverrides,
     },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     paths::{PathError, RuntimePaths},
     retrieval::{
-        LOCAL_SEMANTIC_MODEL, LOCAL_VECTOR_DIMENSION, LOCAL_VECTOR_MODEL, ReadModelBackendConfig,
-        ReadModelBackendMode, ReadModelBackendModeError, ReadModelMetadata,
+        DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_EMBEDDING_MAX_CONCURRENCY, DEFAULT_EMBEDDING_TIMEOUT,
+        EmbeddingProviderKind, EmbeddingProviderKindError, LOCAL_SEMANTIC_MODEL,
+        LOCAL_VECTOR_DIMENSION, LOCAL_VECTOR_MODEL, ReadModelBackendConfig, ReadModelBackendMode,
+        ReadModelBackendModeError, ReadModelMetadata, RemoteEmbeddingConfig,
     },
 };
 
@@ -238,7 +242,10 @@ impl Error for RuntimeConfigurationError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetrievalRuntimeConfigError {
     InvalidBackend(ReadModelBackendModeError),
+    InvalidProvider(EmbeddingProviderKindError),
     EmptyModelName(&'static str),
+    MissingRemoteValue(&'static str),
+    InvalidRemoteBaseUrl(String),
     DimensionTooLarge(usize),
 }
 
@@ -246,8 +253,21 @@ impl fmt::Display for RetrievalRuntimeConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBackend(error) => write!(formatter, "{error}"),
+            Self::InvalidProvider(error) => write!(formatter, "{error}"),
             Self::EmptyModelName(variable) => {
                 write!(formatter, "{variable} must not be blank")
+            }
+            Self::MissingRemoteValue(variable) => {
+                write!(
+                    formatter,
+                    "{variable} is required when a read model backend is external"
+                )
+            }
+            Self::InvalidRemoteBaseUrl(value) => {
+                write!(
+                    formatter,
+                    "embedding base URL '{value}' must use http:// or https://"
+                )
             }
             Self::DimensionTooLarge(value) => {
                 write!(formatter, "embedding dimension {value} does not fit in u32")
@@ -261,6 +281,11 @@ impl Error for RetrievalRuntimeConfigError {}
 fn retrieval_config_from_environment(
     overrides: &RetrievalEnvOverrides,
 ) -> Result<ReadModelBackendConfig, RetrievalRuntimeConfigError> {
+    let semantic_mode = parse_backend_mode(overrides.semantic_backend.as_deref())?;
+    let vector_mode = parse_backend_mode(overrides.vector_backend.as_deref())?;
+    let remote_required = semantic_mode == ReadModelBackendMode::External
+        || vector_mode == ReadModelBackendMode::External;
+    require_remote_model_metadata(overrides, remote_required)?;
     let dimension = match overrides.embedding_dimension {
         Some(value) => u32::try_from(value)
             .map_err(|_| RetrievalRuntimeConfigError::DimensionTooLarge(value))?,
@@ -282,9 +307,11 @@ fn retrieval_config_from_environment(
         "relay-local-image-hash-v1",
     )?;
 
+    let remote_embedding = remote_embedding_config_from_environment(overrides, remote_required)?;
+
     Ok(ReadModelBackendConfig {
-        semantic_mode: parse_backend_mode(overrides.semantic_backend.as_deref())?,
-        vector_mode: parse_backend_mode(overrides.vector_backend.as_deref())?,
+        semantic_mode,
+        vector_mode,
         semantic_model: ReadModelMetadata {
             name: semantic_model,
             dimension,
@@ -297,7 +324,85 @@ fn retrieval_config_from_environment(
             name: image_model,
             dimension,
         },
+        remote_embedding,
     })
+}
+
+fn require_remote_model_metadata(
+    overrides: &RetrievalEnvOverrides,
+    required: bool,
+) -> Result<(), RetrievalRuntimeConfigError> {
+    if !required {
+        return Ok(());
+    }
+    if overrides.text_embedding_model.is_none() {
+        return Err(RetrievalRuntimeConfigError::MissingRemoteValue(
+            RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        ));
+    }
+    if overrides.embedding_dimension.is_none() {
+        return Err(RetrievalRuntimeConfigError::MissingRemoteValue(
+            RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+        ));
+    }
+
+    Ok(())
+}
+
+fn remote_embedding_config_from_environment(
+    overrides: &RetrievalEnvOverrides,
+    required: bool,
+) -> Result<Option<RemoteEmbeddingConfig>, RetrievalRuntimeConfigError> {
+    if !required {
+        return Ok(None);
+    }
+    let provider = overrides
+        .llm_provider
+        .as_deref()
+        .map(EmbeddingProviderKind::parse)
+        .transpose()
+        .map_err(RetrievalRuntimeConfigError::InvalidProvider)?
+        .unwrap_or(EmbeddingProviderKind::OpenAiCompatible);
+    let base_url = required_remote_value(
+        overrides.embedding_base_url.as_deref(),
+        RELAY_KNOWLEDGE_EMBEDDING_BASE_URL,
+    )?;
+    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+        return Err(RetrievalRuntimeConfigError::InvalidRemoteBaseUrl(base_url));
+    }
+    let api_key = required_remote_value(
+        overrides.embedding_api_key.as_deref(),
+        RELAY_KNOWLEDGE_EMBEDDING_API_KEY,
+    )?;
+    let batch_size = overrides
+        .embedding_batch_size
+        .unwrap_or(DEFAULT_EMBEDDING_BATCH_SIZE);
+    let timeout = overrides
+        .embedding_timeout_ms
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_EMBEDDING_TIMEOUT);
+    let max_concurrency = overrides
+        .embedding_max_concurrency
+        .unwrap_or(DEFAULT_EMBEDDING_MAX_CONCURRENCY);
+
+    Ok(Some(RemoteEmbeddingConfig {
+        provider,
+        base_url,
+        api_key,
+        batch_size,
+        timeout,
+        max_concurrency,
+    }))
+}
+
+fn required_remote_value(
+    value: Option<&str>,
+    variable: &'static str,
+) -> Result<String, RetrievalRuntimeConfigError> {
+    match value.map(str::trim) {
+        Some(trimmed) if !trimmed.is_empty() => Ok(trimmed.to_owned()),
+        _ => Err(RetrievalRuntimeConfigError::MissingRemoteValue(variable)),
+    }
 }
 
 fn model_name_override(
@@ -448,9 +553,18 @@ mod tests {
             [
                 ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "external"),
                 ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+                ("RELAY_KNOWLEDGE_LLM_PROVIDER", "openai_compatible"),
+                (
+                    "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+                    "https://embeddings.example/v1",
+                ),
+                ("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "secret-key"),
                 ("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "text-embed-3-small"),
                 ("RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL", "clip-vit-b32"),
                 ("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", "1536"),
+                ("RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE", "16"),
+                ("RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS", "9000"),
+                ("RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY", "2"),
             ],
         )
         .expect("environment should parse");
@@ -470,6 +584,42 @@ mod tests {
         assert_eq!(runtime.retrieval.vector_model.name, "text-embed-3-small");
         assert_eq!(runtime.retrieval.image_model.name, "clip-vit-b32");
         assert_eq!(runtime.retrieval.vector_model.dimension, 1536);
+        let remote = runtime
+            .retrieval
+            .remote_embedding
+            .expect("remote embedding config should be present");
+        assert_eq!(remote.provider, EmbeddingProviderKind::OpenAiCompatible);
+        assert_eq!(remote.redacted_base_url(), "https://embeddings.example");
+        assert_eq!(remote.batch_size, 16);
+        assert_eq!(remote.timeout, Duration::from_millis(9000));
+        assert_eq!(remote.max_concurrency, 2);
+    }
+
+    #[tokio::test]
+    async fn rejects_external_backend_without_remote_model_metadata() {
+        let environment = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [
+                ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+                (
+                    "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+                    "https://embeddings.example/v1",
+                ),
+                ("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "secret-key"),
+            ],
+        )
+        .expect("environment should parse");
+
+        let error = RuntimeConfiguration::from_environment(&environment)
+            .await
+            .expect_err("external backend should require explicit model metadata");
+
+        assert!(matches!(
+            error,
+            RuntimeConfigurationError::Retrieval(RetrievalRuntimeConfigError::MissingRemoteValue(
+                RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL
+            ))
+        ));
     }
 
     #[tokio::test]

@@ -3,7 +3,10 @@
 //! Retrieval owns query-shape validation and budgets before the application
 //! service asks storage and derived indexes for data.
 
+use std::time::Duration;
 use std::{error::Error, fmt};
+
+pub mod provider;
 
 use crate::domain::{
     FreshnessPolicy, GraphVersion, IndexKind, IndexStatus, RetrievalBackendState,
@@ -13,6 +16,9 @@ use crate::domain::{
 pub const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
 pub const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
 pub const LOCAL_VECTOR_DIMENSION: u32 = 16;
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 32;
+pub const DEFAULT_EMBEDDING_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_EMBEDDING_MAX_CONCURRENCY: usize = 4;
 
 /// Validated retrieval request with bounded result count.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +36,52 @@ pub enum ReadModelBackendMode {
     External,
     Disabled,
 }
+
+/// Remote LLM provider family used for embedding calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbeddingProviderKind {
+    OpenAiCompatible,
+    Echo,
+}
+
+impl EmbeddingProviderKind {
+    /// Parses a stable environment/config value.
+    pub fn parse(value: &str) -> Result<Self, EmbeddingProviderKindError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "openai_compatible" => Ok(Self::OpenAiCompatible),
+            "echo" => Ok(Self::Echo),
+            other => Err(EmbeddingProviderKindError {
+                value: other.to_owned(),
+            }),
+        }
+    }
+
+    /// Stable configuration label.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAiCompatible => "openai_compatible",
+            Self::Echo => "echo",
+        }
+    }
+}
+
+/// Invalid embedding provider kind supplied by runtime configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingProviderKindError {
+    pub value: String,
+}
+
+impl fmt::Display for EmbeddingProviderKindError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "embedding provider '{}' must be openai_compatible or echo",
+            self.value
+        )
+    }
+}
+
+impl Error for EmbeddingProviderKindError {}
 
 impl ReadModelBackendMode {
     /// Parses a stable environment/config value.
@@ -79,6 +131,24 @@ pub struct ReadModelMetadata {
     pub dimension: u32,
 }
 
+/// Runtime configuration for a remote embedding provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteEmbeddingConfig {
+    pub provider: EmbeddingProviderKind,
+    pub base_url: String,
+    pub api_key: String,
+    pub batch_size: usize,
+    pub timeout: Duration,
+    pub max_concurrency: usize,
+}
+
+impl RemoteEmbeddingConfig {
+    /// Returns a URL label that is safe to expose in diagnostics.
+    pub fn redacted_base_url(&self) -> String {
+        redacted_url(&self.base_url)
+    }
+}
+
 /// Runtime read model configuration shared by refresh and retrieval status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadModelBackendConfig {
@@ -87,6 +157,7 @@ pub struct ReadModelBackendConfig {
     pub semantic_model: ReadModelMetadata,
     pub vector_model: ReadModelMetadata,
     pub image_model: ReadModelMetadata,
+    pub remote_embedding: Option<RemoteEmbeddingConfig>,
 }
 
 impl ReadModelBackendConfig {
@@ -107,6 +178,7 @@ impl ReadModelBackendConfig {
                 name: "relay-local-image-hash-v1".to_owned(),
                 dimension: LOCAL_VECTOR_DIMENSION,
             },
+            remote_embedding: None,
         }
     }
 
@@ -131,6 +203,22 @@ impl ReadModelBackendConfig {
 
         disabled
     }
+}
+
+fn redacted_url(value: &str) -> String {
+    let trimmed = value.trim();
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return trimmed.to_owned();
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if host.is_empty() {
+        return scheme.to_owned();
+    }
+
+    format!("{scheme}://{host}")
 }
 
 /// Builds semantic/vector backend status from configured read models and index cursors.
@@ -367,5 +455,19 @@ mod tests {
 
         assert_eq!(statuses[0].state, RetrievalBackendState::Degraded);
         assert_eq!(statuses[1].state, RetrievalBackendState::Unavailable);
+    }
+
+    #[test]
+    fn redacted_remote_url_strips_userinfo_and_path() {
+        let config = RemoteEmbeddingConfig {
+            provider: EmbeddingProviderKind::OpenAiCompatible,
+            base_url: "https://user:pass@embeddings.example/v1".to_owned(),
+            api_key: "secret".to_owned(),
+            batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+            timeout: DEFAULT_EMBEDDING_TIMEOUT,
+            max_concurrency: DEFAULT_EMBEDDING_MAX_CONCURRENCY,
+        };
+
+        assert_eq!(config.redacted_base_url(), "https://embeddings.example");
     }
 }

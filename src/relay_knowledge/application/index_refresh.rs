@@ -107,7 +107,7 @@ async fn refresh_index_kinds_with_policy(
             queue_policy,
         )
         .await?;
-        drain_index_refresh_queue(store).await?;
+        drain_index_refresh_queue(store, read_models).await?;
     }
 
     let outcome = index_refresh_outcome(store).await?;
@@ -288,7 +288,10 @@ async fn queue_index_refreshes(
     }
 }
 
-async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<(), ApiError> {
+async fn drain_index_refresh_queue(
+    store: &Arc<dyn KnowledgeStore>,
+    read_models: &ReadModelBackendConfig,
+) -> Result<(), ApiError> {
     let lease_owner = format!("foreground-refresh-{}", std::process::id());
     let mut first_failure = None;
     loop {
@@ -334,18 +337,36 @@ async fn drain_index_refresh_queue(store: &Arc<dyn KnowledgeStore>) -> Result<()
             continue;
         }
 
+        let (model_name, model_dimension) = refresh_model_metadata(task.kind, read_models);
         store
             .complete_index_refresh_task(IndexRefreshCompletion {
                 task_id: task.task_id,
                 lease_owner: lease_owner.clone(),
                 attempt_count: task.attempt_count,
                 indexed_graph_version: task.target_graph_version,
-                model_name: None,
-                model_dimension: None,
+                model_name,
+                model_dimension,
                 now_ms: now_millis(),
             })
             .await
             .map_err(storage_api_error)?;
+    }
+}
+
+fn refresh_model_metadata(
+    kind: IndexKind,
+    read_models: &ReadModelBackendConfig,
+) -> (Option<String>, Option<u32>) {
+    match kind {
+        IndexKind::Bm25 => (None, None),
+        IndexKind::Semantic => (
+            Some(read_models.semantic_model.name.clone()),
+            Some(read_models.semantic_model.dimension),
+        ),
+        IndexKind::Vector => (
+            Some(read_models.vector_model.name.clone()),
+            Some(read_models.vector_model.dimension),
+        ),
     }
 }
 

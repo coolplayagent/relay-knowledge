@@ -5,6 +5,7 @@ import type {
   ServiceStatusResponse
 } from "./api/contracts";
 import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.js";
+import { providersSection } from "./providers.js";
 import {
   INDEX_KINDS,
   OPERATIONS,
@@ -93,6 +94,7 @@ function sidebar(): HTMLElement {
   nav.append(
     navLink("Status", "#status"),
     navLink("Readiness", "#readiness"),
+    navLink("Providers", "#providers"),
     navLink("Operations", "#operations"),
     navLink("Indexes", "#indexes"),
     navLink("Runtime", "#runtime")
@@ -120,6 +122,7 @@ function content(
     toolbar(status, health),
     statusSection(status, health),
     readinessSection(status, health, service),
+    providersSection(status, health),
     operationsSection(status, health),
     indexesSection(health.indexes, health.metadata.graph_version),
     runtimeSection(status, service)
@@ -423,6 +426,13 @@ function operationForm(): HTMLElement {
       break;
     case "indexes":
       form.append(indexKindControls());
+      break;
+    case "provider":
+      form.append(
+        inputControl("Probe input", appState.provider.probeInput, (value) => {
+          appState.provider.probeInput = value;
+        })
+      );
       break;
     case "worker":
       form.append(workerControls());

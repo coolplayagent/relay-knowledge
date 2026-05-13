@@ -29,6 +29,17 @@ pub struct RuntimeStatus {
     pub worker_extractor_endpoint_configured: bool,
     pub worker_max_in_flight: usize,
     pub silent_updates_enabled: bool,
+    pub semantic_backend_mode: String,
+    pub vector_backend_mode: String,
+    pub embedding_provider: Option<String>,
+    pub embedding_base_url: Option<String>,
+    pub embedding_api_key_configured: bool,
+    pub text_embedding_model: String,
+    pub image_embedding_model: String,
+    pub embedding_dimension: u32,
+    pub embedding_batch_size: Option<usize>,
+    pub embedding_timeout_ms: Option<u64>,
+    pub embedding_max_concurrency: Option<usize>,
 }
 
 /// Minimal project status response exposed through the unified API layer.

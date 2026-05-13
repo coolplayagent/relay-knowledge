@@ -113,6 +113,17 @@ mod tests {
                 worker_extractor_endpoint_configured: false,
                 worker_max_in_flight: 2,
                 silent_updates_enabled: false,
+                semantic_backend_mode: "local".to_owned(),
+                vector_backend_mode: "local".to_owned(),
+                embedding_provider: None,
+                embedding_base_url: None,
+                embedding_api_key_configured: false,
+                text_embedding_model: "relay-local-hash-ann-v1".to_owned(),
+                image_embedding_model: "relay-local-image-hash-v1".to_owned(),
+                embedding_dimension: 16,
+                embedding_batch_size: None,
+                embedding_timeout_ms: None,
+                embedding_max_concurrency: None,
             },
         };
 

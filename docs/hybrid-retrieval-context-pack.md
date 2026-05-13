@@ -54,8 +54,9 @@ retrieval remains usable when a derived backend is disabled or stale, and the
 response still reports index freshness.
 BM25, semantic, vector, graph path, temporal, and community hits are fused with
 RRF. The default semantic/vector implementation is the local deterministic read
-model, while external embedding workers can now reuse the same cursor and
-backend-status contract without changing the context-pack shape.
+model. External OpenAI-compatible embedding providers can supply read-model
+metadata and probe diagnostics through the same cursor and backend-status
+contract without changing the context-pack shape.
 Health and index-refresh diagnostics also expose scoped cursor metadata for
 these index families: source hash, backend cursor, and model name/dimension when
 a configured backend worker supplies them. The same diagnostics include
@@ -124,6 +125,9 @@ When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` or
 candidate execution and its read-model refresh work is not scheduled. Semantic
 and vector cursor model metadata is derived from the documents that were indexed,
 not from runtime override labels.
+When either backend is `external`, the remote provider is configured through
+the `env` boundary. Query execution still reads local read-model tables and does
+not call the provider on the hot path.
 
 ## CLI Example
 

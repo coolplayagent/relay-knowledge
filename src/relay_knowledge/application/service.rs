@@ -1,16 +1,18 @@
 use std::{
     path::PathBuf,
     sync::{Arc, OnceLock},
+    time::Instant,
 };
 
 use serde::Serialize;
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
-        HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
-        IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
-        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        ApiError, ApiMetadata, EmbeddingProviderProbeResponse, GraphInspectionRequest,
+        GraphInspectionResponse, HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse,
+        IndexRefreshRequest, IndexRefreshResponse, IngestRequest, IngestResponse,
+        MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
+        RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
         ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind,
@@ -22,7 +24,11 @@ use crate::{
         DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
         PROJECT_NAME, WINDOWS_SERVICE_DEFINITION_FILE_NAME,
     },
-    retrieval::{RetrievalPlan, read_model_backend_statuses},
+    retrieval::{
+        RetrievalPlan,
+        provider::{EmbeddingRequest, ProviderRetryClass, embedding_provider},
+        read_model_backend_statuses,
+    },
     storage::{
         GraphSearchRequest, KnowledgeStore, ProposalListRequest, SqliteGraphStore, StorageError,
     },
@@ -422,6 +428,65 @@ impl RelayKnowledgeService {
         })
     }
 
+    /// Probes the configured remote embedding provider without exposing secrets.
+    pub async fn probe_embedding_provider(
+        &self,
+        context: RequestContext,
+    ) -> Result<EmbeddingProviderProbeResponse, ApiError> {
+        let Some(remote) = self.runtime.retrieval.remote_embedding.clone() else {
+            return Ok(EmbeddingProviderProbeResponse {
+                metadata: ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO),
+                ok: false,
+                provider: None,
+                model: self.runtime.retrieval.vector_model.name.clone(),
+                dimension: self.runtime.retrieval.vector_model.dimension,
+                latency_ms: None,
+                error_code: Some("remote_embedding_not_configured".to_owned()),
+                error_message: Some("remote embedding provider is not configured".to_owned()),
+                retryable: Some(false),
+            });
+        };
+        let network = self.runtime.network.current();
+        let client = crate::net::http::outbound_json_client(&network.http).map_err(|error| {
+            ApiError::invalid_argument(format!("failed to build HTTP client: {error}"))
+        })?;
+        let provider_name = remote.provider.as_str().to_owned();
+        let provider = embedding_provider(remote, client);
+        let started = Instant::now();
+        let result = provider
+            .embed(EmbeddingRequest {
+                inputs: vec!["relay-knowledge provider probe".to_owned()],
+                model: self.runtime.retrieval.vector_model.name.clone(),
+                dimension: self.runtime.retrieval.vector_model.dimension,
+            })
+            .await;
+
+        match result {
+            Ok(_) => Ok(EmbeddingProviderProbeResponse {
+                metadata: ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO),
+                ok: true,
+                provider: Some(provider_name),
+                model: self.runtime.retrieval.vector_model.name.clone(),
+                dimension: self.runtime.retrieval.vector_model.dimension,
+                latency_ms: Some(duration_millis(started.elapsed())),
+                error_code: None,
+                error_message: None,
+                retryable: None,
+            }),
+            Err(error) => Ok(EmbeddingProviderProbeResponse {
+                metadata: ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO),
+                ok: false,
+                provider: Some(provider_name),
+                model: self.runtime.retrieval.vector_model.name.clone(),
+                dimension: self.runtime.retrieval.vector_model.dimension,
+                latency_ms: Some(duration_millis(started.elapsed())),
+                error_code: Some(error.code),
+                error_message: Some(error.message),
+                retryable: Some(error.retry == ProviderRetryClass::Retryable),
+            }),
+        }
+    }
+
     /// Reconciles derived index cursors before resident service work starts.
     pub async fn reconcile_startup_indexes(
         &self,
@@ -642,6 +707,10 @@ fn serialized_context_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
     serde_json::to_vec(value)
         .map(|bytes| bytes.len())
         .unwrap_or(usize::MAX / 4)
+}
+
+fn duration_millis(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn service_definition_filename() -> &'static str {

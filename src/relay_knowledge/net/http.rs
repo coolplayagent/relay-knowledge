@@ -121,6 +121,38 @@ pub struct HttpProxyConfig {
     pub ssl_verify: bool,
 }
 
+/// Builds an async outbound JSON client from validated network policy.
+pub fn outbound_json_client(config: &HttpConfig) -> Result<reqwest::Client, OutboundClientError> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(config.request_timeout)
+        .danger_accept_invalid_certs(!config.proxy.ssl_verify);
+    if let Some(proxy_url) = &config.proxy.proxy {
+        let no_proxy = reqwest::NoProxy::from_string(&config.proxy.no_proxy_rules.join(","));
+        let proxy = reqwest::Proxy::all(proxy_url)
+            .map_err(|error| OutboundClientError {
+                message: error.to_string(),
+            })?
+            .no_proxy(no_proxy);
+        builder = builder.proxy(proxy);
+    }
+
+    builder.build().map_err(|error| OutboundClientError {
+        message: error.to_string(),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboundClientError {
+    pub message: String,
+}
+impl fmt::Display for OutboundClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl Error for OutboundClientError {}
+
 impl HttpProxyConfig {
     /// Validates proxy URL shape and no-proxy entries without exposing credentials.
     pub fn new(

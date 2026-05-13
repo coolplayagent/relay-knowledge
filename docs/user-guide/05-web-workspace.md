@@ -20,7 +20,8 @@ Web 工作区位于 `web/`，用于诊断面板和操作预览:
 /api/service/status
 ```
 
-页面展示 project health、GraphRAG readiness、graph counts、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
+页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
+Providers 面板只展示脱敏后的 semantic/vector backend mode、模型、维度、endpoint host、key configured 状态和 cursor metadata；Web UI 不保存或提交 provider API key。
 
 ## 5.3 操作预览
 
@@ -31,6 +32,7 @@ Web Operations 面板覆盖这些工作流的 typed command/request preview:
 - graph inspect
 - code repository register/index/query/update/impact/status
 - index refresh
+- provider probe 预览
 - service status 和 service run
 
 当前 composer 只生成和暂存命令或 payload 预览。执行型 Web endpoint 仍需要 Rust HTTP adapter 暴露后才能从页面直接发起写入、查询或索引操作。

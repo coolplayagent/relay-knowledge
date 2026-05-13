@@ -6,6 +6,7 @@ export type OperationId =
   | "graph"
   | "code"
   | "indexes"
+  | "provider"
   | "worker"
   | "proposal"
   | "audit"
@@ -66,6 +67,9 @@ export type AppState = {
   indexes: {
     kinds: IndexKind[];
   };
+  provider: {
+    probeInput: string;
+  };
   worker: {
     action: "status" | "run-once";
     kind: WorkerKind;
@@ -94,6 +98,7 @@ export const OPERATIONS: Array<{ id: OperationId; label: string }> = [
   { id: "graph", label: "Graph" },
   { id: "code", label: "Code" },
   { id: "indexes", label: "Indexes" },
+  { id: "provider", label: "Provider" },
   { id: "worker", label: "Workers" },
   { id: "proposal", label: "Proposals" },
   { id: "audit", label: "Audit" },
@@ -135,6 +140,9 @@ export const appState: AppState = {
   },
   indexes: {
     kinds: ["bm25", "semantic", "vector"]
+  },
+  provider: {
+    probeInput: "relay-knowledge provider probe"
   },
   worker: {
     action: "status",
@@ -242,6 +250,8 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
       return codeSnapshot(metadata);
     case "indexes":
       return indexesSnapshot(metadata);
+    case "provider":
+      return providerSnapshot(metadata);
     case "worker":
       return workerSnapshot(metadata);
     case "proposal":
@@ -393,6 +403,18 @@ function indexesSnapshot(metadata: Record<string, unknown>) {
     payload: {
       operation: "index.refresh",
       kinds,
+      metadata
+    }
+  };
+}
+
+function providerSnapshot(metadata: Record<string, unknown>) {
+  return {
+    name: "Probe embedding provider",
+    command: shellCommand(["relay-knowledge", "provider", "probe", "--format", "json"]),
+    payload: {
+      operation: "provider.embedding.probe",
+      input: appState.provider.probeInput,
       metadata
     }
   };
