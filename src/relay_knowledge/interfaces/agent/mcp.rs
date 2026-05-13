@@ -8,8 +8,11 @@ use std::{
 mod state;
 
 mod audit_bridge;
+mod catalog;
 mod code_tools;
 mod http_contract;
+mod prompts;
+mod resources;
 
 use axum::{
     Router,
@@ -17,7 +20,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -31,9 +34,8 @@ use state::{CancellationRegistry, SessionCreateError, SessionLookupError, Sessio
 
 use crate::{
     api::{
-        AgentAccessPolicy, AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest,
-        HybridRetrievalRequest, IndexRefreshRequest, InterfaceKind, RequestContext,
-        RuntimeIdentity, freshness_label,
+        AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest, HybridRetrievalRequest,
+        IndexRefreshRequest, InterfaceKind, RequestContext, RuntimeIdentity, freshness_label,
     },
     application::{AgentRuntimeConfig, RelayKnowledgeService},
     domain::{FreshnessPolicy, IndexKind},
@@ -42,7 +44,7 @@ use crate::{
         http::HttpServeError,
         qos::{QosPermit, QosRuntime, RejectReason},
     },
-    project::PROJECT_NAME,
+    observability::AgentProtocolMetrics,
 };
 
 use super::{
@@ -50,7 +52,10 @@ use super::{
     authorize_scope,
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
-use code_tools::{code_impact_tool_definition, code_query_tool_definition, run_code_tool};
+use catalog::{initialize_result, is_known_tool, tools_list_result};
+use code_tools::run_code_tool;
+use prompts::{prompt_get_result, prompts_list_result};
+use resources::{ResourceReadParams, read_resource, resources_list_result};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -64,6 +69,7 @@ pub struct McpServer {
     agent: AgentRuntimeConfig,
     qos: QosRuntime,
     audit: AgentAuditLog,
+    metrics: AgentProtocolMetrics,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
 }
@@ -75,12 +81,14 @@ impl McpServer {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let metrics = service.observability().agent_metrics();
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
             audit: AgentAuditLog::default(),
+            metrics,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
         }
@@ -94,6 +102,7 @@ impl McpServer {
 
         Router::new()
             .route(&endpoint, post(handle_mcp_post))
+            .route(&endpoint, get(handle_mcp_get).delete(handle_mcp_delete))
             .with_state(self)
             .layer(TraceLayer::new_for_http())
             .layer(RequestBodyLimitLayer::new(body_limit))
@@ -190,6 +199,11 @@ struct ToolCallParams {
     name: String,
     #[serde(default)]
     arguments: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PromptGetParams {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,7 +358,8 @@ async fn handle_mcp_post(
         Err(reason) => {
             let error =
                 AgentAdapterError::new(AgentAdapterErrorKind::QosRejected, qos_message(reason));
-            record_mcp_qos_rejection(&server, method, &id, error.kind.as_str());
+            record_mcp_qos_rejection(&server, method, &id, error.kind.as_str()).await;
+            server.metrics.record_rejection("mcp", error.kind.as_str());
             return if method == "tools/call" {
                 json_rpc_success(id, tool_error_result(error))
             } else {
@@ -356,6 +371,39 @@ async fn handle_mcp_post(
     let result = match method {
         "ping" => json!({}),
         "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
+        "resources/list" => resources_list_result(&server.agent.access_policy),
+        "resources/read" => {
+            let params = match serde_json::from_value::<ResourceReadParams>(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return json_rpc_error(
+                        id,
+                        -32602,
+                        format!("invalid resources/read params: {error}"),
+                    );
+                }
+            };
+            read_resource(&server, params, request_id).await
+        }
+        "prompts/list" => prompts_list_result(),
+        "prompts/get" => {
+            let params = match serde_json::from_value::<PromptGetParams>(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return json_rpc_error(
+                        id,
+                        -32602,
+                        format!("invalid prompts/get params: {error}"),
+                    );
+                }
+            };
+            prompt_get_result(&params.name).unwrap_or_else(|| {
+                json!({
+                    "description": "unknown prompt",
+                    "messages": [],
+                })
+            })
+        }
         "tools/call" => {
             let params = match serde_json::from_value::<ToolCallParams>(request.params) {
                 Ok(params) => params,
@@ -379,18 +427,29 @@ async fn handle_mcp_post(
     json_rpc_success(id, result)
 }
 
-fn is_known_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "relay.retrieve_context"
-            | "relay.inspect_graph"
-            | "relay.health"
-            | "relay.service_status"
-            | "relay.index_status"
-            | "relay.code_query"
-            | "relay.code_impact"
-            | "relay.refresh_indexes"
+async fn handle_mcp_get(State(server): State<McpServer>, headers: HeaderMap) -> Response {
+    if let Err(status) = validate_protocol_version_header(&headers, true) {
+        return status.into_response();
+    }
+    if let Err(error) = server.sessions.require_session(&headers) {
+        return session_lookup_error_response(error);
+    }
+
+    json_rpc_error(
+        Value::Null,
+        -32004,
+        "MCP GET/SSE resumability is not implemented by this server",
     )
+}
+
+async fn handle_mcp_delete(State(server): State<McpServer>, headers: HeaderMap) -> Response {
+    if let Err(status) = validate_protocol_version_header(&headers, true) {
+        return status.into_response();
+    }
+    match server.sessions.terminate_session(&headers) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(error) => session_lookup_error_response(error),
+    }
 }
 
 fn is_valid_json_rpc_response(payload: &Value) -> bool {
@@ -512,7 +571,8 @@ async fn run_cancellable_tool_call(
         &request_id,
         &result,
         elapsed_millis(started),
-    );
+    )
+    .await;
     result
 }
 
@@ -687,105 +747,6 @@ async fn refresh_indexes_tool(server: &McpServer, arguments: Value, request_id: 
         Ok(response) => tool_success_result("indexes refreshed", json!(response)),
         Err(error) => api_error_result(error),
     }
-}
-
-fn initialize_result() -> Value {
-    json!({
-        "protocolVersion": MCP_PROTOCOL_VERSION,
-        "capabilities": {
-            "tools": {}
-        },
-        "serverInfo": {
-            "name": PROJECT_NAME,
-            "version": env!("CARGO_PKG_VERSION")
-        }
-    })
-}
-
-fn tools_list_result(policy: &AgentAccessPolicy) -> Value {
-    let mut tools = vec![
-        retrieve_context_tool_definition(),
-        inspect_graph_tool_definition(),
-        no_argument_tool(
-            "relay.health",
-            "Return relay-knowledge health and freshness status.",
-        ),
-        no_argument_tool("relay.service_status", "Return resident service status."),
-        no_argument_tool(
-            "relay.index_status",
-            "Return derived retrieval index status.",
-        ),
-        code_query_tool_definition(),
-        code_impact_tool_definition(),
-    ];
-    if policy.allow_index_refresh {
-        tools.push(refresh_indexes_tool_definition());
-    }
-
-    json!({ "tools": tools })
-}
-
-fn retrieve_context_tool_definition() -> Value {
-    json!({
-        "name": "relay.retrieve_context",
-        "description": "Retrieve grounded graph context for a query.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 1},
-                "source_scope": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1},
-                "freshness": {
-                    "type": "string",
-                    "enum": ["allow-stale", "wait-until-fresh", "graph-only"]
-                }
-            },
-            "required": ["query"]
-        }
-    })
-}
-
-fn inspect_graph_tool_definition() -> Value {
-    json!({
-        "name": "relay.inspect_graph",
-        "description": "Inspect graph metadata and aggregate counts.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "source_scope": {"type": "string"}
-            }
-        }
-    })
-}
-
-fn refresh_indexes_tool_definition() -> Value {
-    json!({
-        "name": "relay.refresh_indexes",
-        "description": "Refresh derived retrieval indexes when policy permits it.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "kinds": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["bm25", "semantic", "vector"]
-                    }
-                }
-            }
-        }
-    })
-}
-
-fn no_argument_tool(name: &str, description: &str) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "inputSchema": {
-            "type": "object",
-            "properties": {}
-        }
-    })
 }
 
 fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterError> {

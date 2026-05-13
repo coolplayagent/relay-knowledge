@@ -10,6 +10,7 @@ use crate::{
         RetrievalEnvOverrides,
     },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
+    observability::{ObservabilityRuntime, TelemetryConfig},
     paths::{PathError, RuntimePaths},
     retrieval::{
         DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_EMBEDDING_MAX_CONCURRENCY, DEFAULT_EMBEDDING_TIMEOUT,
@@ -24,6 +25,7 @@ use crate::{
 pub struct RuntimeConfiguration {
     pub paths: RuntimePaths,
     pub network: NetworkRuntime,
+    pub observability: ObservabilityRuntime,
     pub agent: AgentRuntimeConfig,
     pub retrieval: ReadModelBackendConfig,
     pub workers: WorkerRuntimeConfig,
@@ -44,6 +46,8 @@ impl RuntimeConfiguration {
     ) -> Result<Self, RuntimeConfigurationError> {
         let network = NetworkConfig::from_overrides(&environment.network)
             .map_err(RuntimeConfigurationError::Network)?;
+        let observability =
+            ObservabilityRuntime::new(TelemetryConfig::from_environment(&environment.telemetry));
         let agent = AgentRuntimeConfig::from_environment(environment, network.http.request_timeout)
             .map_err(RuntimeConfigurationError::Agent)?;
         let retrieval = retrieval_config_from_environment(&environment.retrieval)
@@ -55,6 +59,7 @@ impl RuntimeConfiguration {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
                 .map_err(RuntimeConfigurationError::Paths)?,
             network: NetworkRuntime::from_config(network),
+            observability,
             agent,
             retrieval,
             workers,

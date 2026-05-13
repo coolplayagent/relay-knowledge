@@ -311,6 +311,125 @@ async fn notifications_and_protocol_errors_use_http_contract() {
 }
 
 #[tokio::test]
+async fn resources_prompts_and_delete_session_are_supported() {
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-resource".to_owned()),
+                    source_path: Some("docs/guide.md".to_owned()),
+                    span: None,
+                    confidence: None,
+                    status: None,
+                    content: "MCP resources expose metadata".to_owned(),
+                    entity_labels: Vec::new(),
+                    extraction: None,
+                }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+    let mut router = server.router();
+    let session_id = initialize_session(&mut router).await;
+
+    let resources = call_mcp_with_session(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "resources", "method": "resources/list"}),
+        &session_id,
+    )
+    .await;
+    let scopes = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "scopes",
+            "method": "resources/read",
+            "params": {"uri": "relay://scopes"}
+        }),
+        &session_id,
+    )
+    .await;
+    let diagnostics = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "diag",
+            "method": "resources/read",
+            "params": {"uri": "relay://diagnostics/current"}
+        }),
+        &session_id,
+    )
+    .await;
+    let prompts = call_mcp_with_session(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "prompts", "method": "prompts/list"}),
+        &session_id,
+    )
+    .await;
+    let prompt = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "prompt",
+            "method": "prompts/get",
+            "params": {"name": "relay-grounded-answer-drafting"}
+        }),
+        &session_id,
+    )
+    .await;
+    let delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    let after_delete = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+
+    assert_eq!(
+        resources["result"]["resources"][0]["uri"],
+        "relay://graph/metadata"
+    );
+    assert!(
+        scopes["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("resource text")
+            .contains("\"docs\"")
+    );
+    assert!(
+        diagnostics["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("diagnostics text")
+            .contains("<service-dir>/")
+    );
+    assert_eq!(
+        prompts["result"]["prompts"][0]["name"],
+        "relay-context-planning"
+    );
+    assert!(
+        prompt["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .expect("prompt text")
+            .contains("evidence")
+    );
+    assert_eq!(delete.0, StatusCode::ACCEPTED);
+    assert_eq!(after_delete.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn http_headers_and_body_budget_are_enforced() {
     let server = server_with_env([
         ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
@@ -393,7 +512,7 @@ async fn http_headers_and_body_budget_are_enforced() {
     assert_eq!(uppercase_media_types.0, StatusCode::OK);
     assert_eq!(missing_accept.0, StatusCode::NOT_ACCEPTABLE);
     assert_eq!(too_large.0, StatusCode::PAYLOAD_TOO_LARGE);
-    assert_eq!(get.0, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(get.0, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

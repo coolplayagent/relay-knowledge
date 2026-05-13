@@ -14,12 +14,13 @@ use crate::{
         AgentProtocolKind, AgentRetrievalResult, ErrorKind, HybridRetrievalRequest, InterfaceKind,
         RequestContext, RuntimeIdentity,
     },
-    application::{AgentRuntimeConfig, RelayKnowledgeService},
-    domain::FreshnessPolicy,
+    application::{AgentDurableAuditInput, AgentRuntimeConfig, RelayKnowledgeService},
+    domain::{AuditStatus, FreshnessPolicy},
     net::{
         NetworkRuntime,
         qos::{QosPermit, QosRuntime, RejectReason},
     },
+    observability::AgentProtocolMetrics,
 };
 
 use super::{
@@ -35,6 +36,7 @@ pub struct LocalAcpSessionAdapter {
     agent: AgentRuntimeConfig,
     qos: QosRuntime,
     audit: AgentAuditLog,
+    metrics: AgentProtocolMetrics,
     sessions: AcpSessionRegistry,
 }
 
@@ -45,12 +47,14 @@ impl LocalAcpSessionAdapter {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let metrics = service.observability().agent_metrics();
         Self {
             service,
             network,
             agent,
             qos: QosRuntime::default(),
             audit: AgentAuditLog::default(),
+            metrics,
             sessions: AcpSessionRegistry::default(),
         }
     }
@@ -344,7 +348,7 @@ impl LocalAcpSessionAdapter {
     }
 
     fn record_audit(&self, input: AcpAuditInput<'_>) {
-        self.audit.record(AgentAuditEvent {
+        let event = AgentAuditEvent {
             sequence: 0,
             protocol: AgentProtocolKind::Acp,
             operation: input.operation.to_owned(),
@@ -362,6 +366,49 @@ impl LocalAcpSessionAdapter {
             truncated: input.truncated,
             elapsed_ms: input.elapsed_ms,
             error_kind: input.error_kind.map(str::to_owned),
+        };
+        self.audit.record(event.clone());
+        let status_label = match event.status {
+            AgentAuditStatus::Completed => "completed",
+            AgentAuditStatus::Failed => "failed",
+            AgentAuditStatus::Cancelled => "cancelled",
+        };
+        self.metrics.record_request(
+            "acp",
+            input.operation,
+            status_label,
+            input.elapsed_ms,
+            input.truncated,
+        );
+        if input.qos_decision == AgentAuditQosDecision::Rejected {
+            self.metrics
+                .record_rejection("acp", input.error_kind.unwrap_or("qos_rejected"));
+        }
+        if event.status == AgentAuditStatus::Cancelled {
+            self.metrics.record_cancelled("acp");
+        }
+        let service = self.service.clone();
+        tokio::spawn(async move {
+            let detail_json = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned());
+            let status = match event.status {
+                AgentAuditStatus::Completed => AuditStatus::Completed,
+                AgentAuditStatus::Failed => AuditStatus::Failed,
+                AgentAuditStatus::Cancelled => AuditStatus::Cancelled,
+            };
+            let _ = service
+                .record_agent_audit(AgentDurableAuditInput {
+                    operation: event.operation,
+                    interface: "acp".to_owned(),
+                    request_id: event.request_id,
+                    trace_id: event.trace_id,
+                    status,
+                    actor: event.runtime_identity.actor_id,
+                    source_scope: event.source_scope,
+                    graph_version: 0,
+                    detail_json,
+                    message: event.error_kind,
+                })
+                .await;
         });
     }
 }

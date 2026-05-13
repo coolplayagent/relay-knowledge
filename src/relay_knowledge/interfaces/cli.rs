@@ -792,6 +792,7 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
     if mcp == ServiceMcpTransport::StreamableHttp {
         runtime.agent = runtime.agent.clone().with_streamable_http_enabled();
     }
+    runtime.observability.initialize();
 
     let service = RelayKnowledgeService::new(runtime.clone());
     service
@@ -829,6 +830,7 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
     } else {
         service_shutdown_signal().await;
     }
+    runtime.observability.shutdown();
 
     Ok(String::new())
 }

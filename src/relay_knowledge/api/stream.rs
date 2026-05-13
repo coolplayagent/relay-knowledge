@@ -124,6 +124,12 @@ mod tests {
                 embedding_batch_size: None,
                 embedding_timeout_ms: None,
                 embedding_max_concurrency: None,
+                telemetry: crate::observability::ObservabilityRuntime::new(
+                    crate::observability::TelemetryConfig::from_environment(
+                        &crate::env::TelemetryEnvOverrides::default(),
+                    ),
+                )
+                .status(),
             },
         };
 

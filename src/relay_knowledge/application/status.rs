@@ -63,6 +63,7 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
             .remote_embedding
             .as_ref()
             .map(|config| config.max_concurrency),
+        telemetry: runtime.observability.status(),
     }
 }
 

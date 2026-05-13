@@ -64,6 +64,11 @@ pub const RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT: &str =
     "RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT";
 pub const RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT: &str = "RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT";
 pub const RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED: &str = "RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED";
+pub const RELAY_OTEL_ENDPOINT: &str = "RELAY_OTEL_ENDPOINT";
+pub const RELAY_OTEL_TRACES: &str = "RELAY_OTEL_TRACES";
+pub const RELAY_OTEL_METRICS: &str = "RELAY_OTEL_METRICS";
+pub const RELAY_OTEL_EXPORT_TIMEOUT_MS: &str = "RELAY_OTEL_EXPORT_TIMEOUT_MS";
+pub const RELAY_OTEL_SERVICE_ENVIRONMENT: &str = "RELAY_OTEL_SERVICE_ENVIRONMENT";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -196,6 +201,16 @@ pub struct WorkerEnvOverrides {
     pub silent_updates_enabled: Option<bool>,
 }
 
+/// Telemetry exporter settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TelemetryEnvOverrides {
+    pub otel_endpoint: Option<String>,
+    pub otel_traces: Option<bool>,
+    pub otel_metrics: Option<bool>,
+    pub export_timeout_ms: Option<u64>,
+    pub service_environment: Option<String>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
@@ -205,6 +220,7 @@ pub struct EnvironmentConfig {
     pub agent: AgentEnvOverrides,
     pub retrieval: RetrievalEnvOverrides,
     pub workers: WorkerEnvOverrides,
+    pub telemetry: TelemetryEnvOverrides,
 }
 
 impl EnvironmentConfig {
@@ -352,6 +368,13 @@ impl EnvironmentConfig {
                 extractor_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT)?,
                 max_in_flight: positive_usize_var(&values, RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT)?,
                 silent_updates_enabled: bool_var(&values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
+            },
+            telemetry: TelemetryEnvOverrides {
+                otel_endpoint: string_var(&values, RELAY_OTEL_ENDPOINT)?,
+                otel_traces: bool_var(&values, RELAY_OTEL_TRACES)?,
+                otel_metrics: bool_var(&values, RELAY_OTEL_METRICS)?,
+                export_timeout_ms: positive_u64_var(&values, RELAY_OTEL_EXPORT_TIMEOUT_MS)?,
+                service_environment: string_var(&values, RELAY_OTEL_SERVICE_ENVIRONMENT)?,
             },
         })
     }

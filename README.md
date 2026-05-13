@@ -47,8 +47,10 @@ target/debug/relay-knowledge health --format json
   persistent audit events, silent-update operator state, and service definition
   generation for platform service managers.
 - MCP Streamable HTTP and local ACP adapter access through the shared
-  application service, with scope policy, QoS admission, cancellation, and
-  audit metadata.
+  application service, with scope policy, QoS admission, cancellation,
+  resources/prompts, durable audit metadata, and OTLP-ready agent metrics.
+- Real OTLP HTTP/protobuf traces and metrics export for resident service mode,
+  with local diagnostics when Collector export fails.
 - Static Web diagnostics and operation composers served by the Rust HTTP
   service on the same local port as `/api/*` and MCP when enabled.
 

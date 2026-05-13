@@ -38,6 +38,8 @@ async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
         MCP_PROTOCOL_VERSION
     );
     assert_eq!(initialize["result"]["capabilities"]["tools"], json!({}));
+    assert_eq!(initialize["result"]["capabilities"]["resources"], json!({}));
+    assert_eq!(initialize["result"]["capabilities"]["prompts"], json!({}));
     assert!(tool_names(&tools).contains(&"relay.retrieve_context".to_owned()));
     assert!(tool_names(&tools).contains(&"relay.code_query".to_owned()));
     assert!(tool_names(&tools).contains(&"relay.code_impact".to_owned()));

@@ -101,7 +101,30 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 默认 policy 是只读且本机优先。远程监听、unspecified scope 和 index refresh 都需要显式开启。
 
-## 8.6 Planned Setup Interfaces
+## 8.6 OTLP Telemetry
+
+常驻服务可把 traces 和 metrics 发送到 OpenTelemetry Collector 的 OTLP HTTP endpoint:
+
+```text
+RELAY_OTEL_ENDPOINT
+RELAY_OTEL_TRACES
+RELAY_OTEL_METRICS
+RELAY_OTEL_EXPORT_TIMEOUT_MS
+RELAY_OTEL_SERVICE_ENVIRONMENT
+```
+
+默认 endpoint 是 `http://127.0.0.1:4318`。启用 traces 后使用 `/v1/traces`，启用 metrics 后使用 `/v1/metrics`。`RELAY_OTEL_EXPORT_TIMEOUT_MS` 默认 5000。建议先让 Collector 在本机监听，再开启:
+
+```bash
+RELAY_OTEL_ENDPOINT=http://127.0.0.1:4318 \
+RELAY_OTEL_TRACES=true \
+RELAY_OTEL_METRICS=true \
+relay-knowledge service run --web --mcp streamable-http
+```
+
+Exporter 初始化或导出失败不会阻止服务启动；错误会作为 telemetry diagnostics 暴露。
+
+## 8.7 Planned Setup Interfaces
 
 后续易用性改造应新增两个 CLI 入口，本章先记录接口意图:
 

@@ -104,6 +104,34 @@ MCP tool surface 当前包括:
 
 Agent 请求会写入 bounded in-process audit events；CLI/Web/service operation 还写入持久 audit sink，可通过 `audit query` 检查最近操作。
 
-## 6.7 ACP 本地 adapter
+## 6.7 MCP Resources、Prompts 与 Session 结束
+
+MCP `initialize` 会声明 `tools`、`resources` 和 `prompts` capability。已支持的 resource URI:
+
+- `relay://graph/metadata`
+- `relay://graph/schema`
+- `relay://scopes`
+- `relay://indexes/status`
+- `relay://diagnostics/current`
+
+`relay://scopes` 只返回当前 policy 授权的 scope；diagnostics 会隐藏 service definition 的完整本地目录，只保留可排障的文件名提示。Prompt helper 包括 `relay-context-planning`、`relay-grounded-answer-drafting` 和 `relay-graph-debugging`。这些 prompt 只提供使用模板，不能改变权限或放宽 policy。
+
+客户端结束会话时可向 `/mcp` 发送 `DELETE`，并携带 `Mcp-Session-Id` 和 `MCP-Protocol-Version`。终止后同一 session id 会返回 HTTP 404。GET/SSE resumability 当前返回稳定未实现错误。
+
+## 6.8 OTLP Telemetry
+
+常驻服务支持真实 OTLP HTTP/protobuf traces 和 metrics export。示例:
+
+```bash
+RELAY_OTEL_ENDPOINT=http://127.0.0.1:4318 \
+RELAY_OTEL_TRACES=true \
+RELAY_OTEL_METRICS=true \
+RELAY_OTEL_SERVICE_ENVIRONMENT=local \
+relay-knowledge service run --web --mcp streamable-http
+```
+
+默认 endpoint 是 `http://127.0.0.1:4318`，traces 发送到 `/v1/traces`，metrics 发送到 `/v1/metrics`。Collector 不可用时，检索和协议响应不会失败；错误会出现在 service diagnostics 的 telemetry 状态中。
+
+## 6.9 ACP 本地 adapter
 
 本地 ACP session adapter 暴露相同的检索 contract，支持 progress updates、cancellation 和 context artifact。ACP 适合 agent-client 会话入口，MCP 更适合作为其它 agent runtime 的工具服务入口。两者都复用统一 API 和核心服务，不复制检索逻辑。

@@ -2,19 +2,21 @@ use serde_json::Value;
 
 use crate::{
     api::{AgentProtocolKind, RuntimeIdentity},
+    application::AgentDurableAuditInput,
+    domain::AuditStatus,
     interfaces::agent::{AgentAuditQosDecision, AgentAuditStatus},
 };
 
 use super::{AgentAuditEvent, McpServer, request_id_key};
 
-pub(super) fn record_mcp_qos_rejection(
+pub(super) async fn record_mcp_qos_rejection(
     server: &McpServer,
     operation: &str,
     id: &Value,
     error_kind: &str,
 ) {
     let request_id = request_id_key("mcp", id).unwrap_or_else(|| "mcp|invalid-id".to_owned());
-    server.audit.record(AgentAuditEvent {
+    let event = AgentAuditEvent {
         sequence: 0,
         protocol: AgentProtocolKind::Mcp,
         operation: operation.to_owned(),
@@ -30,10 +32,12 @@ pub(super) fn record_mcp_qos_rejection(
         truncated: false,
         elapsed_ms: 0,
         error_kind: Some(error_kind.to_owned()),
-    });
+    };
+    server.audit.record(event.clone());
+    persist_agent_audit(server, &event).await;
 }
 
-pub(super) fn record_mcp_tool_audit(
+pub(super) async fn record_mcp_tool_audit(
     server: &McpServer,
     operation: &str,
     request_id: &str,
@@ -49,7 +53,7 @@ pub(super) fn record_mcp_tool_audit(
         _ => AgentAuditStatus::Completed,
     };
 
-    server.audit.record(AgentAuditEvent {
+    let event = AgentAuditEvent {
         sequence: 0,
         protocol: AgentProtocolKind::Mcp,
         operation: operation.to_owned(),
@@ -67,7 +71,49 @@ pub(super) fn record_mcp_tool_audit(
         truncated: structured["truncated"].as_bool().unwrap_or(false),
         elapsed_ms,
         error_kind,
-    });
+    };
+    server.audit.record(event.clone());
+    let status_label = match event.status {
+        AgentAuditStatus::Completed => "completed",
+        AgentAuditStatus::Failed => "failed",
+        AgentAuditStatus::Cancelled => "cancelled",
+    };
+    server
+        .metrics
+        .record_request("mcp", operation, status_label, elapsed_ms, event.truncated);
+    if event.status == AgentAuditStatus::Cancelled {
+        server.metrics.record_cancelled("mcp");
+    }
+    persist_agent_audit(server, &event).await;
+}
+
+async fn persist_agent_audit(server: &McpServer, event: &AgentAuditEvent) {
+    let detail_json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_owned());
+    let status = match event.status {
+        AgentAuditStatus::Completed => AuditStatus::Completed,
+        AgentAuditStatus::Failed => AuditStatus::Failed,
+        AgentAuditStatus::Cancelled => AuditStatus::Cancelled,
+    };
+    let _ = server
+        .service
+        .record_agent_audit(AgentDurableAuditInput {
+            operation: event.operation.clone(),
+            interface: "mcp".to_owned(),
+            request_id: event.request_id.clone(),
+            trace_id: event.trace_id.clone(),
+            status,
+            actor: event.runtime_identity.actor_id.clone(),
+            source_scope: event.source_scope.clone(),
+            graph_version: audit_graph_version(event),
+            detail_json,
+            message: event.error_kind.clone(),
+        })
+        .await;
+}
+
+fn audit_graph_version(event: &AgentAuditEvent) -> u64 {
+    let _ = event;
+    0
 }
 
 fn audit_source_scope(structured: &Value) -> Option<String> {
