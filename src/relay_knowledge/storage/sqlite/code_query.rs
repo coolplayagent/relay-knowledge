@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -9,6 +9,8 @@ use crate::{
     },
     storage::StorageError,
 };
+
+const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::repository_status;
 
@@ -64,35 +66,53 @@ fn search_symbols(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &[
+            "lower(name)",
+            "lower(qualified_name)",
+            "lower(signature)",
+            "lower(coalesce(doc_comment, ''))",
+            "lower(path)",
+        ],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT symbol_snapshot_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
-        WHERE repository_id = ?1
+        WHERE repository_id = ?
+          AND ({candidate_condition})
         ORDER BY path ASC, line_start ASC
         ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
+        |row| {
+            Ok(SymbolRow {
+                symbol_snapshot_id: row.get(0)?,
+                file_id: row.get(1)?,
+                path: row.get(2)?,
+                language_id: row.get(3)?,
+                signature: row.get(4)?,
+                doc_comment: row.get(5)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(8)?,
+                    end: row.get(9)?,
+                },
+                name: row.get(10)?,
+                qualified_name: row.get(11)?,
+            })
+        },
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(SymbolRow {
-            symbol_snapshot_id: row.get(0)?,
-            file_id: row.get(1)?,
-            path: row.get(2)?,
-            language_id: row.get(3)?,
-            signature: row.get(4)?,
-            doc_comment: row.get(5)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(8)?,
-                end: row.get(9)?,
-            },
-            name: row.get(10)?,
-            qualified_name: row.get(11)?,
-        })
-    })?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -145,7 +165,11 @@ fn search_references(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &["lower(r.name)", "lower(r.kind)", "lower(r.path)"],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
@@ -153,28 +177,36 @@ fn search_references(
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.repository_id = r.repository_id AND f.path = r.path
-        WHERE r.repository_id = ?1
+        WHERE r.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY r.path ASC, r.line_start ASC
         ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
+        |row| {
+            Ok(ReferenceRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                name: row.get(3)?,
+                kind: row.get(4)?,
+                target_symbol_snapshot_id: row.get(5)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(8)?,
+                    end: row.get(9)?,
+                },
+            })
+        },
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ReferenceRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            name: row.get(3)?,
-            kind: row.get(4)?,
-            target_symbol_snapshot_id: row.get(5)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(8)?,
-                end: row.get(9)?,
-            },
-        })
-    })?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -211,7 +243,15 @@ fn search_calls(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &[
+            "lower(coalesce(c.caller_name, ''))",
+            "lower(c.callee_name)",
+            "lower(c.path)",
+        ],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
@@ -219,25 +259,33 @@ fn search_calls(
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
+        WHERE c.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
         ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
+        |row| {
+            Ok(CallRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                caller_symbol_snapshot_id: row.get(3)?,
+                caller_name: row.get(4)?,
+                callee_symbol_snapshot_id: row.get(5)?,
+                callee_name: row.get(6)?,
+                line_range: RepositoryCodeRange {
+                    start: row.get(7)?,
+                    end: row.get(8)?,
+                },
+            })
+        },
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(CallRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            caller_symbol_snapshot_id: row.get(3)?,
-            caller_name: row.get(4)?,
-            callee_symbol_snapshot_id: row.get(5)?,
-            callee_name: row.get(6)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
-            },
-        })
-    })?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -285,28 +333,38 @@ fn search_imports(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) =
+        candidate_condition(&["lower(i.module)", "lower(i.path)"], &request.query);
+    let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.repository_id = i.repository_id AND f.path = i.path
-        WHERE i.repository_id = ?1
+        WHERE i.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY i.path ASC, i.line_start ASC
         ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
+        |row| {
+            Ok(ImportRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                module: row.get(3)?,
+                line_range: RepositoryCodeRange {
+                    start: row.get(4)?,
+                    end: row.get(5)?,
+                },
+            })
+        },
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ImportRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-        })
-    })?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -343,7 +401,9 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) =
+        candidate_condition(&["lower(c.content)", "lower(c.path)"], &request.query);
+    let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
@@ -351,29 +411,37 @@ fn search_chunks(
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
+        WHERE c.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
         ",
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
+        |row| {
+            Ok(ChunkRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                content: row.get(3)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(4)?,
+                    end: row.get(5)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                symbol_snapshot_id: row.get(8)?,
+                parse_status: row.get(9)?,
+                degraded_reason: row.get(10)?,
+            })
+        },
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ChunkRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            content: row.get(3)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            symbol_snapshot_id: row.get(8)?,
-            parse_status: row.get(9)?,
-            degraded_reason: row.get(10)?,
-        })
-    })?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -583,6 +651,57 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     score
 }
 
+fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
+    let max_patterns = (MAX_CANDIDATE_BIND_VALUES / fields.len().max(1)).max(1);
+    let patterns = candidate_patterns(query, max_patterns);
+    if patterns.is_empty() {
+        return ("1 = 1".to_owned(), Vec::new());
+    }
+
+    let mut values = Vec::new();
+    let groups = patterns
+        .into_iter()
+        .map(|pattern| {
+            let clauses = fields
+                .iter()
+                .map(|field| {
+                    values.push(Value::Text(pattern.clone()));
+                    format!("{field} LIKE ?")
+                })
+                .collect::<Vec<_>>();
+            format!("({})", clauses.join(" OR "))
+        })
+        .collect::<Vec<_>>();
+
+    (groups.join(" OR "), values)
+}
+
+fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
+    let mut patterns = Vec::new();
+    for token in query.to_lowercase().split_whitespace() {
+        let token = token.chars().filter(|ch| *ch != '%').collect::<String>();
+        if token.is_empty() {
+            continue;
+        }
+        let pattern = format!("%{token}%");
+        if !patterns.contains(&pattern) {
+            patterns.push(pattern);
+        }
+        if patterns.len() >= max_patterns {
+            break;
+        }
+    }
+
+    patterns
+}
+
+fn candidate_values_for(repository_id: &str, candidate_values: Vec<Value>) -> Vec<Value> {
+    let mut values = Vec::with_capacity(candidate_values.len() + 1);
+    values.push(Value::Text(repository_id.to_owned()));
+    values.extend(candidate_values);
+    values
+}
+
 struct SymbolRow {
     symbol_snapshot_id: String,
     file_id: String,
@@ -650,5 +769,29 @@ mod tests {
         assert!(path_matches_filter("src/lib.rs", "./"));
         assert!(path_matches_filter("src/lib.rs", "./src"));
         assert!(!path_matches_filter("src-other/lib.rs", "src/"));
+    }
+
+    #[test]
+    fn candidate_condition_preserves_all_query_terms() {
+        let (condition, values) =
+            candidate_condition(&["lower(name)", "lower(path)"], "retry budget");
+
+        assert!(condition.contains("lower(name) LIKE ?"));
+        assert_eq!(values.len(), 4);
+        assert!(values.contains(&Value::Text("%retry%".to_owned())));
+        assert!(values.contains(&Value::Text("%budget%".to_owned())));
+    }
+
+    #[test]
+    fn candidate_condition_caps_bind_values_for_long_queries() {
+        let query = (0..300)
+            .map(|index| format!("term{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fields = ["a", "b", "c", "d", "e"];
+
+        let (_, values) = candidate_condition(&fields, &query);
+
+        assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES);
     }
 }

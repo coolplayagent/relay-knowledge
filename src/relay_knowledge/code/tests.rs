@@ -135,6 +135,89 @@ fn dot_path_filter_selects_repository_root() {
 }
 
 #[test]
+fn explicit_default_exclusion_opt_in_stays_path_scoped() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![".".to_owned(), "dist".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(path_is_selected("dist/bundle.js", &registration, &selector));
+    assert!(!path_is_selected(
+        "target/generated.rs",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
+fn explicit_default_exclusion_opt_in_normalizes_extension_case() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec!["assets/logo.SVG".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(path_is_selected(
+        "assets/logo.SVG",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
+fn anchored_ignore_rules_only_match_repo_root_paths() {
+    let repo = TempGitRepo::create("anchored-ignore-rules");
+    repo.write(".relay-knowledgeignore", "/docs\n");
+    repo.write("docs/root.rs", "fn root() {}\n");
+    repo.write("src/docs/nested.rs", "fn nested() {}\n");
+
+    let registration = repo.registration();
+    let selector = repo.selector();
+
+    assert!(!path_is_selected("docs/root.rs", &registration, &selector));
+    assert!(path_is_selected(
+        "src/docs/nested.rs",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
+fn incremental_deletions_survive_tighter_ignore_rules() {
+    let repo = TempGitRepo::create("incremental-tightened-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+
+    repo.write(".relay-knowledgeignore", "src\n");
+    fs::remove_file(repo.path.join("src/lib.rs")).expect("source file should delete");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "tighten ignore and delete"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::incremental(base, "HEAD").expect("incremental mode should validate"),
+        Vec::new(),
+    )
+    .expect("incremental delete should index");
+
+    assert_eq!(snapshot.deleted_paths, ["src/lib.rs"]);
+}
+
+#[test]
 fn repository_id_includes_local_root_with_remote_origin() {
     let first = TempGitRepo::create("repo-id-first");
     let second = TempGitRepo::create("repo-id-second");
@@ -615,6 +698,142 @@ fn deleted_symbol_names_are_extracted_from_base_diff() {
             .expect("deleted symbols should parse");
 
     assert_eq!(names, ["removed_api"]);
+}
+
+#[test]
+fn scope_preview_reports_default_and_ignore_exclusions() {
+    let repo = TempGitRepo::create("scope-preview");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("dist/bundle.js", "function generated() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write("manual.pdf", "%PDF-1.7\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert_eq!(preview.language_distribution[0].language_id, "rust");
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "dist/bundle.js" && path.reason == "excluded by source preset"
+    }));
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
+    }));
+}
+
+#[test]
+fn scope_preview_uses_ignore_rules_from_requested_commit() {
+    let repo = TempGitRepo::create("scope-preview-commit-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write(".relay-knowledgeignore", "");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
+    }));
+}
+
+#[test]
+fn impact_path_partition_uses_ignore_rules_from_selected_commit() {
+    let repo = TempGitRepo::create("impact-partition-commit-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write(".relay-knowledgeignore", "");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let groups = partition_changed_paths_for_selector(
+        &registration,
+        &selector,
+        vec!["src/lib.rs".to_owned(), "docs/notes.rs".to_owned()],
+    )
+    .expect("paths should partition");
+
+    assert_eq!(groups.in_scope_changed_paths, ["src/lib.rs"]);
+    assert_eq!(groups.out_of_scope_changed_paths, ["docs/notes.rs"]);
+}
+
+#[test]
+fn scope_preview_counts_each_degraded_file_once() {
+    let repo = TempGitRepo::create("scope-preview-degraded-count");
+    repo.write("docs/large.custom", &"x".repeat(512 * 1024 + 1));
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert_eq!(preview.unsupported_file_count, 1);
+    assert_eq!(preview.generated_or_heavy_file_count, 1);
+    assert_eq!(preview.expected_degraded_file_count, 1);
+}
+
+#[test]
+fn impact_path_partition_uses_effective_scope() {
+    let repo = TempGitRepo::create("impact-path-groups");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("dist/bundle.js", "function generated() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    let groups = partition_changed_paths_for_selector(
+        &repo.registration(),
+        &repo.selector(),
+        vec!["src/lib.rs".to_owned(), "dist/bundle.js".to_owned()],
+    )
+    .expect("paths should partition");
+
+    assert_eq!(groups.in_scope_changed_paths, ["src/lib.rs"]);
+    assert_eq!(groups.out_of_scope_changed_paths, ["dist/bundle.js"]);
 }
 
 #[test]

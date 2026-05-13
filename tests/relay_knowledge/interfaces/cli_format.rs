@@ -41,7 +41,7 @@ fn rejects_unknown_cli_output_format() {
     assert_eq!(error.exit_code(), 2);
     assert_eq!(
         error.to_string(),
-        "invalid --format value 'xml', expected text, json, or streaming-json"
+        "invalid --format value 'xml', expected text, json, markdown, or streaming-json"
     );
 }
 

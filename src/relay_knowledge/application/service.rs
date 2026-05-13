@@ -19,7 +19,7 @@ use crate::{
     },
     env::EnvironmentConfig,
     project::PROJECT_NAME,
-    retrieval::{DerivedRetrievalAdapter, DerivedRetrievalRequest, RetrievalPlan},
+    retrieval::RetrievalPlan,
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
 };
 
@@ -291,10 +291,15 @@ impl RelayKnowledgeService {
     ) -> Result<GraphInspectionResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
+        let repository_code_totals = store
+            .code_repository_totals()
+            .await
+            .map_err(storage_api_error)?;
 
         Ok(GraphInspectionResponse {
             metadata: ApiMetadata::graph_only(&context, graph.graph_version),
             graph,
+            repository_code_totals,
         })
     }
 
@@ -324,6 +329,10 @@ impl RelayKnowledgeService {
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
+        let repository_code_totals = store
+            .code_repository_totals()
+            .await
+            .map_err(storage_api_error)?;
         reconcile_index_refreshes(&store, graph.graph_version).await?;
         let outcome = index_refresh_outcome(&store).await?;
         let healthy = outcome
@@ -335,6 +344,7 @@ impl RelayKnowledgeService {
             metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
             healthy,
             graph,
+            repository_code_totals,
             indexes: outcome.indexes,
             index_cursors: outcome.cursors,
             index_refresh: outcome.diagnostics,
@@ -526,21 +536,19 @@ async fn derived_backend_statuses(
     plan: &RetrievalPlan,
     graph_version: GraphVersion,
 ) -> Vec<crate::domain::RetrievalBackendStatus> {
-    let request = DerivedRetrievalRequest {
-        query: plan.query.clone(),
-        source_scope: plan.source_scope.clone(),
-        graph_version,
-        limit: plan.limit,
-    };
-    let mut statuses = Vec::new();
-    for adapter in crate::retrieval::phase1_unavailable_adapters() {
-        match adapter.search(request.clone()).await {
-            Ok(outcome) => statuses.push(outcome.status),
-            Err(error) => statuses.push(error.status),
-        }
-    }
-
-    statuses
+    [
+        crate::domain::RetrieverSource::Semantic,
+        crate::domain::RetrieverSource::Vector,
+    ]
+    .into_iter()
+    .map(|source| crate::domain::RetrievalBackendStatus {
+        source,
+        state: crate::domain::RetrievalBackendState::Available,
+        scope_post_filter: plan.source_scope.is_some(),
+        indexed_graph_version: Some(graph_version),
+        reason: Some("local deterministic SQLite read model".to_owned()),
+    })
+    .collect()
 }
 
 fn service_definition_filename() -> &'static str {

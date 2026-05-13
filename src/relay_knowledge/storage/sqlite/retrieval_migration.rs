@@ -6,8 +6,9 @@ use crate::{
 };
 
 use super::{
-    EvidenceDocumentInput, entities_for_evidence, insert_code_chunk_document,
-    insert_code_symbol_document, parse_fact_status, replace_evidence_document,
+    EvidenceDocumentInput,
+    context::{entities_for_evidence, parse_fact_status},
+    insert_code_chunk_document, insert_code_symbol_document, replace_evidence_document,
 };
 
 pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bool, StorageError> {
@@ -46,9 +47,33 @@ pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bo
 }
 
 pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), StorageError> {
+    clear_retrieval_documents(connection)?;
     rebuild_evidence_documents(connection)?;
     rebuild_code_symbol_documents(connection)?;
     rebuild_code_chunk_documents(connection)?;
+
+    Ok(())
+}
+
+pub(super) fn derived_documents_missing(connection: &Connection) -> Result<bool, StorageError> {
+    let expected_count = retrievable_source_document_count(connection)?;
+    if expected_count == 0 {
+        return Ok(false);
+    }
+
+    let bm25_count = table_row_count(connection, "graph_bm25")?;
+    let semantic_count = table_row_count(connection, "graph_semantic_documents")?;
+    let vector_count = table_row_count(connection, "graph_vector_documents")?;
+
+    Ok(bm25_count != expected_count
+        || semantic_count != expected_count
+        || vector_count != expected_count)
+}
+
+fn clear_retrieval_documents(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute("DELETE FROM graph_bm25", [])?;
+    connection.execute("DELETE FROM graph_semantic_documents", [])?;
+    connection.execute("DELETE FROM graph_vector_documents", [])?;
 
     Ok(())
 }
@@ -263,4 +288,40 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageErr
     )?;
 
     Ok(exists)
+}
+
+fn optional_table_row_count(
+    connection: &Connection,
+    table: &'static str,
+) -> Result<usize, StorageError> {
+    if table_exists(connection, table)? {
+        table_row_count(connection, table)
+    } else {
+        Ok(0)
+    }
+}
+
+fn table_row_count(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    connection
+        .query_row(&sql, [], |row| row.get::<_, usize>(0))
+        .map_err(StorageError::from)
+}
+
+fn retrievable_source_document_count(connection: &Connection) -> Result<usize, StorageError> {
+    let evidence_count = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM evidence
+            WHERE status IN ('accepted', 'proposed')
+            ",
+            [],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(StorageError::from)?;
+
+    Ok(evidence_count
+        + optional_table_row_count(connection, "code_symbols")?
+        + optional_table_row_count(connection, "code_chunks")?)
 }

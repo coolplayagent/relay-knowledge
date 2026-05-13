@@ -2,10 +2,11 @@
 
 use crate::domain::{
     CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,
-    CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
+    CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals,
+    CodeRetrievalHit, CodeRetrievalRequest,
 };
 
-use super::StorageFuture;
+use super::{StorageError, StorageFuture};
 
 /// Diff-derived inputs used to seed code impact expansion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -46,4 +47,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         request: CodeImpactRequest,
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>>;
+
+    fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
+        Box::pin(async { Ok(CodeRepositoryTotals::default()) })
+    }
+
+    fn code_repository_report(
+        &self,
+        repository: String,
+    ) -> StorageFuture<'_, CodeRepositoryReport> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code repository report for '{repository}' is unavailable"
+            )))
+        })
+    }
 }

@@ -46,11 +46,6 @@ The retrieval layer uses these concrete recall paths:
 - `community_summary`: scoped summary hit for global/overview/community
   queries.
 
-`semantic` and `vector` remain explicit index families in freshness metadata.
-When those backends are unavailable, `backend_statuses` records an unavailable
-state for each backend, whether scope post-filtering would have been applied,
-and the fallback reason. BM25 plus graph evidence retrieval remains usable and
-the response still reports index freshness.
 BM25, semantic, vector, graph path, temporal, and community hits are fused with
 RRF. Semantic/vector are local read models, not external embedding services; the
 metadata is present so a future external backend can coexist without changing
@@ -60,6 +55,14 @@ these index families: source hash, backend cursor, and model name/dimension when
 a configured backend worker supplies them. The same diagnostics include
 `stale_reasons`, a structured list of index-family and scoped-cursor reasons
 that explain failed state, graph-version lag, and last-error conditions.
+
+`semantic` and `vector` are explicit index families in freshness metadata.
+The current v2 baseline uses local deterministic SQLite read models: semantic
+documents store normalized concept tokens, while vector documents store hashed
+token and character n-gram weights. If a future backend is unavailable,
+`backend_statuses` still records the unavailable state and fallback reason.
+BM25 plus graph evidence retrieval remains usable and the response still
+reports index freshness.
 
 ## Graph Facts
 

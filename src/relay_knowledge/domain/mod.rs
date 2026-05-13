@@ -17,9 +17,12 @@ pub use code::{
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
 };
 pub use code_repository::{
-    CodeCallRecord, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactRequest, CodeImportRecord,
-    CodeIndexMode, CodeIndexRequest, CodeIndexSnapshot, CodeIndexSummary, CodePathTombstone,
-    CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
+    CodeCallRecord, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
+    CodeImpactRequest, CodeImportRecord, CodeIndexMode, CodeIndexProgressSummary, CodeIndexRequest,
+    CodeIndexSnapshot, CodeIndexSummary, CodePathTombstone, CodeQueryKind,
+    CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview, CodeRepositoryLargestFile,
+    CodeRepositoryLatencySample, CodeRepositoryRegistration, CodeRepositoryReport,
+    CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeChunkRecord,
     RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
     RepositoryCodeSymbolRecord,
