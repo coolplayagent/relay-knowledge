@@ -59,46 +59,28 @@ RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
   target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-## 1.3 运行时目录
+## 1.3 零配置默认值
 
-运行时状态不应写入仓库目录。默认目录由平台规则解析，`status --format json` 会显示当前配置和状态。需要隔离一次性实验时，设置 `RELAY_KNOWLEDGE_HOME` 最直接:
+普通本地使用不需要先设置环境变量。默认行为是:
+
+- 运行时目录由平台规则解析，不写入仓库目录。
+- SQLite 本地存储和本地 deterministic semantic/vector read models 自动启用。
+- 网络和 QoS 使用保守默认值。
+- MCP 写入、index refresh tool 和远程监听默认关闭。
+
+`status --format json` 会显示当前配置和状态。需要隔离一次性实验时，设置一个临时 `RELAY_KNOWLEDGE_HOME` 即可:
 
 ```bash
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
   target/debug/relay-knowledge status --format json
 ```
 
-设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。也可以分别覆盖:
+设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
 
-```text
-RELAY_KNOWLEDGE_CONFIG_DIR
-RELAY_KNOWLEDGE_DATA_DIR
-RELAY_KNOWLEDGE_STATE_DIR
-RELAY_KNOWLEDGE_CACHE_DIR
-RELAY_KNOWLEDGE_LOG_DIR
-RELAY_KNOWLEDGE_TEMP_DIR
-RELAY_KNOWLEDGE_RUNTIME_DIR
-RELAY_KNOWLEDGE_SERVICE_DIR
-```
+## 1.4 网络与 QoS
 
-所有覆盖路径必须是绝对路径，且不能包含 `..`。路径解析只在 `env` 和 `paths` 边界内完成。
-
-## 1.4 网络与 QoS 配置
-
-常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。常用覆盖项:
-
-```text
-RELAY_KNOWLEDGE_HTTP_BIND
-RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS
-RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS
-RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES
-RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS
-RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
-RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
-```
-
-代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。这些变量只在环境边界读取，业务模块不直接访问进程环境。
+常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。日常本地使用不需要调整网络预算；需要远程监听、调大请求体或复现代理问题时，再进入 [第 8 章](08-advanced-configuration.md)。
 
 ## 1.5 安装与发布路径
 
-当前开发路径以 `cargo build` 和本地二进制为主。正式发布要求见 [安装部署与发布规格](../specs/installation-and-release.md): 稳定版本需要 GitHub Releases、crates.io、校验和、包管理器清单和平台 service manager 安装路径。使用指南中的命令均适用于本地构建出的 `relay-knowledge` 二进制。
+当前开发路径以 `cargo build`、本地二进制和仓库脚本为主。正式发布要求见 [安装部署与发布规格](../specs/installation-and-release.md): 稳定版本需要 GitHub Releases、crates.io、校验和、包管理器清单和平台 service manager 安装路径。使用指南中的命令均适用于本地构建出的 `relay-knowledge` 二进制。

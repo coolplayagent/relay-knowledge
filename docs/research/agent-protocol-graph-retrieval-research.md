@@ -4,6 +4,7 @@
 > 编制日期: 2026-05-12
 > 研究范围: 常驻 `relay-knowledge` 进程通过 MCP server 和 Agent Client Protocol adapter 向其它 agent 暴露图检索能力
 > 结论摘要: MCP 和 ACP 都可以接入图检索，但它们解决的问题不同；v1 应双协议同级支持，同时保持核心检索能力只实现一次
+> 协议刷新: MCP 链接已按 2025-11-25 规范刷新；早期 HTTP+SSE 只作为兼容方向，不作为新实现默认路径。
 
 ## 1. 背景
 
@@ -24,10 +25,10 @@
 
 MCP 采用 host / client / server 架构。host 管理 client 生命周期、权限、授权、LLM 集成和上下文聚合；server 暴露专业能力，并通过 capability negotiation 声明 resources、tools 和 prompts。参考:
 
-- [MCP Architecture](https://modelcontextprotocol.io/specification/2025-06-18/architecture)
-- [MCP Tools](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
-- [MCP Resources](https://modelcontextprotocol.io/specification/2025-06-18/server/resources)
-- [MCP Prompts](https://modelcontextprotocol.io/specification/2025-06-18/server/prompts)
+- [MCP Architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture)
+- [MCP Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+- [MCP Resources](https://modelcontextprotocol.io/specification/2025-11-25/server/resources)
+- [MCP Prompts](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts)
 
 对 `relay-knowledge` 的含义:
 

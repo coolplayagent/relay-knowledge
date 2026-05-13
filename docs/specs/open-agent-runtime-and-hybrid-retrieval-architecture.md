@@ -5,6 +5,8 @@
 > 适用范围: 外部 Agent Runtime 集成、LLM 知识处理、混合检索、模块解耦和后续 MCP/ACP/A2A adapter 设计
 > 默认路线: 支持开放 runtime，不内置 runtime；知识图谱和检索能力通过统一 API 暴露
 
+行业协议和检索能力刷新见 [2026 行业能力快照与差距分析](../research/industry-capability-snapshot-2026.md)。本文件保留 `relay-knowledge` 作为 knowledge substrate 的定位，不因 A2A 或 agent framework 生态成熟而把 core 改成 agent runtime。
+
 ## 1. 设计结论
 
 `relay-knowledge` 应定位为 **knowledge substrate**，而不是 agent runtime。项目负责图谱事实、证据、版本、索引、检索、事件和审计；外部 agent runtime 负责 planning、tool calling、handoff、approval、长任务状态和最终 LLM 交互编排。
@@ -26,12 +28,15 @@
 
 | 方向 | 关键洞察 | 对 `relay-knowledge` 的影响 |
 | --- | --- | --- |
-| [Model Context Protocol architecture](https://modelcontextprotocol.io/specification/2025-06-18/architecture) | MCP 采用 host / client / server 架构，server 暴露 tools、resources、prompts，host 管理权限、生命周期和上下文隔离 | `relay-knowledge` 适合做 MCP server，但不应接管 host/runtime 职责 |
+| [Model Context Protocol architecture](https://modelcontextprotocol.io/specification/2025-11-25/architecture) | MCP 采用 host / client / server 架构，server 暴露 tools、resources、prompts，host 管理权限、生命周期和上下文隔离 | `relay-knowledge` 适合做 MCP server，但不应接管 host/runtime 职责 |
 | [OpenAI Agents SDK](https://developers.openai.com/api/docs/guides/agents) | Agent 应用负责 orchestration、tool execution、approvals、state、handoffs 和 tracing | 这些运行时职责应留给外部应用，core 只提供知识工具和审计数据 |
 | [A2A protocol](https://github.com/a2aproject/A2A) | A2A 面向不同框架和厂商 agent 的发现、能力协商、长任务协作和结果交换 | 后续可提供 A2A gateway，让知识服务成为 specialist agent 能力，而不是内置多 agent 系统 |
 | [GraphRAG Query Engine](https://microsoft.github.io/graphrag/query/overview/) | Local search 结合图谱和原文 chunks，global search 使用 community reports，DRIFT 扩展局部检索起点 | 检索层应保留局部实体检索、全局摘要检索和社区信息扩展能力 |
 | [LightRAG](https://arxiv.org/abs/2410.05779) | 图结构与向量表示结合可以提升实体关系检索和增量更新效果 | 三层检索不能只做向量搜索，必须把图关系、文本索引和索引新鲜度纳入主路径 |
 | [Agent interoperability survey](https://arxiv.org/abs/2505.02279) | MCP、ACP、A2A、ANP 分别覆盖工具访问、结构化消息、agent 协作和开放发现 | v1 从 MCP tool/resource/prompt 暴露开始，保留更高层 agent 协议 adapter 的扩展点 |
+| [MCP Streamable HTTP 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) | Streamable HTTP 使用单一 endpoint、session header、protocol-version header、Origin 防护、cancellation 和可选 resumability | 已实现的 MCP server 应继续补齐 resources/prompts、GET/SSE resumability 和 session termination |
+| [A2A Protocol](https://a2a-protocol.org/dev/specification/) | A2A 面向独立 agent 系统之间的发现、任务协作、消息和 artifact 交换，v1.0 已作为稳定生产版本发布 | 后续 A2A gateway 应只映射 unified API task 和 artifact，不把 A2A 类型引入 domain |
+| [OpenAI File Search](https://developers.openai.com/api/docs/guides/tools-file-search) | 托管检索隐藏执行细节，只让用户选择 knowledge base、tool 和少量结果控制项 | relay-knowledge 的本地 UX 应同样默认零配置，把 provider/QoS/MCP 细节移到高级层 |
 
 ## 3. 总体架构边界
 
@@ -184,6 +189,14 @@ A2A 或类似 agent interoperability gateway 推荐作为后续 adapter，而不
 
 gateway 应把外部 task lifecycle 映射为 `ApiStreamEvent`，并把 A2A agent card、task id、artifact id 等信息放在 adapter metadata 中，不能进入 domain 类型。
 
+初版 A2A gateway 计划接口:
+
+- Agent card: 声明 knowledge retrieval、knowledge extraction proposal、graph validation 和 index maintenance 能力。
+- Task lifecycle: A2A task id 映射到 `RequestContext.trace_id` 或 stream event correlation id，不能成为 graph fact id。
+- Artifacts: context pack、diagnostic report、proposal validation report 作为 artifact metadata 暴露，原始 evidence 仍通过统一 API 和 scope policy 访问。
+- Identity: 支持 signed agent card 或等价身份元数据时，只进入 adapter/audit metadata，不改变 domain identity model。
+- Safety: A2A gateway 默认只读；proposal、commit、refresh 和 maintenance 仍需要显式 policy。
+
 ## 5. LLM 知识处理工作流
 
 ### 5.1 摄取后抽取
@@ -236,6 +249,15 @@ agent question
 ## 6. 混合检索设计
 
 `relay-knowledge` 的检索不是单一路径。三层检索必须作为独立 read model 保持可替换、可降级和可解释。
+
+后续 query strategy layer 不替代三层检索，而是在它们之上选择召回组合:
+
+- `local`: 当前默认 hybrid retrieval，适合具体实体、代码符号、source scope 内事实。
+- `global`: 基于 community summaries 或 topic reports 的数据集级问题。
+- `lite-global`: 在更小 token/resource budget 下读取少量社区摘要，作为 global 的低成本路径。
+- `drift-like`: 用 community insights 扩展 local 查询起点，生成可审计 follow-up retrieval steps。
+
+每次策略选择都必须进入 context pack metadata，包含选择原因、预算、执行步数、truncated/degraded 和 retriever contribution。
 
 | 层 | 主要对象 | 最适合的问题 | 典型失败 |
 | --- | --- | --- | --- |
