@@ -196,7 +196,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
 pub(super) fn ensure_code_repository_compat_columns(
     connection: &Connection,
 ) -> Result<(), StorageError> {
-    add_column_if_missing(
+    let mut should_rebuild_symbol_identities = add_column_if_missing(
         connection,
         "code_repository_symbols",
         "canonical_symbol_id",
@@ -270,13 +270,17 @@ pub(super) fn ensure_code_repository_compat_columns(
         "confidence_tier",
         "TEXT NOT NULL DEFAULT 'ambiguous'",
     )?;
-    rebuild_code_repository_symbol_identities(connection)?;
+    should_rebuild_symbol_identities |= symbol_identities_need_rebuild(connection)?;
+    if should_rebuild_symbol_identities {
+        rebuild_code_repository_symbol_identities(connection)?;
+    }
 
     Ok(())
 }
 
 fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<(), StorageError> {
-    let mut statement = connection.prepare(
+    let transaction = connection.unchecked_transaction()?;
+    let mut statement = transaction.prepare(
         "
         SELECT source_scope, symbol_snapshot_id, repository_id, path, name, kind,
                line_start, line_end, qualified_name
@@ -344,7 +348,8 @@ fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<
             }
         }
     }
-    let mut update = connection.prepare(
+    drop(statement);
+    let mut update = transaction.prepare(
         "
         UPDATE code_repository_symbols
         SET qualified_name = ?3,
@@ -360,8 +365,56 @@ fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<
             canonical_symbol_id,
         ])?;
     }
+    drop(update);
+    transaction.commit()?;
 
     Ok(())
+}
+
+fn symbol_identities_need_rebuild(connection: &Connection) -> Result<bool, StorageError> {
+    let has_direct_stale_id = connection.query_row(
+        "
+        SELECT EXISTS(
+            SELECT 1
+            FROM code_repository_symbols
+            WHERE canonical_symbol_id = ''
+               OR canonical_symbol_id = symbol_snapshot_id
+               OR canonical_symbol_id NOT LIKE 'repo://%'
+            LIMIT 1
+        )
+        ",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? != 0;
+    if has_direct_stale_id {
+        return Ok(true);
+    }
+
+    connection
+        .query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1
+                FROM code_repository_symbols AS child
+                JOIN code_repository_symbols AS ancestor
+                  ON ancestor.source_scope = child.source_scope
+                 AND ancestor.path = child.path
+                 AND ancestor.symbol_snapshot_id <> child.symbol_snapshot_id
+                 AND ancestor.line_start <= child.line_start
+                 AND ancestor.line_end >= child.line_end
+                 AND ancestor.kind IN (
+                    'class', 'constructor', 'function', 'interface',
+                    'method', 'module', 'type'
+                 )
+                WHERE child.qualified_name NOT LIKE '%.%'
+                LIMIT 1
+            )
+            ",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|exists| exists != 0)
+        .map_err(StorageError::from)
 }
 
 struct SymbolIdentityRow {
@@ -477,7 +530,7 @@ fn add_column_if_missing(
     table: &str,
     column: &str,
     definition: &str,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
     let columns = rows
@@ -488,9 +541,10 @@ fn add_column_if_missing(
             &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
             [],
         )?;
+        return Ok(true);
     }
 
-    Ok(())
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -554,6 +608,10 @@ mod tests {
         assert_eq!(
             canonical_symbol_id,
             "repo://repo/src::lib.rs::outer_b.inner"
+        );
+        assert!(
+            !symbol_identities_need_rebuild(&connection)
+                .expect("rebuilt identities should not be stale")
         );
     }
 }
