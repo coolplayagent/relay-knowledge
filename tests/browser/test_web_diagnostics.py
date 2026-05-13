@@ -33,8 +33,12 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("bm25 / docs: scoped cursor lags graph version")).to_be_visible()
         expect(page.get_by_role("cell", name="bm25")).to_be_visible()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
+        expect(page.get_by_role("heading", name="Providers")).to_be_visible()
+        expect(page.get_by_text("Semantic backend")).to_be_visible()
+        expect(page.get_by_text("https://embeddings.example")).to_be_visible()
+        expect(page.get_by_text("text-embed-3-small").first).to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
-        expect(page.locator("aside nav a")).to_have_count(5)
+        expect(page.locator("aside nav a")).to_have_count(6)
         assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
             "data:image/svg+xml"
         )
@@ -64,7 +68,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".command-preview")).to_contain_text("repo impact core")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        expect(page.locator("aside nav a")).to_have_count(5)
+        expect(page.locator("aside nav a")).to_have_count(6)
         expect(page.get_by_text("Runtime budgets")).to_be_visible()
         mobile_link_display = page.locator("aside nav a").first.evaluate(
             "node => getComputedStyle(node).display"
@@ -124,6 +128,17 @@ RUNTIME = {
     "qos_max_connections": 1024,
     "qos_max_in_flight_requests": 256,
     "qos_max_queue_depth": 512,
+    "semantic_backend_mode": "external",
+    "vector_backend_mode": "external",
+    "embedding_provider": "openai_compatible",
+    "embedding_base_url": "https://embeddings.example",
+    "embedding_api_key_configured": True,
+    "text_embedding_model": "text-embed-3-small",
+    "image_embedding_model": "clip-vit-b32",
+    "embedding_dimension": 1536,
+    "embedding_batch_size": 16,
+    "embedding_timeout_ms": 9000,
+    "embedding_max_concurrency": 2,
 }
 
 PROJECT_STATUS_RESPONSE = {
@@ -177,12 +192,18 @@ HEALTH_RESPONSE = {
             "index_version": 3,
             "indexed_graph_version": 7,
             "state": "fresh",
+            "model_name": "text-embed-3-small",
+            "model_dimension": 1536,
+            "backend_cursor": "semantic:text:abc",
         },
         {
             "kind": "vector",
             "index_version": 3,
             "indexed_graph_version": 7,
             "state": "fresh",
+            "model_name": "text-embed-3-small",
+            "model_dimension": 1536,
+            "backend_cursor": "vector:text:def",
         },
     ],
     "index_cursors": [

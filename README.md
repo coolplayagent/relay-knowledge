@@ -11,6 +11,7 @@
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
 - [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local/external semantic/vector backend contract、schema path、temporal/community、多模态 evidence maintenance、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为说明。
+- [Semantic/Vector Provider Backend](docs/semantic-vector-provider-backend.md): 远端 OpenAI-compatible embedding provider 配置、脱敏诊断、Web Providers 面板和降级行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
 重点架构文档:
@@ -25,6 +26,7 @@
 - [代码仓库 Tree-sitter 检索规格](docs/specs/code-repository-tree-sitter-retrieval.md): Git 代码仓库基于 tree-sitter 的结构化解析、全量/增量更新、高并发检索、代码图和影响分析设计。
 - [代码仓库检索 v2 优化规格](docs/specs/code-repository-retrieval-v2-optimization.md): scope preview、默认源码排除、repo report、查询预筛和本地确定性 semantic/vector 检索设计。
 - [开放 Agent Runtime 与混合检索架构](docs/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md): 支持外部 agent runtime 驱动 LLM 知识处理，但 core 不实现 runtime，并定义混合检索、mutation proposal 和 adapter 边界。
+- [Semantic/Vector Provider Backend 规格](docs/specs/semantic-vector-provider-backend.md): semantic/vector 外部 embedding provider 的配置、HTTP 边界、错误分类、Web contract 和测试要求。
 - [常驻进程 Agent 图检索访问规格](docs/specs/resident-agent-graph-retrieval-access.md): 常驻进程通过 MCP server 和 Agent Client Protocol adapter 向其它 agent 暴露图检索能力，并统一权限、QoS、新鲜度、审计和测试要求。
 
 ## Development
@@ -80,6 +82,9 @@ worker metadata can be selected with:
 ```bash
 RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
 RELAY_KNOWLEDGE_VECTOR_BACKEND=external
+RELAY_KNOWLEDGE_LLM_PROVIDER=openai_compatible
+RELAY_KNOWLEDGE_EMBEDDING_BASE_URL=https://api.example.com/v1
+RELAY_KNOWLEDGE_EMBEDDING_API_KEY=...
 RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL=text-embed-3-small
 RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL=clip-vit-b32
 RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536

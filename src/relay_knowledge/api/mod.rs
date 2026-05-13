@@ -20,11 +20,11 @@ pub use operations::{
     CodeRepositoryImpactResponse, CodeRepositoryIndexResponse, CodeRepositoryQueryResponse,
     CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryReportResponse,
     CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
-    GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
-    HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestClaim, IngestEvent,
-    IngestEvidence, IngestEvidenceExtraction, IngestRelation, IngestRequest, IngestResponse,
-    MultimodalExtractionRequest, MultimodalExtractionResponse, ServiceRecoveryReport,
-    ServiceStatusResponse,
+    EmbeddingProviderProbeResponse, GraphInspectionRequest, GraphInspectionResponse,
+    HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest,
+    IndexRefreshResponse, IngestClaim, IngestEvent, IngestEvidence, IngestEvidenceExtraction,
+    IngestRelation, IngestRequest, IngestResponse, MultimodalExtractionRequest,
+    MultimodalExtractionResponse, ServiceRecoveryReport, ServiceStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};

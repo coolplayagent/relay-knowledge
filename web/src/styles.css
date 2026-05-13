@@ -302,6 +302,7 @@ a {
 
 .metric-item,
 .readiness-item,
+.provider-item,
 .runtime-list div,
 .operation-form,
 .operation-preview,
@@ -320,6 +321,22 @@ a {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.provider-item {
+  min-width: 0;
+  padding: 12px;
+}
+
+.provider-cursors {
+  margin-top: 4px;
 }
 
 .readiness-item {
@@ -635,6 +652,7 @@ tr:last-child td {
 
   .metric-grid,
   .readiness-grid,
+  .provider-grid,
   .runtime-list,
   .operation-layout {
     grid-template-columns: 1fr;

@@ -46,9 +46,16 @@ pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
 pub const RELAY_KNOWLEDGE_SEMANTIC_BACKEND: &str = "RELAY_KNOWLEDGE_SEMANTIC_BACKEND";
 pub const RELAY_KNOWLEDGE_VECTOR_BACKEND: &str = "RELAY_KNOWLEDGE_VECTOR_BACKEND";
+pub const RELAY_KNOWLEDGE_LLM_PROVIDER: &str = "RELAY_KNOWLEDGE_LLM_PROVIDER";
+pub const RELAY_KNOWLEDGE_EMBEDDING_BASE_URL: &str = "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL";
+pub const RELAY_KNOWLEDGE_EMBEDDING_API_KEY: &str = "RELAY_KNOWLEDGE_EMBEDDING_API_KEY";
 pub const RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL";
 pub const RELAY_KNOWLEDGE_EMBEDDING_DIMENSION: &str = "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION";
+pub const RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE: &str = "RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE";
+pub const RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY: &str =
+    "RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -159,9 +166,15 @@ pub struct AgentEnvOverrides {
 pub struct RetrievalEnvOverrides {
     pub semantic_backend: Option<String>,
     pub vector_backend: Option<String>,
+    pub llm_provider: Option<String>,
+    pub embedding_base_url: Option<String>,
+    pub embedding_api_key: Option<String>,
     pub text_embedding_model: Option<String>,
     pub image_embedding_model: Option<String>,
     pub embedding_dimension: Option<usize>,
+    pub embedding_batch_size: Option<usize>,
+    pub embedding_timeout_ms: Option<u64>,
+    pub embedding_max_concurrency: Option<usize>,
 }
 
 /// Fully parsed process environment relevant to relay-knowledge.
@@ -290,11 +303,26 @@ impl EnvironmentConfig {
             retrieval: RetrievalEnvOverrides {
                 semantic_backend: string_var(&values, RELAY_KNOWLEDGE_SEMANTIC_BACKEND)?,
                 vector_backend: string_var(&values, RELAY_KNOWLEDGE_VECTOR_BACKEND)?,
+                llm_provider: string_var(&values, RELAY_KNOWLEDGE_LLM_PROVIDER)?,
+                embedding_base_url: string_var(&values, RELAY_KNOWLEDGE_EMBEDDING_BASE_URL)?,
+                embedding_api_key: string_var(&values, RELAY_KNOWLEDGE_EMBEDDING_API_KEY)?,
                 text_embedding_model: string_var(&values, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL)?,
                 image_embedding_model: string_var(&values, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL)?,
                 embedding_dimension: positive_usize_var(
                     &values,
                     RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+                )?,
+                embedding_batch_size: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE,
+                )?,
+                embedding_timeout_ms: positive_u64_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS,
+                )?,
+                embedding_max_concurrency: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY,
                 )?,
             },
         })
@@ -560,9 +588,18 @@ mod tests {
                 (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
                 (RELAY_KNOWLEDGE_SEMANTIC_BACKEND, "external"),
                 (RELAY_KNOWLEDGE_VECTOR_BACKEND, "external"),
+                (RELAY_KNOWLEDGE_LLM_PROVIDER, "openai_compatible"),
+                (
+                    RELAY_KNOWLEDGE_EMBEDDING_BASE_URL,
+                    "https://embeddings.example/v1",
+                ),
+                (RELAY_KNOWLEDGE_EMBEDDING_API_KEY, "secret-key"),
                 (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
                 (RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, "clip-vit-b32"),
                 (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
+                (RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE, "16"),
+                (RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS, "9000"),
+                (RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY, "2"),
             ],
         )
         .expect("environment should parse");
@@ -600,6 +637,18 @@ mod tests {
         );
         assert_eq!(config.retrieval.vector_backend, Some("external".to_owned()));
         assert_eq!(
+            config.retrieval.llm_provider,
+            Some("openai_compatible".to_owned())
+        );
+        assert_eq!(
+            config.retrieval.embedding_base_url,
+            Some("https://embeddings.example/v1".to_owned())
+        );
+        assert_eq!(
+            config.retrieval.embedding_api_key,
+            Some("secret-key".to_owned())
+        );
+        assert_eq!(
             config.retrieval.text_embedding_model,
             Some("text-embed-3-small".to_owned())
         );
@@ -608,6 +657,9 @@ mod tests {
             Some("clip-vit-b32".to_owned())
         );
         assert_eq!(config.retrieval.embedding_dimension, Some(1536));
+        assert_eq!(config.retrieval.embedding_batch_size, Some(16));
+        assert_eq!(config.retrieval.embedding_timeout_ms, Some(9000));
+        assert_eq!(config.retrieval.embedding_max_concurrency, Some(2));
     }
 
     #[test]

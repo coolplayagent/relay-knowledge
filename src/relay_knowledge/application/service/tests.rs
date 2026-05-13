@@ -306,6 +306,11 @@ async fn index_refresh_cursors_use_indexed_document_model_metadata() {
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
             ("RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "external"),
             ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+            (
+                "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+                "https://embeddings.example/v1",
+            ),
+            ("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "secret-key"),
             ("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "runtime-model"),
             ("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", "1536"),
         ],

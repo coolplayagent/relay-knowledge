@@ -26,6 +26,17 @@ export type RuntimeStatus = {
   qos_max_connections: number;
   qos_max_in_flight_requests: number;
   qos_max_queue_depth: number;
+  semantic_backend_mode: "local" | "external" | "disabled";
+  vector_backend_mode: "local" | "external" | "disabled";
+  embedding_provider?: "openai_compatible" | "echo";
+  embedding_base_url?: string;
+  embedding_api_key_configured: boolean;
+  text_embedding_model: string;
+  image_embedding_model: string;
+  embedding_dimension: number;
+  embedding_batch_size?: number;
+  embedding_timeout_ms?: number;
+  embedding_max_concurrency?: number;
 };
 
 export type ProjectStatusResponse = {

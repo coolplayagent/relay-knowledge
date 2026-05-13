@@ -1,6 +1,13 @@
 import type { HealthResponse, IndexStatus, ProjectStatusResponse } from "./api/contracts";
 
-export type OperationId = "retrieve" | "ingest" | "graph" | "code" | "indexes" | "service";
+export type OperationId =
+  | "retrieve"
+  | "ingest"
+  | "graph"
+  | "code"
+  | "indexes"
+  | "provider"
+  | "service";
 export type Freshness = "allow-stale" | "wait-until-fresh" | "graph-only";
 export type CodeAction = "register" | "index" | "update" | "query" | "impact" | "status";
 export type CodeQueryKind =
@@ -55,6 +62,9 @@ export type AppState = {
   indexes: {
     kinds: IndexKind[];
   };
+  provider: {
+    probeInput: string;
+  };
   service: {
     mcpTransport: "configured" | "streamable-http";
     allowedScopes: string;
@@ -67,6 +77,7 @@ export const OPERATIONS: Array<{ id: OperationId; label: string }> = [
   { id: "graph", label: "Graph" },
   { id: "code", label: "Code" },
   { id: "indexes", label: "Indexes" },
+  { id: "provider", label: "Provider" },
   { id: "service", label: "Service" }
 ];
 
@@ -105,6 +116,9 @@ export const appState: AppState = {
   },
   indexes: {
     kinds: ["bm25", "semantic", "vector"]
+  },
+  provider: {
+    probeInput: "relay-knowledge provider probe"
   },
   service: {
     mcpTransport: "streamable-http",
@@ -196,6 +210,8 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
       return codeSnapshot(metadata);
     case "indexes":
       return indexesSnapshot(metadata);
+    case "provider":
+      return providerSnapshot(metadata);
     case "service":
       return serviceSnapshot(metadata);
   }
@@ -341,6 +357,18 @@ function indexesSnapshot(metadata: Record<string, unknown>) {
     payload: {
       operation: "index.refresh",
       kinds,
+      metadata
+    }
+  };
+}
+
+function providerSnapshot(metadata: Record<string, unknown>) {
+  return {
+    name: "Probe embedding provider",
+    command: shellCommand(["relay-knowledge", "provider", "probe", "--format", "json"]),
+    payload: {
+      operation: "provider.embedding.probe",
+      input: appState.provider.probeInput,
       metadata
     }
   };

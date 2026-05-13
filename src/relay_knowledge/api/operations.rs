@@ -294,6 +294,24 @@ pub struct HealthResponse {
     pub runtime: RuntimeStatus,
 }
 
+/// Remote embedding provider probe response with secret-free diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingProviderProbeResponse {
+    pub metadata: ApiMetadata,
+    pub ok: bool,
+    pub provider: Option<String>,
+    pub model: String,
+    pub dimension: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+}
+
 /// Code repository registration request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryRegisterRequest {

@@ -17,6 +17,7 @@
 
 - [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local/external semantic/vector backend contract、schema path、temporal/community、多模态 evidence maintenance、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为。
+- [Semantic/Vector Provider Backend](semantic-vector-provider-backend.md): 远端 OpenAI-compatible embedding provider 配置、脱敏诊断、Web Providers 面板和降级行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
 
 ## Research
@@ -41,4 +42,5 @@
 - [Source Scope 与多模态摄取规格](specs/source-scope-and-multimodal-ingestion.md): Git 分支/rebase 快照隔离、检索 scope 和文档文字/图片多模态 evidence 设计。
 - [代码仓库 Tree-sitter 检索规格](specs/code-repository-tree-sitter-retrieval.md): Git 代码仓库基于 tree-sitter 的结构化解析、全量/增量更新、高并发检索、代码图和影响分析设计。
 - [开放 Agent Runtime 与混合检索架构](specs/open-agent-runtime-and-hybrid-retrieval-architecture.md): 支持外部 agent runtime 驱动 LLM 知识处理，同时保持 core 不实现 runtime，并明确 BM25、semantic、vector 和 graph expansion 的混合检索边界。
+- [Semantic/Vector Provider Backend 规格](specs/semantic-vector-provider-backend.md): semantic/vector 外部 embedding provider 的配置、HTTP 边界、错误分类、Web contract 和测试要求。
 - [常驻进程 Agent 图检索访问规格](specs/resident-agent-graph-retrieval-access.md): 常驻进程通过 MCP server 和 Agent Client Protocol adapter 向其它 agent 暴露图检索能力的接口、权限、QoS、审计和测试要求。

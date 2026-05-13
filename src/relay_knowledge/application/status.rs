@@ -26,6 +26,37 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
         qos_max_connections: network.qos.max_connections,
         qos_max_in_flight_requests: network.qos.max_in_flight_requests,
         qos_max_queue_depth: network.qos.max_queue_depth,
+        semantic_backend_mode: runtime.retrieval.semantic_mode.as_str().to_owned(),
+        vector_backend_mode: runtime.retrieval.vector_mode.as_str().to_owned(),
+        embedding_provider: runtime
+            .retrieval
+            .remote_embedding
+            .as_ref()
+            .map(|config| config.provider.as_str().to_owned()),
+        embedding_base_url: runtime
+            .retrieval
+            .remote_embedding
+            .as_ref()
+            .map(|config| config.redacted_base_url()),
+        embedding_api_key_configured: runtime.retrieval.remote_embedding.is_some(),
+        text_embedding_model: runtime.retrieval.vector_model.name.clone(),
+        image_embedding_model: runtime.retrieval.image_model.name.clone(),
+        embedding_dimension: runtime.retrieval.vector_model.dimension,
+        embedding_batch_size: runtime
+            .retrieval
+            .remote_embedding
+            .as_ref()
+            .map(|config| config.batch_size),
+        embedding_timeout_ms: runtime
+            .retrieval
+            .remote_embedding
+            .as_ref()
+            .map(|config| duration_millis(config.timeout)),
+        embedding_max_concurrency: runtime
+            .retrieval
+            .remote_embedding
+            .as_ref()
+            .map(|config| config.max_concurrency),
     }
 }
 
