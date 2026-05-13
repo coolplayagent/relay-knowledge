@@ -2,6 +2,17 @@
 
 本目录按文档用途归档，避免研究资料、能力规格和后续设计文档混放。
 
+## User Guide
+
+- [使用指南总览](user-guide/README.md): 按章节拆分的安装、CLI、知识图谱、代码仓库、Web、MCP/Agent 和运维排障说明。
+- [第 1 章 安装与运行时目录](user-guide/01-install-and-runtime.md)
+- [第 2 章 CLI 基础](user-guide/02-cli-basics.md)
+- [第 3 章 知识图谱工作流](user-guide/03-knowledge-graph-workflow.md)
+- [第 4 章 代码仓库工作流](user-guide/04-code-repository-workflow.md)
+- [第 5 章 Web 工作区](user-guide/05-web-workspace.md)
+- [第 6 章 Agent 与常驻服务](user-guide/06-agent-and-service.md)
+- [第 7 章 运维与排障](user-guide/07-operations-and-troubleshooting.md)
+
 ## Features
 
 - [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local semantic/vector、schema path、temporal/community、多模态 evidence、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
