@@ -174,6 +174,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_schema_migrations (
+            name TEXT PRIMARY KEY
+        );
+
         CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
             ON code_repository_symbols(source_scope, name, qualified_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_references_lookup
@@ -270,7 +274,8 @@ pub(super) fn ensure_code_repository_compat_columns(
         "confidence_tier",
         "TEXT NOT NULL DEFAULT 'ambiguous'",
     )?;
-    should_rebuild_symbol_identities |= symbol_identities_need_rebuild(connection)?;
+    should_rebuild_symbol_identities |= !symbol_identity_v1_migration_recorded(connection)?;
+    should_rebuild_symbol_identities |= symbol_identities_have_direct_stale_ids(connection)?;
     if should_rebuild_symbol_identities {
         rebuild_code_repository_symbol_identities(connection)?;
     }
@@ -366,14 +371,39 @@ fn rebuild_code_repository_symbol_identities(connection: &Connection) -> Result<
         ])?;
     }
     drop(update);
+    transaction.execute(
+        "
+        INSERT OR IGNORE INTO code_repository_schema_migrations (name)
+        VALUES ('symbol_identity_v1')
+        ",
+        [],
+    )?;
     transaction.commit()?;
 
     Ok(())
 }
 
-fn symbol_identities_need_rebuild(connection: &Connection) -> Result<bool, StorageError> {
-    let has_direct_stale_id = connection.query_row(
-        "
+fn symbol_identity_v1_migration_recorded(connection: &Connection) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT EXISTS(
+                SELECT 1
+                FROM code_repository_schema_migrations
+                WHERE name = 'symbol_identity_v1'
+            )
+            ",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|exists| exists != 0)
+        .map_err(StorageError::from)
+}
+
+fn symbol_identities_have_direct_stale_ids(connection: &Connection) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "
         SELECT EXISTS(
             SELECT 1
             FROM code_repository_symbols
@@ -383,33 +413,6 @@ fn symbol_identities_need_rebuild(connection: &Connection) -> Result<bool, Stora
             LIMIT 1
         )
         ",
-        [],
-        |row| row.get::<_, i64>(0),
-    )? != 0;
-    if has_direct_stale_id {
-        return Ok(true);
-    }
-
-    connection
-        .query_row(
-            "
-            SELECT EXISTS(
-                SELECT 1
-                FROM code_repository_symbols AS child
-                JOIN code_repository_symbols AS ancestor
-                  ON ancestor.source_scope = child.source_scope
-                 AND ancestor.path = child.path
-                 AND ancestor.symbol_snapshot_id <> child.symbol_snapshot_id
-                 AND ancestor.line_start <= child.line_start
-                 AND ancestor.line_end >= child.line_end
-                 AND ancestor.kind IN (
-                    'class', 'constructor', 'function', 'interface',
-                    'method', 'module', 'type'
-                 )
-                WHERE child.qualified_name NOT LIKE '%.%'
-                LIMIT 1
-            )
-            ",
             [],
             |row| row.get::<_, i64>(0),
         )
@@ -610,7 +613,11 @@ mod tests {
             "repo://repo/src::lib.rs::outer_b.inner"
         );
         assert!(
-            !symbol_identities_need_rebuild(&connection)
+            symbol_identity_v1_migration_recorded(&connection)
+                .expect("rebuilt identities should be recorded")
+        );
+        assert!(
+            !symbol_identities_have_direct_stale_ids(&connection)
                 .expect("rebuilt identities should not be stale")
         );
     }

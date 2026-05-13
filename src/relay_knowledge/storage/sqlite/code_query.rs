@@ -461,11 +461,14 @@ fn search_chunks(
     let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
-               c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
-               f.degraded_reason
+               c.line_start, c.line_end, c.symbol_snapshot_id,
+               symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
+        LEFT JOIN code_repository_symbols symbol
+            ON symbol.source_scope = c.source_scope
+           AND symbol.symbol_snapshot_id = c.symbol_snapshot_id
         WHERE c.source_scope = ?
           AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
@@ -492,8 +495,9 @@ fn search_chunks(
                     end: row.get(7)?,
                 },
                 symbol_snapshot_id: row.get(8)?,
-                parse_status: row.get(9)?,
-                degraded_reason: row.get(10)?,
+                canonical_symbol_id: row.get(9)?,
+                parse_status: row.get(10)?,
+                degraded_reason: row.get(11)?,
             })
         },
     )?;
@@ -516,7 +520,7 @@ fn search_chunks(
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: row.symbol_snapshot_id,
-                        canonical_symbol_id: None,
+                        canonical_symbol_id: row.canonical_symbol_id,
                         file_id: Some(row.file_id),
                         retrieval_layers: chunk_layers(&row.parse_status),
                         score,
@@ -885,6 +889,7 @@ struct ChunkRow {
     byte_range: RepositoryCodeRange,
     line_range: RepositoryCodeRange,
     symbol_snapshot_id: Option<String>,
+    canonical_symbol_id: Option<String>,
     parse_status: String,
     degraded_reason: Option<String>,
 }

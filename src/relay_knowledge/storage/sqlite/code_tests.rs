@@ -84,6 +84,36 @@ async fn hybrid_deduplication_preserves_retrieval_layers() {
 }
 
 #[tokio::test]
+async fn chunk_hits_with_symbol_snapshots_include_canonical_identity() {
+    let mut snapshot = snapshot_with_symbol_and_matching_chunk();
+    snapshot.chunks[0].content = "body text only".to_owned();
+    let store = store_with_repository_snapshot(snapshot).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "body",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("chunk query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("target-symbol"));
+    assert_eq!(
+        hits[0].canonical_symbol_id.as_deref(),
+        Some("repo://repo/src::lib.rs::target")
+    );
+}
+
+#[tokio::test]
 async fn rejects_code_queries_for_unindexed_refs() {
     let store = store_with_repository_snapshot(snapshot_with_chunk(
         "repo",
@@ -495,6 +525,45 @@ async fn impact_imports_use_rust_symbol_namespace_seeds() {
                 .retrieval_layers
                 .contains(&CodeRetrievalLayer::ImportGraph)
     }));
+}
+
+#[tokio::test]
+async fn impact_chunk_hits_with_symbol_snapshots_include_canonical_identity() {
+    let mut snapshot = snapshot_with_symbol_and_matching_chunk();
+    snapshot.chunks[0].content = "changed body".to_owned();
+    let store = store_with_repository_snapshot(snapshot).await;
+    let request = crate::domain::CodeImpactRequest::new(
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate"),
+        "base",
+        "commit",
+        10,
+    )
+    .expect("impact request should validate");
+
+    let hits = store
+        .analyze_code_impact(
+            request,
+            CodeImpactChanges {
+                paths: vec!["src/lib.rs".to_owned()],
+                deleted_symbol_names: Vec::new(),
+            },
+        )
+        .await
+        .expect("impact should succeed");
+    let chunk_hit = hits
+        .iter()
+        .find(|hit| hit.file_id.as_deref() == Some("target-file"))
+        .expect("chunk hit should be returned");
+
+    assert_eq!(
+        chunk_hit.symbol_snapshot_id.as_deref(),
+        Some("target-symbol")
+    );
+    assert_eq!(
+        chunk_hit.canonical_symbol_id.as_deref(),
+        Some("repo://repo/src::lib.rs::target")
+    );
 }
 
 #[tokio::test]
