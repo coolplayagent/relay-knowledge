@@ -1,8 +1,6 @@
 //! Observability runtime for local diagnostics and OTLP export.
 
 use std::{
-    error::Error,
-    fmt,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -88,21 +86,14 @@ impl ObservabilityRuntime {
 
     /// Installs tracing and OTLP exporters. Exporter failures are captured for diagnostics.
     pub fn initialize(&self) {
-        let result = self.try_initialize();
+        let initialized = self.try_initialize();
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match result {
-            Ok(initialized) => {
-                state.trace_initialized = initialized.trace_initialized;
-                state.metrics_initialized = initialized.metrics_initialized;
-                state.last_error = None;
-            }
-            Err(error) => {
-                state.last_error = Some(error.to_string());
-            }
-        }
+        state.trace_initialized = initialized.trace_initialized;
+        state.metrics_initialized = initialized.metrics_initialized;
+        state.last_error = initialized.last_error;
     }
 
     /// Returns a recorder for low-cardinality agent protocol metrics.
@@ -136,7 +127,7 @@ impl ObservabilityRuntime {
         // failures best-effort and leaves process teardown to flush remaining work.
     }
 
-    fn try_initialize(&self) -> Result<InitializedTelemetry, ObservabilityError> {
+    fn try_initialize(&self) -> InitializedTelemetry {
         let resource = Resource::builder()
             .with_service_name(PROJECT_NAME.to_owned())
             .with_attribute(KeyValue::new(
@@ -147,45 +138,53 @@ impl ObservabilityRuntime {
         let mut initialized = InitializedTelemetry::default();
 
         if self.config.metrics_enabled {
-            let exporter = opentelemetry_otlp::MetricExporter::builder()
+            match opentelemetry_otlp::MetricExporter::builder()
                 .with_http()
                 .with_endpoint(self.config.metric_endpoint())
                 .with_timeout(self.config.export_timeout)
                 .build()
-                .map_err(|error| ObservabilityError(error.to_string()))?;
-            let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
-                .with_interval(Duration::from_secs(5))
-                .build();
-            let provider = SdkMeterProvider::builder()
-                .with_resource(resource.clone())
-                .with_reader(reader)
-                .build();
-            global::set_meter_provider(provider);
-            initialized.metrics_initialized = true;
+            {
+                Ok(exporter) => {
+                    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+                        .with_interval(Duration::from_secs(5))
+                        .build();
+                    let provider = SdkMeterProvider::builder()
+                        .with_resource(resource.clone())
+                        .with_reader(reader)
+                        .build();
+                    global::set_meter_provider(provider);
+                    initialized.metrics_initialized = true;
+                }
+                Err(error) => initialized.push_error(format!("metrics exporter: {error}")),
+            }
         }
 
         if self.config.traces_enabled {
-            let exporter = opentelemetry_otlp::SpanExporter::builder()
+            match opentelemetry_otlp::SpanExporter::builder()
                 .with_http()
                 .with_endpoint(self.config.trace_endpoint())
                 .with_timeout(self.config.export_timeout)
                 .build()
-                .map_err(|error| ObservabilityError(error.to_string()))?;
-            let provider = SdkTracerProvider::builder()
-                .with_resource(resource)
-                .with_batch_exporter(exporter)
-                .build();
-            let tracer = provider.tracer(PROJECT_NAME.to_owned());
-            global::set_tracer_provider(provider);
-            let filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-            let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-            let _ = tracing_subscriber::registry()
-                .with(filter)
-                .with(tracing_subscriber::fmt::layer())
-                .with(otel_layer)
-                .try_init();
-            initialized.trace_initialized = true;
+            {
+                Ok(exporter) => {
+                    let provider = SdkTracerProvider::builder()
+                        .with_resource(resource)
+                        .with_batch_exporter(exporter)
+                        .build();
+                    let tracer = provider.tracer(PROJECT_NAME.to_owned());
+                    global::set_tracer_provider(provider);
+                    let filter = EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| EnvFilter::new("info"));
+                    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+                    let _ = tracing_subscriber::registry()
+                        .with(filter)
+                        .with(tracing_subscriber::fmt::layer())
+                        .with(otel_layer)
+                        .try_init();
+                    initialized.trace_initialized = true;
+                }
+                Err(error) => initialized.push_error(format!("trace exporter: {error}")),
+            }
         } else {
             let filter =
                 EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -195,7 +194,7 @@ impl ObservabilityRuntime {
                 .try_init();
         }
 
-        Ok(initialized)
+        initialized
     }
 }
 
@@ -203,6 +202,19 @@ impl ObservabilityRuntime {
 struct InitializedTelemetry {
     trace_initialized: bool,
     metrics_initialized: bool,
+    last_error: Option<String>,
+}
+
+impl InitializedTelemetry {
+    fn push_error(&mut self, error: String) {
+        match &mut self.last_error {
+            Some(existing) => {
+                existing.push_str("; ");
+                existing.push_str(&error);
+            }
+            None => self.last_error = Some(error),
+        }
+    }
 }
 
 /// Stable telemetry diagnostics exposed through service status.
@@ -339,17 +351,6 @@ pub struct AgentProtocolMetricsSnapshot {
     pub cancelled_total: u64,
     pub context_truncated_total: u64,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObservabilityError(String);
-
-impl fmt::Display for ObservabilityError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl Error for ObservabilityError {}
 
 fn signal_endpoint(base: &str, path: &str) -> String {
     let trimmed = base.trim_end_matches('/');
@@ -501,9 +502,15 @@ mod tests {
     }
 
     #[test]
-    fn observability_error_displays_source_message() {
-        let error = ObservabilityError("collector unavailable".to_owned());
+    fn initialized_telemetry_accumulates_exporter_errors() {
+        let mut initialized = InitializedTelemetry::default();
 
-        assert_eq!(error.to_string(), "collector unavailable");
+        initialized.push_error("metrics exporter: invalid endpoint".to_owned());
+        initialized.push_error("trace exporter: invalid endpoint".to_owned());
+
+        assert_eq!(
+            initialized.last_error.as_deref(),
+            Some("metrics exporter: invalid endpoint; trace exporter: invalid endpoint")
+        );
     }
 }
