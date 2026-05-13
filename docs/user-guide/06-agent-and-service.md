@@ -32,6 +32,8 @@ http://127.0.0.1:8791/mcp
 
 `service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
+Web 页面中的 service run 操作只通过 `/api/web/operations/execute` 返回当前 service runtime snapshot，用于检查即将运行的配置和 MCP 状态；实际常驻服务必须由 CLI、`run.sh` 或平台 service manager 启动。
+
 ## 6.2 MCP 权限变量
 
 ```text

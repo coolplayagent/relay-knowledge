@@ -225,14 +225,17 @@ uv run --extra dev pytest tests/browser
 The static Web workspace renders project health, GraphRAG readiness, graph
 counts, scoped index freshness, refresh queue diagnostics, stale reasons,
 runtime budgets, and interactive operation composers for retrieval, ingestion,
-graph inspection, code repository workflows, index refresh, and service runtime
-commands. The same Rust HTTP service serves static Web assets plus
+graph inspection, code repository workflows, index refresh, provider probes,
+worker/proposal/audit operations, and service runtime commands. The same Rust
+HTTP service serves static Web assets plus
 `/api/project/status`, `/api/health`, `/api/service/status`, and
 `/api/web/operations/execute` on one local port. The execute endpoint accepts
 the current composer snapshot, calls the shared application service, and returns
-operation metadata plus result JSON for the page to display. Web execute
-requests are bounded by `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback
-HTTP binds require the remote-client access policy to be enabled explicitly.
+operation metadata plus result JSON for the page to display. Web `service run`
+returns a service runtime snapshot rather than starting a resident loop from the
+browser. Web execute requests are bounded by
+`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
+remote-client access policy to be enabled explicitly.
 
 Optional local hooks:
 
