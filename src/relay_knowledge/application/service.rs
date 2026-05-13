@@ -18,7 +18,10 @@ use crate::{
         RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
-    project::PROJECT_NAME,
+    project::{
+        DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
+        PROJECT_NAME, WINDOWS_SERVICE_DEFINITION_FILE_NAME,
+    },
     retrieval::{RetrievalPlan, read_model_backend_statuses},
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
 };
@@ -47,7 +50,7 @@ pub struct RelayKnowledgeService {
 impl RelayKnowledgeService {
     /// Creates a service from already validated foundational configuration.
     pub fn new(runtime: RuntimeConfiguration) -> Self {
-        let database_path = runtime.paths.data_dir.join("relay-knowledge.sqlite");
+        let database_path = runtime.paths.data_dir.join(DATABASE_FILE_NAME);
 
         Self {
             runtime,
@@ -613,11 +616,11 @@ fn serialized_context_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
 
 fn service_definition_filename() -> &'static str {
     if cfg!(target_os = "windows") {
-        "relay-knowledge-service.xml"
+        WINDOWS_SERVICE_DEFINITION_FILE_NAME
     } else if cfg!(target_os = "macos") {
-        "com.coolplayagent.relay-knowledge.plist"
+        MACOS_SERVICE_DEFINITION_FILE_NAME
     } else {
-        "relay-knowledge.service"
+        LINUX_SERVICE_DEFINITION_FILE_NAME
     }
 }
 

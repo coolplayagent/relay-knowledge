@@ -14,6 +14,7 @@ use crate::{
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{FreshnessPolicy, IndexKind},
     interfaces::agent::mcp::McpServer,
+    project::PROJECT_NAME,
 };
 
 /// Supported CLI output formats.
@@ -487,12 +488,12 @@ struct VersionResponse {
 
 fn render_version(format: OutputFormat) -> Result<String, CliError> {
     match format {
-        OutputFormat::Text => Ok(format!("relay-knowledge {}\n", env!("CARGO_PKG_VERSION"))),
+        OutputFormat::Text => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
         OutputFormat::Json => serialize_line(&VersionResponse {
-            project_name: "relay-knowledge",
+            project_name: PROJECT_NAME,
             version: env!("CARGO_PKG_VERSION"),
         }),
-        OutputFormat::Markdown => Ok(format!("relay-knowledge {}\n", env!("CARGO_PKG_VERSION"))),
+        OutputFormat::Markdown => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
         OutputFormat::StreamingJson => Err(CliError::UnsupportedVersionFormat(format)),
     }
 }
@@ -738,7 +739,7 @@ where
     let line = match operation {
         "project.status" => value["project_name"]
             .as_str()
-            .unwrap_or("relay-knowledge")
+            .unwrap_or(PROJECT_NAME)
             .to_owned(),
         "knowledge.ingest" => format!(
             "ingested graph_version={} evidence_count={}",
@@ -781,7 +782,7 @@ where
         ),
         "service.status" => format!(
             "service={} mode={}",
-            value["service_name"].as_str().unwrap_or("relay-knowledge"),
+            value["service_name"].as_str().unwrap_or(PROJECT_NAME),
             value["mode"].as_str().unwrap_or("disabled")
         ),
         "code.repo.index" => format!(

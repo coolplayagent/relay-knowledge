@@ -7,8 +7,8 @@ This repository is a Rust skeleton for `relay-knowledge`, a graph-database-based
 Use the existing Rust layout:
 
 - `Cargo.toml`: package manifest and Rust lint configuration.
-- `src/lib.rs`: reusable knowledge graph primitives.
-- `src/main.rs`: default CLI entry point.
+- `src/relay_knowledge/lib.rs`: reusable knowledge graph primitives and the Cargo library entry point.
+- `src/relay_knowledge/main.rs`: default CLI entry point.
 - `tests/`: integration and smoke tests.
 - `docs/specs/engineering-hard-constraints.md`: hard constraints for shallow functions, dead code, documentation completeness, foundational modules, acyclic dependencies, max file length, unit-test coverage, event-driven HTTP, QoS, and Playwright Chromium browser integration-test readiness.
 - `docs/specs/installation-and-release.md`: installation, packaging, publishing, service deployment, upgrade, and uninstall requirements.
@@ -67,6 +67,10 @@ Document required services, such as graph databases or local containers, in `REA
 Use idiomatic Rust conventions: four-space indentation, `snake_case` for functions/modules, `PascalCase` for types and traits, and `SCREAMING_SNAKE_CASE` for constants. Keep `unsafe` out of the codebase unless explicitly justified. Run `cargo fmt` before committing Rust code.
 
 Configuration and documentation files should use descriptive names, for example `docs/graph-schema.md` or `examples/load_dataset.rs`.
+
+Delete empty or meaningless placeholder files instead of keeping them in the module tree. This includes 0-byte files, whitespace-only files, and files that contain only placeholder comments without a real module responsibility. Required Cargo or Rust module entry points, such as `src/relay_knowledge/lib.rs`, are not considered empty when they declare the crate/module surface.
+
+Keep project identity constants centralized in `src/relay_knowledge/project/mod.rs`. Product names, application directory names, database filenames, service definition filenames, and similar `relay-knowledge` identity strings should be added there and referenced from feature modules rather than duplicated in `paths`, `application`, `interfaces`, or adapters. Module-local operational defaults, such as HTTP, QoS, parser, storage, or indexing limits, should stay with the module that owns their behavior.
 
 No tracked file may exceed 1000 lines. Split Rust modules, tests, docs, scripts, and workflow files by responsibility before they cross that limit; do not use dense formatting or unrelated aggregation to bypass the cap.
 

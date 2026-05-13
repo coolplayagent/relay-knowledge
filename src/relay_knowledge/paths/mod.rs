@@ -13,7 +13,7 @@ use std::{
 
 use crate::env::{PathEnvOverrides, PlatformEnvironment, PlatformKind};
 
-pub const APP_DIR_NAME: &str = "relay-knowledge";
+pub use crate::project::APP_DIR_NAME;
 
 /// Resolved runtime directories used by CLI, Web, services, and future workers.
 #[derive(Debug, Clone, PartialEq, Eq)]
