@@ -26,7 +26,8 @@ use axum::{
     response::{IntoResponse, Response},
     serve::{IncomingStream, Listener},
 };
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use serde_json::Value;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tower::Service;
 
 use crate::{
@@ -273,6 +274,138 @@ impl fmt::Display for HttpServeError {
 }
 
 impl Error for HttpServeError {}
+
+/// Error raised by bounded outbound JSON HTTP calls.
+#[derive(Debug)]
+pub enum HttpClientError {
+    InvalidUrl(String),
+    Io(io::Error),
+    Timeout,
+    InvalidResponse,
+    ResponseStatus(u16),
+    ResponseJson(serde_json::Error),
+}
+
+impl fmt::Display for HttpClientError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidUrl(value) => write!(formatter, "invalid HTTP worker URL: {value}"),
+            Self::Io(error) => write!(formatter, "HTTP worker request failed: {error}"),
+            Self::Timeout => write!(formatter, "HTTP worker request timed out"),
+            Self::InvalidResponse => write!(formatter, "HTTP worker returned invalid response"),
+            Self::ResponseStatus(status) => {
+                write!(formatter, "HTTP worker returned status {status}")
+            }
+            Self::ResponseJson(error) => {
+                write!(formatter, "HTTP worker returned invalid JSON: {error}")
+            }
+        }
+    }
+}
+
+impl Error for HttpClientError {}
+
+/// Posts a JSON payload through the network boundary using the configured timeout.
+pub async fn post_json(
+    config: &HttpConfig,
+    url: &str,
+    payload: &Value,
+) -> Result<Value, HttpClientError> {
+    let request = JsonHttpRequest::parse(url)?;
+    let body = serde_json::to_vec(payload).map_err(HttpClientError::ResponseJson)?;
+    let response = tokio::time::timeout(config.request_timeout, send_json_request(request, body))
+        .await
+        .map_err(|_| HttpClientError::Timeout)??;
+
+    serde_json::from_slice(&response).map_err(HttpClientError::ResponseJson)
+}
+
+struct JsonHttpRequest {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+impl JsonHttpRequest {
+    fn parse(value: &str) -> Result<Self, HttpClientError> {
+        let remainder = value
+            .strip_prefix("http://")
+            .ok_or_else(|| HttpClientError::InvalidUrl(value.to_owned()))?;
+        let (authority, path) = remainder
+            .split_once('/')
+            .map_or((remainder, "/"), |(authority, path)| {
+                (authority, path.trim_start_matches('/'))
+            });
+        if authority.is_empty() {
+            return Err(HttpClientError::InvalidUrl(value.to_owned()));
+        }
+        let (host, port) = authority
+            .rsplit_once(':')
+            .map(|(host, port)| {
+                let parsed_port = port
+                    .parse::<u16>()
+                    .map_err(|_| HttpClientError::InvalidUrl(value.to_owned()))?;
+                Ok((host.to_owned(), parsed_port))
+            })
+            .unwrap_or_else(|| Ok((authority.to_owned(), 80)))?;
+        if host.is_empty() || port == 0 {
+            return Err(HttpClientError::InvalidUrl(value.to_owned()));
+        }
+        let path = if path.is_empty() {
+            "/".to_owned()
+        } else {
+            format!("/{path}")
+        };
+
+        Ok(Self { host, port, path })
+    }
+}
+
+async fn send_json_request(
+    request: JsonHttpRequest,
+    body: Vec<u8>,
+) -> Result<Vec<u8>, HttpClientError> {
+    let mut stream = tokio::net::TcpStream::connect((request.host.as_str(), request.port))
+        .await
+        .map_err(HttpClientError::Io)?;
+    let head = format!(
+        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nAccept: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        request.path,
+        request.host,
+        body.len()
+    );
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .map_err(HttpClientError::Io)?;
+    stream.write_all(&body).await.map_err(HttpClientError::Io)?;
+    stream.shutdown().await.map_err(HttpClientError::Io)?;
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .map_err(HttpClientError::Io)?;
+    parse_http_response(response)
+}
+
+fn parse_http_response(response: Vec<u8>) -> Result<Vec<u8>, HttpClientError> {
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Err(HttpClientError::InvalidResponse);
+    };
+    let headers = std::str::from_utf8(&response[..header_end])
+        .map_err(|_| HttpClientError::InvalidResponse)?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or(HttpClientError::InvalidResponse)?;
+    if !(200..300).contains(&status) {
+        return Err(HttpClientError::ResponseStatus(status));
+    }
+
+    Ok(response[header_end + 4..].to_vec())
+}
 
 /// Stable identifier assigned to an accepted HTTP connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -569,6 +702,8 @@ mod tests {
     use super::*;
     use crate::net::qos::{QosPolicy, QosRuntime};
     use axum::{Router, routing::get};
+    use serde_json::json;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn parses_overridden_http_bind_address() {
@@ -656,6 +791,51 @@ mod tests {
             HttpConfig::from_overrides(&overrides).expect_err("empty no-proxy entry should fail");
 
         assert_eq!(error, HttpConfigError::EmptyNoProxyRule);
+    }
+
+    #[tokio::test]
+    async fn post_json_sends_bounded_worker_request() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("local addr should load");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("client should connect");
+            let mut buffer = vec![0; 1024];
+            let count = stream.read(&mut buffer).await.expect("request should read");
+            let request = String::from_utf8_lossy(&buffer[..count]);
+
+            assert!(request.starts_with("POST /worker HTTP/1.1"));
+            assert!(request.contains("Host: 127.0.0.1"));
+            assert!(request.contains("Content-Type: application/json"));
+            assert!(request.contains("\"task\":\"ocr\""));
+
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                )
+                .await
+                .expect("response should write");
+        });
+        let config = HttpConfig::new(
+            HttpBindAddress::parse("127.0.0.1:8791").expect("bind should parse"),
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            1024,
+            HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
+        )
+        .expect("config should build");
+
+        let response = post_json(
+            &config,
+            &format!("http://{addr}/worker"),
+            &json!({"task": "ocr"}),
+        )
+        .await
+        .expect("worker response should parse");
+
+        assert_eq!(response["ok"], true);
+        server.await.expect("server task should finish");
     }
 
     #[tokio::test]

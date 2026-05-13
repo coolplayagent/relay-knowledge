@@ -50,6 +50,7 @@ The storage contract also includes the v1 code graph data surface for tree-sitte
 Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
 Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
 Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
+Operational productization persists worker tasks, manual proposals, audit events, and silent-update operator state. Multimodal ingest queues embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP endpoint when available or creates a deterministic fallback proposal; `proposal accept` commits through the same graph mutation path; and service manager commands generate platform service definitions without running privileged installation.
 The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
 Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
 
@@ -67,8 +68,16 @@ relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
+relay-knowledge worker status --format json
+relay-knowledge worker run-once --kind ocr --format json
+relay-knowledge proposal list --state proposed --format json
+relay-knowledge proposal accept <proposal-id> --by reviewer --reason reviewed
+relay-knowledge audit query --limit 50 --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
+relay-knowledge service plan install --format json
+relay-knowledge service definition write --format json
+relay-knowledge service operator pause
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --mcp streamable-http
 relay-knowledge query -- --help
 ```

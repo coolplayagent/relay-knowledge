@@ -7,8 +7,10 @@ use crate::{
         CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
         CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
         ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
-        IndexKind, IndexStatus, LayoutRegion, RetrievalBackendStatus, RetrievalBudgetUsed,
-        RetrievalHit, RetrievalMode, RetrievedContextPack,
+        IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
+        ProposalState, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
+        WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -266,6 +268,139 @@ pub struct ServiceStatusResponse {
     pub service_definition_path: String,
     pub index_refresh: IndexRefreshDiagnostics,
     pub agent_protocols: AgentProtocolStatus,
+    pub operator: ServiceOperatorStatus,
+    pub workers: Vec<WorkerStatus>,
+    pub proposal_backlog: usize,
+    pub audit_sink: AuditSinkStatus,
+}
+
+/// Durable audit sink health surfaced in service diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditSinkStatus {
+    pub durable: bool,
+    pub event_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+/// Worker status filter. Missing kind means all worker families.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerStatusRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<WorkerKind>,
+}
+
+/// Worker status response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerStatusResponse {
+    pub metadata: ApiMetadata,
+    pub workers: Vec<WorkerStatus>,
+}
+
+/// Bounded foreground worker run request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerRunRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<WorkerKind>,
+}
+
+/// Bounded foreground worker run response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkerRunResponse {
+    pub metadata: ApiMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<WorkerTaskRecord>,
+    #[serde(default)]
+    pub proposals: Vec<ProposalRecord>,
+    pub workers: Vec<WorkerStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Proposal list filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalListApiRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<ProposalState>,
+    pub limit: usize,
+}
+
+/// Proposal list response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalListResponse {
+    pub metadata: ApiMetadata,
+    pub proposals: Vec<ProposalRecord>,
+}
+
+/// Proposal detail response with conflict lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalShowResponse {
+    pub metadata: ApiMetadata,
+    pub proposal: ProposalRecord,
+    pub conflicts: Vec<ProposalConflictRecord>,
+    pub payload: serde_json::Value,
+}
+
+/// Manual proposal decision request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalDecisionApiRequest {
+    pub actor: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Manual proposal decision response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalDecisionResponse {
+    pub metadata: ApiMetadata,
+    pub proposal: ProposalRecord,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<CommitReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_refresh_error: Option<String>,
+}
+
+/// Durable audit query request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditQueryApiRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    pub limit: usize,
+}
+
+/// Durable audit query response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditQueryResponse {
+    pub metadata: ApiMetadata,
+    pub events: Vec<crate::domain::AuditEventRecord>,
+}
+
+/// Service manager plan request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServicePlanRequest {
+    pub action: ServiceManagerAction,
+}
+
+/// Service manager plan response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServicePlanResponse {
+    pub metadata: ApiMetadata,
+    pub plan: ServiceDefinitionPlan,
+}
+
+/// Service definition write response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceDefinitionWriteResponse {
+    pub metadata: ApiMetadata,
+    pub plan: ServiceDefinitionPlan,
+    pub written: bool,
+}
+
+/// Service silent-update operator response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceOperatorResponse {
+    pub metadata: ApiMetadata,
+    pub operator: ServiceOperatorStatus,
 }
 
 /// Startup recovery report for resident service mode.

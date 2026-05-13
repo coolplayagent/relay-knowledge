@@ -26,6 +26,12 @@ export type RuntimeStatus = {
   qos_max_connections: number;
   qos_max_in_flight_requests: number;
   qos_max_queue_depth: number;
+  worker_embedding_endpoint_configured: boolean;
+  worker_ocr_endpoint_configured: boolean;
+  worker_vision_endpoint_configured: boolean;
+  worker_extractor_endpoint_configured: boolean;
+  worker_max_in_flight: number;
+  silent_updates_enabled: boolean;
 };
 
 export type ProjectStatusResponse = {
@@ -109,4 +115,77 @@ export type HealthResponse = {
   index_cursors: IndexCursor[];
   index_refresh: IndexRefreshDiagnostics;
   runtime: RuntimeStatus;
+};
+
+export type WorkerKind = "embedding" | "ocr" | "vision" | "extractor";
+
+export type WorkerStatus = {
+  kind: WorkerKind;
+  backend_state: "fallback" | "configured" | "degraded" | "unavailable";
+  endpoint_configured: boolean;
+  queue_depth: number;
+  running_count: number;
+  retrying_count: number;
+  dead_letter_count: number;
+  last_error?: string;
+};
+
+export type ProposalRecord = {
+  proposal_id: string;
+  source_scope: string;
+  kind: "evidence" | "relation" | "claim" | "event";
+  state: "proposed" | "accepted" | "rejected" | "superseded";
+  title: string;
+  summary: string;
+  payload_json: string;
+  origin: string;
+  confidence_basis_points: number;
+  conflict_count: number;
+  decided_by?: string;
+  decision_reason?: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+export type AuditEventRecord = {
+  sequence: number;
+  operation: string;
+  interface: string;
+  request_id: string;
+  trace_id: string;
+  status: "started" | "completed" | "failed" | "cancelled";
+  actor?: string;
+  source_scope?: string;
+  graph_version: number;
+  detail_json: string;
+  message?: string;
+  created_at_ms: number;
+};
+
+export type ServiceOperatorStatus = {
+  state: "disabled" | "enabled" | "paused" | "degraded" | "failed";
+  silent_updates_enabled: boolean;
+  allowed_scopes: string[];
+  last_run_at_ms?: number;
+  next_retry_at_ms?: number;
+  last_error?: string;
+  updated_at_ms: number;
+};
+
+export type ServiceStatusResponse = {
+  metadata: ApiMetadata;
+  service_name: string;
+  mode: string;
+  background_enabled: boolean;
+  silent_updates_enabled: boolean;
+  service_definition_path: string;
+  index_refresh: IndexRefreshDiagnostics;
+  operator: ServiceOperatorStatus;
+  workers: WorkerStatus[];
+  proposal_backlog: number;
+  audit_sink: {
+    durable: boolean;
+    event_count: number;
+    last_error?: string;
+  };
 };

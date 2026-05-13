@@ -23,6 +23,12 @@ pub struct RuntimeStatus {
     pub qos_max_connections: usize,
     pub qos_max_in_flight_requests: usize,
     pub qos_max_queue_depth: usize,
+    pub worker_embedding_endpoint_configured: bool,
+    pub worker_ocr_endpoint_configured: bool,
+    pub worker_vision_endpoint_configured: bool,
+    pub worker_extractor_endpoint_configured: bool,
+    pub worker_max_in_flight: usize,
+    pub silent_updates_enabled: bool,
 }
 
 /// Minimal project status response exposed through the unified API layer.

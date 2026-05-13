@@ -1,7 +1,8 @@
-import type { HealthResponse, ProjectStatusResponse } from "./contracts";
+import type { HealthResponse, ProjectStatusResponse, ServiceStatusResponse } from "./contracts";
 
 const PROJECT_STATUS_PATH = "/api/project/status";
 const HEALTH_PATH = "/api/health";
+const SERVICE_STATUS_PATH = "/api/service/status";
 const REQUEST_TIMEOUT_MS = 10000;
 
 export async function loadProjectStatus(): Promise<ProjectStatusResponse> {
@@ -10,6 +11,10 @@ export async function loadProjectStatus(): Promise<ProjectStatusResponse> {
 
 export async function loadHealth(): Promise<HealthResponse> {
   return fetchJson<HealthResponse>(HEALTH_PATH);
+}
+
+export async function loadServiceStatus(): Promise<ServiceStatusResponse> {
+  return fetchJson<ServiceStatusResponse>(SERVICE_STATUS_PATH);
 }
 
 async function fetchJson<T>(path: string): Promise<T> {

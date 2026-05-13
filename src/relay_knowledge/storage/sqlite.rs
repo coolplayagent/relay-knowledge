@@ -11,25 +11,23 @@ use rusqlite::{Connection, OptionalExtension, params};
 mod code_graph;
 mod helpers;
 mod indexing;
+mod operations;
 mod retrieval;
+mod store_impls;
 
 use crate::{
-    domain::{
-        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
-        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
-        RetrievalHit, SourceScope,
-    },
+    domain::{CommitReceipt, GraphMutationBatch, GraphVersion, SourceScope},
+    storage::{GraphInspection, StorageError, StorageFuture},
+};
+
+#[cfg(test)]
+use crate::{
+    domain::IndexKind,
     storage::{
-        CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
-        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
-        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
-        MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
+        CodeGraphStore, GraphSearchRequest, GraphStore, IndexStore, MutationLogStore, RetrievalHit,
     },
 };
-use helpers::{
-    count_rows, read_mutations_after, source_hash_for_evidence, stable_id, storage_version_range,
-};
+use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
 
 /// SQLite implementation of graph facts, mutation log, and index metadata.
 #[derive(Debug, Clone)]
@@ -62,7 +60,7 @@ impl SqliteGraphStore {
         })
     }
 
-    fn run<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    pub(super) fn run<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
@@ -77,114 +75,6 @@ impl SqliteGraphStore {
             })
             .await?
         })
-    }
-}
-
-impl GraphStore for SqliteGraphStore {
-    fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt> {
-        self.run(move |connection| commit_batch(connection, batch))
-    }
-
-    fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
-        self.run(inspect_graph)
-    }
-
-    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
-        self.run(move |connection| retrieval::search_graph(connection, request))
-    }
-
-    fn current_graph_version(&self) -> StorageFuture<'_, GraphVersion> {
-        self.run(current_graph_version)
-    }
-}
-
-impl MutationLogStore for SqliteGraphStore {
-    fn read_after(
-        &self,
-        graph_version: GraphVersion,
-        limit: usize,
-    ) -> StorageFuture<'_, Vec<MutationLogEntry>> {
-        self.run(move |connection| read_mutations_after(connection, graph_version, limit))
-    }
-}
-
-impl IndexStore for SqliteGraphStore {
-    fn index_statuses(&self) -> StorageFuture<'_, Vec<IndexStatus>> {
-        self.run(|connection| indexing::index_statuses(connection))
-    }
-
-    fn mark_refresh_complete(
-        &self,
-        kind: IndexKind,
-        graph_version: GraphVersion,
-    ) -> StorageFuture<'_, IndexStatus> {
-        self.run(move |connection| indexing::mark_refresh_complete(connection, kind, graph_version))
-    }
-
-    fn index_cursors(&self) -> StorageFuture<'_, Vec<IndexCursor>> {
-        self.run(indexing::index_cursors)
-    }
-
-    fn queue_index_refreshes(
-        &self,
-        request: IndexRefreshQueueRequest,
-    ) -> StorageFuture<'_, IndexRefreshDiagnostics> {
-        self.run(move |connection| indexing::queue_index_refreshes(connection, request))
-    }
-
-    fn claim_index_refresh_task(
-        &self,
-        request: IndexRefreshClaimRequest,
-    ) -> StorageFuture<'_, Option<IndexRefreshTask>> {
-        self.run(move |connection| indexing::claim_index_refresh_task(connection, request))
-    }
-
-    fn complete_index_refresh_task(
-        &self,
-        request: IndexRefreshCompletion,
-    ) -> StorageFuture<'_, IndexRefreshTask> {
-        self.run(move |connection| indexing::complete_index_refresh_task(connection, request))
-    }
-
-    fn fail_index_refresh_task(
-        &self,
-        request: IndexRefreshFailure,
-    ) -> StorageFuture<'_, IndexRefreshTask> {
-        self.run(move |connection| indexing::fail_index_refresh_task(connection, request))
-    }
-
-    fn index_refresh_diagnostics(&self, now_ms: u64) -> StorageFuture<'_, IndexRefreshDiagnostics> {
-        self.run(move |connection| indexing::diagnostics(connection, now_ms))
-    }
-}
-
-impl CodeGraphStore for SqliteGraphStore {
-    fn commit_code_graph_batch(
-        &self,
-        batch: CodeGraphBatch,
-    ) -> StorageFuture<'_, CodeGraphCommitReceipt> {
-        self.run(move |connection| code_graph::commit_batch(connection, batch))
-    }
-
-    fn search_code_symbols(
-        &self,
-        request: CodeSymbolSearchRequest,
-    ) -> StorageFuture<'_, Vec<CodeSymbolRecord>> {
-        self.run(move |connection| code_graph::search_symbols(connection, request))
-    }
-
-    fn search_code_references(
-        &self,
-        request: CodeReferenceSearchRequest,
-    ) -> StorageFuture<'_, Vec<CodeReferenceRecord>> {
-        self.run(move |connection| code_graph::search_references(connection, request))
-    }
-
-    fn search_code_chunks(
-        &self,
-        request: CodeChunkSearchRequest,
-    ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
-        self.run(move |connection| code_graph::search_chunks(connection, request))
     }
 }
 
@@ -381,6 +271,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     code::initialize_code_schema(connection)?;
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
+    operations::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
 
@@ -996,3 +887,6 @@ mod graphrag_phase4_tests;
 
 #[cfg(test)]
 mod index_refresh_tests;
+
+#[cfg(test)]
+mod operations_tests;

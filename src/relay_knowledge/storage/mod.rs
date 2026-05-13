@@ -12,9 +12,12 @@ use std::{error::Error, fmt, future::Future, pin::Pin};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeParseStatusCounts,
-    CodeReferenceRecord, CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion,
-    IndexKind, IndexModality, IndexStatus, RetrievalHit, RetrieverSource,
+    AuditEventRecord, AuditStatus, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
+    CodeParseStatusCounts, CodeReferenceRecord, CodeSymbolRecord, CommitReceipt,
+    GraphMutationBatch, GraphVersion, IndexKind, IndexModality, IndexStatus,
+    ProposalConflictRecord, ProposalConflictSeverity, ProposalKind, ProposalRecord, ProposalState,
+    RetrievalHit, RetrieverSource, ServiceOperatorState, ServiceOperatorStatus, WorkerKind,
+    WorkerStatus, WorkerTaskRecord,
 };
 
 pub use code::{CodeImpactChanges, CodeRepositoryStore};
@@ -117,6 +120,121 @@ pub trait IndexStore: Send + Sync {
             ))
         })
     }
+
+    fn queue_worker_tasks(
+        &self,
+        _tasks: Vec<WorkerTaskSeed>,
+    ) -> StorageFuture<'_, Vec<WorkerTaskRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn worker_statuses(&self) -> StorageFuture<'_, Vec<WorkerStatus>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn claim_worker_task(
+        &self,
+        _request: WorkerTaskClaimRequest,
+    ) -> StorageFuture<'_, Option<WorkerTaskRecord>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn complete_worker_task(
+        &self,
+        _request: WorkerTaskCompletion,
+    ) -> StorageFuture<'_, WorkerTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "worker task storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn fail_worker_task(&self, _request: WorkerTaskFailure) -> StorageFuture<'_, WorkerTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "worker task storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn insert_proposal(&self, _proposal: NewProposal) -> StorageFuture<'_, ProposalRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "proposal storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn list_proposals(
+        &self,
+        _request: ProposalListRequest,
+    ) -> StorageFuture<'_, Vec<ProposalRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn proposal_by_id(&self, _proposal_id: String) -> StorageFuture<'_, Option<ProposalRecord>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn proposal_conflicts(
+        &self,
+        _proposal_id: String,
+    ) -> StorageFuture<'_, Vec<ProposalConflictRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn decide_proposal(&self, _request: ProposalDecision) -> StorageFuture<'_, ProposalRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "proposal storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn insert_audit_event(&self, _event: NewAuditEvent) -> StorageFuture<'_, AuditEventRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "audit storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn query_audit_events(
+        &self,
+        _request: AuditQueryRequest,
+    ) -> StorageFuture<'_, Vec<AuditEventRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn audit_event_count(&self) -> StorageFuture<'_, usize> {
+        Box::pin(async { Ok(0) })
+    }
+
+    fn service_operator_status(&self) -> StorageFuture<'_, ServiceOperatorStatus> {
+        Box::pin(async {
+            Ok(ServiceOperatorStatus {
+                state: ServiceOperatorState::Disabled,
+                silent_updates_enabled: false,
+                allowed_scopes: Vec::new(),
+                last_run_at_ms: None,
+                next_retry_at_ms: None,
+                last_error: None,
+                updated_at_ms: 0,
+            })
+        })
+    }
+
+    fn update_service_operator(
+        &self,
+        _request: ServiceOperatorUpdate,
+    ) -> StorageFuture<'_, ServiceOperatorStatus> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "service operator storage is unavailable".to_owned(),
+            ))
+        })
+    }
 }
 
 /// Code graph fact persistence and query contract for tree-sitter output.
@@ -199,6 +317,125 @@ pub struct CodeChunkSearchRequest {
     pub query: Option<String>,
     pub graph_version: GraphVersion,
     pub limit: usize,
+}
+
+/// Worker task input inserted after graph changes or service reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerTaskSeed {
+    pub kind: WorkerKind,
+    pub source_scope: String,
+    pub evidence_id: Option<String>,
+    pub target_graph_version: GraphVersion,
+    pub input_fingerprint: String,
+    pub payload_json: String,
+    pub now_ms: u64,
+}
+
+/// Worker lease acquisition request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerTaskClaimRequest {
+    pub kind: Option<WorkerKind>,
+    pub lease_owner: String,
+    pub lease_duration_ms: u64,
+    pub max_attempts: u32,
+    pub now_ms: u64,
+}
+
+/// Worker completion guarded by the active lease.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerTaskCompletion {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub now_ms: u64,
+}
+
+/// Worker failure report for retry and dead-letter handling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerTaskFailure {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub error_kind: String,
+    pub error_message: String,
+    pub retry_backoff_ms: u64,
+    pub max_attempts: u32,
+    pub now_ms: u64,
+}
+
+/// New proposal to persist before manual approval.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewProposal {
+    pub proposal_id: String,
+    pub source_scope: String,
+    pub kind: ProposalKind,
+    pub title: String,
+    pub summary: String,
+    pub payload_json: String,
+    pub origin: String,
+    pub confidence_basis_points: u16,
+    pub conflicts: Vec<NewProposalConflict>,
+    pub now_ms: u64,
+}
+
+/// New proposal conflict to persist with a proposal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewProposalConflict {
+    pub conflict_id: String,
+    pub existing_fact_kind: String,
+    pub existing_fact_id: String,
+    pub severity: ProposalConflictSeverity,
+    pub reason: String,
+}
+
+/// Proposal list filter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalListRequest {
+    pub state: Option<ProposalState>,
+    pub limit: usize,
+}
+
+/// Proposal decision request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalDecision {
+    pub proposal_id: String,
+    pub next_state: ProposalState,
+    pub actor: String,
+    pub reason: Option<String>,
+    pub now_ms: u64,
+}
+
+/// New durable audit event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewAuditEvent {
+    pub operation: String,
+    pub interface: String,
+    pub request_id: String,
+    pub trace_id: String,
+    pub status: AuditStatus,
+    pub actor: Option<String>,
+    pub source_scope: Option<String>,
+    pub graph_version: u64,
+    pub detail_json: String,
+    pub message: Option<String>,
+    pub now_ms: u64,
+}
+
+/// Audit query filter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditQueryRequest {
+    pub operation: Option<String>,
+    pub limit: usize,
+}
+
+/// Service operator state update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceOperatorUpdate {
+    pub state: ServiceOperatorState,
+    pub silent_updates_enabled: bool,
+    pub allowed_scopes: Vec<String>,
+    pub last_error: Option<String>,
+    pub now_ms: u64,
 }
 
 /// Aggregated graph status for diagnostics.
@@ -571,5 +808,150 @@ mod tests {
                 .to_string()
                 .contains("index refresh diagnostics are unavailable")
         );
+    }
+
+    #[tokio::test]
+    async fn default_operational_methods_are_bounded_and_explicit() {
+        let store = MinimalIndexStore;
+
+        let tasks = store
+            .queue_worker_tasks(vec![WorkerTaskSeed {
+                kind: WorkerKind::Extractor,
+                source_scope: "docs".to_owned(),
+                evidence_id: Some("ev-1".to_owned()),
+                target_graph_version: GraphVersion::new(1),
+                input_fingerprint: "extractor:ev-1:1".to_owned(),
+                payload_json: "{}".to_owned(),
+                now_ms: 1,
+            }])
+            .await
+            .expect("default queue is a no-op");
+        let statuses = store
+            .worker_statuses()
+            .await
+            .expect("default status is empty");
+        let claimed = store
+            .claim_worker_task(WorkerTaskClaimRequest {
+                kind: None,
+                lease_owner: "worker".to_owned(),
+                lease_duration_ms: 10,
+                max_attempts: 1,
+                now_ms: 1,
+            })
+            .await
+            .expect("default claim is empty");
+        let proposals = store
+            .list_proposals(ProposalListRequest {
+                state: None,
+                limit: 10,
+            })
+            .await
+            .expect("default proposal list is empty");
+        let conflicts = store
+            .proposal_conflicts("proposal".to_owned())
+            .await
+            .expect("default conflicts are empty");
+        let audit = store
+            .query_audit_events(AuditQueryRequest {
+                operation: None,
+                limit: 10,
+            })
+            .await
+            .expect("default audit query is empty");
+        let audit_count = store
+            .audit_event_count()
+            .await
+            .expect("default audit count is zero");
+        let operator = store
+            .service_operator_status()
+            .await
+            .expect("default operator is disabled");
+
+        assert!(tasks.is_empty());
+        assert!(statuses.is_empty());
+        assert!(claimed.is_none());
+        assert!(proposals.is_empty());
+        assert!(conflicts.is_empty());
+        assert!(audit.is_empty());
+        assert_eq!(audit_count, 0);
+        assert_eq!(operator.state, ServiceOperatorState::Disabled);
+
+        for error in [
+            store
+                .complete_worker_task(WorkerTaskCompletion {
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    now_ms: 2,
+                })
+                .await
+                .expect_err("completion should require storage"),
+            store
+                .fail_worker_task(WorkerTaskFailure {
+                    task_id: "task".to_owned(),
+                    lease_owner: "worker".to_owned(),
+                    attempt_count: 1,
+                    error_kind: "worker".to_owned(),
+                    error_message: "failed".to_owned(),
+                    retry_backoff_ms: 10,
+                    max_attempts: 1,
+                    now_ms: 2,
+                })
+                .await
+                .expect_err("failure should require storage"),
+            store
+                .insert_proposal(NewProposal {
+                    proposal_id: "proposal".to_owned(),
+                    source_scope: "docs".to_owned(),
+                    kind: ProposalKind::Evidence,
+                    title: "title".to_owned(),
+                    summary: "summary".to_owned(),
+                    payload_json: "{}".to_owned(),
+                    origin: "test".to_owned(),
+                    confidence_basis_points: 1,
+                    conflicts: Vec::new(),
+                    now_ms: 1,
+                })
+                .await
+                .expect_err("proposal insert should require storage"),
+            store
+                .decide_proposal(ProposalDecision {
+                    proposal_id: "proposal".to_owned(),
+                    next_state: ProposalState::Rejected,
+                    actor: "tester".to_owned(),
+                    reason: None,
+                    now_ms: 2,
+                })
+                .await
+                .expect_err("proposal decision should require storage"),
+            store
+                .insert_audit_event(NewAuditEvent {
+                    operation: "test".to_owned(),
+                    interface: "cli".to_owned(),
+                    request_id: "req".to_owned(),
+                    trace_id: "trace".to_owned(),
+                    status: AuditStatus::Completed,
+                    actor: None,
+                    source_scope: None,
+                    graph_version: 0,
+                    detail_json: "{}".to_owned(),
+                    message: None,
+                    now_ms: 1,
+                })
+                .await
+                .expect_err("audit insert should require storage"),
+            store
+                .update_service_operator(ServiceOperatorUpdate {
+                    state: ServiceOperatorState::Enabled,
+                    silent_updates_enabled: true,
+                    allowed_scopes: vec!["docs".to_owned()],
+                    last_error: None,
+                    now_ms: 2,
+                })
+                .await
+                .expect_err("operator update should require storage"),
+        ] {
+            assert!(error.to_string().contains("storage is unavailable"));
+        }
     }
 }

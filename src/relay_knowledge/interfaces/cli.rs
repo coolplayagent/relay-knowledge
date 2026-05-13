@@ -1,5 +1,9 @@
 //! CLI adapter for the shared application service.
 
+#[path = "cli_render.rs"]
+mod cli_render;
+#[path = "ops_cli.rs"]
+mod ops_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
 
@@ -7,15 +11,16 @@ use std::{error::Error, fmt};
 
 use crate::{
     api::{
-        ApiMetadata, ApiStreamEvent, GraphInspectionRequest, HybridRetrievalRequest,
-        IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind, ProjectStatusResponse,
-        RequestContext, StreamEventKind,
+        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
+        IngestRequest, InterfaceKind, RequestContext,
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
-    domain::{FreshnessPolicy, IndexKind},
+    domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
     interfaces::agent::mcp::McpServer,
     project::PROJECT_NAME,
 };
+
+use cli_render::{render_project_status, render_response, serialize_line};
 
 /// Supported CLI output formats.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -150,6 +155,10 @@ fn option_consumes_value(option: &str) -> bool {
             | "--head"
             | "--query"
             | "--mcp"
+            | "--state"
+            | "--by"
+            | "--reason"
+            | "--operation"
     )
 }
 
@@ -162,6 +171,9 @@ fn is_command_word(token: &str) -> bool {
             | "repo"
             | "graph"
             | "index"
+            | "worker"
+            | "proposal"
+            | "audit"
             | "health"
             | "service"
             | "version"
@@ -187,9 +199,48 @@ pub enum CliAction {
     IndexRefresh {
         kinds: Vec<IndexKind>,
     },
+    WorkerStatus {
+        kind: Option<WorkerKind>,
+    },
+    WorkerRunOnce {
+        kind: Option<WorkerKind>,
+    },
+    ProposalList {
+        state: Option<ProposalState>,
+        limit: usize,
+    },
+    ProposalShow {
+        proposal_id: String,
+    },
+    ProposalAccept {
+        proposal_id: String,
+        actor: String,
+        reason: Option<String>,
+    },
+    ProposalReject {
+        proposal_id: String,
+        actor: String,
+        reason: Option<String>,
+    },
+    ProposalSupersede {
+        proposal_id: String,
+        actor: String,
+        reason: Option<String>,
+    },
+    AuditQuery {
+        operation: Option<String>,
+        limit: usize,
+    },
     Repo(repo_cli::RepoCommand),
     Health,
     ServiceStatus,
+    ServicePlan {
+        action: ServiceManagerAction,
+    },
+    ServiceDefinitionWrite,
+    ServiceOperatorStatus,
+    ServiceOperatorPause,
+    ServiceOperatorResume,
     ServiceRun {
         mcp: ServiceMcpTransport,
     },
@@ -210,6 +261,9 @@ pub enum CliError {
     InvalidCodeQueryKind(String),
     InvalidFreshness(String),
     InvalidIndexKind(String),
+    InvalidWorkerKind(String),
+    InvalidProposalState(String),
+    InvalidServiceAction(String),
     InvalidLimit(String),
     MissingFormatValue,
     MissingValue(&'static str),
@@ -233,6 +287,9 @@ impl CliError {
             | Self::InvalidCodeQueryKind(_)
             | Self::InvalidFreshness(_)
             | Self::InvalidIndexKind(_)
+            | Self::InvalidWorkerKind(_)
+            | Self::InvalidProposalState(_)
+            | Self::InvalidServiceAction(_)
             | Self::InvalidLimit(_)
             | Self::MissingFormatValue
             | Self::MissingValue(_)
@@ -264,6 +321,18 @@ impl fmt::Display for CliError {
             Self::InvalidIndexKind(value) => write!(
                 formatter,
                 "invalid --kind value '{value}', expected bm25, semantic, or vector"
+            ),
+            Self::InvalidWorkerKind(value) => write!(
+                formatter,
+                "invalid worker kind '{value}', expected embedding, ocr, vision, or extractor"
+            ),
+            Self::InvalidProposalState(value) => write!(
+                formatter,
+                "invalid proposal state '{value}', expected proposed, accepted, rejected, or superseded"
+            ),
+            Self::InvalidServiceAction(value) => write!(
+                formatter,
+                "invalid service action '{value}', expected install or uninstall"
             ),
             Self::InvalidLimit(value) => write!(formatter, "invalid --limit value '{value}'"),
             Self::MissingFormatValue => write!(formatter, "missing value for --format"),
@@ -322,6 +391,11 @@ pub async fn run_with_service(
     context: RequestContext,
 ) -> Result<String, CliError> {
     let format = command.format;
+    if let Some(output) =
+        ops_cli::run_operational_action(service, &command.action, context.clone(), format).await?
+    {
+        return Ok(output);
+    }
     match command.action {
         CliAction::Status => {
             let response = service
@@ -432,21 +506,24 @@ pub async fn run_with_service(
                 format,
             )
         }
-        CliAction::ServiceStatus => {
-            let response = service
-                .service_status(context)
-                .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
-
-            render_response(
-                "service.status",
-                response.metadata.clone(),
-                &response,
-                format,
-            )
-        }
         CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
             "service run requires process runtime".to_owned(),
+        )),
+        CliAction::WorkerStatus { .. }
+        | CliAction::WorkerRunOnce { .. }
+        | CliAction::ProposalList { .. }
+        | CliAction::ProposalShow { .. }
+        | CliAction::ProposalAccept { .. }
+        | CliAction::ProposalReject { .. }
+        | CliAction::ProposalSupersede { .. }
+        | CliAction::AuditQuery { .. }
+        | CliAction::ServiceStatus
+        | CliAction::ServicePlan { .. }
+        | CliAction::ServiceDefinitionWrite
+        | CliAction::ServiceOperatorStatus
+        | CliAction::ServiceOperatorPause
+        | CliAction::ServiceOperatorResume => Err(CliError::ApiFailed(
+            "operational command was not handled by the service adapter".to_owned(),
         )),
         CliAction::Version => render_version(command.format),
     }
@@ -472,8 +549,16 @@ pub fn help_text() -> &'static str {
         "  repo status <alias>\n",
         "  graph inspect\n",
         "  index refresh [--kind bm25|semantic|vector]\n",
+        "  worker status|run-once [--kind embedding|ocr|vision|extractor]\n",
+        "  proposal list [--state proposed|accepted|rejected|superseded] [--limit <n>]\n",
+        "  proposal show <id>\n",
+        "  proposal accept|reject|supersede <id> --by <actor> [--reason <text>]\n",
+        "  audit query [--operation <name>] [--limit <n>]\n",
         "  health\n",
         "  service status|doctor\n",
+        "  service plan install|uninstall\n",
+        "  service definition write\n",
+        "  service operator status|pause|resume\n",
         "  service run [--mcp streamable-http]\n",
         "  version [--format text|json]\n",
         "  --version [--format text|json]\n",
@@ -498,19 +583,6 @@ fn render_version(format: OutputFormat) -> Result<String, CliError> {
     }
 }
 
-/// Renders a project status response in the requested CLI format.
-pub fn render_project_status(
-    response: &ProjectStatusResponse,
-    format: OutputFormat,
-) -> Result<String, CliError> {
-    match format {
-        OutputFormat::Text => render_text("project.status", response),
-        OutputFormat::Json => serialize_line(response),
-        OutputFormat::Markdown => render_text("project.status", response),
-        OutputFormat::StreamingJson => render_streaming_project_status(response),
-    }
-}
-
 fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
     if tokens.is_empty() || tokens == ["status"] {
         return Ok(CliAction::Status);
@@ -528,8 +600,11 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
         "graph" => parse_graph(&tokens[1..]),
         "index" => parse_index(&tokens[1..]),
+        "worker" => ops_cli::parse_worker(&tokens[1..]),
+        "proposal" => ops_cli::parse_proposal(&tokens[1..]),
+        "audit" => ops_cli::parse_audit(&tokens[1..]),
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
-        "service" => parse_service(&tokens[1..]),
+        "service" => ops_cli::parse_service(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
         other => Err(CliError::UnexpectedArgument(other.to_owned())),
     }
@@ -648,42 +723,6 @@ fn parse_index(tokens: &[String]) -> Result<CliAction, CliError> {
     Ok(CliAction::IndexRefresh { kinds })
 }
 
-fn parse_service(tokens: &[String]) -> Result<CliAction, CliError> {
-    if tokens == ["status"] || tokens == ["doctor"] {
-        return Ok(CliAction::ServiceStatus);
-    }
-    if tokens.first().map(String::as_str) == Some("run") {
-        return parse_service_run(&tokens[1..]);
-    }
-
-    Err(CliError::UnexpectedArgument(
-        tokens
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "service".to_owned()),
-    ))
-}
-
-fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {
-    let mut mcp = ServiceMcpTransport::Configured;
-    let mut index = 0;
-    while index < tokens.len() {
-        match tokens[index].as_str() {
-            "--mcp" => {
-                let value = value_after(tokens, index, "--mcp")?;
-                mcp = match value.as_str() {
-                    "streamable-http" => ServiceMcpTransport::StreamableHttp,
-                    other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-                };
-                index += 2;
-            }
-            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-        }
-    }
-
-    Ok(CliAction::ServiceRun { mcp })
-}
-
 pub(super) fn value_after(
     tokens: &[String],
     index: usize,
@@ -711,209 +750,6 @@ fn parse_index_kind(value: &str) -> Result<IndexKind, CliError> {
         "vector" => Ok(IndexKind::Vector),
         other => Err(CliError::InvalidIndexKind(other.to_owned())),
     }
-}
-
-pub(super) fn render_response<T>(
-    operation: &str,
-    metadata: ApiMetadata,
-    response: &T,
-    format: OutputFormat,
-) -> Result<String, CliError>
-where
-    T: serde::Serialize,
-{
-    match format {
-        OutputFormat::Text => render_text(operation, response),
-        OutputFormat::Json => serialize_line(response),
-        OutputFormat::Markdown => render_text(operation, response),
-        OutputFormat::StreamingJson => render_streaming_response(operation, metadata, response),
-    }
-}
-
-fn render_text<T>(operation: &str, response: &T) -> Result<String, CliError>
-where
-    T: serde::Serialize,
-{
-    let value = serde_json::to_value(response)
-        .map_err(|error| CliError::RenderFailed(error.to_string()))?;
-    let line = match operation {
-        "project.status" => value["project_name"]
-            .as_str()
-            .unwrap_or(PROJECT_NAME)
-            .to_owned(),
-        "knowledge.ingest" => format!(
-            "ingested graph_version={} evidence_count={}",
-            value["metadata"]["graph_version"].as_u64().unwrap_or(0),
-            value["receipt"]["evidence_count"].as_u64().unwrap_or(0)
-        ),
-        "knowledge.retrieve_context" => {
-            format!(
-                "results={}",
-                value["results"].as_array().map_or(0, Vec::len)
-            )
-        }
-        "graph.inspect" => format!(
-            "graph_version={} entities={} evidence={} code_files={} code_symbols={} repo_code_files={} repo_code_symbols={}",
-            value["graph"]["graph_version"].as_u64().unwrap_or(0),
-            value["graph"]["entity_count"].as_u64().unwrap_or(0),
-            value["graph"]["evidence_count"].as_u64().unwrap_or(0),
-            value["graph"]["code_file_count"].as_u64().unwrap_or(0),
-            value["graph"]["code_symbol_count"].as_u64().unwrap_or(0),
-            value["repository_code_totals"]["indexed_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["repository_code_totals"]["symbol_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
-        "index.refresh" => format!(
-            "refreshed_indexes={}",
-            value["indexes"].as_array().map_or(0, Vec::len)
-        ),
-        "service.health" => format!(
-            "healthy={} repo_code_files={} repo_code_symbols={}",
-            value["healthy"].as_bool().unwrap_or(false),
-            value["repository_code_totals"]["indexed_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["repository_code_totals"]["symbol_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
-        "service.status" => format!(
-            "service={} mode={}",
-            value["service_name"].as_str().unwrap_or(PROJECT_NAME),
-            value["mode"].as_str().unwrap_or("disabled")
-        ),
-        "code.repo.index" => format!(
-            "indexed files={} symbols={} references={} chunks={} degraded={}",
-            value["summary"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["summary"]["symbol_count"].as_u64().unwrap_or(0),
-            value["summary"]["reference_count"].as_u64().unwrap_or(0),
-            value["summary"]["chunk_count"].as_u64().unwrap_or(0),
-            value["summary"]["degraded_file_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
-        "code.repo.scope_preview" => format!(
-            "preview files={} bytes={} unsupported={} expected_degraded={}",
-            value["preview"]["selected_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["selected_byte_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["unsupported_file_count"]
-                .as_u64()
-                .unwrap_or(0),
-            value["preview"]["expected_degraded_file_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
-        "code.repo.query" => format!(
-            "results={}",
-            value["results"].as_array().map_or(0, Vec::len)
-        ),
-        "code.repo.impact" => format!(
-            "changed_in_scope={} results={}",
-            value["path_groups"]["in_scope_changed_paths"]
-                .as_array()
-                .map_or(0, Vec::len),
-            value["results"].as_array().map_or(0, Vec::len)
-        ),
-        "code.repo.status" => format!(
-            "repo={} files={} symbols={} stale={}",
-            value["status"]["alias"].as_str().unwrap_or(""),
-            value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["status"]["symbol_count"].as_u64().unwrap_or(0),
-            value["status"]["stale"].as_bool().unwrap_or(true)
-        ),
-        "code.repo.report" => format!(
-            "repo={} files={} freshness={}",
-            value["report"]["alias"].as_str().unwrap_or(""),
-            value["report"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["report"]["freshness_state"]
-                .as_str()
-                .unwrap_or("unknown")
-        ),
-        _ => operation.to_owned(),
-    };
-
-    Ok(format!("{line}\n"))
-}
-
-fn render_streaming_response<T>(
-    operation: &str,
-    metadata: ApiMetadata,
-    response: &T,
-) -> Result<String, CliError>
-where
-    T: serde::Serialize,
-{
-    let payload = serde_json::to_value(response)
-        .map_err(|error| CliError::RenderFailed(error.to_string()))?;
-    let events = [
-        ApiStreamEvent::operation(
-            StreamEventKind::Started,
-            operation,
-            metadata.clone(),
-            Some("operation started"),
-            None,
-        ),
-        ApiStreamEvent::operation(
-            StreamEventKind::Item,
-            operation,
-            metadata.clone(),
-            None,
-            Some(payload),
-        ),
-        ApiStreamEvent::operation(
-            StreamEventKind::Completed,
-            operation,
-            metadata,
-            Some("operation completed"),
-            None,
-        ),
-    ];
-    let mut output = String::new();
-    for event in events {
-        output.push_str(&serialize_line(&event)?);
-    }
-
-    Ok(output)
-}
-
-fn render_streaming_project_status(response: &ProjectStatusResponse) -> Result<String, CliError> {
-    let events = [
-        ApiStreamEvent::project_status(StreamEventKind::Started, response, Some("status started")),
-        ApiStreamEvent::project_status(
-            StreamEventKind::Progress,
-            response,
-            Some("runtime configuration loaded"),
-        ),
-        ApiStreamEvent::project_status(StreamEventKind::Item, response, None),
-        ApiStreamEvent::project_status(
-            StreamEventKind::Completed,
-            response,
-            Some("status completed"),
-        ),
-    ];
-    let mut output = String::new();
-    for event in events {
-        output.push_str(&serialize_line(&event)?);
-    }
-
-    Ok(output)
-}
-
-fn serialize_line<T>(value: &T) -> Result<String, CliError>
-where
-    T: serde::Serialize,
-{
-    let line =
-        serde_json::to_string(value).map_err(|error| CliError::RenderFailed(error.to_string()))?;
-
-    Ok(format!("{line}\n"))
 }
 
 async fn run_service(mcp: ServiceMcpTransport) -> Result<String, CliError> {

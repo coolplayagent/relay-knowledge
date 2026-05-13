@@ -145,6 +145,79 @@ fn parses_index_and_service_actions() {
 }
 
 #[test]
+fn parses_operational_worker_proposal_audit_and_service_actions() {
+    let worker = CliCommand::parse(["worker", "run-once", "--kind", "vision"])
+        .expect("worker command should parse");
+    let proposals = CliCommand::parse(["proposal", "list", "--state", "proposed", "--limit", "7"])
+        .expect("proposal list should parse");
+    let accept = CliCommand::parse([
+        "proposal",
+        "accept",
+        "proposal:1",
+        "--by",
+        "reviewer",
+        "--reason",
+        "valid",
+    ])
+    .expect("proposal accept should parse");
+    let audit = CliCommand::parse(["audit", "query", "--operation", "worker.run_once"])
+        .expect("audit command should parse");
+    let service_plan =
+        CliCommand::parse(["service", "plan", "uninstall"]).expect("service plan should parse");
+    let operator = CliCommand::parse(["service", "operator", "resume"])
+        .expect("operator command should parse");
+
+    assert_eq!(
+        worker.action,
+        CliAction::WorkerRunOnce {
+            kind: Some(WorkerKind::Vision),
+        }
+    );
+    assert_eq!(
+        proposals.action,
+        CliAction::ProposalList {
+            state: Some(ProposalState::Proposed),
+            limit: 7,
+        }
+    );
+    assert_eq!(
+        accept.action,
+        CliAction::ProposalAccept {
+            proposal_id: "proposal:1".to_owned(),
+            actor: "reviewer".to_owned(),
+            reason: Some("valid".to_owned()),
+        }
+    );
+    assert_eq!(
+        audit.action,
+        CliAction::AuditQuery {
+            operation: Some("worker.run_once".to_owned()),
+            limit: 100,
+        }
+    );
+    assert_eq!(
+        service_plan.action,
+        CliAction::ServicePlan {
+            action: ServiceManagerAction::Uninstall,
+        }
+    );
+    assert_eq!(operator.action, CliAction::ServiceOperatorResume);
+
+    assert!(matches!(
+        CliCommand::parse(["worker", "run-once", "--kind", "gpu"]),
+        Err(CliError::InvalidWorkerKind(_))
+    ));
+    assert!(matches!(
+        CliCommand::parse(["proposal", "list", "--state", "merged"]),
+        Err(CliError::InvalidProposalState(_))
+    ));
+    assert!(matches!(
+        CliCommand::parse(["service", "plan", "restart"]),
+        Err(CliError::InvalidServiceAction(_))
+    ));
+}
+
+#[test]
 fn rejects_invalid_query_limit_and_freshness() {
     let limit =
         CliCommand::parse(["query", "x", "--limit", "nope"]).expect_err("limit should fail");
@@ -194,6 +267,108 @@ fn parses_version_without_other_arguments() {
 
     assert_eq!(command.action, CliAction::Version);
     assert_eq!(flag_alias.action, CliAction::Version);
+}
+
+#[test]
+fn render_text_covers_operational_and_code_repository_summaries() {
+    let cases = [
+        (
+            "worker.run_once",
+            serde_json::json!({
+                "task": {"task_id": "task:1"},
+                "proposals": [{"proposal_id": "proposal:1"}],
+            }),
+            "task=task:1 proposals=1\n",
+        ),
+        (
+            "proposal.show",
+            serde_json::json!({
+                "proposal": {"proposal_id": "proposal:1"},
+                "conflicts": [{"conflict_id": "conflict:1"}],
+            }),
+            "proposal=proposal:1 conflicts=1\n",
+        ),
+        (
+            "proposal.supersede",
+            serde_json::json!({
+                "proposal": {"proposal_id": "proposal:1", "state": "superseded"},
+            }),
+            "proposal=proposal:1 state=superseded\n",
+        ),
+        (
+            "service.definition.write",
+            serde_json::json!({"written": true}),
+            "service_definition_written=true\n",
+        ),
+        (
+            "service.operator.status",
+            serde_json::json!({"operator": {"state": "paused"}}),
+            "operator=paused\n",
+        ),
+        (
+            "code.repo.index",
+            serde_json::json!({
+                "summary": {
+                    "indexed_file_count": 2,
+                    "symbol_count": 3,
+                    "reference_count": 4,
+                    "chunk_count": 5,
+                    "degraded_file_count": 1,
+                },
+            }),
+            "indexed files=2 symbols=3 references=4 chunks=5 degraded=1\n",
+        ),
+        (
+            "code.repo.scope_preview",
+            serde_json::json!({
+                "preview": {
+                    "selected_file_count": 2,
+                    "selected_byte_count": 128,
+                    "unsupported_file_count": 1,
+                    "expected_degraded_file_count": 1,
+                },
+            }),
+            "preview files=2 bytes=128 unsupported=1 expected_degraded=1\n",
+        ),
+        (
+            "code.repo.impact",
+            serde_json::json!({
+                "path_groups": {"in_scope_changed_paths": ["src/lib.rs"]},
+                "results": [{"symbol_id": "sym:1"}],
+            }),
+            "changed_in_scope=1 results=1\n",
+        ),
+        (
+            "code.repo.status",
+            serde_json::json!({
+                "status": {
+                    "alias": "repo",
+                    "indexed_file_count": 2,
+                    "symbol_count": 3,
+                    "stale": false,
+                },
+            }),
+            "repo=repo files=2 symbols=3 stale=false\n",
+        ),
+        (
+            "code.repo.report",
+            serde_json::json!({
+                "report": {
+                    "alias": "repo",
+                    "indexed_file_count": 2,
+                    "freshness_state": "fresh",
+                },
+            }),
+            "repo=repo files=2 freshness=fresh\n",
+        ),
+    ];
+
+    for (operation, payload, expected) in cases {
+        let rendered =
+            super::cli_render::render_text(operation, &payload).expect("render should succeed");
+
+        assert_eq!(rendered, expected);
+    }
 }
 
 #[tokio::test]
@@ -330,6 +505,198 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         "healthy=true repo_code_files=0 repo_code_symbols=0\n"
     );
     assert_eq!(service_status, "service=relay-knowledge mode=disabled\n");
+}
+
+#[tokio::test]
+async fn run_with_service_covers_operational_lifecycle_commands() {
+    let service = service_with_memory_store().await;
+    run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::Ingest {
+                source_scope: "docs".to_owned(),
+                content: "Operational text queues extractor and embedding work".to_owned(),
+                entity_labels: Vec::new(),
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("ops-ingest"),
+    )
+    .await
+    .expect("ingest should queue worker tasks");
+
+    let worker_status = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::WorkerStatus {
+                kind: Some(WorkerKind::Extractor),
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("worker-status"),
+    )
+    .await
+    .expect("worker status should run");
+    assert_eq!(worker_status, "workers=1\n");
+
+    let first_run = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::WorkerRunOnce {
+                kind: Some(WorkerKind::Extractor),
+            },
+            format: OutputFormat::Json,
+            help: false,
+        },
+        context("worker-run-extractor"),
+    )
+    .await
+    .expect("worker run should create proposal");
+    let first: Value = serde_json::from_str(&first_run).expect("run output should be JSON");
+    let first_id = first["proposals"][0]["proposal_id"]
+        .as_str()
+        .expect("proposal id should exist")
+        .to_owned();
+
+    let show = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ProposalShow {
+                proposal_id: first_id.clone(),
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("proposal-show"),
+    )
+    .await
+    .expect("proposal show should run");
+    assert!(show.contains("conflicts=0"));
+
+    let accepted = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ProposalAccept {
+                proposal_id: first_id,
+                actor: "reviewer".to_owned(),
+                reason: Some("accepted".to_owned()),
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("proposal-accept"),
+    )
+    .await
+    .expect("proposal accept should run");
+    assert!(accepted.contains("state=accepted"));
+
+    let second_run = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::WorkerRunOnce {
+                kind: Some(WorkerKind::Embedding),
+            },
+            format: OutputFormat::Json,
+            help: false,
+        },
+        context("worker-run-embedding"),
+    )
+    .await
+    .expect("embedding worker run should create proposal");
+    let second: Value = serde_json::from_str(&second_run).expect("run output should be JSON");
+    let second_id = second["proposals"][0]["proposal_id"]
+        .as_str()
+        .expect("proposal id should exist")
+        .to_owned();
+
+    let rejected = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ProposalReject {
+                proposal_id: second_id,
+                actor: "reviewer".to_owned(),
+                reason: Some("not needed".to_owned()),
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("proposal-reject"),
+    )
+    .await
+    .expect("proposal reject should run");
+    assert!(rejected.contains("state=rejected"));
+
+    let proposal_list = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ProposalList {
+                state: None,
+                limit: 10,
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("proposal-list"),
+    )
+    .await
+    .expect("proposal list should run");
+    let audit = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::AuditQuery {
+                operation: Some("worker.run_once".to_owned()),
+                limit: 10,
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("audit-query"),
+    )
+    .await
+    .expect("audit query should run");
+    let service_plan = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ServicePlan {
+                action: ServiceManagerAction::Install,
+            },
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("service-plan"),
+    )
+    .await
+    .expect("service plan should run");
+    let paused = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ServiceOperatorPause,
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("service-pause"),
+    )
+    .await
+    .expect("service operator pause should run");
+    let resumed = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ServiceOperatorResume,
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("service-resume"),
+    )
+    .await
+    .expect("service operator resume should run");
+
+    assert!(proposal_list.starts_with("proposals="));
+    assert!(audit.starts_with("audit_events="));
+    assert!(service_plan.contains("service_plan=install"));
+    assert_eq!(paused, "operator=paused\n");
+    assert_eq!(resumed, "operator=enabled\n");
 }
 
 #[tokio::test]
