@@ -7,7 +7,7 @@
 
 ## 1. 背景
 
-`relay-knowledge` 已经把 CLI、Web 和未来 API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。下一步需要让常驻进程启动后，外部 agent 能通过协议访问这些图检索能力。
+`relay-knowledge` 已经把 CLI、Web、MCP、本地 ACP 和未来 HTTP API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。当前实现已提供 MCP Streamable HTTP tool adapter 和本地 ACP session adapter；后续重点是 MCP resources/prompts、持久审计、metrics exporter、旧 HTTP+SSE 兼容端点和平台 service manager 集成。
 
 本研究把用户提到的 ACP 明确为 **Agent Client Protocol**。这里不把 ACP 解释为 Agent Communication Protocol 或 Agent Control Protocol。
 
@@ -152,7 +152,7 @@ MCP 中该结构进入 tool `structuredContent`。ACP 中该结构进入 `sessio
 
 ## 8. 工程结论
 
-v1 设计应采用以下路线:
+v1 设计与当前实现采用以下路线:
 
 1. 双协议同级: MCP 和 ACP 都在常驻进程中作为一等 adapter 设计。
 2. 读向优先: v1 对外开放检索、图检查、健康、服务状态和索引状态；索引刷新默认受限；写入后续再做。

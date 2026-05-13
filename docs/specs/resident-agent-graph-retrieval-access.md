@@ -51,7 +51,7 @@ interfaces::agent::acp -> api -> application -> domain
 
 ## 3. 公共 API 扩展
 
-后续实现应在 `api` 层补充 agent identity 和 protocol context，不把 MCP/ACP SDK 类型放进 `api`、`application` 或 `domain`。
+当前实现已在 `api` 层提供 protocol-neutral agent identity 和 protocol context；后续扩展仍不能把 MCP/ACP SDK 类型放进 `api`、`application` 或 `domain`。
 
 ```rust
 pub enum InterfaceKind {
@@ -473,6 +473,6 @@ CI expectations:
 3. Done: add `interfaces::agent` module with protocol-neutral validation and policy mapping.
 4. Done: implement MCP Streamable HTTP tool adapter over the shared mapping.
 5. Done: add service status fields showing enabled protocols, bind mode and policy summary without secrets.
-6. Next: implement ACP adapter over the same mapping.
+6. Done: implement local ACP session adapter over the same mapping.
 7. Next: add persistent observability events and metrics exporters.
 8. Next: add MCP resources/prompts when product scope requires them.

@@ -8,7 +8,7 @@
 
 `relay-knowledge` 的核心定位是本地优先的 knowledge substrate。它负责事实、证据、图版本、source scope、派生索引、检索、诊断、QoS 和审计，不内置通用 agent runtime，也不直接生成最终 LLM 答案。
 
-外部 agent runtime、CLI、Web、MCP 和未来 ACP adapter 只能通过统一 application API 访问能力。它们不得直接访问 SQLite、Git、tree-sitter parser、索引 writer、环境变量、运行时路径或网络 socket。
+外部 agent runtime、CLI、Web、MCP 和本地 ACP adapter 只能通过统一 application API 访问能力。它们不得直接访问 SQLite、Git、tree-sitter parser、索引 writer、环境变量、运行时路径或网络 socket。
 
 GraphRAG 能力必须保持可解释:
 
@@ -26,10 +26,10 @@ GraphRAG 能力必须保持可解释:
 - SQLite 图状态: evidence/entity、typed relation、claim、event、graph mutation log、graph version、index status 和 code graph tables。
 - 混合检索雏形: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、RRF 融合、source span/structured fact context pack 和 semantic/vector backend availability metadata。
 - 代码仓库能力: Git 仓库注册、full/incremental index、worktree overlay、tree-sitter 多语言解析、symbol/reference/chunk 查询和 diff impact。
-- Agent 接入基础: MCP Streamable HTTP server、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status 和 index refresh。
+- Agent 接入基础: MCP Streamable HTTP server、本地 ACP session adapter、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh。
 - Web 诊断面: `/api/project/status` 和 `/api/health` 驱动的 health、index、runtime、operation composer 和 GraphRAG readiness 视图。
 
-这些能力仍是 v1 底座。semantic/vector 真实后端、proposal lifecycle、scoped index cursor、后台 task lease/reconciler/dead-letter、多模态 evidence 和 temporal query 仍属于后续实现。
+这些能力仍是 v1 底座。semantic/vector 真实后端、proposal lifecycle、平台 service manager/silent update operator、多模态 evidence、temporal query、MCP resources/prompts 和持久审计仍属于后续实现。
 
 ## 3. 优化措施
 
@@ -92,16 +92,15 @@ GraphRAG 能力必须保持可解释:
 
 ### Phase 2: 可恢复索引刷新
 
-- 设计 scoped index cursor schema，记录 kind、scope、modality、model、indexed graph version 和 last error。
-- mutation log 增加 affected scope、evidence id、entity id、source hash 和 code path hints。
-- 增加 bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler。
-- health/service doctor 返回 queue depth、oldest task age、dead-letter count、index lag 和 stale reason。
+- 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
+- 为 semantic/vector backend 补充 model、dimension、source hash、backend-specific cursor 和 last error 元数据。
+- health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和 stale reason。
 
 ### Phase 3: Agent 与常驻服务
 
-- 完善 MCP read-only 工具矩阵: retrieve context、inspect graph、index status、service doctor、code graph query 和 code impact。
-- 增加 ACP adapter 或本地会话入口，支持 progress、cancellation、context artifact 和 runtime identity。
-- 增加 audit log，记录 identity、scope、freshness、QoS decision、budget、truncation 和 result count。
+- 保持 MCP read-only 工具矩阵: retrieve context、inspect graph、index status、service doctor、code graph query 和 code impact。
+- 保持本地 ACP 会话入口，支持 progress、cancellation、context artifact 和 runtime identity。
+- 保持 bounded in-process audit log，记录 identity、scope、freshness、QoS decision、budget、truncation 和 result count；后续补持久审计 sink 和 metrics exporters。
 - 安装/升级/卸载文档必须覆盖 service manager 模板、运行时目录、rollback 和 diagnostics。
 
 ### Phase 4: 高级 GraphRAG
@@ -114,7 +113,7 @@ GraphRAG 能力必须保持可解释:
 ## 5. 验收要求
 
 - 所有新增 public API 有生产调用方或规格支撑，并配套单元测试或集成测试。
-- CLI、Web、MCP 和未来 ACP 共享 application service，不复制业务逻辑。
+- CLI、Web、MCP 和 ACP 共享 application service，不复制业务逻辑。
 - 新增 I/O、数据库、embedding、OCR、parser、index rebuild 和 compaction 不得阻塞 async runtime hot path。
 - 所有队列、检索和遍历有 limit、timeout、cancellation、budget、truncated/degraded 状态。
 - 文档与实现同步更新，尤其是配置、环境变量、路径、网络、QoS、索引、后台服务、安装部署和用户可见功能。

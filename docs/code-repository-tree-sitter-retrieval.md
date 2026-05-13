@@ -9,9 +9,9 @@ registration, tree-sitter indexing, code retrieval, and impact analysis.
 ```bash
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust
 relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --format json
-relay-knowledge repo query core --query retry_policy --kind references --format json
-relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
+relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query core --query retry_policy --kind references --ref HEAD --format json
+relay-knowledge repo query core --query crate::retry_policy --kind imports --ref HEAD --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
@@ -22,6 +22,8 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
 `callees`, and `imports`. Diff-based impact analysis is served by
 `repo impact`; `impact` is rejected as a plain query kind so changeset results
 cannot be confused with hybrid search.
+`repo query` also accepts `--limit`, `--ref`, repeated `--path`, repeated
+`--language`, and `--freshness allow-stale|wait-until-fresh|graph-only`.
 
 ## Implementation
 

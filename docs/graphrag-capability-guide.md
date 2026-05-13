@@ -2,11 +2,11 @@
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-12
-> 范围: 当前可用 GraphRAG 能力、CLI/Web/MCP 使用方式和降级语义。
+> 范围: 当前可用 GraphRAG 能力、CLI/Web/MCP/ACP 使用方式和降级语义。
 
 ## 1. 当前能力
 
-`relay-knowledge` 当前提供本地知识图谱、代码知识图谱、混合检索 context pack、诊断状态和 MCP Streamable HTTP 接入。
+`relay-knowledge` 当前提供本地知识图谱、代码知识图谱、混合检索 context pack、诊断状态、MCP Streamable HTTP 接入和本地 ACP session adapter。
 
 当前可用能力:
 
@@ -14,15 +14,16 @@
 - structured fact ingest: API 可写入 evidence source path、span、confidence、status、typed relation、claim 和 event；结构化 facts 必须引用 supporting evidence ids，反序列化后的 span、confidence 和 version range 会重新验证。
 - hybrid retrieval: 使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
-- diagnostics: graph inspect、index status、health、service doctor 和 Web readiness。
-- resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status 和受权限控制的 index refresh。
+- index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors、bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
+- diagnostics: graph inspect、index status、health、service doctor 和 Web readiness；`service status` 与 `service doctor` 当前复用同一统一 API 输出，报告 disabled service mode、后台更新状态、service definition path、agent protocol status 和 refresh queue diagnostics。
+- resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission 和 bounded audit events。
 
 规划中能力:
 
 - proposal lifecycle 和冲突处理。
 - semantic/vector 后端和 ANN read model。
-- scoped index refresh queue、lease、dead-letter 和 startup reconciler。
-- ACP adapter、多模态 evidence、temporal query 和 community summary。
+- MCP resources/prompts、持久 audit sink 和旧 HTTP+SSE 兼容端点。
+- 平台 service install/upgrade/uninstall、silent update operator、多模态 evidence、temporal query 和 community summary。
 
 ## 2. CLI 工作流
 
@@ -66,7 +67,15 @@ relay-knowledge repo register /path/to/repo \
   --format json
 
 relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind hybrid --format json
+relay-knowledge repo query core \
+  --query retry_policy \
+  --kind hybrid \
+  --ref HEAD \
+  --path src \
+  --language rust \
+  --freshness wait-until-fresh \
+  --limit 10 \
+  --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
@@ -112,6 +121,7 @@ http://127.0.0.1:8791/mcp
 - 发送 `notifications/initialized` 后再调用工具。
 
 默认 agent policy 要求配置允许 scope。未配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。
+`relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
 
 ## 5. Freshness 和降级语义
 
