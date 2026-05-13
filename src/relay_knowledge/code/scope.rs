@@ -141,7 +141,8 @@ pub fn partition_changed_paths_for_selector(
     paths: Vec<String>,
 ) -> Result<CodeImpactPathGroups, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    let ignore_rules = load_ignore_rules(&root)?;
+    let commit = resolve_ref(&root, &selector.ref_selector)?;
+    let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
     let mut in_scope_changed_paths = Vec::new();
     let mut out_of_scope_changed_paths = Vec::new();
     for path in paths {

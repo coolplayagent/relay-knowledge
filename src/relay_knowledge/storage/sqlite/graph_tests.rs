@@ -537,6 +537,58 @@ async fn initialization_backfills_empty_semantic_and_vector_documents() {
 }
 
 #[tokio::test]
+async fn initialization_rebuilds_partially_populated_retrieval_documents() {
+    let path = temp_db_path("partial-derived-backfill");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-partial-keep",
+            "docs",
+            "Partial rebuild keeps one existing row",
+        )
+        .await;
+        commit_evidence(
+            &store,
+            "ev-partial-missing",
+            "docs",
+            "SecondPartialNeedle should be rebuilt",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        for table in [
+            "graph_bm25",
+            "graph_semantic_documents",
+            "graph_vector_documents",
+        ] {
+            guard
+                .execute(
+                    &format!("DELETE FROM {table} WHERE evidence_id = ?1"),
+                    ["ev-partial-missing"],
+                )
+                .expect("partial rows should delete");
+        }
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "SecondPartialNeedle".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(2),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert!(
+        hits.iter()
+            .any(|hit| hit.evidence_id == "ev-partial-missing")
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
 async fn search_excludes_rejected_and_superseded_evidence() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let scope = SourceScope::parse("docs").expect("scope should parse");

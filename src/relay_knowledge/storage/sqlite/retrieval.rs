@@ -15,6 +15,9 @@ use crate::{
 #[path = "retrieval/context.rs"]
 mod context;
 
+#[path = "retrieval/derived.rs"]
+mod derived;
+
 #[path = "retrieval_migration.rs"]
 mod migration;
 
@@ -537,13 +540,13 @@ pub(super) fn search_graph(
     );
     merge_ranked(
         &mut candidates,
-        advanced::semantic_candidates(connection, &request)?,
+        derived::semantic_candidates(connection, &request)?,
         RetrieverSource::Semantic,
         "local semantic token signature read model with scope and graph-version filters",
     );
     merge_ranked(
         &mut candidates,
-        advanced::vector_candidates(connection, &request)?,
+        derived::vector_candidates(connection, &request)?,
         RetrieverSource::Vector,
         "local hashed vector ANN read model with model, dimension, source hash, scope, and graph-version metadata",
     );

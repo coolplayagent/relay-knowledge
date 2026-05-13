@@ -56,16 +56,18 @@ pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), Stor
 }
 
 pub(super) fn derived_documents_missing(connection: &Connection) -> Result<bool, StorageError> {
-    let semantic_count = table_row_count(connection, "graph_semantic_documents")?;
-    let vector_count = table_row_count(connection, "graph_vector_documents")?;
-    if semantic_count > 0 && vector_count > 0 {
+    let expected_count = retrievable_source_document_count(connection)?;
+    if expected_count == 0 {
         return Ok(false);
     }
 
-    Ok(table_row_count(connection, "evidence")?
-        + optional_table_row_count(connection, "code_symbols")?
-        + optional_table_row_count(connection, "code_chunks")?
-        > 0)
+    let bm25_count = table_row_count(connection, "graph_bm25")?;
+    let semantic_count = table_row_count(connection, "graph_semantic_documents")?;
+    let vector_count = table_row_count(connection, "graph_vector_documents")?;
+
+    Ok(bm25_count != expected_count
+        || semantic_count != expected_count
+        || vector_count != expected_count)
 }
 
 fn clear_retrieval_documents(connection: &Connection) -> Result<(), StorageError> {
@@ -304,4 +306,22 @@ fn table_row_count(connection: &Connection, table: &'static str) -> Result<usize
     connection
         .query_row(&sql, [], |row| row.get::<_, usize>(0))
         .map_err(StorageError::from)
+}
+
+fn retrievable_source_document_count(connection: &Connection) -> Result<usize, StorageError> {
+    let evidence_count = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM evidence
+            WHERE status IN ('accepted', 'proposed')
+            ",
+            [],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(StorageError::from)?;
+
+    Ok(evidence_count
+        + optional_table_row_count(connection, "code_symbols")?
+        + optional_table_row_count(connection, "code_chunks")?)
 }

@@ -29,15 +29,3 @@ fn temporal_query_applies_case_insensitive_as_of_dates_strictly() {
     assert!(!temporal.matches(Some("2026-11-01")));
     assert!(!temporal.matches(Some("undated event")));
 }
-
-#[test]
-fn bounded_candidate_limit_scales_with_request_limit() {
-    let request = GraphSearchRequest {
-        query: "semantic".to_owned(),
-        source_scope: None,
-        graph_version: crate::domain::GraphVersion::new(1),
-        limit: 10,
-    };
-
-    assert_eq!(bounded_candidate_limit(&request), 80);
-}

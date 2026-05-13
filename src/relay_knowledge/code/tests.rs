@@ -700,6 +700,37 @@ fn scope_preview_uses_ignore_rules_from_requested_commit() {
 }
 
 #[test]
+fn impact_path_partition_uses_ignore_rules_from_selected_commit() {
+    let repo = TempGitRepo::create("impact-partition-commit-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write(".relay-knowledgeignore", "");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let groups = partition_changed_paths_for_selector(
+        &registration,
+        &selector,
+        vec!["src/lib.rs".to_owned(), "docs/notes.rs".to_owned()],
+    )
+    .expect("paths should partition");
+
+    assert_eq!(groups.in_scope_changed_paths, ["src/lib.rs"]);
+    assert_eq!(groups.out_of_scope_changed_paths, ["docs/notes.rs"]);
+}
+
+#[test]
 fn scope_preview_counts_each_degraded_file_once() {
     let repo = TempGitRepo::create("scope-preview-degraded-count");
     repo.write("docs/large.custom", &"x".repeat(512 * 1024 + 1));
