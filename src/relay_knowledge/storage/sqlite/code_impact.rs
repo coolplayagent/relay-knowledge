@@ -12,7 +12,7 @@ use crate::{
 
 use super::code_query::{
     HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, language_filter_allows,
-    path_filter_allows, required_repository,
+    path_filter_allows, required_repository, required_scope,
 };
 
 const CODE_PATH_LANGUAGE_SUFFIXES: &[(&str, &str)] = &[
@@ -58,13 +58,9 @@ pub(super) fn analyze_impact(
     request: CodeImpactRequest,
     changes: CodeImpactChanges,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let status = required_repository(
-        connection,
-        &request.repository.repository,
-        &request.repository.ref_selector,
-    )?;
+    let status = required_repository(connection, &request.repository)?;
     let changed = selected_changed_paths(connection, &status, &request, changes.paths)?;
-    let changed_symbols = symbol_seeds_for_paths(connection, &status.repository_id, &changed)?;
+    let changed_symbols = symbol_seeds_for_paths(connection, required_scope(&status)?, &changed)?;
     let changed_modules =
         import_module_seeds(&changed, &changed_symbols, &changes.deleted_symbol_names);
     let mut hits = Vec::new();
@@ -94,21 +90,21 @@ pub(super) fn analyze_impact(
 
 fn symbol_seeds_for_paths(
     connection: &Connection,
-    repository_id: &str,
+    source_scope: &str,
     paths: &BTreeSet<String>,
 ) -> Result<ImpactSymbolSeeds, StorageError> {
     let mut path_statement = connection.prepare(
         "
         SELECT symbol_snapshot_id, path, name, qualified_name
         FROM code_repository_symbols
-        WHERE repository_id = ?1 AND path = ?2
+        WHERE source_scope = ?1 AND path = ?2
         ",
     )?;
     let mut symbol_ids = BTreeSet::new();
     let mut import_modules = BTreeSet::new();
     for path in paths {
         import_modules.extend(module_keys_for_path(path));
-        let rows = path_statement.query_map(params![repository_id, path], |row| {
+        let rows = path_statement.query_map(params![source_scope, path], |row| {
             Ok(ImpactSymbolRow {
                 symbol_snapshot_id: row.get(0)?,
                 path: row.get(1)?,
@@ -169,12 +165,12 @@ fn chunks_for_paths(
                f.degraded_reason
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
+            ON f.source_scope = c.source_scope AND f.path = c.path
+        WHERE c.source_scope = ?1
         ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
+    let rows = statement.query_map(params![required_scope(status)?], |row| {
         Ok(ImpactChunkRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -242,12 +238,12 @@ fn callers_for_symbols(
                c.confidence_basis_points, c.confidence_tier
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
+            ON f.source_scope = c.source_scope AND f.path = c.path
+        WHERE c.source_scope = ?1
         ORDER BY c.path ASC, c.line_start ASC
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
+    let rows = statement.query_map(params![required_scope(status)?], |row| {
         Ok(ImpactCallRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -321,12 +317,12 @@ fn importers_for_modules(
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
-            ON f.repository_id = i.repository_id AND f.path = i.path
-        WHERE i.repository_id = ?1
+            ON f.source_scope = i.source_scope AND f.path = i.path
+        WHERE i.source_scope = ?1
         ORDER BY i.path ASC, i.line_start ASC
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
+    let rows = statement.query_map(params![required_scope(status)?], |row| {
         Ok(ImpactImportRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -390,9 +386,10 @@ fn selected_changed_paths(
         "
         SELECT language_id
         FROM code_repository_files
-        WHERE repository_id = ?1 AND path = ?2
+        WHERE source_scope = ?1 AND path = ?2
         ",
     )?;
+    let source_scope = required_scope(status)?;
     let mut selected = BTreeSet::new();
     for path in changed_paths {
         if !path_filter_allows(&path, &status.path_filters)
@@ -401,9 +398,7 @@ fn selected_changed_paths(
             continue;
         }
         let stored_language_id = statement
-            .query_row(params![&status.repository_id, &path], |row| {
-                row.get::<_, String>(0)
-            })
+            .query_row(params![source_scope, &path], |row| row.get::<_, String>(0))
             .optional()?;
         let language_id = stored_language_id.or_else(|| language_id_for_path(&path));
         if language_id

@@ -30,159 +30,7 @@ use crate::{
 use super::SqliteGraphStore;
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS code_repositories (
-            repository_id TEXT PRIMARY KEY,
-            alias TEXT NOT NULL UNIQUE,
-            root_path TEXT NOT NULL,
-            path_filters_json TEXT NOT NULL,
-            language_filters_json TEXT NOT NULL,
-            last_indexed_commit TEXT,
-            tree_hash TEXT,
-            state TEXT NOT NULL,
-            indexed_file_count INTEGER NOT NULL,
-            symbol_count INTEGER NOT NULL,
-            reference_count INTEGER NOT NULL,
-            chunk_count INTEGER NOT NULL,
-            stale INTEGER NOT NULL,
-            degraded_reason TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_files (
-            repository_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            blob_hash TEXT NOT NULL,
-            byte_len INTEGER NOT NULL,
-            line_count INTEGER NOT NULL,
-            parse_status TEXT NOT NULL,
-            degraded_reason TEXT,
-            PRIMARY KEY (repository_id, path),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_symbols (
-            repository_id TEXT NOT NULL,
-            symbol_snapshot_id TEXT PRIMARY KEY,
-            canonical_symbol_id TEXT NOT NULL,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            qualified_name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            signature TEXT NOT NULL,
-            doc_comment TEXT,
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_references (
-            repository_id TEXT NOT NULL,
-            reference_id TEXT PRIMARY KEY,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            name TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            target_symbol_snapshot_id TEXT,
-            target_hint TEXT,
-            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
-            confidence_basis_points INTEGER NOT NULL DEFAULT 5000,
-            confidence_tier TEXT NOT NULL DEFAULT 'ambiguous',
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_imports (
-            repository_id TEXT NOT NULL,
-            import_id TEXT PRIMARY KEY,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            module TEXT NOT NULL,
-            target_hint TEXT,
-            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
-            confidence_basis_points INTEGER NOT NULL DEFAULT 10000,
-            confidence_tier TEXT NOT NULL DEFAULT 'extracted',
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_calls (
-            repository_id TEXT NOT NULL,
-            call_id TEXT PRIMARY KEY,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            caller_symbol_snapshot_id TEXT,
-            caller_name TEXT,
-            callee_symbol_snapshot_id TEXT,
-            callee_name TEXT NOT NULL,
-            target_hint TEXT,
-            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
-            confidence_basis_points INTEGER NOT NULL DEFAULT 5000,
-            confidence_tier TEXT NOT NULL DEFAULT 'ambiguous',
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_chunks (
-            repository_id TEXT NOT NULL,
-            chunk_id TEXT PRIMARY KEY,
-            file_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            language_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            byte_start INTEGER NOT NULL,
-            byte_end INTEGER NOT NULL,
-            line_start INTEGER NOT NULL,
-            line_end INTEGER NOT NULL,
-            symbol_snapshot_id TEXT,
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_file_diagnostics (
-            repository_id TEXT NOT NULL,
-            path TEXT NOT NULL,
-            parse_status TEXT NOT NULL,
-            message TEXT NOT NULL,
-            PRIMARY KEY (repository_id, path, message),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS code_repository_path_tombstones (
-            repository_id TEXT NOT NULL,
-            old_path TEXT NOT NULL,
-            new_path TEXT,
-            base_ref TEXT NOT NULL,
-            head_ref TEXT NOT NULL,
-            PRIMARY KEY (repository_id, old_path, base_ref, head_ref),
-            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
-            ON code_repository_symbols(repository_id, name, qualified_name, path);
-        CREATE INDEX IF NOT EXISTS code_repository_references_lookup
-            ON code_repository_references(repository_id, name, kind, path);
-        CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
-            ON code_repository_calls(repository_id, callee_name, caller_name, path);
-        CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
-            ON code_repository_imports(repository_id, module, path);
-        CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
-            ON code_repository_chunks(repository_id, path);
-        ",
-    )?;
-    code_schema::ensure_code_repository_compat_columns(connection)?;
-
-    Ok(())
+    code_schema::initialize_code_schema(connection)
 }
 
 impl CodeRepositoryStore for SqliteGraphStore {
@@ -288,6 +136,64 @@ pub(super) fn repository_status(
     repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
 }
 
+pub(super) fn repository_scope_status(
+    connection: &mut Connection,
+    repository: &str,
+    resolved_commit_sha: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
+    let base = repository_status(connection, repository)?;
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let path_filters_json = serde_json::to_string(path_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let language_filters_json = serde_json::to_string(language_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    connection
+        .query_row(
+            "
+            SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
+                   reference_count, chunk_count, stale, degraded_reason
+            FROM code_repository_scopes
+            WHERE repository_id = ?1
+              AND resolved_commit_sha = ?2
+            ORDER BY
+              CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
+              source_scope ASC
+            LIMIT 1
+            ",
+            params![
+                base.repository_id,
+                resolved_commit_sha,
+                path_filters_json,
+                language_filters_json
+            ],
+            |row| {
+                Ok(CodeRepositoryStatus {
+                    repository_id: base.repository_id.clone(),
+                    alias: base.alias.clone(),
+                    root_path: base.root_path.clone(),
+                    path_filters: path_filters.to_vec(),
+                    language_filters: language_filters.to_vec(),
+                    last_indexed_scope_id: Some(row.get(0)?),
+                    last_indexed_commit: Some(resolved_commit_sha.to_owned()),
+                    tree_hash: Some(row.get(1)?),
+                    state: "fresh".to_owned(),
+                    indexed_file_count: row.get(2)?,
+                    symbol_count: row.get(3)?,
+                    reference_count: row.get(4)?,
+                    chunk_count: row.get(5)?,
+                    stale: row.get::<_, i64>(6)? != 0,
+                    degraded_reason: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 fn repository_status_by_column(
     connection: &mut Connection,
     repository: &str,
@@ -301,15 +207,16 @@ fn repository_status_by_column(
                 root_path: row.get(2)?,
                 path_filters: parse_json_list(row.get::<_, String>(3)?)?,
                 language_filters: parse_json_list(row.get::<_, String>(4)?)?,
-                last_indexed_commit: row.get(5)?,
-                tree_hash: row.get(6)?,
-                state: row.get(7)?,
-                indexed_file_count: row.get(8)?,
-                symbol_count: row.get(9)?,
-                reference_count: row.get(10)?,
-                chunk_count: row.get(11)?,
-                stale: row.get::<_, i64>(12)? != 0,
-                degraded_reason: row.get(13)?,
+                last_indexed_scope_id: row.get(5)?,
+                last_indexed_commit: row.get(6)?,
+                tree_hash: row.get(7)?,
+                state: row.get(8)?,
+                indexed_file_count: row.get(9)?,
+                symbol_count: row.get(10)?,
+                reference_count: row.get(11)?,
+                chunk_count: row.get(12)?,
+                stale: row.get::<_, i64>(13)? != 0,
+                degraded_reason: row.get(14)?,
             })
         })
         .optional()
@@ -327,7 +234,7 @@ impl RepositoryLookupColumn {
             Self::RepositoryId => {
                 "
                 SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_commit, tree_hash,
+                       last_indexed_scope_id, last_indexed_commit, tree_hash,
                        state, indexed_file_count, symbol_count, reference_count, chunk_count,
                        stale, degraded_reason
                 FROM code_repositories
@@ -337,7 +244,7 @@ impl RepositoryLookupColumn {
             Self::Alias => {
                 "
                 SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_commit, tree_hash,
+                       last_indexed_scope_id, last_indexed_commit, tree_hash,
                        state, indexed_file_count, symbol_count, reference_count, chunk_count,
                        stale, degraded_reason
                 FROM code_repositories
@@ -363,6 +270,9 @@ fn file_fingerprints(
         SELECT path, blob_hash
         FROM code_repository_files
         WHERE repository_id = ?1
+          AND source_scope = (
+              SELECT last_indexed_scope_id FROM code_repositories WHERE repository_id = ?1
+          )
         ORDER BY path ASC
         ",
     )?;
@@ -383,13 +293,14 @@ fn apply_snapshot(
 ) -> Result<CodeIndexSummary, StorageError> {
     let transaction = connection.transaction()?;
     if snapshot.full_replace {
-        delete_repository_index(&transaction, &snapshot.repository_id)?;
+        delete_scope_index(&transaction, &snapshot.source_scope)?;
     } else {
+        clone_active_scope_for_incremental(&transaction, &snapshot)?;
         for path in &snapshot.deleted_paths {
-            delete_path_index(&transaction, &snapshot.repository_id, path)?;
+            delete_path_index(&transaction, &snapshot.source_scope, path)?;
         }
         for file in &snapshot.files {
-            delete_path_index(&transaction, &snapshot.repository_id, &file.path)?;
+            delete_path_index(&transaction, &snapshot.source_scope, &file.path)?;
         }
     }
 
@@ -397,13 +308,14 @@ fn apply_snapshot(
         transaction.execute(
             "
             INSERT INTO code_repository_files (
-                repository_id, file_id, path, language_id, blob_hash, byte_len,
+                repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
                 line_count, parse_status, degraded_reason
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ",
             params![
                 file.repository_id,
+                file.source_scope,
                 file.file_id,
                 file.path,
                 file.language_id,
@@ -419,14 +331,16 @@ fn apply_snapshot(
         transaction.execute(
             "
             INSERT INTO code_repository_symbols (
-                repository_id, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name,
+                repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
+                file_id, path, language_id, name,
                 qualified_name, kind, signature, doc_comment, byte_start, byte_end,
                 line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ",
             params![
                 symbol.repository_id,
+                symbol.source_scope,
                 symbol.symbol_snapshot_id,
                 symbol.canonical_symbol_id,
                 symbol.file_id,
@@ -448,15 +362,16 @@ fn apply_snapshot(
         transaction.execute(
             "
             INSERT INTO code_repository_references (
-                repository_id, reference_id, file_id, path, name, kind,
+                repository_id, source_scope, reference_id, file_id, path, name, kind,
                 target_symbol_snapshot_id, target_hint, resolution_state,
                 confidence_basis_points, confidence_tier,
                 byte_start, byte_end, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ",
             params![
                 reference.repository_id,
+                reference.source_scope,
                 reference.reference_id,
                 reference.file_id,
                 reference.path,
@@ -484,6 +399,7 @@ fn apply_snapshot(
 
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id,
+        source_scope: snapshot.source_scope,
         resolved_commit_sha: snapshot.resolved_commit_sha,
         tree_hash: snapshot.tree_hash,
         indexed_file_count: status.indexed_file_count,
@@ -517,6 +433,96 @@ fn apply_snapshot(
     })
 }
 
+fn clone_active_scope_for_incremental(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CodeIndexSnapshot,
+) -> Result<(), StorageError> {
+    let previous_scope = transaction
+        .query_row(
+            "SELECT last_indexed_scope_id FROM code_repositories WHERE repository_id = ?1",
+            params![snapshot.repository_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(previous_scope) = previous_scope else {
+        return Ok(());
+    };
+    if previous_scope == snapshot.source_scope {
+        return Ok(());
+    }
+    delete_scope_index(transaction, &snapshot.source_scope)?;
+    clone_code_table(
+        transaction,
+        "code_repository_files",
+        "repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len, line_count, parse_status, degraded_reason",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_symbols",
+        "repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name, qualified_name, kind, signature, doc_comment, byte_start, byte_end, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_references",
+        "repository_id, source_scope, reference_id, file_id, path, name, kind, target_symbol_snapshot_id, target_hint, resolution_state, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_imports",
+        "repository_id, source_scope, import_id, file_id, path, module, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_calls",
+        "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_chunks",
+        "repository_id, source_scope, chunk_id, file_id, path, language_id, content, byte_start, byte_end, line_start, line_end, symbol_snapshot_id",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_file_diagnostics",
+        "repository_id, source_scope, path, parse_status, message",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+
+    Ok(())
+}
+
+fn clone_code_table(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &'static str,
+    columns: &'static str,
+    previous_scope: &str,
+    next_scope: &str,
+) -> Result<(), StorageError> {
+    let selected_columns = columns.replacen("source_scope", "?2", 1);
+    transaction.execute(
+        &format!(
+            "INSERT INTO {table} ({columns}) SELECT {selected_columns} FROM {table} WHERE source_scope = ?1"
+        ),
+        params![previous_scope, next_scope],
+    )?;
+
+    Ok(())
+}
+
 fn repository_totals(connection: &mut Connection) -> Result<CodeRepositoryTotals, StorageError> {
     Ok(CodeRepositoryTotals {
         repository_count: count_all_rows(connection, "code_repositories")?,
@@ -535,10 +541,11 @@ fn repository_report(
     let status = repository_status(connection, repository)?.ok_or_else(|| {
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
     })?;
-    let degradation_summary = repository_diagnostics(connection, &status.repository_id)?;
-    let degraded_file_count = repository_degraded_file_count(connection, &status.repository_id)?;
-    let edge_counts = repository_edge_resolution_counts(connection, &status.repository_id)?;
-    let representative_queries = representative_queries(connection, &status.repository_id)?;
+    let scope = status.last_indexed_scope_id.as_deref().unwrap_or_default();
+    let degradation_summary = repository_diagnostics(connection, scope)?;
+    let degraded_file_count = repository_degraded_file_count(connection, scope)?;
+    let edge_counts = repository_edge_resolution_counts(connection, scope)?;
+    let representative_queries = representative_queries(connection, scope)?;
     let freshness_state = if status.stale {
         "stale"
     } else {
@@ -569,7 +576,24 @@ fn repository_report(
     })
 }
 
-#[derive(Default)]
+fn repository_degraded_file_count(
+    connection: &Connection,
+    source_scope: &str,
+) -> Result<usize, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM code_repository_file_diagnostics
+            WHERE source_scope = ?1
+            ",
+            params![source_scope],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+#[derive(Debug, Default)]
 struct EdgeResolutionCounts {
     resolved: usize,
     ambiguous: usize,
@@ -578,24 +602,23 @@ struct EdgeResolutionCounts {
 
 fn repository_edge_resolution_counts(
     connection: &Connection,
-    repository_id: &str,
+    source_scope: &str,
 ) -> Result<EdgeResolutionCounts, StorageError> {
     let mut counts = EdgeResolutionCounts::default();
-    for table in [
-        "code_repository_references",
-        "code_repository_imports",
-        "code_repository_calls",
+    for (table, column) in [
+        ("code_repository_references", "resolution_state"),
+        ("code_repository_imports", "resolution_state"),
+        ("code_repository_calls", "resolution_state"),
     ] {
-        let sql = format!(
+        let mut statement = connection.prepare(&format!(
             "
-            SELECT resolution_state, COUNT(*)
+            SELECT {column}, COUNT(*)
             FROM {table}
-            WHERE repository_id = ?1
-            GROUP BY resolution_state
+            WHERE source_scope = ?1
+            GROUP BY {column}
             "
-        );
-        let mut statement = connection.prepare(&sql)?;
-        let rows = statement.query_map(params![repository_id], |row| {
+        ))?;
+        let rows = statement.query_map(params![source_scope], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
         })?;
         for row in rows {
@@ -611,37 +634,20 @@ fn repository_edge_resolution_counts(
     Ok(counts)
 }
 
-fn repository_degraded_file_count(
-    connection: &Connection,
-    repository_id: &str,
-) -> Result<usize, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT COUNT(*)
-            FROM code_repository_file_diagnostics
-            WHERE repository_id = ?1
-            ",
-            params![repository_id],
-            |row| row.get::<_, usize>(0),
-        )
-        .map_err(StorageError::from)
-}
-
 fn repository_diagnostics(
     connection: &Connection,
-    repository_id: &str,
+    source_scope: &str,
 ) -> Result<Vec<String>, StorageError> {
     let mut statement = connection.prepare(
         "
         SELECT path, message
         FROM code_repository_file_diagnostics
-        WHERE repository_id = ?1
+        WHERE source_scope = ?1
         ORDER BY path ASC, message ASC
         LIMIT 20
         ",
     )?;
-    let rows = statement.query_map(params![repository_id], |row| {
+    let rows = statement.query_map(params![source_scope], |row| {
         Ok(format!(
             "{}: {}",
             row.get::<_, String>(0)?,
@@ -655,19 +661,19 @@ fn repository_diagnostics(
 
 fn representative_queries(
     connection: &Connection,
-    repository_id: &str,
+    source_scope: &str,
 ) -> Result<Vec<String>, StorageError> {
     let mut queries = Vec::new();
     let mut statement = connection.prepare(
         "
         SELECT name
         FROM code_repository_symbols
-        WHERE repository_id = ?1
+        WHERE source_scope = ?1
         ORDER BY path ASC, line_start ASC
         LIMIT 3
         ",
     )?;
-    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(params![source_scope], |row| row.get::<_, String>(0))?;
     queries.extend(
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)?,
@@ -689,14 +695,14 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT INTO code_repository_imports (
-                repository_id, import_id, file_id, path, module, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier,
-                line_start, line_end
+                repository_id, source_scope, import_id, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ",
             params![
                 import.repository_id,
+                import.source_scope,
                 import.import_id,
                 import.file_id,
                 import.path,
@@ -714,15 +720,15 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT INTO code_repository_calls (
-                repository_id, call_id, file_id, path, caller_symbol_snapshot_id,
+                repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
                 caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier,
-                line_start, line_end
+                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ",
             params![
                 call.repository_id,
+                call.source_scope,
                 call.call_id,
                 call.file_id,
                 call.path,
@@ -743,13 +749,14 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT INTO code_repository_chunks (
-                repository_id, chunk_id, file_id, path, language_id, content,
+                repository_id, source_scope, chunk_id, file_id, path, language_id, content,
                 byte_start, byte_end, line_start, line_end, symbol_snapshot_id
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ",
             params![
                 chunk.repository_id,
+                chunk.source_scope,
                 chunk.chunk_id,
                 chunk.file_id,
                 chunk.path,
@@ -767,11 +774,12 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT OR REPLACE INTO code_repository_file_diagnostics
-                (repository_id, path, parse_status, message)
-            VALUES (?1, ?2, ?3, ?4)
+                (repository_id, source_scope, path, parse_status, message)
+            VALUES (?1, ?2, ?3, ?4, ?5)
             ",
             params![
                 diagnostic.repository_id,
+                diagnostic.source_scope,
                 diagnostic.path,
                 diagnostic.parse_status.as_str(),
                 diagnostic.message,
@@ -782,11 +790,12 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT OR REPLACE INTO code_repository_path_tombstones
-                (repository_id, old_path, new_path, base_ref, head_ref)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+                (repository_id, source_scope, old_path, new_path, base_ref, head_ref)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ",
             params![
                 tombstone.repository_id,
+                tombstone.source_scope,
                 tombstone.old_path,
                 tombstone.new_path,
                 tombstone.base_ref,
@@ -802,49 +811,86 @@ fn update_repository_after_snapshot(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
-    let file_count = count_code_rows(
-        transaction,
-        "code_repository_files",
-        &snapshot.repository_id,
-    )?;
+    let file_count = count_code_rows(transaction, "code_repository_files", &snapshot.source_scope)?;
     let symbol_count = count_code_rows(
         transaction,
         "code_repository_symbols",
-        &snapshot.repository_id,
+        &snapshot.source_scope,
     )?;
     let reference_count = count_code_rows(
         transaction,
         "code_repository_references",
-        &snapshot.repository_id,
+        &snapshot.source_scope,
     )?;
     let chunk_count = count_code_rows(
         transaction,
         "code_repository_chunks",
-        &snapshot.repository_id,
+        &snapshot.source_scope,
     )?;
     let degraded_file_count = count_code_rows(
         transaction,
         "code_repository_file_diagnostics",
-        &snapshot.repository_id,
+        &snapshot.source_scope,
     )?;
     let degraded_reason = (degraded_file_count > 0)
         .then(|| format!("{degraded_file_count} file(s) degraded during code indexing"));
+    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    transaction.execute(
+        "
+        INSERT INTO code_repository_scopes (
+            source_scope, repository_id, resolved_commit_sha, tree_hash,
+            path_filters_json, language_filters_json, indexed_file_count,
+            symbol_count, reference_count, chunk_count, stale, degraded_reason
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11)
+        ON CONFLICT(source_scope) DO UPDATE SET
+            repository_id = excluded.repository_id,
+            resolved_commit_sha = excluded.resolved_commit_sha,
+            tree_hash = excluded.tree_hash,
+            path_filters_json = excluded.path_filters_json,
+            language_filters_json = excluded.language_filters_json,
+            indexed_file_count = excluded.indexed_file_count,
+            symbol_count = excluded.symbol_count,
+            reference_count = excluded.reference_count,
+            chunk_count = excluded.chunk_count,
+            stale = 0,
+            degraded_reason = excluded.degraded_reason
+        ",
+        params![
+            snapshot.source_scope,
+            snapshot.repository_id,
+            snapshot.resolved_commit_sha,
+            snapshot.tree_hash,
+            path_filters_json,
+            language_filters_json,
+            file_count,
+            symbol_count,
+            reference_count,
+            chunk_count,
+            degraded_reason,
+        ],
+    )?;
     transaction.execute(
         "
         UPDATE code_repositories
-        SET last_indexed_commit = ?2,
-            tree_hash = ?3,
+        SET last_indexed_scope_id = ?2,
+            last_indexed_commit = ?3,
+            tree_hash = ?4,
             state = 'fresh',
-            indexed_file_count = ?4,
-            symbol_count = ?5,
-            reference_count = ?6,
-            chunk_count = ?7,
+            indexed_file_count = ?5,
+            symbol_count = ?6,
+            reference_count = ?7,
+            chunk_count = ?8,
             stale = 0,
-            degraded_reason = ?8
+            degraded_reason = ?9
         WHERE repository_id = ?1
         ",
         params![
             snapshot.repository_id,
+            snapshot.source_scope,
             snapshot.resolved_commit_sha,
             snapshot.tree_hash,
             file_count,
@@ -858,9 +904,9 @@ fn update_repository_after_snapshot(
     Ok(())
 }
 
-fn delete_repository_index(
+fn delete_scope_index(
     transaction: &rusqlite::Transaction<'_>,
-    repository_id: &str,
+    source_scope: &str,
 ) -> Result<(), StorageError> {
     for table in [
         "code_repository_path_tombstones",
@@ -873,8 +919,8 @@ fn delete_repository_index(
         "code_repository_files",
     ] {
         transaction.execute(
-            &format!("DELETE FROM {table} WHERE repository_id = ?1"),
-            params![repository_id],
+            &format!("DELETE FROM {table} WHERE source_scope = ?1"),
+            params![source_scope],
         )?;
     }
 
@@ -883,7 +929,7 @@ fn delete_repository_index(
 
 fn delete_path_index(
     transaction: &rusqlite::Transaction<'_>,
-    repository_id: &str,
+    source_scope: &str,
     path: &str,
 ) -> Result<(), StorageError> {
     for table in [
@@ -896,8 +942,8 @@ fn delete_path_index(
         "code_repository_files",
     ] {
         transaction.execute(
-            &format!("DELETE FROM {table} WHERE repository_id = ?1 AND path = ?2"),
-            params![repository_id, path],
+            &format!("DELETE FROM {table} WHERE source_scope = ?1 AND path = ?2"),
+            params![source_scope, path],
         )?;
     }
 
@@ -907,12 +953,12 @@ fn delete_path_index(
 fn count_code_rows(
     transaction: &rusqlite::Transaction<'_>,
     table: &'static str,
-    repository_id: &str,
+    source_scope: &str,
 ) -> Result<usize, StorageError> {
     transaction
         .query_row(
-            &format!("SELECT COUNT(*) FROM {table} WHERE repository_id = ?1"),
-            params![repository_id],
+            &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = ?1"),
+            params![source_scope],
             |row| row.get(0),
         )
         .map_err(StorageError::from)

@@ -10,7 +10,9 @@ use crate::{
 #[path = "code_test_support.rs"]
 mod code_test_support;
 
-use code_test_support::{call, chunk, file, import, import_module, reference, symbol};
+use code_test_support::{
+    TEST_SOURCE_SCOPE, call, chunk, file, import, import_module, reference, symbol,
+};
 
 #[tokio::test]
 async fn text_only_chunk_hits_are_marked_as_text_fallback() {
@@ -105,7 +107,7 @@ async fn rejects_code_queries_for_unindexed_refs() {
         .await
         .expect_err("stale ref should fail");
 
-    assert!(error.to_string().contains("not requested ref other"));
+    assert!(error.to_string().contains("no index for ref other"));
 }
 
 #[tokio::test]
@@ -519,8 +521,11 @@ fn snapshot_with_chunk_status(
 ) -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: repository_id.to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 1,
         skipped_unchanged_count: 0,
@@ -541,6 +546,7 @@ fn snapshot_with_chunk_status(
         diagnostics: degraded_reason
             .map(|message| CodeFileDiagnostic {
                 repository_id: repository_id.to_owned(),
+                source_scope: TEST_SOURCE_SCOPE.to_owned(),
                 path: path.to_owned(),
                 parse_status,
                 message,
@@ -553,8 +559,11 @@ fn snapshot_with_chunk_status(
 fn snapshot_with_symbol_and_matching_chunk() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 1,
         skipped_unchanged_count: 0,
@@ -603,6 +612,7 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         ));
         diagnostics.push(CodeFileDiagnostic {
             repository_id: "repo".to_owned(),
+            source_scope: TEST_SOURCE_SCOPE.to_owned(),
             path,
             parse_status: CodeParseStatus::Partial,
             message,
@@ -611,8 +621,11 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
 
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: count,
         skipped_unchanged_count: 0,
@@ -631,8 +644,11 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
 fn snapshot_with_language_edges() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 2,
         skipped_unchanged_count: 0,
@@ -675,8 +691,11 @@ fn snapshot_with_language_edges() -> CodeIndexSnapshot {
 fn snapshot_with_duplicate_callee_names() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 4,
         skipped_unchanged_count: 0,
@@ -728,8 +747,11 @@ fn snapshot_with_duplicate_callee_names() -> CodeIndexSnapshot {
 fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 2,
         skipped_unchanged_count: 0,
@@ -768,8 +790,11 @@ fn snapshot_with_out_of_scope_seed() -> CodeIndexSnapshot {
 fn snapshot_with_rust_symbol_importer() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 2,
         skipped_unchanged_count: 0,
@@ -813,8 +838,11 @@ fn snapshot_with_rust_symbol_importer() -> CodeIndexSnapshot {
 fn snapshot_with_deleted_rust_module_importer() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 1,
         skipped_unchanged_count: 0,
@@ -844,8 +872,11 @@ fn snapshot_with_deleted_rust_module_importer() -> CodeIndexSnapshot {
 fn snapshot_with_deleted_go_module_importer() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 1,
         skipped_unchanged_count: 0,
@@ -875,8 +906,11 @@ fn snapshot_with_deleted_go_module_importer() -> CodeIndexSnapshot {
 fn snapshot_with_unresolved_caller() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: true,
         changed_path_count: 1,
         skipped_unchanged_count: 0,
@@ -926,8 +960,11 @@ fn snapshot_with_degraded_and_parsed_files() -> CodeIndexSnapshot {
 fn incremental_snapshot_for_parsed_file() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree-2".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
         full_replace: false,
         changed_path_count: 1,
         skipped_unchanged_count: 0,

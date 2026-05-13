@@ -170,14 +170,22 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         let degraded_reason = results.iter().find_map(|hit| hit.degraded_reason.clone());
+        let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+            &status,
+            &request.repository,
+            requested_ref,
+        );
+        if let Some(hit) = results.first() {
+            scope.scope_id = hit.scope_id.clone();
+            scope.resolved_commit_sha = hit.resolved_commit_sha.clone();
+            scope.tree_hash = hit.tree_hash.clone();
+            scope.index_versions = hit.index_versions.clone();
+            scope.stale = hit.stale;
+        }
 
         Ok(CodeRepositoryQueryResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
-            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
-                &status,
-                &request.repository,
-                requested_ref,
-            ),
+            scope,
             request,
             results,
             degraded_reason,
@@ -192,16 +200,8 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryImpactResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        let indexed_commit =
-            indexed_commit_for_ref(&status, request.repository.ref_selector.clone()).await?;
         let head_commit = resolve_code_ref(&status, request.head_ref.clone()).await?;
-        if head_commit != indexed_commit {
-            return Err(ApiError::invalid_argument(format!(
-                "impact head ref '{}' resolves to {}, but code repository '{}' is indexed at {}",
-                request.head_ref, head_commit, status.alias, indexed_commit
-            )));
-        }
-        request.repository.ref_selector = indexed_commit;
+        request.repository.ref_selector = head_commit.clone();
         let root = PathBuf::from(status.root_path.clone());
         let base_ref = request.base_ref.clone();
         let head_ref = head_commit.clone();
@@ -238,14 +238,22 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
+        let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+            &status,
+            &request.repository,
+            request.head_ref.clone(),
+        );
+        if let Some(hit) = results.first() {
+            scope.scope_id = hit.scope_id.clone();
+            scope.resolved_commit_sha = hit.resolved_commit_sha.clone();
+            scope.tree_hash = hit.tree_hash.clone();
+            scope.index_versions = hit.index_versions.clone();
+            scope.stale = hit.stale;
+        }
 
         Ok(CodeRepositoryImpactResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
-            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
-                &status,
-                &request.repository,
-                request.head_ref.clone(),
-            ),
+            scope,
             request,
             changed_paths,
             path_groups,
@@ -415,17 +423,7 @@ async fn indexed_commit_for_ref(
         )));
     }
 
-    let requested_commit = resolve_code_ref(status, ref_selector).await?;
-    if status.last_indexed_commit.as_deref() != Some(requested_commit.as_str()) {
-        return Err(ApiError::invalid_argument(format!(
-            "code repository '{}' is indexed at {}, not requested ref {}",
-            status.alias,
-            status.last_indexed_commit.as_deref().unwrap_or("nothing"),
-            requested_commit
-        )));
-    }
-
-    Ok(requested_commit)
+    resolve_code_ref(status, ref_selector).await
 }
 
 fn is_worktree_overlay(status: &CodeRepositoryStatus) -> bool {

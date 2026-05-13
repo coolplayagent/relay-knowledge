@@ -40,7 +40,7 @@
 - [基础运行时层规格](specs/foundational-runtime.md): `env`、`paths`、`net::http` 和 `net::qos` 的环境变量、路径默认值、网络预算、失败模式和测试策略。
 - [先进架构与可观测性设计](specs/advanced-architecture-observability.md): 本地优先、日志、telemetry、Grafana 和模块解耦设计。
 - [后台服务、静默更新与自愈设计](specs/background-service-and-self-healing.md): 安装后常驻进程、静默图谱/索引更新、资源治理、假死检测和自愈恢复设计。
-- [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、React/Vite Web 交互层和 `streaming-json` 输出协议。
+- [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、Web 同源操作执行 endpoint 和 `streaming-json` 输出协议。
 - [Source Scope 与多模态摄取规格](specs/source-scope-and-multimodal-ingestion.md): Git 分支/rebase 快照隔离、检索 scope 和文档文字/图片多模态 evidence 设计。
 - [代码仓库 Tree-sitter 检索规格](specs/code-repository-tree-sitter-retrieval.md): Git 代码仓库基于 tree-sitter 的结构化解析、全量/增量更新、高并发检索、代码图和影响分析设计。
 - [开放 Agent Runtime 与混合检索架构](specs/open-agent-runtime-and-hybrid-retrieval-architecture.md): 支持外部 agent runtime 驱动 LLM 知识处理，同时保持 core 不实现 runtime，并明确 BM25、semantic、vector 和 graph expansion 的混合检索边界。

@@ -820,6 +820,15 @@ function isExecutableWebOperation(operation: unknown): boolean {
     operation === "graph.ingest" ||
     operation === "graph.inspect" ||
     operation === "index.refresh" ||
+    operation === "provider.embedding.probe" ||
+    operation === "worker.status" ||
+    operation === "worker.run-once" ||
+    operation === "proposal.list" ||
+    operation === "proposal.show" ||
+    operation === "proposal.accept" ||
+    operation === "proposal.reject" ||
+    operation === "proposal.supersede" ||
+    operation === "audit.query" ||
     operation === "service.doctor" ||
     operation === "service.run.streamable_http" ||
     (typeof operation === "string" && operation.startsWith("code.repo."))

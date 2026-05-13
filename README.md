@@ -107,7 +107,7 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
-Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
+Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata.
 Code graph v1 responses distinguish stable `canonical_symbol_id` values from snapshot-bound `symbol_snapshot_id` values. Reference, call, and import hits expose `target_hint`, `resolution_state`, confidence basis points, and confidence tier so unresolved or ambiguous edges are visible instead of being reported as certain calls.
 Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
 Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
@@ -226,14 +226,17 @@ uv run --extra dev pytest tests/browser
 The static Web workspace renders project health, GraphRAG readiness, graph
 counts, scoped index freshness, refresh queue diagnostics, stale reasons,
 runtime budgets, and interactive operation composers for retrieval, ingestion,
-graph inspection, code repository workflows, index refresh, and service runtime
-commands. The same Rust HTTP service serves static Web assets plus
+graph inspection, code repository workflows, index refresh, provider probes,
+worker/proposal/audit operations, and service runtime commands. The same Rust
+HTTP service serves static Web assets plus
 `/api/project/status`, `/api/health`, `/api/service/status`, and
 `/api/web/operations/execute` on one local port. The execute endpoint accepts
 the current composer snapshot, calls the shared application service, and returns
-operation metadata plus result JSON for the page to display. Web execute
-requests are bounded by `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback
-HTTP binds require the remote-client access policy to be enabled explicitly.
+operation metadata plus result JSON for the page to display. Web `service run`
+returns a service runtime snapshot rather than starting a resident loop from the
+browser. Web execute requests are bounded by
+`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
+remote-client access policy to be enabled explicitly.
 
 Optional local hooks:
 

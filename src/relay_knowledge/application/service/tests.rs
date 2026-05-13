@@ -5,8 +5,8 @@ use crate::{
         MultimodalExtractionRequest,
     },
     domain::{
-        EvidenceModality, FreshnessPolicy, IndexKind, IndexState, RetrievalBackendState,
-        RetrieverSource,
+        EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FreshnessPolicy, IndexKind,
+        IndexState, RetrievalBackendState, RetrieverSource,
     },
     env::PlatformKind,
     storage::{KnowledgeStore, SqliteGraphStore},
@@ -186,6 +186,150 @@ async fn commits_multimodal_extraction_through_maintenance_boundary() {
     assert_eq!(response.parent_evidence_id, "image-1");
     assert_eq!(response.derived_evidence_count, 1);
     assert_eq!(response.receipt.evidence_count, 1);
+}
+
+#[tokio::test]
+async fn multimodal_caption_and_ocr_hits_group_by_parent_image() {
+    let service = service_with_memory_store().await;
+    service
+        .ingest(
+            ingest_request(vec![
+                IngestEvidence {
+                    id: Some("doc-text".to_owned()),
+                    content: "PDF page text introduces the diagram".to_owned(),
+                    source_path: Some("guide.pdf".to_owned()),
+                    extraction: Some(IngestEvidenceExtraction {
+                        source_uri: Some("file:///guide.pdf".to_owned()),
+                        source_hash: Some("sha256:pdf".to_owned()),
+                        ..text_extraction()
+                    }),
+                    ..ingest_evidence("doc-text", "", Vec::new())
+                },
+                IngestEvidence {
+                    id: Some("image-parent".to_owned()),
+                    content: "PDF page diagram image asset".to_owned(),
+                    source_path: Some("guide.pdf".to_owned()),
+                    extraction: Some(IngestEvidenceExtraction {
+                        modality: EvidenceModality::ImageAsset,
+                        source_uri: Some("file:///guide.pdf#page=1".to_owned()),
+                        media_hash: Some("sha256:image-parent".to_owned()),
+                        ..text_extraction()
+                    }),
+                    ..ingest_evidence("image-parent", "", Vec::new())
+                },
+            ]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-doc", "trace-doc"),
+        )
+        .await
+        .expect("document evidence should ingest");
+    service
+        .commit_multimodal_extraction(
+            MultimodalExtractionRequest {
+                source_scope: "docs".to_owned(),
+                parent_evidence_id: "image-parent".to_owned(),
+                derived_evidence: vec![
+                    derived_image_text("ocr-parent", EvidenceModality::OcrText),
+                    derived_image_text("caption-parent", EvidenceModality::Caption),
+                ],
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-derived", "trace-derived"),
+        )
+        .await
+        .expect("derived image evidence should commit");
+
+    let response = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "diagram topology".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 10,
+                freshness: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
+        )
+        .await
+        .expect("multimodal query should succeed");
+
+    let grouped = response
+        .results
+        .iter()
+        .filter(|hit| hit.evidence_id == "image-parent")
+        .count();
+    assert_eq!(grouped, 1);
+    assert!(
+        response
+            .results
+            .iter()
+            .all(|hit| hit.source_scope == "docs")
+    );
+}
+
+#[tokio::test]
+async fn failed_ocr_diagnostic_does_not_block_image_or_text_retrieval() {
+    let service = service_with_memory_store().await;
+    service
+        .ingest(
+            ingest_request(vec![
+                ingest_evidence(
+                    "text-ok",
+                    "Text extraction stays searchable when OCR fails",
+                    vec!["OCR".to_owned()],
+                ),
+                IngestEvidence {
+                    id: Some("image-failed-ocr".to_owned()),
+                    content: "Scanned image asset with failed OCR diagnostic".to_owned(),
+                    extraction: Some(IngestEvidenceExtraction {
+                        modality: EvidenceModality::ImageAsset,
+                        media_hash: Some("sha256:failed-image".to_owned()),
+                        diagnostic: Some(
+                            ExtractionDiagnostic::new(
+                                ExtractionStatus::Failed,
+                                Some("OCR worker timed out".to_owned()),
+                            )
+                            .expect("diagnostic should validate"),
+                        ),
+                        ..text_extraction()
+                    }),
+                    ..ingest_evidence("image-failed-ocr", "", Vec::new())
+                },
+            ]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ocr-fail", "trace-ocr-fail"),
+        )
+        .await
+        .expect("failed OCR diagnostic should not block ingest");
+
+    let text = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "searchable OCR".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 10,
+                freshness: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-text", "trace-text"),
+        )
+        .await
+        .expect("text query should succeed");
+    let image = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "failed diagnostic".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 10,
+                freshness: FreshnessPolicy::WaitUntilFresh,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-image", "trace-image"),
+        )
+        .await
+        .expect("image query should succeed");
+
+    assert!(text.results.iter().any(|hit| hit.evidence_id == "text-ok"));
+    assert!(
+        image
+            .results
+            .iter()
+            .any(|hit| hit.evidence_id == "image-failed-ocr")
+    );
 }
 
 #[tokio::test]
@@ -624,6 +768,22 @@ fn text_extraction() -> IngestEvidenceExtraction {
         embedding_model: None,
         embedding_dimension: None,
         diagnostic: None,
+    }
+}
+
+fn derived_image_text(id: &str, modality: EvidenceModality) -> IngestEvidence {
+    IngestEvidence {
+        id: Some(id.to_owned()),
+        content: "diagram topology legend".to_owned(),
+        entity_labels: vec!["Diagram".to_owned()],
+        extraction: Some(IngestEvidenceExtraction {
+            modality,
+            parent_evidence_id: Some("image-parent".to_owned()),
+            extractor: Some("fixture-worker".to_owned()),
+            extractor_version: Some("1.0".to_owned()),
+            ..text_extraction()
+        }),
+        ..ingest_evidence(id, "", Vec::new())
     }
 }
 

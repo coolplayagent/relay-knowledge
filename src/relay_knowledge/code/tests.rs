@@ -859,6 +859,7 @@ fn reference_resolution_prefers_same_path_and_leaves_ambiguous_names_unresolved(
 fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
         repository_id: "repo".to_owned(),
+        source_scope: "git_snapshot:test".to_owned(),
         symbol_snapshot_id: id.to_owned(),
         canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
         file_id: format!("file-{id}"),
@@ -877,6 +878,7 @@ fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
 fn reference(id: &str, path: &str, name: &str) -> RepositoryCodeReferenceRecord {
     RepositoryCodeReferenceRecord {
         repository_id: "repo".to_owned(),
+        source_scope: "git_snapshot:test".to_owned(),
         reference_id: id.to_owned(),
         file_id: format!("file-{id}"),
         path: path.to_owned(),

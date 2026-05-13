@@ -168,7 +168,7 @@ pub fn retry_policy_v2() -> u32 {
         .await
         .expect_err("impact head must match indexed snapshot");
 
-    assert!(stale_head_error.message.contains("impact head ref"));
+    assert!(stale_head_error.message.contains("no index for ref"));
 }
 
 #[tokio::test]
@@ -349,7 +349,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
         .expect("worktree overlay should index");
 
     assert!(overlay.summary.resolved_commit_sha.starts_with("worktree:"));
-    let clean_error = service
+    let clean_query = service
         .query_code_repository(
             CodeRetrievalRequest::new(
                 "retry_policy_v2",
@@ -362,8 +362,8 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
             context("query-clean-overlay"),
         )
         .await
-        .expect_err("clean commit query should not read overlay rows");
-    assert!(clean_error.message.contains("indexed at worktree:"));
+        .expect("clean commit query should stay on the clean snapshot");
+    assert!(clean_query.results.is_empty());
 
     let overlay_query = service
         .query_code_repository(
@@ -387,6 +387,218 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
     );
 }
 
+#[tokio::test]
+async fn git_snapshot_queries_remain_isolated_after_indexing_another_branch() {
+    let repo = FixtureRepo::create("code-branch-scope");
+    repo.write("src/lib.rs", "pub fn branch_a_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "branch a"]);
+    repo.git(["branch", "branch-a"]);
+    repo.git(["checkout", "-b", "branch-b"]);
+    repo.write("src/lib.rs", "pub fn branch_b_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "branch b"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-branch-scope").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "branch-a"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-branch-a"),
+        )
+        .await
+        .expect("branch A should index");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "branch-b"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-branch-b"),
+        )
+        .await
+        .expect("branch B should index");
+
+    let branch_a = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "branch_a_policy",
+                selector("fixture", "branch-a"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-branch-a"),
+        )
+        .await
+        .expect("branch A query should use branch A scope");
+    let branch_b = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "branch_b_policy",
+                selector("fixture", "branch-b"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-branch-b"),
+        )
+        .await
+        .expect("branch B query should use branch B scope");
+
+    assert!(
+        branch_a
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("branch_a_policy"))
+    );
+    assert!(
+        !branch_a
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("branch_b_policy"))
+    );
+    assert!(
+        branch_b
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("branch_b_policy"))
+    );
+    assert_ne!(branch_a.scope.scope_id, branch_b.scope.scope_id);
+}
+
+#[tokio::test]
+async fn same_tree_hash_branches_reuse_scope_but_preserve_requested_ref_audit() {
+    let repo = FixtureRepo::create("code-same-tree");
+    repo.write("src/lib.rs", "pub fn shared_policy() -> u32 { 7 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "shared"]);
+    repo.git(["branch", "branch-a"]);
+    repo.git(["branch", "branch-b"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-same-tree").await;
+
+    let indexed = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "branch-a"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-same-tree-a"),
+        )
+        .await
+        .expect("branch A should index");
+    let queried = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "shared_policy",
+                selector("fixture", "branch-b"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-same-tree-b"),
+        )
+        .await
+        .expect("branch B should reuse same commit/tree scope");
+
+    assert_eq!(queried.scope.requested_ref, "branch-b");
+    assert_eq!(queried.scope.scope_id, indexed.scope.scope_id);
+    assert_eq!(queried.scope.tree_hash, indexed.scope.tree_hash);
+}
+
+#[tokio::test]
+async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
+    let repo = FixtureRepo::create("code-rebase-scope");
+    repo.write("src/lib.rs", "pub fn old_topic_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "old topic"]);
+    repo.git(["branch", "topic"]);
+    let old_commit = repo.git_text(["rev-parse", "topic"]);
+    repo.write("src/lib.rs", "pub fn new_topic_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "new topic"]);
+    repo.git(["branch", "-f", "topic", "HEAD"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-rebase").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", &old_commit),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-old-topic"),
+        )
+        .await
+        .expect("old topic commit should index");
+    let stale_topic = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "old_topic_policy",
+                selector("fixture", "topic"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-topic-before-new-index"),
+        )
+        .await
+        .expect_err("moved branch should require indexing the new snapshot");
+
+    assert!(stale_topic.message.contains("no index for ref"));
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "topic"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-new-topic"),
+        )
+        .await
+        .expect("new topic should index");
+    let topic = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "new_topic_policy",
+                selector("fixture", "topic"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-new-topic"),
+        )
+        .await
+        .expect("topic should read new scope");
+
+    assert!(
+        topic
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("new_topic_policy"))
+    );
+    assert!(
+        !topic
+            .results
+            .iter()
+            .any(|hit| hit.excerpt.contains("old_topic_policy"))
+    );
+}
+
 async fn query(
     service: &RelayKnowledgeService,
     query: &str,
@@ -406,6 +618,21 @@ async fn query(
         )
         .await
         .expect("query should succeed")
+}
+
+async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRepo, name: &str) {
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context(name),
+        )
+        .await
+        .expect("repository should register");
 }
 
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
