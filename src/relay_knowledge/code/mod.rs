@@ -234,21 +234,28 @@ fn build_incremental_snapshot(
     head_ref: &str,
     previous_hashes: &BTreeMap<String, String>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    let base_commit = resolve_ref(root, base_ref)?;
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
+    let base_ignore_rules = load_ignore_rules_from_commit(root, &base_commit)?;
     let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, false, changes.len(), 0);
 
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
-                if path_is_selected_with_rules(&path, registration, selector, &ignore_rules) {
+                if path_is_selected_with_rules(&path, registration, selector, &base_ignore_rules) {
                     build.deleted_paths.push(path);
                 }
             }
             GitChange::Renamed { old_path, new_path } => {
-                if path_is_selected_with_rules(&old_path, registration, selector, &ignore_rules) {
+                if path_is_selected_with_rules(
+                    &old_path,
+                    registration,
+                    selector,
+                    &base_ignore_rules,
+                ) {
                     build.deleted_paths.push(old_path.clone());
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),

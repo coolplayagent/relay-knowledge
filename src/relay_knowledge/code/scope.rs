@@ -270,6 +270,7 @@ fn parse_ignore_rules(content: &str) -> Vec<IgnoreRule> {
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
         .map(|line| IgnoreRule {
             pattern: line.trim_start_matches('/').to_owned(),
+            anchored: line.starts_with('/'),
         })
         .collect()
 }
@@ -277,6 +278,7 @@ fn parse_ignore_rules(content: &str) -> Vec<IgnoreRule> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct IgnoreRule {
     pattern: String,
+    anchored: bool,
 }
 
 impl IgnoreRule {
@@ -287,11 +289,20 @@ impl IgnoreRule {
             return false;
         }
         if let Some(extension) = pattern.strip_prefix("*.") {
-            return path
-                .rsplit_once('.')
-                .is_some_and(|(_, path_extension)| path_extension == extension);
+            return if self.anchored {
+                path.rsplit_once('/').is_none()
+                    && path
+                        .rsplit_once('.')
+                        .is_some_and(|(_, path_extension)| path_extension == extension)
+            } else {
+                path.rsplit_once('.')
+                    .is_some_and(|(_, path_extension)| path_extension == extension)
+            };
         }
         if pattern.contains('/') {
+            return path == pattern || path.starts_with(&format!("{pattern}/"));
+        }
+        if self.anchored {
             return path == pattern || path.starts_with(&format!("{pattern}/"));
         }
         path.split('/').any(|segment| segment == pattern)
@@ -384,8 +395,12 @@ fn explicit_path_filter_opts_into_default_exclusion<'a>(
         let filter_segments = filter.split('/').collect::<Vec<_>>();
         let targets_default_exclusion = filter_segments.iter().any(|segment| {
             DEFAULT_EXCLUDED_SEGMENTS.contains(segment)
-                || DEFAULT_EXCLUDED_EXTENSIONS
-                    .contains(&segment.rsplit_once('.').map(|(_, ext)| ext).unwrap_or(""))
+                || segment
+                    .rsplit_once('.')
+                    .map(|(_, ext)| ext.to_ascii_lowercase())
+                    .is_some_and(|extension| {
+                        DEFAULT_EXCLUDED_EXTENSIONS.contains(&extension.as_str())
+                    })
         });
         if !targets_default_exclusion {
             return false;

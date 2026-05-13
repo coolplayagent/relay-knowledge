@@ -156,6 +156,68 @@ fn explicit_default_exclusion_opt_in_stays_path_scoped() {
 }
 
 #[test]
+fn explicit_default_exclusion_opt_in_normalizes_extension_case() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec!["assets/logo.SVG".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(path_is_selected(
+        "assets/logo.SVG",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
+fn anchored_ignore_rules_only_match_repo_root_paths() {
+    let repo = TempGitRepo::create("anchored-ignore-rules");
+    repo.write(".relay-knowledgeignore", "/docs\n");
+    repo.write("docs/root.rs", "fn root() {}\n");
+    repo.write("src/docs/nested.rs", "fn nested() {}\n");
+
+    let registration = repo.registration();
+    let selector = repo.selector();
+
+    assert!(!path_is_selected("docs/root.rs", &registration, &selector));
+    assert!(path_is_selected(
+        "src/docs/nested.rs",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
+fn incremental_deletions_survive_tighter_ignore_rules() {
+    let repo = TempGitRepo::create("incremental-tightened-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let base = repo.git_text(["rev-parse", "HEAD"]);
+
+    repo.write(".relay-knowledgeignore", "src\n");
+    fs::remove_file(repo.path.join("src/lib.rs")).expect("source file should delete");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "tighten ignore and delete"]);
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::incremental(base, "HEAD").expect("incremental mode should validate"),
+        Vec::new(),
+    )
+    .expect("incremental delete should index");
+
+    assert_eq!(snapshot.deleted_paths, ["src/lib.rs"]);
+}
+
+#[test]
 fn repository_id_includes_local_root_with_remote_origin() {
     let first = TempGitRepo::create("repo-id-first");
     let second = TempGitRepo::create("repo-id-second");
