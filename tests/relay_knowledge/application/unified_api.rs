@@ -177,7 +177,7 @@ async fn ingest_reports_partial_success_when_index_refresh_fails_after_commit() 
     assert!(response.indexes.is_empty());
     assert_eq!(
         response.index_refresh_error.as_deref(),
-        Some("invalid storage input: index metadata unavailable")
+        Some("invalid storage input: index refresh task storage is unavailable")
     );
 }
 

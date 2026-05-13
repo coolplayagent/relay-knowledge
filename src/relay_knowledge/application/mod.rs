@@ -1,6 +1,7 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
 mod code_service;
+mod index_refresh;
 mod runtime;
 mod service;
 mod status;

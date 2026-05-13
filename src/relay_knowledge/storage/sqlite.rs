@@ -9,17 +9,20 @@ mod code;
 use rusqlite::{Connection, OptionalExtension, params};
 
 mod code_graph;
+mod indexing;
 mod retrieval;
 
 use crate::{
     domain::{
         CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
-        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexState,
-        IndexStatus, RetrievalHit,
+        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
+        RetrievalHit,
     },
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexStore,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
+        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
         MutationLogEntry, MutationLogStore, StorageError, StorageFuture,
     },
 };
@@ -103,7 +106,7 @@ impl MutationLogStore for SqliteGraphStore {
 
 impl IndexStore for SqliteGraphStore {
     fn index_statuses(&self) -> StorageFuture<'_, Vec<IndexStatus>> {
-        self.run(index_statuses)
+        self.run(|connection| indexing::index_statuses(connection))
     }
 
     fn mark_refresh_complete(
@@ -111,7 +114,43 @@ impl IndexStore for SqliteGraphStore {
         kind: IndexKind,
         graph_version: GraphVersion,
     ) -> StorageFuture<'_, IndexStatus> {
-        self.run(move |connection| mark_refresh_complete(connection, kind, graph_version))
+        self.run(move |connection| indexing::mark_refresh_complete(connection, kind, graph_version))
+    }
+
+    fn index_cursors(&self) -> StorageFuture<'_, Vec<IndexCursor>> {
+        self.run(indexing::index_cursors)
+    }
+
+    fn queue_index_refreshes(
+        &self,
+        request: IndexRefreshQueueRequest,
+    ) -> StorageFuture<'_, IndexRefreshDiagnostics> {
+        self.run(move |connection| indexing::queue_index_refreshes(connection, request))
+    }
+
+    fn claim_index_refresh_task(
+        &self,
+        request: IndexRefreshClaimRequest,
+    ) -> StorageFuture<'_, Option<IndexRefreshTask>> {
+        self.run(move |connection| indexing::claim_index_refresh_task(connection, request))
+    }
+
+    fn complete_index_refresh_task(
+        &self,
+        request: IndexRefreshCompletion,
+    ) -> StorageFuture<'_, IndexRefreshTask> {
+        self.run(move |connection| indexing::complete_index_refresh_task(connection, request))
+    }
+
+    fn fail_index_refresh_task(
+        &self,
+        request: IndexRefreshFailure,
+    ) -> StorageFuture<'_, IndexRefreshTask> {
+        self.run(move |connection| indexing::fail_index_refresh_task(connection, request))
+    }
+
+    fn index_refresh_diagnostics(&self, now_ms: u64) -> StorageFuture<'_, IndexRefreshDiagnostics> {
+        self.run(move |connection| indexing::diagnostics(connection, now_ms))
     }
 }
 
@@ -244,13 +283,6 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
             FOREIGN KEY (entity_id) REFERENCES entities(id)
         );
 
-        CREATE TABLE IF NOT EXISTS index_status (
-            kind TEXT PRIMARY KEY,
-            index_version INTEGER NOT NULL,
-            indexed_graph_version INTEGER NOT NULL,
-            state TEXT NOT NULL,
-            last_error TEXT
-        );
         ",
     )?;
     ensure_column(connection, "evidence", "source_path", "TEXT")?;
@@ -290,15 +322,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     )?;
     retrieval::initialize_schema(connection)?;
     code::initialize_code_schema(connection)?;
-
-    for kind in IndexKind::ALL {
-        connection.execute(
-            "INSERT OR IGNORE INTO index_status
-             (kind, index_version, indexed_graph_version, state, last_error)
-             VALUES (?1, 0, 0, 'fresh', NULL)",
-            params![kind.as_str()],
-        )?;
-    }
+    indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
 
     Ok(())
@@ -337,14 +361,28 @@ fn commit_batch(
     let claim_count = batch.claims.len();
     let event_count = batch.events.len();
     let mut affected_entity_ids = BTreeSet::new();
+    let mut affected_scopes = BTreeSet::new();
+    let mut evidence_ids = BTreeSet::new();
+    let mut source_hashes = BTreeSet::new();
 
     for evidence in batch.evidence {
         let evidence_id = evidence.id;
         let source_scope = evidence.source_scope;
+        let source_scope_text = source_scope.as_str().to_owned();
         let source_path = evidence.source_path;
         let span = evidence.span;
         let content = evidence.content;
         let entity_labels = evidence.entity_labels;
+        if let Some(previous_scope) = evidence_scope(&transaction, &evidence_id)? {
+            affected_scopes.insert(previous_scope);
+        }
+        affected_scopes.insert(source_scope_text.clone());
+        evidence_ids.insert(evidence_id.clone());
+        source_hashes.insert(indexing::source_hash(
+            &source_scope_text,
+            source_path.as_deref(),
+            &content,
+        ));
         transaction.execute(
             "INSERT INTO evidence (
                  id, source_scope, source_path, span_start_byte, span_end_byte,
@@ -364,14 +402,14 @@ fn commit_batch(
                  status = excluded.status,
                  created_graph_version = excluded.created_graph_version",
             params![
-                evidence_id,
-                source_scope.as_str(),
+                &evidence_id,
+                &source_scope_text,
                 source_path.as_deref(),
                 span.map(|value| value.start_byte),
                 span.map(|value| value.end_byte),
                 span.map(|value| value.start_line),
                 span.map(|value| value.end_line),
-                content,
+                &content,
                 evidence.confidence.basis_points,
                 evidence.status.as_str(),
                 next.get()
@@ -380,7 +418,7 @@ fn commit_batch(
 
         transaction.execute(
             "DELETE FROM evidence_entities WHERE evidence_id = ?1",
-            params![evidence_id],
+            params![&evidence_id],
         )?;
 
         for label in &entity_labels {
@@ -395,7 +433,7 @@ fn commit_batch(
         retrieval::replace_evidence_document(
             &transaction,
             &evidence_id,
-            source_scope.as_str(),
+            &source_scope_text,
             source_path.as_deref(),
             &entity_labels,
             &content,
@@ -404,6 +442,7 @@ fn commit_batch(
     }
 
     for relation in batch.relations {
+        evidence_ids.extend(relation.evidence_ids.iter().cloned());
         let source_entity_id = upsert_entity(&transaction, &relation.source_entity_label, next)?;
         let target_entity_id = upsert_entity(&transaction, &relation.target_entity_label, next)?;
         affected_entity_ids.insert(source_entity_id.clone());
@@ -443,6 +482,7 @@ fn commit_batch(
     }
 
     for claim in batch.claims {
+        evidence_ids.extend(claim.evidence_ids.iter().cloned());
         let subject_entity_id = upsert_entity(&transaction, &claim.subject_entity_label, next)?;
         affected_entity_ids.insert(subject_entity_id.clone());
         transaction.execute(
@@ -480,6 +520,7 @@ fn commit_batch(
     }
 
     for event in batch.events {
+        evidence_ids.extend(event.evidence_ids.iter().cloned());
         transaction.execute(
             "
             INSERT INTO graph_events (
@@ -538,20 +579,38 @@ fn commit_batch(
     )?;
 
     let entity_count = affected_entity_ids.len();
+    add_scopes_for_evidence_ids(&transaction, &evidence_ids, &mut affected_scopes)?;
+    if affected_scopes.is_empty()
+        && (evidence_count > 0 || relation_count > 0 || claim_count > 0 || event_count > 0)
+    {
+        affected_scopes.insert(indexing::DEFAULT_SCOPE.to_owned());
+    }
+    let affected_scopes = affected_scopes.into_iter().collect::<Vec<_>>();
+    let affected_entity_ids = affected_entity_ids.into_iter().collect::<Vec<_>>();
+    let affected_scopes_json = indexing::json_array(affected_scopes.clone())?;
+    let affected_entity_ids_json = indexing::json_array(affected_entity_ids.clone())?;
+    let evidence_ids_json = indexing::json_array(evidence_ids)?;
+    let source_hashes_json = indexing::json_array(source_hashes)?;
     transaction.execute(
         "INSERT INTO graph_mutations (
-             graph_version, evidence_count, entity_count, relation_count, claim_count, event_count
+             graph_version, evidence_count, entity_count, relation_count, claim_count, event_count,
+             affected_scopes_json, affected_entity_ids_json, evidence_ids_json, source_hashes_json
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             next.get(),
             evidence_count,
             entity_count,
             relation_count,
             claim_count,
-            event_count
+            event_count,
+            affected_scopes_json,
+            affected_entity_ids_json,
+            evidence_ids_json,
+            source_hashes_json
         ],
     )?;
+    indexing::mark_mutation_cursors_stale(&transaction, &affected_scopes)?;
     transaction.execute(
         "UPDATE graph_state SET graph_version = ?1 WHERE id = 1",
         params![next.get()],
@@ -617,6 +676,34 @@ fn upsert_entity(
     Ok(entity_id)
 }
 
+fn add_scopes_for_evidence_ids(
+    connection: &Connection,
+    evidence_ids: &BTreeSet<String>,
+    affected_scopes: &mut BTreeSet<String>,
+) -> Result<(), StorageError> {
+    for evidence_id in evidence_ids {
+        if let Some(scope) = evidence_scope(connection, evidence_id)? {
+            affected_scopes.insert(scope);
+        }
+    }
+
+    Ok(())
+}
+
+fn evidence_scope(
+    connection: &Connection,
+    evidence_id: &str,
+) -> Result<Option<String>, StorageError> {
+    connection
+        .query_row(
+            "SELECT source_scope FROM evidence WHERE id = ?1",
+            params![evidence_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 fn evidence_ids_json(evidence_ids: &[String]) -> Result<String, StorageError> {
     serde_json::to_string(evidence_ids)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))
@@ -643,7 +730,9 @@ fn read_mutations_after(
     let mut statement = connection.prepare(
         "
         SELECT graph_version, evidence_count, entity_count,
-               relation_count, claim_count, event_count
+               relation_count, claim_count, event_count,
+               affected_scopes_json, affected_entity_ids_json,
+               evidence_ids_json, source_hashes_json
         FROM graph_mutations
         WHERE graph_version > ?1
         ORDER BY graph_version ASC
@@ -651,180 +740,49 @@ fn read_mutations_after(
         ",
     )?;
     let rows = statement.query_map(params![graph_version.get(), limit], |row| {
-        Ok(MutationLogEntry {
-            graph_version: GraphVersion::new(row.get(0)?),
-            evidence_count: row.get(1)?,
-            entity_count: row.get(2)?,
-            relation_count: row.get(3)?,
-            claim_count: row.get(4)?,
-            event_count: row.get(5)?,
-        })
-    })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn index_statuses(connection: &mut Connection) -> Result<Vec<IndexStatus>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT kind, index_version, indexed_graph_version, state, last_error
-        FROM index_status
-        ORDER BY kind ASC
-        ",
-    )?;
-    let rows = statement.query_map([], |row| {
-        let state: String = row.get(3)?;
         Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, u64>(1)?,
-            row.get::<_, u64>(2)?,
-            state,
-            row.get::<_, Option<String>>(4)?,
+            row.get::<_, u64>(0)?,
+            row.get::<_, usize>(1)?,
+            row.get::<_, usize>(2)?,
+            row.get::<_, usize>(3)?,
+            row.get::<_, usize>(4)?,
+            row.get::<_, usize>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
         ))
     })?;
-    let raw_statuses = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    let statuses = raw_statuses
+    rows.collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .map(
-            |(kind, index_version, indexed_graph_version, state, last_error)| {
-                Ok(IndexStatus {
-                    kind: parse_index_kind(&kind)?,
-                    index_version,
-                    indexed_graph_version: GraphVersion::new(indexed_graph_version),
-                    state: parse_index_state(&state)?,
-                    last_error,
+            |(
+                graph_version,
+                evidence_count,
+                entity_count,
+                relation_count,
+                claim_count,
+                event_count,
+                affected_scopes,
+                affected_entity_ids,
+                evidence_ids,
+                source_hashes,
+            )| {
+                Ok(MutationLogEntry {
+                    graph_version: GraphVersion::new(graph_version),
+                    evidence_count,
+                    entity_count,
+                    relation_count,
+                    claim_count,
+                    event_count,
+                    affected_scopes: indexing::parse_json_array(affected_scopes)?,
+                    affected_entity_ids: indexing::parse_json_array(affected_entity_ids)?,
+                    evidence_ids: indexing::parse_json_array(evidence_ids)?,
+                    source_hashes: indexing::parse_json_array(source_hashes)?,
                 })
             },
         )
-        .collect::<Result<Vec<_>, StorageError>>()?;
-    validate_required_index_statuses(&statuses)?;
-
-    Ok(statuses)
-}
-
-fn mark_refresh_complete(
-    connection: &mut Connection,
-    kind: IndexKind,
-    graph_version: GraphVersion,
-) -> Result<IndexStatus, StorageError> {
-    let Some(current) = read_index_status(connection, kind)? else {
-        return Err(StorageError::InvalidInput(format!(
-            "index status row for '{}' is missing",
-            kind.as_str()
-        )));
-    };
-    if current.indexed_graph_version > graph_version {
-        return Ok(current);
-    }
-
-    let updated = connection.execute(
-        "
-        UPDATE index_status
-        SET index_version = index_version + 1,
-            indexed_graph_version = ?2,
-            state = 'fresh',
-            last_error = NULL
-        WHERE kind = ?1
-        ",
-        params![kind.as_str(), graph_version.get()],
-    )?;
-    if updated != 1 {
-        return Err(StorageError::InvalidInput(format!(
-            "index status row for '{}' was not updated",
-            kind.as_str()
-        )));
-    }
-
-    read_index_status(connection, kind)?.ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "index status row for '{}' is missing",
-            kind.as_str()
-        ))
-    })
-}
-
-fn read_index_status(
-    connection: &Connection,
-    kind: IndexKind,
-) -> Result<Option<IndexStatus>, StorageError> {
-    let raw_status = connection
-        .query_row(
-            "
-            SELECT index_version, indexed_graph_version, state, last_error
-            FROM index_status
-            WHERE kind = ?1
-            ",
-            params![kind.as_str()],
-            |row| {
-                let state: String = row.get(2)?;
-                Ok((
-                    row.get::<_, u64>(0)?,
-                    row.get::<_, u64>(1)?,
-                    state,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(StorageError::from)?;
-
-    raw_status
-        .map(
-            |(index_version, indexed_graph_version, state, last_error)| {
-                Ok(IndexStatus {
-                    kind,
-                    index_version,
-                    indexed_graph_version: GraphVersion::new(indexed_graph_version),
-                    state: parse_index_state(&state)?,
-                    last_error,
-                })
-            },
-        )
-        .transpose()
-}
-
-fn parse_index_kind(value: &str) -> Result<IndexKind, StorageError> {
-    match value {
-        "bm25" => Ok(IndexKind::Bm25),
-        "semantic" => Ok(IndexKind::Semantic),
-        "vector" => Ok(IndexKind::Vector),
-        _ => Err(invalid_index_metadata(format!(
-            "unknown index kind '{value}'"
-        ))),
-    }
-}
-
-fn parse_index_state(value: &str) -> Result<IndexState, StorageError> {
-    match value {
-        "fresh" => Ok(IndexState::Fresh),
-        "stale" => Ok(IndexState::Stale),
-        "failed" => Ok(IndexState::Failed),
-        "paused" => Ok(IndexState::Paused),
-        _ => Err(invalid_index_metadata(format!(
-            "unknown index state '{value}'"
-        ))),
-    }
-}
-
-fn validate_required_index_statuses(statuses: &[IndexStatus]) -> Result<(), StorageError> {
-    for kind in IndexKind::ALL {
-        if !statuses.iter().any(|status| status.kind == kind) {
-            return Err(invalid_index_metadata(format!(
-                "required index status row for '{}' is missing",
-                kind.as_str()
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn invalid_index_metadata(message: String) -> StorageError {
-    StorageError::InvalidInput(format!("{message} in storage metadata"))
+        .collect()
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {
@@ -851,3 +809,6 @@ mod metadata_tests;
 
 #[cfg(test)]
 mod graph_tests;
+
+#[cfg(test)]
+mod index_refresh_tests;

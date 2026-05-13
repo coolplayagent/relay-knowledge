@@ -42,6 +42,25 @@ export type IndexStatus = {
   last_error?: string;
 };
 
+export type IndexCursor = IndexStatus & {
+  source_scope: string;
+  modality: "text";
+};
+
+export type IndexRefreshDiagnostics = {
+  queue_depth: number;
+  running_count: number;
+  retrying_count: number;
+  dead_letter_count: number;
+  oldest_unfinished_age_ms?: number;
+  index_lag_by_kind: Array<{
+    kind: "bm25" | "semantic" | "vector";
+    lag_versions: number;
+  }>;
+  max_index_lag_versions: number;
+  stale_index_count: number;
+};
+
 export type HealthResponse = {
   metadata: ApiMetadata;
   healthy: boolean;
@@ -65,5 +84,7 @@ export type HealthResponse = {
     };
   };
   indexes: IndexStatus[];
+  index_cursors: IndexCursor[];
+  index_refresh: IndexRefreshDiagnostics;
   runtime: RuntimeStatus;
 };

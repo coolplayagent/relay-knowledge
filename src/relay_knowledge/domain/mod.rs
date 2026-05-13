@@ -26,7 +26,7 @@ pub use code_repository::{
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;
 pub use graph_version::GraphVersion;
-pub use index::{IndexKind, IndexState, IndexStatus};
+pub use index::{IndexKind, IndexModality, IndexState, IndexStatus};
 pub use mutation::{
     ClaimRecord, CommitReceipt, ConfidenceScore, EventRecord, EvidenceRecord, EvidenceSpan,
     FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange,

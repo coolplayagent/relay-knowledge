@@ -7,7 +7,7 @@ use crate::{
         IndexKind, IndexStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
         RetrievedContextPack,
     },
-    storage::GraphInspection,
+    storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
 
 use super::{AgentProtocolStatus, ApiMetadata, RuntimeStatus};
@@ -105,6 +105,8 @@ pub struct IndexRefreshRequest {
 pub struct IndexRefreshResponse {
     pub metadata: ApiMetadata,
     pub indexes: Vec<IndexStatus>,
+    pub index_cursors: Vec<IndexCursor>,
+    pub diagnostics: IndexRefreshDiagnostics,
 }
 
 /// Service manager status surfaced without exposing platform-specific handles.
@@ -116,6 +118,7 @@ pub struct ServiceStatusResponse {
     pub background_enabled: bool,
     pub silent_updates_enabled: bool,
     pub service_definition_path: String,
+    pub index_refresh: IndexRefreshDiagnostics,
     pub agent_protocols: AgentProtocolStatus,
 }
 
@@ -139,6 +142,8 @@ pub struct HealthResponse {
     pub healthy: bool,
     pub graph: GraphInspection,
     pub indexes: Vec<IndexStatus>,
+    pub index_cursors: Vec<IndexCursor>,
+    pub index_refresh: IndexRefreshDiagnostics,
     pub runtime: RuntimeStatus,
 }
 

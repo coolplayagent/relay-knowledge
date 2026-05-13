@@ -12,11 +12,10 @@ use crate::{
     },
     domain::{
         ContextPackItem, EvidenceRecord, FreshnessPolicy, FusionDiagnostics, GraphMutationBatch,
-        GraphVersion, IndexKind, IndexStatus, RECIPROCAL_RANK_FUSION_K, RetrievalBudgetUsed,
-        RetrievalMode, RetrievedContextPack, SourceScope,
+        IndexKind, RECIPROCAL_RANK_FUSION_K, RetrievalBudgetUsed, RetrievalMode,
+        RetrievedContextPack, SourceScope,
     },
     env::EnvironmentConfig,
-    indexing::IndexRefreshPlan,
     project::PROJECT_NAME,
     retrieval::RetrievalPlan,
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
@@ -24,6 +23,10 @@ use crate::{
 
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
+    index_refresh::{
+        index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
+        recover_index_kinds, refresh_index_kinds,
+    },
     status::{agent_protocol_status, runtime_status},
 };
 
@@ -139,10 +142,11 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let (indexes, metadata, index_refresh_error) =
             match refresh_index_kinds(&store, IndexKind::ALL, receipt.graph_version).await {
-                Ok(indexes) => {
-                    let metadata = metadata_for_indexes(&context, receipt.graph_version, &indexes);
+                Ok(outcome) => {
+                    let metadata =
+                        metadata_for_indexes(&context, receipt.graph_version, &outcome.indexes);
 
-                    (indexes, metadata, None)
+                    (outcome.indexes, metadata, None)
                 }
                 Err(error) => (
                     Vec::new(),
@@ -287,27 +291,35 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let plan = IndexRefreshPlan::from_requested(request.kinds);
-        let indexes = refresh_index_kinds(&store, plan.into_kinds(), graph_version).await?;
-        let metadata = metadata_for_indexes(&context, graph_version, &indexes);
+        let outcome = refresh_index_kinds(&store, request.kinds, graph_version).await?;
+        let metadata = metadata_for_indexes(&context, graph_version, &outcome.indexes);
 
-        Ok(IndexRefreshResponse { metadata, indexes })
+        Ok(IndexRefreshResponse {
+            metadata,
+            indexes: outcome.indexes,
+            index_cursors: outcome.cursors,
+            diagnostics: outcome.diagnostics,
+        })
     }
 
     /// Returns service and data health for diagnostics.
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let graph = store.inspect_graph().await.map_err(storage_api_error)?;
-        let indexes = store.index_statuses().await.map_err(storage_api_error)?;
-        let healthy = indexes
+        reconcile_index_refreshes(&store, graph.graph_version).await?;
+        let outcome = index_refresh_outcome(&store).await?;
+        let healthy = outcome
+            .indexes
             .iter()
             .all(|status| !status.is_stale_for(graph.graph_version));
 
         Ok(HealthResponse {
-            metadata: metadata_for_indexes(&context, graph.graph_version, &indexes),
+            metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
             healthy,
             graph,
-            indexes,
+            indexes: outcome.indexes,
+            index_cursors: outcome.cursors,
+            index_refresh: outcome.diagnostics,
             runtime: runtime_status(&self.runtime),
         })
     }
@@ -337,12 +349,20 @@ impl RelayKnowledgeService {
             })
             .max()
             .unwrap_or(0);
-        let refreshed = refresh_index_kinds(&store, stale_index_kinds.clone(), graph_version)
-            .await?
-            .into_iter()
+        let outcome = if stale_index_kinds.is_empty() {
+            index_refresh_outcome(&store).await?
+        } else {
+            recover_index_kinds(&store, stale_index_kinds.clone(), graph_version).await?
+        };
+        let refreshed = outcome
+            .indexes
+            .iter()
+            .filter(|status| {
+                stale_index_kinds.contains(&status.kind) && !status.is_stale_for(graph_version)
+            })
             .map(|status| status.kind)
             .collect::<Vec<_>>();
-        let after = store.index_statuses().await.map_err(storage_api_error)?;
+        let after = outcome.indexes;
         let metadata = metadata_for_indexes(&context, graph_version, &after);
 
         Ok(ServiceRecoveryReport {
@@ -351,8 +371,8 @@ impl RelayKnowledgeService {
             stale_index_kinds,
             refreshed_index_kinds: refreshed,
             index_lag_max,
-            task_queue_depth: 0,
-            dead_letter_count: 0,
+            task_queue_depth: outcome.diagnostics.queue_depth,
+            dead_letter_count: outcome.diagnostics.dead_letter_count,
             heartbeat_state: "ready".to_owned(),
         })
     }
@@ -367,6 +387,7 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
+        let index_refresh = reconcile_index_refreshes(&store, graph_version).await?;
         let service_definition_path = self
             .runtime
             .paths
@@ -382,6 +403,7 @@ impl RelayKnowledgeService {
             background_enabled: false,
             silent_updates_enabled: false,
             service_definition_path,
+            index_refresh,
             agent_protocols: agent_protocol_status(&self.runtime),
         })
     }
@@ -459,47 +481,6 @@ fn normalize_optional_source_scope(value: Option<String>) -> Result<Option<Strin
         .transpose()
 }
 
-async fn refresh_index_kinds(
-    store: &Arc<dyn KnowledgeStore>,
-    kinds: impl IntoIterator<Item = IndexKind>,
-    graph_version: GraphVersion,
-) -> Result<Vec<IndexStatus>, ApiError> {
-    let mut statuses = Vec::new();
-    for kind in kinds {
-        statuses.push(
-            store
-                .mark_refresh_complete(kind, graph_version)
-                .await
-                .map_err(storage_api_error)?,
-        );
-    }
-
-    Ok(statuses)
-}
-
-fn metadata_for_indexes(
-    context: &RequestContext,
-    graph_version: GraphVersion,
-    indexes: &[IndexStatus],
-) -> ApiMetadata {
-    let latest_index_version = indexes.iter().map(|status| status.index_version).max();
-    let lowest_indexed_graph_version = indexes
-        .iter()
-        .map(|status| status.indexed_graph_version)
-        .min();
-    let stale = indexes
-        .iter()
-        .any(|status| status.is_stale_for(graph_version));
-
-    ApiMetadata::indexed(
-        context,
-        graph_version,
-        latest_index_version,
-        lowest_indexed_graph_version,
-        stale,
-    )
-}
-
 fn generated_evidence_id(scope: &str, content: &str) -> String {
     let mut input = Vec::with_capacity(scope.len() + content.len() + 16);
     input.extend_from_slice(&(scope.len() as u64).to_le_bytes());
@@ -541,6 +522,9 @@ mod graph_only_tests;
 
 #[cfg(test)]
 mod recovery_tests;
+
+#[cfg(test)]
+mod refresh_tests;
 
 #[cfg(test)]
 mod tests {
