@@ -44,7 +44,7 @@ export type IndexStatus = {
 
 export type IndexCursor = IndexStatus & {
   source_scope: string;
-  modality: "text";
+  modality: "text" | "image" | "layout" | "table";
 };
 
 export type IndexRefreshDiagnostics = {

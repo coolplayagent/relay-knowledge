@@ -12,18 +12,21 @@
 
 - evidence ingest: 写入 source-scoped evidence 和 entity label，提交后产生新的 `graph_version`。
 - structured fact ingest: API 可写入 evidence source path、span、confidence、status、typed relation、claim 和 event；结构化 facts 必须引用 supporting evidence ids，反序列化后的 span、confidence 和 version range 会重新验证。
-- hybrid retrieval: 使用 SQLite FTS5 BM25、graph evidence fallback、code graph documents 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
+- hybrid retrieval: 使用 SQLite FTS5 BM25、local semantic token read model、local hashed-vector ANN read model、graph evidence fallback、code graph documents、schema path、temporal event、community summary 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
+- multimodal evidence: evidence 可记录 `text_span`、`image_asset`、`ocr_text`、`caption`、`image_embedding`、`table` 和 `layout_region` 抽取元数据；派生 OCR/caption/image embedding 按 parent evidence 合并为一个 context item。
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
 - index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors、bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
 - diagnostics: graph inspect、index status、health、service doctor 和 Web readiness；`service status` 与 `service doctor` 当前复用同一统一 API 输出，报告 disabled service mode、后台更新状态、service definition path、agent protocol status 和 refresh queue diagnostics。
 - resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission 和 bounded audit events。
+- evaluation harness: 纯 Rust harness 覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact 观测。
 
 规划中能力:
 
-- proposal lifecycle 和冲突处理。
-- semantic/vector 后端和 ANN read model。
-- MCP resources/prompts、持久 audit sink 和旧 HTTP+SSE 兼容端点。
-- 平台 service install/upgrade/uninstall、silent update operator、多模态 evidence、temporal query 和 community summary。
+- 外部 semantic/vector embedding backend 与模型并存策略；当前实现是确定性的本地 read model。
+- proposal lifecycle、事实冲突处理和审批流。
+- service manager install/upgrade/uninstall、silent update operator 和持久 audit sink。
+- MCP resources/prompts、旧 HTTP+SSE 兼容端点和更完整的 ACP 远程 adapter。
+- 真实 OCR/caption/table/layout worker、image embedding backend 和 extractor 产品化。
 
 ## 2. CLI 工作流
 
@@ -138,6 +141,7 @@ http://127.0.0.1:8791/mcp
 - parser degraded: 文件为 partial、text-only 或 failed，代码查询仍可返回可用文本 chunk。
 - budget exceeded: 检索结果或 agent context 超过 limit/context bytes，返回 `truncated=true`。
 - backend unavailable: semantic/vector 后端未启用时，BM25 和 graph evidence 仍可工作。
+- local semantic/vector degraded: 当前 semantic/vector 使用本地确定性 read model；外部 embedding、OCR 或视觉模型不可用不会阻塞 BM25、graph path 或 temporal retrieval。
 
 ## 6. Context Pack 字段
 

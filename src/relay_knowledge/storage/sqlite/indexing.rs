@@ -709,6 +709,9 @@ fn parse_index_kind(value: &str) -> Result<IndexKind, StorageError> {
 fn parse_index_modality(value: &str) -> Result<IndexModality, StorageError> {
     match value {
         "text" => Ok(IndexModality::Text),
+        "image" => Ok(IndexModality::Image),
+        "layout" => Ok(IndexModality::Layout),
+        "table" => Ok(IndexModality::Table),
         _ => Err(invalid_index_metadata(format!(
             "unknown index modality '{value}'"
         ))),

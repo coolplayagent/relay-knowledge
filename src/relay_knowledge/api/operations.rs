@@ -4,8 +4,9 @@ use crate::{
     domain::{
         CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositorySelector,
         CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest, CommitReceipt,
-        ConfidenceScore, EvidenceSpan, FactStatus, FreshnessPolicy, FusionDiagnostics,
-        GraphVersionRange, IndexKind, IndexStatus, RetrievalBackendStatus, RetrievalBudgetUsed,
+        ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
+        ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
+        IndexKind, IndexStatus, LayoutRegion, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
@@ -29,6 +30,58 @@ pub struct IngestEvidence {
     pub content: String,
     #[serde(default)]
     pub entity_labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction: Option<IngestEvidenceExtraction>,
+}
+
+/// Optional multimodal extraction metadata supplied with an evidence item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestEvidenceExtraction {
+    pub modality: EvidenceModality,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extractor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extractor_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_evidence_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_region: Option<LayoutRegion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_dimension: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<ExtractionDiagnostic>,
+}
+
+impl IngestEvidenceExtraction {
+    /// Converts API metadata into the domain extraction contract.
+    pub fn into_domain_metadata(self) -> EvidenceExtractionMetadata {
+        EvidenceExtractionMetadata {
+            modality: self.modality,
+            source_uri: self.source_uri,
+            source_hash: self.source_hash,
+            media_hash: self.media_hash,
+            extractor: self.extractor,
+            extractor_version: self.extractor_version,
+            observed_at: self.observed_at,
+            parent_evidence_id: self.parent_evidence_id,
+            layout_region: self.layout_region,
+            embedding_model: self.embedding_model,
+            embedding_dimension: self.embedding_dimension,
+            diagnostic: self
+                .diagnostic
+                .unwrap_or_else(|| EvidenceExtractionMetadata::text_span().diagnostic),
+        }
+    }
 }
 
 /// Structured relation supplied to the ingest API.

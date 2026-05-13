@@ -4,8 +4,8 @@
 
 ## Features
 
-- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
-- [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为。
+- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local semantic/vector、schema path、temporal/community、多模态 evidence、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
+- [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、检索返回字段和测试覆盖。
 
 ## Research

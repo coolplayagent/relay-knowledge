@@ -24,7 +24,7 @@ pub(super) fn mutation_batch_from_request(
                 &content,
             )
         });
-        let record =
+        let mut record =
             EvidenceRecord::new(id, source_scope.clone(), content, evidence.entity_labels)?
                 .with_metadata(
                     source_path,
@@ -32,6 +32,9 @@ pub(super) fn mutation_batch_from_request(
                     evidence.confidence.unwrap_or(ConfidenceScore::CERTAIN),
                     evidence.status.unwrap_or(FactStatus::Accepted),
                 )?;
+        if let Some(extraction) = evidence.extraction {
+            record = record.with_extraction_metadata(extraction.into_domain_metadata())?;
+        }
         records.push(record);
     }
 
