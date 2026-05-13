@@ -57,7 +57,7 @@ relay-knowledge repo query core --query retry_policy --kind callees --format jso
 relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
 ```
 
-结果包含 repository id、alias、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。
+结果包含 repository id、alias、`scope_id`、requested ref、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个 branch 复用同一 scope，但响应仍保留本次请求的 ref 作为审计信息。rebase 或 force-move 后的新 head 必须先重新索引，否则查询会失败而不是返回旧 branch 内容。
 
 ## 4.4 增量更新
 

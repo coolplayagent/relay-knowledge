@@ -26,7 +26,7 @@ pub use code_repository::{
     CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
     CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeChunkRecord,
     RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord,
+    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
 };
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;

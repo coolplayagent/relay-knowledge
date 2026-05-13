@@ -21,7 +21,7 @@ mod tests;
 use crate::domain::{
     CodeCallRecord, CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
     CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord,
+    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
 };
 
 use parser::parse_indexed_file;
@@ -175,8 +175,9 @@ pub fn deleted_symbol_names_for_diff(
             continue;
         }
         let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
-        let mut build = SnapshotBuild::new(
+        let mut build = SnapshotBuild::new_with_selector(
             registration,
+            selector,
             base_commit.clone(),
             "deleted-symbol-seed".to_owned(),
             true,
@@ -216,7 +217,15 @@ fn build_full_snapshot(
             selection_exclusion_reason(path, registration, selector, &ignore_rules).is_none()
         })
         .collect::<Vec<_>>();
-    let mut build = SnapshotBuild::new(registration, commit, tree_hash, true, paths.len(), 0);
+    let mut build = SnapshotBuild::new_with_selector(
+        registration,
+        selector,
+        commit,
+        tree_hash,
+        true,
+        paths.len(),
+        0,
+    );
 
     for path in paths {
         let bytes = git_bytes(root, ["show", &format!("{}:{path}", build.commit)])?;
@@ -240,7 +249,15 @@ fn build_incremental_snapshot(
     let changes = diff_changes(root, base_ref, head_ref)?;
     let base_ignore_rules = load_ignore_rules_from_commit(root, &base_commit)?;
     let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
-    let mut build = SnapshotBuild::new(registration, commit, tree_hash, false, changes.len(), 0);
+    let mut build = SnapshotBuild::new_with_selector(
+        registration,
+        selector,
+        commit,
+        tree_hash,
+        false,
+        changes.len(),
+        0,
+    );
 
     for change in changes {
         match change {
@@ -259,6 +276,7 @@ fn build_incremental_snapshot(
                     build.deleted_paths.push(old_path.clone());
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
+                        source_scope: build.source_scope.clone(),
                         old_path,
                         new_path: Some(new_path.clone()),
                         base_ref: base_ref.to_owned(),
@@ -279,6 +297,7 @@ fn build_incremental_snapshot(
                 if path_is_selected_with_rules(&new_path, registration, selector, &ignore_rules) {
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
+                        source_scope: build.source_scope.clone(),
                         old_path,
                         new_path: Some(new_path.clone()),
                         base_ref: base_ref.to_owned(),
@@ -420,8 +439,9 @@ fn build_worktree_overlay_snapshot(
     let overlay_hash = format!("{:016x}", stable_hash64(&overlay_hash_input));
     let tree_hash = format!("worktree:{overlay_hash}");
     let overlay_commit = format!("worktree:{commit}:{overlay_hash}");
-    let mut build = SnapshotBuild::new(
+    let mut build = SnapshotBuild::new_with_selector(
         registration,
+        selector,
         overlay_commit,
         tree_hash,
         false,
@@ -549,8 +569,11 @@ fn parse_changed_path(
 
 pub(super) struct SnapshotBuild {
     pub(super) repository_id: String,
+    pub(super) source_scope: String,
     commit: String,
     tree_hash: String,
+    path_filters: Vec<String>,
+    language_filters: Vec<String>,
     full_replace: bool,
     changed_path_count: usize,
     pub(super) skipped_unchanged_count: usize,
@@ -566,6 +589,7 @@ pub(super) struct SnapshotBuild {
 }
 
 impl SnapshotBuild {
+    #[cfg(test)]
     fn new(
         registration: &CodeRepositoryRegistration,
         commit: String,
@@ -574,10 +598,48 @@ impl SnapshotBuild {
         changed_path_count: usize,
         skipped_unchanged_count: usize,
     ) -> Self {
-        Self {
-            repository_id: registration.repository_id.clone(),
+        let selector = CodeRepositorySelector {
+            repository: registration.repository_id.clone(),
+            ref_selector: commit.clone(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        };
+        Self::new_with_selector(
+            registration,
+            &selector,
             commit,
             tree_hash,
+            full_replace,
+            changed_path_count,
+            skipped_unchanged_count,
+        )
+    }
+
+    fn new_with_selector(
+        registration: &CodeRepositoryRegistration,
+        selector: &CodeRepositorySelector,
+        commit: String,
+        tree_hash: String,
+        full_replace: bool,
+        changed_path_count: usize,
+        skipped_unchanged_count: usize,
+    ) -> Self {
+        let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
+        let language_filters =
+            merged_filters(&registration.language_filters, &selector.language_filters);
+        let source_scope = code_snapshot_scope_id(
+            &registration.repository_id,
+            &tree_hash,
+            &path_filters,
+            &language_filters,
+        );
+        Self {
+            repository_id: registration.repository_id.clone(),
+            source_scope,
+            commit,
+            tree_hash,
+            path_filters,
+            language_filters,
             full_replace,
             changed_path_count,
             skipped_unchanged_count,
@@ -601,10 +663,12 @@ impl SnapshotBuild {
             .filter(|reference| reference.kind == "call")
             .map(|reference| CodeCallRecord {
                 repository_id: reference.repository_id.clone(),
+                source_scope: reference.source_scope.clone(),
                 call_id: stable_id(
                     "call",
                     [
                         self.repository_id.as_str(),
+                        self.source_scope.as_str(),
                         reference.reference_id.as_str(),
                         reference.path.as_str(),
                         reference.name.as_str(),
@@ -633,8 +697,11 @@ impl SnapshotBuild {
 
         CodeIndexSnapshot {
             repository_id: self.repository_id,
+            source_scope: self.source_scope,
             resolved_commit_sha: self.commit,
             tree_hash: self.tree_hash,
+            path_filters: self.path_filters,
+            language_filters: self.language_filters,
             full_replace: self.full_replace,
             changed_path_count: self.changed_path_count,
             skipped_unchanged_count: self.skipped_unchanged_count,
@@ -702,6 +769,17 @@ fn caller_for_line<'a>(
             symbol.path == path && symbol.line_range.start <= line && symbol.line_range.end >= line
         })
         .max_by_key(|symbol| symbol.line_range.start)
+}
+
+fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in left.iter().chain(right.iter()) {
+        if !merged.contains(value) {
+            merged.push(value.clone());
+        }
+    }
+
+    merged
 }
 
 fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {

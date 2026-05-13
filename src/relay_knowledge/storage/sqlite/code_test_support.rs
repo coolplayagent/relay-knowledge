@@ -4,6 +4,8 @@ use crate::domain::{
     RepositoryCodeSymbolRecord,
 };
 
+pub(super) const TEST_SOURCE_SCOPE: &str = "git_snapshot:test";
+
 pub(super) fn file(
     file_id: &str,
     path: &str,
@@ -13,6 +15,7 @@ pub(super) fn file(
 ) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
         language_id: language_id.to_owned(),
@@ -32,6 +35,7 @@ pub(super) fn symbol(
 ) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         symbol_snapshot_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
@@ -54,6 +58,7 @@ pub(super) fn reference(
 ) -> RepositoryCodeReferenceRecord {
     RepositoryCodeReferenceRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         reference_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
@@ -72,6 +77,7 @@ pub(super) fn import(id: &str, file_id: &str, path: &str) -> CodeImportRecord {
 pub(super) fn import_module(id: &str, file_id: &str, path: &str, module: &str) -> CodeImportRecord {
     CodeImportRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         import_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
@@ -89,6 +95,7 @@ pub(super) fn chunk(
 ) -> RepositoryCodeChunkRecord {
     RepositoryCodeChunkRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         chunk_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
@@ -108,6 +115,7 @@ pub(super) fn call(
 ) -> CodeCallRecord {
     CodeCallRecord {
         repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
         call_id: id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
