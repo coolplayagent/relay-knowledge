@@ -159,6 +159,7 @@ async fn search_preserves_entity_labels_with_unit_separator() {
             source_scope: Some("docs".to_owned()),
             graph_version: receipt.graph_version,
             limit: 5,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");
@@ -186,6 +187,7 @@ async fn search_orders_equal_scores_by_evidence_id() {
             source_scope: Some("docs".to_owned()),
             graph_version: receipt.graph_version,
             limit: 2,
+            disabled_retriever_sources: Vec::new(),
         })
         .await
         .expect("search should succeed");

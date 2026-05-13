@@ -9,27 +9,28 @@ use crate::{
     api::{
         ApiError, ApiMetadata, GraphInspectionRequest, GraphInspectionResponse, HealthResponse,
         HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse,
-        IngestRequest, IngestResponse, ProjectStatusResponse, RequestContext,
-        ServiceRecoveryReport, ServiceStatusResponse,
+        IngestRequest, IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
+        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
-        ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, GraphVersion,
-        IndexKind, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed,
-        RetrievalHit, RetrievalMode, RetrievedContextPack, SourceScope,
+        ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind,
+        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
+        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
     project::PROJECT_NAME,
-    retrieval::RetrievalPlan,
+    retrieval::{RetrievalPlan, read_model_backend_statuses},
     storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
 };
 
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     index_refresh::{
-        index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
-        recover_index_kinds, refresh_index_kinds,
+        filter_outcome_to_read_models, index_refresh_outcome, metadata_for_indexes,
+        reconcile_index_refreshes, recover_index_kinds, refresh_index_kinds,
     },
     ingest::mutation_batch_from_request,
+    multimodal::extraction_ingest_request,
     status::{agent_protocol_status, runtime_status},
 };
 
@@ -132,26 +133,53 @@ impl RelayKnowledgeService {
             .commit_mutation_batch(batch)
             .await
             .map_err(storage_api_error)?;
-        let (indexes, metadata, index_refresh_error) =
-            match refresh_index_kinds(&store, IndexKind::ALL, receipt.graph_version).await {
-                Ok(outcome) => {
-                    let metadata =
-                        metadata_for_indexes(&context, receipt.graph_version, &outcome.indexes);
+        let (indexes, metadata, index_refresh_error) = match refresh_index_kinds(
+            &store,
+            IndexKind::ALL,
+            receipt.graph_version,
+            &self.runtime.retrieval,
+        )
+        .await
+        {
+            Ok(outcome) => {
+                let metadata =
+                    metadata_for_indexes(&context, receipt.graph_version, &outcome.indexes);
 
-                    (outcome.indexes, metadata, None)
-                }
-                Err(error) => (
-                    Vec::new(),
-                    ApiMetadata::indexed(&context, receipt.graph_version, None, None, true),
-                    Some(error.message),
-                ),
-            };
+                (outcome.indexes, metadata, None)
+            }
+            Err(error) => (
+                Vec::new(),
+                ApiMetadata::indexed(&context, receipt.graph_version, None, None, true),
+                Some(error.message),
+            ),
+        };
 
         Ok(IngestResponse {
             metadata,
             receipt,
             indexes,
             index_refresh_error,
+        })
+    }
+
+    /// Commits derived multimodal worker output through the same bounded ingest path.
+    pub async fn commit_multimodal_extraction(
+        &self,
+        request: MultimodalExtractionRequest,
+        context: RequestContext,
+    ) -> Result<MultimodalExtractionResponse, ApiError> {
+        let converted = extraction_ingest_request(request).map_err(ApiError::invalid_argument)?;
+        let parent_evidence_id = converted.parent_evidence_id;
+        let derived_evidence_count = converted.derived_evidence_count;
+        let response = self.ingest(converted.ingest, context).await?;
+
+        Ok(MultimodalExtractionResponse {
+            metadata: response.metadata,
+            parent_evidence_id,
+            derived_evidence_count,
+            receipt: response.receipt,
+            indexes: response.indexes,
+            index_refresh_error: response.index_refresh_error,
         })
     }
 
@@ -186,27 +214,43 @@ impl RelayKnowledgeService {
             Vec::new()
         } else {
             indexes = store.index_statuses().await.map_err(storage_api_error)?;
+            let mut active_indexes = indexes
+                .iter()
+                .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+                .cloned()
+                .collect::<Vec<_>>();
             if plan.freshness == FreshnessPolicy::WaitUntilFresh {
-                let stale_kinds = indexes
+                let stale_kinds = active_indexes
                     .iter()
                     .filter(|status| status.is_stale_for(graph_version))
                     .map(|status| status.kind)
                     .collect::<Vec<_>>();
                 if !stale_kinds.is_empty() {
-                    refresh_index_kinds(&store, stale_kinds, graph_version).await?;
+                    refresh_index_kinds(
+                        &store,
+                        stale_kinds,
+                        graph_version,
+                        &self.runtime.retrieval,
+                    )
+                    .await?;
                     indexes = store.index_statuses().await.map_err(storage_api_error)?;
+                    active_indexes = indexes
+                        .iter()
+                        .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+                        .cloned()
+                        .collect();
                 }
             }
 
-            let stale = indexes
+            let stale = active_indexes
                 .iter()
                 .any(|status| status.is_stale_for(graph_version));
-            metadata = metadata_for_indexes(&context, graph_version, &indexes);
+            metadata = metadata_for_indexes(&context, graph_version, &active_indexes);
             if plan.freshness == FreshnessPolicy::AllowStale && stale {
                 degraded_reasons
                     .push("one or more indexes are behind the graph version".to_owned());
             }
-            derived_backend_statuses(&plan, graph_version).await
+            read_model_backend_statuses(&plan, graph_version, &indexes, &self.runtime.retrieval)
         };
         if backend_statuses
             .iter()
@@ -218,12 +262,21 @@ impl RelayKnowledgeService {
             );
         }
         let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
+        let mut disabled_retriever_sources = self.runtime.retrieval.disabled_retriever_sources();
+        if plan.freshness == FreshnessPolicy::GraphOnly {
+            for source in [RetrieverSource::Semantic, RetrieverSource::Vector] {
+                if !disabled_retriever_sources.contains(&source) {
+                    disabled_retriever_sources.push(source);
+                }
+            }
+        }
         let mut results = store
             .search(GraphSearchRequest {
                 query: plan.query.clone(),
                 source_scope: plan.source_scope.clone(),
                 graph_version,
                 limit: plan.limit.saturating_add(1),
+                disabled_retriever_sources,
             })
             .await
             .map_err(storage_api_error)?;
@@ -314,7 +367,13 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let outcome = refresh_index_kinds(&store, request.kinds, graph_version).await?;
+        let outcome = refresh_index_kinds(
+            &store,
+            request.kinds,
+            graph_version,
+            &self.runtime.retrieval,
+        )
+        .await?;
         let metadata = metadata_for_indexes(&context, graph_version, &outcome.indexes);
 
         Ok(IndexRefreshResponse {
@@ -333,8 +392,11 @@ impl RelayKnowledgeService {
             .code_repository_totals()
             .await
             .map_err(storage_api_error)?;
-        reconcile_index_refreshes(&store, graph.graph_version).await?;
-        let outcome = index_refresh_outcome(&store).await?;
+        reconcile_index_refreshes(&store, graph.graph_version, &self.runtime.retrieval).await?;
+        let outcome = filter_outcome_to_read_models(
+            index_refresh_outcome(&store).await?,
+            &self.runtime.retrieval,
+        );
         let healthy = outcome
             .indexes
             .iter()
@@ -363,12 +425,17 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         let before = store.index_statuses().await.map_err(storage_api_error)?;
-        let stale_index_kinds = before
+        let active_before = before
+            .iter()
+            .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+            .cloned()
+            .collect::<Vec<_>>();
+        let stale_index_kinds = active_before
             .iter()
             .filter(|status| status.is_stale_for(graph_version))
             .map(|status| status.kind)
             .collect::<Vec<_>>();
-        let index_lag_max = before
+        let index_lag_max = active_before
             .iter()
             .map(|status| {
                 graph_version
@@ -380,7 +447,13 @@ impl RelayKnowledgeService {
         let outcome = if stale_index_kinds.is_empty() {
             index_refresh_outcome(&store).await?
         } else {
-            recover_index_kinds(&store, stale_index_kinds.clone(), graph_version).await?
+            recover_index_kinds(
+                &store,
+                stale_index_kinds.clone(),
+                graph_version,
+                &self.runtime.retrieval,
+            )
+            .await?
         };
         let refreshed = outcome
             .indexes
@@ -391,7 +464,12 @@ impl RelayKnowledgeService {
             .map(|status| status.kind)
             .collect::<Vec<_>>();
         let after = outcome.indexes;
-        let metadata = metadata_for_indexes(&context, graph_version, &after);
+        let active_after = after
+            .iter()
+            .filter(|status| self.runtime.retrieval.refreshes_index(status.kind))
+            .cloned()
+            .collect::<Vec<_>>();
+        let metadata = metadata_for_indexes(&context, graph_version, &active_after);
 
         Ok(ServiceRecoveryReport {
             metadata,
@@ -415,7 +493,8 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let index_refresh = reconcile_index_refreshes(&store, graph_version).await?;
+        let index_refresh =
+            reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?;
         let service_definition_path = self
             .runtime
             .paths
@@ -532,25 +611,6 @@ fn serialized_context_bytes<T: Serialize + ?Sized>(value: &T) -> usize {
         .unwrap_or(usize::MAX / 4)
 }
 
-async fn derived_backend_statuses(
-    plan: &RetrievalPlan,
-    graph_version: GraphVersion,
-) -> Vec<crate::domain::RetrievalBackendStatus> {
-    [
-        crate::domain::RetrieverSource::Semantic,
-        crate::domain::RetrieverSource::Vector,
-    ]
-    .into_iter()
-    .map(|source| crate::domain::RetrievalBackendStatus {
-        source,
-        state: crate::domain::RetrievalBackendState::Available,
-        scope_post_filter: plan.source_scope.is_some(),
-        indexed_graph_version: Some(graph_version),
-        reason: Some("local deterministic SQLite read model".to_owned()),
-    })
-    .collect()
-}
-
 fn service_definition_filename() -> &'static str {
     if cfg!(target_os = "windows") {
         "relay-knowledge-service.xml"
@@ -577,415 +637,4 @@ mod refresh_tests;
 mod storage_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        api::{IngestEvidence, InterfaceKind},
-        domain::{FreshnessPolicy, IndexKind, IndexState},
-        env::PlatformKind,
-        storage::{KnowledgeStore, SqliteGraphStore},
-    };
-
-    #[tokio::test]
-    async fn status_includes_foundational_runtime_configuration() {
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", "/home/alice"),
-                ("TMPDIR", "/tmp"),
-                ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
-                ("RELAY_KNOWLEDGE_HTTP_BIND", "127.0.0.1:9000"),
-                ("HTTPS_PROXY", "https://proxy.internal:8443"),
-                ("NO_PROXY", "localhost,.internal"),
-                ("SSL_VERIFY", "false"),
-                ("RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH", "42"),
-            ],
-        )
-        .expect("environment should parse");
-        let service = service_with_environment(&environment).await;
-        let context = RequestContext::with_ids(InterfaceKind::Cli, "req", "trace");
-
-        let response = service
-            .project_status(context)
-            .await
-            .expect("status should load");
-
-        assert_eq!(response.runtime.config_dir, "/srv/relay/config");
-        assert_eq!(response.runtime.data_dir, "/srv/relay/data");
-        assert_eq!(response.runtime.http_bind, "127.0.0.1:9000");
-        assert!(response.runtime.http_proxy_configured);
-        assert_eq!(response.runtime.http_no_proxy_rules, 2);
-        assert!(!response.runtime.http_ssl_verify);
-        assert_eq!(response.runtime.qos_max_queue_depth, 42);
-    }
-
-    #[tokio::test]
-    async fn status_reflects_refreshed_network_environment() {
-        let initial_environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", "/home/alice"),
-                ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
-            ],
-        )
-        .expect("environment should parse");
-        let service = service_with_environment(&initial_environment).await;
-
-        let refreshed_environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HTTP_PROXY", "http://proxy.internal:8080"),
-                ("SSL_VERIFY", "false"),
-                ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "4"),
-            ],
-        )
-        .expect("environment should parse");
-
-        service
-            .refresh_network_from_environment(&refreshed_environment)
-            .await
-            .expect("network refresh should succeed");
-        let response = service
-            .project_status(RequestContext::with_ids(InterfaceKind::Cli, "req", "trace"))
-            .await
-            .expect("status should load");
-
-        assert!(response.runtime.http_proxy_configured);
-        assert!(!response.runtime.http_ssl_verify);
-        assert_eq!(response.runtime.qos_max_in_flight_requests, 4);
-    }
-
-    #[tokio::test]
-    async fn project_status_reports_current_graph_version() {
-        let service = service_with_memory_store().await;
-        service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    "ev-status",
-                    "Project status tracks graph versions",
-                    Vec::new(),
-                )]),
-                RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-            )
-            .await
-            .expect("ingest should succeed");
-
-        let response = service
-            .project_status(RequestContext::with_ids(
-                InterfaceKind::Cli,
-                "req-status",
-                "trace-status",
-            ))
-            .await
-            .expect("status should load");
-
-        assert_eq!(response.metadata.graph_version, 1);
-        assert_eq!(response.metadata.trace_id, "trace-status");
-    }
-
-    #[tokio::test]
-    async fn ingest_commits_graph_and_refreshes_all_indexes() {
-        let service = service_with_memory_store().await;
-        let context = RequestContext::with_ids(InterfaceKind::Cli, "req", "trace");
-
-        let response = service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    "ev-1",
-                    "Hybrid retrieval uses BM25 and vector indexes",
-                    vec!["BM25".to_owned(), "Vector".to_owned()],
-                )]),
-                context,
-            )
-            .await
-            .expect("ingest should succeed");
-
-        assert_eq!(response.metadata.graph_version, 1);
-        assert!(!response.metadata.stale);
-        assert_eq!(response.receipt.evidence_count, 1);
-        assert_eq!(response.indexes.len(), 3);
-        assert!(
-            response
-                .indexes
-                .iter()
-                .all(|status| status.state == IndexState::Fresh)
-        );
-    }
-
-    #[tokio::test]
-    async fn retrieve_context_reports_results_and_index_freshness() {
-        let service = service_with_memory_store().await;
-        let context = RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest");
-        service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    "ev-1",
-                    "Rust async services isolate blocking SQLite work",
-                    vec!["Rust".to_owned()],
-                )]),
-                context,
-            )
-            .await
-            .expect("ingest should succeed");
-
-        let response = service
-            .retrieve_context(
-                HybridRetrievalRequest {
-                    query: "SQLite".to_owned(),
-                    source_scope: Some("docs".to_owned()),
-                    limit: 5,
-                    freshness: FreshnessPolicy::WaitUntilFresh,
-                },
-                RequestContext::with_ids(InterfaceKind::Web, "req-query", "trace-query"),
-            )
-            .await
-            .expect("query should succeed");
-
-        assert_eq!(response.metadata.trace_id, "trace-query");
-        assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].evidence_id, "ev-1");
-        assert_eq!(response.context_pack.items.len(), 1);
-        assert_eq!(
-            response.context_pack.freshness,
-            FreshnessPolicy::WaitUntilFresh
-        );
-        assert!(!response.truncated);
-        assert_eq!(response.fusion.algorithm, "reciprocal_rank_fusion");
-        assert!(
-            response.results[0]
-                .ranking
-                .iter()
-                .any(|signal| signal.source == crate::domain::RetrieverSource::Bm25)
-        );
-        assert!(!response.metadata.stale);
-        assert_eq!(
-            response
-                .indexes
-                .iter()
-                .map(|status| status.kind)
-                .collect::<Vec<_>>(),
-            IndexKind::ALL
-        );
-    }
-
-    #[tokio::test]
-    async fn wait_until_fresh_query_does_not_increment_fresh_index_versions() {
-        let service = service_with_memory_store().await;
-        service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    "ev-fresh",
-                    "Fresh indexes should not refresh on read",
-                    vec!["Index".to_owned()],
-                )]),
-                RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-            )
-            .await
-            .expect("ingest should succeed");
-
-        let first = retrieve_wait_until_fresh(&service, "req-query-1").await;
-        let second = retrieve_wait_until_fresh(&service, "req-query-2").await;
-
-        assert_eq!(first.metadata.index_version, Some(1));
-        assert_eq!(second.metadata.index_version, Some(1));
-        assert!(
-            second
-                .indexes
-                .iter()
-                .all(|status| status.index_version == 1)
-        );
-    }
-
-    #[tokio::test]
-    async fn retrieve_context_reports_truncated_context_pack_budget() {
-        let service = service_with_memory_store().await;
-        for index in 0..3 {
-            service
-                .ingest(
-                    ingest_request(vec![ingest_evidence(
-                        format!("ev-{index}"),
-                        format!("Shared BM25 retrieval candidate {index}"),
-                        vec!["BM25".to_owned()],
-                    )]),
-                    RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-                )
-                .await
-                .expect("ingest should succeed");
-        }
-
-        let response = service
-            .retrieve_context(
-                HybridRetrievalRequest {
-                    query: "BM25".to_owned(),
-                    source_scope: Some("docs".to_owned()),
-                    limit: 2,
-                    freshness: FreshnessPolicy::WaitUntilFresh,
-                },
-                RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
-            )
-            .await
-            .expect("query should succeed");
-
-        assert!(response.truncated);
-        assert!(response.context_pack.truncated);
-        assert_eq!(response.results.len(), 2);
-        assert_eq!(response.budget_used.limit, 2);
-        assert_eq!(response.budget_used.returned_count, 2);
-        assert_eq!(response.budget_used.candidate_count, 3);
-    }
-
-    #[tokio::test]
-    async fn service_status_reports_current_graph_version() {
-        let service = service_with_memory_store().await;
-        service
-            .ingest(
-                ingest_request(vec![ingest_evidence(
-                    "ev-service",
-                    "Service status tracks graph versions",
-                    Vec::new(),
-                )]),
-                RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
-            )
-            .await
-            .expect("ingest should succeed");
-
-        let response = service
-            .service_status(RequestContext::with_ids(
-                InterfaceKind::Cli,
-                "req-service",
-                "trace-service",
-            ))
-            .await
-            .expect("service status should load");
-
-        assert_eq!(response.metadata.graph_version, 1);
-        assert_eq!(response.metadata.trace_id, "trace-service");
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_retrieval_query() {
-        let service = service_with_memory_store().await;
-
-        let error = service
-            .retrieve_context(
-                HybridRetrievalRequest::new(" "),
-                RequestContext::with_ids(InterfaceKind::Cli, "req", "trace"),
-            )
-            .await
-            .expect_err("empty query should fail");
-
-        assert_eq!(error.message, "query must not be empty");
-    }
-
-    #[tokio::test]
-    async fn default_service_opens_sqlite_under_resolved_data_dir() {
-        let root =
-            std::env::temp_dir().join(format!("relay-knowledge-service-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", "/home/alice"),
-                ("TMPDIR", "/tmp"),
-                (
-                    "RELAY_KNOWLEDGE_HOME",
-                    root.to_str().expect("temp path is UTF-8"),
-                ),
-            ],
-        )
-        .expect("environment should parse");
-        let service = RelayKnowledgeService::from_environment(&environment)
-            .await
-            .expect("service should compose");
-
-        let health = service
-            .health(RequestContext::with_ids(InterfaceKind::Cli, "req", "trace"))
-            .await
-            .expect("health should initialize storage");
-
-        assert!(health.healthy);
-        assert!(root.join("data").join("relay-knowledge.sqlite").exists());
-    }
-
-    async fn service_with_memory_store() -> RelayKnowledgeService {
-        let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-
-        service_with_store(store).await
-    }
-
-    async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
-        let environment = EnvironmentConfig::from_pairs(
-            PlatformKind::Unix,
-            [
-                ("HOME", "/home/alice"),
-                ("TMPDIR", "/tmp"),
-                ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
-            ],
-        )
-        .expect("environment should parse");
-
-        service_with_environment_and_store(&environment, store).await
-    }
-
-    async fn service_with_environment(environment: &EnvironmentConfig) -> RelayKnowledgeService {
-        let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-
-        service_with_environment_and_store(environment, store).await
-    }
-
-    async fn service_with_environment_and_store(
-        environment: &EnvironmentConfig,
-        store: Arc<dyn KnowledgeStore>,
-    ) -> RelayKnowledgeService {
-        let runtime = RuntimeConfiguration::from_environment(environment)
-            .await
-            .expect("runtime should compose");
-
-        RelayKnowledgeService::with_store(runtime, store)
-    }
-
-    fn ingest_request(evidence: Vec<IngestEvidence>) -> IngestRequest {
-        IngestRequest {
-            source_scope: "docs".to_owned(),
-            evidence,
-            relations: Vec::new(),
-            claims: Vec::new(),
-            events: Vec::new(),
-        }
-    }
-
-    fn ingest_evidence(
-        id: impl Into<String>,
-        content: impl Into<String>,
-        entity_labels: Vec<String>,
-    ) -> IngestEvidence {
-        IngestEvidence {
-            id: Some(id.into()),
-            source_path: None,
-            span: None,
-            confidence: None,
-            status: None,
-            content: content.into(),
-            entity_labels,
-            extraction: None,
-        }
-    }
-
-    async fn retrieve_wait_until_fresh(
-        service: &RelayKnowledgeService,
-        request_id: &str,
-    ) -> HybridRetrievalResponse {
-        service
-            .retrieve_context(
-                HybridRetrievalRequest {
-                    query: "Fresh".to_owned(),
-                    source_scope: Some("docs".to_owned()),
-                    limit: 5,
-                    freshness: FreshnessPolicy::WaitUntilFresh,
-                },
-                RequestContext::with_ids(InterfaceKind::Cli, request_id, "trace-query"),
-            )
-            .await
-            .expect("query should succeed")
-    }
-}
+mod tests;

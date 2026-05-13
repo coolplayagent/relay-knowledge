@@ -360,6 +360,7 @@ mod tests {
             source_scope: None,
             graph_version: crate::domain::GraphVersion::new(1),
             limit: 10,
+            disabled_retriever_sources: Vec::new(),
         };
 
         assert_eq!(bounded_candidate_limit(&request), 80);

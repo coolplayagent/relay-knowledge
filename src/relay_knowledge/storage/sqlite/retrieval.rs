@@ -538,18 +538,22 @@ pub(super) fn search_graph(
         RetrieverSource::GraphEvidence,
         "term overlap over graph evidence and entity labels",
     );
-    merge_ranked(
-        &mut candidates,
-        derived::semantic_candidates(connection, &request)?,
-        RetrieverSource::Semantic,
-        "local semantic token signature read model with scope and graph-version filters",
-    );
-    merge_ranked(
-        &mut candidates,
-        derived::vector_candidates(connection, &request)?,
-        RetrieverSource::Vector,
-        "local hashed vector ANN read model with model, dimension, source hash, scope, and graph-version metadata",
-    );
+    if request.allows_retriever_source(RetrieverSource::Semantic) {
+        merge_ranked(
+            &mut candidates,
+            derived::semantic_candidates(connection, &request)?,
+            RetrieverSource::Semantic,
+            "local semantic token signature read model with scope and graph-version filters",
+        );
+    }
+    if request.allows_retriever_source(RetrieverSource::Vector) {
+        merge_ranked(
+            &mut candidates,
+            derived::vector_candidates(connection, &request)?,
+            RetrieverSource::Vector,
+            "local hashed vector ANN read model with model, dimension, source hash, scope, and graph-version metadata",
+        );
+    }
     merge_ranked(
         &mut candidates,
         advanced::path_candidates(connection, &request)?,

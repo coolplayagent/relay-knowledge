@@ -46,10 +46,16 @@ The retrieval layer uses these concrete recall paths:
 - `community_summary`: scoped summary hit for global/overview/community
   queries.
 
+`semantic` and `vector` remain explicit index families in freshness metadata.
+`backend_statuses` records the configured `local`, `external`, or `disabled`
+read model mode, model name, dimension, scope post-filtering, indexed graph
+version, and stale/unavailable reason when applicable. BM25 plus graph evidence
+retrieval remains usable when a derived backend is disabled or stale, and the
+response still reports index freshness.
 BM25, semantic, vector, graph path, temporal, and community hits are fused with
-RRF. Semantic/vector are local read models, not external embedding services; the
-metadata is present so a future external backend can coexist without changing
-the context-pack contract.
+RRF. The default semantic/vector implementation is the local deterministic read
+model, while external embedding workers can now reuse the same cursor and
+backend-status contract without changing the context-pack shape.
 Health and index-refresh diagnostics also expose scoped cursor metadata for
 these index families: source hash, backend cursor, and model name/dimension when
 a configured backend worker supplies them. The same diagnostics include
@@ -94,10 +100,12 @@ returned through retrieval. Ingest revalidates deserialized spans, confidence
 scores, and version ranges before persistence. Evidence with `rejected` or
 `superseded` status remains inspectable in the graph but is excluded from BM25
 and graph-evidence retrieval candidates.
-OCR, caption, and image embedding evidence can reference a parent evidence item.
-Retrieval uses the parent evidence id as the merge key, so OCR and caption hits
-for the same image are returned as one grouped context item instead of duplicate
-results.
+OCR, caption, table, layout, and image embedding maintenance workers submit
+derived evidence through `commit_multimodal_extraction`, which enforces parent
+evidence ownership and extractor identity before using the regular ingest and
+index-refresh path. Retrieval uses the parent evidence id as the merge key, so
+OCR and caption hits for the same image are returned as one grouped context item
+instead of duplicate results.
 
 ## Freshness And Snapshot Behavior
 
@@ -110,6 +118,12 @@ Freshness policies are unchanged:
 - `allow_stale`: return results and mark stale metadata when an index lags.
 - `wait_until_fresh`: refresh stale index metadata before querying.
 - `graph_only`: bypass index metadata and return graph-only degraded context.
+
+When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` or
+`RELAY_KNOWLEDGE_VECTOR_BACKEND` is `disabled`, that retriever is excluded from
+candidate execution and its read-model refresh work is not scheduled. Semantic
+and vector cursor model metadata is derived from the documents that were indexed,
+not from runtime override labels.
 
 ## CLI Example
 

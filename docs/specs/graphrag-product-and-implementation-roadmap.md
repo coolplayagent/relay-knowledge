@@ -25,12 +25,12 @@ GraphRAG 能力必须保持可解释:
 - 统一 API: ingest、hybrid retrieval、graph inspection、index refresh、health、service status 和 code repository API。
 - 异步 application service: CLI、Web、MCP adapter 共用 `RelayKnowledgeService`，阻塞 SQLite 和 Git/tree-sitter 工作被隔离到边界内。
 - SQLite 图状态: evidence/entity、typed relation、claim、event、graph mutation log、graph version、index status 和 code graph tables。
-- 混合检索: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、local semantic/vector read model、schema path、temporal/community retrieval、RRF 融合、source span/structured fact context pack 和 backend availability metadata。
+- 混合检索: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、local semantic/vector read model、可配置 external backend metadata、schema path、temporal/community retrieval、RRF 融合、source span/structured fact context pack 和 backend availability metadata。
 - 代码仓库能力: Git 仓库注册、full/incremental index、worktree overlay、tree-sitter 多语言解析、symbol/reference/chunk 查询和 diff impact。
 - Agent 接入基础: MCP Streamable HTTP server、本地 ACP session adapter、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh。
 - Web 诊断面: `/api/project/status` 和 `/api/health` 驱动的 health、index、runtime、operation composer 和 GraphRAG readiness 视图。
 
-这些能力已经从 v1 底座推进到 Phase 4 的本地 GraphRAG read model: typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、local semantic/vector read model、多模态 evidence schema、schema path、temporal query、community summary 和 evaluation harness 已有 Rust 实现。外部 embedding/OCR/vision 后端、proposal lifecycle、service manager 安装面和 silent update operator 仍属于后续实现。
+这些能力已经从 v1 底座推进到 Phase 4 的本地 GraphRAG read model: typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、local semantic/vector read model、external backend runtime metadata contract、多模态 evidence schema、maintenance worker 输出提交边界、schema path、temporal query、community summary 和 evaluation fixture gate 已有 Rust 实现。具体外部 embedding/OCR/vision provider、proposal lifecycle、service manager 安装面和 silent update operator 仍属于后续实现。
 
 ## 3. 优化措施
 
@@ -40,7 +40,7 @@ GraphRAG 能力必须保持可解释:
 - BM25 字段质量优先覆盖 evidence content、entity label、source path、code symbol、code chunk 和 doc comment。
 - RRF 融合必须保留每个 retriever 的 rank、score 和 explanation。
 - graph expansion 必须限制深度、节点数、时间和输出字节，超限时返回 `truncated=true` 和原因。
-- semantic/vector 当前使用确定性的本地 token/hash read model，已在 ranking explanation 和 cursor diagnostics 中记录 model、dimension、source hash、scope、backend cursor 和 graph version；外部 embedding backend 接入时必须保持同一 metadata contract 和 scope post-filter。
+- semantic/vector 默认使用确定性的本地 token/hash read model，已在 ranking explanation 和 cursor diagnostics 中记录 model、dimension、source hash、scope、backend cursor 和 graph version；runtime backend mode 支持 `local`、`external` 和 `disabled`，`disabled` 会跳过对应 retriever 与 refresh，外部 embedding worker 必须保持同一 metadata contract 和 scope post-filter。
 
 ### 3.2 事实模型
 
@@ -79,7 +79,7 @@ GraphRAG 能力必须保持可解释:
 - 检索时合并同一 parent evidence 的文本、OCR、caption、image 和 table hit，避免重复展示。
 - temporal query 必须支持 `as_of` 或 time range，并参与 index invalidation 与 context pack metadata。
 
-当前 Rust 实现已支持 evidence modality/extraction metadata、OCR/caption/image embedding parent grouping、`as_of:<date>` 与年份事件检索，以及 community summary context item。真实 OCR、vision caption 和外部 embedding worker 仍需要在后台 worker 边界后接入。
+当前 Rust 实现已支持 evidence modality/extraction metadata、OCR/caption/image embedding parent grouping、maintenance worker 输出提交入口、`as_of:<date>` 与年份事件检索，以及 community summary context item。真实 OCR、vision caption 和外部 embedding provider 仍需要在后台 worker 边界后产品化。
 
 ## 4. 分阶段路线
 
@@ -90,13 +90,13 @@ GraphRAG 能力必须保持可解释:
 - 让 context pack 覆盖 evidence、entity、code symbol、code chunk、source span、structured graph facts 和 direct graph path evidence；当前实现已从 structured relation/claim/event 派生 `graph_paths`。
 - 检索候选只使用 `accepted`/`proposed` evidence，`rejected`/`superseded` evidence 保留为可检查图状态但不作为 grounding context。
 - 增强 BM25/lexical 文档构建字段，覆盖 source path、entity/code symbol lexical aliases、code symbol、code chunk 和 doc comment，并补充 ranking explanation 测试；当前 SQLite FTS5 read model 已为 entity labels 和 code symbols 写入独立 alias 字段。
-- 为 semantic/vector 保留 adapter trait、backend status metadata 和 scope post-filter metadata，但默认允许 unavailable/degraded。
+- 为 semantic/vector 保留 backend status metadata、scope post-filter metadata 和 `local`/`external`/`disabled` runtime mode。
 - Web readiness 继续从 health/status 显示 BM25、semantic cursor、vector cursor、code graph、runtime budgets 和 index lag。
 
 ### Phase 2: 可恢复索引刷新
 
 - 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
-- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；未配置真实 backend 时 model/dimension 为空，但 refresh worker 可在完成任务时写入并由 cursor 诊断返回。
+- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；refresh worker 完成任务时从已索引文档推导 model/dimension 并由 cursor 诊断返回。
 - health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和结构化 stale reasons；每条 reason 必须能指向索引族或 scoped cursor，并携带 lag versions 和 last error。
 
 ### Phase 3: Agent 与常驻服务
@@ -109,15 +109,16 @@ GraphRAG 能力必须保持可解释:
 ### Phase 4: 高级 GraphRAG
 
 - 已接入 local semantic retrieval 和 hashed-vector ANN read model，支持 model、dimension、source hash、scope 和 graph version metadata。
+- 已接入 semantic/vector backend runtime contract，支持 `local`、`external` 和 `disabled` 状态、disabled execution gate 以及 refresh cursor model metadata。
 - 已增加 path retrieval、schema-guided traversal、community summary 和 temporal query。
-- 已增加 multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality 和 parent evidence grouping。
-- 已建立 evaluation harness，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
+- 已增加 multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality、parent evidence grouping 和 maintenance worker 输出提交边界。
+- 已建立 evaluation harness 和 CI fixture gate，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
 
 剩余 Phase 4 产品化工作:
 
-- 接入可替换的外部 text/image embedding backend，并保留本地 read model 作为 deterministic fallback。
-- 把真实 OCR、caption、table/layout extractor 放入后台 worker/maintenance 边界，写入当前 multimodal schema。
-- 将 evaluation harness 接到 CI fixture 和后续 release diagnostics。
+- 接入具体外部 text/image embedding provider，并保留本地 read model 作为 deterministic fallback。
+- 产品化真实 OCR、caption、table/layout extractor 调度、重试和 provider 诊断。
+- 扩充 evaluation fixture 数据集规模并接入后续 release diagnostics。
 
 ## 5. 验收要求
 

@@ -85,6 +85,59 @@ impl EvaluationCase {
     }
 }
 
+/// Small deterministic Phase 4 fixture suite used by integration and CI gates.
+pub fn phase4_fixture_cases() -> Result<Vec<EvaluationCase>, EvaluationError> {
+    Ok(vec![
+        EvaluationCase::new(
+            "phase4_exact_fact",
+            EvaluationCaseKind::ExactFact,
+            "exact fact async sqlite",
+        )?
+        .requiring_results(&["ev-exact"])?
+        .requiring_sources(&[RetrieverSource::Bm25]),
+        EvaluationCase::new(
+            "phase4_multi_hop",
+            EvaluationCaseKind::MultiHop,
+            "GraphRAG uses vector path",
+        )?
+        .requiring_results(&["ev-path"])?
+        .requiring_sources(&[RetrieverSource::GraphPath]),
+        EvaluationCase::new(
+            "phase4_temporal",
+            EvaluationCaseKind::Temporal,
+            "timeline 2026 relay release",
+        )?
+        .requiring_results(&["ev-temporal"])?
+        .requiring_sources(&[RetrieverSource::Temporal]),
+        EvaluationCase::new(
+            "phase4_negative_rejection",
+            EvaluationCaseKind::NegativeRejection,
+            "rejected only context",
+        )?
+        .forbidding_results(&["ev-rejected"])?,
+        EvaluationCase::new(
+            "phase4_stale_index",
+            EvaluationCaseKind::StaleIndex,
+            "stale index refresh",
+        )?
+        .requiring_results(&["ev-stale"])?
+        .expecting_stale(true),
+        EvaluationCase::new(
+            "phase4_ambiguous_entity",
+            EvaluationCaseKind::AmbiguousEntity,
+            "rust",
+        )?
+        .requiring_results(&["ev-rust-language", "ev-rust-material"])?,
+        EvaluationCase::new(
+            "phase4_code_impact",
+            EvaluationCaseKind::CodeImpact,
+            "retry policy changed",
+        )?
+        .requiring_results(&["symbol:retry_policy"])?
+        .requiring_sources(&[RetrieverSource::CodeGraph]),
+    ])
+}
+
 /// Compact observation submitted by integration tests or diagnostics commands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvaluationObservation {
@@ -279,41 +332,19 @@ mod tests {
 
     #[test]
     fn evaluates_phase4_case_families() {
-        let cases = vec![
-            EvaluationCase::new("exact", EvaluationCaseKind::ExactFact, "fact")
-                .unwrap()
-                .requiring_results(&["ev-1"])
-                .unwrap(),
-            EvaluationCase::new("multi", EvaluationCaseKind::MultiHop, "path")
-                .unwrap()
-                .requiring_sources(&[RetrieverSource::GraphPath]),
-            EvaluationCase::new("temporal", EvaluationCaseKind::Temporal, "as_of:2026")
-                .unwrap()
-                .requiring_sources(&[RetrieverSource::Temporal]),
-            EvaluationCase::new("negative", EvaluationCaseKind::NegativeRejection, "unknown")
-                .unwrap()
-                .forbidding_results(&["ev-2"])
-                .unwrap(),
-            EvaluationCase::new("stale", EvaluationCaseKind::StaleIndex, "stale")
-                .unwrap()
-                .expecting_stale(true),
-            EvaluationCase::new("ambiguous", EvaluationCaseKind::AmbiguousEntity, "rust")
-                .unwrap()
-                .requiring_results(&["ev-rust-lang", "ev-rust-fungus"])
-                .unwrap(),
-            EvaluationCase::new("impact", EvaluationCaseKind::CodeImpact, "changed")
-                .unwrap()
-                .requiring_results(&["symbol:retry_policy"])
-                .unwrap(),
-        ];
+        let cases = phase4_fixture_cases().expect("fixture cases should validate");
         let observations = vec![
-            observation(&["ev-1"], &[], false),
+            observation(&["ev-exact"], &[RetrieverSource::Bm25], false),
             observation(&["ev-path"], &[RetrieverSource::GraphPath], false),
-            observation(&["ev-time"], &[RetrieverSource::Temporal], false),
+            observation(&["ev-temporal"], &[RetrieverSource::Temporal], false),
             observation(&[], &[], false),
             observation(&["ev-stale"], &[], true),
-            observation(&["ev-rust-lang", "ev-rust-fungus"], &[], false),
-            observation(&["symbol:retry_policy"], &[], false),
+            observation(&["ev-rust-language", "ev-rust-material"], &[], false),
+            observation(
+                &["symbol:retry_policy"],
+                &[RetrieverSource::CodeGraph],
+                false,
+            ),
         ];
 
         let report = evaluate_suite(&cases, &observations).expect("suite should score");

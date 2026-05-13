@@ -78,6 +78,16 @@ impl GraphStore for GraphOnlySearchStore {
     fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
         Box::pin(async move {
             assert_eq!(request.source_scope.as_deref(), Some("docs"));
+            assert!(
+                request
+                    .disabled_retriever_sources
+                    .contains(&crate::domain::RetrieverSource::Semantic)
+            );
+            assert!(
+                request
+                    .disabled_retriever_sources
+                    .contains(&crate::domain::RetrieverSource::Vector)
+            );
 
             Ok(vec![RetrievalHit {
                 evidence_id: "ev-graph-only".to_owned(),

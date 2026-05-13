@@ -9,7 +9,7 @@
 - [使用指南](docs/user-guide/README.md): 按章节拆分的安装、CLI、知识图谱、代码仓库、Web、MCP/Agent 和运维排障说明。
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
-- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local semantic/vector、schema path、temporal/community、多模态 evidence、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
+- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local/external semantic/vector backend contract、schema path、temporal/community、多模态 evidence maintenance、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
 - [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
@@ -35,6 +35,7 @@ This is a Rust project. Install Rust through `rustup`, then run:
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 cargo run
 cargo run -- --format json
@@ -47,10 +48,10 @@ The binary starts a Tokio runtime, and the shared application service exposes as
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
 Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
-Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
-Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, and retrieval groups those hits by parent to avoid duplicate context items.
-The `evaluation` module provides a pure GraphRAG harness for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
-Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` now explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
+Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
+Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
+The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
+Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 
@@ -71,6 +72,24 @@ relay-knowledge service doctor --format json
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --mcp streamable-http
 relay-knowledge query -- --help
 ```
+
+Semantic/vector read-model backend metadata is configured only through the
+`env` boundary. The default mode is local deterministic read models; external
+worker metadata can be selected with:
+
+```bash
+RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
+RELAY_KNOWLEDGE_VECTOR_BACKEND=external
+RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL=text-embed-3-small
+RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL=clip-vit-b32
+RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
+```
+
+`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` and
+`RELAY_KNOWLEDGE_VECTOR_BACKEND` also accept `local` and `disabled`. Disabled
+read-model backends are excluded from semantic/vector retrieval execution and
+refresh scheduling; blank embedding model names fail during runtime
+configuration.
 
 The CLI ingest command writes evidence plus entity labels. The shared API also
 accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source

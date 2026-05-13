@@ -44,6 +44,11 @@ pub const RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES: &str = "RELAY_KNOWLEDGE_MCP_MAX
 pub const RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH: &str = "RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH";
 pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
+pub const RELAY_KNOWLEDGE_SEMANTIC_BACKEND: &str = "RELAY_KNOWLEDGE_SEMANTIC_BACKEND";
+pub const RELAY_KNOWLEDGE_VECTOR_BACKEND: &str = "RELAY_KNOWLEDGE_VECTOR_BACKEND";
+pub const RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL";
+pub const RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL: &str = "RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL";
+pub const RELAY_KNOWLEDGE_EMBEDDING_DIMENSION: &str = "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -149,6 +154,16 @@ pub struct AgentEnvOverrides {
     pub mcp_allow_remote_clients: Option<bool>,
 }
 
+/// Retrieval backend settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RetrievalEnvOverrides {
+    pub semantic_backend: Option<String>,
+    pub vector_backend: Option<String>,
+    pub text_embedding_model: Option<String>,
+    pub image_embedding_model: Option<String>,
+    pub embedding_dimension: Option<usize>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
@@ -156,6 +171,7 @@ pub struct EnvironmentConfig {
     pub paths: PathEnvOverrides,
     pub network: NetworkEnvOverrides,
     pub agent: AgentEnvOverrides,
+    pub retrieval: RetrievalEnvOverrides,
 }
 
 impl EnvironmentConfig {
@@ -269,6 +285,16 @@ impl EnvironmentConfig {
                 mcp_allow_remote_clients: bool_var(
                     &values,
                     RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS,
+                )?,
+            },
+            retrieval: RetrievalEnvOverrides {
+                semantic_backend: string_var(&values, RELAY_KNOWLEDGE_SEMANTIC_BACKEND)?,
+                vector_backend: string_var(&values, RELAY_KNOWLEDGE_VECTOR_BACKEND)?,
+                text_embedding_model: string_var(&values, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL)?,
+                image_embedding_model: string_var(&values, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL)?,
+                embedding_dimension: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
                 )?,
             },
         })
@@ -532,6 +558,11 @@ mod tests {
                 (RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES, "8192"),
                 (RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH, "true"),
                 (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
+                (RELAY_KNOWLEDGE_SEMANTIC_BACKEND, "external"),
+                (RELAY_KNOWLEDGE_VECTOR_BACKEND, "external"),
+                (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
+                (RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, "clip-vit-b32"),
+                (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
             ],
         )
         .expect("environment should parse");
@@ -563,6 +594,20 @@ mod tests {
         assert_eq!(config.agent.mcp_max_context_bytes, Some(8192));
         assert_eq!(config.agent.mcp_allow_index_refresh, Some(true));
         assert_eq!(config.agent.mcp_allow_remote_clients, Some(false));
+        assert_eq!(
+            config.retrieval.semantic_backend,
+            Some("external".to_owned())
+        );
+        assert_eq!(config.retrieval.vector_backend, Some("external".to_owned()));
+        assert_eq!(
+            config.retrieval.text_embedding_model,
+            Some("text-embed-3-small".to_owned())
+        );
+        assert_eq!(
+            config.retrieval.image_embedding_model,
+            Some("clip-vit-b32".to_owned())
+        );
+        assert_eq!(config.retrieval.embedding_dimension, Some(1536));
     }
 
     #[test]

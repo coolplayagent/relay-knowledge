@@ -3,15 +3,16 @@
 //! Retrieval owns query-shape validation and budgets before the application
 //! service asks storage and derived indexes for data.
 
-use std::{error::Error, fmt, future::Future, pin::Pin};
+use std::{error::Error, fmt};
 
 use crate::domain::{
-    FreshnessPolicy, GraphVersion, RetrievalBackendState, RetrievalBackendStatus, RetrievalHit,
-    RetrieverSource,
+    FreshnessPolicy, GraphVersion, IndexKind, IndexStatus, RetrievalBackendState,
+    RetrievalBackendStatus, RetrieverSource,
 };
 
-pub type RetrievalAdapterFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, RetrievalAdapterError>> + Send + 'a>>;
+pub const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
+pub const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
+pub const LOCAL_VECTOR_DIMENSION: u32 = 16;
 
 /// Validated retrieval request with bounded result count.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,79 +23,207 @@ pub struct RetrievalPlan {
     pub freshness: FreshnessPolicy,
 }
 
-/// Bounded request sent to semantic or vector retrieval backends.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DerivedRetrievalRequest {
-    pub query: String,
-    pub source_scope: Option<String>,
-    pub graph_version: GraphVersion,
-    pub limit: usize,
+/// Configured owner of a semantic or vector read model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadModelBackendMode {
+    Local,
+    External,
+    Disabled,
 }
 
-/// Successful derived retrieval output with backend status metadata.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DerivedRetrievalOutcome {
-    pub hits: Vec<RetrievalHit>,
-    pub status: RetrievalBackendStatus,
-}
+impl ReadModelBackendMode {
+    /// Parses a stable environment/config value.
+    pub fn parse(value: &str) -> Result<Self, ReadModelBackendModeError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "external" => Ok(Self::External),
+            "disabled" => Ok(Self::Disabled),
+            other => Err(ReadModelBackendModeError {
+                value: other.to_owned(),
+            }),
+        }
+    }
 
-/// Adapter boundary for semantic/vector read models.
-pub trait DerivedRetrievalAdapter: Send + Sync {
-    fn search(
-        &self,
-        request: DerivedRetrievalRequest,
-    ) -> RetrievalAdapterFuture<'_, DerivedRetrievalOutcome>;
-}
-
-/// Unavailable backend adapter used until a real read model is configured.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackendUnavailableAdapter {
-    source: RetrieverSource,
-    reason: &'static str,
-}
-
-impl BackendUnavailableAdapter {
-    /// Creates an adapter that records an unavailable backend decision.
-    pub const fn new(source: RetrieverSource, reason: &'static str) -> Self {
-        Self { source, reason }
+    /// Stable configuration label.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::External => "external",
+            Self::Disabled => "disabled",
+        }
     }
 }
 
-impl DerivedRetrievalAdapter for BackendUnavailableAdapter {
-    fn search(
-        &self,
-        request: DerivedRetrievalRequest,
-    ) -> RetrievalAdapterFuture<'_, DerivedRetrievalOutcome> {
-        let status = RetrievalBackendStatus {
-            source: self.source,
-            state: RetrievalBackendState::Unavailable,
-            scope_post_filter: request.source_scope.is_some(),
-            indexed_graph_version: Some(request.graph_version),
-            reason: Some(self.reason.to_owned()),
-        };
+/// Invalid read model backend mode supplied by runtime configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadModelBackendModeError {
+    pub value: String,
+}
 
-        Box::pin(async move { Err(RetrievalAdapterError { status }) })
+impl fmt::Display for ReadModelBackendModeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "retrieval backend '{}' must be local, external, or disabled",
+            self.value
+        )
     }
 }
 
-/// Adapter failure that still carries stable API metadata.
+impl Error for ReadModelBackendModeError {}
+
+/// Model metadata used by semantic/vector refresh workers and diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RetrievalAdapterError {
-    pub status: RetrievalBackendStatus,
+pub struct ReadModelMetadata {
+    pub name: String,
+    pub dimension: u32,
 }
 
-/// Phase 1 derived backends are explicit but not yet configured.
-pub fn phase1_unavailable_adapters() -> [BackendUnavailableAdapter; 2] {
+/// Runtime read model configuration shared by refresh and retrieval status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadModelBackendConfig {
+    pub semantic_mode: ReadModelBackendMode,
+    pub vector_mode: ReadModelBackendMode,
+    pub semantic_model: ReadModelMetadata,
+    pub vector_model: ReadModelMetadata,
+    pub image_model: ReadModelMetadata,
+}
+
+impl ReadModelBackendConfig {
+    /// Uses the built-in deterministic read models.
+    pub fn local() -> Self {
+        Self {
+            semantic_mode: ReadModelBackendMode::Local,
+            vector_mode: ReadModelBackendMode::Local,
+            semantic_model: ReadModelMetadata {
+                name: LOCAL_SEMANTIC_MODEL.to_owned(),
+                dimension: LOCAL_VECTOR_DIMENSION,
+            },
+            vector_model: ReadModelMetadata {
+                name: LOCAL_VECTOR_MODEL.to_owned(),
+                dimension: LOCAL_VECTOR_DIMENSION,
+            },
+            image_model: ReadModelMetadata {
+                name: "relay-local-image-hash-v1".to_owned(),
+                dimension: LOCAL_VECTOR_DIMENSION,
+            },
+        }
+    }
+
+    /// Returns whether local index refresh should maintain an index family.
+    pub fn refreshes_index(&self, kind: IndexKind) -> bool {
+        match kind {
+            IndexKind::Bm25 => true,
+            IndexKind::Semantic => self.semantic_mode != ReadModelBackendMode::Disabled,
+            IndexKind::Vector => self.vector_mode != ReadModelBackendMode::Disabled,
+        }
+    }
+
+    /// Returns read-model retrievers that must not execute for a request.
+    pub fn disabled_retriever_sources(&self) -> Vec<RetrieverSource> {
+        let mut disabled = Vec::new();
+        if self.semantic_mode == ReadModelBackendMode::Disabled {
+            disabled.push(RetrieverSource::Semantic);
+        }
+        if self.vector_mode == ReadModelBackendMode::Disabled {
+            disabled.push(RetrieverSource::Vector);
+        }
+
+        disabled
+    }
+}
+
+/// Builds semantic/vector backend status from configured read models and index cursors.
+pub fn read_model_backend_statuses(
+    plan: &RetrievalPlan,
+    graph_version: GraphVersion,
+    indexes: &[IndexStatus],
+    config: &ReadModelBackendConfig,
+) -> Vec<RetrievalBackendStatus> {
     [
-        BackendUnavailableAdapter::new(
+        (
             RetrieverSource::Semantic,
-            "semantic retrieval backend is not configured",
+            IndexKind::Semantic,
+            config.semantic_mode,
+            &config.semantic_model,
         ),
-        BackendUnavailableAdapter::new(
+        (
             RetrieverSource::Vector,
-            "vector retrieval backend is not configured",
+            IndexKind::Vector,
+            config.vector_mode,
+            &config.vector_model,
         ),
     ]
+    .into_iter()
+    .map(|(source, kind, mode, metadata)| {
+        read_model_backend_status(source, kind, mode, metadata, plan, graph_version, indexes)
+    })
+    .collect()
+}
+
+fn read_model_backend_status(
+    source: RetrieverSource,
+    kind: IndexKind,
+    mode: ReadModelBackendMode,
+    metadata: &ReadModelMetadata,
+    plan: &RetrievalPlan,
+    graph_version: GraphVersion,
+    indexes: &[IndexStatus],
+) -> RetrievalBackendStatus {
+    if mode == ReadModelBackendMode::Disabled {
+        return RetrievalBackendStatus {
+            source,
+            state: RetrievalBackendState::Unavailable,
+            scope_post_filter: plan.source_scope.is_some(),
+            indexed_graph_version: None,
+            reason: Some(format!(
+                "{} read model disabled by configuration",
+                source.as_str()
+            )),
+        };
+    }
+
+    let Some(index) = indexes.iter().find(|status| status.kind == kind) else {
+        return RetrievalBackendStatus {
+            source,
+            state: RetrievalBackendState::Unavailable,
+            scope_post_filter: plan.source_scope.is_some(),
+            indexed_graph_version: None,
+            reason: Some(format!("{} index metadata is unavailable", source.as_str())),
+        };
+    };
+    let stale = index.is_stale_for(graph_version);
+    let reason = if stale {
+        format!(
+            "{} read model index is stale at graph version {} while graph is {}; configured {} backend model={} dimension={}",
+            source.as_str(),
+            index.indexed_graph_version.get(),
+            graph_version.get(),
+            mode.as_str(),
+            metadata.name,
+            metadata.dimension
+        )
+    } else {
+        format!(
+            "{} read model available through {} backend model={} dimension={}",
+            source.as_str(),
+            mode.as_str(),
+            metadata.name,
+            metadata.dimension
+        )
+    };
+
+    RetrievalBackendStatus {
+        source,
+        state: if stale {
+            RetrievalBackendState::Degraded
+        } else {
+            RetrievalBackendState::Available
+        },
+        scope_post_filter: plan.source_scope.is_some(),
+        indexed_graph_version: Some(index.indexed_graph_version),
+        reason: Some(reason),
+    }
 }
 
 impl RetrievalPlan {
@@ -180,28 +309,63 @@ mod tests {
         assert_eq!(too_large.to_string(), "limit must be 50 or less");
     }
 
-    #[tokio::test]
-    async fn unavailable_adapter_reports_scope_post_filter_metadata() {
-        let adapter = BackendUnavailableAdapter::new(
-            RetrieverSource::Semantic,
-            "semantic retrieval backend is not configured",
+    #[test]
+    fn read_model_statuses_report_available_local_backends() {
+        let plan = RetrievalPlan::new(
+            "SQLite",
+            Some("docs".to_owned()),
+            5,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("plan should validate");
+        let statuses = read_model_backend_statuses(
+            &plan,
+            GraphVersion::new(7),
+            &[
+                IndexStatus {
+                    kind: IndexKind::Semantic,
+                    index_version: 1,
+                    indexed_graph_version: GraphVersion::new(7),
+                    state: crate::domain::IndexState::Fresh,
+                    last_error: None,
+                },
+                IndexStatus {
+                    kind: IndexKind::Vector,
+                    index_version: 1,
+                    indexed_graph_version: GraphVersion::new(7),
+                    state: crate::domain::IndexState::Fresh,
+                    last_error: None,
+                },
+            ],
+            &ReadModelBackendConfig::local(),
         );
-        let error = adapter
-            .search(DerivedRetrievalRequest {
-                query: "SQLite".to_owned(),
-                source_scope: Some("docs".to_owned()),
-                graph_version: GraphVersion::new(7),
-                limit: 5,
-            })
-            .await
-            .expect_err("backend should be unavailable");
 
-        assert_eq!(error.status.source, RetrieverSource::Semantic);
-        assert_eq!(error.status.state, RetrievalBackendState::Unavailable);
-        assert!(error.status.scope_post_filter);
-        assert_eq!(
-            error.status.indexed_graph_version,
-            Some(GraphVersion::new(7))
+        assert_eq!(statuses[0].state, RetrievalBackendState::Available);
+        assert_eq!(statuses[1].state, RetrievalBackendState::Available);
+        assert!(statuses.iter().all(|status| status.scope_post_filter));
+    }
+
+    #[test]
+    fn read_model_statuses_report_stale_or_disabled_backends() {
+        let plan = RetrievalPlan::new("SQLite", None, 5, FreshnessPolicy::AllowStale)
+            .expect("plan should validate");
+        let mut config = ReadModelBackendConfig::local();
+        config.vector_mode = ReadModelBackendMode::Disabled;
+
+        let statuses = read_model_backend_statuses(
+            &plan,
+            GraphVersion::new(9),
+            &[IndexStatus {
+                kind: IndexKind::Semantic,
+                index_version: 1,
+                indexed_graph_version: GraphVersion::new(8),
+                state: crate::domain::IndexState::Fresh,
+                last_error: None,
+            }],
+            &config,
         );
+
+        assert_eq!(statuses[0].state, RetrievalBackendState::Degraded);
+        assert_eq!(statuses[1].state, RetrievalBackendState::Unavailable);
     }
 }

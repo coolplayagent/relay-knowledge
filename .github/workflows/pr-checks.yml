@@ -61,6 +61,9 @@ jobs:
       - name: Unit and integration test suite
         run: cargo test --all-targets --all-features
 
+      - name: GraphRAG evaluation fixture gate
+        run: cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
+
   coverage:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest

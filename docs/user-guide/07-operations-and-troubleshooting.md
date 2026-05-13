@@ -58,6 +58,9 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 路径配置错误: `RELAY_KNOWLEDGE_*_DIR` 和 `RELAY_KNOWLEDGE_HOME` 必须是绝对路径，且不能包含 `..`。
 
+`RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL must not be blank` 或
+`RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL must not be blank`: 模型名环境变量不能只包含空白字符；删除该变量可回到默认本地 deterministic model。
+
 ## 7.4 隔离复现
 
 排查用户数据或开发机污染时，用独立 runtime home:
@@ -77,6 +80,7 @@ Rust 质量门禁:
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
