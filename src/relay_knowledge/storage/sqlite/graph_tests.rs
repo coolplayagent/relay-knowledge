@@ -125,6 +125,52 @@ async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants()
 }
 
 #[tokio::test]
+async fn code_read_model_hits_merge_with_bm25_document() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .commit_code_graph_batch(
+            CodeGraphBatch::new(vec![parsed_code_file("repo", "src/lib.rs", "sym-main")])
+                .expect("batch should validate"),
+        )
+        .await
+        .expect("code graph commit should succeed");
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "main".to_owned(),
+            source_scope: Some("repo".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+    let symbol_hit = hits
+        .iter()
+        .find(|hit| {
+            hit.code_artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.artifact_id == "sym-main")
+        })
+        .expect("symbol hit should be present");
+
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::CodeGraph)
+    );
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+    );
+    assert!(
+        symbol_hit
+            .retriever_sources
+            .contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
 async fn reads_mutation_log_after_version() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(&store, "ev-1", "docs", "Rust async storage").await;

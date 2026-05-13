@@ -26,7 +26,8 @@ use crate::domain::{
 
 use parser::parse_indexed_file;
 use scope::{
-    load_ignore_rules, path_is_selected_with_rules, path_scope_overlaps, selection_exclusion_reason,
+    load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
+    path_scope_overlaps, selection_exclusion_reason,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 
@@ -158,8 +159,9 @@ pub fn deleted_symbol_names_for_diff(
 ) -> Result<Vec<String>, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let base_commit = resolve_ref(&root, base_ref)?;
+    let head_commit = resolve_ref(&root, head_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
-    let ignore_rules = load_ignore_rules(&root)?;
+    let ignore_rules = load_ignore_rules_from_commit(&root, &head_commit)?;
     let mut names = Vec::new();
 
     for change in changes {
@@ -207,7 +209,7 @@ fn build_full_snapshot(
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(root, &commit)?;
-    let ignore_rules = load_ignore_rules(root)?;
+    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let paths = tracked_paths(root, &commit)?
         .into_iter()
         .filter(|path| {
@@ -235,7 +237,7 @@ fn build_incremental_snapshot(
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
-    let ignore_rules = load_ignore_rules(root)?;
+    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, false, changes.len(), 0);
 
     for change in changes {
@@ -802,6 +804,16 @@ fn git_bytes<const N: usize>(root: &Path, args: [&str; N]) -> Result<Vec<u8>, Co
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
+}
+
+fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "-e", object])
+        .output()?;
+
+    Ok(output.status.success())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

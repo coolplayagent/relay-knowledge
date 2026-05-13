@@ -8,9 +8,10 @@ use crate::{
 };
 
 use super::{
-    ScoredHit, context::entities_for_evidence, cosine_similarity, evidence_group_key,
-    hashed_vector, overlap_score, parse_f64_array, parse_string_array, semantic_overlap_score,
-    sort_scored_hits, split_labels, token_signature,
+    ScoredHit,
+    context::{code_artifact_for_document, entities_for_evidence},
+    cosine_similarity, evidence_group_key, hashed_vector, overlap_score, parse_f64_array,
+    parse_string_array, semantic_overlap_score, sort_scored_hits, split_labels, token_signature,
 };
 
 const SEMANTIC_SCAN_MULTIPLIER: usize = 8;
@@ -30,8 +31,8 @@ pub(super) fn semantic_candidates(
     let candidate_limit = bounded_candidate_limit(request)?;
     let mut statement = connection.prepare(
         "
-        SELECT document_id, evidence_id, parent_evidence_id, modality, source_scope,
-               source_path, entity_labels_json, content, token_signature_json,
+        SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
+               source_scope, source_path, entity_labels_json, content, token_signature_json,
                model, dimension, source_hash
         FROM graph_semantic_documents
         WHERE (?1 IS NULL OR source_scope = ?1)
@@ -50,16 +51,17 @@ pub(super) fn semantic_candidates(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, String>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
                 row.get::<_, String>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, String>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
             ))
         },
     )?;
@@ -67,6 +69,7 @@ pub(super) fn semantic_candidates(
     let mut hits = Vec::new();
     for (
         document_id,
+        document_kind,
         evidence_id,
         parent_evidence_id,
         modality,
@@ -93,8 +96,15 @@ pub(super) fn semantic_candidates(
         let group_id = parent_evidence_id
             .as_deref()
             .unwrap_or(evidence_id.as_str());
+        let key = if document_kind == "evidence" {
+            evidence_group_key(group_id)
+        } else {
+            document_id.clone()
+        };
+        let code_artifact =
+            code_artifact_for_document(&document_kind, &evidence_id, source_path.as_deref());
         hits.push(ScoredHit {
-            key: evidence_group_key(group_id),
+            key,
             hit: RetrievalHit {
                 evidence_id: group_id.to_owned(),
                 source_scope,
@@ -104,7 +114,7 @@ pub(super) fn semantic_candidates(
                 content,
                 entities: Vec::new(),
                 graph_facts: Vec::new(),
-                code_artifact: None,
+                code_artifact,
                 retriever_sources: Vec::new(),
                 ranking: Vec::new(),
                 score: 0.0,
@@ -129,8 +139,8 @@ pub(super) fn vector_candidates(
     let candidate_limit = bounded_candidate_limit(request)?;
     let mut statement = connection.prepare(
         "
-        SELECT document_id, evidence_id, parent_evidence_id, modality, source_scope,
-               source_path, entity_labels_json, content, vector_json, model,
+        SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
+               source_scope, source_path, entity_labels_json, content, vector_json, model,
                dimension, source_hash
         FROM graph_vector_documents
         WHERE (?1 IS NULL OR source_scope = ?1)
@@ -149,16 +159,17 @@ pub(super) fn vector_candidates(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, String>(6)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
                 row.get::<_, String>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, String>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
             ))
         },
     )?;
@@ -166,6 +177,7 @@ pub(super) fn vector_candidates(
     let mut hits = Vec::new();
     for (
         document_id,
+        document_kind,
         evidence_id,
         parent_evidence_id,
         modality,
@@ -202,8 +214,15 @@ pub(super) fn vector_candidates(
         let group_id = parent_evidence_id
             .as_deref()
             .unwrap_or(evidence_id.as_str());
+        let key = if document_kind == "evidence" {
+            evidence_group_key(group_id)
+        } else {
+            document_id.clone()
+        };
+        let code_artifact =
+            code_artifact_for_document(&document_kind, &evidence_id, source_path.as_deref());
         hits.push(ScoredHit {
-            key: evidence_group_key(group_id),
+            key,
             hit: RetrievalHit {
                 evidence_id: group_id.to_owned(),
                 source_scope,
@@ -213,7 +232,7 @@ pub(super) fn vector_candidates(
                 content,
                 entities: Vec::new(),
                 graph_facts: Vec::new(),
-                code_artifact: None,
+                code_artifact,
                 retriever_sources: Vec::new(),
                 ranking: Vec::new(),
                 score: 0.0,

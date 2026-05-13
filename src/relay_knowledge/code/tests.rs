@@ -672,6 +672,59 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
 }
 
 #[test]
+fn scope_preview_uses_ignore_rules_from_requested_commit() {
+    let repo = TempGitRepo::create("scope-preview-commit-ignore");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write(".relay-knowledgeignore", "");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
+    }));
+}
+
+#[test]
+fn scope_preview_counts_each_degraded_file_once() {
+    let repo = TempGitRepo::create("scope-preview-degraded-count");
+    repo.write("docs/large.custom", &"x".repeat(512 * 1024 + 1));
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert_eq!(preview.unsupported_file_count, 1);
+    assert_eq!(preview.generated_or_heavy_file_count, 1);
+    assert_eq!(preview.expected_degraded_file_count, 1);
+}
+
+#[test]
 fn impact_path_partition_uses_effective_scope() {
     let repo = TempGitRepo::create("impact-path-groups");
     repo.write("src/lib.rs", "fn kept() {}\n");

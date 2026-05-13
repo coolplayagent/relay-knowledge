@@ -360,6 +360,22 @@ pub fn retry_policy_v2() -> u32 {
     repo.git(["commit", "-m", "update policy"]);
     let head_ref = repo.git_text(["rev-parse", "HEAD"]);
 
+    let preview_after_change = run_repo(
+        &service,
+        RepoCommand::Index {
+            alias: "fixture".to_owned(),
+            ref_selector: "HEAD".to_owned(),
+            dry_run: true,
+        },
+        context("preview-new-head"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("dry-run preview should run after head changes");
+    let preview_value = json_value(&preview_after_change);
+    assert_eq!(preview_value["scope"]["resolved_commit_sha"], base_ref);
+    assert_eq!(preview_value["preview"]["resolved_commit_sha"], head_ref);
+
     let updated = run_repo(
         &service,
         RepoCommand::Update {

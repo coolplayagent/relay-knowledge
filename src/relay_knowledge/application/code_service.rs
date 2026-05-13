@@ -117,17 +117,10 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let scope_status = CodeRepositoryStatus {
-            last_indexed_commit: Some(preview.resolved_commit_sha.clone()),
-            tree_hash: Some(preview.tree_hash.clone()),
-            stale: status.stale,
-            ..status
-        };
-
         Ok(CodeRepositoryScopePreviewResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             scope: crate::api::CodeRepositoryScopeMetadata::from_status(
-                &scope_status,
+                &status,
                 &request.repository,
                 request.repository.ref_selector.clone(),
             ),

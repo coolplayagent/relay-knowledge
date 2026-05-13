@@ -11,7 +11,8 @@ use crate::domain::{
 };
 
 use super::{
-    CodeIndexError, git_bytes, languages::language_id, resolve_ref, resolve_tree, split_nul,
+    CodeIndexError, git_bytes, git_object_exists, languages::language_id, resolve_ref,
+    resolve_tree, split_nul,
 };
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
@@ -53,7 +54,7 @@ pub fn preview_repository_scope(
     let root = PathBuf::from(&registration.root_path);
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(&root, &commit)?;
-    let ignore_rules = load_ignore_rules(&root)?;
+    let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
     let mut selected_byte_count = 0usize;
     let mut selected_file_count = 0usize;
     let mut unsupported_file_count = 0usize;
@@ -83,12 +84,15 @@ pub fn preview_repository_scope(
             .or_insert((0, 0));
         bucket.0 += 1;
         bucket.1 = bucket.1.saturating_add(entry.byte_count);
-        if language == "unknown" {
+        let is_unsupported = language == "unknown";
+        let is_heavy = entry.byte_count > DEFAULT_TEXT_FILE_BUDGET_BYTES;
+        if is_unsupported {
             unsupported_file_count += 1;
-            expected_degraded_file_count += 1;
         }
-        if entry.byte_count > DEFAULT_TEXT_FILE_BUDGET_BYTES {
+        if is_heavy {
             generated_or_heavy_file_count += 1;
+        }
+        if is_unsupported || is_heavy {
             expected_degraded_file_count += 1;
         }
         largest_files.push(CodeRepositoryLargestFile {
@@ -165,7 +169,7 @@ pub(super) fn path_is_selected(
     selector: &CodeRepositorySelector,
 ) -> bool {
     let root = Path::new(&registration.root_path);
-    let ignore_rules = load_ignore_rules(root).unwrap_or_default();
+    let ignore_rules = load_ignore_rules(root).expect("ignore rules should load in tests");
 
     path_is_selected_with_rules(path, registration, selector, &ignore_rules)
 }
@@ -237,14 +241,36 @@ pub(super) fn load_ignore_rules(root: &Path) -> Result<Vec<IgnoreRule>, CodeInde
         Err(error) => return Err(error.into()),
     };
 
-    Ok(content
+    Ok(parse_ignore_rules(&content))
+}
+
+pub(super) fn load_ignore_rules_from_commit(
+    root: &Path,
+    commit: &str,
+) -> Result<Vec<IgnoreRule>, CodeIndexError> {
+    let object = format!("{commit}:.relay-knowledgeignore");
+    if !git_object_exists(root, &object)? {
+        return Ok(Vec::new());
+    }
+    let content = String::from_utf8(git_bytes(root, ["show", &object])?).map_err(|error| {
+        CodeIndexError::InvalidInput(format!(
+            ".relay-knowledgeignore at {commit} is not valid UTF-8: {}",
+            error.utf8_error()
+        ))
+    })?;
+
+    Ok(parse_ignore_rules(&content))
+}
+
+fn parse_ignore_rules(content: &str) -> Vec<IgnoreRule> {
+    content
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
         .map(|line| IgnoreRule {
             pattern: line.trim_start_matches('/').to_owned(),
         })
-        .collect())
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
