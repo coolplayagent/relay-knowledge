@@ -27,6 +27,14 @@ pub trait CodeRepositoryStore: Send + Sync {
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>>;
 
+    fn code_repository_scope_status(
+        &self,
+        repository: String,
+        resolved_commit_sha: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>>;
+
     fn code_file_fingerprints(
         &self,
         repository_id: String,

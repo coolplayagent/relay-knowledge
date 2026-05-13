@@ -111,6 +111,160 @@ async fn rejects_code_queries_for_unindexed_refs() {
 }
 
 #[tokio::test]
+async fn rejects_code_queries_when_requested_filter_scope_was_not_indexed() {
+    let mut snapshot = snapshot_with_chunk("repo", "src/lib.rs", "fn retry_policy() {}");
+    snapshot.path_filters = vec!["src".to_owned()];
+    let store = store_with_repository_snapshot(snapshot).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let error = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "retry_policy",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect_err("unindexed broader filter scope should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("no index for ref commit and requested filters")
+    );
+}
+
+#[tokio::test]
+async fn code_queries_match_canonical_filter_spellings() {
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_chunk("repo", "src/lib.rs", "fn retry_policy() {}"),
+        vec!["src/".to_owned()],
+        Vec::new(),
+    )
+    .await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", vec!["./src".to_owned()], Vec::new())
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "retry_policy",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("canonical filter spelling should match indexed scope");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/lib.rs");
+}
+
+#[tokio::test]
+async fn incremental_update_rejects_unrelated_filter_baselines() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/lib.rs",
+        "fn retry_policy() {}",
+    ))
+    .await;
+    let mut incremental = incremental_snapshot_for_parsed_file();
+    incremental.path_filters = vec!["src".to_owned()];
+
+    let error = store
+        .apply_code_index_snapshot(incremental)
+        .await
+        .expect_err("unrelated filter baseline should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("no matching indexed scope for incremental filters")
+    );
+}
+
+#[tokio::test]
+async fn incremental_update_matches_canonical_filter_baselines() {
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_chunk("repo", "src/lib.rs", "fn retry_policy() {}"),
+        vec!["src/".to_owned()],
+        Vec::new(),
+    )
+    .await;
+    let mut incremental = incremental_snapshot_for_parsed_file();
+    retarget_snapshot_scope(&mut incremental, "scope-next");
+    incremental.resolved_commit_sha = "commit-next".to_owned();
+    incremental.path_filters = vec!["./src".to_owned()];
+
+    store
+        .apply_code_index_snapshot(incremental)
+        .await
+        .expect("canonical baseline filters should match");
+
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit-next", vec!["src".to_owned()], Vec::new())
+            .expect("selector should validate");
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "kept",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("incremental scope should be searchable");
+
+    assert_eq!(hits.len(), 1);
+}
+
+#[tokio::test]
+async fn incremental_update_rejects_filter_baselines_from_older_commits() {
+    let mut scoped_base = snapshot_with_chunk("repo", "src/lib.rs", "fn old_policy() {}");
+    retarget_snapshot_scope(&mut scoped_base, "scope-src-a");
+    scoped_base.resolved_commit_sha = "commit-a".to_owned();
+    scoped_base.tree_hash = "tree-a".to_owned();
+    scoped_base.path_filters = vec!["src".to_owned()];
+    let store = store_with_repository_snapshot(scoped_base).await;
+
+    let mut current_other_scope =
+        snapshot_with_chunk("repo", "tests/lib.rs", "fn test_policy() {}");
+    retarget_snapshot_scope(&mut current_other_scope, "scope-tests-b");
+    current_other_scope.resolved_commit_sha = "commit-b".to_owned();
+    current_other_scope.tree_hash = "tree-b".to_owned();
+    current_other_scope.path_filters = vec!["tests".to_owned()];
+    store
+        .apply_code_index_snapshot(current_other_scope)
+        .await
+        .expect("current unrelated scope should apply");
+
+    let mut incremental = incremental_snapshot_for_parsed_file();
+    retarget_snapshot_scope(&mut incremental, "scope-src-c");
+    incremental.resolved_commit_sha = "commit-c".to_owned();
+    incremental.tree_hash = "tree-c".to_owned();
+    incremental.path_filters = vec!["src".to_owned()];
+
+    let error = store
+        .apply_code_index_snapshot(incremental)
+        .await
+        .expect_err("older filter baseline should not seed current incremental scope");
+
+    assert!(error.to_string().contains("current base commit"));
+}
+
+#[tokio::test]
 async fn rejects_impact_kind_for_plain_code_queries() {
     let store = store_with_repository_snapshot(snapshot_with_chunk(
         "repo",
@@ -140,11 +294,16 @@ async fn rejects_impact_kind_for_plain_code_queries() {
 
 #[tokio::test]
 async fn language_filters_apply_to_references_calls_and_imports() {
-    let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_language_edges(),
+        vec!["src".to_owned()],
+        vec!["rust".to_owned()],
+    )
+    .await;
     let selector = CodeRepositorySelector::new(
         "fixture",
         "commit",
-        vec!["src/".to_owned()],
+        vec!["src".to_owned()],
         vec!["rust".to_owned()],
     )
     .expect("selector should validate");
@@ -342,7 +501,12 @@ async fn impact_callers_match_resolved_symbol_identity() {
 
 #[tokio::test]
 async fn impact_seeds_respect_request_path_filters() {
-    let store = store_with_repository_snapshot(snapshot_with_out_of_scope_seed()).await;
+    let store = store_with_repository_snapshot_and_filters(
+        snapshot_with_out_of_scope_seed(),
+        vec!["src".to_owned()],
+        Vec::new(),
+    )
+    .await;
     let request = crate::domain::CodeImpactRequest::new(
         CodeRepositorySelector::new("fixture", "commit", vec!["src".to_owned()], Vec::new())
             .expect("selector should validate"),
@@ -428,7 +592,7 @@ async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGr
 }
 
 async fn store_with_repository_snapshot_and_filters(
-    snapshot: CodeIndexSnapshot,
+    mut snapshot: CodeIndexSnapshot,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
 ) -> SqliteGraphStore {
@@ -437,20 +601,52 @@ async fn store_with_repository_snapshot_and_filters(
         "repo",
         "fixture",
         "/tmp/repo",
-        path_filters,
-        language_filters,
+        path_filters.clone(),
+        language_filters.clone(),
     )
     .expect("registration should validate");
     store
         .upsert_code_repository(registration)
         .await
         .expect("repository should persist");
+    if !path_filters.is_empty() || !language_filters.is_empty() {
+        snapshot.path_filters = path_filters;
+        snapshot.language_filters = language_filters;
+    }
     store
         .apply_code_index_snapshot(snapshot)
         .await
         .expect("snapshot should apply");
 
     store
+}
+
+fn retarget_snapshot_scope(snapshot: &mut CodeIndexSnapshot, source_scope: &str) {
+    snapshot.source_scope = source_scope.to_owned();
+    for file in &mut snapshot.files {
+        file.source_scope = source_scope.to_owned();
+    }
+    for symbol in &mut snapshot.symbols {
+        symbol.source_scope = source_scope.to_owned();
+    }
+    for reference in &mut snapshot.references {
+        reference.source_scope = source_scope.to_owned();
+    }
+    for import in &mut snapshot.imports {
+        import.source_scope = source_scope.to_owned();
+    }
+    for call in &mut snapshot.calls {
+        call.source_scope = source_scope.to_owned();
+    }
+    for chunk in &mut snapshot.chunks {
+        chunk.source_scope = source_scope.to_owned();
+    }
+    for diagnostic in &mut snapshot.diagnostics {
+        diagnostic.source_scope = source_scope.to_owned();
+    }
+    for tombstone in &mut snapshot.tombstones {
+        tombstone.source_scope = source_scope.to_owned();
+    }
 }
 
 pub(super) fn snapshot_with_chunk(

@@ -235,6 +235,22 @@ fn migrate_legacy_code_scope_schema(connection: &Connection) -> Result<(), Stora
             )?;
         }
     }
+    drop_renamed_legacy_lookup_indexes(connection)?;
+
+    Ok(())
+}
+
+fn drop_renamed_legacy_lookup_indexes(connection: &Connection) -> Result<(), StorageError> {
+    for index in [
+        "code_repository_symbols_lookup",
+        "code_repository_references_lookup",
+        "code_repository_calls_lookup",
+        "code_repository_imports_lookup",
+        "code_repository_chunks_lookup",
+        "code_repository_scopes_lookup",
+    ] {
+        connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+    }
 
     Ok(())
 }
@@ -301,6 +317,24 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
         self.run(move |connection| repository_status(connection, &repository))
+    }
+
+    fn code_repository_scope_status(
+        &self,
+        repository: String,
+        resolved_commit_sha: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        self.run(move |connection| {
+            repository_scope_status(
+                connection,
+                &repository,
+                &resolved_commit_sha,
+                &path_filters,
+                &language_filters,
+            )
+        })
     }
 
     fn code_file_fingerprints(
@@ -406,32 +440,38 @@ pub(super) fn repository_scope_status(
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     let language_filters_json = serde_json::to_string(language_filters)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    connection
-        .query_row(
-            "
-            SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
-                   reference_count, chunk_count, stale, degraded_reason
-            FROM code_repository_scopes
-            WHERE repository_id = ?1
-              AND resolved_commit_sha = ?2
-            ORDER BY
-              CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
-              source_scope ASC
-            LIMIT 1
-            ",
-            params![
-                base.repository_id,
-                resolved_commit_sha,
-                path_filters_json,
-                language_filters_json
-            ],
-            |row| {
-                Ok(CodeRepositoryStatus {
+    let requested_path_filters = canonical_path_filters(path_filters);
+    let requested_language_filters = canonical_filter_values(language_filters);
+    let mut statement = connection.prepare(
+        "
+        SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
+               reference_count, chunk_count, stale, degraded_reason,
+               path_filters_json, language_filters_json
+        FROM code_repository_scopes
+        WHERE repository_id = ?1
+          AND resolved_commit_sha = ?2
+        ORDER BY
+          CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
+          source_scope ASC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![
+            base.repository_id,
+            resolved_commit_sha,
+            path_filters_json,
+            language_filters_json
+        ],
+        |row| {
+            let stored_path_filters = parse_json_list(row.get::<_, String>(8)?)?;
+            let stored_language_filters = parse_json_list(row.get::<_, String>(9)?)?;
+            Ok((
+                CodeRepositoryStatus {
                     repository_id: base.repository_id.clone(),
                     alias: base.alias.clone(),
                     root_path: base.root_path.clone(),
-                    path_filters: path_filters.to_vec(),
-                    language_filters: language_filters.to_vec(),
+                    path_filters: stored_path_filters.clone(),
+                    language_filters: stored_language_filters.clone(),
                     last_indexed_scope_id: Some(row.get(0)?),
                     last_indexed_commit: Some(resolved_commit_sha.to_owned()),
                     tree_hash: Some(row.get(1)?),
@@ -442,11 +482,22 @@ pub(super) fn repository_scope_status(
                     chunk_count: row.get(5)?,
                     stale: row.get::<_, i64>(6)? != 0,
                     degraded_reason: row.get(7)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(StorageError::from)
+                },
+                stored_path_filters,
+                stored_language_filters,
+            ))
+        },
+    )?;
+    for row in rows {
+        let (status, stored_path_filters, stored_language_filters) = row?;
+        if canonical_path_filters(&stored_path_filters) == requested_path_filters
+            && canonical_filter_values(&stored_language_filters) == requested_language_filters
+        {
+            return Ok(Some(status));
+        }
+    }
+
+    Ok(None)
 }
 
 fn repository_status_by_column(
@@ -514,6 +565,38 @@ fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {
     serde_json::from_str(&value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
     })
+}
+
+fn canonical_path_filters(filters: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for filter in filters {
+        let value = normalize_path_filter(filter).to_owned();
+        if !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+
+    normalized
+}
+
+fn canonical_filter_values(filters: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for filter in filters {
+        if !normalized.contains(filter) {
+            normalized.push(filter.clone());
+        }
+    }
+
+    normalized
+}
+
+fn normalize_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 fn file_fingerprints(
@@ -684,17 +767,57 @@ fn clone_active_scope_for_incremental(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
-    let previous_scope = transaction
-        .query_row(
-            "SELECT last_indexed_scope_id FROM code_repositories WHERE repository_id = ?1",
-            params![snapshot.repository_id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten();
-    let Some(previous_scope) = previous_scope else {
-        return Ok(());
-    };
+    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let requested_path_filters = canonical_path_filters(&snapshot.path_filters);
+    let requested_language_filters = canonical_filter_values(&snapshot.language_filters);
+    let mut statement = transaction.prepare(
+        "
+        SELECT source_scope, path_filters_json, language_filters_json
+        FROM code_repository_scopes
+        WHERE repository_id = ?1
+          AND resolved_commit_sha = (
+              SELECT last_indexed_commit
+              FROM code_repositories
+              WHERE repository_id = ?1
+          )
+        ORDER BY
+          CASE WHEN path_filters_json = ?2 AND language_filters_json = ?3 THEN 0 ELSE 1 END,
+          rowid DESC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![
+            snapshot.repository_id,
+            path_filters_json,
+            language_filters_json
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                parse_json_list(row.get::<_, String>(1)?)?,
+                parse_json_list(row.get::<_, String>(2)?)?,
+            ))
+        },
+    )?;
+    let mut previous_scope = None;
+    for row in rows {
+        let (source_scope, stored_path_filters, stored_language_filters) = row?;
+        if canonical_path_filters(&stored_path_filters) == requested_path_filters
+            && canonical_filter_values(&stored_language_filters) == requested_language_filters
+        {
+            previous_scope = Some(source_scope);
+            break;
+        }
+    }
+    let previous_scope = previous_scope.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{}' has no matching indexed scope for incremental filters at the current base commit",
+            snapshot.repository_id
+        ))
+    })?;
     if previous_scope == snapshot.source_scope {
         return Ok(());
     }

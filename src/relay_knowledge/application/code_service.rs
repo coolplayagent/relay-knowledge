@@ -153,14 +153,20 @@ impl RelayKnowledgeService {
                 degraded_reason: Some("graph_only freshness policy selected".to_owned()),
             });
         }
-        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh && status.stale {
-            return Err(ApiError::invalid_argument(format!(
-                "code repository '{}' is stale; run repo index or repo update before querying with wait_until_fresh",
-                status.alias
-            )));
-        }
         let requested_ref = request.repository.ref_selector.clone();
         let request = retrieval_request_at_indexed_ref(request, &status).await?;
+        let scoped_status =
+            resolved_code_scope_status(&store, &status, &request.repository).await?;
+        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh && scoped_status.stale {
+            return Err(ApiError::invalid_argument(format!(
+                "code repository '{}' scope '{}' is stale; run repo index or repo update before querying with wait_until_fresh",
+                scoped_status.alias,
+                scoped_status
+                    .last_indexed_scope_id
+                    .as_deref()
+                    .unwrap_or("unscoped")
+            )));
+        }
         let graph_version = store
             .current_graph_version()
             .await
@@ -170,18 +176,11 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
         let degraded_reason = results.iter().find_map(|hit| hit.degraded_reason.clone());
-        let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
-            &status,
+        let scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+            &scoped_status,
             &request.repository,
             requested_ref,
         );
-        if let Some(hit) = results.first() {
-            scope.scope_id = hit.scope_id.clone();
-            scope.resolved_commit_sha = hit.resolved_commit_sha.clone();
-            scope.tree_hash = hit.tree_hash.clone();
-            scope.index_versions = hit.index_versions.clone();
-            scope.stale = hit.stale;
-        }
 
         Ok(CodeRepositoryQueryResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -202,6 +201,8 @@ impl RelayKnowledgeService {
         let status = required_code_repository(&store, &request.repository.repository).await?;
         let head_commit = resolve_code_ref(&status, request.head_ref.clone()).await?;
         request.repository.ref_selector = head_commit.clone();
+        let scoped_status =
+            resolved_code_scope_status(&store, &status, &request.repository).await?;
         let root = PathBuf::from(status.root_path.clone());
         let base_ref = request.base_ref.clone();
         let head_ref = head_commit.clone();
@@ -238,18 +239,11 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
-            &status,
+        let scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+            &scoped_status,
             &request.repository,
             request.head_ref.clone(),
         );
-        if let Some(hit) = results.first() {
-            scope.scope_id = hit.scope_id.clone();
-            scope.resolved_commit_sha = hit.resolved_commit_sha.clone();
-            scope.tree_hash = hit.tree_hash.clone();
-            scope.index_versions = hit.index_versions.clone();
-            scope.stale = hit.stale;
-        }
 
         Ok(CodeRepositoryImpactResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -402,6 +396,41 @@ async fn retrieval_request_at_indexed_ref(
         indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
 
     Ok(request)
+}
+
+async fn resolved_code_scope_status(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    selector: &CodeRepositorySelector,
+) -> Result<CodeRepositoryStatus, ApiError> {
+    let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
+    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    store
+        .code_repository_scope_status(
+            selector.repository.clone(),
+            selector.ref_selector.clone(),
+            path_filters,
+            language_filters,
+        )
+        .await
+        .map_err(storage_api_error)?
+        .ok_or_else(|| {
+            ApiError::invalid_argument(format!(
+                "code repository '{}' has no index for ref {} and requested filters",
+                selector.repository, selector.ref_selector
+            ))
+        })
+}
+
+fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in left.iter().chain(right.iter()) {
+        if !merged.contains(value) {
+            merged.push(value.clone());
+        }
+    }
+
+    merged
 }
 
 async fn indexed_commit_for_ref(
