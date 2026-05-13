@@ -10,6 +10,7 @@ use std::{
     fmt,
     future::{Future, IntoFuture, Ready, ready},
     io,
+    net::IpAddr,
     pin::Pin,
     sync::{
         Arc,
@@ -111,6 +112,11 @@ impl fmt::Display for HttpBindAddress {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.value)
     }
+}
+
+/// Returns whether a listener may accept non-local clients under the access policy.
+pub fn remote_clients_allowed(config: &HttpConfig, allow_remote_clients: bool) -> bool {
+    allow_remote_clients || is_local_bind(&config.bind_address.to_string())
 }
 
 /// Outbound HTTP proxy and TLS verification policy.
@@ -727,6 +733,29 @@ fn parse_no_proxy_rules(value: Option<&str>) -> Result<Vec<String>, HttpConfigEr
                 .collect()
         })
         .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn is_local_bind(bind: &str) -> bool {
+    is_loopback_host(authority_host(bind))
+}
+
+fn authority_host(authority: &str) -> &str {
+    if let Some(remainder) = authority.strip_prefix('[') {
+        return remainder
+            .find(']')
+            .map_or(authority, |index| &remainder[..index]);
+    }
+
+    authority
+        .rsplit_once(':')
+        .map_or(authority, |(host, _)| host)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
 }
 
 #[cfg(test)]

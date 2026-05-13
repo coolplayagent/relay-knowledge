@@ -200,3 +200,22 @@ export type ServiceStatusResponse = {
     last_error?: string;
   };
 };
+
+export type WebOperationSnapshot = {
+  id: string;
+  name: string;
+  command: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type WebOperationExecuteRequest = {
+  snapshot: WebOperationSnapshot;
+};
+
+export type WebOperationExecuteResponse = {
+  metadata: ApiMetadata;
+  operation: string;
+  command: string;
+  result: unknown;
+};

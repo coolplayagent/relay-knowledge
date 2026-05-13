@@ -814,6 +814,34 @@ async fn run_with_service_maps_api_errors_to_cli_errors() {
     assert_eq!(error.to_string(), "query must not be empty");
 }
 
+#[tokio::test]
+async fn web_service_remote_bind_requires_explicit_remote_policy() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_HTTP_BIND", "0.0.0.0:8791"),
+        ],
+    )
+    .expect("environment should parse");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+
+    let error = ensure_web_remote_bind_allowed(
+        &runtime.network.current().http,
+        runtime.agent.access_policy.allow_remote_clients,
+    )
+    .expect_err("remote bind should require explicit policy");
+
+    assert_eq!(
+        error.to_string(),
+        "Web remote bind requires allow_remote_clients=true"
+    );
+}
+
 async fn service_with_memory_store() -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
