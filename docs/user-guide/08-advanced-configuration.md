@@ -58,7 +58,15 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536 \
 relay-knowledge index refresh --kind semantic --kind vector --format json
 ```
 
-`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 接受 `local`、`external` 或 `disabled`。`disabled` 会跳过对应 retriever 和 refresh scheduling。
+可选 provider worker 调优:
+
+```text
+RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE
+RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS
+RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY
+```
+
+`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 接受 `local`、`external` 或 `disabled`。`disabled` 会跳过对应 retriever 和 refresh scheduling。外部 provider 配置只描述 metadata 和 worker contract；查询热路径不会同步调用外部 embedding 服务。
 
 ## 8.4 网络与 QoS
 
@@ -75,6 +83,8 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 ```
 
 代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。业务模块不直接读取进程环境。
+
+非 loopback HTTP bind 应同时配置 MCP remote-client policy 和 origin/scope 限制。QoS budget 是 admission control，不是安全认证；它用于限制连接数、in-flight 请求、队列深度、超时和 overload 行为。
 
 ## 8.5 MCP Policy
 
@@ -101,7 +111,24 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 默认 policy 是只读且本机优先。远程监听、unspecified scope 和 index refresh 都需要显式开启。
 
-## 8.6 Planned Setup Interfaces
+## 8.6 Worker、Silent Updates 与 Audit
+
+后台 worker 和 silent-update operator 使用这些变量:
+
+```text
+RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT
+RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT
+RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED
+RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
+RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
+```
+
+未设置 worker endpoint 时，`worker run-once` 使用 deterministic fallback 生成 proposal。开启 audit sink 后，agent audit JSONL 写入 `paths` 管理的 log 目录；队列深度在运行时 capped 到 65536，队列满时持久镜像可以丢弃事件，内存 audit log 仍保留最近事件。
+
+## 8.7 Planned Setup Interfaces
 
 后续易用性改造应新增两个 CLI 入口，本章先记录接口意图:
 

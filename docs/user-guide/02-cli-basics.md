@@ -2,10 +2,10 @@
 
 ## 2.1 命令结构
 
-CLI 使用 git-style 子命令:
+CLI 使用 git-style 子命令。全局 `--format` 可以放在命令前后；命令参数仍按各子命令解析:
 
 ```bash
-relay-knowledge [command] [command options] [--format text|json|streaming-json]
+relay-knowledge [command] [command options] [--format text|json|markdown|streaming-json]
 ```
 
 没有子命令时等同于 `status`。查看帮助:
@@ -23,10 +23,11 @@ relay-knowledge query -- "--help" --format json
 
 ## 2.2 输出格式
 
-支持三种输出:
+支持四种输出:
 
 - `text`: 面向终端的短文本摘要，默认格式。
 - `json`: 单行 JSON，适合脚本、测试和其它工具消费。
+- `markdown`: 面向人工阅读的 Markdown；目前主要用于 `repo report` 和版本输出，其它命令会按通用响应渲染能力处理。
 - `streaming-json`: 输出 started、item、completed 等事件，适合长操作和未来前端流式展示。
 
 示例:
@@ -34,10 +35,11 @@ relay-knowledge query -- "--help" --format json
 ```bash
 relay-knowledge status --format text
 relay-knowledge status --format json
+relay-knowledge repo report core --format markdown
 relay-knowledge status --format streaming-json
 ```
 
-`version` 和 `--version` 只支持 `text` 和 `json`:
+`version` 和 `--version` 按 CLI 帮助公开支持 `text` 和 `json`，不支持 `streaming-json`:
 
 ```bash
 relay-knowledge version
@@ -67,6 +69,14 @@ relay-knowledge service doctor --format json
 
 `service status` 和 `service doctor` 当前复用同一统一 API 输出，报告 service mode、后台更新状态、service definition path、agent protocol status 和 refresh queue diagnostics。
 
+Provider 诊断:
+
+```bash
+relay-knowledge provider probe --format json
+```
+
+`provider probe` 读取环境边界解析出的 remote embedding provider 配置，并执行一次轻量探测。JSON 响应包含 `ok`、`provider`、`model`、`dimension`、可选 `latency_ms`，失败时还包含 `error_code`、`error_message` 和 `retryable`。它不会输出 API key 原文，也不会绕过 `env` 模块直接读取环境变量。endpoint host、batch、timeout、并发和 cursor metadata 属于 `status`、`health` 或 Web Providers 面板的运行时诊断。
+
 ## 2.4 Freshness 策略
 
 查询类命令可使用 `--freshness` 控制索引新鲜度:
@@ -84,16 +94,31 @@ relay-knowledge status
 relay-knowledge ingest --source <scope> --content <text> [--entity <label>]
 relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]
 relay-knowledge repo register <path> --alias <name> [--path <filter>] [--language <id>]
-relay-knowledge repo index <alias> [--ref <ref>]
+relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
+relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
 relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
+relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo status <alias>
 relay-knowledge graph inspect
 relay-knowledge index refresh [--kind bm25|semantic|vector]
+relay-knowledge worker status|run-once [--kind embedding|ocr|vision|extractor]
+relay-knowledge proposal list [--state proposed|accepted|rejected|superseded] [--limit <n>]
+relay-knowledge proposal show <proposal-id>
+relay-knowledge proposal accept|reject|supersede <proposal-id> --by <actor> [--reason <text>]
+relay-knowledge audit query [--operation <name>] [--limit <n>]
+relay-knowledge provider probe
 relay-knowledge health
 relay-knowledge service status
 relay-knowledge service doctor
+relay-knowledge service plan install|uninstall
+relay-knowledge service definition write
+relay-knowledge service operator status|pause|resume
 relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge version
 ```
+
+## 2.6 参数边界
+
+`--limit` 必须是正整数并由各 API 层继续执行上限校验；`0` 会被 retrieval、repository 和 audit/proposal 等请求校验拒绝。`--kind` 在不同命令中含义不同: `index refresh` 只接受 `bm25`、`semantic`、`vector`；`worker` 只接受 `embedding`、`ocr`、`vision`、`extractor`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`。当查询文本或 reason 中包含以 `-` 开头的词时，使用 `--` 或引号避免被解析成选项。
