@@ -618,6 +618,58 @@ fn deleted_symbol_names_are_extracted_from_base_diff() {
 }
 
 #[test]
+fn scope_preview_reports_default_and_ignore_exclusions() {
+    let repo = TempGitRepo::create("scope-preview");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("dist/bundle.js", "function generated() {}\n");
+    repo.write("docs/notes.rs", "fn ignored() {}\n");
+    repo.write("manual.pdf", "%PDF-1.7\n");
+    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
+
+    assert_eq!(preview.selected_file_count, 1);
+    assert_eq!(preview.language_distribution[0].language_id, "rust");
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "dist/bundle.js" && path.reason == "excluded by source preset"
+    }));
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
+    }));
+}
+
+#[test]
+fn impact_path_partition_uses_effective_scope() {
+    let repo = TempGitRepo::create("impact-path-groups");
+    repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("dist/bundle.js", "function generated() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    let groups = partition_changed_paths_for_selector(
+        &repo.registration(),
+        &repo.selector(),
+        vec!["src/lib.rs".to_owned(), "dist/bundle.js".to_owned()],
+    )
+    .expect("paths should partition");
+
+    assert_eq!(groups.in_scope_changed_paths, ["src/lib.rs"]);
+    assert_eq!(groups.out_of_scope_changed_paths, ["dist/bundle.js"]);
+}
+
+#[test]
 fn reference_resolution_prefers_same_path_and_leaves_ambiguous_names_unresolved() {
     let symbols = vec![
         symbol("sym-a", "src/a.rs", "run"),

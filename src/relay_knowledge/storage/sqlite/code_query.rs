@@ -70,29 +70,42 @@ fn search_symbols(
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
         WHERE repository_id = ?1
+          AND (
+            lower(name) LIKE ?2 OR lower(qualified_name) LIKE ?2
+            OR lower(signature) LIKE ?2 OR lower(coalesce(doc_comment, '')) LIKE ?2
+            OR lower(path) LIKE ?2
+          )
         ORDER BY path ASC, line_start ASC
+        LIMIT ?3
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(SymbolRow {
-            symbol_snapshot_id: row.get(0)?,
-            file_id: row.get(1)?,
-            path: row.get(2)?,
-            language_id: row.get(3)?,
-            signature: row.get(4)?,
-            doc_comment: row.get(5)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(8)?,
-                end: row.get(9)?,
-            },
-            name: row.get(10)?,
-            qualified_name: row.get(11)?,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            status.repository_id,
+            candidate_like(&request.query),
+            candidate_limit(request)
+        ],
+        |row| {
+            Ok(SymbolRow {
+                symbol_snapshot_id: row.get(0)?,
+                file_id: row.get(1)?,
+                path: row.get(2)?,
+                language_id: row.get(3)?,
+                signature: row.get(4)?,
+                doc_comment: row.get(5)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(8)?,
+                    end: row.get(9)?,
+                },
+                name: row.get(10)?,
+                qualified_name: row.get(11)?,
+            })
+        },
+    )?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -154,27 +167,36 @@ fn search_references(
         INNER JOIN code_repository_files f
             ON f.repository_id = r.repository_id AND f.path = r.path
         WHERE r.repository_id = ?1
+          AND (lower(r.name) LIKE ?2 OR lower(r.kind) LIKE ?2 OR lower(r.path) LIKE ?2)
         ORDER BY r.path ASC, r.line_start ASC
+        LIMIT ?3
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ReferenceRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            name: row.get(3)?,
-            kind: row.get(4)?,
-            target_symbol_snapshot_id: row.get(5)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(8)?,
-                end: row.get(9)?,
-            },
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            status.repository_id,
+            candidate_like(&request.query),
+            candidate_limit(request)
+        ],
+        |row| {
+            Ok(ReferenceRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                name: row.get(3)?,
+                kind: row.get(4)?,
+                target_symbol_snapshot_id: row.get(5)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(8)?,
+                    end: row.get(9)?,
+                },
+            })
+        },
+    )?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -220,24 +242,37 @@ fn search_calls(
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
         WHERE c.repository_id = ?1
+          AND (
+            lower(coalesce(c.caller_name, '')) LIKE ?2
+            OR lower(c.callee_name) LIKE ?2
+            OR lower(c.path) LIKE ?2
+          )
         ORDER BY c.path ASC, c.line_start ASC
+        LIMIT ?3
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(CallRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            caller_symbol_snapshot_id: row.get(3)?,
-            caller_name: row.get(4)?,
-            callee_symbol_snapshot_id: row.get(5)?,
-            callee_name: row.get(6)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(7)?,
-                end: row.get(8)?,
-            },
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            status.repository_id,
+            candidate_like(&request.query),
+            candidate_limit(request)
+        ],
+        |row| {
+            Ok(CallRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                caller_symbol_snapshot_id: row.get(3)?,
+                caller_name: row.get(4)?,
+                callee_symbol_snapshot_id: row.get(5)?,
+                callee_name: row.get(6)?,
+                line_range: RepositoryCodeRange {
+                    start: row.get(7)?,
+                    end: row.get(8)?,
+                },
+            })
+        },
+    )?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -292,21 +327,30 @@ fn search_imports(
         INNER JOIN code_repository_files f
             ON f.repository_id = i.repository_id AND f.path = i.path
         WHERE i.repository_id = ?1
+          AND (lower(i.module) LIKE ?2 OR lower(i.path) LIKE ?2)
         ORDER BY i.path ASC, i.line_start ASC
+        LIMIT ?3
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ImportRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            module: row.get(3)?,
-            line_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            status.repository_id,
+            candidate_like(&request.query),
+            candidate_limit(request)
+        ],
+        |row| {
+            Ok(ImportRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                module: row.get(3)?,
+                line_range: RepositoryCodeRange {
+                    start: row.get(4)?,
+                    end: row.get(5)?,
+                },
+            })
+        },
+    )?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -352,28 +396,37 @@ fn search_chunks(
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
         WHERE c.repository_id = ?1
+          AND (lower(c.content) LIKE ?2 OR lower(c.path) LIKE ?2)
         ORDER BY c.path ASC, c.line_start ASC
+        LIMIT ?3
         ",
     )?;
-    let rows = statement.query_map(params![status.repository_id], |row| {
-        Ok(ChunkRow {
-            file_id: row.get(0)?,
-            path: row.get(1)?,
-            language_id: row.get(2)?,
-            content: row.get(3)?,
-            byte_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
-            },
-            line_range: RepositoryCodeRange {
-                start: row.get(6)?,
-                end: row.get(7)?,
-            },
-            symbol_snapshot_id: row.get(8)?,
-            parse_status: row.get(9)?,
-            degraded_reason: row.get(10)?,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            status.repository_id,
+            candidate_like(&request.query),
+            candidate_limit(request)
+        ],
+        |row| {
+            Ok(ChunkRow {
+                file_id: row.get(0)?,
+                path: row.get(1)?,
+                language_id: row.get(2)?,
+                content: row.get(3)?,
+                byte_range: RepositoryCodeRange {
+                    start: row.get(4)?,
+                    end: row.get(5)?,
+                },
+                line_range: RepositoryCodeRange {
+                    start: row.get(6)?,
+                    end: row.get(7)?,
+                },
+                symbol_snapshot_id: row.get(8)?,
+                parse_status: row.get(9)?,
+                degraded_reason: row.get(10)?,
+            })
+        },
+    )?;
     let query = request.query.to_lowercase();
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -581,6 +634,23 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     }
 
     score
+}
+
+fn candidate_like(query: &str) -> String {
+    let token = query
+        .to_lowercase()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .filter(|ch| *ch != '%')
+        .collect::<String>();
+
+    format!("%{token}%")
+}
+
+fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    request.limit.saturating_mul(40).max(100)
 }
 
 struct SymbolRow {

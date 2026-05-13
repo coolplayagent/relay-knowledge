@@ -382,7 +382,7 @@ async fn structured_facts_and_backend_statuses_reach_context_pack() {
     assert_eq!(event.object.as_deref(), Some("2026-05-12T00:00:00Z"));
     assert!(response.backend_statuses.iter().any(|status| {
         status.source == RetrieverSource::Semantic
-            && status.state == RetrievalBackendState::Unavailable
+            && status.state == RetrievalBackendState::Available
             && status.scope_post_filter
     }));
     assert!(
@@ -393,12 +393,7 @@ async fn structured_facts_and_backend_statuses_reach_context_pack() {
                 .map(|hit| hit.content.len())
                 .sum::<usize>()
     );
-    assert!(
-        response
-            .degraded_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("semantic/vector"))
-    );
+    assert!(response.degraded_reason.is_none());
 }
 
 #[derive(Default)]

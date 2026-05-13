@@ -4,15 +4,18 @@ use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryImpactResponse, CodeRepositoryIndexResponse,
         CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
+        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
         CodeIndexError, build_index_snapshot, changed_paths_for_diff,
-        deleted_symbol_names_for_diff, register_repository, resolve_repository_ref,
+        deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
+        preview_repository_scope, register_repository, resolve_repository_ref,
     },
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
+        CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::{CodeImpactChanges, StorageError},
 };
@@ -98,6 +101,40 @@ impl RelayKnowledgeService {
         })
     }
 
+    /// Previews the effective code repository indexing scope without writing rows.
+    pub async fn preview_code_repository_scope(
+        &self,
+        request: CodeIndexRequest,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryScopePreviewResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, &request.repository.repository).await?;
+        let registration = registration_from_status(&status);
+        let selector = request.repository.clone();
+        let preview =
+            run_blocking_code(move || preview_repository_scope(&registration, &selector)).await?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let scope_status = CodeRepositoryStatus {
+            last_indexed_commit: Some(preview.resolved_commit_sha.clone()),
+            tree_hash: Some(preview.tree_hash.clone()),
+            stale: status.stale,
+            ..status
+        };
+
+        Ok(CodeRepositoryScopePreviewResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                &scope_status,
+                &request.repository,
+                request.repository.ref_selector.clone(),
+            ),
+            preview,
+        })
+    }
+
     /// Queries indexed symbols, references, imports, calls, and code chunks.
     pub async fn query_code_repository(
         &self,
@@ -178,6 +215,15 @@ impl RelayKnowledgeService {
         let changed_paths =
             run_blocking_code(move || changed_paths_for_diff(root, &base_ref, &head_ref)).await?;
         let registration = registration_from_status(&status);
+        let path_groups = {
+            let registration = registration.clone();
+            let selector = request.repository.clone();
+            let changed_paths = changed_paths.clone();
+            run_blocking_code(move || {
+                partition_changed_paths_for_selector(&registration, &selector, changed_paths)
+            })
+            .await?
+        };
         let selector = request.repository.clone();
         let base_ref = request.base_ref.clone();
         let head_ref = head_commit;
@@ -209,6 +255,7 @@ impl RelayKnowledgeService {
             ),
             request,
             changed_paths,
+            path_groups,
             results,
         })
     }
@@ -229,6 +276,70 @@ impl RelayKnowledgeService {
         Ok(CodeRepositoryStatusResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             status,
+        })
+    }
+
+    /// Builds a reusable operations report for a registered code repository.
+    pub async fn code_repository_report(
+        &self,
+        selector: CodeRepositorySelector,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryReportResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, &selector.repository).await?;
+        let mut report = store
+            .code_repository_report(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let sample_queries = report.representative_queries.clone();
+        for query in sample_queries
+            .into_iter()
+            .take(3)
+            .filter(|_| status.last_indexed_commit.is_some())
+        {
+            let indexed_ref = status.last_indexed_commit.clone().unwrap_or_default();
+            let request = CodeRetrievalRequest::new(
+                query.clone(),
+                CodeRepositorySelector::new(
+                    status.repository_id.clone(),
+                    indexed_ref.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .map_err(|error| ApiError::invalid_argument(error.to_string()))?,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+            let started = std::time::Instant::now();
+            let result_count = store
+                .search_code(request)
+                .await
+                .map(|hits| hits.len())
+                .unwrap_or_default();
+            report
+                .latency_samples
+                .push(crate::domain::CodeRepositoryLatencySample {
+                    query,
+                    kind: CodeQueryKind::Hybrid,
+                    result_count,
+                    duration_ms: started.elapsed().as_millis() as u64,
+                });
+        }
+
+        Ok(CodeRepositoryReportResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                &status,
+                &selector,
+                selector.ref_selector.clone(),
+            ),
+            report,
         })
     }
 }

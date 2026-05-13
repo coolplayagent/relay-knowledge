@@ -6,8 +6,9 @@ use crate::{
 };
 
 use super::{
-    EvidenceDocumentInput, entities_for_evidence, insert_code_chunk_document,
-    insert_code_symbol_document, parse_fact_status, replace_evidence_document,
+    EvidenceDocumentInput,
+    context::{entities_for_evidence, parse_fact_status},
+    insert_code_chunk_document, insert_code_symbol_document, replace_evidence_document,
 };
 
 pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bool, StorageError> {

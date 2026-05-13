@@ -16,8 +16,10 @@ mod code_metadata_tests;
 
 use crate::{
     domain::{
-        CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,
-        CodeRepositoryRegistration, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalRequest,
+        CodeFileFingerprint, CodeImpactRequest, CodeIndexProgressSummary, CodeIndexSnapshot,
+        CodeIndexSummary, CodeRepositoryLatencySample, CodeRepositoryRegistration,
+        CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
+        CodeRetrievalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -149,6 +151,17 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             PRIMARY KEY (repository_id, old_path, base_ref, head_ref),
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
+
+        CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
+            ON code_repository_symbols(repository_id, name, qualified_name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_references_lookup
+            ON code_repository_references(repository_id, name, kind, path);
+        CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
+            ON code_repository_calls(repository_id, callee_name, caller_name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
+            ON code_repository_imports(repository_id, module, path);
+        CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
+            ON code_repository_chunks(repository_id, path);
         ",
     )?;
     ensure_code_repository_calls_target_column(connection)?;
@@ -217,6 +230,17 @@ impl CodeRepositoryStore for SqliteGraphStore {
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         self.run(move |connection| code_impact::analyze_impact(connection, request, changes))
+    }
+
+    fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
+        self.run(repository_totals)
+    }
+
+    fn code_repository_report(
+        &self,
+        repository: String,
+    ) -> StorageFuture<'_, CodeRepositoryReport> {
+        self.run(move |connection| repository_report(connection, &repository))
     }
 }
 
@@ -466,7 +490,127 @@ fn apply_snapshot(
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count: snapshot.diagnostics.len(),
+        progress: CodeIndexProgressSummary {
+            git_file_count: if snapshot.full_replace {
+                status.indexed_file_count
+            } else {
+                snapshot.changed_path_count
+            },
+            blob_read_count: snapshot.files.len(),
+            parsed_file_count: snapshot.files.len(),
+            sqlite_write_count: snapshot
+                .files
+                .len()
+                .saturating_add(snapshot.symbols.len())
+                .saturating_add(snapshot.references.len())
+                .saturating_add(snapshot.imports.len())
+                .saturating_add(snapshot.calls.len())
+                .saturating_add(snapshot.chunks.len())
+                .saturating_add(snapshot.diagnostics.len()),
+            skipped_file_count: snapshot.skipped_unchanged_count,
+            degraded_file_count: snapshot.diagnostics.len(),
+        },
     })
+}
+
+fn repository_totals(connection: &mut Connection) -> Result<CodeRepositoryTotals, StorageError> {
+    Ok(CodeRepositoryTotals {
+        repository_count: count_all_rows(connection, "code_repositories")?,
+        indexed_file_count: count_all_rows(connection, "code_repository_files")?,
+        symbol_count: count_all_rows(connection, "code_repository_symbols")?,
+        reference_count: count_all_rows(connection, "code_repository_references")?,
+        chunk_count: count_all_rows(connection, "code_repository_chunks")?,
+        degraded_file_count: count_all_rows(connection, "code_repository_file_diagnostics")?,
+    })
+}
+
+fn repository_report(
+    connection: &mut Connection,
+    repository: &str,
+) -> Result<CodeRepositoryReport, StorageError> {
+    let status = repository_status(connection, repository)?.ok_or_else(|| {
+        StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
+    })?;
+    let degradation_summary = repository_diagnostics(connection, &status.repository_id)?;
+    let representative_queries = representative_queries(connection, &status.repository_id)?;
+    let freshness_state = if status.stale {
+        "stale"
+    } else {
+        status.state.as_str()
+    }
+    .to_owned();
+
+    Ok(CodeRepositoryReport {
+        repository_id: status.repository_id,
+        alias: status.alias,
+        root_path: status.root_path,
+        path_filters: status.path_filters,
+        language_filters: status.language_filters,
+        resolved_commit_sha: status.last_indexed_commit,
+        tree_hash: status.tree_hash,
+        indexed_file_count: status.indexed_file_count,
+        symbol_count: status.symbol_count,
+        reference_count: status.reference_count,
+        chunk_count: status.chunk_count,
+        degraded_file_count: degradation_summary.len(),
+        degradation_summary,
+        representative_queries,
+        latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
+        freshness_state,
+    })
+}
+
+fn repository_diagnostics(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT path, message
+        FROM code_repository_file_diagnostics
+        WHERE repository_id = ?1
+        ORDER BY path ASC, message ASC
+        LIMIT 20
+        ",
+    )?;
+    let rows = statement.query_map(params![repository_id], |row| {
+        Ok(format!(
+            "{}: {}",
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?
+        ))
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn representative_queries(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut queries = Vec::new();
+    let mut statement = connection.prepare(
+        "
+        SELECT name
+        FROM code_repository_symbols
+        WHERE repository_id = ?1
+        ORDER BY path ASC, line_start ASC
+        LIMIT 3
+        ",
+    )?;
+    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
+    queries.extend(
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)?,
+    );
+    if queries.is_empty() {
+        queries.push("hybrid".to_owned());
+    }
+    queries.sort();
+    queries.dedup();
+
+    Ok(queries)
 }
 
 fn insert_imports_calls_chunks_diagnostics(
@@ -691,5 +835,13 @@ fn count_code_rows(
             params![repository_id],
             |row| row.get(0),
         )
+        .map_err(StorageError::from)
+}
+
+fn count_all_rows(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
+    connection
+        .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
         .map_err(StorageError::from)
 }

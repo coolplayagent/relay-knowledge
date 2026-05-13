@@ -95,6 +95,36 @@ async fn bm25_matches_generated_entity_aliases_without_returning_aliases_as_labe
 }
 
 #[tokio::test]
+async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(
+        &store,
+        "ev-retry",
+        "docs",
+        "Retry policy controls the runtime budget",
+    )
+    .await;
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "retry_policy".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].evidence_id, "ev-retry");
+    assert!(
+        hits[0]
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+            || hits[0].retriever_sources.contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
 async fn reads_mutation_log_after_version() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(&store, "ev-1", "docs", "Rust async storage").await;

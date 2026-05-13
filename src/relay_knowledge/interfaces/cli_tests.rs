@@ -322,10 +322,13 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
 
     assert_eq!(
         graph,
-        "graph_version=1 entities=1 evidence=1 code_files=0 code_symbols=0\n"
+        "graph_version=1 entities=1 evidence=1 code_files=0 code_symbols=0 repo_code_files=0 repo_code_symbols=0\n"
     );
     assert_eq!(index, "refreshed_indexes=1\n");
-    assert_eq!(health, "healthy=true\n");
+    assert_eq!(
+        health,
+        "healthy=true repo_code_files=0 repo_code_symbols=0\n"
+    );
     assert_eq!(service_status, "service=relay-knowledge mode=disabled\n");
 }
 

@@ -13,6 +13,7 @@ use std::{
 
 mod languages;
 mod parser;
+mod scope;
 
 #[cfg(test)]
 mod tests;
@@ -23,8 +24,15 @@ use crate::domain::{
     RepositoryCodeSymbolRecord,
 };
 
-use languages::language_id;
 use parser::parse_indexed_file;
+use scope::{load_ignore_rules, path_is_selected, path_scope_overlaps, selection_exclusion_reason};
+pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+
+#[cfg(test)]
+use languages::language_id;
+
+#[cfg(test)]
+use scope::path_scope_allows;
 
 /// Blocking code index failure.
 #[derive(Debug)]
@@ -196,9 +204,12 @@ fn build_full_snapshot(
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(root, &commit)?;
+    let ignore_rules = load_ignore_rules(root)?;
     let paths = tracked_paths(root, &commit)?
         .into_iter()
-        .filter(|path| path_is_selected(path, registration, selector))
+        .filter(|path| {
+            selection_exclusion_reason(path, registration, selector, &ignore_rules).is_none()
+        })
         .collect::<Vec<_>>();
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, true, paths.len(), 0);
 
@@ -884,86 +895,6 @@ fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
     }
 
     changes
-}
-
-fn path_is_selected(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_scope_allows(path, registration, selector)
-        && language_filter_allows(path, &registration.language_filters)
-        && language_filter_allows(path, &selector.language_filters)
-}
-
-fn path_scope_allows(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_filter_allows(path, &registration.path_filters)
-        && path_filter_allows(path, &selector.path_filters)
-}
-
-fn path_scope_overlaps(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-) -> bool {
-    path_filter_overlaps(path, &registration.path_filters)
-        && path_filter_overlaps(path, &selector.path_filters)
-}
-
-fn path_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || filters
-            .iter()
-            .any(|filter| path_matches_filter(path, filter))
-}
-
-fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || filters
-            .iter()
-            .any(|filter| path_overlaps_filter(path, filter))
-}
-
-fn language_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || language_id(path)
-            .map(|language| filters.iter().any(|filter| filter == language))
-            .unwrap_or(false)
-}
-
-fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_path_filter(path);
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
-}
-
-fn path_overlaps_filter(path: &str, filter: &str) -> bool {
-    let path = normalize_path_filter(path);
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !path.is_empty()
-        && !filter.is_empty()
-        && (path == filter
-            || path.starts_with(&format!("{filter}/"))
-            || filter.starts_with(&format!("{path}/")))
-}
-
-fn normalize_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
 }
 
 pub(super) fn stable_content_hash(bytes: &[u8]) -> String {
