@@ -1,7 +1,8 @@
 # GraphRAG 产品与实现路线规格
 
-> 文档版本: 1.0
+> 文档版本: 1.1
 > 编制日期: 2026-05-12
+> 进展刷新: 2026-05-13
 > 范围: relay-knowledge 的 GraphRAG 产品边界、当前实现基线、优化措施和分阶段实现规格。
 
 ## 1. 定位
@@ -61,7 +62,7 @@ GraphRAG 能力必须保持可解释:
   bounded refresh queue、persistent task lease、retry backoff、mutation-log
   replay 和 scoped cursor 更新路径。
 - index cursor 必须按 kind、scope、modality、model 和 graph version 记录，不能只用全局 freshness 代表所有快照；当前 Rust 实现已覆盖 kind/scope/text modality、source hash、backend cursor，以及 semantic/vector worker 可回传的 model name/dimension 元数据。
-- 后台服务必须使用 bounded queues、retry backoff、lease、dead-letter、startup reconciler 和 stale diagnostics；当前 foreground service path 已暴露 queue depth、oldest task age、dead-letter count 和 per-kind lag。
+- 后台服务必须使用 bounded queues、retry backoff、lease、dead-letter、startup reconciler 和 stale diagnostics；当前 foreground service path 已暴露 queue depth、oldest task age、dead-letter count、per-kind lag 和结构化 stale reasons。
 - 启动时如果 graph version 领先 index cursor，reconciler 必须补发刷新或报告 degraded；当前 health/service status 会补发缺失 refresh task，显式 `refresh_indexes` 负责 drain。
 
 ### 3.5 Agent 与服务化
@@ -96,7 +97,7 @@ GraphRAG 能力必须保持可解释:
 
 - 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
 - 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；未配置真实 backend 时 model/dimension 为空，但 refresh worker 可在完成任务时写入并由 cursor 诊断返回。
-- health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和 stale reason。
+- health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和结构化 stale reasons；每条 reason 必须能指向索引族或 scoped cursor，并携带 lag versions 和 last error。
 
 ### Phase 3: Agent 与常驻服务
 

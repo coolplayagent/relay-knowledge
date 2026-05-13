@@ -656,6 +656,18 @@ async fn failed_refresh_task_retries_then_dead_letters() {
     );
     assert_eq!(diagnostics.queue_depth, 0);
     assert_eq!(diagnostics.dead_letter_count, 1);
+    assert!(diagnostics.stale_reasons.iter().any(|reason| {
+        reason.kind == IndexKind::Vector
+            && reason.source_scope.is_none()
+            && reason.reason == "index family failed"
+            && reason.last_error.as_deref() == Some("embedding worker still unavailable")
+    }));
+    assert!(diagnostics.stale_reasons.iter().any(|reason| {
+        reason.kind == IndexKind::Vector
+            && reason.source_scope.as_deref() == Some("docs")
+            && reason.reason == "scoped cursor failed"
+            && reason.last_error.as_deref() == Some("embedding worker still unavailable")
+    }));
 
     let preserved = store
         .queue_index_refreshes(IndexRefreshQueueRequest {

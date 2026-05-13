@@ -199,6 +199,7 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
   const vector = health.indexes.find((index) => index.kind === "vector");
   const hasEvidence = graph.entity_count > 0 || graph.evidence_count > 0;
   const hasCodeGraph = graph.code_file_count > 0 || graph.code_symbol_count > 0;
+  const staleSummary = staleReasonSummary(health);
 
   grid.append(
     readinessItem(
@@ -242,6 +243,12 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
       health.index_refresh.dead_letter_count > 0 ? "failed" : "ready",
       health.index_refresh.dead_letter_count > 0 ? "bad" : "good",
       `${health.index_refresh.queue_depth} queued / ${health.index_refresh.dead_letter_count} dead-letter`
+    ),
+    readinessItem(
+      "Stale reasons",
+      staleSummary.value,
+      staleSummary.tone,
+      staleSummary.detail
     )
   );
   section.append(grid);
@@ -276,6 +283,24 @@ function indexReadinessDetail(index: IndexStatus | undefined, graphVersion: numb
   const lag = Math.max(0, graphVersion - index.indexed_graph_version);
 
   return `version ${index.index_version} / lag ${lag}`;
+}
+
+function staleReasonSummary(health: HealthResponse): { value: string; tone: Tone; detail: string } {
+  const reasons = health.index_refresh.stale_reasons ?? [];
+  if (reasons.length === 0) {
+    return { value: "clear", tone: "good", detail: "no stale or failed cursor reasons" };
+  }
+  const failed = reasons.find((reason) => reason.last_error || reason.reason.includes("failed"));
+  const scoped = reasons.find((reason) => reason.source_scope);
+  const first = failed ?? scoped ?? reasons[0];
+  const scope = first.source_scope ? ` / ${first.source_scope}` : "";
+  const detail = `${first.kind}${scope}: ${first.reason}`;
+
+  return {
+    value: `${reasons.length} reason${reasons.length === 1 ? "" : "s"}`,
+    tone: failed ? "bad" : "warn",
+    detail
+  };
 }
 
 function operationsSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {

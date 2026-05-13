@@ -57,7 +57,9 @@ metadata is present so a future external backend can coexist without changing
 the context-pack contract.
 Health and index-refresh diagnostics also expose scoped cursor metadata for
 these index families: source hash, backend cursor, and model name/dimension when
-a configured backend worker supplies them.
+a configured backend worker supplies them. The same diagnostics include
+`stale_reasons`, a structured list of index-family and scoped-cursor reasons
+that explain failed state, graph-version lag, and last-error conditions.
 
 ## Graph Facts
 

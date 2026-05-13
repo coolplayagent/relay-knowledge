@@ -15,7 +15,7 @@ relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-重点关注 graph version、index lag、refresh queue diagnostics、runtime directories、HTTP bind、QoS budgets、agent protocol status 和 degraded reason。
+重点关注 graph version、index lag、refresh queue diagnostics、`index_refresh.stale_reasons`、runtime directories、HTTP bind、QoS budgets、agent protocol status 和 degraded reason。
 
 ## 7.2 索引新鲜度
 
@@ -38,6 +38,11 @@ relay-knowledge query "topic" --freshness wait-until-fresh --format json
 ```bash
 relay-knowledge query "topic" --freshness graph-only --format json
 ```
+
+`health`、`service doctor` 和 `index refresh` 的 JSON 响应会返回
+`index_refresh.stale_reasons`。优先处理 `reason` 含 failed 或带 `last_error`
+的项；只有 lag reason 时，通常先运行 `relay-knowledge index refresh --format json`
+或在查询中使用 `--freshness wait-until-fresh`。
 
 ## 7.3 常见错误
 

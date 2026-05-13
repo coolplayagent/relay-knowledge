@@ -20,7 +20,7 @@ npm run build --prefix web
 /api/health
 ```
 
-页面展示 project health、GraphRAG readiness、graph counts、scoped index freshness、refresh queue diagnostics、runtime budgets 和操作 composer。
+页面展示 project health、GraphRAG readiness、graph counts、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
 
 ## 5.3 操作预览
 

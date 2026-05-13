@@ -344,6 +344,20 @@ pub struct IndexLag {
     pub lag_versions: u64,
 }
 
+/// Structured reason explaining why an index family or scoped cursor is stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexStalenessReason {
+    pub kind: IndexKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modality: Option<IndexModality>,
+    pub reason: String,
+    pub lag_versions: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
 /// Snapshot for queue, dead-letter, and stale-index diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRefreshDiagnostics {
@@ -355,6 +369,7 @@ pub struct IndexRefreshDiagnostics {
     pub index_lag_by_kind: Vec<IndexLag>,
     pub max_index_lag_versions: u64,
     pub stale_index_count: usize,
+    pub stale_reasons: Vec<IndexStalenessReason>,
 }
 
 /// Storage health surfaced to diagnostics.

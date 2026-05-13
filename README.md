@@ -49,7 +49,7 @@ Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScri
 Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
 Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, and retrieval groups those hits by parent to avoid duplicate context items.
 The `evaluation` module provides a pure GraphRAG harness for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
-Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, while explicit refresh paths surface queue-cap failures instead of reporting false freshness.
+Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` now explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
 
@@ -115,7 +115,7 @@ uv run --extra dev pytest tests/browser
 ```
 
 The static Web workspace renders project health, GraphRAG readiness, graph
-counts, scoped index freshness, refresh queue diagnostics, runtime budgets, and interactive operation composers
+counts, scoped index freshness, refresh queue diagnostics, stale reasons, runtime budgets, and interactive operation composers
 for retrieval, ingestion, graph inspection, code repository workflows, index
 refresh, and service runtime commands. The current Web client still reads live
 diagnostics only from `/api/project/status` and `/api/health`; operation

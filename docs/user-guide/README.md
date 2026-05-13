@@ -12,7 +12,7 @@
 - [第 2 章 CLI 基础](02-cli-basics.md): 命令结构、输出格式、版本、状态和 freshness 策略。
 - [第 3 章 知识图谱工作流](03-knowledge-graph-workflow.md): evidence 写入、混合检索、图检查和索引刷新。
 - [第 4 章 代码仓库工作流](04-code-repository-workflow.md): Git 仓库注册、tree-sitter 索引、代码检索、增量更新和影响分析。
-- [第 5 章 Web 工作区](05-web-workspace.md): 静态 Web 构建、诊断面板和操作预览。
+- [第 5 章 Web 工作区](05-web-workspace.md): 静态 Web 构建、诊断面板、stale reasons 和操作预览。
 - [第 6 章 Agent 与常驻服务](06-agent-and-service.md): MCP Streamable HTTP、权限、会话和 agent 工具面。
 - [第 7 章 运维与排障](07-operations-and-troubleshooting.md): 健康检查、索引新鲜度、常见错误和 PR 验证命令。
 
