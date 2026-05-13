@@ -176,6 +176,7 @@ async fn diagnostic_tools_return_structured_content() {
                     status: None,
                     content: "Diagnostic tools share application service state".to_owned(),
                     entity_labels: Vec::new(),
+                    extraction: None,
                 }],
                 relations: Vec::new(),
                 claims: Vec::new(),

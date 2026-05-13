@@ -1,12 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+mod advanced;
+
 use rusqlite::{Connection, Row, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{
         CodeGraphArtifact, CodeGraphArtifactKind, ConfidenceScore, ContextEntity, ContextGraphFact,
-        ContextGraphFactKind, EvidenceSpan, FactStatus, GraphVersion, GraphVersionRange,
-        RECIPROCAL_RANK_FUSION_K, RankingSignal, RetrievalHit, RetrieverSource,
+        ContextGraphFactKind, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
+        FactStatus, GraphVersion, GraphVersionRange, RECIPROCAL_RANK_FUSION_K, RankingSignal,
+        RetrievalHit, RetrieverSource,
     },
     storage::{GraphSearchRequest, StorageError},
 };
@@ -16,6 +19,9 @@ mod migration;
 
 const LABEL_SEPARATOR: char = '\u{1f}';
 const FACT_LOOKUP_CHUNK_SIZE: usize = 250;
+const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
+const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
+const LOCAL_VECTOR_DIMENSION: usize = 16;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     let rebuild_required = migration::drop_incompatible_bm25_table(connection)?;
@@ -25,11 +31,47 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             document_id UNINDEXED,
             document_kind UNINDEXED,
             evidence_id UNINDEXED,
+            parent_evidence_id UNINDEXED,
+            modality UNINDEXED,
             created_graph_version UNINDEXED,
             source_scope,
             source_path,
             entity_labels,
             content
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_semantic_documents (
+            document_id TEXT PRIMARY KEY,
+            document_kind TEXT NOT NULL,
+            evidence_id TEXT NOT NULL,
+            parent_evidence_id TEXT,
+            modality TEXT NOT NULL,
+            created_graph_version INTEGER NOT NULL,
+            source_scope TEXT NOT NULL,
+            source_path TEXT,
+            entity_labels_json TEXT NOT NULL,
+            content TEXT NOT NULL,
+            token_signature_json TEXT NOT NULL,
+            model TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            source_hash TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_vector_documents (
+            document_id TEXT PRIMARY KEY,
+            document_kind TEXT NOT NULL,
+            evidence_id TEXT NOT NULL,
+            parent_evidence_id TEXT,
+            modality TEXT NOT NULL,
+            created_graph_version INTEGER NOT NULL,
+            source_scope TEXT NOT NULL,
+            source_path TEXT,
+            entity_labels_json TEXT NOT NULL,
+            content TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            model TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            source_hash TEXT NOT NULL
         );
         ",
     )?;
@@ -40,53 +82,110 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     Ok(())
 }
 
-pub(super) struct EvidenceDocument<'a> {
+pub(super) struct EvidenceDocumentInput<'a> {
     pub evidence_id: &'a str,
     pub source_scope: &'a str,
     pub source_path: Option<&'a str>,
     pub entity_labels: &'a [String],
     pub content: &'a str,
     pub status: FactStatus,
+    pub extraction: &'a EvidenceExtractionMetadata,
+    pub source_hash: &'a str,
     pub graph_version: u64,
 }
 
 pub(super) fn replace_evidence_document(
-    transaction: &rusqlite::Transaction<'_>,
-    document: EvidenceDocument<'_>,
+    connection: &Connection,
+    input: EvidenceDocumentInput<'_>,
 ) -> Result<(), StorageError> {
-    let document_id = evidence_document_id(document.evidence_id);
-    transaction.execute(
+    let document_id = evidence_document_id(input.evidence_id);
+    connection.execute(
         "DELETE FROM graph_bm25 WHERE document_id = ?1",
         params![document_id],
     )?;
-    insert_evidence_document(transaction, document)
-}
-
-fn insert_evidence_document(
-    connection: &Connection,
-    document: EvidenceDocument<'_>,
-) -> Result<(), StorageError> {
-    let document_id = evidence_document_id(document.evidence_id);
-    if !retrievable_status(document.status) {
+    connection.execute(
+        "DELETE FROM graph_semantic_documents WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    connection.execute(
+        "DELETE FROM graph_vector_documents WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    if !retrievable_status(input.status) {
         return Ok(());
     }
     connection.execute(
         "
         INSERT INTO graph_bm25 (
-            document_id, document_kind, evidence_id, created_graph_version,
+            document_id, document_kind, evidence_id, parent_evidence_id, modality,
+            created_graph_version,
             source_scope, source_path, entity_labels, content
         )
-        VALUES (?1, 'evidence', ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, 'evidence', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ",
         params![
             document_id,
-            document.evidence_id,
-            document.graph_version,
-            document.source_scope,
-            document.source_path,
-            join_labels(document.entity_labels),
-            document.content,
+            input.evidence_id,
+            input.extraction.parent_evidence_id.as_deref(),
+            input.extraction.modality.as_str(),
+            input.graph_version,
+            input.source_scope,
+            input.source_path,
+            join_labels(input.entity_labels),
+            input.content,
         ],
+    )?;
+    replace_semantic_document(
+        connection,
+        SemanticDocumentInput {
+            document_id: &document_id,
+            document_kind: "evidence",
+            evidence_id: input.evidence_id,
+            parent_evidence_id: input.extraction.parent_evidence_id.as_deref(),
+            modality: input.extraction.modality,
+            source_scope: input.source_scope,
+            source_path: input.source_path,
+            entity_labels: input.entity_labels,
+            content: input.content,
+            source_hash: input.source_hash,
+            graph_version: input.graph_version,
+            model: input
+                .extraction
+                .embedding_model
+                .as_deref()
+                .unwrap_or(LOCAL_SEMANTIC_MODEL),
+            dimension: input
+                .extraction
+                .embedding_dimension
+                .map(usize::from)
+                .unwrap_or(LOCAL_VECTOR_DIMENSION),
+        },
+    )?;
+    replace_vector_document(
+        connection,
+        VectorDocumentInput {
+            document_id: &document_id,
+            document_kind: "evidence",
+            evidence_id: input.evidence_id,
+            parent_evidence_id: input.extraction.parent_evidence_id.as_deref(),
+            modality: input.extraction.modality,
+            source_scope: input.source_scope,
+            source_path: input.source_path,
+            entity_labels: input.entity_labels,
+            content: input.content,
+            source_hash: input.source_hash,
+            graph_version: input.graph_version,
+            model: input
+                .extraction
+                .embedding_model
+                .as_deref()
+                .unwrap_or(LOCAL_VECTOR_MODEL),
+            dimension: input
+                .extraction
+                .embedding_dimension
+                .map(usize::from)
+                .unwrap_or(LOCAL_VECTOR_DIMENSION),
+        },
     )?;
 
     Ok(())
@@ -124,10 +223,11 @@ pub(super) fn insert_code_symbol_document(
     connection.execute(
         "
         INSERT INTO graph_bm25 (
-            document_id, document_kind, evidence_id, created_graph_version,
+            document_id, document_kind, evidence_id, parent_evidence_id, modality,
+            created_graph_version,
             source_scope, source_path, entity_labels, content
         )
-        VALUES (?1, 'code_symbol', ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, 'code_symbol', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7)
         ",
         params![
             document_id,
@@ -156,10 +256,11 @@ pub(super) fn insert_code_chunk_document(
     connection.execute(
         "
         INSERT INTO graph_bm25 (
-            document_id, document_kind, evidence_id, created_graph_version,
+            document_id, document_kind, evidence_id, parent_evidence_id, modality,
+            created_graph_version,
             source_scope, source_path, entity_labels, content
         )
-        VALUES (?1, 'code_chunk', ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, 'code_chunk', ?2, NULL, 'text_span', ?3, ?4, ?5, ?6, ?7)
         ",
         params![
             document_id,
@@ -169,6 +270,127 @@ pub(super) fn insert_code_chunk_document(
             path,
             join_labels(linked_symbol_ids),
             content
+        ],
+    )?;
+
+    Ok(())
+}
+
+struct SemanticDocumentInput<'a> {
+    document_id: &'a str,
+    document_kind: &'a str,
+    evidence_id: &'a str,
+    parent_evidence_id: Option<&'a str>,
+    modality: EvidenceModality,
+    source_scope: &'a str,
+    source_path: Option<&'a str>,
+    entity_labels: &'a [String],
+    content: &'a str,
+    source_hash: &'a str,
+    graph_version: u64,
+    model: &'a str,
+    dimension: usize,
+}
+
+fn replace_semantic_document(
+    connection: &Connection,
+    input: SemanticDocumentInput<'_>,
+) -> Result<(), StorageError> {
+    let signature = token_signature(
+        input.content,
+        input.entity_labels,
+        input.source_path,
+        input.source_hash,
+    );
+    connection.execute(
+        "DELETE FROM graph_semantic_documents WHERE document_id = ?1",
+        params![input.document_id],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO graph_semantic_documents (
+            document_id, document_kind, evidence_id, parent_evidence_id, modality,
+            created_graph_version, source_scope, source_path, entity_labels_json,
+            content, token_signature_json, model, dimension, source_hash
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ",
+        params![
+            input.document_id,
+            input.document_kind,
+            input.evidence_id,
+            input.parent_evidence_id,
+            input.modality.as_str(),
+            input.graph_version,
+            input.source_scope,
+            input.source_path,
+            join_labels(input.entity_labels),
+            input.content,
+            json_string_array(&signature)?,
+            input.model,
+            input.dimension as i64,
+            input.source_hash,
+        ],
+    )?;
+
+    Ok(())
+}
+
+struct VectorDocumentInput<'a> {
+    document_id: &'a str,
+    document_kind: &'a str,
+    evidence_id: &'a str,
+    parent_evidence_id: Option<&'a str>,
+    modality: EvidenceModality,
+    source_scope: &'a str,
+    source_path: Option<&'a str>,
+    entity_labels: &'a [String],
+    content: &'a str,
+    source_hash: &'a str,
+    graph_version: u64,
+    model: &'a str,
+    dimension: usize,
+}
+
+fn replace_vector_document(
+    connection: &Connection,
+    input: VectorDocumentInput<'_>,
+) -> Result<(), StorageError> {
+    let vector = hashed_vector(
+        input.content,
+        input.entity_labels,
+        input.source_path,
+        input.source_hash,
+        input.dimension,
+    );
+    connection.execute(
+        "DELETE FROM graph_vector_documents WHERE document_id = ?1",
+        params![input.document_id],
+    )?;
+    connection.execute(
+        "
+        INSERT INTO graph_vector_documents (
+            document_id, document_kind, evidence_id, parent_evidence_id, modality,
+            created_graph_version, source_scope, source_path, entity_labels_json,
+            content, vector_json, model, dimension, source_hash
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        ",
+        params![
+            input.document_id,
+            input.document_kind,
+            input.evidence_id,
+            input.parent_evidence_id,
+            input.modality.as_str(),
+            input.graph_version,
+            input.source_scope,
+            input.source_path,
+            join_labels(input.entity_labels),
+            input.content,
+            json_f64_array(&vector)?,
+            input.model,
+            input.dimension as i64,
+            input.source_hash,
         ],
     )?;
 
@@ -198,6 +420,36 @@ pub(super) fn search_graph(
         RetrieverSource::GraphEvidence,
         "term overlap over graph evidence and entity labels",
     );
+    merge_ranked(
+        &mut candidates,
+        advanced::semantic_candidates(connection, &request)?,
+        RetrieverSource::Semantic,
+        "local semantic token signature read model with scope and graph-version filters",
+    );
+    merge_ranked(
+        &mut candidates,
+        advanced::vector_candidates(connection, &request)?,
+        RetrieverSource::Vector,
+        "local hashed vector ANN read model with model, dimension, source hash, scope, and graph-version metadata",
+    );
+    merge_ranked(
+        &mut candidates,
+        advanced::path_candidates(connection, &request)?,
+        RetrieverSource::GraphPath,
+        "schema-guided traversal over accepted relations, claims, events, and supporting evidence",
+    );
+    merge_ranked(
+        &mut candidates,
+        advanced::temporal_candidates(connection, &request)?,
+        RetrieverSource::Temporal,
+        "temporal event retrieval using occurred-at and as-of query constraints",
+    );
+    merge_ranked(
+        &mut candidates,
+        advanced::community_summary_candidates(connection, &request)?,
+        RetrieverSource::CommunitySummary,
+        "community summary read model generated from scoped entity and fact neighborhoods",
+    );
     let mut hits = candidates
         .into_values()
         .map(Candidate::into_hit)
@@ -222,29 +474,31 @@ fn bm25_candidates(
     };
     let mut statement = connection.prepare(
         "
-	        SELECT
-	            graph_bm25.document_id,
-	            graph_bm25.document_kind,
-	            graph_bm25.evidence_id,
-	            graph_bm25.source_scope,
-	            graph_bm25.source_path,
-	            graph_bm25.entity_labels,
-	            graph_bm25.content,
-	            bm25(graph_bm25) AS rank
-	        FROM graph_bm25
-	        LEFT JOIN evidence e
-	          ON graph_bm25.document_kind = 'evidence'
-	         AND e.id = graph_bm25.evidence_id
-	        WHERE graph_bm25 MATCH ?1
-	          AND (?2 IS NULL OR graph_bm25.source_scope = ?2)
-	          AND graph_bm25.created_graph_version <= ?3
-	          AND (
-	              graph_bm25.document_kind != 'evidence'
-	              OR e.status IN ('accepted', 'proposed')
-	          )
-	        ORDER BY rank ASC, graph_bm25.document_id ASC
-	        LIMIT ?4
-	        ",
+        SELECT
+            graph_bm25.document_id,
+            graph_bm25.document_kind,
+            graph_bm25.evidence_id,
+            graph_bm25.parent_evidence_id,
+            graph_bm25.modality,
+            graph_bm25.source_scope,
+            graph_bm25.source_path,
+            graph_bm25.entity_labels,
+            graph_bm25.content,
+            bm25(graph_bm25) AS rank
+        FROM graph_bm25
+        LEFT JOIN evidence e
+          ON graph_bm25.document_kind = 'evidence'
+         AND e.id = graph_bm25.evidence_id
+        WHERE graph_bm25 MATCH ?1
+          AND (?2 IS NULL OR graph_bm25.source_scope = ?2)
+          AND graph_bm25.created_graph_version <= ?3
+          AND (
+              graph_bm25.document_kind != 'evidence'
+              OR e.status IN ('accepted', 'proposed')
+          )
+        ORDER BY rank ASC, graph_bm25.document_id ASC
+        LIMIT ?4
+        ",
     )?;
     let rows = statement.query_map(
         params![
@@ -258,11 +512,13 @@ fn bm25_candidates(
                 document_id: row.get(0)?,
                 document_kind: row.get(1)?,
                 evidence_id: row.get(2)?,
-                source_scope: row.get(3)?,
-                source_path: row.get(4)?,
-                entity_labels: split_labels(row.get(5)?),
-                content: row.get(6)?,
-                rank: row.get(7)?,
+                parent_evidence_id: row.get(3)?,
+                modality: row.get(4)?,
+                source_scope: row.get(5)?,
+                source_path: row.get(6)?,
+                entity_labels: split_labels(row.get(7)?),
+                content: row.get(8)?,
+                rank: row.get(9)?,
             })
         },
     )?;
@@ -318,9 +574,17 @@ fn scored_bm25_hit(
     };
 
     Ok(ScoredHit {
-        key: row.document_id,
+        key: if row.document_kind == "evidence" {
+            evidence_group_key(
+                row.parent_evidence_id
+                    .as_deref()
+                    .unwrap_or(&row.evidence_id),
+            )
+        } else {
+            row.document_id
+        },
         hit: RetrievalHit {
-            evidence_id: row.evidence_id,
+            evidence_id: row.parent_evidence_id.unwrap_or(row.evidence_id),
             source_scope: row.source_scope,
             source_path: row.source_path,
             source_span,
@@ -335,6 +599,8 @@ fn scored_bm25_hit(
         },
         source,
         source_score: -row.rank,
+        modality: row.modality,
+        explanation: None,
     })
 }
 
@@ -384,6 +650,8 @@ fn graph_evidence_candidates(
         "
         SELECT
             e.id,
+            e.parent_evidence_id,
+            e.modality,
             e.source_scope,
             e.source_path,
             e.span_start_byte,
@@ -403,13 +671,15 @@ fn graph_evidence_candidates(
         |row| {
             Ok(RawEvidenceRow {
                 evidence_id: row.get(0)?,
-                source_scope: row.get(1)?,
-                source_path: row.get(2)?,
-                span_start_byte: row.get(3)?,
-                span_end_byte: row.get(4)?,
-                span_start_line: row.get(5)?,
-                span_end_line: row.get(6)?,
-                content: row.get(7)?,
+                parent_evidence_id: row.get(1)?,
+                modality: row.get(2)?,
+                source_scope: row.get(3)?,
+                source_path: row.get(4)?,
+                span_start_byte: row.get(5)?,
+                span_end_byte: row.get(6)?,
+                span_start_line: row.get(7)?,
+                span_end_line: row.get(8)?,
+                content: row.get(9)?,
             })
         },
     )?;
@@ -419,6 +689,7 @@ fn graph_evidence_candidates(
     drop(statement);
 
     let mut hits = Vec::new();
+    let mut fact_evidence_ids_by_group = BTreeMap::<String, Vec<String>>::new();
     for row in evidence_rows {
         let source_span = optional_span_from_parts(
             row.span_start_byte,
@@ -438,10 +709,18 @@ fn graph_evidence_candidates(
             row.source_path.as_deref(),
         );
         if score > 0.0 {
+            let group_id = row
+                .parent_evidence_id
+                .as_deref()
+                .unwrap_or(row.evidence_id.as_str());
+            fact_evidence_ids_by_group
+                .entry(group_id.to_owned())
+                .or_default()
+                .push(row.evidence_id.clone());
             hits.push(ScoredHit {
-                key: evidence_document_id(&row.evidence_id),
+                key: evidence_group_key(group_id),
                 hit: RetrievalHit {
-                    evidence_id: row.evidence_id,
+                    evidence_id: group_id.to_owned(),
                     source_scope: row.source_scope,
                     source_path: row.source_path,
                     source_span,
@@ -456,6 +735,8 @@ fn graph_evidence_candidates(
                 },
                 source: RetrieverSource::GraphEvidence,
                 source_score: score,
+                modality: row.modality,
+                explanation: None,
             });
         }
     }
@@ -468,16 +749,27 @@ fn graph_evidence_candidates(
     hits.truncate(request.limit.saturating_mul(4).max(request.limit));
     let facts_by_evidence = facts_for_evidence_ids(
         connection,
-        hits.iter()
-            .map(|hit| hit.hit.evidence_id.clone())
+        fact_evidence_ids_by_group
+            .values()
+            .flat_map(|evidence_ids| evidence_ids.iter().cloned())
             .collect::<Vec<_>>(),
         request.graph_version,
     )?;
     for scored in &mut hits {
-        scored.hit.graph_facts = facts_by_evidence
-            .get(&scored.hit.evidence_id)
-            .cloned()
-            .unwrap_or_default();
+        let Some(evidence_ids) = fact_evidence_ids_by_group.get(&scored.hit.evidence_id) else {
+            continue;
+        };
+        for evidence_id in evidence_ids {
+            if let Some(facts) = facts_by_evidence.get(evidence_id) {
+                for fact in facts {
+                    if !scored.hit.graph_facts.iter().any(|existing| {
+                        existing.fact_id == fact.fact_id && existing.kind == fact.kind
+                    }) {
+                        scored.hit.graph_facts.push(fact.clone());
+                    }
+                }
+            }
+        }
     }
 
     Ok(hits)
@@ -860,8 +1152,12 @@ fn merge_ranked(
             RetrieverSource::CodeGraph => RetrieverSource::CodeGraph,
             _ => fallback_source,
         };
+        let explanation_text = scored
+            .explanation
+            .unwrap_or_else(|| format!("{explanation}; modality={}", scored.modality));
         let candidate = candidates
             .entry(scored.key)
+            .and_modify(|candidate| candidate.merge_hit(&scored.hit))
             .or_insert_with(|| Candidate::new(scored.hit));
         if !candidate.hit.retriever_sources.contains(&source) {
             candidate.hit.retriever_sources.push(source);
@@ -870,7 +1166,7 @@ fn merge_ranked(
             source,
             rank,
             score: scored.source_score,
-            explanation: explanation.to_owned(),
+            explanation: explanation_text,
         });
         candidate.rrf_score += rrf_score;
     }
@@ -893,6 +1189,49 @@ impl Candidate {
         self.hit.score = self.rrf_score;
         self.hit
     }
+
+    fn merge_hit(&mut self, hit: &RetrievalHit) {
+        if !hit.content.is_empty() && !self.hit.content.contains(&hit.content) {
+            if !self.hit.content.is_empty() {
+                self.hit.content.push_str("\n\n");
+            }
+            self.hit.content.push_str(&hit.content);
+        }
+        if self.hit.source_path.is_none() {
+            self.hit.source_path = hit.source_path.clone();
+        }
+        if self.hit.source_span.is_none() {
+            self.hit.source_span = hit.source_span;
+        }
+        if self.hit.code_artifact.is_none() {
+            self.hit.code_artifact = hit.code_artifact.clone();
+        }
+        for label in &hit.entity_labels {
+            if !self.hit.entity_labels.contains(label) {
+                self.hit.entity_labels.push(label.clone());
+            }
+        }
+        for entity in &hit.entities {
+            if !self
+                .hit
+                .entities
+                .iter()
+                .any(|existing| existing.id == entity.id)
+            {
+                self.hit.entities.push(entity.clone());
+            }
+        }
+        for fact in &hit.graph_facts {
+            if !self
+                .hit
+                .graph_facts
+                .iter()
+                .any(|existing| existing.fact_id == fact.fact_id && existing.kind == fact.kind)
+            {
+                self.hit.graph_facts.push(fact.clone());
+            }
+        }
+    }
 }
 
 struct ScoredHit {
@@ -900,12 +1239,16 @@ struct ScoredHit {
     hit: RetrievalHit,
     source: RetrieverSource,
     source_score: f64,
+    modality: String,
+    explanation: Option<String>,
 }
 
 struct RawBm25Row {
     document_id: String,
     document_kind: String,
     evidence_id: String,
+    parent_evidence_id: Option<String>,
+    modality: String,
     source_scope: String,
     source_path: Option<String>,
     entity_labels: Vec<String>,
@@ -915,6 +1258,8 @@ struct RawBm25Row {
 
 struct RawEvidenceRow {
     evidence_id: String,
+    parent_evidence_id: Option<String>,
+    modality: String,
     source_scope: String,
     source_path: Option<String>,
     span_start_byte: Option<u32>,
@@ -931,6 +1276,90 @@ fn fts_query(query: &str) -> Option<String> {
         .map(|token| format!("\"{}\"", token.replace('"', "\"\"")))
         .collect::<Vec<_>>();
     (!tokens.is_empty()).then(|| tokens.join(" OR "))
+}
+
+fn token_signature(
+    content: &str,
+    labels: &[String],
+    source_path: Option<&str>,
+    source_hash: &str,
+) -> Vec<String> {
+    let mut terms = BTreeSet::new();
+    collect_terms(content, &mut terms);
+    collect_terms(&labels.join(" "), &mut terms);
+    collect_terms(source_path.unwrap_or_default(), &mut terms);
+    collect_terms(source_hash, &mut terms);
+
+    terms.into_iter().collect()
+}
+
+fn collect_terms(value: &str, terms: &mut BTreeSet<String>) {
+    for token in value
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .filter(|token| token.len() >= 2)
+    {
+        terms.insert(token.to_ascii_lowercase());
+    }
+}
+
+fn hashed_vector(
+    content: &str,
+    labels: &[String],
+    source_path: Option<&str>,
+    source_hash: &str,
+    dimension: usize,
+) -> Vec<f64> {
+    if dimension == 0 {
+        return Vec::new();
+    }
+    let terms = token_signature(content, labels, source_path, source_hash);
+    let mut vector = vec![0.0; dimension];
+    for term in terms {
+        let hash = stable_hash64(term.as_bytes());
+        let index = (hash as usize) % dimension;
+        let sign = if hash & 1 == 0 { 1.0 } else { -1.0 };
+        vector[index] += sign;
+    }
+    normalize_vector(&mut vector);
+
+    vector
+}
+
+fn normalize_vector(vector: &mut [f64]) {
+    let norm = vector.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if norm == 0.0 {
+        return;
+    }
+    for value in vector {
+        *value /= norm;
+    }
+}
+
+fn semantic_overlap_score(
+    query_terms: &BTreeSet<String>,
+    document_terms: &BTreeSet<String>,
+) -> f64 {
+    if query_terms.is_empty() || document_terms.is_empty() {
+        return 0.0;
+    }
+    let intersection = query_terms.intersection(document_terms).count();
+    if intersection == 0 {
+        return 0.0;
+    }
+    let union = query_terms.union(document_terms).count();
+
+    intersection as f64 / query_terms.len() as f64 + intersection as f64 / union as f64
+}
+
+fn cosine_similarity(left: &[f64], right: &[f64]) -> f64 {
+    if left.len() != right.len() || left.is_empty() {
+        return 0.0;
+    }
+    left.iter()
+        .zip(right.iter())
+        .map(|(left, right)| left * right)
+        .sum::<f64>()
+        .max(0.0)
 }
 
 fn overlap_score(query: &str, content: &str, labels: &[String], source_path: Option<&str>) -> f64 {
@@ -954,12 +1383,41 @@ fn evidence_document_id(evidence_id: &str) -> String {
     format!("evidence:{evidence_id}")
 }
 
+fn evidence_group_key(evidence_id: &str) -> String {
+    format!("evidence_group:{evidence_id}")
+}
+
 fn code_document_id(kind: &str, source_scope: &str, path: &str, id: &str) -> String {
     format!("code:{kind}:{source_scope}:{path}:{id}")
 }
 
 fn join_labels(labels: &[String]) -> String {
     serde_json::to_string(labels).unwrap_or_default()
+}
+
+fn json_string_array(values: &[String]) -> Result<String, StorageError> {
+    serde_json::to_string(values).map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
+
+fn json_f64_array(values: &[f64]) -> Result<String, StorageError> {
+    serde_json::to_string(values).map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
+
+fn parse_string_array(value: &str) -> Result<Vec<String>, StorageError> {
+    serde_json::from_str(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
+
+fn parse_f64_array(value: &str) -> Result<Vec<f64>, StorageError> {
+    serde_json::from_str(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
+
+fn sort_scored_hits(hits: &mut [ScoredHit]) {
+    hits.sort_by(|left, right| {
+        right
+            .source_score
+            .total_cmp(&left.source_score)
+            .then_with(|| left.hit.evidence_id.cmp(&right.hit.evidence_id))
+    });
 }
 
 fn split_labels(labels: String) -> Vec<String> {
@@ -970,4 +1428,34 @@ fn split_labels(labels: String) -> Vec<String> {
             .map(str::to_owned)
             .collect()
     })
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_signature_and_vector_are_deterministic() {
+        let labels = vec!["Rust".to_owned()];
+        let signature = token_signature("Async Rust graph", &labels, Some("src/lib.rs"), "abc");
+        let first = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), "abc", 8);
+        let second = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), "abc", 8);
+
+        assert!(signature.contains(&"rust".to_owned()));
+        assert_eq!(first, second);
+        assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001);
+    }
 }

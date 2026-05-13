@@ -1,6 +1,6 @@
 # Hybrid Retrieval Context Pack
 
-This document describes the current Phase 1 retrieval behavior implemented by
+This document describes the current Phase 4 retrieval behavior implemented by
 `RelayKnowledgeService::retrieve_context`.
 
 ## What It Does
@@ -25,25 +25,42 @@ score, and a short explanation so agents can cite why an item was selected.
 
 ## Retrieval Sources
 
-Phase 1 uses three concrete recall paths:
+The retrieval layer uses these concrete recall paths:
 
 - `bm25`: SQLite FTS5 BM25 over evidence content, entity labels, source scope,
   source path, code symbols, and code chunks.
 - `graph_evidence`: deterministic graph evidence/entity term overlap fallback.
 - `code_graph`: code symbol and chunk documents inserted from the tree-sitter
   code graph into the shared BM25 read model.
+- `semantic`: local token-signature read model over evidence and derived
+  multimodal evidence, with model, dimension, source hash, scope, and graph
+  version metadata in ranking explanations.
+- `vector`: local hashed-vector ANN read model with deterministic vectors,
+  scope post-filtering, graph-version filtering, model metadata, and source
+  hashes.
+- `graph_path`: schema-guided traversal over accepted relations, claims,
+  events, and their supporting evidence.
+- `temporal`: event retrieval for year terms and `as_of:<date>` constraints.
+- `community_summary`: scoped summary hit for global/overview/community
+  queries.
 
 `semantic` and `vector` remain explicit index families in freshness metadata.
 When those backends are unavailable, `backend_statuses` records an unavailable
 state for each backend, whether scope post-filtering would have been applied,
 and the fallback reason. BM25 plus graph evidence retrieval remains usable and
 the response still reports index freshness.
+BM25, semantic, vector, graph path, temporal, and community hits are fused with
+RRF. Semantic/vector are local read models, not external embedding services; the
+metadata is present so a future external backend can coexist without changing
+the context-pack contract.
 
 ## Graph Facts
 
 Graph mutations now support evidence metadata and structured facts:
 
 - evidence source path, source span, confidence, status, and graph version;
+- evidence modality and extraction metadata for `text_span`, `image_asset`,
+  `ocr_text`, `caption`, `image_embedding`, `table`, and `layout_region`;
 - typed relations between entity labels;
 - claims with subject, predicate, object, evidence ids, confidence, status, and
   version range;
@@ -63,6 +80,10 @@ returned through retrieval. Ingest revalidates deserialized spans, confidence
 scores, and version ranges before persistence. Evidence with `rejected` or
 `superseded` status remains inspectable in the graph but is excluded from BM25
 and graph-evidence retrieval candidates.
+OCR, caption, and image embedding evidence can reference a parent evidence item.
+Retrieval uses the parent evidence id as the merge key, so OCR and caption hits
+for the same image are returned as one grouped context item instead of duplicate
+results.
 
 ## Freshness And Snapshot Behavior
 

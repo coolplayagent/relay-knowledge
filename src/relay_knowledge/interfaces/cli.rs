@@ -344,6 +344,7 @@ pub async fn run_with_service(
                             status: None,
                             content,
                             entity_labels,
+                            extraction: None,
                         }],
                         relations: Vec::new(),
                         claims: Vec::new(),

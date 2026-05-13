@@ -33,6 +33,7 @@ async fn retrieve_context_returns_canonical_structured_content() {
                     status: None,
                     content: "MCP Streamable HTTP retrieves graph context".to_owned(),
                     entity_labels: vec!["MCP".to_owned()],
+                    extraction: None,
                 }],
                 relations: Vec::new(),
                 claims: Vec::new(),

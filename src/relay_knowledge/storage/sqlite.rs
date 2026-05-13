@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -15,8 +15,8 @@ mod retrieval;
 use crate::{
     domain::{
         CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
-        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, GraphVersionRange,
-        IndexKind, IndexStatus, RetrievalHit, SourceScope,
+        CodeSymbolRecord, CommitReceipt, EvidenceExtractionMetadata, GraphMutationBatch,
+        GraphVersion, GraphVersionRange, IndexKind, IndexStatus, RetrievalHit, SourceScope,
     },
     storage::{
         CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
@@ -214,6 +214,23 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
             content TEXT NOT NULL,
             confidence_basis_points INTEGER NOT NULL DEFAULT 10000,
             status TEXT NOT NULL DEFAULT 'accepted',
+            modality TEXT NOT NULL DEFAULT 'text_span',
+            source_uri TEXT,
+            source_hash TEXT,
+            media_hash TEXT,
+            extractor TEXT,
+            extractor_version TEXT,
+            observed_at TEXT,
+            parent_evidence_id TEXT,
+            layout_page_number INTEGER,
+            layout_x INTEGER,
+            layout_y INTEGER,
+            layout_width INTEGER,
+            layout_height INTEGER,
+            embedding_model TEXT,
+            embedding_dimension INTEGER,
+            extraction_status TEXT NOT NULL DEFAULT 'succeeded',
+            extraction_message TEXT,
             created_graph_version INTEGER NOT NULL
         );
 
@@ -312,6 +329,33 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
         "status",
         "TEXT NOT NULL DEFAULT 'accepted'",
     )?;
+    ensure_column(
+        connection,
+        "evidence",
+        "modality",
+        "TEXT NOT NULL DEFAULT 'text_span'",
+    )?;
+    ensure_column(connection, "evidence", "source_uri", "TEXT")?;
+    ensure_column(connection, "evidence", "source_hash", "TEXT")?;
+    ensure_column(connection, "evidence", "media_hash", "TEXT")?;
+    ensure_column(connection, "evidence", "extractor", "TEXT")?;
+    ensure_column(connection, "evidence", "extractor_version", "TEXT")?;
+    ensure_column(connection, "evidence", "observed_at", "TEXT")?;
+    ensure_column(connection, "evidence", "parent_evidence_id", "TEXT")?;
+    ensure_column(connection, "evidence", "layout_page_number", "INTEGER")?;
+    ensure_column(connection, "evidence", "layout_x", "INTEGER")?;
+    ensure_column(connection, "evidence", "layout_y", "INTEGER")?;
+    ensure_column(connection, "evidence", "layout_width", "INTEGER")?;
+    ensure_column(connection, "evidence", "layout_height", "INTEGER")?;
+    ensure_column(connection, "evidence", "embedding_model", "TEXT")?;
+    ensure_column(connection, "evidence", "embedding_dimension", "INTEGER")?;
+    ensure_column(
+        connection,
+        "evidence",
+        "extraction_status",
+        "TEXT NOT NULL DEFAULT 'succeeded'",
+    )?;
+    ensure_column(connection, "evidence", "extraction_message", "TEXT")?;
     ensure_column(
         connection,
         "graph_mutations",
@@ -417,6 +461,16 @@ fn commit_batch(
     let mut affected_scopes = BTreeSet::new();
     let mut evidence_ids = BTreeSet::new();
     let mut source_hashes = BTreeSet::new();
+    let batch_evidence_scopes = batch
+        .evidence
+        .iter()
+        .map(|evidence| {
+            (
+                evidence.id.clone(),
+                evidence.source_scope.as_str().to_owned(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
 
     for evidence in batch.evidence {
         let evidence_id = evidence.id;
@@ -426,23 +480,46 @@ fn commit_batch(
         let span = evidence.span;
         let content = evidence.content;
         let entity_labels = evidence.entity_labels;
+        let extraction = evidence.extraction;
+        let derived_source_hash = source_hash_for_evidence(
+            &extraction,
+            &source_scope_text,
+            source_path.as_deref(),
+            &content,
+        );
         if let Some(previous_scope) = evidence_scope(&transaction, &evidence_id)? {
             affected_scopes.insert(previous_scope);
         }
         affected_scopes.insert(source_scope_text.clone());
         evidence_ids.insert(evidence_id.clone());
-        source_hashes.insert(indexing::source_hash(
-            &source_scope_text,
-            source_path.as_deref(),
-            &content,
-        ));
+        source_hashes.insert(derived_source_hash.clone());
+        if let Some(media_hash) = &extraction.media_hash {
+            source_hashes.insert(media_hash.clone());
+        }
+        if let Some(parent_evidence_id) = extraction.parent_evidence_id.as_deref() {
+            validate_parent_evidence(
+                &transaction,
+                &batch_evidence_scopes,
+                &evidence_id,
+                &source_scope_text,
+                parent_evidence_id,
+            )?;
+        }
+        let layout_region = extraction.layout_region;
         transaction.execute(
             "INSERT INTO evidence (
                  id, source_scope, source_path, span_start_byte, span_end_byte,
                  span_start_line, span_end_line, content, confidence_basis_points,
-                 status, created_graph_version
+                 status, modality, source_uri, source_hash, media_hash, extractor,
+                 extractor_version, observed_at, parent_evidence_id, layout_page_number,
+                 layout_x, layout_y, layout_width, layout_height, embedding_model,
+                 embedding_dimension, extraction_status, extraction_message, created_graph_version
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             VALUES (
+                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26,
+                 ?27, ?28
+             )
              ON CONFLICT(id) DO UPDATE SET
                  source_scope = excluded.source_scope,
                  source_path = excluded.source_path,
@@ -453,6 +530,23 @@ fn commit_batch(
                  content = excluded.content,
                  confidence_basis_points = excluded.confidence_basis_points,
                  status = excluded.status,
+                 modality = excluded.modality,
+                 source_uri = excluded.source_uri,
+                 source_hash = excluded.source_hash,
+                 media_hash = excluded.media_hash,
+                 extractor = excluded.extractor,
+                 extractor_version = excluded.extractor_version,
+                 observed_at = excluded.observed_at,
+                 parent_evidence_id = excluded.parent_evidence_id,
+                 layout_page_number = excluded.layout_page_number,
+                 layout_x = excluded.layout_x,
+                 layout_y = excluded.layout_y,
+                 layout_width = excluded.layout_width,
+                 layout_height = excluded.layout_height,
+                 embedding_model = excluded.embedding_model,
+                 embedding_dimension = excluded.embedding_dimension,
+                 extraction_status = excluded.extraction_status,
+                 extraction_message = excluded.extraction_message,
                  created_graph_version = excluded.created_graph_version",
             params![
                 &evidence_id,
@@ -465,6 +559,23 @@ fn commit_batch(
                 &content,
                 evidence.confidence.basis_points,
                 evidence.status.as_str(),
+                extraction.modality.as_str(),
+                extraction.source_uri.as_deref(),
+                &derived_source_hash,
+                extraction.media_hash.as_deref(),
+                extraction.extractor.as_deref(),
+                extraction.extractor_version.as_deref(),
+                extraction.observed_at.as_deref(),
+                extraction.parent_evidence_id.as_deref(),
+                layout_region.map(|region| region.page_number),
+                layout_region.map(|region| region.x),
+                layout_region.map(|region| region.y),
+                layout_region.map(|region| region.width),
+                layout_region.map(|region| region.height),
+                extraction.embedding_model.as_deref(),
+                extraction.embedding_dimension.map(i64::from),
+                extraction.diagnostic.status.as_str(),
+                extraction.diagnostic.message.as_deref(),
                 next.get()
             ],
         )?;
@@ -485,13 +596,15 @@ fn commit_batch(
         }
         retrieval::replace_evidence_document(
             &transaction,
-            retrieval::EvidenceDocument {
+            retrieval::EvidenceDocumentInput {
                 evidence_id: &evidence_id,
-                source_scope: source_scope.as_str(),
+                source_scope: &source_scope_text,
                 source_path: source_path.as_deref(),
                 entity_labels: &entity_labels,
                 content: &content,
                 status: evidence.status,
+                extraction: &extraction,
+                source_hash: &derived_source_hash,
                 graph_version: next.get(),
             },
         )?;
@@ -774,6 +887,41 @@ fn evidence_scope(
         .map_err(StorageError::from)
 }
 
+fn validate_parent_evidence(
+    connection: &Connection,
+    batch_evidence_scopes: &BTreeMap<String, String>,
+    evidence_id: &str,
+    source_scope: &str,
+    parent_evidence_id: &str,
+) -> Result<(), StorageError> {
+    if parent_evidence_id == evidence_id {
+        return Err(StorageError::InvalidInput(
+            "parent evidence id must reference a different evidence record".to_owned(),
+        ));
+    }
+    let parent_scope = if let Some(scope) = batch_evidence_scopes.get(parent_evidence_id) {
+        Some(scope.clone())
+    } else {
+        evidence_scope(connection, parent_evidence_id).map_err(|error| {
+            StorageError::InvalidInput(format!(
+                "parent evidence id '{parent_evidence_id}' could not be validated: {error}"
+            ))
+        })?
+    };
+
+    match parent_scope {
+        Some(parent_scope) if parent_scope == source_scope => Ok(()),
+        Some(parent_scope) => Err(StorageError::InvalidInput(format!(
+            "parent evidence id '{parent_evidence_id}' belongs to source scope \
+             '{parent_scope}' instead of '{source_scope}'"
+        ))),
+        None => Err(StorageError::InvalidInput(format!(
+            "parent evidence id '{parent_evidence_id}' does not exist in source scope \
+             '{source_scope}'"
+        ))),
+    }
+}
+
 fn evidence_ids_json(evidence_ids: &[String]) -> Result<String, StorageError> {
     serde_json::to_string(evidence_ids)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))
@@ -839,6 +987,18 @@ fn storage_version_range(
     } else {
         range
     }
+}
+
+fn source_hash_for_evidence(
+    extraction: &EvidenceExtractionMetadata,
+    source_scope: &str,
+    source_path: Option<&str>,
+    content: &str,
+) -> String {
+    extraction
+        .source_hash
+        .clone()
+        .unwrap_or_else(|| indexing::source_hash(source_scope, source_path, content))
 }
 
 fn count_rows(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
@@ -944,6 +1104,9 @@ mod graph_tests;
 
 #[cfg(test)]
 mod index_refresh_queue_tests;
+
+#[cfg(test)]
+mod graphrag_phase4_tests;
 
 #[cfg(test)]
 mod index_refresh_tests;

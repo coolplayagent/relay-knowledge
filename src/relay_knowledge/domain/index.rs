@@ -38,6 +38,9 @@ impl fmt::Display for IndexKind {
 #[serde(rename_all = "snake_case")]
 pub enum IndexModality {
     Text,
+    Image,
+    Layout,
+    Table,
 }
 
 impl IndexModality {
@@ -48,6 +51,9 @@ impl IndexModality {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
+            Self::Image => "image",
+            Self::Layout => "layout",
+            Self::Table => "table",
         }
     }
 }
@@ -129,6 +135,9 @@ mod tests {
     #[test]
     fn index_modality_has_stable_display_values() {
         assert_eq!(IndexModality::Text.to_string(), "text");
+        assert_eq!(IndexModality::Image.to_string(), "image");
+        assert_eq!(IndexModality::Layout.to_string(), "layout");
+        assert_eq!(IndexModality::Table.to_string(), "table");
     }
 
     #[test]

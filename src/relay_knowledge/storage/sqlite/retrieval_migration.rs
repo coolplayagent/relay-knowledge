@@ -1,10 +1,13 @@
 use rusqlite::{Connection, params};
 
-use crate::storage::StorageError;
+use crate::{
+    domain::{EvidenceExtractionMetadata, EvidenceModality},
+    storage::StorageError,
+};
 
 use super::{
-    EvidenceDocument, entities_for_evidence, insert_code_chunk_document,
-    insert_code_symbol_document, insert_evidence_document, parse_fact_status,
+    EvidenceDocumentInput, entities_for_evidence, insert_code_chunk_document,
+    insert_code_symbol_document, parse_fact_status, replace_evidence_document,
 };
 
 pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bool, StorageError> {
@@ -25,9 +28,10 @@ pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bo
     let columns = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
-    if !columns
+    let required = ["created_graph_version", "parent_evidence_id", "modality"];
+    if required
         .iter()
-        .any(|column| column == "created_graph_version")
+        .any(|required_column| !columns.iter().any(|column| column == required_column))
     {
         connection.execute("DROP TABLE graph_bm25", [])?;
         return Ok(true);
@@ -47,7 +51,8 @@ pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), Stor
 fn rebuild_evidence_documents(connection: &Connection) -> Result<(), StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT id, source_scope, source_path, content, status, created_graph_version
+        SELECT id, source_scope, source_path, content, status, modality, source_hash,
+               parent_evidence_id, embedding_model, embedding_dimension, created_graph_version
         FROM evidence
         WHERE status IN ('accepted', 'proposed')
         ORDER BY created_graph_version ASC, id ASC
@@ -60,7 +65,12 @@ fn rebuild_evidence_documents(connection: &Connection) -> Result<(), StorageErro
             row.get::<_, Option<String>>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
-            row.get::<_, u64>(5)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<u16>>(9)?,
+            row.get::<_, u64>(10)?,
         ))
     })?;
     let documents = rows
@@ -68,27 +78,68 @@ fn rebuild_evidence_documents(connection: &Connection) -> Result<(), StorageErro
         .map_err(StorageError::from)?;
     drop(statement);
 
-    for (evidence_id, source_scope, source_path, content, status, graph_version) in documents {
+    for (
+        evidence_id,
+        source_scope,
+        source_path,
+        content,
+        status,
+        modality,
+        source_hash,
+        parent_evidence_id,
+        embedding_model,
+        embedding_dimension,
+        graph_version,
+    ) in documents
+    {
         let entities = entities_for_evidence(connection, &evidence_id)?;
         let entity_labels = entities
             .iter()
             .map(|entity| entity.label.clone())
             .collect::<Vec<_>>();
-        insert_evidence_document(
+        let source_hash = source_hash.unwrap_or_else(|| {
+            super::super::indexing::source_hash(&source_scope, source_path.as_deref(), &content)
+        });
+        let extraction = EvidenceExtractionMetadata {
+            modality: parse_evidence_modality(&modality)?,
+            source_hash: Some(source_hash.clone()),
+            parent_evidence_id,
+            embedding_model,
+            embedding_dimension,
+            ..EvidenceExtractionMetadata::text_span()
+        };
+        replace_evidence_document(
             connection,
-            EvidenceDocument {
+            EvidenceDocumentInput {
                 evidence_id: &evidence_id,
                 source_scope: &source_scope,
                 source_path: source_path.as_deref(),
                 entity_labels: &entity_labels,
                 content: &content,
                 status: parse_fact_status(&status)?,
+                extraction: &extraction,
+                source_hash: &source_hash,
                 graph_version,
             },
         )?;
     }
 
     Ok(())
+}
+
+fn parse_evidence_modality(value: &str) -> Result<EvidenceModality, StorageError> {
+    match value {
+        "text_span" => Ok(EvidenceModality::TextSpan),
+        "image_asset" => Ok(EvidenceModality::ImageAsset),
+        "ocr_text" => Ok(EvidenceModality::OcrText),
+        "caption" => Ok(EvidenceModality::Caption),
+        "image_embedding" => Ok(EvidenceModality::ImageEmbedding),
+        "table" => Ok(EvidenceModality::Table),
+        "layout_region" => Ok(EvidenceModality::LayoutRegion),
+        _ => Err(StorageError::InvalidInput(format!(
+            "unknown evidence modality '{value}'"
+        ))),
+    }
 }
 
 fn rebuild_code_symbol_documents(connection: &Connection) -> Result<(), StorageError> {

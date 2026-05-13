@@ -36,6 +36,7 @@ async fn local_acp_prompt_returns_progress_context_artifact_and_audit() {
                     status: None,
                     content: "ACP local sessions retrieve graph context".to_owned(),
                     entity_labels: vec!["ACP".to_owned()],
+                    extraction: None,
                 }],
                 relations: Vec::new(),
                 claims: Vec::new(),

@@ -24,12 +24,12 @@ GraphRAG 能力必须保持可解释:
 - 统一 API: ingest、hybrid retrieval、graph inspection、index refresh、health、service status 和 code repository API。
 - 异步 application service: CLI、Web、MCP adapter 共用 `RelayKnowledgeService`，阻塞 SQLite 和 Git/tree-sitter 工作被隔离到边界内。
 - SQLite 图状态: evidence/entity、typed relation、claim、event、graph mutation log、graph version、index status 和 code graph tables。
-- 混合检索雏形: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、RRF 融合、source span/structured fact context pack 和 semantic/vector backend availability metadata。
+- 混合检索: SQLite FTS5 BM25 read model、graph evidence fallback、code graph documents、local semantic/vector read model、schema path、temporal/community retrieval、RRF 融合、source span/structured fact context pack 和 backend availability metadata。
 - 代码仓库能力: Git 仓库注册、full/incremental index、worktree overlay、tree-sitter 多语言解析、symbol/reference/chunk 查询和 diff impact。
 - Agent 接入基础: MCP Streamable HTTP server、本地 ACP session adapter、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh。
 - Web 诊断面: `/api/project/status` 和 `/api/health` 驱动的 health、index、runtime、operation composer 和 GraphRAG readiness 视图。
 
-这些能力仍是 v1 底座。semantic/vector 真实后端、proposal lifecycle、平台 service manager/silent update operator、多模态 evidence、temporal query、MCP resources/prompts 和持久审计仍属于后续实现。
+这些能力已经从 v1 底座推进到 Phase 4 的本地 GraphRAG read model: typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、local semantic/vector read model、多模态 evidence schema、schema path、temporal query、community summary 和 evaluation harness 已有 Rust 实现。外部 embedding/OCR/vision 后端、proposal lifecycle、service manager 安装面和 silent update operator 仍属于后续实现。
 
 ## 3. 优化措施
 
@@ -39,7 +39,7 @@ GraphRAG 能力必须保持可解释:
 - BM25 字段质量优先覆盖 evidence content、entity label、source path、code symbol、code chunk 和 doc comment。
 - RRF 融合必须保留每个 retriever 的 rank、score 和 explanation。
 - graph expansion 必须限制深度、节点数、时间和输出字节，超限时返回 `truncated=true` 和原因。
-- semantic/vector 接入前先定义 adapter trait、model metadata、dimension、source hash、scope 和 graph version。
+- semantic/vector 当前使用确定性的本地 token/hash read model，已在 ranking explanation 中记录 model、dimension、source hash、scope 和 graph version；外部 embedding backend 接入时必须保持同一 metadata contract 和 scope post-filter。
 
 ### 3.2 事实模型
 
@@ -78,6 +78,8 @@ GraphRAG 能力必须保持可解释:
 - 检索时合并同一 parent evidence 的文本、OCR、caption、image 和 table hit，避免重复展示。
 - temporal query 必须支持 `as_of` 或 time range，并参与 index invalidation 与 context pack metadata。
 
+当前 Rust 实现已支持 evidence modality/extraction metadata、OCR/caption/image embedding parent grouping、`as_of:<date>` 与年份事件检索，以及 community summary context item。真实 OCR、vision caption 和外部 embedding worker 仍需要在后台 worker 边界后接入。
+
 ## 4. 分阶段路线
 
 ### Phase 1: 真实检索闭环
@@ -105,10 +107,16 @@ GraphRAG 能力必须保持可解释:
 
 ### Phase 4: 高级 GraphRAG
 
-- 接入 semantic retrieval 和 vector ANN read model，支持模型并存和 scope post-filter。
-- 增加 path retrieval、schema-guided traversal、community summary 和 temporal query。
-- 增加 multimodal evidence schema 与 extractor diagnostics。
-- 建立 evaluation harness，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
+- 已接入 local semantic retrieval 和 hashed-vector ANN read model，支持 model、dimension、source hash、scope 和 graph version metadata。
+- 已增加 path retrieval、schema-guided traversal、community summary 和 temporal query。
+- 已增加 multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality 和 parent evidence grouping。
+- 已建立 evaluation harness，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
+
+剩余 Phase 4 产品化工作:
+
+- 接入可替换的外部 text/image embedding backend，并保留本地 read model 作为 deterministic fallback。
+- 把真实 OCR、caption、table/layout extractor 放入后台 worker/maintenance 边界，写入当前 multimodal schema。
+- 将 evaluation harness 接到 CI fixture 和后续 release diagnostics。
 
 ## 5. 验收要求
 

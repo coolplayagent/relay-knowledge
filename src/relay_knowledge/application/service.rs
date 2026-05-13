@@ -954,6 +954,7 @@ mod tests {
             status: None,
             content: content.into(),
             entity_labels,
+            extraction: None,
         }
     }
 

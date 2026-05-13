@@ -2,7 +2,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{DomainError, GraphVersion, SourceScope, error::required_text};
+use super::{
+    DomainError, EvidenceExtractionMetadata, GraphVersion, SourceScope, error::required_text,
+};
 
 /// Lifecycle status for graph facts created from evidence or extraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +171,7 @@ pub struct EvidenceRecord {
     pub entity_labels: Vec<String>,
     pub confidence: ConfidenceScore,
     pub status: FactStatus,
+    pub extraction: EvidenceExtractionMetadata,
 }
 
 impl EvidenceRecord {
@@ -190,6 +193,7 @@ impl EvidenceRecord {
             entity_labels: normalized_labels,
             confidence: ConfidenceScore::CERTAIN,
             status: FactStatus::Accepted,
+            extraction: EvidenceExtractionMetadata::text_span(),
         })
     }
 
@@ -207,6 +211,16 @@ impl EvidenceRecord {
         self.span = span.map(validate_span).transpose()?;
         self.confidence = confidence.validate()?;
         self.status = status;
+
+        Ok(self)
+    }
+
+    /// Attaches validated multimodal extraction metadata to the evidence.
+    pub fn with_extraction_metadata(
+        mut self,
+        extraction: EvidenceExtractionMetadata,
+    ) -> Result<Self, DomainError> {
+        self.extraction = extraction.validate()?;
 
         Ok(self)
     }
@@ -609,6 +623,31 @@ mod tests {
         )
         .expect_err("invalid deserialized metadata should fail");
         assert_eq!(invalid.field, "evidence_span");
+    }
+
+    #[test]
+    fn evidence_accepts_multimodal_extraction_metadata() {
+        let evidence = EvidenceRecord::new(
+            "ocr-1",
+            SourceScope::parse("docs").expect("scope should parse"),
+            "Detected diagram label",
+            vec!["Diagram".to_owned()],
+        )
+        .expect("evidence should validate")
+        .with_extraction_metadata(EvidenceExtractionMetadata {
+            modality: crate::domain::EvidenceModality::OcrText,
+            parent_evidence_id: Some("image-1".to_owned()),
+            extractor: Some("ocr-worker".to_owned()),
+            extractor_version: Some("1.0".to_owned()),
+            ..EvidenceExtractionMetadata::text_span()
+        })
+        .expect("extraction metadata should validate");
+
+        assert_eq!(evidence.extraction.modality.as_str(), "ocr_text");
+        assert_eq!(
+            evidence.extraction.parent_evidence_id.as_deref(),
+            Some("image-1")
+        );
     }
 
     #[test]

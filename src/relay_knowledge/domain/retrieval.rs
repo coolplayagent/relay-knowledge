@@ -24,7 +24,7 @@ pub enum RetrievalMode {
 }
 
 /// Retrieval source that contributed to a fused context result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RetrieverSource {
     Bm25,
@@ -32,6 +32,9 @@ pub enum RetrieverSource {
     CodeGraph,
     Semantic,
     Vector,
+    GraphPath,
+    Temporal,
+    CommunitySummary,
 }
 
 /// Availability state for optional retrieval backends.
@@ -65,6 +68,9 @@ impl RetrieverSource {
             Self::CodeGraph => "code_graph",
             Self::Semantic => "semantic",
             Self::Vector => "vector",
+            Self::GraphPath => "graph_path",
+            Self::Temporal => "temporal",
+            Self::CommunitySummary => "community_summary",
         }
     }
 }
@@ -80,6 +86,12 @@ mod tests {
         assert_eq!(RetrieverSource::CodeGraph.as_str(), "code_graph");
         assert_eq!(RetrieverSource::Semantic.as_str(), "semantic");
         assert_eq!(RetrieverSource::Vector.as_str(), "vector");
+        assert_eq!(RetrieverSource::GraphPath.as_str(), "graph_path");
+        assert_eq!(RetrieverSource::Temporal.as_str(), "temporal");
+        assert_eq!(
+            RetrieverSource::CommunitySummary.as_str(),
+            "community_summary"
+        );
     }
 }
 

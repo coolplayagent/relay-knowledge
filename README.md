@@ -8,8 +8,8 @@
 
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
-- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
-- [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25 read model、RRF 融合、结构化图事实、context pack 响应字段和 freshness/truncation 行为说明。
+- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local semantic/vector、schema path、temporal/community、多模态 evidence、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
+- [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为说明。
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md): 注册 Git 仓库、tree-sitter 索引、代码图查询、增量更新和影响分析的当前实现说明。
 
 重点架构文档:
@@ -45,7 +45,9 @@ The binary starts a Tokio runtime, and the shared application service exposes as
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
 Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
-Hybrid retrieval uses the SQLite-backed BM25 read model plus graph evidence fallback, fuses candidates with reciprocal-rank fusion, and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, code artifacts, backend availability, freshness, truncation, and budget metadata.
+Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, code artifacts, backend availability, freshness, truncation, and budget metadata.
+Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, and retrieval groups those hits by parent to avoid duplicate context items.
+The `evaluation` module provides a pure GraphRAG harness for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
 Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, while explicit refresh paths surface queue-cap failures instead of reporting false freshness.
 
 Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:

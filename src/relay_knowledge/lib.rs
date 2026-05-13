@@ -5,6 +5,7 @@ pub mod application;
 pub mod code;
 pub mod domain;
 pub mod env;
+pub mod evaluation;
 pub mod indexing;
 pub mod interfaces;
 pub mod net;

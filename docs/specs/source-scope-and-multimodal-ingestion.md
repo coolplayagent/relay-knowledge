@@ -167,7 +167,13 @@ document source
 
 ## 5. API 和存储落点
 
-后续实现 API 时，检索请求应包含:
+当前 Rust API 的 evidence ingest 已支持可选 `extraction` 元数据，字段覆盖
+`modality`、`source_uri`、`source_hash`、`media_hash`、`extractor`、
+`extractor_version`、`observed_at`、`parent_evidence_id`、`layout_region`、
+`embedding_model`、`embedding_dimension` 和 extractor diagnostic。未提供时默认写入
+`text_span` evidence。
+
+检索请求后续可继续扩展为显式 modality selector:
 
 ```rust
 pub struct RetrievalRequest {
@@ -193,10 +199,19 @@ pub struct RetrievalMetadata {
 存储层未来需要支持:
 
 - `source_scopes`: 记录 scope kind、source ID、resolved version、fingerprint 和 metadata。
-- `evidence.scope_id`: 所有 evidence 可按 scope 过滤。
+- `evidence.scope_id`: 所有 evidence 可按 scope 过滤；当前实现使用 `evidence.source_scope` 并在 BM25、semantic、vector、path、temporal 和 community retrieval 中做 scope post-filter。
 - `graph_mutations.scope_id`: 索引器可以局部消费和刷新。
 - `index_versions.scope_id`: stale 判断按 scope 和 modality 计算。
-- `embedding_records.modality`: 区分 text/image/layout/table embedding。
+- `embedding_records.modality`: 区分 text/image/layout/table embedding；当前实现使用 `graph_semantic_documents` 和 `graph_vector_documents` 存储 modality、parent evidence、model、dimension、source hash 和 graph version。
+
+当前 parent grouping 规则:
+
+- `ocr_text`、`caption`、`image_embedding` 和 `layout_region` 必须引用
+  `parent_evidence_id`。
+- retrieval 使用 parent evidence id 作为 RRF merge key，避免同一图片的 OCR 和
+  caption 重复出现在 context pack 中。
+- `image_asset` 必须提供 `media_hash` 或 `source_hash`，便于后续 extractor 和
+  embedding worker 做幂等刷新。
 
 ## 6. 可观测性
 
