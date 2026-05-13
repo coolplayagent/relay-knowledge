@@ -495,6 +495,18 @@ dependencies = [
    - `文件路径::类.方法` 的命名空间格式简洁有效
    - 支持精确图查询和去重
 
+### relay-knowledge 当前对齐状态
+
+截至 2026-05-13，`relay-knowledge` 的代码知识图谱 v1 已完成以下对齐:
+
+- **Tree-sitter 代码仓库索引**: 支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；Unsupported、二进制、超大或解析失败文件降级为 text chunk/diagnostic。
+- **SQLite 本地图谱读写**: code repository 文件、symbol、reference、call、import、chunk、diagnostic 和 rename tombstone 通过 storage trait 写入 SQLite，并同步写入 BM25、local semantic 和 local vector read model。
+- **符号身份**: `symbol_snapshot_id` 表示某一 Git snapshot 中的符号实例，`canonical_symbol_id` 表示 `repo://{repository_id}/{qualified_name}` 形式的逻辑符号身份；类方法使用 `路径::Class.method` 层级限定名。
+- **边解析与置信度**: reference、call 和 import 均持久化 `target_hint`、`resolution_state`、`confidence_basis_points` 和 `confidence_tier`。无法唯一解析时保持 `ambiguous` 或 `unresolved`，不会被报告为确定调用。
+- **接口暴露**: CLI `repo query` / `repo impact` / `repo report`、Web operation 和 MCP `relay.code_query` / `relay.code_impact` 共用 application service，查询命中会返回 symbol identity 与 edge metadata。
+
+仍明确属于后续 v2 或更高阶段的能力: 社区检测、wiki/export、真实外部 embedding 索引刷新、多仓库联邦调用解析、reranker、watch/daemon 静默更新和完整时间旅行查询。
+
 ### 可超越的关键差距
 
 | 差距 | 当前状态 | relay-knowledge 可改进方向 |

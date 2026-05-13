@@ -210,11 +210,17 @@ fn chunks_for_paths(
                     byte_range: row.byte_range,
                     line_range: row.line_range,
                     symbol_snapshot_id: row.symbol_snapshot_id,
+                    canonical_symbol_id: None,
                     file_id: Some(row.file_id),
                     retrieval_layers: chunk_layers(&row.parse_status),
                     score: 4.0,
                     excerpt: row.content,
                     degraded_reason: row.degraded_reason,
+                    edge_kind: None,
+                    edge_resolution_state: None,
+                    edge_target_hint: None,
+                    edge_confidence_basis_points: None,
+                    edge_confidence_tier: None,
                 },
             )
         })
@@ -232,7 +238,8 @@ fn callers_for_symbols(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
-               c.line_start, c.line_end
+               c.line_start, c.line_end, c.target_hint, c.resolution_state,
+               c.confidence_basis_points, c.confidence_tier
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
@@ -253,6 +260,10 @@ fn callers_for_symbols(
                 start: row.get(7)?,
                 end: row.get(8)?,
             },
+            target_hint: row.get(9)?,
+            resolution_state: row.get(10)?,
+            confidence_basis_points: row.get(11)?,
+            confidence_tier: row.get(12)?,
         })
     })?;
     let symbol_set = symbol_ids.iter().collect::<BTreeSet<_>>();
@@ -281,11 +292,17 @@ fn callers_for_symbols(
                     byte_range: RepositoryCodeRange { start: 0, end: 0 },
                     line_range: row.line_range,
                     symbol_snapshot_id: row.caller_symbol_snapshot_id,
+                    canonical_symbol_id: None,
                     file_id: Some(row.file_id),
                     retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                     score: 2.5,
                     excerpt: format!("{caller} calls {}", row.callee_name),
                     degraded_reason: None,
+                    edge_kind: Some("call".to_owned()),
+                    edge_resolution_state: Some(row.resolution_state),
+                    edge_target_hint: row.target_hint,
+                    edge_confidence_basis_points: Some(row.confidence_basis_points),
+                    edge_confidence_tier: Some(row.confidence_tier),
                 },
             )
         })
@@ -300,7 +317,8 @@ fn importers_for_modules(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
+        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.repository_id = i.repository_id AND f.path = i.path
@@ -318,6 +336,10 @@ fn importers_for_modules(
                 start: row.get(4)?,
                 end: row.get(5)?,
             },
+            target_hint: row.get(6)?,
+            resolution_state: row.get(7)?,
+            confidence_basis_points: row.get(8)?,
+            confidence_tier: row.get(9)?,
         })
     })?;
     let rows = rows
@@ -341,11 +363,17 @@ fn importers_for_modules(
                     byte_range: RepositoryCodeRange { start: 0, end: 0 },
                     line_range: row.line_range,
                     symbol_snapshot_id: None,
+                    canonical_symbol_id: None,
                     file_id: Some(row.file_id),
                     retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
                     score: 2.0,
                     excerpt: row.module,
                     degraded_reason: None,
+                    edge_kind: Some("import".to_owned()),
+                    edge_resolution_state: Some(row.resolution_state),
+                    edge_target_hint: row.target_hint,
+                    edge_confidence_basis_points: Some(row.confidence_basis_points),
+                    edge_confidence_tier: Some(row.confidence_tier),
                 },
             )
         })
@@ -538,6 +566,10 @@ struct ImpactCallRow {
     callee_symbol_snapshot_id: Option<String>,
     callee_name: String,
     line_range: RepositoryCodeRange,
+    target_hint: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 struct ImpactImportRow {
@@ -546,6 +578,10 @@ struct ImpactImportRow {
     language_id: String,
     module: String,
     line_range: RepositoryCodeRange,
+    target_hint: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 #[cfg(test)]

@@ -24,6 +24,10 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
 cannot be confused with hybrid search.
 `repo query` also accepts `--limit`, `--ref`, repeated `--path`, repeated
 `--language`, and `--freshness allow-stale|wait-until-fresh|graph-only`.
+Symbol hits include both snapshot-bound `symbol_snapshot_id` and stable
+`canonical_symbol_id`. Reference, caller/callee, import, and impact hits expose
+edge metadata: `edge_kind`, `edge_resolution_state`, `edge_target_hint`,
+`edge_confidence_basis_points`, and `edge_confidence_tier`.
 
 ## relay-teams E2E Findings
 

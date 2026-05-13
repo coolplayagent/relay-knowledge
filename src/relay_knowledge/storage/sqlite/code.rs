@@ -6,6 +6,9 @@ mod code_query;
 #[path = "code_impact.rs"]
 mod code_impact;
 
+#[path = "code_schema.rs"]
+mod code_schema;
+
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
@@ -63,6 +66,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         CREATE TABLE IF NOT EXISTS code_repository_symbols (
             repository_id TEXT NOT NULL,
             symbol_snapshot_id TEXT PRIMARY KEY,
+            canonical_symbol_id TEXT NOT NULL,
             file_id TEXT NOT NULL,
             path TEXT NOT NULL,
             language_id TEXT NOT NULL,
@@ -86,6 +90,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             name TEXT NOT NULL,
             kind TEXT NOT NULL,
             target_symbol_snapshot_id TEXT,
+            target_hint TEXT,
+            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
+            confidence_basis_points INTEGER NOT NULL DEFAULT 5000,
+            confidence_tier TEXT NOT NULL DEFAULT 'ambiguous',
             byte_start INTEGER NOT NULL,
             byte_end INTEGER NOT NULL,
             line_start INTEGER NOT NULL,
@@ -99,6 +107,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             file_id TEXT NOT NULL,
             path TEXT NOT NULL,
             module TEXT NOT NULL,
+            target_hint TEXT,
+            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
+            confidence_basis_points INTEGER NOT NULL DEFAULT 10000,
+            confidence_tier TEXT NOT NULL DEFAULT 'extracted',
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
@@ -113,6 +125,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             caller_name TEXT,
             callee_symbol_snapshot_id TEXT,
             callee_name TEXT NOT NULL,
+            target_hint TEXT,
+            resolution_state TEXT NOT NULL DEFAULT 'unresolved',
+            confidence_basis_points INTEGER NOT NULL DEFAULT 5000,
+            confidence_tier TEXT NOT NULL DEFAULT 'ambiguous',
             line_start INTEGER NOT NULL,
             line_end INTEGER NOT NULL,
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
@@ -164,26 +180,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_chunks(repository_id, path);
         ",
     )?;
-    ensure_code_repository_calls_target_column(connection)?;
-
-    Ok(())
-}
-
-fn ensure_code_repository_calls_target_column(connection: &Connection) -> Result<(), StorageError> {
-    let mut statement = connection.prepare("PRAGMA table_info(code_repository_calls)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let columns = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    if !columns
-        .iter()
-        .any(|column| column == "callee_symbol_snapshot_id")
-    {
-        connection.execute(
-            "ALTER TABLE code_repository_calls ADD COLUMN callee_symbol_snapshot_id TEXT",
-            [],
-        )?;
-    }
+    code_schema::ensure_code_repository_compat_columns(connection)?;
 
     Ok(())
 }
@@ -422,15 +419,16 @@ fn apply_snapshot(
         transaction.execute(
             "
             INSERT INTO code_repository_symbols (
-                repository_id, symbol_snapshot_id, file_id, path, language_id, name,
+                repository_id, symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, name,
                 qualified_name, kind, signature, doc_comment, byte_start, byte_end,
                 line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ",
             params![
                 symbol.repository_id,
                 symbol.symbol_snapshot_id,
+                symbol.canonical_symbol_id,
                 symbol.file_id,
                 symbol.path,
                 symbol.language_id,
@@ -451,9 +449,11 @@ fn apply_snapshot(
             "
             INSERT INTO code_repository_references (
                 repository_id, reference_id, file_id, path, name, kind,
-                target_symbol_snapshot_id, byte_start, byte_end, line_start, line_end
+                target_symbol_snapshot_id, target_hint, resolution_state,
+                confidence_basis_points, confidence_tier,
+                byte_start, byte_end, line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             ",
             params![
                 reference.repository_id,
@@ -463,6 +463,10 @@ fn apply_snapshot(
                 reference.name,
                 reference.kind,
                 reference.target_symbol_snapshot_id,
+                reference.target_hint,
+                reference.resolution_state,
+                reference.confidence_basis_points,
+                reference.confidence_tier,
                 reference.byte_range.start,
                 reference.byte_range.end,
                 reference.line_range.start,
@@ -533,6 +537,7 @@ fn repository_report(
     })?;
     let degradation_summary = repository_diagnostics(connection, &status.repository_id)?;
     let degraded_file_count = repository_degraded_file_count(connection, &status.repository_id)?;
+    let edge_counts = repository_edge_resolution_counts(connection, &status.repository_id)?;
     let representative_queries = representative_queries(connection, &status.repository_id)?;
     let freshness_state = if status.stale {
         "stale"
@@ -554,11 +559,56 @@ fn repository_report(
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
         degraded_file_count,
+        resolved_edge_count: edge_counts.resolved,
+        ambiguous_edge_count: edge_counts.ambiguous,
+        unresolved_edge_count: edge_counts.unresolved,
         degradation_summary,
         representative_queries,
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
         freshness_state,
     })
+}
+
+#[derive(Default)]
+struct EdgeResolutionCounts {
+    resolved: usize,
+    ambiguous: usize,
+    unresolved: usize,
+}
+
+fn repository_edge_resolution_counts(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<EdgeResolutionCounts, StorageError> {
+    let mut counts = EdgeResolutionCounts::default();
+    for table in [
+        "code_repository_references",
+        "code_repository_imports",
+        "code_repository_calls",
+    ] {
+        let sql = format!(
+            "
+            SELECT resolution_state, COUNT(*)
+            FROM {table}
+            WHERE repository_id = ?1
+            GROUP BY resolution_state
+            "
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params![repository_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })?;
+        for row in rows {
+            let (state, count) = row?;
+            match state.as_str() {
+                "resolved" => counts.resolved += count,
+                "ambiguous" => counts.ambiguous += count,
+                _ => counts.unresolved += count,
+            }
+        }
+    }
+
+    Ok(counts)
 }
 
 fn repository_degraded_file_count(
@@ -639,9 +689,11 @@ fn insert_imports_calls_chunks_diagnostics(
         transaction.execute(
             "
             INSERT INTO code_repository_imports (
-                repository_id, import_id, file_id, path, module, line_start, line_end
+                repository_id, import_id, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, confidence_tier,
+                line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ",
             params![
                 import.repository_id,
@@ -649,6 +701,10 @@ fn insert_imports_calls_chunks_diagnostics(
                 import.file_id,
                 import.path,
                 import.module,
+                import.target_hint,
+                import.resolution_state,
+                import.confidence_basis_points,
+                import.confidence_tier,
                 import.line_range.start,
                 import.line_range.end,
             ],
@@ -659,9 +715,11 @@ fn insert_imports_calls_chunks_diagnostics(
             "
             INSERT INTO code_repository_calls (
                 repository_id, call_id, file_id, path, caller_symbol_snapshot_id,
-                caller_name, callee_symbol_snapshot_id, callee_name, line_start, line_end
+                caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
+                resolution_state, confidence_basis_points, confidence_tier,
+                line_start, line_end
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             ",
             params![
                 call.repository_id,
@@ -672,6 +730,10 @@ fn insert_imports_calls_chunks_diagnostics(
                 call.caller_name,
                 call.callee_symbol_snapshot_id,
                 call.callee_name,
+                call.target_hint,
+                call.resolution_state,
+                call.confidence_basis_points,
+                call.confidence_tier,
                 call.line_range.start,
                 call.line_range.end,
             ],

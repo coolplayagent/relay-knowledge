@@ -577,6 +577,10 @@ fn collect_import_node(
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             module,
+            target_hint: None,
+            resolution_state: "unresolved".to_owned(),
+            confidence_basis_points: 10_000,
+            confidence_tier: "extracted".to_owned(),
             line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
                 .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         });
@@ -723,6 +727,7 @@ fn symbol_record(
     Ok(RepositoryCodeSymbolRecord {
         repository_id: context.build.repository_id.clone(),
         symbol_snapshot_id,
+        canonical_symbol_id: qualified_name.clone(),
         file_id: context.file_id.to_owned(),
         path: context.path.to_owned(),
         language_id: context.language_id.to_owned(),
@@ -762,6 +767,10 @@ fn reference_record(
         name: name.to_owned(),
         kind: kind.to_owned(),
         target_symbol_snapshot_id: None,
+        target_hint: Some(name.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 5_000,
+        confidence_tier: "ambiguous".to_owned(),
         byte_range: RepositoryCodeRange::new("byte_range", range.byte_start, range.byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)

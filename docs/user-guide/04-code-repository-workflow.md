@@ -57,7 +57,7 @@ relay-knowledge repo query core --query retry_policy --kind callees --format jso
 relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
 ```
 
-结果包含 repository id、alias、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。
+结果包含 repository id、alias、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份；引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。
 
 ## 4.4 增量更新
 
@@ -101,3 +101,5 @@ relay-knowledge repo status core --format json
 ```
 
 状态输出用于确认当前索引 ref、文件数量、symbol/reference/chunk 总量、诊断和 freshness。若 `repo status` 与 `graph inspect` 的 code counts 看起来不一致，以 `repo status` 为代码索引诊断入口；`graph inspect` 更偏向通用图状态。
+
+`repo report --format markdown` 还会汇总 edge resolution: resolved、ambiguous 和 unresolved 数量，用于判断当前代码图谱是否主要来自确定 AST 提取，还是存在大量需要人工或后续解析器改进的模糊边。

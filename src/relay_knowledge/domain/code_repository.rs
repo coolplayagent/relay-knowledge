@@ -269,6 +269,7 @@ pub struct CodeFileFingerprint {
 pub struct RepositoryCodeSymbolRecord {
     pub repository_id: String,
     pub symbol_snapshot_id: String,
+    pub canonical_symbol_id: String,
     pub file_id: String,
     pub path: String,
     pub language_id: String,
@@ -293,6 +294,11 @@ pub struct RepositoryCodeReferenceRecord {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_symbol_snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_hint: Option<String>,
+    pub resolution_state: String,
+    pub confidence_basis_points: u16,
+    pub confidence_tier: String,
     pub byte_range: RepositoryCodeRange,
     pub line_range: RepositoryCodeRange,
 }
@@ -305,6 +311,11 @@ pub struct CodeImportRecord {
     pub file_id: String,
     pub path: String,
     pub module: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_hint: Option<String>,
+    pub resolution_state: String,
+    pub confidence_basis_points: u16,
+    pub confidence_tier: String,
     pub line_range: RepositoryCodeRange,
 }
 
@@ -320,6 +331,11 @@ pub struct CodeCallRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callee_symbol_snapshot_id: Option<String>,
     pub callee_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_hint: Option<String>,
+    pub resolution_state: String,
+    pub confidence_basis_points: u16,
+    pub confidence_tier: String,
     pub line_range: RepositoryCodeRange,
 }
 
@@ -479,6 +495,9 @@ pub struct CodeRepositoryReport {
     pub reference_count: usize,
     pub chunk_count: usize,
     pub degraded_file_count: usize,
+    pub resolved_edge_count: usize,
+    pub ambiguous_edge_count: usize,
+    pub unresolved_edge_count: usize,
     pub degradation_summary: Vec<String>,
     pub representative_queries: Vec<String>,
     pub latency_samples: Vec<CodeRepositoryLatencySample>,
@@ -504,12 +523,24 @@ pub struct CodeRetrievalHit {
     pub byte_range: RepositoryCodeRange,
     pub line_range: RepositoryCodeRange,
     pub symbol_snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_symbol_id: Option<String>,
     pub file_id: Option<String>,
     pub retrieval_layers: Vec<CodeRetrievalLayer>,
     pub index_versions: Vec<String>,
     pub stale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_resolution_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_target_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_confidence_basis_points: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge_confidence_tier: Option<String>,
     pub score: f64,
     pub excerpt: String,
 }

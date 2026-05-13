@@ -78,7 +78,7 @@ fn search_symbols(
     );
     let sql = format!(
         "
-        SELECT symbol_snapshot_id, file_id, path, language_id, signature, doc_comment,
+        SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
         WHERE repository_id = ?
@@ -95,21 +95,22 @@ fn search_symbols(
         |row| {
             Ok(SymbolRow {
                 symbol_snapshot_id: row.get(0)?,
-                file_id: row.get(1)?,
-                path: row.get(2)?,
-                language_id: row.get(3)?,
-                signature: row.get(4)?,
-                doc_comment: row.get(5)?,
+                canonical_symbol_id: row.get(1)?,
+                file_id: row.get(2)?,
+                path: row.get(3)?,
+                language_id: row.get(4)?,
+                signature: row.get(5)?,
+                doc_comment: row.get(6)?,
                 byte_range: RepositoryCodeRange {
-                    start: row.get(6)?,
-                    end: row.get(7)?,
+                    start: row.get(7)?,
+                    end: row.get(8)?,
                 },
                 line_range: RepositoryCodeRange {
-                    start: row.get(8)?,
-                    end: row.get(9)?,
+                    start: row.get(9)?,
+                    end: row.get(10)?,
                 },
-                name: row.get(10)?,
-                qualified_name: row.get(11)?,
+                name: row.get(11)?,
+                qualified_name: row.get(12)?,
             })
         },
     )?;
@@ -145,6 +146,7 @@ fn search_symbols(
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: Some(row.symbol_snapshot_id),
+                        canonical_symbol_id: Some(row.canonical_symbol_id),
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![
                             CodeRetrievalLayer::Symbol,
@@ -153,6 +155,11 @@ fn search_symbols(
                         score: score + 2.0,
                         excerpt,
                         degraded_reason: None,
+                        edge_kind: None,
+                        edge_resolution_state: None,
+                        edge_target_hint: None,
+                        edge_confidence_basis_points: None,
+                        edge_confidence_tier: None,
                     },
                 )
             })
@@ -173,7 +180,8 @@ fn search_references(
         "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
-               r.line_start, r.line_end
+               r.line_start, r.line_end, r.target_hint, r.resolution_state,
+               r.confidence_basis_points, r.confidence_tier
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.repository_id = r.repository_id AND f.path = r.path
@@ -204,6 +212,10 @@ fn search_references(
                     start: row.get(8)?,
                     end: row.get(9)?,
                 },
+                target_hint: row.get(10)?,
+                resolution_state: row.get(11)?,
+                confidence_basis_points: row.get(12)?,
+                confidence_tier: row.get(13)?,
             })
         },
     )?;
@@ -226,11 +238,17 @@ fn search_references(
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: row.target_symbol_snapshot_id,
+                        canonical_symbol_id: None,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::Reference],
                         score: score + 1.5,
                         excerpt: format!("{} reference to {}", row.kind, row.name),
                         degraded_reason: None,
+                        edge_kind: Some(row.kind),
+                        edge_resolution_state: Some(row.resolution_state),
+                        edge_target_hint: row.target_hint,
+                        edge_confidence_basis_points: Some(row.confidence_basis_points),
+                        edge_confidence_tier: Some(row.confidence_tier),
                     },
                 )
             })
@@ -255,7 +273,8 @@ fn search_calls(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
-               c.line_start, c.line_end
+               c.line_start, c.line_end, c.target_hint, c.resolution_state,
+               c.confidence_basis_points, c.confidence_tier
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
@@ -283,6 +302,10 @@ fn search_calls(
                     start: row.get(7)?,
                     end: row.get(8)?,
                 },
+                target_hint: row.get(9)?,
+                resolution_state: row.get(10)?,
+                confidence_basis_points: row.get(11)?,
+                confidence_tier: row.get(12)?,
             })
         },
     )?;
@@ -316,11 +339,17 @@ fn search_calls(
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
                         symbol_snapshot_id,
+                        canonical_symbol_id: None,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
                         score: score + 1.25,
                         excerpt: format!("{caller} calls {}", row.callee_name),
                         degraded_reason: None,
+                        edge_kind: Some("call".to_owned()),
+                        edge_resolution_state: Some(row.resolution_state),
+                        edge_target_hint: row.target_hint,
+                        edge_confidence_basis_points: Some(row.confidence_basis_points),
+                        edge_confidence_tier: Some(row.confidence_tier),
                     },
                 )
             })
@@ -337,7 +366,8 @@ fn search_imports(
         candidate_condition(&["lower(i.module)", "lower(i.path)"], &request.query);
     let sql = format!(
         "
-        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
+        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
+               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.repository_id = i.repository_id AND f.path = i.path
@@ -362,6 +392,10 @@ fn search_imports(
                     start: row.get(4)?,
                     end: row.get(5)?,
                 },
+                target_hint: row.get(6)?,
+                resolution_state: row.get(7)?,
+                confidence_basis_points: row.get(8)?,
+                confidence_tier: row.get(9)?,
             })
         },
     )?;
@@ -384,11 +418,17 @@ fn search_imports(
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
                         line_range: row.line_range,
                         symbol_snapshot_id: None,
+                        canonical_symbol_id: None,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
                         score: score + 1.0,
                         excerpt: row.module,
                         degraded_reason: None,
+                        edge_kind: Some("import".to_owned()),
+                        edge_resolution_state: Some(row.resolution_state),
+                        edge_target_hint: row.target_hint,
+                        edge_confidence_basis_points: Some(row.confidence_basis_points),
+                        edge_confidence_tier: Some(row.confidence_tier),
                     },
                 )
             })
@@ -461,11 +501,17 @@ fn search_chunks(
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: row.symbol_snapshot_id,
+                        canonical_symbol_id: None,
                         file_id: Some(row.file_id),
                         retrieval_layers: chunk_layers(&row.parse_status),
                         score,
                         excerpt: row.content,
                         degraded_reason: row.degraded_reason,
+                        edge_kind: None,
+                        edge_resolution_state: None,
+                        edge_target_hint: None,
+                        edge_confidence_basis_points: None,
+                        edge_confidence_tier: None,
                     },
                 )
             })
@@ -548,11 +594,17 @@ pub(super) struct HitParts {
     pub(super) byte_range: RepositoryCodeRange,
     pub(super) line_range: RepositoryCodeRange,
     pub(super) symbol_snapshot_id: Option<String>,
+    pub(super) canonical_symbol_id: Option<String>,
     pub(super) file_id: Option<String>,
     pub(super) retrieval_layers: Vec<CodeRetrievalLayer>,
     pub(super) score: f64,
     pub(super) excerpt: String,
     pub(super) degraded_reason: Option<String>,
+    pub(super) edge_kind: Option<String>,
+    pub(super) edge_resolution_state: Option<String>,
+    pub(super) edge_target_hint: Option<String>,
+    pub(super) edge_confidence_basis_points: Option<u16>,
+    pub(super) edge_confidence_tier: Option<String>,
 }
 
 pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetrievalHit {
@@ -566,6 +618,7 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
         byte_range: parts.byte_range,
         line_range: parts.line_range,
         symbol_snapshot_id: parts.symbol_snapshot_id,
+        canonical_symbol_id: parts.canonical_symbol_id,
         file_id: parts.file_id,
         retrieval_layers: parts.retrieval_layers,
         index_versions: vec![format!(
@@ -576,6 +629,11 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
         degraded_reason: parts
             .degraded_reason
             .or_else(|| status.degraded_reason.clone()),
+        edge_kind: parts.edge_kind,
+        edge_resolution_state: parts.edge_resolution_state,
+        edge_target_hint: parts.edge_target_hint,
+        edge_confidence_basis_points: parts.edge_confidence_basis_points,
+        edge_confidence_tier: parts.edge_confidence_tier,
         score: parts.score,
         excerpt: parts.excerpt,
     }
@@ -630,8 +688,18 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
     if target.symbol_snapshot_id.is_none() {
         target.symbol_snapshot_id = source.symbol_snapshot_id.clone();
     }
+    if target.canonical_symbol_id.is_none() {
+        target.canonical_symbol_id = source.canonical_symbol_id.clone();
+    }
     if target.file_id.is_none() {
         target.file_id = source.file_id.clone();
+    }
+    if target.edge_kind.is_none() {
+        target.edge_kind = source.edge_kind.clone();
+        target.edge_resolution_state = source.edge_resolution_state.clone();
+        target.edge_target_hint = source.edge_target_hint.clone();
+        target.edge_confidence_basis_points = source.edge_confidence_basis_points;
+        target.edge_confidence_tier = source.edge_confidence_tier.clone();
     }
 }
 
@@ -704,6 +772,7 @@ fn candidate_values_for(repository_id: &str, candidate_values: Vec<Value>) -> Ve
 
 struct SymbolRow {
     symbol_snapshot_id: String,
+    canonical_symbol_id: String,
     file_id: String,
     path: String,
     language_id: String,
@@ -724,6 +793,10 @@ struct ReferenceRow {
     target_symbol_snapshot_id: Option<String>,
     byte_range: RepositoryCodeRange,
     line_range: RepositoryCodeRange,
+    target_hint: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 struct CallRow {
@@ -735,6 +808,10 @@ struct CallRow {
     callee_symbol_snapshot_id: Option<String>,
     callee_name: String,
     line_range: RepositoryCodeRange,
+    target_hint: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 struct ImportRow {
@@ -743,6 +820,10 @@ struct ImportRow {
     language_id: String,
     module: String,
     line_range: RepositoryCodeRange,
+    target_hint: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 struct ChunkRow {

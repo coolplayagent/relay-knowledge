@@ -178,6 +178,57 @@ async fn language_filters_apply_to_references_calls_and_imports() {
 }
 
 #[tokio::test]
+async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() {
+    let symbol_store =
+        store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await;
+    let edge_store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let symbol_hits = symbol_store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector.clone(),
+                CodeQueryKind::Symbol,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("symbol query should succeed");
+    let call_hits = edge_store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Callers,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(
+        symbol_hits[0].canonical_symbol_id.as_deref(),
+        Some("repo://repo/src::lib.rs::target")
+    );
+    assert_eq!(call_hits[0].edge_kind.as_deref(), Some("call"));
+    assert_eq!(
+        call_hits[0].edge_resolution_state.as_deref(),
+        Some("unresolved")
+    );
+    assert_eq!(
+        call_hits[0].edge_confidence_tier.as_deref(),
+        Some("ambiguous")
+    );
+    assert_eq!(call_hits[0].edge_confidence_basis_points, Some(2_500));
+}
+
+#[tokio::test]
 async fn impact_imports_use_rust_symbol_namespace_seeds() {
     let store = store_with_repository_snapshot_and_filters(
         snapshot_with_rust_symbol_importer(),
