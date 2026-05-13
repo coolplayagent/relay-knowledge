@@ -14,8 +14,8 @@ use super::{
     parse_string_array, semantic_overlap_score, sort_scored_hits, split_labels, token_signature,
 };
 
-const SEMANTIC_SCAN_MULTIPLIER: usize = 8;
-const MAX_SEMANTIC_SCAN_LIMIT: usize = 512;
+const DERIVED_RESULT_MULTIPLIER: usize = 8;
+const MAX_DERIVED_RESULT_LIMIT: usize = 512;
 
 pub(super) fn semantic_candidates(
     connection: &Connection,
@@ -28,7 +28,7 @@ pub(super) fn semantic_candidates(
         return Ok(Vec::new());
     }
 
-    let candidate_limit = bounded_candidate_limit(request)?;
+    let result_limit = bounded_candidate_limit(request);
     let mut statement = connection.prepare(
         "
         SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
@@ -38,15 +38,10 @@ pub(super) fn semantic_candidates(
         WHERE (?1 IS NULL OR source_scope = ?1)
           AND created_graph_version <= ?2
         ORDER BY created_graph_version DESC, document_id ASC
-        LIMIT ?3
         ",
     )?;
     let rows = statement.query_map(
-        params![
-            request.source_scope.as_deref(),
-            request.graph_version.get(),
-            candidate_limit
-        ],
+        params![request.source_scope.as_deref(), request.graph_version.get()],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -128,6 +123,7 @@ pub(super) fn semantic_candidates(
         });
     }
     sort_scored_hits(&mut hits);
+    hits.truncate(result_limit);
 
     Ok(hits)
 }
@@ -136,7 +132,7 @@ pub(super) fn vector_candidates(
     connection: &Connection,
     request: &GraphSearchRequest,
 ) -> Result<Vec<ScoredHit>, StorageError> {
-    let candidate_limit = bounded_candidate_limit(request)?;
+    let result_limit = bounded_candidate_limit(request);
     let mut statement = connection.prepare(
         "
         SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
@@ -146,15 +142,10 @@ pub(super) fn vector_candidates(
         WHERE (?1 IS NULL OR source_scope = ?1)
           AND created_graph_version <= ?2
         ORDER BY created_graph_version DESC, document_id ASC
-        LIMIT ?3
         ",
     )?;
     let rows = statement.query_map(
-        params![
-            request.source_scope.as_deref(),
-            request.graph_version.get(),
-            candidate_limit
-        ],
+        params![request.source_scope.as_deref(), request.graph_version.get()],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -246,17 +237,16 @@ pub(super) fn vector_candidates(
         });
     }
     sort_scored_hits(&mut hits);
+    hits.truncate(result_limit);
 
     Ok(hits)
 }
 
-fn bounded_candidate_limit(request: &GraphSearchRequest) -> Result<i64, StorageError> {
-    let scan_limit = request
+fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize {
+    request
         .limit
-        .saturating_mul(SEMANTIC_SCAN_MULTIPLIER)
-        .clamp(1, MAX_SEMANTIC_SCAN_LIMIT);
-    i64::try_from(scan_limit)
-        .map_err(|_| StorageError::InvalidInput("candidate scan limit is too large".to_owned()))
+        .saturating_mul(DERIVED_RESULT_MULTIPLIER)
+        .clamp(1, MAX_DERIVED_RESULT_LIMIT)
 }
 
 pub(super) fn path_candidates(

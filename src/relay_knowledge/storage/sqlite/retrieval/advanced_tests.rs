@@ -39,5 +39,5 @@ fn bounded_candidate_limit_scales_with_request_limit() {
         limit: 10,
     };
 
-    assert_eq!(bounded_candidate_limit(&request).unwrap(), 80);
+    assert_eq!(bounded_candidate_limit(&request), 80);
 }

@@ -408,6 +408,19 @@ async fn incremental_updates_retain_existing_degraded_status() {
     assert!(status.degraded_reason.is_some());
 }
 
+#[tokio::test]
+async fn repository_report_counts_degraded_files_beyond_summary_limit() {
+    let store = store_with_repository_snapshot(snapshot_with_degraded_files(25)).await;
+
+    let report = store
+        .code_repository_report("fixture".to_owned())
+        .await
+        .expect("report should load");
+
+    assert_eq!(report.degraded_file_count, 25);
+    assert_eq!(report.degradation_summary.len(), 20);
+}
+
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
     store_with_repository_snapshot_and_filters(snapshot, Vec::new(), Vec::new()).await
 }
@@ -520,6 +533,47 @@ fn snapshot_with_symbol_and_matching_chunk() -> CodeIndexSnapshot {
             Some("target-symbol"),
         )],
         diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut diagnostics = Vec::new();
+    for index in 0..count {
+        let file_id = format!("file-{index}");
+        let path = format!("src/degraded_{index}.rs");
+        let message = format!("parse degraded {index}");
+        files.push(file(
+            &file_id,
+            &path,
+            "rust",
+            CodeParseStatus::Partial,
+            Some(message.clone()),
+        ));
+        diagnostics.push(CodeFileDiagnostic {
+            repository_id: "repo".to_owned(),
+            path,
+            parse_status: CodeParseStatus::Partial,
+            message,
+        });
+    }
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        full_replace: true,
+        changed_path_count: count,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics,
     }
 }
 

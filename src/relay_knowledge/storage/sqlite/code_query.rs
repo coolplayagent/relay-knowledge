@@ -10,6 +10,8 @@ use crate::{
     storage::StorageError,
 };
 
+const MAX_CANDIDATE_BIND_VALUES: usize = 900;
+
 use super::repository_status;
 
 pub(super) fn search_code(
@@ -650,7 +652,8 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
 }
 
 fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
-    let patterns = candidate_patterns(query);
+    let max_patterns = (MAX_CANDIDATE_BIND_VALUES / fields.len().max(1)).max(1);
+    let patterns = candidate_patterns(query, max_patterns);
     if patterns.is_empty() {
         return ("1 = 1".to_owned(), Vec::new());
     }
@@ -673,14 +676,23 @@ fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
     (groups.join(" OR "), values)
 }
 
-fn candidate_patterns(query: &str) -> Vec<String> {
-    query
-        .to_lowercase()
-        .split_whitespace()
-        .map(|token| token.chars().filter(|ch| *ch != '%').collect::<String>())
-        .filter(|token| !token.is_empty())
-        .map(|token| format!("%{token}%"))
-        .collect()
+fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
+    let mut patterns = Vec::new();
+    for token in query.to_lowercase().split_whitespace() {
+        let token = token.chars().filter(|ch| *ch != '%').collect::<String>();
+        if token.is_empty() {
+            continue;
+        }
+        let pattern = format!("%{token}%");
+        if !patterns.contains(&pattern) {
+            patterns.push(pattern);
+        }
+        if patterns.len() >= max_patterns {
+            break;
+        }
+    }
+
+    patterns
 }
 
 fn candidate_values_for(repository_id: &str, candidate_values: Vec<Value>) -> Vec<Value> {
@@ -768,5 +780,18 @@ mod tests {
         assert_eq!(values.len(), 4);
         assert!(values.contains(&Value::Text("%retry%".to_owned())));
         assert!(values.contains(&Value::Text("%budget%".to_owned())));
+    }
+
+    #[test]
+    fn candidate_condition_caps_bind_values_for_long_queries() {
+        let query = (0..300)
+            .map(|index| format!("term{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let fields = ["a", "b", "c", "d", "e"];
+
+        let (_, values) = candidate_condition(&fields, &query);
+
+        assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES);
     }
 }

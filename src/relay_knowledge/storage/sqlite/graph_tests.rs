@@ -125,6 +125,46 @@ async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants()
 }
 
 #[tokio::test]
+async fn derived_retrieval_scores_older_documents_before_truncating() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    commit_evidence(
+        &store,
+        "ev-older-match",
+        "docs",
+        "AncientNeedle policy controls runtime budget",
+    )
+    .await;
+    for index in 0..45 {
+        commit_evidence(
+            &store,
+            &format!("ev-filler-{index}"),
+            "docs",
+            &format!("Recent filler document {index}"),
+        )
+        .await;
+    }
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "ancientneedle".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(46),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+    let hit = hits
+        .iter()
+        .find(|hit| hit.evidence_id == "ev-older-match")
+        .expect("older matching document should be retained");
+
+    assert!(
+        hit.retriever_sources.contains(&RetrieverSource::Semantic)
+            || hit.retriever_sources.contains(&RetrieverSource::Vector)
+    );
+}
+
+#[tokio::test]
 async fn code_read_model_hits_merge_with_bm25_document() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store

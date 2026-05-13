@@ -532,6 +532,7 @@ fn repository_report(
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
     })?;
     let degradation_summary = repository_diagnostics(connection, &status.repository_id)?;
+    let degraded_file_count = repository_degraded_file_count(connection, &status.repository_id)?;
     let representative_queries = representative_queries(connection, &status.repository_id)?;
     let freshness_state = if status.stale {
         "stale"
@@ -552,12 +553,29 @@ fn repository_report(
         symbol_count: status.symbol_count,
         reference_count: status.reference_count,
         chunk_count: status.chunk_count,
-        degraded_file_count: degradation_summary.len(),
+        degraded_file_count,
         degradation_summary,
         representative_queries,
         latency_samples: Vec::<CodeRepositoryLatencySample>::new(),
         freshness_state,
     })
+}
+
+fn repository_degraded_file_count(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<usize, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM code_repository_file_diagnostics
+            WHERE repository_id = ?1
+            ",
+            params![repository_id],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(StorageError::from)
 }
 
 fn repository_diagnostics(
