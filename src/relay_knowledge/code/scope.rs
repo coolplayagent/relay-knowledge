@@ -158,6 +158,7 @@ pub fn partition_changed_paths_for_selector(
     })
 }
 
+#[cfg(test)]
 pub(super) fn path_is_selected(
     path: &str,
     registration: &CodeRepositoryRegistration,
@@ -166,7 +167,16 @@ pub(super) fn path_is_selected(
     let root = Path::new(&registration.root_path);
     let ignore_rules = load_ignore_rules(root).unwrap_or_default();
 
-    selection_exclusion_reason(path, registration, selector, &ignore_rules).is_none()
+    path_is_selected_with_rules(path, registration, selector, &ignore_rules)
+}
+
+pub(super) fn path_is_selected_with_rules(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    ignore_rules: &[IgnoreRule],
+) -> bool {
+    selection_exclusion_reason(path, registration, selector, ignore_rules).is_none()
 }
 
 pub(super) fn selection_exclusion_reason(
@@ -336,21 +346,27 @@ fn explicit_path_filter_opts_into_default_exclusion<'a>(
     path: &str,
     filters: impl IntoIterator<Item = &'a String>,
 ) -> bool {
-    let path_segments = normalize_path_filter(path).split('/').collect::<Vec<_>>();
+    let path_extension = path
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase());
     filters.into_iter().any(|filter| {
         let filter = normalize_path_filter(filter);
         if filter.is_empty() || filter == "." {
             return false;
         }
         let filter_segments = filter.split('/').collect::<Vec<_>>();
-        filter_segments.iter().any(|segment| {
+        let targets_default_exclusion = filter_segments.iter().any(|segment| {
             DEFAULT_EXCLUDED_SEGMENTS.contains(segment)
                 || DEFAULT_EXCLUDED_EXTENSIONS
                     .contains(&segment.rsplit_once('.').map(|(_, ext)| ext).unwrap_or(""))
-        }) || path_segments.starts_with(&filter_segments)
-            && filter_segments
-                .last()
-                .is_some_and(|segment| DEFAULT_EXCLUDED_SEGMENTS.contains(segment))
+        });
+        if !targets_default_exclusion {
+            return false;
+        }
+        path_matches_filter(path, filter)
+            || filter.strip_prefix("*.").is_some_and(|extension| {
+                path_extension.as_deref() == Some(&extension.to_ascii_lowercase())
+            })
     })
 }
 

@@ -25,14 +25,16 @@ use crate::domain::{
 };
 
 use parser::parse_indexed_file;
-use scope::{load_ignore_rules, path_is_selected, path_scope_overlaps, selection_exclusion_reason};
+use scope::{
+    load_ignore_rules, path_is_selected_with_rules, path_scope_overlaps, selection_exclusion_reason,
+};
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 
 #[cfg(test)]
 use languages::language_id;
 
 #[cfg(test)]
-use scope::path_scope_allows;
+use scope::{path_is_selected, path_scope_allows};
 
 /// Blocking code index failure.
 #[derive(Debug)]
@@ -157,6 +159,7 @@ pub fn deleted_symbol_names_for_diff(
     let root = PathBuf::from(&registration.root_path);
     let base_commit = resolve_ref(&root, base_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
+    let ignore_rules = load_ignore_rules(&root)?;
     let mut names = Vec::new();
 
     for change in changes {
@@ -166,7 +169,7 @@ pub fn deleted_symbol_names_for_diff(
             | GitChange::Copied { .. }
             | GitChange::TypeChanged { .. } => continue,
         };
-        if !path_is_selected(&deleted_path, registration, selector) {
+        if !path_is_selected_with_rules(&deleted_path, registration, selector, &ignore_rules) {
             continue;
         }
         let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
@@ -232,17 +235,18 @@ fn build_incremental_snapshot(
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
+    let ignore_rules = load_ignore_rules(root)?;
     let mut build = SnapshotBuild::new(registration, commit, tree_hash, false, changes.len(), 0);
 
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
-                if path_is_selected(&path, registration, selector) {
+                if path_is_selected_with_rules(&path, registration, selector, &ignore_rules) {
                     build.deleted_paths.push(path);
                 }
             }
             GitChange::Renamed { old_path, new_path } => {
-                if path_is_selected(&old_path, registration, selector) {
+                if path_is_selected_with_rules(&old_path, registration, selector, &ignore_rules) {
                     build.deleted_paths.push(old_path.clone());
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
@@ -259,10 +263,11 @@ fn build_incremental_snapshot(
                     root,
                     &new_path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
             GitChange::Copied { old_path, new_path } => {
-                if path_is_selected(&new_path, registration, selector) {
+                if path_is_selected_with_rules(&new_path, registration, selector, &ignore_rules) {
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
                         old_path,
@@ -278,6 +283,7 @@ fn build_incremental_snapshot(
                     root,
                     &new_path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
@@ -288,6 +294,7 @@ fn build_incremental_snapshot(
                     root,
                     &path,
                     previous_hashes,
+                    &ignore_rules,
                 )?;
             }
         }
@@ -322,10 +329,11 @@ fn build_worktree_overlay_snapshot(
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
+    let ignore_rules = load_ignore_rules(root)?;
 
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            if path_is_selected(deleted_path, registration, selector) {
+            if path_is_selected_with_rules(deleted_path, registration, selector, &ignore_rules) {
                 overlay_hash_input.extend_from_slice(b"D\0");
                 overlay_hash_input.extend_from_slice(deleted_path.as_bytes());
                 overlay_hash_input.push(0);
@@ -340,7 +348,7 @@ fn build_worktree_overlay_snapshot(
         let metadata = match fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if path_is_selected(path, registration, selector) {
+                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                     overlay_hash_input.extend_from_slice(b"D\0");
                     overlay_hash_input.extend_from_slice(path.as_bytes());
                     overlay_hash_input.push(0);
@@ -352,20 +360,21 @@ fn build_worktree_overlay_snapshot(
         };
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            if path_is_selected(path, registration, selector) {
+            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
         if file_type.is_dir() {
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                if path_is_selected(path, registration, selector) {
+                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                     record_worktree_status_marker(path, &mut overlay_hash_input);
                 }
                 continue;
             }
             for nested_path in worktree_directory_files(root, path)? {
-                if path_is_selected(&nested_path, registration, selector) {
+                if path_is_selected_with_rules(&nested_path, registration, selector, &ignore_rules)
+                {
                     record_worktree_file(
                         root,
                         &nested_path,
@@ -379,12 +388,12 @@ fn build_worktree_overlay_snapshot(
             continue;
         }
         if !file_type.is_file() {
-            if path_is_selected(path, registration, selector) {
+            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
-        if path_is_selected(path, registration, selector) {
+        if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
             record_worktree_file(
                 root,
                 path,
@@ -513,8 +522,9 @@ fn parse_changed_path(
     root: &Path,
     path: &str,
     previous_hashes: &BTreeMap<String, String>,
+    ignore_rules: &[scope::IgnoreRule],
 ) -> Result<(), CodeIndexError> {
-    if !path_is_selected(path, registration, selector) {
+    if !path_is_selected_with_rules(path, registration, selector, ignore_rules) {
         return Ok(());
     }
     let object = format!("{}:{path}", build.commit);

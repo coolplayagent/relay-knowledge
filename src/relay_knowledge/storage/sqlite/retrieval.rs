@@ -88,7 +88,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         );
         ",
     )?;
-    if rebuild_required {
+    if rebuild_required || migration::derived_documents_missing(connection)? {
         migration::rebuild_bm25_documents(connection)?;
     }
 

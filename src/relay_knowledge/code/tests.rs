@@ -135,6 +135,27 @@ fn dot_path_filter_selects_repository_root() {
 }
 
 #[test]
+fn explicit_default_exclusion_opt_in_stays_path_scoped() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![".".to_owned(), "dist".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(path_is_selected("dist/bundle.js", &registration, &selector));
+    assert!(!path_is_selected(
+        "target/generated.rs",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
 fn repository_id_includes_local_root_with_remote_origin() {
     let first = TempGitRepo::create("repo-id-first");
     let second = TempGitRepo::create("repo-id-second");

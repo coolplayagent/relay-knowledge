@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -64,27 +64,32 @@ fn search_symbols(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &[
+            "lower(name)",
+            "lower(qualified_name)",
+            "lower(signature)",
+            "lower(coalesce(doc_comment, ''))",
+            "lower(path)",
+        ],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT symbol_snapshot_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
-        WHERE repository_id = ?1
-          AND (
-            lower(name) LIKE ?2 OR lower(qualified_name) LIKE ?2
-            OR lower(signature) LIKE ?2 OR lower(coalesce(doc_comment, '')) LIKE ?2
-            OR lower(path) LIKE ?2
-          )
+        WHERE repository_id = ?
+          AND ({candidate_condition})
         ORDER BY path ASC, line_start ASC
-        LIMIT ?3
         ",
-    )?;
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params![
-            status.repository_id,
-            candidate_like(&request.query),
-            candidate_limit(request)
-        ],
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
         |row| {
             Ok(SymbolRow {
                 symbol_snapshot_id: row.get(0)?,
@@ -158,7 +163,11 @@ fn search_references(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &["lower(r.name)", "lower(r.kind)", "lower(r.path)"],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
@@ -166,18 +175,17 @@ fn search_references(
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.repository_id = r.repository_id AND f.path = r.path
-        WHERE r.repository_id = ?1
-          AND (lower(r.name) LIKE ?2 OR lower(r.kind) LIKE ?2 OR lower(r.path) LIKE ?2)
+        WHERE r.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY r.path ASC, r.line_start ASC
-        LIMIT ?3
         ",
-    )?;
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params![
-            status.repository_id,
-            candidate_like(&request.query),
-            candidate_limit(request)
-        ],
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
         |row| {
             Ok(ReferenceRow {
                 file_id: row.get(0)?,
@@ -233,7 +241,15 @@ fn search_calls(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) = candidate_condition(
+        &[
+            "lower(coalesce(c.caller_name, ''))",
+            "lower(c.callee_name)",
+            "lower(c.path)",
+        ],
+        &request.query,
+    );
+    let sql = format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
@@ -241,22 +257,17 @@ fn search_calls(
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
-          AND (
-            lower(coalesce(c.caller_name, '')) LIKE ?2
-            OR lower(c.callee_name) LIKE ?2
-            OR lower(c.path) LIKE ?2
-          )
+        WHERE c.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
-        LIMIT ?3
         ",
-    )?;
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params![
-            status.repository_id,
-            candidate_like(&request.query),
-            candidate_limit(request)
-        ],
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
         |row| {
             Ok(CallRow {
                 file_id: row.get(0)?,
@@ -320,24 +331,25 @@ fn search_imports(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) =
+        candidate_condition(&["lower(i.module)", "lower(i.path)"], &request.query);
+    let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.repository_id = i.repository_id AND f.path = i.path
-        WHERE i.repository_id = ?1
-          AND (lower(i.module) LIKE ?2 OR lower(i.path) LIKE ?2)
+        WHERE i.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY i.path ASC, i.line_start ASC
-        LIMIT ?3
         ",
-    )?;
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params![
-            status.repository_id,
-            candidate_like(&request.query),
-            candidate_limit(request)
-        ],
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
         |row| {
             Ok(ImportRow {
                 file_id: row.get(0)?,
@@ -387,7 +399,9 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    let (candidate_condition, candidate_values) =
+        candidate_condition(&["lower(c.content)", "lower(c.path)"], &request.query);
+    let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id, f.parse_status,
@@ -395,18 +409,17 @@ fn search_chunks(
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?1
-          AND (lower(c.content) LIKE ?2 OR lower(c.path) LIKE ?2)
+        WHERE c.repository_id = ?
+          AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
-        LIMIT ?3
         ",
-    )?;
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params![
-            status.repository_id,
-            candidate_like(&request.query),
-            candidate_limit(request)
-        ],
+        params_from_iter(candidate_values_for(
+            &status.repository_id,
+            candidate_values,
+        )),
         |row| {
             Ok(ChunkRow {
                 file_id: row.get(0)?,
@@ -636,21 +649,45 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     score
 }
 
-fn candidate_like(query: &str) -> String {
-    let token = query
-        .to_lowercase()
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .filter(|ch| *ch != '%')
-        .collect::<String>();
+fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
+    let patterns = candidate_patterns(query);
+    if patterns.is_empty() {
+        return ("1 = 1".to_owned(), Vec::new());
+    }
 
-    format!("%{token}%")
+    let mut values = Vec::new();
+    let groups = patterns
+        .into_iter()
+        .map(|pattern| {
+            let clauses = fields
+                .iter()
+                .map(|field| {
+                    values.push(Value::Text(pattern.clone()));
+                    format!("{field} LIKE ?")
+                })
+                .collect::<Vec<_>>();
+            format!("({})", clauses.join(" OR "))
+        })
+        .collect::<Vec<_>>();
+
+    (groups.join(" OR "), values)
 }
 
-fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
-    request.limit.saturating_mul(40).max(100)
+fn candidate_patterns(query: &str) -> Vec<String> {
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|token| token.chars().filter(|ch| *ch != '%').collect::<String>())
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("%{token}%"))
+        .collect()
+}
+
+fn candidate_values_for(repository_id: &str, candidate_values: Vec<Value>) -> Vec<Value> {
+    let mut values = Vec::with_capacity(candidate_values.len() + 1);
+    values.push(Value::Text(repository_id.to_owned()));
+    values.extend(candidate_values);
+    values
 }
 
 struct SymbolRow {
@@ -720,5 +757,16 @@ mod tests {
         assert!(path_matches_filter("src/lib.rs", "./"));
         assert!(path_matches_filter("src/lib.rs", "./src"));
         assert!(!path_matches_filter("src-other/lib.rs", "src/"));
+    }
+
+    #[test]
+    fn candidate_condition_preserves_all_query_terms() {
+        let (condition, values) =
+            candidate_condition(&["lower(name)", "lower(path)"], "retry budget");
+
+        assert!(condition.contains("lower(name) LIKE ?"));
+        assert_eq!(values.len(), 4);
+        assert!(values.contains(&Value::Text("%retry%".to_owned())));
+        assert!(values.contains(&Value::Text("%budget%".to_owned())));
     }
 }

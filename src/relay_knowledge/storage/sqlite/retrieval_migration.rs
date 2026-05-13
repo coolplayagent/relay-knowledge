@@ -47,9 +47,31 @@ pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bo
 }
 
 pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), StorageError> {
+    clear_retrieval_documents(connection)?;
     rebuild_evidence_documents(connection)?;
     rebuild_code_symbol_documents(connection)?;
     rebuild_code_chunk_documents(connection)?;
+
+    Ok(())
+}
+
+pub(super) fn derived_documents_missing(connection: &Connection) -> Result<bool, StorageError> {
+    let semantic_count = table_row_count(connection, "graph_semantic_documents")?;
+    let vector_count = table_row_count(connection, "graph_vector_documents")?;
+    if semantic_count > 0 && vector_count > 0 {
+        return Ok(false);
+    }
+
+    Ok(table_row_count(connection, "evidence")?
+        + optional_table_row_count(connection, "code_symbols")?
+        + optional_table_row_count(connection, "code_chunks")?
+        > 0)
+}
+
+fn clear_retrieval_documents(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute("DELETE FROM graph_bm25", [])?;
+    connection.execute("DELETE FROM graph_semantic_documents", [])?;
+    connection.execute("DELETE FROM graph_vector_documents", [])?;
 
     Ok(())
 }
@@ -264,4 +286,22 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageErr
     )?;
 
     Ok(exists)
+}
+
+fn optional_table_row_count(
+    connection: &Connection,
+    table: &'static str,
+) -> Result<usize, StorageError> {
+    if table_exists(connection, table)? {
+        table_row_count(connection, table)
+    } else {
+        Ok(0)
+    }
+}
+
+fn table_row_count(connection: &Connection, table: &'static str) -> Result<usize, StorageError> {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    connection
+        .query_row(&sql, [], |row| row.get::<_, usize>(0))
+        .map_err(StorageError::from)
 }

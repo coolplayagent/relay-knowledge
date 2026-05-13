@@ -412,6 +412,45 @@ async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
 }
 
 #[tokio::test]
+async fn initialization_backfills_empty_semantic_and_vector_documents() {
+    let path = temp_db_path("derived-backfill");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        commit_evidence(
+            &store,
+            "ev-retry-backfill",
+            "docs",
+            "Retry policy controls runtime budget",
+        )
+        .await;
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute("DELETE FROM graph_semantic_documents", [])
+            .expect("semantic rows should delete");
+        guard
+            .execute("DELETE FROM graph_vector_documents", [])
+            .expect("vector rows should delete");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "retry_policy".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("search should succeed");
+
+    assert!(hits.iter().any(|hit| {
+        hit.retriever_sources.contains(&RetrieverSource::Semantic)
+            || hit.retriever_sources.contains(&RetrieverSource::Vector)
+    }));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
 async fn search_excludes_rejected_and_superseded_evidence() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let scope = SourceScope::parse("docs").expect("scope should parse");
