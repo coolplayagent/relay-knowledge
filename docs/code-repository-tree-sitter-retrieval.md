@@ -25,6 +25,75 @@ cannot be confused with hybrid search.
 `repo query` also accepts `--limit`, `--ref`, repeated `--path`, repeated
 `--language`, and `--freshness allow-stale|wait-until-fresh|graph-only`.
 
+## relay-teams E2E Findings
+
+The `relay-teams` repository was exercised through the CLI as an end-to-end
+code retrieval source. The successful interactive baseline used an immutable
+commit ref so the exact index totals remain reproducible:
+
+```bash
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
+  relay-knowledge repo register /opt/workspace/relay-teams \
+  --alias relay-teams-src \
+  --path src/relay_teams \
+  --language python \
+  --format json
+
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
+  relay-knowledge repo index relay-teams-src \
+  --ref a6063949f4c526ce0e4eddf09d627f5f26c69df7 \
+  --format json
+```
+
+That run indexed commit `a6063949f4c526ce0e4eddf09d627f5f26c69df7` for the
+Python production source scope: 691 files, 13,399 symbols, 82,460 references,
+and 13,402 chunks with no degraded files. Definition, reference, import, caller,
+and hybrid queries all returned revision-scoped hits with resolved commit, tree
+hash, path, line range, retrieval layer, index version, freshness, score, and
+excerpt metadata.
+
+The wider trial scope, `src`, `tests`, `docs`, and `frontend`, was not suitable
+for interactive CLI indexing because it pulled in generated frontend assets,
+PDFs, large documentation files, and large UI test fixtures. The current CLI
+does not expose enough preflight or progress information for users to understand
+that cost before starting a long full-index operation.
+
+Follow-up improvements from this run:
+
+- Add `repo index --dry-run` or `repo scope preview` so users can see selected
+  file count, byte count, language distribution, largest files, unsupported
+  files, generated assets, and expected degraded files before indexing.
+- Add progress and budget reporting during full indexing, including Git file
+  enumeration, blob reads, parser work, SQLite writes, elapsed time, skipped
+  files, degraded files, and active scope.
+- Add practical source presets and exclusion support. A source preset should
+  exclude common generated or heavyweight paths such as `dist`, build outputs,
+  cache directories, PDFs, and vendored assets unless users explicitly opt in.
+  A repository-local ignore file, such as `.relay-knowledgeignore`, should make
+  these exclusions repeatable.
+- Make `graph inspect` and `health` code counts either include code repository
+  index totals or clearly label those fields as graph-evidence counts only.
+  During the E2E run, `repo status` reported code index totals while
+  `graph inspect` reported zero code files and symbols, which is easy to
+  misread as a failed code index.
+- Split `repo impact` path reporting into in-scope and out-of-scope changes, or
+  default the visible `changed_paths` list to the registered scope. The impact
+  hits respected the registered source scope, but the path report still included
+  unrelated docs, frontend, and test changes.
+- Optimize query execution for larger code indexes. The measured Python source
+  baseline was acceptable for focused use, but hybrid retrieval was materially
+  slower than definition and reference lookup. Symbol, reference, call, import,
+  and chunk search should use indexed SQLite predicates or FTS-backed candidate
+  selection before in-memory scoring.
+- Improve CLI argument ergonomics for multi-word queries. A command such as
+  `repo query relay-teams-src --query runtime tools role` currently fails after
+  `runtime`; the error should explain quoting, or the CLI should accept the
+  remaining words as the query when doing so is unambiguous.
+- Add `repo report <alias> --format markdown|json` to emit a reusable
+  operations report with registration scope, resolved commit, tree hash, index
+  totals, degradation summary, representative queries, latency samples, and
+  freshness state.
+
 ## Implementation
 
 - Git registration resolves the repository root and derives a stable
