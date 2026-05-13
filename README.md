@@ -6,6 +6,7 @@
 
 文档按用途归档在 [`docs/`](docs/README.md):
 
+- [使用指南](docs/user-guide/README.md): 按章节拆分的安装、CLI、知识图谱、代码仓库、Web、MCP/Agent 和运维排障说明。
 - `docs/research/`: 知识图谱、GraphRAG、代码仓库检索和 arXiv 论文研究总结。
 - `docs/specs/`: 能力规格、参考实现分析和后续接口规格。
 - [GraphRAG 功能文档](docs/graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local semantic/vector、schema path、temporal/community、多模态 evidence、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
