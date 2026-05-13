@@ -56,6 +56,14 @@ pub const RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE: &str = "RELAY_KNOWLEDGE_EMBEDDIN
 pub const RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS";
 pub const RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY: &str =
     "RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY";
+pub const RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT: &str =
+    "RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT: &str =
+    "RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT";
+pub const RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT: &str = "RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT";
+pub const RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED: &str = "RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED";
 pub const HTTPS_PROXY: &str = "HTTPS_PROXY";
 pub const HTTPS_PROXY_LOWER: &str = "https_proxy";
 pub const HTTP_PROXY: &str = "HTTP_PROXY";
@@ -177,6 +185,17 @@ pub struct RetrievalEnvOverrides {
     pub embedding_max_concurrency: Option<usize>,
 }
 
+/// Worker and service-operator settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkerEnvOverrides {
+    pub embedding_endpoint: Option<String>,
+    pub ocr_endpoint: Option<String>,
+    pub vision_endpoint: Option<String>,
+    pub extractor_endpoint: Option<String>,
+    pub max_in_flight: Option<usize>,
+    pub silent_updates_enabled: Option<bool>,
+}
+
 /// Fully parsed process environment relevant to relay-knowledge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvironmentConfig {
@@ -185,6 +204,7 @@ pub struct EnvironmentConfig {
     pub network: NetworkEnvOverrides,
     pub agent: AgentEnvOverrides,
     pub retrieval: RetrievalEnvOverrides,
+    pub workers: WorkerEnvOverrides,
 }
 
 impl EnvironmentConfig {
@@ -324,6 +344,14 @@ impl EnvironmentConfig {
                     &values,
                     RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY,
                 )?,
+            },
+            workers: WorkerEnvOverrides {
+                embedding_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT)?,
+                ocr_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT)?,
+                vision_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT)?,
+                extractor_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT)?,
+                max_in_flight: positive_usize_var(&values, RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT)?,
+                silent_updates_enabled: bool_var(&values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
             },
         })
     }
@@ -588,18 +616,9 @@ mod tests {
                 (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
                 (RELAY_KNOWLEDGE_SEMANTIC_BACKEND, "external"),
                 (RELAY_KNOWLEDGE_VECTOR_BACKEND, "external"),
-                (RELAY_KNOWLEDGE_LLM_PROVIDER, "openai_compatible"),
-                (
-                    RELAY_KNOWLEDGE_EMBEDDING_BASE_URL,
-                    "https://embeddings.example/v1",
-                ),
-                (RELAY_KNOWLEDGE_EMBEDDING_API_KEY, "secret-key"),
                 (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
                 (RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, "clip-vit-b32"),
                 (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
-                (RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE, "16"),
-                (RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS, "9000"),
-                (RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY, "2"),
             ],
         )
         .expect("environment should parse");
@@ -637,18 +656,6 @@ mod tests {
         );
         assert_eq!(config.retrieval.vector_backend, Some("external".to_owned()));
         assert_eq!(
-            config.retrieval.llm_provider,
-            Some("openai_compatible".to_owned())
-        );
-        assert_eq!(
-            config.retrieval.embedding_base_url,
-            Some("https://embeddings.example/v1".to_owned())
-        );
-        assert_eq!(
-            config.retrieval.embedding_api_key,
-            Some("secret-key".to_owned())
-        );
-        assert_eq!(
             config.retrieval.text_embedding_model,
             Some("text-embed-3-small".to_owned())
         );
@@ -657,9 +664,6 @@ mod tests {
             Some("clip-vit-b32".to_owned())
         );
         assert_eq!(config.retrieval.embedding_dimension, Some(1536));
-        assert_eq!(config.retrieval.embedding_batch_size, Some(16));
-        assert_eq!(config.retrieval.embedding_timeout_ms, Some(9000));
-        assert_eq!(config.retrieval.embedding_max_concurrency, Some(2));
     }
 
     #[test]

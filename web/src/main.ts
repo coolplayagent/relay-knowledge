@@ -1,5 +1,11 @@
-import type { HealthResponse, IndexCursor, IndexStatus, ProjectStatusResponse } from "./api/contracts";
-import { loadHealth, loadProjectStatus } from "./api/client.js";
+import type {
+  HealthResponse,
+  IndexStatus,
+  ProjectStatusResponse,
+  ServiceStatusResponse
+} from "./api/contracts";
+import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.js";
+import { providersSection } from "./providers.js";
 import {
   INDEX_KINDS,
   OPERATIONS,
@@ -14,12 +20,15 @@ import {
   type AppState,
   type CodeAction,
   type CodeQueryKind,
-  type Freshness
+  type Freshness,
+  type ProposalAction,
+  type WorkerKind
 } from "./operations.js";
 
 type Diagnostics = {
   status: ProjectStatusResponse;
   health: HealthResponse;
+  service: ServiceStatusResponse | null;
 };
 
 type Tone = "good" | "warn" | "bad";
@@ -34,9 +43,13 @@ async function renderApp() {
 
   root.replaceChildren(loadingShell());
   try {
-    const [status, health] = await Promise.all([loadProjectStatus(), loadHealth()]);
-    currentDiagnostics = { status, health };
-    root.replaceChildren(shell(status, health));
+    const [status, health, service] = await Promise.all([
+      loadProjectStatus(),
+      loadHealth(),
+      loadServiceStatus().catch(() => null)
+    ]);
+    currentDiagnostics = { status, health, service };
+    root.replaceChildren(shell(status, health, service));
   } catch (error) {
     root.replaceChildren(errorShell(error));
   }
@@ -48,7 +61,9 @@ function rerenderFromState() {
     return;
   }
 
-  root.replaceChildren(shell(currentDiagnostics.status, currentDiagnostics.health));
+  root.replaceChildren(
+    shell(currentDiagnostics.status, currentDiagnostics.health, currentDiagnostics.service)
+  );
 }
 
 function loadingShell(): HTMLElement {
@@ -60,9 +75,13 @@ function loadingShell(): HTMLElement {
   return container;
 }
 
-function shell(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function shell(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const container = element("div", "shell");
-  container.append(sidebar(), content(status, health));
+  container.append(sidebar(), content(status, health, service));
 
   return container;
 }
@@ -93,16 +112,20 @@ function navLink(label: string, href: string): HTMLAnchorElement {
   return link;
 }
 
-function content(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function content(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const main = element("main", "content");
   main.append(
     toolbar(status, health),
     statusSection(status, health),
-    readinessSection(status, health),
+    readinessSection(status, health, service),
     providersSection(status, health),
     operationsSection(status, health),
     indexesSection(health.indexes, health.metadata.graph_version),
-    runtimeSection(status)
+    runtimeSection(status, service)
   );
 
   return main;
@@ -191,7 +214,11 @@ function metricItem(label: string, value: number): HTMLElement {
   return item;
 }
 
-function readinessSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function readinessSection(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const section = sectionShell("readiness", "GraphRAG readiness");
   const grid = element("div", "readiness-grid");
   const graph = health.graph;
@@ -241,6 +268,14 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
       `${status.runtime.qos_max_in_flight_requests} in-flight / ${status.runtime.qos_max_queue_depth} queue`
     ),
     readinessItem(
+      "Service manager",
+      service?.mode ?? "unknown",
+      serviceTone(service),
+      service
+        ? `${service.workers.length} workers / ${service.proposal_backlog} proposals`
+        : "service status endpoint unavailable"
+    ),
+    readinessItem(
       "Refresh recovery",
       health.index_refresh.dead_letter_count > 0 ? "failed" : "ready",
       health.index_refresh.dead_letter_count > 0 ? "bad" : "good",
@@ -256,6 +291,21 @@ function readinessSection(status: ProjectStatusResponse, health: HealthResponse)
   section.append(grid);
 
   return section;
+}
+
+function serviceTone(service: ServiceStatusResponse | null): Tone {
+  if (!service || service.operator.state === "failed") {
+    return "bad";
+  }
+  if (
+    service.operator.state === "paused" ||
+    service.operator.state === "degraded" ||
+    service.proposal_backlog > 0
+  ) {
+    return "warn";
+  }
+
+  return "good";
 }
 
 function readinessItem(label: string, value: string, tone: Tone, detail: string): HTMLElement {
@@ -303,120 +353,6 @@ function staleReasonSummary(health: HealthResponse): { value: string; tone: Tone
     tone: failed ? "bad" : "warn",
     detail
   };
-}
-
-function providersSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
-  const section = sectionShell("providers", "Providers");
-  const grid = element("div", "provider-grid");
-  const semanticCursor = primaryCursor(health.index_cursors, "semantic");
-  const vectorCursor = primaryCursor(health.index_cursors, "vector");
-  grid.append(
-    providerItem(
-      "Semantic backend",
-      status.runtime.semantic_backend_mode,
-      backendTone(status.runtime.semantic_backend_mode, semanticCursor),
-      providerDetail(status.runtime.text_embedding_model, status.runtime.embedding_dimension, semanticCursor)
-    ),
-    providerItem(
-      "Vector backend",
-      status.runtime.vector_backend_mode,
-      backendTone(status.runtime.vector_backend_mode, vectorCursor),
-      providerDetail(status.runtime.text_embedding_model, status.runtime.embedding_dimension, vectorCursor)
-    ),
-    providerItem(
-      "Remote endpoint",
-      status.runtime.embedding_provider ?? "not configured",
-      status.runtime.embedding_provider ? "good" : "warn",
-      endpointDetail(status)
-    ),
-    providerItem(
-      "Budgets",
-      `${status.runtime.embedding_max_concurrency ?? 0} concurrent`,
-      status.runtime.embedding_provider ? "good" : "warn",
-      `batch ${status.runtime.embedding_batch_size ?? 0} / timeout ${status.runtime.embedding_timeout_ms ?? 0}ms`
-    )
-  );
-  section.append(grid, providerCursorTable(health.index_cursors));
-
-  return section;
-}
-
-function primaryCursor(cursors: IndexCursor[], kind: IndexStatus["kind"]): IndexCursor | undefined {
-  return cursors
-    .filter((cursor) => cursor.kind === kind)
-    .sort((left, right) => right.indexed_graph_version - left.indexed_graph_version)[0];
-}
-
-function backendTone(mode: string, cursor: IndexCursor | undefined): Tone {
-  if (mode === "disabled") {
-    return "warn";
-  }
-  if (!cursor || cursor.state === "failed") {
-    return "bad";
-  }
-  return cursor.state === "fresh" ? "good" : "warn";
-}
-
-function providerDetail(model: string, dimension: number, cursor: IndexCursor | undefined): string {
-  const indexed = cursor ? `indexed ${cursor.indexed_graph_version}` : "cursor unavailable";
-  const cursorModel = cursor?.model_name ? ` / cursor ${cursor.model_name}` : "";
-
-  return `${model} / ${dimension}d / ${indexed}${cursorModel}`;
-}
-
-function endpointDetail(status: ProjectStatusResponse): string {
-  if (!status.runtime.embedding_provider) {
-    return "external backend is not active";
-  }
-  const auth = status.runtime.embedding_api_key_configured ? "key configured" : "key missing";
-  const baseUrl = status.runtime.embedding_base_url ?? "endpoint unavailable";
-
-  return `${baseUrl} / ${auth}`;
-}
-
-function providerItem(label: string, value: string, tone: Tone, detail: string): HTMLElement {
-  const item = element("div", "provider-item");
-  const heading = element("div", "readiness-heading");
-  heading.append(textElement("span", "readiness-label", label), statusPill(value, tone));
-  item.append(heading, textElement("div", "readiness-detail", detail));
-
-  return item;
-}
-
-function providerCursorTable(cursors: IndexCursor[]): HTMLElement {
-  const table = document.createElement("table");
-  table.className = "provider-cursors";
-  table.append(
-    tableHead(["Kind", "Scope", "State", "Model", "Dimension", "Cursor"]),
-    cursorTableBody(cursors)
-  );
-
-  return table;
-}
-
-function cursorTableBody(cursors: IndexCursor[]): HTMLTableSectionElement {
-  const body = document.createElement("tbody");
-  for (const cursor of cursors.filter((item) => item.kind === "semantic" || item.kind === "vector")) {
-    const row = document.createElement("tr");
-    row.append(
-      textElement("td", undefined, cursor.kind),
-      textElement("td", undefined, cursor.source_scope),
-      tableState(cursor.state),
-      textElement("td", undefined, cursor.model_name ?? "unknown"),
-      textElement("td", undefined, String(cursor.model_dimension ?? 0)),
-      textElement("td", undefined, cursor.backend_cursor ?? "pending")
-    );
-    body.append(row);
-  }
-  if (body.children.length === 0) {
-    const row = document.createElement("tr");
-    const cell = textElement("td", "muted-line", "No semantic/vector cursor metadata");
-    cell.colSpan = 6;
-    row.append(cell);
-    body.append(row);
-  }
-
-  return body;
 }
 
 function operationsSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
@@ -495,6 +431,22 @@ function operationForm(): HTMLElement {
       form.append(
         inputControl("Probe input", appState.provider.probeInput, (value) => {
           appState.provider.probeInput = value;
+        })
+      );
+      break;
+    case "worker":
+      form.append(workerControls());
+      break;
+    case "proposal":
+      form.append(proposalControls());
+      break;
+    case "audit":
+      form.append(
+        inputControl("Operation", appState.audit.operation, (value) => {
+          appState.audit.operation = value;
+        }),
+        numberControl("Limit", appState.audit.limit, (value) => {
+          appState.audit.limit = positiveInt(value, 50);
         })
       );
       break;
@@ -623,6 +575,100 @@ function indexKindControls(): HTMLElement {
   return group;
 }
 
+function workerControls(): HTMLElement {
+  const group = element("div", "field-grid");
+  group.append(
+    selectControl(
+      "Action",
+      appState.worker.action,
+      [
+        ["status", "status"],
+        ["run-once", "run-once"]
+      ],
+      (value) => {
+        appState.worker.action = value as AppState["worker"]["action"];
+        updatePreview();
+      }
+    ),
+    selectControl(
+      "Kind",
+      appState.worker.kind,
+      [
+        ["embedding", "embedding"],
+        ["ocr", "ocr"],
+        ["vision", "vision"],
+        ["extractor", "extractor"]
+      ],
+      (value) => {
+        appState.worker.kind = value as WorkerKind;
+        updatePreview();
+      }
+    )
+  );
+
+  return group;
+}
+
+function proposalControls(): HTMLElement {
+  const group = element("div", "field-grid");
+  group.append(
+    selectControl(
+      "Action",
+      appState.proposal.action,
+      [
+        ["list", "list"],
+        ["show", "show"],
+        ["accept", "accept"],
+        ["reject", "reject"],
+        ["supersede", "supersede"]
+      ],
+      (value) => {
+        appState.proposal.action = value as ProposalAction;
+        rerenderFromState();
+      }
+    )
+  );
+  if (appState.proposal.action === "list") {
+    group.append(
+      selectControl(
+        "State",
+        appState.proposal.state,
+        [
+          ["proposed", "proposed"],
+          ["accepted", "accepted"],
+          ["rejected", "rejected"],
+          ["superseded", "superseded"]
+        ],
+        (value) => {
+          appState.proposal.state = value as AppState["proposal"]["state"];
+          updatePreview();
+        }
+      ),
+      numberControl("Limit", appState.proposal.limit, (value) => {
+        appState.proposal.limit = positiveInt(value, 25);
+      })
+    );
+  } else {
+    group.append(
+      inputControl("Proposal", appState.proposal.proposalId, (value) => {
+        appState.proposal.proposalId = value;
+      })
+    );
+    if (appState.proposal.action !== "show") {
+      group.append(
+        inputControl("Actor", appState.proposal.actor, (value) => {
+          appState.proposal.actor = value;
+        }),
+        inputControl("Reason", appState.proposal.reason, (value) => {
+          appState.proposal.reason = value;
+        })
+      );
+    }
+  }
+
+  return group;
+}
+
 function operationPreview(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
   const snapshot = currentOperationSnapshot(status, health);
   const preview = element("div", "operation-preview");
@@ -728,7 +774,10 @@ function tableState(state: IndexStatus["state"]): HTMLTableCellElement {
   return cell;
 }
 
-function runtimeSection(status: ProjectStatusResponse): HTMLElement {
+function runtimeSection(
+  status: ProjectStatusResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const section = sectionShell("runtime", "Runtime");
   const list = element("dl", "runtime-list");
   list.append(
@@ -741,6 +790,15 @@ function runtimeSection(status: ProjectStatusResponse): HTMLElement {
     runtimeItem("In-flight", String(status.runtime.qos_max_in_flight_requests)),
     runtimeItem("Queue depth", String(status.runtime.qos_max_queue_depth))
   );
+  if (service) {
+    list.append(
+      runtimeItem("Service mode", service.mode),
+      runtimeItem("Definition", service.service_definition_path),
+      runtimeItem("Worker families", String(service.workers.length)),
+      runtimeItem("Proposal backlog", String(service.proposal_backlog)),
+      runtimeItem("Audit events", String(service.audit_sink.event_count))
+    );
+  }
   section.append(list);
 
   return section;

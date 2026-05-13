@@ -16,17 +16,22 @@ use crate::{
     },
     domain::{
         ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind,
-        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
-        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
+        ProposalState, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed,
+        RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
-    project::PROJECT_NAME,
+    project::{
+        DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
+        PROJECT_NAME, WINDOWS_SERVICE_DEFINITION_FILE_NAME,
+    },
     retrieval::{
         RetrievalPlan,
         provider::{EmbeddingRequest, ProviderRetryClass, embedding_provider},
         read_model_backend_statuses,
     },
-    storage::{GraphSearchRequest, KnowledgeStore, SqliteGraphStore, StorageError},
+    storage::{
+        GraphSearchRequest, KnowledgeStore, ProposalListRequest, SqliteGraphStore, StorageError,
+    },
 };
 
 use super::{
@@ -46,14 +51,14 @@ use super::ingest::generated_evidence_id;
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
 pub struct RelayKnowledgeService {
-    runtime: RuntimeConfiguration,
-    storage: StorageProvider,
+    pub(super) runtime: RuntimeConfiguration,
+    pub(super) storage: StorageProvider,
 }
 
 impl RelayKnowledgeService {
     /// Creates a service from already validated foundational configuration.
     pub fn new(runtime: RuntimeConfiguration) -> Self {
-        let database_path = runtime.paths.data_dir.join("relay-knowledge.sqlite");
+        let database_path = runtime.paths.data_dir.join(DATABASE_FILE_NAME);
 
         Self {
             runtime,
@@ -134,11 +139,14 @@ impl RelayKnowledgeService {
     ) -> Result<IngestResponse, ApiError> {
         let batch = mutation_batch_from_request(request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let worker_evidence = batch.evidence.clone();
         let store = self.storage.get().await.map_err(storage_api_error)?;
         let receipt = store
             .commit_mutation_batch(batch)
             .await
             .map_err(storage_api_error)?;
+        self.queue_worker_tasks_for_evidence(&store, &worker_evidence, receipt.graph_version)
+            .await?;
         let (indexes, metadata, index_refresh_error) = match refresh_index_kinds(
             &store,
             IndexKind::ALL,
@@ -567,16 +575,41 @@ impl RelayKnowledgeService {
             .join(service_definition_filename())
             .display()
             .to_string();
+        let operator = store
+            .service_operator_status()
+            .await
+            .map_err(storage_api_error)?;
+        let workers = super::operations::overlay_worker_runtime(
+            store.worker_statuses().await.map_err(storage_api_error)?,
+            &self.runtime.workers,
+        );
+        let proposal_backlog = store
+            .list_proposals(ProposalListRequest {
+                state: Some(ProposalState::Proposed),
+                limit: usize::MAX,
+            })
+            .await
+            .map_err(storage_api_error)?
+            .len();
+        let audit_event_count = store.audit_event_count().await.map_err(storage_api_error)?;
 
         Ok(ServiceStatusResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             service_name: PROJECT_NAME.to_owned(),
-            mode: "disabled".to_owned(),
-            background_enabled: false,
-            silent_updates_enabled: false,
+            mode: operator.state.as_str().to_owned(),
+            background_enabled: operator.state != crate::domain::ServiceOperatorState::Disabled,
+            silent_updates_enabled: operator.silent_updates_enabled,
             service_definition_path,
             index_refresh,
             agent_protocols: agent_protocol_status(&self.runtime),
+            operator,
+            workers,
+            proposal_backlog,
+            audit_sink: crate::api::AuditSinkStatus {
+                durable: true,
+                event_count: audit_event_count,
+                last_error: None,
+            },
         })
     }
 
@@ -586,7 +619,7 @@ impl RelayKnowledgeService {
 }
 
 #[derive(Clone)]
-struct StorageProvider {
+pub(super) struct StorageProvider {
     path: Option<PathBuf>,
     ready: Arc<OnceLock<Arc<dyn KnowledgeStore>>>,
     init_lock: Arc<tokio::sync::Mutex<()>>,
@@ -612,7 +645,7 @@ impl StorageProvider {
         }
     }
 
-    async fn get(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
+    pub(super) async fn get(&self) -> Result<Arc<dyn KnowledgeStore>, StorageError> {
         if let Some(store) = self.ready.get() {
             return Ok(Arc::clone(store));
         }
@@ -682,11 +715,11 @@ fn duration_millis(duration: std::time::Duration) -> u64 {
 
 fn service_definition_filename() -> &'static str {
     if cfg!(target_os = "windows") {
-        "relay-knowledge-service.xml"
+        WINDOWS_SERVICE_DEFINITION_FILE_NAME
     } else if cfg!(target_os = "macos") {
-        "com.coolplayagent.relay-knowledge.plist"
+        MACOS_SERVICE_DEFINITION_FILE_NAME
     } else {
-        "relay-knowledge.service"
+        LINUX_SERVICE_DEFINITION_FILE_NAME
     }
 }
 
@@ -704,6 +737,9 @@ mod refresh_tests;
 
 #[cfg(test)]
 mod storage_tests;
+
+#[cfg(test)]
+mod operations_tests;
 
 #[cfg(test)]
 mod tests;

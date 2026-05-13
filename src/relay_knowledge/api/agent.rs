@@ -6,6 +6,7 @@ use crate::domain::{
     FreshnessPolicy, FusionDiagnostics, IndexStatus, RetrievalBackendStatus, RetrievalHit,
     RetrievalMode, RetrievedContextPack,
 };
+use crate::project::{ACP_LOCAL_ADAPTER_NAME, MCP_ADAPTER_NAME};
 
 use super::{ApiMetadata, RequestContext};
 
@@ -43,7 +44,7 @@ impl RuntimeIdentity {
     pub fn mcp(tool_call_id: Option<String>) -> Self {
         Self {
             protocol: AgentProtocolKind::Mcp,
-            adapter_name: "relay-knowledge-mcp".to_owned(),
+            adapter_name: MCP_ADAPTER_NAME.to_owned(),
             adapter_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             client_name: None,
             client_version: None,
@@ -64,7 +65,7 @@ impl RuntimeIdentity {
     ) -> Self {
         Self {
             protocol: AgentProtocolKind::Acp,
-            adapter_name: "relay-knowledge-acp-local".to_owned(),
+            adapter_name: ACP_LOCAL_ADAPTER_NAME.to_owned(),
             adapter_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             client_name,
             client_version,

@@ -8,6 +8,7 @@ mod graph_version;
 mod index;
 mod multimodal;
 mod mutation;
+mod operational;
 mod retrieval;
 mod source;
 
@@ -38,6 +39,12 @@ pub use multimodal::{
 pub use mutation::{
     ClaimRecord, CommitReceipt, ConfidenceScore, EventRecord, EvidenceRecord, EvidenceSpan,
     FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange,
+};
+pub use operational::{
+    AuditEventRecord, AuditStatus, ProposalConflictRecord, ProposalConflictSeverity, ProposalKind,
+    ProposalRecord, ProposalState, ServiceDefinitionPlan, ServiceManagerAction,
+    ServiceOperatorState, ServiceOperatorStatus, WorkerBackendState, WorkerKind, WorkerStatus,
+    WorkerTaskRecord, WorkerTaskState, normalize_actor,
 };
 pub use retrieval::{
     CodeGraphArtifact, CodeGraphArtifactKind, ContextEntity, ContextGraphFact,

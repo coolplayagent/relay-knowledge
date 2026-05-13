@@ -30,7 +30,7 @@ GraphRAG 能力必须保持可解释:
 - Agent 接入基础: MCP Streamable HTTP server、本地 ACP session adapter、session/protocol header 校验、access policy、QoS admission、tool-level graph retrieval、graph inspect、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh。
 - Web 诊断面: `/api/project/status` 和 `/api/health` 驱动的 health、index、runtime、operation composer 和 GraphRAG readiness 视图。
 
-这些能力已经从 v1 底座推进到 Phase 4 的本地 GraphRAG read model: typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、local semantic/vector read model、external backend runtime metadata contract、多模态 evidence schema、maintenance worker 输出提交边界、schema path、temporal query、community summary 和 evaluation fixture gate 已有 Rust 实现。具体外部 embedding/OCR/vision provider、proposal lifecycle、service manager 安装面和 silent update operator 仍属于后续实现。
+这些能力已经从 v1 底座推进到 Phase 4 的本地 GraphRAG read model: typed fact schema、scoped index cursor、后台 task lease/reconciler/dead-letter、local semantic/vector read model、多模态 evidence schema、schema path、temporal query、community summary 和 evaluation harness 已有 Rust 实现。外部 embedding/OCR/vision/extractor worker 现在有持久队列、HTTP worker contract 和 deterministic fallback；proposal lifecycle、service manager 定义生成、持久 audit sink 和 silent-update operator state 已形成统一 CLI/Web/service API 面。
 
 ## 3. 优化措施
 
@@ -44,7 +44,7 @@ GraphRAG 能力必须保持可解释:
 
 ### 3.2 事实模型
 
-- 通用图已从 evidence/entity 扩展到 typed relation、claim、event、confidence、source span 和 status；proposal lifecycle 仍需后续补齐。
+- 通用图已从 evidence/entity 扩展到 typed relation、claim、event、confidence、source span 和 status；worker 输出先进入 proposal lifecycle，人工 accept 后才通过 graph mutation contract 写入。
 - `graph_version` 表示系统提交版本，用于 replay、index cursor 和 stale 判断。
 - 事实有效时间使用 `valid_from`、`valid_to`、`observed_at` 和 `source_published_at`，不得用 `graph_version` 替代。
 - 冲突事实不能静默覆盖，应通过 status、confidence、source span 和 proposal/approval 流程表达。
@@ -79,7 +79,7 @@ GraphRAG 能力必须保持可解释:
 - 检索时合并同一 parent evidence 的文本、OCR、caption、image 和 table hit，避免重复展示。
 - temporal query 必须支持 `as_of` 或 time range，并参与 index invalidation 与 context pack metadata。
 
-当前 Rust 实现已支持 evidence modality/extraction metadata、OCR/caption/image embedding parent grouping、maintenance worker 输出提交入口、`as_of:<date>` 与年份事件检索，以及 community summary context item。真实 OCR、vision caption 和外部 embedding provider 仍需要在后台 worker 边界后产品化。
+当前 Rust 实现已支持 evidence modality/extraction metadata、OCR/caption/image embedding parent grouping、`as_of:<date>` 与年份事件检索，以及 community summary context item。生产级 OCR、vision caption、embedding payload 适配和 worker metrics 仍需在现有 worker contract 上扩展。
 
 ## 4. 分阶段路线
 
@@ -103,8 +103,8 @@ GraphRAG 能力必须保持可解释:
 
 - 保持 MCP read-only 工具矩阵: retrieve context、inspect graph、index status、service doctor、code graph query 和 code impact。
 - 保持本地 ACP 会话入口，支持 progress、cancellation、context artifact 和 runtime identity。
-- 保持 bounded in-process audit log，记录 identity、scope、freshness、QoS decision、budget、truncation 和 result count；后续补持久审计 sink 和 metrics exporters。
-- 安装/升级/卸载文档必须覆盖 service manager 模板、运行时目录、rollback 和 diagnostics。
+- 保持 bounded in-process agent audit log；CLI/Web/service operation 写入持久 audit sink，并通过 `audit query` 暴露。
+- service manager v1 生成 systemd/launchd/Windows Service 定义和安装/卸载/启动/停止命令预览，不在 CLI 内执行提权安装；silent-update operator state 可 status/pause/resume。
 
 ### Phase 4: 高级 GraphRAG
 
@@ -116,9 +116,8 @@ GraphRAG 能力必须保持可解释:
 
 剩余 Phase 4 产品化工作:
 
-- 接入具体外部 text/image embedding provider，并保留本地 read model 作为 deterministic fallback。
-- 产品化真实 OCR、caption、table/layout extractor 调度、重试和 provider 诊断。
-- 扩充 evaluation fixture 数据集规模并接入后续 release diagnostics。
+- 扩展外部 worker 响应 contract，覆盖生产 embedding vector payload、OCR/caption/table/layout 结果、metrics exporter 和 release diagnostics。
+- 将 evaluation harness 接到 CI fixture 和后续 release diagnostics。
 
 ## 5. 验收要求
 

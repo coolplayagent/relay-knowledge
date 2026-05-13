@@ -26,6 +26,12 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
         qos_max_connections: network.qos.max_connections,
         qos_max_in_flight_requests: network.qos.max_in_flight_requests,
         qos_max_queue_depth: network.qos.max_queue_depth,
+        worker_embedding_endpoint_configured: runtime.workers.embedding_endpoint.is_some(),
+        worker_ocr_endpoint_configured: runtime.workers.ocr_endpoint.is_some(),
+        worker_vision_endpoint_configured: runtime.workers.vision_endpoint.is_some(),
+        worker_extractor_endpoint_configured: runtime.workers.extractor_endpoint.is_some(),
+        worker_max_in_flight: runtime.workers.max_in_flight,
+        silent_updates_enabled: runtime.workers.silent_updates_enabled,
         semantic_backend_mode: runtime.retrieval.semantic_mode.as_str().to_owned(),
         vector_backend_mode: runtime.retrieval.vector_mode.as_str().to_owned(),
         embedding_provider: runtime

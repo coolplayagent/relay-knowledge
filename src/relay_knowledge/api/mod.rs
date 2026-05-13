@@ -17,14 +17,19 @@ pub use context::{InterfaceKind, RequestContext};
 pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
-    CodeRepositoryImpactResponse, CodeRepositoryIndexResponse, CodeRepositoryQueryResponse,
-    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryReportResponse,
-    CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+    AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeRepositoryImpactResponse,
+    CodeRepositoryIndexResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
+    CodeRepositoryRegisterResponse, CodeRepositoryReportResponse, CodeRepositoryScopeMetadata,
+    CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
     EmbeddingProviderProbeResponse, GraphInspectionRequest, GraphInspectionResponse,
     HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse, IndexRefreshRequest,
     IndexRefreshResponse, IngestClaim, IngestEvent, IngestEvidence, IngestEvidenceExtraction,
     IngestRelation, IngestRequest, IngestResponse, MultimodalExtractionRequest,
-    MultimodalExtractionResponse, ServiceRecoveryReport, ServiceStatusResponse,
+    MultimodalExtractionResponse, ProposalDecisionApiRequest, ProposalDecisionResponse,
+    ProposalListApiRequest, ProposalListResponse, ProposalShowResponse,
+    ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServicePlanRequest,
+    ServicePlanResponse, ServiceRecoveryReport, ServiceStatusResponse, WorkerRunRequest,
+    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};

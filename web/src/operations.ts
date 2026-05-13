@@ -7,6 +7,9 @@ export type OperationId =
   | "code"
   | "indexes"
   | "provider"
+  | "worker"
+  | "proposal"
+  | "audit"
   | "service";
 export type Freshness = "allow-stale" | "wait-until-fresh" | "graph-only";
 export type CodeAction = "register" | "index" | "update" | "query" | "impact" | "status";
@@ -19,6 +22,8 @@ export type CodeQueryKind =
   | "callees"
   | "imports";
 export type IndexKind = IndexStatus["kind"];
+export type WorkerKind = "embedding" | "ocr" | "vision" | "extractor";
+export type ProposalAction = "list" | "show" | "accept" | "reject" | "supersede";
 
 export type OperationSnapshot = {
   id: string;
@@ -65,6 +70,22 @@ export type AppState = {
   provider: {
     probeInput: string;
   };
+  worker: {
+    action: "status" | "run-once";
+    kind: WorkerKind;
+  };
+  proposal: {
+    action: ProposalAction;
+    proposalId: string;
+    state: "proposed" | "accepted" | "rejected" | "superseded";
+    actor: string;
+    reason: string;
+    limit: number;
+  };
+  audit: {
+    operation: string;
+    limit: number;
+  };
   service: {
     mcpTransport: "configured" | "streamable-http";
     allowedScopes: string;
@@ -78,6 +99,9 @@ export const OPERATIONS: Array<{ id: OperationId; label: string }> = [
   { id: "code", label: "Code" },
   { id: "indexes", label: "Indexes" },
   { id: "provider", label: "Provider" },
+  { id: "worker", label: "Workers" },
+  { id: "proposal", label: "Proposals" },
+  { id: "audit", label: "Audit" },
   { id: "service", label: "Service" }
 ];
 
@@ -119,6 +143,22 @@ export const appState: AppState = {
   },
   provider: {
     probeInput: "relay-knowledge provider probe"
+  },
+  worker: {
+    action: "status",
+    kind: "extractor"
+  },
+  proposal: {
+    action: "list",
+    proposalId: "proposal:extractor:example",
+    state: "proposed",
+    actor: "web-user",
+    reason: "Reviewed in Web workspace",
+    limit: 25
+  },
+  audit: {
+    operation: "",
+    limit: 50
   },
   service: {
     mcpTransport: "streamable-http",
@@ -212,6 +252,12 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
       return indexesSnapshot(metadata);
     case "provider":
       return providerSnapshot(metadata);
+    case "worker":
+      return workerSnapshot(metadata);
+    case "proposal":
+      return proposalSnapshot(metadata);
+    case "audit":
+      return auditSnapshot(metadata);
     case "service":
       return serviceSnapshot(metadata);
   }
@@ -369,6 +415,70 @@ function providerSnapshot(metadata: Record<string, unknown>) {
     payload: {
       operation: "provider.embedding.probe",
       input: appState.provider.probeInput,
+      metadata
+    }
+  };
+}
+
+function workerSnapshot(metadata: Record<string, unknown>) {
+  const parts = ["relay-knowledge", "worker", appState.worker.action];
+  appendOption(parts, "--kind", appState.worker.kind);
+  parts.push("--format", "json");
+
+  return {
+    name: `Worker ${appState.worker.action}`,
+    command: shellCommand(parts),
+    payload: {
+      operation: `worker.${appState.worker.action}`,
+      kind: appState.worker.kind,
+      metadata
+    }
+  };
+}
+
+function proposalSnapshot(metadata: Record<string, unknown>) {
+  const state = appState.proposal;
+  const parts = ["relay-knowledge", "proposal", state.action];
+  if (state.action === "list") {
+    appendOption(parts, "--state", state.state);
+    appendOption(parts, "--limit", String(state.limit));
+  } else {
+    parts.push(state.proposalId);
+    if (state.action !== "show") {
+      appendOption(parts, "--by", state.actor);
+      appendOption(parts, "--reason", state.reason);
+    }
+  }
+  parts.push("--format", "json");
+
+  return {
+    name: `Proposal ${state.action}`,
+    command: shellCommand(parts),
+    payload: {
+      operation: `proposal.${state.action}`,
+      proposal_id: state.action === "list" ? null : state.proposalId,
+      state: state.action === "list" ? state.state : null,
+      actor: state.action === "show" || state.action === "list" ? null : state.actor,
+      reason: state.action === "show" || state.action === "list" ? null : state.reason,
+      limit: state.action === "list" ? state.limit : null,
+      metadata
+    }
+  };
+}
+
+function auditSnapshot(metadata: Record<string, unknown>) {
+  const parts = ["relay-knowledge", "audit", "query"];
+  appendOption(parts, "--operation", appState.audit.operation);
+  appendOption(parts, "--limit", String(appState.audit.limit));
+  parts.push("--format", "json");
+
+  return {
+    name: "Audit query",
+    command: shellCommand(parts),
+    payload: {
+      operation: "audit.query",
+      filter_operation: appState.audit.operation || null,
+      limit: appState.audit.limit,
       metadata
     }
   };

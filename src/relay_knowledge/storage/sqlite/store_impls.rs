@@ -1,0 +1,225 @@
+use crate::{
+    domain::{
+        CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
+        CodeSymbolRecord, CommitReceipt, GraphMutationBatch, GraphVersion, IndexKind, IndexStatus,
+        RetrievalHit,
+    },
+    storage::{
+        AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
+        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
+        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
+        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, ServiceOperatorUpdate, StorageFuture, WorkerTaskClaimRequest,
+        WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
+    },
+};
+
+use super::{
+    SqliteGraphStore, code_graph, commit_batch, current_graph_version,
+    helpers::read_mutations_after, indexing, inspect_graph, operations, retrieval,
+};
+
+impl GraphStore for SqliteGraphStore {
+    fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt> {
+        self.run(move |connection| commit_batch(connection, batch))
+    }
+
+    fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
+        self.run(inspect_graph)
+    }
+
+    fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {
+        self.run(move |connection| retrieval::search_graph(connection, request))
+    }
+
+    fn current_graph_version(&self) -> StorageFuture<'_, GraphVersion> {
+        self.run(current_graph_version)
+    }
+}
+
+impl MutationLogStore for SqliteGraphStore {
+    fn read_after(
+        &self,
+        graph_version: GraphVersion,
+        limit: usize,
+    ) -> StorageFuture<'_, Vec<MutationLogEntry>> {
+        self.run(move |connection| read_mutations_after(connection, graph_version, limit))
+    }
+}
+
+impl IndexStore for SqliteGraphStore {
+    fn index_statuses(&self) -> StorageFuture<'_, Vec<IndexStatus>> {
+        self.run(|connection| indexing::index_statuses(connection))
+    }
+
+    fn mark_refresh_complete(
+        &self,
+        kind: IndexKind,
+        graph_version: GraphVersion,
+    ) -> StorageFuture<'_, IndexStatus> {
+        self.run(move |connection| indexing::mark_refresh_complete(connection, kind, graph_version))
+    }
+
+    fn index_cursors(&self) -> StorageFuture<'_, Vec<IndexCursor>> {
+        self.run(indexing::index_cursors)
+    }
+
+    fn queue_index_refreshes(
+        &self,
+        request: IndexRefreshQueueRequest,
+    ) -> StorageFuture<'_, IndexRefreshDiagnostics> {
+        self.run(move |connection| indexing::queue_index_refreshes(connection, request))
+    }
+
+    fn claim_index_refresh_task(
+        &self,
+        request: IndexRefreshClaimRequest,
+    ) -> StorageFuture<'_, Option<IndexRefreshTask>> {
+        self.run(move |connection| indexing::claim_index_refresh_task(connection, request))
+    }
+
+    fn complete_index_refresh_task(
+        &self,
+        request: IndexRefreshCompletion,
+    ) -> StorageFuture<'_, IndexRefreshTask> {
+        self.run(move |connection| indexing::complete_index_refresh_task(connection, request))
+    }
+
+    fn fail_index_refresh_task(
+        &self,
+        request: IndexRefreshFailure,
+    ) -> StorageFuture<'_, IndexRefreshTask> {
+        self.run(move |connection| indexing::fail_index_refresh_task(connection, request))
+    }
+
+    fn index_refresh_diagnostics(&self, now_ms: u64) -> StorageFuture<'_, IndexRefreshDiagnostics> {
+        self.run(move |connection| indexing::diagnostics(connection, now_ms))
+    }
+
+    fn queue_worker_tasks(
+        &self,
+        tasks: Vec<WorkerTaskSeed>,
+    ) -> StorageFuture<'_, Vec<crate::domain::WorkerTaskRecord>> {
+        self.run(move |connection| operations::queue_worker_tasks(connection, tasks))
+    }
+
+    fn worker_statuses(&self) -> StorageFuture<'_, Vec<crate::domain::WorkerStatus>> {
+        self.run(|connection| operations::worker_statuses(connection))
+    }
+
+    fn claim_worker_task(
+        &self,
+        request: WorkerTaskClaimRequest,
+    ) -> StorageFuture<'_, Option<crate::domain::WorkerTaskRecord>> {
+        self.run(move |connection| operations::claim_worker_task(connection, request))
+    }
+
+    fn complete_worker_task(
+        &self,
+        request: WorkerTaskCompletion,
+    ) -> StorageFuture<'_, crate::domain::WorkerTaskRecord> {
+        self.run(move |connection| operations::complete_worker_task(connection, request))
+    }
+
+    fn fail_worker_task(
+        &self,
+        request: WorkerTaskFailure,
+    ) -> StorageFuture<'_, crate::domain::WorkerTaskRecord> {
+        self.run(move |connection| operations::fail_worker_task(connection, request))
+    }
+
+    fn insert_proposal(
+        &self,
+        proposal: NewProposal,
+    ) -> StorageFuture<'_, crate::domain::ProposalRecord> {
+        self.run(move |connection| operations::insert_proposal(connection, proposal))
+    }
+
+    fn list_proposals(
+        &self,
+        request: ProposalListRequest,
+    ) -> StorageFuture<'_, Vec<crate::domain::ProposalRecord>> {
+        self.run(move |connection| operations::list_proposals(connection, request))
+    }
+
+    fn proposal_by_id(
+        &self,
+        proposal_id: String,
+    ) -> StorageFuture<'_, Option<crate::domain::ProposalRecord>> {
+        self.run(move |connection| operations::proposal_by_id(connection, &proposal_id))
+    }
+
+    fn proposal_conflicts(
+        &self,
+        proposal_id: String,
+    ) -> StorageFuture<'_, Vec<crate::domain::ProposalConflictRecord>> {
+        self.run(move |connection| operations::proposal_conflicts(connection, &proposal_id))
+    }
+
+    fn decide_proposal(
+        &self,
+        request: ProposalDecision,
+    ) -> StorageFuture<'_, crate::domain::ProposalRecord> {
+        self.run(move |connection| operations::decide_proposal(connection, request))
+    }
+
+    fn insert_audit_event(
+        &self,
+        event: NewAuditEvent,
+    ) -> StorageFuture<'_, crate::domain::AuditEventRecord> {
+        self.run(move |connection| operations::insert_audit_event(connection, event))
+    }
+
+    fn query_audit_events(
+        &self,
+        request: AuditQueryRequest,
+    ) -> StorageFuture<'_, Vec<crate::domain::AuditEventRecord>> {
+        self.run(move |connection| operations::query_audit_events(connection, request))
+    }
+
+    fn audit_event_count(&self) -> StorageFuture<'_, usize> {
+        self.run(|connection| operations::audit_event_count(connection))
+    }
+
+    fn service_operator_status(&self) -> StorageFuture<'_, crate::domain::ServiceOperatorStatus> {
+        self.run(|connection| operations::service_operator_status(connection))
+    }
+
+    fn update_service_operator(
+        &self,
+        request: ServiceOperatorUpdate,
+    ) -> StorageFuture<'_, crate::domain::ServiceOperatorStatus> {
+        self.run(move |connection| operations::update_service_operator(connection, request))
+    }
+}
+
+impl CodeGraphStore for SqliteGraphStore {
+    fn commit_code_graph_batch(
+        &self,
+        batch: CodeGraphBatch,
+    ) -> StorageFuture<'_, CodeGraphCommitReceipt> {
+        self.run(move |connection| code_graph::commit_batch(connection, batch))
+    }
+
+    fn search_code_symbols(
+        &self,
+        request: CodeSymbolSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeSymbolRecord>> {
+        self.run(move |connection| code_graph::search_symbols(connection, request))
+    }
+
+    fn search_code_references(
+        &self,
+        request: CodeReferenceSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeReferenceRecord>> {
+        self.run(move |connection| code_graph::search_references(connection, request))
+    }
+
+    fn search_code_chunks(
+        &self,
+        request: CodeChunkSearchRequest,
+    ) -> StorageFuture<'_, Vec<CodeChunkRecord>> {
+        self.run(move |connection| code_graph::search_chunks(connection, request))
+    }
+}
