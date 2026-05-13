@@ -244,22 +244,24 @@ pub struct RetrievalMetadata {
 
 ## 7. 测试场景
 
-后续实现必须覆盖:
+当前实现和测试覆盖:
 
-- 同一文件在两个 branch 中内容不同，查询 branch A 不返回 branch B 的符号或文本。
-- rebase 后同一 branch 名称解析到新 scope，默认搜索只返回 rebase 后 head 的结果。
-- 相同 tree hash 出现在多个 branch 时复用索引，但响应仍返回用户请求解析出的 branch 审计信息。
-- PR/rebase range 查询提升 changed files 和 affected symbols，同时结果标记具体快照来源。
-- PDF 同页包含文字、图片和图注时，三者都能追溯到同一 source scope。
-- 图片 OCR 失败时，原始图片 evidence 仍入库，文本检索正常返回降级信息。
-- 图注和 OCR 文本都命中同一图片时，organizer 合并为同一 evidence group，而不是重复展示。
+- Git branch fixture 覆盖同一路径在 branch A/B 内容不同；两个 branch 先后索引后，显式查询 branch A 不返回 branch B 的符号或文本。
+- branch force-move/rebase fixture 覆盖同一 branch 名称解析到新 commit/tree 后必须形成新 scope；新 head 未索引时查询失败，索引后默认只返回新 head。
+- 相同 tree hash fixture 覆盖多个 branch 指向同一 commit/tree 时复用同一 `scope_id`，同时响应 `requested_ref` 保留用户请求的 branch 审计信息。
+- `repo impact` fixture 覆盖 PR/rebase range 类 changeset 视图；changed files、deleted symbol names、callers 和 importers 会提升影响结果，命中项仍带 head snapshot 的 `scope_id`、commit 和 tree hash。
+- 多模态 application/storage fixture 覆盖同一文档 scope 下 text、image asset、OCR text 和 caption evidence 的提交、检索和 scope 过滤。
+- OCR 失败 diagnostic fixture 覆盖原始 image evidence 入库不阻塞，同 scope 文本检索继续可用。
+- OCR 与 caption 同时命中同一图片的 fixture 覆盖 organizer 按 parent evidence 合并，context pack 不重复展示同一图片。
 
 ## 8. 实施顺序
 
-1. 在 domain/API 中增加 `SourceScope`、`SourceScopeSelector`、`Modality` 和 scoped metadata 类型。
-2. 在 storage schema 中增加 source scope、evidence scope、index scope 和 modality 字段。
-3. Git adapter 先实现 branch/ref -> commit/tree -> scope 的解析，不直接按 branch 名称建索引。
-4. Retrieval service 强制 scope filter，并为无 scope 代码搜索返回 invalid argument 或解析当前工作树默认 scope。
-5. 文档摄取先支持 text、image asset、OCR text 和 caption evidence。
-6. 索引器按 `scope_id + modality` 刷新 BM25 和 embedding 记录。
-7. 增加 Git 分支/rebase fixture 和多模态文档 fixture。
+当前实施状态:
+
+1. `SourceScope` 已作为规范化 domain 类型落地；多模态 `EvidenceModality`、extractor metadata 和 scoped index cursor 已落地。结构化 `SourceScopeSelector` 保留为后续公开 API 兼容扩展。
+2. storage 已记录 evidence scope、code snapshot scope、index cursor scope 和 modality；代码仓库新增 `code_repository_scopes` 清单，scope id 由 `repository_id + tree_hash + path/language filters` 稳定生成。
+3. Git adapter 已按 branch/ref -> commit -> tree hash -> scope 的顺序索引；branch 名只作为请求和审计输入，不作为事实真源。
+4. 代码检索强制解析到已索引 scope；未索引的新 branch head 或 rebase head 返回 invalid argument，不回退到旧 branch 内容。
+5. 文档摄取已支持 `text_span`、`image_asset`、`ocr_text`、`caption`、`image_embedding`、`table` 和 `layout_region` metadata；真实 extractor 仍通过 worker/maintenance 边界提交。
+6. BM25、semantic 和 vector read model 已携带 scope、modality、parent evidence、model、dimension、source hash 和 graph version；index cursor 按 kind/scope/modality 跟踪 freshness。
+7. Git 分支/rebase fixture、多模态 parent grouping fixture 和 OCR failure fixture 已加入测试集。

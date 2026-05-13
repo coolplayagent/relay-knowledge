@@ -486,6 +486,7 @@ pub struct CodeRepositoryScopePreviewResponse {
 /// Code repository scope and index metadata attached to code responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryScopeMetadata {
+    pub scope_id: String,
     pub repository_id: String,
     pub alias: String,
     pub requested_ref: String,
@@ -505,6 +506,7 @@ impl CodeRepositoryScopeMetadata {
         requested_ref: impl Into<String>,
     ) -> Self {
         Self {
+            scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
             repository_id: status.repository_id.clone(),
             alias: status.alias.clone(),
             requested_ref: requested_ref.into(),
@@ -513,7 +515,11 @@ impl CodeRepositoryScopeMetadata {
             path_filters: merged_filters(&status.path_filters, &selector.path_filters),
             language_filters: merged_filters(&status.language_filters, &selector.language_filters),
             index_versions: vec![format!(
-                "code:{}",
+                "code:{}:{}",
+                status
+                    .last_indexed_scope_id
+                    .as_deref()
+                    .unwrap_or("unscoped"),
                 status.tree_hash.as_deref().unwrap_or("unindexed")
             )],
             stale: status.stale,

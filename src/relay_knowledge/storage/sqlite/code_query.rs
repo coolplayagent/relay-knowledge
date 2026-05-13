@@ -12,17 +12,13 @@ use crate::{
 
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
-use super::repository_status;
+use super::{repository_scope_status, repository_status};
 
 pub(super) fn search_code(
     connection: &mut Connection,
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let status = required_repository(
-        connection,
-        &request.repository.repository,
-        &request.repository.ref_selector,
-    )?;
+    let status = required_repository(connection, &request.repository)?;
     if request.code_query_kind == CodeQueryKind::Impact {
         return Err(StorageError::InvalidInput(
             "impact query kind requires repo impact with base/head refs".to_owned(),
@@ -81,7 +77,7 @@ fn search_symbols(
         SELECT symbol_snapshot_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
-        WHERE repository_id = ?
+        WHERE source_scope = ?
           AND ({candidate_condition})
         ORDER BY path ASC, line_start ASC
         ",
@@ -89,7 +85,7 @@ fn search_symbols(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(candidate_values_for(
-            &status.repository_id,
+            required_scope(status)?,
             candidate_values,
         )),
         |row| {
@@ -176,8 +172,8 @@ fn search_references(
                r.line_start, r.line_end
         FROM code_repository_references r
         INNER JOIN code_repository_files f
-            ON f.repository_id = r.repository_id AND f.path = r.path
-        WHERE r.repository_id = ?
+            ON f.source_scope = r.source_scope AND f.path = r.path
+        WHERE r.source_scope = ?
           AND ({candidate_condition})
         ORDER BY r.path ASC, r.line_start ASC
         ",
@@ -185,7 +181,7 @@ fn search_references(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(candidate_values_for(
-            &status.repository_id,
+            required_scope(status)?,
             candidate_values,
         )),
         |row| {
@@ -258,8 +254,8 @@ fn search_calls(
                c.line_start, c.line_end
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?
+            ON f.source_scope = c.source_scope AND f.path = c.path
+        WHERE c.source_scope = ?
           AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
         ",
@@ -267,7 +263,7 @@ fn search_calls(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(candidate_values_for(
-            &status.repository_id,
+            required_scope(status)?,
             candidate_values,
         )),
         |row| {
@@ -340,8 +336,8 @@ fn search_imports(
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
-            ON f.repository_id = i.repository_id AND f.path = i.path
-        WHERE i.repository_id = ?
+            ON f.source_scope = i.source_scope AND f.path = i.path
+        WHERE i.source_scope = ?
           AND ({candidate_condition})
         ORDER BY i.path ASC, i.line_start ASC
         ",
@@ -349,7 +345,7 @@ fn search_imports(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(candidate_values_for(
-            &status.repository_id,
+            required_scope(status)?,
             candidate_values,
         )),
         |row| {
@@ -410,8 +406,8 @@ fn search_chunks(
                f.degraded_reason
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
-            ON f.repository_id = c.repository_id AND f.path = c.path
-        WHERE c.repository_id = ?
+            ON f.source_scope = c.source_scope AND f.path = c.path
+        WHERE c.source_scope = ?
           AND ({candidate_condition})
         ORDER BY c.path ASC, c.line_start ASC
         ",
@@ -419,7 +415,7 @@ fn search_chunks(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(candidate_values_for(
-            &status.repository_id,
+            required_scope(status)?,
             candidate_values,
         )),
         |row| {
@@ -475,22 +471,42 @@ fn search_chunks(
 
 pub(super) fn required_repository(
     connection: &mut Connection,
-    repository: &str,
-    ref_selector: &str,
+    selector: &crate::domain::CodeRepositorySelector,
 ) -> Result<CodeRepositoryStatus, StorageError> {
-    let status = repository_status(connection, repository)?.ok_or_else(|| {
-        StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
+    let status = repository_status(connection, &selector.repository)?.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{}' is not registered",
+            selector.repository
+        ))
     })?;
-    let indexed_commit = status.last_indexed_commit.as_deref().ok_or_else(|| {
-        StorageError::InvalidInput(format!("code repository '{repository}' is not indexed"))
+    let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
+    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let scoped_status = repository_scope_status(
+        connection,
+        &selector.repository,
+        &selector.ref_selector,
+        &path_filters,
+        &language_filters,
+    )?
+    .ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{}' has no index for ref {} and requested filters",
+            selector.repository, selector.ref_selector
+        ))
     })?;
-    if indexed_commit != ref_selector {
-        return Err(StorageError::InvalidInput(format!(
-            "code repository '{repository}' is indexed at {indexed_commit}, not requested ref {ref_selector}"
-        )));
+
+    Ok(scoped_status)
+}
+
+fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in left.iter().chain(right.iter()) {
+        if !merged.contains(value) {
+            merged.push(value.clone());
+        }
     }
 
-    Ok(status)
+    merged
 }
 
 fn selected_row(
@@ -558,7 +574,7 @@ pub(super) struct HitParts {
 pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetrievalHit {
     CodeRetrievalHit {
         repository_id: status.repository_id.clone(),
-        scope_id: status.alias.clone(),
+        scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
         resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
         tree_hash: status.tree_hash.clone().unwrap_or_default(),
         path: parts.path,
@@ -569,7 +585,11 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
         file_id: parts.file_id,
         retrieval_layers: parts.retrieval_layers,
         index_versions: vec![format!(
-            "code:{}",
+            "code:{}:{}",
+            status
+                .last_indexed_scope_id
+                .as_deref()
+                .unwrap_or("unscoped"),
             status.tree_hash.as_deref().unwrap_or("unindexed")
         )],
         stale: status.stale,
@@ -579,6 +599,15 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
         score: parts.score,
         excerpt: parts.excerpt,
     }
+}
+
+pub(super) fn required_scope(status: &CodeRepositoryStatus) -> Result<&str, StorageError> {
+    status.last_indexed_scope_id.as_deref().ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{}' does not have an indexed source scope",
+            status.alias
+        ))
+    })
 }
 
 pub(super) fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {

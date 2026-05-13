@@ -527,10 +527,10 @@ relay-knowledge repo status <alias> --format json
 - `repo index`: 对 clean Git tree 做 full build，写入 code files、symbols、references、imports、calls 和 chunks。
 - `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 selected deleted/renamed old path，并记录 rename tombstone。copy source path 不能作为 impact changed seed。worktree overlay 必须删除 selected rename source path，synthetic tree hash 只由 selector 范围内的 changed path/content 计算；clean 或 out-of-scope-only overlay 必须回到 clean snapshot，不得重标记旧数据。
 - `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees` 和 `imports` query kind。`impact` 不是普通查询模式，必须通过 `repo impact` 执行。
-- `repo query`: 请求 ref 必须解析到当前 indexed commit；显式 `worktree` ref 才能读取 worktree overlay。查询旧 commit、branch 或 tag 前必须先对该 ref 建索引，避免返回错误 revision 的 code context。
+- `repo query`: 请求 ref 先解析为 commit，再按 `repository_id + tree_hash + path/language filters` 查找已索引 scope；显式 `worktree` ref 才能读取 worktree overlay。查询未索引的新 commit、branch、tag 或 rebase head 会失败，避免返回错误 revision 的 code context。已经索引过的旧 commit 可显式查询，结果不会被后续 branch 索引覆盖。
 - `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
-- `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果。
-- `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断已注册 tree-sitter language id，再执行 language filters；`head_ref` 必须解析到当前 indexed snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
+- `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果；结果绑定到已索引 head snapshot scope，changeset 本身不是事实真源。
+- `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断已注册 tree-sitter language id，再执行 language filters；`head_ref` 必须解析到一个已索引 snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
 - `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
