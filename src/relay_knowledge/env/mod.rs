@@ -654,6 +654,11 @@ mod tests {
                 (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
                 (RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, "clip-vit-b32"),
                 (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
+                (RELAY_OTEL_ENDPOINT, "http://collector.internal:4318"),
+                (RELAY_OTEL_TRACES, "true"),
+                (RELAY_OTEL_METRICS, "false"),
+                (RELAY_OTEL_EXPORT_TIMEOUT_MS, "1500"),
+                (RELAY_OTEL_SERVICE_ENVIRONMENT, "test"),
             ],
         )
         .expect("environment should parse");
@@ -701,6 +706,17 @@ mod tests {
             Some("clip-vit-b32".to_owned())
         );
         assert_eq!(config.retrieval.embedding_dimension, Some(1536));
+        assert_eq!(
+            config.telemetry.otel_endpoint,
+            Some("http://collector.internal:4318".to_owned())
+        );
+        assert_eq!(config.telemetry.otel_traces, Some(true));
+        assert_eq!(config.telemetry.otel_metrics, Some(false));
+        assert_eq!(config.telemetry.export_timeout_ms, Some(1500));
+        assert_eq!(
+            config.telemetry.service_environment,
+            Some("test".to_owned())
+        );
     }
 
     #[test]
@@ -739,6 +755,33 @@ mod tests {
 
         assert_eq!(error.variable, RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS);
         assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+    }
+
+    #[test]
+    fn rejects_zero_otel_export_timeout() {
+        let error = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [(RELAY_OTEL_EXPORT_TIMEOUT_MS, "0")],
+        )
+        .expect_err("zero otel export timeout should fail");
+
+        assert_eq!(error.variable, RELAY_OTEL_EXPORT_TIMEOUT_MS);
+        assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+    }
+
+    #[test]
+    fn rejects_invalid_otel_boolean_values() {
+        let error =
+            EnvironmentConfig::from_pairs(PlatformKind::Unix, [(RELAY_OTEL_TRACES, "yes?")])
+                .expect_err("invalid otel boolean should fail");
+
+        assert_eq!(error.variable, RELAY_OTEL_TRACES);
+        assert_eq!(
+            error.kind,
+            EnvErrorKind::InvalidBoolean {
+                value: "yes?".to_owned()
+            }
+        );
     }
 
     #[test]
