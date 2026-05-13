@@ -97,6 +97,7 @@ CodeSnapshotScope {
 - branch、tag、HEAD、PR ref 和 worktree selector 必须先解析为 commit/tree，再构造 scope。用户输入的 ref 不能以 `-` 开头，必须在调用 Git 前拒绝，避免被解释为 Git 选项。
 - 同一 tree hash 可复用索引分区，即使来自不同 branch 名。
 - rebase 后的新 head 必须产生新 scope；旧 scope 只能用于历史审计或显式 diff。
+- 请求 path/language filters 与注册 scope 合并后，必须先规范化等价 path filter 拼写，再精确匹配一个已索引 snapshot scope。查询或影响分析不得回退到同 commit 的其他 filter scope，也不得用宽 scope 伪装窄 scope；需要新 filter 组合时必须先索引该 scope。
 - dirty worktree 必须显式建模为 `git_changeset` 或 `worktree_overlay`，不能混入 clean snapshot。`worktree_overlay` 必须有显式 overlay identity；查询 clean commit ref 时不能返回 overlay 内容。
 
 ### 3.3 Changeset scope
@@ -535,7 +536,7 @@ relay-knowledge repo status <alias> --format json
 - `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 selected deleted/renamed old path，并记录 rename tombstone。copy source path 不能作为 impact changed seed。worktree overlay 必须删除 selected rename source path，synthetic tree hash 只由 selector 范围内的 changed path/content 计算；clean 或 out-of-scope-only overlay 必须回到 clean snapshot，不得重标记旧数据。
 - `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees` 和 `imports` query kind。`impact` 不是普通查询模式，必须通过 `repo impact` 执行。
 - `repo query`: 请求 ref 先解析为 commit，再按 `repository_id + tree_hash + path/language filters` 查找已索引 scope；显式 `worktree` ref 才能读取 worktree overlay。查询未索引的新 commit、branch、tag 或 rebase head 会失败，避免返回错误 revision 的 code context。已经索引过的旧 commit 可显式查询，结果不会被后续 branch 索引覆盖。
-- `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
+- `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters；合并后的 filters 必须在规范化 `src`、`src/`、`./src` 等等价 path 写法后精确命中已索引 scope，未命中时返回错误而不是回退到同 commit 的其他 scope。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
 - `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果；结果绑定到已索引 head snapshot scope，changeset 本身不是事实真源。
 - `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断已注册 tree-sitter language id，再执行 language filters；`head_ref` 必须解析到一个已索引 snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
 - `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。

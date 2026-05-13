@@ -12,7 +12,7 @@ use crate::{
 
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
-use super::{repository_scope_status, repository_status};
+use super::code_status::{repository_scope_status, repository_status};
 
 pub(super) fn search_code(
     connection: &mut Connection,

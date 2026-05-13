@@ -422,6 +422,22 @@ fn migrate_legacy_code_scope_schema(connection: &Connection) -> Result<(), Stora
             )?;
         }
     }
+    drop_renamed_legacy_lookup_indexes(connection)?;
+
+    Ok(())
+}
+
+fn drop_renamed_legacy_lookup_indexes(connection: &Connection) -> Result<(), StorageError> {
+    for index in [
+        "code_repository_symbols_lookup",
+        "code_repository_references_lookup",
+        "code_repository_calls_lookup",
+        "code_repository_imports_lookup",
+        "code_repository_chunks_lookup",
+        "code_repository_scopes_lookup",
+    ] {
+        connection.execute(&format!("DROP INDEX IF EXISTS {index}"), [])?;
+    }
 
     Ok(())
 }

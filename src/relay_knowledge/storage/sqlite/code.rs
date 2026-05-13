@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 #[path = "code_query.rs"]
 mod code_query;
@@ -8,6 +8,9 @@ mod code_impact;
 
 #[path = "code_schema.rs"]
 mod code_schema;
+
+#[path = "code_status.rs"]
+mod code_status;
 
 #[cfg(test)]
 #[path = "code_tests.rs"]
@@ -28,6 +31,7 @@ use crate::{
 };
 
 use super::SqliteGraphStore;
+use code_status::{canonical_filter_values, canonical_path_filters, parse_json_list};
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     code_schema::initialize_code_schema(connection)
@@ -38,14 +42,32 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         registration: CodeRepositoryRegistration,
     ) -> StorageFuture<'_, CodeRepositoryStatus> {
-        self.run(move |connection| upsert_repository(connection, registration))
+        self.run(move |connection| code_status::upsert_repository(connection, registration))
     }
 
     fn code_repository_status(
         &self,
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        self.run(move |connection| repository_status(connection, &repository))
+        self.run(move |connection| code_status::repository_status(connection, &repository))
+    }
+
+    fn code_repository_scope_status(
+        &self,
+        repository: String,
+        resolved_commit_sha: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        self.run(move |connection| {
+            code_status::repository_scope_status(
+                connection,
+                &repository,
+                &resolved_commit_sha,
+                &path_filters,
+                &language_filters,
+            )
+        })
     }
 
     fn code_file_fingerprints(
@@ -87,178 +109,6 @@ impl CodeRepositoryStore for SqliteGraphStore {
     ) -> StorageFuture<'_, CodeRepositoryReport> {
         self.run(move |connection| repository_report(connection, &repository))
     }
-}
-
-fn upsert_repository(
-    connection: &mut Connection,
-    registration: CodeRepositoryRegistration,
-) -> Result<CodeRepositoryStatus, StorageError> {
-    connection.execute(
-        "
-        INSERT INTO code_repositories (
-            repository_id, alias, root_path, path_filters_json, language_filters_json,
-            state, indexed_file_count, symbol_count, reference_count, chunk_count,
-            stale, degraded_reason
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, 'registered', 0, 0, 0, 0, 1, NULL)
-        ON CONFLICT(repository_id) DO UPDATE SET
-            alias = excluded.alias,
-            root_path = excluded.root_path,
-            path_filters_json = excluded.path_filters_json,
-            language_filters_json = excluded.language_filters_json,
-            stale = 1
-        ",
-        params![
-            registration.repository_id,
-            registration.alias,
-            registration.root_path,
-            serde_json::to_string(&registration.path_filters)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
-            serde_json::to_string(&registration.language_filters)
-                .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
-        ],
-    )?;
-
-    repository_status(connection, &registration.repository_id)?.ok_or_else(|| {
-        StorageError::InvalidInput("registered code repository was not persisted".to_owned())
-    })
-}
-
-pub(super) fn repository_status(
-    connection: &mut Connection,
-    repository: &str,
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    if let Some(status) =
-        repository_status_by_column(connection, repository, RepositoryLookupColumn::RepositoryId)?
-    {
-        return Ok(Some(status));
-    }
-    repository_status_by_column(connection, repository, RepositoryLookupColumn::Alias)
-}
-
-pub(super) fn repository_scope_status(
-    connection: &mut Connection,
-    repository: &str,
-    resolved_commit_sha: &str,
-    path_filters: &[String],
-    language_filters: &[String],
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    let base = repository_status(connection, repository)?;
-    let Some(base) = base else {
-        return Ok(None);
-    };
-    let path_filters_json = serde_json::to_string(path_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(language_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    connection
-        .query_row(
-            "
-            SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
-                   reference_count, chunk_count, stale, degraded_reason
-            FROM code_repository_scopes
-            WHERE repository_id = ?1
-              AND resolved_commit_sha = ?2
-            ORDER BY
-              CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
-              source_scope ASC
-            LIMIT 1
-            ",
-            params![
-                base.repository_id,
-                resolved_commit_sha,
-                path_filters_json,
-                language_filters_json
-            ],
-            |row| {
-                Ok(CodeRepositoryStatus {
-                    repository_id: base.repository_id.clone(),
-                    alias: base.alias.clone(),
-                    root_path: base.root_path.clone(),
-                    path_filters: path_filters.to_vec(),
-                    language_filters: language_filters.to_vec(),
-                    last_indexed_scope_id: Some(row.get(0)?),
-                    last_indexed_commit: Some(resolved_commit_sha.to_owned()),
-                    tree_hash: Some(row.get(1)?),
-                    state: "fresh".to_owned(),
-                    indexed_file_count: row.get(2)?,
-                    symbol_count: row.get(3)?,
-                    reference_count: row.get(4)?,
-                    chunk_count: row.get(5)?,
-                    stale: row.get::<_, i64>(6)? != 0,
-                    degraded_reason: row.get(7)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(StorageError::from)
-}
-
-fn repository_status_by_column(
-    connection: &mut Connection,
-    repository: &str,
-    column: RepositoryLookupColumn,
-) -> Result<Option<CodeRepositoryStatus>, StorageError> {
-    connection
-        .query_row(column.query(), params![repository], |row| {
-            Ok(CodeRepositoryStatus {
-                repository_id: row.get(0)?,
-                alias: row.get(1)?,
-                root_path: row.get(2)?,
-                path_filters: parse_json_list(row.get::<_, String>(3)?)?,
-                language_filters: parse_json_list(row.get::<_, String>(4)?)?,
-                last_indexed_scope_id: row.get(5)?,
-                last_indexed_commit: row.get(6)?,
-                tree_hash: row.get(7)?,
-                state: row.get(8)?,
-                indexed_file_count: row.get(9)?,
-                symbol_count: row.get(10)?,
-                reference_count: row.get(11)?,
-                chunk_count: row.get(12)?,
-                stale: row.get::<_, i64>(13)? != 0,
-                degraded_reason: row.get(14)?,
-            })
-        })
-        .optional()
-        .map_err(StorageError::from)
-}
-
-enum RepositoryLookupColumn {
-    RepositoryId,
-    Alias,
-}
-
-impl RepositoryLookupColumn {
-    fn query(&self) -> &'static str {
-        match self {
-            Self::RepositoryId => {
-                "
-                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_scope_id, last_indexed_commit, tree_hash,
-                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                       stale, degraded_reason
-                FROM code_repositories
-                WHERE repository_id = ?1
-                "
-            }
-            Self::Alias => {
-                "
-                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_scope_id, last_indexed_commit, tree_hash,
-                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                       stale, degraded_reason
-                FROM code_repositories
-                WHERE alias = ?1
-                "
-            }
-        }
-    }
-}
-
-fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {
-    serde_json::from_str(&value).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
-    })
 }
 
 fn file_fingerprints(
@@ -393,9 +243,10 @@ fn apply_snapshot(
     update_repository_after_snapshot(&transaction, &snapshot)?;
     transaction.commit()?;
 
-    let status = repository_status(connection, &snapshot.repository_id)?.ok_or_else(|| {
-        StorageError::InvalidInput("code repository status is missing after index".to_owned())
-    })?;
+    let status =
+        code_status::repository_status(connection, &snapshot.repository_id)?.ok_or_else(|| {
+            StorageError::InvalidInput("code repository status is missing after index".to_owned())
+        })?;
 
     Ok(CodeIndexSummary {
         repository_id: snapshot.repository_id,
@@ -437,17 +288,57 @@ fn clone_active_scope_for_incremental(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
-    let previous_scope = transaction
-        .query_row(
-            "SELECT last_indexed_scope_id FROM code_repositories WHERE repository_id = ?1",
-            params![snapshot.repository_id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten();
-    let Some(previous_scope) = previous_scope else {
-        return Ok(());
-    };
+    let path_filters_json = serde_json::to_string(&snapshot.path_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let language_filters_json = serde_json::to_string(&snapshot.language_filters)
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+    let requested_path_filters = canonical_path_filters(&snapshot.path_filters);
+    let requested_language_filters = canonical_filter_values(&snapshot.language_filters);
+    let mut statement = transaction.prepare(
+        "
+        SELECT source_scope, path_filters_json, language_filters_json
+        FROM code_repository_scopes
+        WHERE repository_id = ?1
+          AND resolved_commit_sha = (
+              SELECT last_indexed_commit
+              FROM code_repositories
+              WHERE repository_id = ?1
+          )
+        ORDER BY
+          CASE WHEN path_filters_json = ?2 AND language_filters_json = ?3 THEN 0 ELSE 1 END,
+          rowid DESC
+        ",
+    )?;
+    let rows = statement.query_map(
+        params![
+            snapshot.repository_id,
+            path_filters_json,
+            language_filters_json
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                parse_json_list(row.get::<_, String>(1)?)?,
+                parse_json_list(row.get::<_, String>(2)?)?,
+            ))
+        },
+    )?;
+    let mut previous_scope = None;
+    for row in rows {
+        let (source_scope, stored_path_filters, stored_language_filters) = row?;
+        if canonical_path_filters(&stored_path_filters) == requested_path_filters
+            && canonical_filter_values(&stored_language_filters) == requested_language_filters
+        {
+            previous_scope = Some(source_scope);
+            break;
+        }
+    }
+    let previous_scope = previous_scope.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository '{}' has no matching indexed scope for incremental filters at the current base commit",
+            snapshot.repository_id
+        ))
+    })?;
     if previous_scope == snapshot.source_scope {
         return Ok(());
     }
@@ -538,7 +429,7 @@ fn repository_report(
     connection: &mut Connection,
     repository: &str,
 ) -> Result<CodeRepositoryReport, StorageError> {
-    let status = repository_status(connection, repository)?.ok_or_else(|| {
+    let status = code_status::repository_status(connection, repository)?.ok_or_else(|| {
         StorageError::InvalidInput(format!("code repository '{repository}' is not registered"))
     })?;
     let scope = status.last_indexed_scope_id.as_deref().unwrap_or_default();
