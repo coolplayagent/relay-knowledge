@@ -22,7 +22,7 @@
 
 当前实现已经完成了几条重要边界:
 
-- `api` 层定义了 CLI、Web、HTTP 和 agent adapter 可共享的 request/response 类型，包括 ingest、hybrid retrieval、context pack、graph inspection、index refresh、health、service status、agent identity 和 code repository API。
+- `api` 层定义了 CLI、Web、HTTP 和 agent adapter 可共享的 request/response 类型，包括 ingest、hybrid retrieval、context pack、graph inspection、index refresh、health、service status、agent identity 和 code repository API；Web adapter 已通过同源 `/api/web/operations/execute` 将操作 composer 接到 application service。
 - `application` 层通过 `RelayKnowledgeService` 收口业务入口，CLI 和未来 adapter 不需要直接访问 SQLite 或 tree-sitter。
 - `storage` 层通过 trait 隔离图事实、mutation log、index metadata 和 code graph 查询，SQLite 实现把阻塞数据库操作放到 `spawn_blocking` worker 中。
 - `domain` 层已有 `GraphVersion`、`SourceScope`、`FreshnessPolicy`、`IndexStatus`、`GraphMutationBatch`、`EvidenceRecord` 和代码图类型，适合继续扩展成更完整的事实模型。
@@ -172,6 +172,14 @@ guard、retry/dead-letter、startup reconciler、queue-cap 错误、dead-letter 
 audit log、adapter QoS admission 和 `service run` startup index reconciler。剩余项主要是
 平台 service install/upgrade/uninstall、跨进程 worker orchestration、watchdog 集成、
 MCP resources/prompts 和持久审计 sink。
+
+当前 Web 工作区进展已刷新: diagnostics 继续读取 `/api/project/status` 和
+`/api/health`；Operations 面板现在可以通过 `/api/web/operations/execute`
+执行 retrieve、ingest、graph inspect、index refresh、code repository workflow 和
+service status/run snapshot，并在成功后刷新诊断状态。Rust Web adapter 只做 HTTP
+JSON 解析、错误映射和 QoS 之外的最小路由分发，业务行为仍由 `RelayKnowledgeService`
+统一提供。`service run` 会挂载 Web endpoints；启用 MCP Streamable HTTP 时，MCP 与
+Web routes 合并到同一 `net::http` listener 和 QoS budget。
 
 ### Phase 4: 高级 GraphRAG 与多模态
 

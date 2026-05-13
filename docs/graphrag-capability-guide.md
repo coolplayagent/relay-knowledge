@@ -110,16 +110,19 @@ Web workspace 从同源服务读取:
 
 - `/api/project/status`
 - `/api/health`
+- `/api/web/operations/execute`
 
 当前 Web 页面展示:
 
 - Status: graph version、health、index lag、mutation count 和图谱计数。
 - GraphRAG readiness: evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、runtime budgets、refresh recovery 和 stale reasons。
-- Operations: retrieve、ingest、graph、code、index 和 service 操作的命令与 payload 预览。
+- Operations: retrieve、ingest、graph、code、index 和 service 操作的命令与 payload 预览，以及同源执行结果。
 - Indexes: BM25、semantic、vector 的 index version、indexed graph version、state 和 lag。
 - Runtime: HTTP bind、数据目录、状态目录、缓存目录、日志目录和 QoS budgets。
 
-Web operation composer 当前用于生成和暂存 typed command/request preview。执行型 Web endpoint 仍待 Rust HTTP API adapter 提供。
+Web operation composer 可以生成、暂存并执行 typed command/request preview。执行时页面把当前 snapshot 发送到 `/api/web/operations/execute`，Rust Web adapter 复用 application service 完成实际 retrieve、ingest、graph inspect、index refresh、code repository workflow 或 service status/run snapshot，并把 result JSON 回显到页面。
+
+`relay-knowledge service run` 会挂载 Web endpoints；如果加上 `--mcp streamable-http`，MCP 和 Web routes 会共用配置的 HTTP listener 与 QoS budget。
 
 ## 4. MCP 工作流
 
@@ -204,4 +207,4 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG readiness、operation composer、index table、runtime panel 和移动端布局。
+浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG readiness、operation composer、同源执行结果、index table、runtime panel 和移动端布局。

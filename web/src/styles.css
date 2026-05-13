@@ -206,6 +206,7 @@ a {
 
 .plus-icon::before,
 .plus-icon::after,
+.run-icon::before,
 .clear-icon::before,
 .clear-icon::after {
   position: absolute;
@@ -225,6 +226,17 @@ a {
   left: 7px;
   width: 2px;
   height: 12px;
+}
+
+.run-icon::before {
+  top: 3px;
+  left: 4px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+  background: transparent;
 }
 
 .clear-icon::before,
@@ -480,6 +492,27 @@ textarea:focus {
   padding: 14px;
 }
 
+.operation-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.result-heading {
+  color: var(--text);
+  font-weight: 680;
+}
+
+.operation-result[data-state="running"] .muted-line {
+  color: var(--amber);
+}
+
+.operation-result[data-state="success"] .result-heading {
+  color: var(--green);
+}
+
 .panel-title {
   margin-bottom: 10px;
   color: var(--text);
@@ -569,6 +602,11 @@ time {
 
 .error-message {
   color: var(--red);
+}
+
+.warning-message {
+  color: var(--amber);
+  font-size: 13px;
 }
 
 table {

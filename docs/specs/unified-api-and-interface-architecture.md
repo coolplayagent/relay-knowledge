@@ -165,11 +165,15 @@ Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/heal
 伪造健康状态、图版本、运行时路径或索引元数据。当前 Web 页面从这两个 contract 派生
 Status、GraphRAG readiness、Indexes、Runtime 和操作工作台状态；GraphRAG readiness 只
 展示 evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、
-refresh recovery 和 runtime budgets 的诊断投影，不在前端执行索引、检索或图谱变更。当前操作工作台可以为
-检索、摄取、图检查、代码仓库、索引刷新和服务运行生成 typed request / CLI command
-preview，并将操作加入本地 staged queue；在 Rust HTTP adapter 暴露可执行 Web endpoint
-前，不得把这些 preview 渲染成已执行的后端结果。浏览器测试只验证交互层能渲染统一
-contract 和本地操作编排状态，不把业务逻辑放入前端。
+refresh recovery 和 runtime budgets 的诊断投影。操作工作台可以为检索、摄取、图检查、
+代码仓库、索引刷新和服务运行生成 typed request / CLI command preview，并将操作加入
+本地 staged queue；执行操作时必须调用同源 `/api/web/operations/execute`，由 Rust Web
+HTTP adapter 解析 snapshot、调用 application service、返回 result JSON。`service run --web`
+必须挂载 Web endpoints；同时启用 MCP Streamable HTTP 时，MCP routes 和 Web routes 必须共用
+同一 `net::http` listener 和 QoS budget。Web execute route 必须使用配置的 HTTP body
+budget，非 loopback bind 必须遵守 remote-client access policy，前端不得对长运行操作套用
+短诊断请求超时。浏览器测试验证
+统一 contract、同源执行结果和本地操作编排状态，不把业务逻辑放入前端。
 
 推荐目录:
 

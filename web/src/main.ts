@@ -4,7 +4,12 @@ import type {
   ProjectStatusResponse,
   ServiceStatusResponse
 } from "./api/contracts";
-import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.js";
+import {
+  executeWebOperation,
+  loadHealth,
+  loadProjectStatus,
+  loadServiceStatus
+} from "./api/client.js";
 import { providersSection } from "./providers.js";
 import {
   INDEX_KINDS,
@@ -34,6 +39,12 @@ type Diagnostics = {
 type Tone = "good" | "warn" | "bad";
 
 let currentDiagnostics: Diagnostics | null = null;
+let activeOperationRunId = 0;
+let operationRun:
+  | { state: "idle" }
+  | { state: "running"; snapshotName: string }
+  | { state: "success"; snapshotName: string; result: unknown; diagnosticsError?: string }
+  | { state: "error"; snapshotName: string; message: string } = { state: "idle" };
 
 async function renderApp() {
   const root = document.getElementById("root");
@@ -676,7 +687,8 @@ function operationPreview(status: ProjectStatusResponse, health: HealthResponse)
     textElement("div", "panel-title", snapshot.name),
     preBlock("Command", snapshot.command, "command-preview"),
     preBlock("Request", JSON.stringify(snapshot.payload, null, 2), "payload-preview"),
-    previewActions(status, health)
+    previewActions(status, health),
+    operationResultPanel()
   );
 
   return preview;
@@ -684,9 +696,23 @@ function operationPreview(status: ProjectStatusResponse, health: HealthResponse)
 
 function previewActions(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
   const actions = element("div", "preview-actions");
+  const snapshot = currentOperationSnapshot(status, health);
+  const runnable = isExecutableWebOperation(snapshot.payload.operation);
+  const run = document.createElement("button");
+  run.type = "button";
+  run.className = "button primary";
+  run.dataset.testid = "run-operation";
+  run.disabled = operationRun.state === "running" || !runnable;
+  run.append(icon("run-icon"), document.createTextNode("Run"));
+  run.addEventListener("click", () => {
+    if (runnable) {
+      void runCurrentOperation(status, health);
+    }
+  });
+
   const stage = document.createElement("button");
   stage.type = "button";
-  stage.className = "button primary";
+  stage.className = "button";
   stage.dataset.testid = "stage-operation";
   stage.append(icon("plus-icon"), document.createTextNode("Stage"));
   stage.addEventListener("click", () => {
@@ -700,11 +726,104 @@ function previewActions(status: ProjectStatusResponse, health: HealthResponse): 
   clear.append(icon("clear-icon"), document.createTextNode("Clear"));
   clear.addEventListener("click", () => {
     appState.staged = [];
+    operationRun = { state: "idle" };
     rerenderFromState();
   });
-  actions.append(stage, clear);
+  actions.append(run, stage, clear);
 
   return actions;
+}
+
+async function runCurrentOperation(status: ProjectStatusResponse, health: HealthResponse) {
+  const runId = activeOperationRunId + 1;
+  activeOperationRunId = runId;
+  const snapshot = currentOperationSnapshot(status, health);
+  operationRun = { state: "running", snapshotName: snapshot.name };
+  rerenderFromState();
+
+  try {
+    const response = await executeWebOperation(snapshot);
+    if (runId !== activeOperationRunId) {
+      return;
+    }
+    operationRun = { state: "success", snapshotName: snapshot.name, result: response };
+    rerenderFromState();
+    await refreshDiagnosticsAfterOperation(response, snapshot.name, runId);
+  } catch (error) {
+    if (runId !== activeOperationRunId) {
+      return;
+    }
+    operationRun = {
+      state: "error",
+      snapshotName: snapshot.name,
+      message: errorMessage(error)
+    };
+  }
+  rerenderFromState();
+}
+
+async function refreshDiagnosticsAfterOperation(result: unknown, snapshotName: string, runId: number) {
+  try {
+    const [nextStatus, nextHealth, nextService] = await Promise.all([
+      loadProjectStatus(),
+      loadHealth(),
+      loadServiceStatus().catch(() => null)
+    ]);
+    if (runId !== activeOperationRunId) {
+      return;
+    }
+    currentDiagnostics = { status: nextStatus, health: nextHealth, service: nextService };
+  } catch (error) {
+    if (runId !== activeOperationRunId) {
+      return;
+    }
+    operationRun = {
+      state: "success",
+      snapshotName,
+      result,
+      diagnosticsError: errorMessage(error)
+    };
+  }
+}
+
+function operationResultPanel(): HTMLElement {
+  const panel = element("div", "operation-result");
+  panel.dataset.state = operationRun.state;
+  if (operationRun.state === "idle") {
+    panel.append(textElement("div", "muted-line", "No operation has run in this session."));
+  } else if (operationRun.state === "running") {
+    panel.append(
+      textElement("div", "result-heading", operationRun.snapshotName),
+      textElement("div", "muted-line", "Running")
+    );
+  } else if (operationRun.state === "success") {
+    panel.append(
+      textElement("div", "result-heading", operationRun.snapshotName),
+      preBlock("Result", JSON.stringify(operationRun.result, null, 2), "result-preview")
+    );
+    if (operationRun.diagnosticsError) {
+      panel.append(textElement("div", "warning-message", operationRun.diagnosticsError));
+    }
+  } else {
+    panel.append(
+      textElement("div", "result-heading", operationRun.snapshotName),
+      textElement("div", "error-message", operationRun.message)
+    );
+  }
+
+  return panel;
+}
+
+function isExecutableWebOperation(operation: unknown): boolean {
+  return (
+    operation === "retrieve.context" ||
+    operation === "graph.ingest" ||
+    operation === "graph.inspect" ||
+    operation === "index.refresh" ||
+    operation === "service.doctor" ||
+    operation === "service.run.streamable_http" ||
+    (typeof operation === "string" && operation.startsWith("code.repo."))
+  );
 }
 
 function stagedOperations(): HTMLElement {

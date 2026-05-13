@@ -1,8 +1,9 @@
-use std::net::IpAddr;
-
 use axum::http::{HeaderMap, StatusCode, header};
 
-use crate::{api::AgentAccessPolicy, net::http::HttpConfig};
+use crate::{
+    api::AgentAccessPolicy,
+    net::http::{HttpConfig, remote_clients_allowed},
+};
 
 use super::{MCP_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION_HEADER, McpServeError, McpServer};
 
@@ -45,7 +46,7 @@ pub(super) fn ensure_remote_bind_allowed(
     config: &HttpConfig,
     policy: &AgentAccessPolicy,
 ) -> Result<(), McpServeError> {
-    if policy.allow_remote_clients || is_local_bind(&config.bind_address.to_string()) {
+    if remote_clients_allowed(config, policy.allow_remote_clients) {
         Ok(())
     } else {
         Err(McpServeError::RemoteBindDisabled)
@@ -154,10 +155,6 @@ fn validate_origin(server: &McpServer, headers: &HeaderMap) -> Result<(), Status
     Err(StatusCode::FORBIDDEN)
 }
 
-fn is_local_bind(bind: &str) -> bool {
-    is_loopback_host(authority_host(bind))
-}
-
 fn is_loopback_origin(origin: &str) -> bool {
     let authority = origin
         .strip_prefix("http://")
@@ -188,6 +185,6 @@ fn authority_host(authority: &str) -> &str {
 fn is_loopback_host(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
         || host
-            .parse::<IpAddr>()
+            .parse::<std::net::IpAddr>()
             .is_ok_and(|address| address.is_loopback())
 }
