@@ -34,7 +34,7 @@ pub(super) async fn record_mcp_qos_rejection(
         error_kind: Some(error_kind.to_owned()),
     };
     server.audit.record(event.clone());
-    persist_agent_audit(server, &event).await;
+    persist_agent_audit(server, &event, 0).await;
 }
 
 pub(super) async fn record_mcp_tool_audit(
@@ -84,10 +84,10 @@ pub(super) async fn record_mcp_tool_audit(
     if event.status == AgentAuditStatus::Cancelled {
         server.metrics.record_cancelled("mcp");
     }
-    persist_agent_audit(server, &event).await;
+    persist_agent_audit(server, &event, audit_graph_version(structured)).await;
 }
 
-async fn persist_agent_audit(server: &McpServer, event: &AgentAuditEvent) {
+async fn persist_agent_audit(server: &McpServer, event: &AgentAuditEvent, graph_version: u64) {
     let detail_json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_owned());
     let status = match event.status {
         AgentAuditStatus::Completed => AuditStatus::Completed,
@@ -104,16 +104,19 @@ async fn persist_agent_audit(server: &McpServer, event: &AgentAuditEvent) {
             status,
             actor: event.runtime_identity.actor_id.clone(),
             source_scope: event.source_scope.clone(),
-            graph_version: audit_graph_version(event),
+            graph_version,
             detail_json,
             message: event.error_kind.clone(),
         })
         .await;
 }
 
-fn audit_graph_version(event: &AgentAuditEvent) -> u64 {
-    let _ = event;
-    0
+fn audit_graph_version(structured: &Value) -> u64 {
+    structured["metadata"]["graph_version"]
+        .as_u64()
+        .or_else(|| structured["graph_version"].as_u64())
+        .or_else(|| structured["graph"]["graph_version"].as_u64())
+        .unwrap_or(0)
 }
 
 pub(super) struct McpMethodAudit<'a> {
@@ -159,4 +162,25 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
     }
 
     structured["results"].as_array().map(Vec::len)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::audit_graph_version;
+
+    #[test]
+    fn audit_graph_version_reads_common_response_shapes() {
+        assert_eq!(
+            audit_graph_version(&json!({"metadata": {"graph_version": 7}})),
+            7
+        );
+        assert_eq!(audit_graph_version(&json!({"graph_version": 8})), 8);
+        assert_eq!(
+            audit_graph_version(&json!({"graph": {"graph_version": 9}})),
+            9
+        );
+        assert_eq!(audit_graph_version(&json!({"error_kind": "timeout"})), 0);
+    }
 }

@@ -353,8 +353,10 @@ impl Error for ObservabilityError {}
 
 fn signal_endpoint(base: &str, path: &str) -> String {
     let trimmed = base.trim_end_matches('/');
-    if trimmed.ends_with("/v1/traces") || trimmed.ends_with("/v1/metrics") {
-        trimmed.to_owned()
+    if let Some(prefix) = trimmed.strip_suffix(OTLP_TRACE_PATH) {
+        format!("{prefix}{path}")
+    } else if let Some(prefix) = trimmed.strip_suffix(OTLP_METRIC_PATH) {
+        format!("{prefix}{path}")
     } else {
         format!("{trimmed}{path}")
     }
@@ -403,12 +405,24 @@ mod tests {
     #[test]
     fn signal_endpoint_preserves_signal_specific_paths() {
         assert_eq!(
-            signal_endpoint("http://collector:4318/v1/traces", OTLP_METRIC_PATH),
+            signal_endpoint("http://collector:4318/v1/traces", OTLP_TRACE_PATH),
             "http://collector:4318/v1/traces"
         );
         assert_eq!(
-            signal_endpoint("http://collector:4318/v1/metrics", OTLP_TRACE_PATH),
+            signal_endpoint("http://collector:4318/v1/metrics", OTLP_METRIC_PATH),
             "http://collector:4318/v1/metrics"
+        );
+    }
+
+    #[test]
+    fn signal_endpoint_routes_sibling_signals_from_specific_paths() {
+        assert_eq!(
+            signal_endpoint("http://collector:4318/v1/traces", OTLP_METRIC_PATH),
+            "http://collector:4318/v1/metrics"
+        );
+        assert_eq!(
+            signal_endpoint("http://collector:4318/v1/metrics", OTLP_TRACE_PATH),
+            "http://collector:4318/v1/traces"
         );
     }
 
