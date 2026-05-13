@@ -231,6 +231,34 @@ async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() {
 }
 
 #[tokio::test]
+async fn reference_hits_include_resolved_target_canonical_identity() {
+    let store = store_with_repository_snapshot(snapshot_with_resolved_reference()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::References,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("target-symbol"));
+    assert_eq!(
+        hits[0].canonical_symbol_id.as_deref(),
+        Some("repo://repo/src::lib.rs::target")
+    );
+}
+
+#[tokio::test]
 async fn impact_imports_use_rust_symbol_namespace_seeds() {
     let store = store_with_repository_snapshot_and_filters(
         snapshot_with_rust_symbol_importer(),
@@ -474,6 +502,20 @@ async fn repository_report_counts_degraded_files_beyond_summary_limit() {
     assert_eq!(report.degradation_summary.len(), 20);
 }
 
+#[tokio::test]
+async fn repository_report_counts_materialized_call_edges_once() {
+    let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+
+    let report = store
+        .code_repository_report("fixture".to_owned())
+        .await
+        .expect("report should load");
+
+    assert_eq!(report.resolved_edge_count, 0);
+    assert_eq!(report.ambiguous_edge_count, 0);
+    assert_eq!(report.unresolved_edge_count, 4);
+}
+
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
     store_with_repository_snapshot_and_filters(snapshot, Vec::new(), Vec::new()).await
 }
@@ -683,6 +725,54 @@ fn snapshot_with_language_edges() -> CodeIndexSnapshot {
             call("rust-call", "rust-file", "src/lib.rs", None),
             call("python-call", "python-file", "py/app.py", None),
         ],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_resolved_reference() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "target-file",
+                "src/lib.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "caller-file",
+                "src/caller.rs",
+                "rust",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![symbol(
+            "target-symbol",
+            "target-file",
+            "src/lib.rs",
+            "target",
+        )],
+        references: vec![reference(
+            "target-reference",
+            "caller-file",
+            "src/caller.rs",
+            Some("target-symbol"),
+        )],
+        imports: Vec::new(),
+        calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

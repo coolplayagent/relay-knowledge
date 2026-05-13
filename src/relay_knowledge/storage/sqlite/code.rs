@@ -608,7 +608,6 @@ fn repository_edge_resolution_counts(
     for (table, column) in [
         ("code_repository_references", "resolution_state"),
         ("code_repository_imports", "resolution_state"),
-        ("code_repository_calls", "resolution_state"),
     ] {
         let mut statement = connection.prepare(&format!(
             "

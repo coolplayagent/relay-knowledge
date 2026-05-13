@@ -271,8 +271,8 @@ pub(super) fn ensure_code_repository_compat_columns(
     connection.execute(
         "
         UPDATE code_repository_symbols
-        SET canonical_symbol_id = symbol_snapshot_id
-        WHERE canonical_symbol_id = ''
+        SET canonical_symbol_id = 'repo://' || repository_id || '/' || qualified_name
+        WHERE canonical_symbol_id = '' OR canonical_symbol_id = symbol_snapshot_id
         ",
         [],
     )?;
@@ -366,4 +366,58 @@ fn add_column_if_missing(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatibility_migration_backfills_canonical_symbol_ids() {
+        let connection = Connection::open_in_memory().expect("connection should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE code_repositories (
+                    repository_id TEXT PRIMARY KEY,
+                    last_indexed_scope_id TEXT
+                );
+                CREATE TABLE code_repository_files (
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    PRIMARY KEY (source_scope, path)
+                );
+                CREATE TABLE code_repository_symbols (
+                    repository_id TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    symbol_snapshot_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    qualified_name TEXT NOT NULL,
+                    PRIMARY KEY (source_scope, symbol_snapshot_id)
+                );
+                INSERT INTO code_repository_symbols (
+                    repository_id, source_scope, symbol_snapshot_id, path, name, qualified_name
+                )
+                VALUES ('repo', 'scope', 'snapshot-id', 'src/lib.rs', 'target', 'src::lib.rs::target');
+                ",
+            )
+            .expect("legacy-compatible fixture should build");
+
+        initialize_code_schema(&connection).expect("schema should initialize");
+
+        let canonical_symbol_id = connection
+            .query_row(
+                "
+                SELECT canonical_symbol_id
+                FROM code_repository_symbols
+                WHERE symbol_snapshot_id = 'snapshot-id'
+                ",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("canonical id should load");
+        assert_eq!(canonical_symbol_id, "repo://repo/src::lib.rs::target");
+    }
 }

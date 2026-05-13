@@ -177,10 +177,13 @@ fn search_references(
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
                r.line_start, r.line_end, r.target_hint, r.resolution_state,
-               r.confidence_basis_points, r.confidence_tier
+               r.confidence_basis_points, r.confidence_tier, s.canonical_symbol_id
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.source_scope = r.source_scope AND f.path = r.path
+        LEFT JOIN code_repository_symbols s
+            ON s.source_scope = r.source_scope
+           AND s.symbol_snapshot_id = r.target_symbol_snapshot_id
         WHERE r.source_scope = ?
           AND ({candidate_condition})
         ORDER BY r.path ASC, r.line_start ASC
@@ -212,6 +215,7 @@ fn search_references(
                 resolution_state: row.get(11)?,
                 confidence_basis_points: row.get(12)?,
                 confidence_tier: row.get(13)?,
+                target_canonical_symbol_id: row.get(14)?,
             })
         },
     )?;
@@ -234,7 +238,7 @@ fn search_references(
                         byte_range: row.byte_range,
                         line_range: row.line_range,
                         symbol_snapshot_id: row.target_symbol_snapshot_id,
-                        canonical_symbol_id: None,
+                        canonical_symbol_id: row.target_canonical_symbol_id,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::Reference],
                         score: score + 1.5,
@@ -826,6 +830,7 @@ struct ReferenceRow {
     resolution_state: String,
     confidence_basis_points: u16,
     confidence_tier: String,
+    target_canonical_symbol_id: Option<String>,
 }
 
 struct CallRow {

@@ -89,10 +89,10 @@ class RetryPolicy {
         .find(|reference| reference.name == "backoff")
         .expect("call should be extracted");
 
-    assert_eq!(method.qualified_name, "src::RetryPolicy.run");
+    assert_eq!(method.qualified_name, "src::RetryPolicy::RetryPolicy.run");
     assert_eq!(
         method.canonical_symbol_id,
-        "repo://repo/src::RetryPolicy.run"
+        "repo://repo/src::RetryPolicy::RetryPolicy.run"
     );
     assert_eq!(call.resolution_state, "resolved");
     assert_eq!(call.confidence_tier, "inferred");
