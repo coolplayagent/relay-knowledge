@@ -16,7 +16,8 @@ use crate::{
     },
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
-    interfaces::agent::mcp::McpServer,
+    interfaces::{agent::mcp::McpServer, web},
+    net::qos::QosRuntime,
     project::PROJECT_NAME,
 };
 
@@ -243,6 +244,7 @@ pub enum CliAction {
     ServiceOperatorResume,
     ServiceRun {
         mcp: ServiceMcpTransport,
+        web: bool,
     },
     Version,
 }
@@ -372,8 +374,8 @@ where
     if command.action == CliAction::Version {
         return render_version(command.format);
     }
-    if let CliAction::ServiceRun { mcp } = command.action.clone() {
-        return run_service(mcp).await;
+    if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
+        return run_service(mcp, web).await;
     }
 
     let service = RelayKnowledgeService::from_process_environment()
@@ -559,7 +561,7 @@ pub fn help_text() -> &'static str {
         "  service plan install|uninstall\n",
         "  service definition write\n",
         "  service operator status|pause|resume\n",
-        "  service run [--mcp streamable-http]\n",
+        "  service run [--web] [--mcp streamable-http]\n",
         "  version [--format text|json]\n",
         "  --version [--format text|json]\n",
     )
@@ -752,7 +754,7 @@ fn parse_index_kind(value: &str) -> Result<IndexKind, CliError> {
     }
 }
 
-async fn run_service(mcp: ServiceMcpTransport) -> Result<String, CliError> {
+async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<String, CliError> {
     let mut runtime = RuntimeConfiguration::from_process_environment()
         .await
         .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
@@ -765,7 +767,29 @@ async fn run_service(mcp: ServiceMcpTransport) -> Result<String, CliError> {
         .reconcile_startup_indexes(RequestContext::for_interface(InterfaceKind::Cli))
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.message))?;
-    if runtime.agent.mcp_streamable_http_enabled {
+    if web_enabled {
+        let mut router = web::router(service.clone());
+        if runtime.agent.mcp_streamable_http_enabled {
+            let mcp_router = McpServer::new(
+                service.clone(),
+                runtime.network.clone(),
+                runtime.agent.clone(),
+            )
+            .checked_router()
+            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+            router = router.merge(mcp_router);
+        }
+        let network_config = runtime.network.current();
+        crate::net::http::serve_router_with_qos(
+            router,
+            network_config.http,
+            QosRuntime::default(),
+            network_config.qos,
+            service_shutdown_signal(),
+        )
+        .await
+        .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
+    } else if runtime.agent.mcp_streamable_http_enabled {
         let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
         server
             .serve_until_shutdown(service_shutdown_signal())

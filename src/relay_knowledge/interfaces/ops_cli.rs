@@ -409,9 +409,14 @@ fn parse_proposal_decision(
 
 fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {
     let mut mcp = ServiceMcpTransport::Configured;
+    let mut web = false;
     let mut index = 0;
     while index < tokens.len() {
         match tokens[index].as_str() {
+            "--web" => {
+                web = true;
+                index += 1;
+            }
             "--mcp" => {
                 let value = value_after(tokens, index, "--mcp")?;
                 mcp = match value.as_str() {
@@ -424,7 +429,7 @@ fn parse_service_run(tokens: &[String]) -> Result<CliAction, CliError> {
         }
     }
 
-    Ok(CliAction::ServiceRun { mcp })
+    Ok(CliAction::ServiceRun { mcp, web })
 }
 
 fn parse_worker_kind(value: &str) -> Result<WorkerKind, CliError> {

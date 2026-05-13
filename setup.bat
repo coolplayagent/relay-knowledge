@@ -67,55 +67,18 @@ if not "%PRE_COMMIT_CMD%"=="" (
     echo [Warning] Python or pre-commit not found. Skipping git hook installation.
 )
 
-echo Fetching dependencies...
-cargo fetch
-if %errorlevel% neq 0 (
-    echo [Error] Dependency fetch failed.
-    exit /b 1
-)
-
-echo Running quality checks...
-cargo fmt --all -- --check
-if %errorlevel% neq 0 exit /b 1
-
-cargo clippy --all-targets --all-features -- -D warnings
-if %errorlevel% neq 0 exit /b 1
-
-cargo test --all-targets --all-features
-if %errorlevel% neq 0 exit /b 1
-
-cargo llvm-cov --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Installing cargo-llvm-cov...
-    cargo install cargo-llvm-cov --locked
-    if %errorlevel% neq 0 exit /b 1
-)
-
-cargo llvm-cov --all-targets --all-features --fail-under-lines 90
-if %errorlevel% neq 0 exit /b 1
-
 where npm >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Building Web diagnostics...
-    npm install --prefix web
-    if %errorlevel% neq 0 exit /b 1
-    npm run build --prefix web
-    if %errorlevel% neq 0 exit /b 1
+    echo npm found.
 ) else (
-    echo [Warning] npm not found. Skipping Web build.
+    echo [Warning] npm not found. Install Node.js/npm before building Web assets.
 )
 
 where uv >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Running browser integration gate...
-    uv sync --extra dev --no-default-groups
-    if %errorlevel% neq 0 exit /b 1
-    uv run --extra dev python -m playwright install --with-deps chromium
-    if %errorlevel% neq 0 exit /b 1
-    uv run --extra dev pytest tests/browser
-    if %errorlevel% neq 0 exit /b 1
+    echo uv found.
 ) else (
-    echo [Warning] uv not found. Skipping browser integration gate.
+    echo [Warning] uv not found. Browser integration tests will be skipped.
 )
 
-echo Environment setup completed.
+echo Environment setup completed. Use build.sh to build and check.sh to verify on Unix-like systems.

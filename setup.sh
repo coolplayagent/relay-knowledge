@@ -55,7 +55,7 @@ elif [ -n "$PYTHON_BIN" ]; then
   if "$PYTHON_BIN" -m pip install --user pre-commit; then
     PRE_COMMIT_MODE="python-module"
   else
-    echo "[Warning] pre-commit install failed. Cargo checks will still run."
+    echo "[Warning] pre-commit install failed. Run ./check.sh before committing."
   fi
 else
   echo "[Warning] Python not found. Skipping pre-commit installation."
@@ -74,39 +74,20 @@ if [ -n "$PRE_COMMIT_MODE" ]; then
   if run_pre_commit install; then
     echo "Git hooks install successful."
   else
-    echo "[Warning] Git hooks install failed."
+    echo "[Warning] Git hooks install failed. Run ./check.sh before committing."
   fi
 fi
 
-echo "Fetching dependencies..."
-cargo fetch
-
-echo "Running quality checks..."
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-
-if ! cargo llvm-cov --version >/dev/null 2>&1; then
-  echo "Installing cargo-llvm-cov..."
-  cargo install cargo-llvm-cov --locked
-fi
-cargo llvm-cov --all-targets --all-features --fail-under-lines 90
-
 if command_exists npm; then
-  echo "Building Web diagnostics..."
-  npm install --prefix web
-  npm run build --prefix web
+  echo "npm found."
 else
-  echo "[Warning] npm not found. Skipping Web build."
+  echo "[Warning] npm not found. Install Node.js/npm before running ./build.sh for Web assets."
 fi
 
 if command_exists uv; then
-  echo "Running browser integration gate..."
-  uv sync --extra dev --no-default-groups
-  uv run --extra dev python -m playwright install --with-deps chromium
-  uv run --extra dev pytest tests/browser
+  echo "uv found."
 else
-  echo "[Warning] uv not found. Skipping browser integration gate."
+  echo "[Warning] uv not found. Browser integration tests in ./check.sh will be skipped."
 fi
 
-echo "Environment setup completed."
+echo "Environment setup completed. Use ./build.sh to build and ./check.sh to verify."

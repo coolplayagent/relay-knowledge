@@ -29,7 +29,24 @@
 
 ## Development
 
-This is a Rust project. Install Rust through `rustup`, then run:
+This is a Rust project. Install Rust through `rustup`, then use the repository
+scripts by responsibility:
+
+```bash
+./setup.sh
+./build.sh
+./run.sh start --port 8791 --daemon
+./run.sh status
+./run.sh stop --force
+./check.sh
+```
+
+`setup.sh` prepares the local development environment and hooks only. `build.sh`
+builds the Rust CLI and `web/dist`. `run.sh` manages the local Web service
+process and does not build missing artifacts. `check.sh` runs the full quality
+gate.
+
+The underlying commands are:
 
 ```bash
 cargo fmt --all -- --check
@@ -78,7 +95,7 @@ relay-knowledge service doctor --format json
 relay-knowledge service plan install --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
-RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --mcp streamable-http
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp streamable-http
 relay-knowledge query -- --help
 ```
 
@@ -110,9 +127,10 @@ pack items now expose direct `graph_paths` derived from those structured facts
 so agent callers can cite one-hop relation, claim, or event paths alongside raw
 fact provenance.
 
-`service run --mcp streamable-http` starts the resident MCP Streamable HTTP
-adapter on the configured local HTTP bind, defaulting to
-`http://127.0.0.1:8791/mcp`. It is disabled unless requested by the command or
+`service run --web --mcp streamable-http` starts the same-port Web diagnostics,
+`/api/*`, and resident MCP Streamable HTTP adapters on the configured local HTTP
+bind, defaulting to `http://127.0.0.1:8791/` and
+`http://127.0.0.1:8791/mcp`. MCP is disabled unless requested by the command or
 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured.
@@ -136,8 +154,9 @@ index cursors before accepting resident adapter work.
 Web diagnostics, operation workspace, and browser integration checks:
 
 ```bash
-npm install --prefix web
-npm run build --prefix web
+./build.sh
+./run.sh start --port 8791 --daemon
+curl http://127.0.0.1:8791/api/health
 uv sync --extra dev --no-default-groups
 uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
@@ -146,10 +165,10 @@ uv run --extra dev pytest tests/browser
 The static Web workspace renders project health, GraphRAG readiness, graph
 counts, scoped index freshness, refresh queue diagnostics, stale reasons, runtime budgets, and interactive operation composers
 for retrieval, ingestion, graph inspection, code repository workflows, index
-refresh, and service runtime commands. The current Web client still reads live
-diagnostics only from `/api/project/status` and `/api/health`; operation
-composers stage typed command and request previews until a Rust HTTP adapter
-exposes executable Web endpoints.
+refresh, and service runtime commands. The same Rust HTTP service serves the
+static Web workspace plus `/api/project/status`, `/api/health`, and
+`/api/service/status` on one local port. Operation composers still stage typed
+command and request previews.
 
 Optional local pre-commit checks:
 
@@ -162,6 +181,8 @@ Setup helpers are also available:
 
 ```bash
 ./setup.sh
+./build.sh
+./check.sh
 ```
 
 On Windows, run `setup.bat` from Command Prompt.

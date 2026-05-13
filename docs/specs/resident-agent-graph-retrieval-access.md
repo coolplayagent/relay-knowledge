@@ -159,6 +159,7 @@ protocol request
 MCP server 必须声明 tools、resources 和 prompts capability，并按 access policy 动态决定可见工具。
 
 当前 v1 已实现 MCP Streamable HTTP tool surface。入口是
+`relay-knowledge service run --web --mcp streamable-http`、
 `relay-knowledge service run --mcp streamable-http` 或
 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`，默认 endpoint 为 `/mcp`。
 实现支持 `initialize`、`notifications/initialized`、`notifications/cancelled`、

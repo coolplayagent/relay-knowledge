@@ -5,8 +5,7 @@
 Web 工作区位于 `web/`，用于诊断面板和操作预览:
 
 ```bash
-npm install --prefix web
-npm run build --prefix web
+./build.sh
 ```
 
 构建产物位于 `web/dist`。浏览器集成测试会先构建静态资源，再启动测试用静态目录服务。
@@ -18,6 +17,7 @@ npm run build --prefix web
 ```text
 /api/project/status
 /api/health
+/api/service/status
 ```
 
 页面展示 project health、GraphRAG readiness、graph counts、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
@@ -35,7 +35,25 @@ Web Operations 面板覆盖这些工作流的 typed command/request preview:
 
 当前 composer 只生成和暂存命令或 payload 预览。执行型 Web endpoint 仍需要 Rust HTTP adapter 暴露后才能从页面直接发起写入、查询或索引操作。
 
-## 5.4 浏览器集成测试
+## 5.4 同端口本地服务
+
+本地启动 Web/API/MCP 服务:
+
+```bash
+./build.sh
+./run.sh start --port 8791 --daemon
+```
+
+访问:
+
+```text
+http://127.0.0.1:8791/
+http://127.0.0.1:8791/api/health
+```
+
+`run.sh` 不会自动构建。缺少 `target/release/relay-knowledge` 或 `web/dist/index.html` 时，先运行 `./build.sh`。
+
+## 5.5 浏览器集成测试
 
 本地验证:
 
