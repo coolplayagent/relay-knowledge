@@ -314,6 +314,8 @@ async fn complete_bm25_refresh(store: &SqliteGraphStore, graph_version: GraphVer
             lease_owner: "test-worker".to_owned(),
             attempt_count: task.attempt_count,
             indexed_graph_version: graph_version,
+            model_name: None,
+            model_dimension: None,
             now_ms: 12,
         })
         .await

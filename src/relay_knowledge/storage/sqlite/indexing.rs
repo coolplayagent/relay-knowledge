@@ -2,7 +2,13 @@ use std::collections::BTreeSet;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+mod cursor_metadata;
 mod task_queue;
+
+use cursor_metadata::{
+    CursorBackendMetadata, CursorBackendMetadataRequest, checked_model_dimension,
+    cursor_backend_metadata, cursor_indexed_graph_version,
+};
 
 use crate::{
     domain::{GraphVersion, IndexKind, IndexModality, IndexState, IndexStatus},
@@ -87,6 +93,10 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         "source_hashes_json",
         "TEXT NOT NULL DEFAULT '[]'",
     )?;
+    super::ensure_column(connection, "index_cursors", "source_hash", "TEXT")?;
+    super::ensure_column(connection, "index_cursors", "backend_cursor", "TEXT")?;
+    super::ensure_column(connection, "index_cursors", "model_name", "TEXT")?;
+    super::ensure_column(connection, "index_cursors", "model_dimension", "INTEGER")?;
 
     for kind in IndexKind::ALL {
         connection.execute(
@@ -216,6 +226,21 @@ pub(super) fn mark_refresh_complete(
         ",
         params![kind.as_str(), DEFAULT_SCOPE, TEXT_MODALITY.as_str()],
     )?;
+    let cursor_before =
+        cursor_indexed_graph_version(connection, kind, DEFAULT_SCOPE, TEXT_MODALITY)?
+            .unwrap_or(GraphVersion::ZERO);
+    let metadata = cursor_backend_metadata(
+        connection,
+        CursorBackendMetadataRequest {
+            kind,
+            scope: DEFAULT_SCOPE,
+            modality: TEXT_MODALITY,
+            cursor_before,
+            graph_version,
+            model_name: None,
+            model_dimension: None,
+        },
+    )?;
     mark_cursor_complete(
         connection,
         kind,
@@ -223,6 +248,7 @@ pub(super) fn mark_refresh_complete(
         TEXT_MODALITY,
         graph_version,
         None,
+        &metadata,
     )?;
     recompute_aggregate_status(connection, kind, graph_version)?;
 
@@ -238,7 +264,8 @@ pub(super) fn index_cursors(connection: &mut Connection) -> Result<Vec<IndexCurs
     let mut statement = connection.prepare(
         "
         SELECT kind, source_scope, modality, index_version,
-               indexed_graph_version, state, last_error
+               indexed_graph_version, state, last_error,
+               source_hash, backend_cursor, model_name, model_dimension
         FROM index_cursors
         ORDER BY kind ASC, source_scope ASC, modality ASC
         ",
@@ -252,6 +279,10 @@ pub(super) fn index_cursors(connection: &mut Connection) -> Result<Vec<IndexCurs
             row.get::<_, u64>(4)?,
             row.get::<_, String>(5)?,
             row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<u64>>(10)?,
         ))
     })?;
     rows.collect::<Result<Vec<_>, _>>()?
@@ -265,6 +296,10 @@ pub(super) fn index_cursors(connection: &mut Connection) -> Result<Vec<IndexCurs
                 indexed_graph_version,
                 state,
                 last_error,
+                source_hash,
+                backend_cursor,
+                model_name,
+                model_dimension,
             )| {
                 Ok(IndexCursor {
                     kind: parse_index_kind(&kind)?,
@@ -274,6 +309,10 @@ pub(super) fn index_cursors(connection: &mut Connection) -> Result<Vec<IndexCurs
                     indexed_graph_version: GraphVersion::new(indexed_graph_version),
                     state: parse_index_state(&state)?,
                     last_error,
+                    source_hash,
+                    backend_cursor,
+                    model_name,
+                    model_dimension: model_dimension.map(checked_model_dimension).transpose()?,
                 })
             },
         )
@@ -406,6 +445,7 @@ fn mark_cursor_complete(
     modality: IndexModality,
     graph_version: GraphVersion,
     error: Option<&str>,
+    metadata: &CursorBackendMetadata,
 ) -> Result<(), StorageError> {
     ensure_cursor(connection, kind, scope, modality, IndexState::Stale)?;
     connection.execute(
@@ -414,7 +454,11 @@ fn mark_cursor_complete(
         SET index_version = index_version + 1,
             indexed_graph_version = ?4,
             state = 'fresh',
-            last_error = ?5
+            last_error = ?5,
+            source_hash = ?6,
+            backend_cursor = ?7,
+            model_name = ?8,
+            model_dimension = ?9
         WHERE kind = ?1 AND source_scope = ?2 AND modality = ?3
         ",
         params![
@@ -422,7 +466,11 @@ fn mark_cursor_complete(
             scope,
             modality.as_str(),
             graph_version.get(),
-            error
+            error,
+            &metadata.source_hash,
+            &metadata.backend_cursor,
+            metadata.model_name.as_deref(),
+            metadata.model_dimension
         ],
     )?;
 
@@ -436,6 +484,7 @@ fn mark_cursor_stale_at(
     modality: IndexModality,
     graph_version: GraphVersion,
     error: Option<&str>,
+    metadata: &CursorBackendMetadata,
 ) -> Result<(), StorageError> {
     ensure_cursor(connection, kind, scope, modality, IndexState::Stale)?;
     connection.execute(
@@ -444,7 +493,11 @@ fn mark_cursor_stale_at(
         SET index_version = index_version + 1,
             indexed_graph_version = ?4,
             state = 'stale',
-            last_error = ?5
+            last_error = ?5,
+            source_hash = ?6,
+            backend_cursor = ?7,
+            model_name = ?8,
+            model_dimension = ?9
         WHERE kind = ?1 AND source_scope = ?2 AND modality = ?3
         ",
         params![
@@ -452,7 +505,11 @@ fn mark_cursor_stale_at(
             scope,
             modality.as_str(),
             graph_version.get(),
-            error
+            error,
+            &metadata.source_hash,
+            &metadata.backend_cursor,
+            metadata.model_name.as_deref(),
+            metadata.model_dimension
         ],
     )?;
 

@@ -235,6 +235,14 @@ pub struct IndexCursor {
     pub indexed_graph_version: GraphVersion,
     pub state: crate::domain::IndexState,
     pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_dimension: Option<u32>,
 }
 
 /// Persistent index refresh task lifecycle state.
@@ -311,6 +319,8 @@ pub struct IndexRefreshCompletion {
     pub lease_owner: String,
     pub attempt_count: u32,
     pub indexed_graph_version: GraphVersion,
+    pub model_name: Option<String>,
+    pub model_dimension: Option<u32>,
     pub now_ms: u64,
 }
 
@@ -501,6 +511,8 @@ mod tests {
                 lease_owner: "worker".to_owned(),
                 attempt_count: 1,
                 indexed_graph_version: GraphVersion::new(1),
+                model_name: None,
+                model_dimension: None,
                 now_ms: 20,
             })
             .await

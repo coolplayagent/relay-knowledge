@@ -39,7 +39,7 @@ GraphRAG 能力必须保持可解释:
 - BM25 字段质量优先覆盖 evidence content、entity label、source path、code symbol、code chunk 和 doc comment。
 - RRF 融合必须保留每个 retriever 的 rank、score 和 explanation。
 - graph expansion 必须限制深度、节点数、时间和输出字节，超限时返回 `truncated=true` 和原因。
-- semantic/vector 当前使用确定性的本地 token/hash read model，已在 ranking explanation 中记录 model、dimension、source hash、scope 和 graph version；外部 embedding backend 接入时必须保持同一 metadata contract 和 scope post-filter。
+- semantic/vector 当前使用确定性的本地 token/hash read model，已在 ranking explanation 和 cursor diagnostics 中记录 model、dimension、source hash、scope、backend cursor 和 graph version；外部 embedding backend 接入时必须保持同一 metadata contract 和 scope post-filter。
 
 ### 3.2 事实模型
 
@@ -60,7 +60,7 @@ GraphRAG 能力必须保持可解释:
 - v1 已经把 `refresh_indexes`、ingest 后置刷新和 `wait-until-fresh` 查询接到
   bounded refresh queue、persistent task lease、retry backoff、mutation-log
   replay 和 scoped cursor 更新路径。
-- index cursor 必须按 kind、scope、modality、model 和 graph version 记录，不能只用全局 freshness 代表所有快照；当前 Rust 实现已覆盖 kind/scope/text modality，后续 semantic/vector backend 接入时必须补 model/dimension 元数据。
+- index cursor 必须按 kind、scope、modality、model 和 graph version 记录，不能只用全局 freshness 代表所有快照；当前 Rust 实现已覆盖 kind/scope/text modality、source hash、backend cursor，以及 semantic/vector worker 可回传的 model name/dimension 元数据。
 - 后台服务必须使用 bounded queues、retry backoff、lease、dead-letter、startup reconciler 和 stale diagnostics；当前 foreground service path 已暴露 queue depth、oldest task age、dead-letter count 和 per-kind lag。
 - 启动时如果 graph version 领先 index cursor，reconciler 必须补发刷新或报告 degraded；当前 health/service status 会补发缺失 refresh task，显式 `refresh_indexes` 负责 drain。
 
@@ -95,7 +95,7 @@ GraphRAG 能力必须保持可解释:
 ### Phase 2: 可恢复索引刷新
 
 - 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
-- 为 semantic/vector backend 补充 model、dimension、source hash、backend-specific cursor 和 last error 元数据。
+- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；未配置真实 backend 时 model/dimension 为空，但 refresh worker 可在完成任务时写入并由 cursor 诊断返回。
 - health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和 stale reason。
 
 ### Phase 3: Agent 与常驻服务

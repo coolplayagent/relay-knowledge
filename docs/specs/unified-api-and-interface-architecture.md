@@ -158,7 +158,9 @@ CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async applica
 Web v1 默认采用 React + Vite + TypeScript。Web 是交互层，不是第二套业务后端。
 当前 Web workspace 工程位于 `web/`，使用 TypeScript 静态前端，通过前端 typed
 contract 复用 `ProjectStatusResponse`、`HealthResponse`、index status、
-scoped index cursor 和 index refresh diagnostics 字段形状。
+scoped index cursor 和 index refresh diagnostics 字段形状。`index_cursors`
+包含 kind、scope、modality、indexed graph version、state、source hash、
+backend cursor，以及后端提供时的 model name/dimension。
 Web client 必须从同源服务 API 读取 `/api/project/status` 和 `/api/health`，不得在前端
 伪造健康状态、图版本、运行时路径或索引元数据。当前 Web 页面从这两个 contract 派生
 Status、GraphRAG readiness、Indexes、Runtime 和操作工作台状态；GraphRAG readiness 只

@@ -15,7 +15,7 @@
 - hybrid retrieval: 使用 SQLite FTS5 BM25、local semantic token read model、local hashed-vector ANN read model、graph evidence fallback、code graph documents、schema path、temporal event、community summary 和 RRF 返回 context pack，并携带实体、source span、结构化 facts、code artifact 和 backend 状态；`rejected`/`superseded` evidence 不会作为检索上下文返回。
 - multimodal evidence: evidence 可记录 `text_span`、`image_asset`、`ocr_text`、`caption`、`image_embedding`、`table` 和 `layout_region` 抽取元数据；派生 OCR/caption/image embedding 按 parent evidence 合并为一个 context item。
 - code repository indexing: 注册 Git 仓库，索引 clean snapshot，增量更新，查询 symbol/reference/chunk，分析 diff impact。
-- index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors、bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
+- index recovery: graph commits 记录 affected scopes、entity ids、evidence ids 和 source hashes；scoped cursors 持久化 kind/scope/modality freshness、source hash、backend cursor，以及 semantic/vector worker 可回传的 model name/dimension；bounded refresh queue、lease/attempt guard、retry/dead-letter、diagnostic reconciler 和 startup reconciler 已接入 ingest、wait-until-fresh query、index refresh、health、service doctor 和 foreground service startup。
 - diagnostics: graph inspect、index status、health、service doctor 和 Web readiness；`service status` 与 `service doctor` 当前复用同一统一 API 输出，报告 disabled service mode、后台更新状态、service definition path、agent protocol status 和 refresh queue diagnostics。
 - resident agent access: MCP Streamable HTTP 工具暴露 retrieve context、inspect graph、health、service status、index status、授权 code graph query、授权 code impact 和受权限控制的 index refresh；本地 ACP session adapter 暴露相同检索 contract，支持 progress updates、cancellation、context artifact、QoS admission 和 bounded audit events。
 - evaluation harness: 纯 Rust harness 覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact 观测。
@@ -159,6 +159,10 @@ http://127.0.0.1:8791/mcp
 - `budget_used`: limit、candidate count、returned count 和 context bytes。
 - `degraded_reason`: stale、graph-only、backend unavailable 或其它降级原因。
 - `truncated`: 结果或 context pack 是否被预算截断。
+
+Health 和 index refresh 响应额外返回 `index_cursors[*]`，包含 kind、source scope、
+modality、indexed graph version、source hash、backend cursor，以及后端提供时的
+model name/dimension。
 
 ## 7. 运维检查
 

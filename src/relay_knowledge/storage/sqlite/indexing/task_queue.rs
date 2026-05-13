@@ -148,6 +148,18 @@ pub(super) fn complete_index_refresh_task(
     let task = require_task(&transaction, &request.task_id)?;
     let superseded = task.target_graph_version > request.indexed_graph_version
         || has_matching_mutation_after(&transaction, &task, request.indexed_graph_version)?;
+    let metadata = super::cursor_metadata::cursor_backend_metadata(
+        &transaction,
+        super::cursor_metadata::CursorBackendMetadataRequest {
+            kind: task.kind,
+            scope: &task.source_scope,
+            modality: task.modality,
+            cursor_before: task.cursor_before,
+            graph_version: request.indexed_graph_version,
+            model_name: request.model_name.as_deref(),
+            model_dimension: request.model_dimension,
+        },
+    )?;
     let next_target = if superseded {
         super::current_graph_version(&transaction)?.max(task.target_graph_version)
     } else {
@@ -218,6 +230,7 @@ pub(super) fn complete_index_refresh_task(
             task.modality,
             request.indexed_graph_version,
             None,
+            &metadata,
         )?;
     } else {
         super::mark_cursor_complete(
@@ -227,6 +240,7 @@ pub(super) fn complete_index_refresh_task(
             task.modality,
             request.indexed_graph_version,
             None,
+            &metadata,
         )?;
     }
     super::recompute_aggregate_status(&transaction, task.kind, GraphVersion::ZERO)?;
@@ -371,7 +385,8 @@ fn stale_cursors_for_kind(
     let mut statement = connection.prepare(
         "
         SELECT kind, source_scope, modality, index_version,
-               indexed_graph_version, state, last_error
+               indexed_graph_version, state, last_error,
+               source_hash, backend_cursor, model_name, model_dimension
         FROM index_cursors
         WHERE kind = ?1
           AND state != 'fresh'
@@ -387,6 +402,10 @@ fn stale_cursors_for_kind(
             row.get::<_, u64>(4)?,
             row.get::<_, String>(5)?,
             row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<u64>>(10)?,
         ))
     })?;
 
@@ -401,6 +420,10 @@ fn stale_cursors_for_kind(
                 indexed_graph_version,
                 state,
                 last_error,
+                source_hash,
+                backend_cursor,
+                model_name,
+                model_dimension,
             )| {
                 Ok(IndexCursor {
                     kind: super::parse_index_kind(&kind)?,
@@ -410,6 +433,12 @@ fn stale_cursors_for_kind(
                     indexed_graph_version: GraphVersion::new(indexed_graph_version),
                     state: super::parse_index_state(&state)?,
                     last_error,
+                    source_hash,
+                    backend_cursor,
+                    model_name,
+                    model_dimension: model_dimension
+                        .map(super::cursor_metadata::checked_model_dimension)
+                        .transpose()?,
                 })
             },
         )
