@@ -69,6 +69,8 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | MCP 返回 context 文本预算，默认 `65536` |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH` | 是否暴露 `relay.refresh_indexes`，默认 `false` |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | 是否允许非本机 bind 对外服务，默认 `false` |
+| `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED` | 是否启用 agent audit JSONL 持久 sink，默认 `false` |
+| `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` | agent audit 持久 sink 队列深度，默认 `1024`，运行时上限 `65536` |
 | `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` | semantic read model backend mode: `local`、`external` 或 `disabled`，默认 `local` |
 | `RELAY_KNOWLEDGE_VECTOR_BACKEND` | vector read model backend mode: `local`、`external` 或 `disabled`，默认 `local` |
 | `RELAY_KNOWLEDGE_LLM_PROVIDER` | remote embedding provider: `openai_compatible` 或 `echo`，external backend 默认 `openai_compatible` |

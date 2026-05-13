@@ -79,7 +79,25 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 
 ## 1.4 网络与 QoS
 
-常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。日常本地使用不需要调整网络预算；需要远程监听、调大请求体或复现代理问题时，再进入 [第 8 章](08-advanced-configuration.md)。
+所有覆盖路径必须是绝对路径，且不能包含 `..`。路径解析只在 `env` 和 `paths` 边界内完成。
+
+常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。日常本地使用不需要调整网络预算；需要远程监听、调大请求体或复现代理问题时，再进入 [第 8 章](08-advanced-configuration.md)。常用覆盖项:
+
+```text
+RELAY_KNOWLEDGE_HTTP_BIND
+RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS
+RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS
+RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES
+RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS
+RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
+RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
+RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
+RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
+```
+
+代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。这些变量只在环境边界读取，业务模块不直接访问进程环境。
+
+Agent audit 持久化默认关闭。开启 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，常驻 MCP 和本地 ACP adapter 会把 bounded audit events 异步镜像到当前 log 目录下的 `agent-audit.jsonl`；日志目录仍由 `paths` 模块解析，默认不写入仓库或当前工作目录。
 
 ## 1.5 安装与发布路径
 

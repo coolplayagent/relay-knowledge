@@ -881,11 +881,16 @@ mod tests {
             HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
         )
         .expect("config should build");
+        let handler_started = Arc::new(tokio::sync::Notify::new());
+        let route_handler_started = handler_started.clone();
         let router = Router::new().route(
             "/hold",
-            get(|| async {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                "done"
+            get(move || {
+                let handler_started = route_handler_started.clone();
+                async move {
+                    handler_started.notify_one();
+                    std::future::pending::<&'static str>().await
+                }
             }),
         );
         let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
@@ -900,7 +905,9 @@ mod tests {
             .await
             .expect("stream should become writable");
         stream.try_write(request).expect("request should write");
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::timeout(Duration::from_secs(1), handler_started.notified())
+            .await
+            .expect("handler should start before shutdown");
         let _ = shutdown.send(());
 
         let error = server

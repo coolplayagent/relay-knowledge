@@ -43,6 +43,38 @@ async fn service_status_reports_current_graph_version() {
 }
 
 #[tokio::test]
+async fn service_status_hides_mcp_subcapabilities_when_mcp_runtime_is_disabled() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED", "false"),
+        ],
+    )
+    .expect("environment should parse");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+    let service = RelayKnowledgeService::with_store(runtime, store as Arc<dyn KnowledgeStore>);
+
+    let response = service
+        .service_status(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-service",
+            "trace-service",
+        ))
+        .await
+        .expect("service status should load");
+
+    assert!(!response.agent_protocols.mcp_streamable_http_enabled);
+    assert!(!response.agent_protocols.mcp_resources_enabled);
+    assert!(!response.agent_protocols.mcp_prompts_enabled);
+}
+
+#[tokio::test]
 async fn multimodal_ingest_queues_worker_and_accepts_manual_proposal() {
     let service = service_with_memory_store().await;
     let mut image = ingest_evidence("image-1", "image asset", Vec::new());

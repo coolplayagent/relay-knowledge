@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -301,6 +301,30 @@ async fn service_api_errors_preserve_error_kind_in_tool_results() {
     );
 }
 
+#[tokio::test]
+async fn persistent_audit_sink_writes_jsonl_events_when_enabled() {
+    let runtime_root = FixtureRepo::create("mcp-audit-runtime");
+    let root = runtime_root.path.display().to_string();
+    let server = server_with_env([
+        ("RELAY_KNOWLEDGE_HOME", root.as_str()),
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        ("RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED", "true"),
+        ("RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH", "4"),
+    ])
+    .await;
+    let mut router = server.router();
+
+    let response = tool_call(&mut router, "audit-health", "relay.health", json!({})).await;
+    let audit_path = runtime_root.path.join("logs").join("agent-audit.jsonl");
+    let audit = wait_for_audit_line(&audit_path, "relay.health").await;
+    let event: Value = serde_json::from_str(&audit).expect("audit event should be json");
+
+    assert_eq!(response["result"]["isError"], false);
+    assert_eq!(event["operation"], "relay.health");
+    assert_eq!(event["status"], "completed");
+    assert_eq!(event["qos_decision"], "admitted");
+}
+
 async fn register_and_index_fixture(
     service: &RelayKnowledgeService,
     repo: &FixtureRepo,
@@ -576,4 +600,24 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     let mut command = Command::new("git");
     command.current_dir(path).args(args);
     command
+}
+
+async fn wait_for_audit_line(path: &Path, operation: &str) -> String {
+    for _ in 0..40 {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if let Some(line) = contents
+                .lines()
+                .find(|line| line.contains(operation))
+                .map(str::to_owned)
+            {
+                return line;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    panic!(
+        "audit line for {operation} was not written to {}",
+        path.display()
+    );
 }

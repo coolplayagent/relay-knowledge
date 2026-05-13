@@ -125,8 +125,12 @@ GraphRAG 能力必须保持可解释:
 
 - 保持 MCP read-only 工具矩阵: retrieve context、inspect graph、index status、service doctor、code graph query 和 code impact。
 - 保持本地 ACP 会话入口，支持 progress、cancellation、context artifact 和 runtime identity。
-- 保持 bounded in-process agent audit log；CLI/Web/service operation 写入持久 audit sink，并通过 `audit query` 暴露。
+- 保持 MCP resources/prompts: service status、health、index status、policy-gated graph summary、Prometheus metrics resource、retrieval prompt 和 code-impact prompt。
+- 保持旧 HTTP+SSE 兼容入口 `/mcp/sse` + `/mcp/message`，但新集成优先使用 Streamable HTTP `/mcp`。
+- 保持 bounded in-process audit log，记录 identity、scope、freshness、QoS decision、budget、truncation 和 result count；CLI/Web/service operation 写入持久 audit sink 并通过 `audit query` 暴露；MCP/ACP 可选 JSONL 持久 audit sink 通过有界 async queue 写入 `logs/agent-audit.jsonl`。
+- 保持 `/mcp/metrics` Prometheus text exporter，覆盖 graph version、index refresh backlog、dead letter、QoS request counters 和 per-index stale 状态。
 - service manager v1 生成 systemd/launchd/Windows Service 定义和安装/卸载/启动/停止命令预览，不在 CLI 内执行提权安装；silent-update operator state 可 status/pause/resume。
+- 安装/升级/卸载文档必须覆盖 service manager 模板、运行时目录、rollback 和 diagnostics。
 
 ### Phase 4: 高级 GraphRAG
 

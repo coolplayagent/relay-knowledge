@@ -104,7 +104,114 @@ cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
-Web diagnostics and browser integration checks:
+The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
+SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
+The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
+Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files.
+Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
+Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
+Operational productization persists worker tasks, manual proposals, audit events, and silent-update operator state. Multimodal ingest queues embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP endpoint when available or creates a deterministic fallback proposal; `proposal accept` commits through the same graph mutation path; and service manager commands generate platform service definitions without running privileged installation.
+The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
+Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
+
+Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
+
+```bash
+relay-knowledge status --format json
+relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
+relay-knowledge query SQLite --freshness wait-until-fresh --format json
+relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
+relay-knowledge repo index core --ref HEAD --format json
+relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo update core --base main --head HEAD --format json
+relay-knowledge repo impact core --base main --head HEAD --format json
+relay-knowledge repo status core --format json
+relay-knowledge graph inspect --format json
+relay-knowledge index refresh --kind bm25 --format json
+relay-knowledge worker status --format json
+relay-knowledge worker run-once --kind ocr --format json
+relay-knowledge proposal list --state proposed --format json
+relay-knowledge proposal accept <proposal-id> --by reviewer --reason reviewed
+relay-knowledge audit query --limit 50 --format json
+relay-knowledge health --format json
+relay-knowledge service doctor --format json
+relay-knowledge service plan install --format json
+relay-knowledge service definition write --format json
+relay-knowledge service operator pause
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp streamable-http
+relay-knowledge query -- --help
+```
+
+Semantic/vector read-model backend metadata is configured only through the
+`env` boundary. The default mode is local deterministic read models; external
+worker metadata can be selected with:
+
+```bash
+RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
+RELAY_KNOWLEDGE_VECTOR_BACKEND=external
+RELAY_KNOWLEDGE_LLM_PROVIDER=openai_compatible
+RELAY_KNOWLEDGE_EMBEDDING_BASE_URL=https://api.example.com/v1
+RELAY_KNOWLEDGE_EMBEDDING_API_KEY=...
+RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL=text-embed-3-small
+RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL=clip-vit-b32
+RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
+```
+
+`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` and
+`RELAY_KNOWLEDGE_VECTOR_BACKEND` also accept `local` and `disabled`. Disabled
+read-model backends are excluded from semantic/vector retrieval execution and
+refresh scheduling; blank embedding model names fail during runtime
+configuration.
+
+The CLI ingest command writes evidence plus entity labels. The shared API also
+accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source
+`span`, confidence, lifecycle status, typed relations, claims, and events that
+reference evidence ids. Structured facts must cite supporting evidence, supplied
+confidence, span, and version-range fields are revalidated after deserialization,
+and retrieval only uses `accepted` or `proposed` evidence as context. Context
+pack items now expose direct `graph_paths` derived from those structured facts
+so agent callers can cite one-hop relation, claim, or event paths alongside raw
+fact provenance.
+
+`service run --web --mcp streamable-http` starts the same-port Web diagnostics,
+`/api/*`, and resident MCP Streamable HTTP adapters on the configured local HTTP
+bind, defaulting to `http://127.0.0.1:8791/` and
+`http://127.0.0.1:8791/mcp`. MCP is disabled unless requested by the command or
+`RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
+`RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
+`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured.
+The adapter validates `initialize` params, then issues an unpredictable
+`Mcp-Session-Id`. Clients must send `notifications/initialized`, then include
+that session header and `MCP-Protocol-Version` on later calls so `ping`, tool
+requests and `notifications/cancelled` stay bound to the issued session.
+Missing session headers are rejected with HTTP 400; unknown or evicted session
+IDs are rejected with HTTP 404.
+The MCP tool surface includes graph retrieval, graph inspection, health,
+service status, index status, authorized code graph queries, and authorized
+code impact analysis. `relay.refresh_indexes` remains hidden unless
+`RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` is explicitly configured.
+The MCP server also advertises resources and prompts: resources expose service
+status, health, index status, and Prometheus text metrics; the graph-wide
+summary resource is advertised only when
+`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`. Prompts provide retrieval
+and code-impact planning templates. Legacy HTTP+SSE
+clients can keep `/mcp/sse` open for `endpoint` and `message` events, then post
+JSON-RPC payloads to `/mcp/message`; the native Streamable HTTP endpoint remains
+preferred. `/mcp/metrics` exports a
+small Prometheus-compatible snapshot for graph version, index refresh backlog,
+dead letters, QoS request counts, and per-index stale state.
+Agent requests write bounded in-process audit events with runtime identity,
+scope, freshness, QoS decision, budget, truncation, result count, and status.
+Set `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` to mirror those events to
+the path-owned JSONL file `logs/agent-audit.jsonl`; the sink uses a bounded
+async queue controlled by `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` and capped
+at 65536 entries.
+The local ACP session adapter exposes the same retrieval contract for
+agent-client sessions, including progress updates, cancellation, and context
+artifacts. Foreground service startup runs a recovery pass that refreshes stale
+index cursors before accepting resident adapter work.
+
+Web diagnostics, operation workspace, and browser integration checks:
 
 ```bash
 ./build.sh
