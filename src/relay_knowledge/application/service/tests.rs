@@ -358,6 +358,57 @@ async fn index_refresh_cursors_use_indexed_document_model_metadata() {
 }
 
 #[tokio::test]
+async fn probe_embedding_provider_reports_echo_success_without_secret_leakage() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+            ("RELAY_KNOWLEDGE_LLM_PROVIDER", "echo"),
+            (
+                "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+                "https://user:pass@embeddings.example/v1",
+            ),
+            ("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "secret-key"),
+            ("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", "runtime-model"),
+            ("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", "4"),
+        ],
+    )
+    .expect("environment should parse");
+    let service = service_with_environment(&environment).await;
+
+    let response = service
+        .probe_embedding_provider(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-provider",
+            "trace-provider",
+        ))
+        .await
+        .expect("probe should run");
+
+    assert!(response.ok);
+    assert_eq!(response.provider, Some("echo".to_owned()));
+    assert_eq!(response.model, "runtime-model");
+    assert_eq!(response.dimension, 4);
+    assert_eq!(response.error_code, None);
+    assert_eq!(
+        service
+            .project_status(RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-status",
+                "trace-status",
+            ))
+            .await
+            .expect("status should load")
+            .runtime
+            .embedding_base_url,
+        Some("https://embeddings.example".to_owned())
+    );
+}
+
+#[tokio::test]
 async fn wait_until_fresh_query_does_not_increment_fresh_index_versions() {
     let service = service_with_memory_store().await;
     service

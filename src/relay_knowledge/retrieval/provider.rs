@@ -334,6 +334,126 @@ mod tests {
         assert_eq!(error.code, "rate_limited");
     }
 
+    #[test]
+    fn classifies_provider_http_status_codes() {
+        for (status, code, retry) in [
+            (400, "invalid_request", ProviderRetryClass::Permanent),
+            (401, "auth_invalid", ProviderRetryClass::Permanent),
+            (403, "auth_invalid", ProviderRetryClass::Permanent),
+            (
+                404,
+                "model_or_endpoint_not_found",
+                ProviderRetryClass::Permanent,
+            ),
+            (408, "network_timeout", ProviderRetryClass::Retryable),
+            (500, "provider_unavailable", ProviderRetryClass::Retryable),
+            (418, "provider_http_error", ProviderRetryClass::Permanent),
+        ] {
+            let error = status_error(status, Some("x".repeat(300)));
+
+            assert_eq!(error.code, code);
+            assert_eq!(error.retry, retry);
+            assert_eq!(error.message.len(), 240);
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_provider_posts_and_parses_embeddings() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("local addr should load");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("request should connect");
+            let mut buffer = vec![0; 2048];
+            let count = stream
+                .readable()
+                .await
+                .and_then(|()| stream.try_read(&mut buffer));
+            let request = String::from_utf8_lossy(&buffer[..count.expect("request should read")]);
+
+            assert!(request.starts_with("POST /v1/embeddings HTTP/1.1"));
+            assert!(request.contains("authorization: Bearer secret"));
+            assert!(request.contains("\"model\":\"text-embedding-3-small\""));
+            stream
+                .writable()
+                .await
+                .expect("stream should become writable");
+            stream
+                .try_write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 34\r\n\r\n{\"data\":[{\"embedding\":[0.1,0.2]}]}",
+                )
+                .expect("response should write");
+        });
+        let provider = OpenAiCompatibleEmbeddingProvider {
+            config: remote_config(
+                format!("http://{addr}/v1"),
+                std::time::Duration::from_secs(5),
+            ),
+            client: reqwest::Client::new(),
+        };
+
+        let vectors = provider
+            .embed(EmbeddingRequest {
+                inputs: vec!["probe".to_owned()],
+                model: "text-embedding-3-small".to_owned(),
+                dimension: 2,
+            })
+            .await
+            .expect("provider response should parse");
+
+        assert_eq!(vectors[0].values, [0.1, 0.2]);
+        server.await.expect("server should finish");
+    }
+
+    #[tokio::test]
+    async fn echo_provider_returns_deterministic_vectors() {
+        let provider = EchoEmbeddingProvider {
+            config: remote_config("http://example.test/v1", std::time::Duration::from_secs(5)),
+        };
+
+        let vectors = provider
+            .embed(EmbeddingRequest {
+                inputs: vec!["abc".to_owned(), "abc".to_owned()],
+                model: "echo".to_owned(),
+                dimension: 4,
+            })
+            .await
+            .expect("echo provider should embed");
+
+        assert_eq!(vectors.len(), 2);
+        assert_eq!(vectors[0], vectors[1]);
+        assert_eq!(vectors[0].values.len(), 4);
+    }
+
+    #[test]
+    fn rejects_invalid_requests_and_response_values() {
+        let empty = validate_request(&EmbeddingRequest {
+            inputs: Vec::new(),
+            model: "model".to_owned(),
+            dimension: 1,
+        })
+        .expect_err("empty inputs should fail");
+        let model = validate_request(&EmbeddingRequest {
+            inputs: vec!["x".to_owned()],
+            model: " ".to_owned(),
+            dimension: 1,
+        })
+        .expect_err("blank model should fail");
+        let dimension = validate_request(&EmbeddingRequest {
+            inputs: vec!["x".to_owned()],
+            model: "model".to_owned(),
+            dimension: 0,
+        })
+        .expect_err("zero dimension should fail");
+        let invalid_value = validate_vector(vec![f64::NAN], 1).expect_err("nan values should fail");
+
+        assert_eq!(empty.code, "empty_embedding_batch");
+        assert_eq!(model.code, "empty_embedding_model");
+        assert_eq!(dimension.code, "invalid_dimension");
+        assert_eq!(invalid_value.code, "invalid_embedding_value");
+    }
+
     #[tokio::test]
     async fn applies_configured_embedding_timeout() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -370,5 +490,19 @@ mod tests {
 
         assert_eq!(error.code, "network_timeout");
         server.abort();
+    }
+
+    fn remote_config(
+        base_url: impl Into<String>,
+        timeout: std::time::Duration,
+    ) -> RemoteEmbeddingConfig {
+        RemoteEmbeddingConfig {
+            provider: EmbeddingProviderKind::OpenAiCompatible,
+            base_url: base_url.into(),
+            api_key: "secret".to_owned(),
+            batch_size: 1,
+            timeout,
+            max_concurrency: 1,
+        }
     }
 }
