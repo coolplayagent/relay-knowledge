@@ -191,6 +191,14 @@ export type ServiceStatusResponse = {
   silent_updates_enabled: boolean;
   service_definition_path: string;
   index_refresh: IndexRefreshDiagnostics;
+  agent_protocols: {
+    mcp_streamable_http_enabled: boolean;
+    mcp_resources_enabled: boolean;
+    mcp_prompts_enabled: boolean;
+    acp_local_adapter_enabled: boolean;
+    legacy_http_enabled: boolean;
+    metrics_enabled: boolean;
+  };
   operator: ServiceOperatorStatus;
   workers: WorkerStatus[];
   proposal_backlog: number;
@@ -216,6 +224,7 @@ export type WebOperationExecuteRequest = {
 export type WebOperationExecuteResponse = {
   metadata: ApiMetadata;
   operation: string;
+  name: string;
   command: string;
   result: unknown;
 };

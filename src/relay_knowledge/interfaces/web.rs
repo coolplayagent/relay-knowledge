@@ -19,14 +19,15 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     api::{
-        ApiError, CodeRepositoryRegisterRequest, ErrorKind, GraphInspectionRequest,
-        HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind,
-        RequestContext,
+        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind,
+        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
+        IngestRequest, InterfaceKind, ProposalDecisionApiRequest, ProposalListApiRequest,
+        RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy, IndexKind,
+        CodeRetrievalRequest, FreshnessPolicy, IndexKind, ProposalState, WorkerKind,
     },
 };
 
@@ -145,6 +146,94 @@ async fn dispatch_operation(
         }
         "service.doctor" | "service.run.streamable_http" => {
             let response = service.service_status(context).await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "provider.embedding.probe" => {
+            let response = service.probe_embedding_provider(context).await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "worker.status" => {
+            let response = service
+                .worker_status(
+                    WorkerStatusRequest {
+                        kind: optional_worker_kind(payload)?,
+                    },
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "worker.run-once" => {
+            let response = service
+                .run_worker_once(
+                    WorkerRunRequest {
+                        kind: optional_worker_kind(payload)?,
+                    },
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "proposal.list" => {
+            let response = service
+                .list_proposals(
+                    ProposalListApiRequest {
+                        state: optional_proposal_state(payload)?,
+                        limit: usize_field(payload, "limit")?,
+                    },
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "proposal.show" => {
+            let response = service
+                .show_proposal(string_field(payload, "proposal_id")?.to_owned(), context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "proposal.accept" => {
+            let response = service
+                .accept_proposal(
+                    string_field(payload, "proposal_id")?.to_owned(),
+                    proposal_decision_request(payload)?,
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "proposal.reject" => {
+            let response = service
+                .decide_proposal_without_commit(
+                    string_field(payload, "proposal_id")?.to_owned(),
+                    ProposalState::Rejected,
+                    proposal_decision_request(payload)?,
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "proposal.supersede" => {
+            let response = service
+                .decide_proposal_without_commit(
+                    string_field(payload, "proposal_id")?.to_owned(),
+                    ProposalState::Superseded,
+                    proposal_decision_request(payload)?,
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "audit.query" => {
+            let response = service
+                .query_audit(
+                    AuditQueryApiRequest {
+                        operation: optional_string_field(payload, "filter_operation"),
+                        limit: usize_field(payload, "limit")?,
+                    },
+                    context,
+                )
+                .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
         "code.repo.register" => {
@@ -463,6 +552,31 @@ fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, WebError> {
     }
 }
 
+fn optional_worker_kind(payload: &Value) -> Result<Option<WorkerKind>, WebError> {
+    optional_string_field(payload, "kind")
+        .map(|kind| {
+            WorkerKind::parse(&kind)
+                .map_err(|_| WebError::bad_request(format!("unsupported worker kind '{kind}'")))
+        })
+        .transpose()
+}
+
+fn optional_proposal_state(payload: &Value) -> Result<Option<ProposalState>, WebError> {
+    optional_string_field(payload, "state")
+        .map(|state| {
+            ProposalState::parse(&state)
+                .map_err(|_| WebError::bad_request(format!("unsupported proposal state '{state}'")))
+        })
+        .transpose()
+}
+
+fn proposal_decision_request(payload: &Value) -> Result<ProposalDecisionApiRequest, WebError> {
+    Ok(ProposalDecisionApiRequest {
+        actor: string_field(payload, "actor")?.to_owned(),
+        reason: optional_string_field(payload, "reason"),
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct ExecuteOperationRequest {
     snapshot: WebOperationSnapshot,
@@ -539,7 +653,9 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
+        api::{IngestEvidenceExtraction, IngestRequest},
         application::RelayKnowledgeService,
+        domain::EvidenceModality,
         env::{EnvironmentConfig, PlatformKind},
     };
 
@@ -796,6 +912,170 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn executes_provider_worker_proposal_and_audit_operations() {
+        let service = test_service("execute-ops").await;
+        service
+            .ingest(
+                IngestRequest {
+                    source_scope: "docs".to_owned(),
+                    evidence: vec![IngestEvidence {
+                        id: Some("ev-worker".to_owned()),
+                        source_path: None,
+                        span: None,
+                        confidence: None,
+                        status: None,
+                        content: "Worker proposal source evidence".to_owned(),
+                        entity_labels: Vec::new(),
+                        extraction: Some(IngestEvidenceExtraction {
+                            modality: EvidenceModality::TextSpan,
+                            source_uri: None,
+                            source_hash: None,
+                            media_hash: None,
+                            extractor: Some("web-test".to_owned()),
+                            extractor_version: Some("1".to_owned()),
+                            observed_at: None,
+                            parent_evidence_id: None,
+                            layout_region: None,
+                            embedding_model: None,
+                            embedding_dimension: None,
+                            diagnostic: None,
+                        }),
+                    }],
+                    relations: Vec::new(),
+                    claims: Vec::new(),
+                    events: Vec::new(),
+                },
+                RequestContext::for_interface(InterfaceKind::Web),
+            )
+            .await
+            .expect("ingest should queue worker tasks");
+
+        let provider = execute_json(
+            service.clone(),
+            json!({
+                "snapshot": {
+                    "name": "Probe embedding provider",
+                    "command": "relay-knowledge provider probe --format json",
+                    "payload": {
+                        "operation": "provider.embedding.probe",
+                        "input": "probe"
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(provider["operation"], "provider.embedding.probe");
+        assert_eq!(provider["result"]["ok"], false);
+        assert_eq!(
+            provider["result"]["error_code"],
+            "remote_embedding_not_configured"
+        );
+
+        let worker = execute_json(
+            service.clone(),
+            json!({
+                "snapshot": {
+                    "name": "Worker run-once",
+                    "command": "relay-knowledge worker run-once --kind embedding --format json",
+                    "payload": {
+                        "operation": "worker.run-once",
+                        "kind": "embedding"
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        let proposal_id = worker["result"]["proposals"][0]["proposal_id"]
+            .as_str()
+            .expect("proposal id should be present")
+            .to_owned();
+
+        let proposals = execute_json(
+            service.clone(),
+            json!({
+                "snapshot": {
+                    "name": "Proposal list",
+                    "command": "relay-knowledge proposal list --state proposed --format json",
+                    "payload": {
+                        "operation": "proposal.list",
+                        "state": "proposed",
+                        "limit": 10
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(
+            proposals["result"]["proposals"][0]["proposal_id"],
+            proposal_id
+        );
+
+        let shown = execute_json(
+            service.clone(),
+            json!({
+                "snapshot": {
+                    "name": "Proposal show",
+                    "command": format!("relay-knowledge proposal show {proposal_id} --format json"),
+                    "payload": {
+                        "operation": "proposal.show",
+                        "proposal_id": proposal_id
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(shown["result"]["proposal"]["proposal_id"], proposal_id);
+
+        let rejected = execute_json(
+            service.clone(),
+            json!({
+                "snapshot": {
+                    "name": "Proposal reject",
+                    "command": "relay-knowledge proposal reject --by web",
+                    "payload": {
+                        "operation": "proposal.reject",
+                        "proposal_id": proposal_id,
+                        "actor": "web-reviewer",
+                        "reason": "covered by web endpoint test"
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(rejected["result"]["proposal"]["state"], "rejected");
+
+        let audit = execute_json(
+            service,
+            json!({
+                "snapshot": {
+                    "name": "Audit query",
+                    "command": "relay-knowledge audit query --operation worker.run_once --format json",
+                    "payload": {
+                        "operation": "audit.query",
+                        "filter_operation": "worker.run_once",
+                        "limit": 10
+                    }
+                }
+            }),
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(audit["operation"], "audit.query");
+        assert!(
+            audit["result"]["events"]
+                .as_array()
+                .expect("events should be an array")
+                .iter()
+                .any(|event| event["operation"] == "worker.run_once")
+        );
+    }
+
+    #[tokio::test]
     async fn web_operation_endpoint_maps_bad_payloads_to_http_errors() {
         let service = test_service("execute-errors").await;
         let missing_query = execute_json(
@@ -835,7 +1115,7 @@ mod tests {
         assert_eq!(bad_kind["error"], "unsupported index kind 'unknown'");
 
         let missing_repository = execute_json(
-            service,
+            service.clone(),
             json!({
                 "snapshot": {
                     "name": "Code status",
@@ -854,6 +1134,23 @@ mod tests {
             missing_repository["error"],
             "code repository 'missing' is not registered"
         );
+
+        let bad_worker = execute_json(
+            service,
+            json!({
+                "snapshot": {
+                    "name": "Worker status",
+                    "command": "relay-knowledge worker status --kind unknown",
+                    "payload": {
+                        "operation": "worker.status",
+                        "kind": "unknown"
+                    }
+                }
+            }),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        assert_eq!(bad_worker["error"], "unsupported worker kind 'unknown'");
     }
 
     #[tokio::test]

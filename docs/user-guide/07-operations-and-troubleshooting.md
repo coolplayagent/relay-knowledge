@@ -87,10 +87,14 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 Web 和浏览器集成测试:
 
 ```bash
+npm --prefix web ci
+npm --prefix web run build
 ./build.sh
 uv sync --extra dev --no-default-groups
 uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
+
+Web Operations 或 `/api/web/operations/execute` 变更时，PR 至少要覆盖 Rust router test、TypeScript build 和 Playwright 关键路径，确认同源执行结果来自后端统一 API，而不是前端模拟。
 
 只修改文档时，至少检查新增链接和 Markdown 文件路径，并在 PR 中说明未运行代码测试的原因。

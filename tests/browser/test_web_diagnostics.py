@@ -70,6 +70,11 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_label("Base")).to_be_visible()
         expect(page.locator(".command-preview")).to_contain_text("repo impact core")
 
+        page.get_by_role("tab", name="Workers").click()
+        page.get_by_test_id("run-operation").click()
+        expect(page.locator(".operation-result")).to_contain_text("Worker status")
+        expect(page.locator(".result-preview")).to_contain_text("worker.status")
+
         page.set_viewport_size({"width": 390, "height": 844})
         expect(page.locator("aside nav a")).to_have_count(6)
         expect(page.get_by_text("Runtime budgets")).to_be_visible()
@@ -120,6 +125,7 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
                         "stale": False,
                     },
                     "operation": payload["operation"],
+                    "name": request["snapshot"]["name"],
                     "command": request["snapshot"]["command"],
                     "result": {
                         "accepted": True,
