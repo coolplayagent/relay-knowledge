@@ -162,6 +162,7 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
     .expect("proposal accept should parse");
     let audit = CliCommand::parse(["audit", "query", "--operation", "worker.run_once"])
         .expect("audit command should parse");
+    let provider = CliCommand::parse(["provider", "probe"]).expect("provider command should parse");
     let service_plan =
         CliCommand::parse(["service", "plan", "uninstall"]).expect("service plan should parse");
     let operator = CliCommand::parse(["service", "operator", "resume"])
@@ -195,6 +196,7 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
             limit: 100,
         }
     );
+    assert_eq!(provider.action, CliAction::ProviderProbe);
     assert_eq!(
         service_plan.action,
         CliAction::ServicePlan {
@@ -494,6 +496,17 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
     )
     .await
     .expect("service status should run");
+    let provider = run_with_service(
+        &service,
+        CliCommand {
+            action: CliAction::ProviderProbe,
+            format: OutputFormat::Text,
+            help: false,
+        },
+        context("provider"),
+    )
+    .await
+    .expect("provider probe should run");
 
     assert_eq!(
         graph,
@@ -505,6 +518,10 @@ async fn run_with_service_covers_ingest_query_and_diagnostics() {
         "healthy=true repo_code_files=0 repo_code_symbols=0\n"
     );
     assert_eq!(service_status, "service=relay-knowledge mode=disabled\n");
+    assert_eq!(
+        provider,
+        "provider=none ok=false model=relay-local-hash-ann-v1 dimension=16\n"
+    );
 }
 
 #[tokio::test]

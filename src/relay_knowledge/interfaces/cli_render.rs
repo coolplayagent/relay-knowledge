@@ -103,6 +103,13 @@ where
             "audit_events={}",
             value["events"].as_array().map_or(0, Vec::len)
         ),
+        "provider.embedding.probe" => format!(
+            "provider={} ok={} model={} dimension={}",
+            value["provider"].as_str().unwrap_or("none"),
+            value["ok"].as_bool().unwrap_or(false),
+            value["model"].as_str().unwrap_or("unknown"),
+            value["dimension"].as_u64().unwrap_or(0)
+        ),
         "service.health" => format!(
             "healthy={} repo_code_files={} repo_code_symbols={}",
             value["healthy"].as_bool().unwrap_or(false),

@@ -80,6 +80,7 @@ impl EmbeddingProvider for OpenAiCompatibleEmbeddingProvider {
                 .client
                 .post(url)
                 .bearer_auth(&self.config.api_key)
+                .timeout(self.config.timeout)
                 .json(&OpenAiEmbeddingRequest {
                     model: &request.model,
                     input: &request.inputs,
@@ -331,5 +332,43 @@ mod tests {
 
         assert_eq!(error.retry, ProviderRetryClass::Retryable);
         assert_eq!(error.code, "rate_limited");
+    }
+
+    #[tokio::test]
+    async fn applies_configured_embedding_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("local addr should load");
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.expect("request should connect");
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        });
+        let provider = OpenAiCompatibleEmbeddingProvider {
+            config: RemoteEmbeddingConfig {
+                provider: EmbeddingProviderKind::OpenAiCompatible,
+                base_url: format!("http://{addr}/v1"),
+                api_key: "secret".to_owned(),
+                batch_size: 1,
+                timeout: std::time::Duration::from_millis(20),
+                max_concurrency: 1,
+            },
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .expect("client should build"),
+        };
+
+        let error = provider
+            .embed(EmbeddingRequest {
+                inputs: vec!["probe".to_owned()],
+                model: "text-embedding-3-small".to_owned(),
+                dimension: 3,
+            })
+            .await
+            .expect_err("provider request should use embedding timeout");
+
+        assert_eq!(error.code, "network_timeout");
+        server.abort();
     }
 }

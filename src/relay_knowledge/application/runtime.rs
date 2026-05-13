@@ -5,8 +5,9 @@ use crate::{
     domain::WorkerKind,
     env::{
         EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_EMBEDDING_API_KEY,
-        RELAY_KNOWLEDGE_EMBEDDING_BASE_URL, RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL,
-        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
+        RELAY_KNOWLEDGE_EMBEDDING_BASE_URL, RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+        RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        RetrievalEnvOverrides,
     },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     paths::{PathError, RuntimePaths},
@@ -280,6 +281,11 @@ impl Error for RetrievalRuntimeConfigError {}
 fn retrieval_config_from_environment(
     overrides: &RetrievalEnvOverrides,
 ) -> Result<ReadModelBackendConfig, RetrievalRuntimeConfigError> {
+    let semantic_mode = parse_backend_mode(overrides.semantic_backend.as_deref())?;
+    let vector_mode = parse_backend_mode(overrides.vector_backend.as_deref())?;
+    let remote_required = semantic_mode == ReadModelBackendMode::External
+        || vector_mode == ReadModelBackendMode::External;
+    require_remote_model_metadata(overrides, remote_required)?;
     let dimension = match overrides.embedding_dimension {
         Some(value) => u32::try_from(value)
             .map_err(|_| RetrievalRuntimeConfigError::DimensionTooLarge(value))?,
@@ -301,13 +307,7 @@ fn retrieval_config_from_environment(
         "relay-local-image-hash-v1",
     )?;
 
-    let semantic_mode = parse_backend_mode(overrides.semantic_backend.as_deref())?;
-    let vector_mode = parse_backend_mode(overrides.vector_backend.as_deref())?;
-    let remote_embedding = remote_embedding_config_from_environment(
-        overrides,
-        semantic_mode == ReadModelBackendMode::External
-            || vector_mode == ReadModelBackendMode::External,
-    )?;
+    let remote_embedding = remote_embedding_config_from_environment(overrides, remote_required)?;
 
     Ok(ReadModelBackendConfig {
         semantic_mode,
@@ -326,6 +326,27 @@ fn retrieval_config_from_environment(
         },
         remote_embedding,
     })
+}
+
+fn require_remote_model_metadata(
+    overrides: &RetrievalEnvOverrides,
+    required: bool,
+) -> Result<(), RetrievalRuntimeConfigError> {
+    if !required {
+        return Ok(());
+    }
+    if overrides.text_embedding_model.is_none() {
+        return Err(RetrievalRuntimeConfigError::MissingRemoteValue(
+            RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
+        ));
+    }
+    if overrides.embedding_dimension.is_none() {
+        return Err(RetrievalRuntimeConfigError::MissingRemoteValue(
+            RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
+        ));
+    }
+
+    Ok(())
 }
 
 fn remote_embedding_config_from_environment(
@@ -572,6 +593,33 @@ mod tests {
         assert_eq!(remote.batch_size, 16);
         assert_eq!(remote.timeout, Duration::from_millis(9000));
         assert_eq!(remote.max_concurrency, 2);
+    }
+
+    #[tokio::test]
+    async fn rejects_external_backend_without_remote_model_metadata() {
+        let environment = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [
+                ("RELAY_KNOWLEDGE_VECTOR_BACKEND", "external"),
+                (
+                    "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+                    "https://embeddings.example/v1",
+                ),
+                ("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "secret-key"),
+            ],
+        )
+        .expect("environment should parse");
+
+        let error = RuntimeConfiguration::from_environment(&environment)
+            .await
+            .expect_err("external backend should require explicit model metadata");
+
+        assert!(matches!(
+            error,
+            RuntimeConfigurationError::Retrieval(RetrievalRuntimeConfigError::MissingRemoteValue(
+                RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL
+            ))
+        ));
     }
 
     #[tokio::test]

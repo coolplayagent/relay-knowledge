@@ -211,11 +211,14 @@ fn redacted_url(value: &str) -> String {
         return trimmed.to_owned();
     };
     let authority = rest.split('/').next().unwrap_or(rest);
-    if authority.is_empty() {
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if host.is_empty() {
         return scheme.to_owned();
     }
 
-    format!("{scheme}://{authority}")
+    format!("{scheme}://{host}")
 }
 
 /// Builds semantic/vector backend status from configured read models and index cursors.
@@ -452,5 +455,19 @@ mod tests {
 
         assert_eq!(statuses[0].state, RetrievalBackendState::Degraded);
         assert_eq!(statuses[1].state, RetrievalBackendState::Unavailable);
+    }
+
+    #[test]
+    fn redacted_remote_url_strips_userinfo_and_path() {
+        let config = RemoteEmbeddingConfig {
+            provider: EmbeddingProviderKind::OpenAiCompatible,
+            base_url: "https://user:pass@embeddings.example/v1".to_owned(),
+            api_key: "secret".to_owned(),
+            batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+            timeout: DEFAULT_EMBEDDING_TIMEOUT,
+            max_concurrency: DEFAULT_EMBEDDING_MAX_CONCURRENCY,
+        };
+
+        assert_eq!(config.redacted_base_url(), "https://embeddings.example");
     }
 }

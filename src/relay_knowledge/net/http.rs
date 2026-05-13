@@ -127,12 +127,13 @@ pub fn outbound_json_client(config: &HttpConfig) -> Result<reqwest::Client, Outb
         .timeout(config.request_timeout)
         .danger_accept_invalid_certs(!config.proxy.ssl_verify);
     if let Some(proxy_url) = &config.proxy.proxy {
-        builder =
-            builder.proxy(
-                reqwest::Proxy::all(proxy_url).map_err(|error| OutboundClientError {
-                    message: error.to_string(),
-                })?,
-            );
+        let no_proxy = reqwest::NoProxy::from_string(&config.proxy.no_proxy_rules.join(","));
+        let proxy = reqwest::Proxy::all(proxy_url)
+            .map_err(|error| OutboundClientError {
+                message: error.to_string(),
+            })?
+            .no_proxy(no_proxy);
+        builder = builder.proxy(proxy);
     }
 
     builder.build().map_err(|error| OutboundClientError {
@@ -140,7 +141,6 @@ pub fn outbound_json_client(config: &HttpConfig) -> Result<reqwest::Client, Outb
     })
 }
 
-/// Error raised while creating an outbound HTTP client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboundClientError {
     pub message: String,
