@@ -38,6 +38,10 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             PRIMARY KEY (kind, source_scope, modality)
         );
 
+        CREATE TABLE IF NOT EXISTS index_scope_manifest (
+            source_scope TEXT PRIMARY KEY
+        );
+
         CREATE TABLE IF NOT EXISTS index_refresh_tasks (
             task_id TEXT PRIMARY KEY,
             kind TEXT NOT NULL,
@@ -92,6 +96,20 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             params![kind.as_str()],
         )?;
     }
+    connection.execute(
+        "
+        INSERT OR IGNORE INTO index_scope_manifest (source_scope)
+        SELECT DISTINCT source_scope FROM evidence
+        ",
+        [],
+    )?;
+    connection.execute(
+        "
+        INSERT OR IGNORE INTO index_scope_manifest (source_scope)
+        SELECT DISTINCT source_scope FROM index_cursors
+        ",
+        [],
+    )?;
 
     Ok(())
 }
@@ -101,6 +119,10 @@ pub(super) fn mark_mutation_cursors_stale(
     scopes: &[String],
 ) -> Result<(), StorageError> {
     for scope in scopes {
+        transaction.execute(
+            "INSERT OR IGNORE INTO index_scope_manifest (source_scope) VALUES (?1)",
+            params![scope],
+        )?;
         for kind in IndexKind::ALL {
             transaction.execute(
                 "
@@ -151,13 +173,16 @@ pub(super) fn index_statuses(connection: &Connection) -> Result<Vec<IndexStatus>
         .into_iter()
         .map(
             |(kind, index_version, indexed_graph_version, state, last_error)| {
-                Ok(IndexStatus {
+                let mut status = IndexStatus {
                     kind: parse_index_kind(&kind)?,
                     index_version,
                     indexed_graph_version: GraphVersion::new(indexed_graph_version),
                     state: parse_index_state(&state)?,
                     last_error,
-                })
+                };
+                apply_cursor_integrity(connection, &mut status)?;
+
+                Ok(status)
             },
         )
         .collect::<Result<Vec<_>, StorageError>>()?;
@@ -357,6 +382,10 @@ fn ensure_cursor(
     state: IndexState,
 ) -> Result<(), StorageError> {
     connection.execute(
+        "INSERT OR IGNORE INTO index_scope_manifest (source_scope) VALUES (?1)",
+        params![scope],
+    )?;
+    connection.execute(
         "
         INSERT OR IGNORE INTO index_cursors (
             kind, source_scope, modality, index_version,
@@ -439,6 +468,7 @@ fn recompute_aggregate_status(
     let failed_error = first_failed_cursor_error(connection, kind)?;
     let has_unfinished = unfinished_task_for_kind_count(connection, kind)? > 0;
     let has_stale_cursor = stale_cursor_count(connection, kind)? > 0;
+    let has_missing_cursor = !missing_cursor_scopes(connection, kind)?.is_empty();
     let current = read_index_status(connection, kind)?.ok_or_else(|| {
         StorageError::InvalidInput(format!(
             "index status row for '{}' is missing",
@@ -452,7 +482,7 @@ fn recompute_aggregate_status(
             current.indexed_graph_version,
             Some(error),
         )
-    } else if has_unfinished || has_stale_cursor {
+    } else if has_unfinished || has_stale_cursor || has_missing_cursor {
         (IndexState::Stale, current.indexed_graph_version, None)
     } else {
         (IndexState::Fresh, graph_version, None)
@@ -516,6 +546,45 @@ fn stale_cursor_count(connection: &Connection, kind: IndexKind) -> Result<usize,
             |row| row.get::<_, usize>(0),
         )
         .map_err(StorageError::from)
+}
+
+pub(super) fn missing_cursor_scopes(
+    connection: &Connection,
+    kind: IndexKind,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT manifest.source_scope
+        FROM index_scope_manifest manifest
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM index_cursors cursor
+            WHERE cursor.kind = ?1
+              AND cursor.source_scope = manifest.source_scope
+              AND cursor.modality = ?2
+        )
+        ORDER BY manifest.source_scope ASC
+        ",
+    )?;
+    let rows = statement.query_map(params![kind.as_str(), TEXT_MODALITY.as_str()], |row| {
+        row.get::<_, String>(0)
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn apply_cursor_integrity(
+    connection: &Connection,
+    status: &mut IndexStatus,
+) -> Result<(), StorageError> {
+    let missing = missing_cursor_scopes(connection, status.kind)?.len();
+    if missing > 0 && status.state == IndexState::Fresh {
+        status.state = IndexState::Stale;
+        status.last_error = Some(format!("{missing} scoped index cursor(s) missing"));
+    }
+
+    Ok(())
 }
 
 fn unfinished_task_count(connection: &Connection) -> Result<usize, StorageError> {
