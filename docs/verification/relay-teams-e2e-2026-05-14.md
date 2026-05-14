@@ -134,9 +134,19 @@ Passed against the same `127.0.0.1:8897` service:
 
 ## Findings
 
+Follow-up performance verification in
+[`docs/benchmarks/relay-teams-baseline-2026-05-14.md`](../benchmarks/relay-teams-baseline-2026-05-14.md)
+re-tested the live Rust-served Web page after full-repository indexing. The
+dashboard displayed repository code totals and did not show the earlier
+`Code graph empty` state.
+
 ### RK-E2E-2026-05-14-1: Web Dashboard Shows Code Graph Empty After Successful Repository Index
 
 Severity: Medium
+
+Status: not reproduced in the follow-up benchmark. Keep this finding as
+historical evidence for the earlier filtered-scope run, but use the benchmark
+baseline for current performance numbers.
 
 After indexing `/opt/workspace/relay-teams`, `/api/health` reported
 `repository_code_totals.indexed_file_count=738`,

@@ -15,10 +15,10 @@ use crate::{
         ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
-        AuditStatus, ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics,
-        IndexKind, ProposalState, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus,
-        RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
-        SourceScope,
+        AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, ContextGraphPath,
+        ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind, ProposalState,
+        RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
+        RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
     observability::ObservabilityRuntime,
@@ -32,8 +32,8 @@ use crate::{
         read_model_backend_statuses,
     },
     storage::{
-        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore,
-        StorageError,
+        GraphInspection, GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest,
+        SqliteGraphStore, StorageError,
     },
 };
 
@@ -402,11 +402,14 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<GraphInspectionResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
-        let graph = store.inspect_graph().await.map_err(storage_api_error)?;
         let repository_code_totals = store
             .code_repository_totals()
             .await
             .map_err(storage_api_error)?;
+        let graph = graph_with_repository_code_totals(
+            store.inspect_graph().await.map_err(storage_api_error)?,
+            &repository_code_totals,
+        );
 
         Ok(GraphInspectionResponse {
             metadata: ApiMetadata::graph_only(&context, graph.graph_version),
@@ -446,11 +449,14 @@ impl RelayKnowledgeService {
     /// Returns service and data health for diagnostics.
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
-        let graph = store.inspect_graph().await.map_err(storage_api_error)?;
         let repository_code_totals = store
             .code_repository_totals()
             .await
             .map_err(storage_api_error)?;
+        let graph = graph_with_repository_code_totals(
+            store.inspect_graph().await.map_err(storage_api_error)?,
+            &repository_code_totals,
+        );
         reconcile_index_refreshes(&store, graph.graph_version, &self.runtime.retrieval).await?;
         let outcome = filter_outcome_to_read_models(
             index_refresh_outcome(&store).await?,
@@ -774,6 +780,42 @@ fn retrieval_context_bytes(
                 .map(serialized_context_bytes)
                 .sum::<usize>(),
         )
+}
+
+fn graph_with_repository_code_totals(
+    mut graph: GraphInspection,
+    repository_totals: &CodeRepositoryTotals,
+) -> GraphInspection {
+    graph.code_file_count = graph
+        .code_file_count
+        .saturating_add(repository_totals.indexed_file_count);
+    graph.code_symbol_count = graph
+        .code_symbol_count
+        .saturating_add(repository_totals.symbol_count);
+    graph.code_reference_count = graph
+        .code_reference_count
+        .saturating_add(repository_totals.reference_count);
+    graph.code_chunk_count = graph
+        .code_chunk_count
+        .saturating_add(repository_totals.chunk_count);
+    graph.code_parse_status_counts = add_parse_status_counts(
+        graph.code_parse_status_counts,
+        repository_totals.parse_status_counts,
+    );
+
+    graph
+}
+
+fn add_parse_status_counts(
+    left: CodeParseStatusCounts,
+    right: CodeParseStatusCounts,
+) -> CodeParseStatusCounts {
+    CodeParseStatusCounts {
+        parsed: left.parsed.saturating_add(right.parsed),
+        partial: left.partial.saturating_add(right.partial),
+        text_only: left.text_only.saturating_add(right.text_only),
+        failed: left.failed.saturating_add(right.failed),
+    }
 }
 
 fn serialized_context_bytes<T: Serialize + ?Sized>(value: &T) -> usize {

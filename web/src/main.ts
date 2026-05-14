@@ -314,7 +314,8 @@ function codeRepositoryTotals(health: HealthResponse): HealthResponse["repositor
       symbol_count: health.graph.code_symbol_count,
       reference_count: health.graph.code_reference_count,
       chunk_count: health.graph.code_chunk_count,
-      degraded_file_count: health.graph.code_parse_status_counts.failed
+      degraded_file_count: health.graph.code_parse_status_counts.failed,
+      parse_status_counts: health.graph.code_parse_status_counts
     }
   );
 }

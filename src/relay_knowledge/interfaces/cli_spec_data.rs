@@ -333,7 +333,9 @@ fn repo_register() -> CliCommandSpec {
         &[
             "relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json",
         ],
-        &["Stores repository registration metadata; indexing is a separate command."],
+        &[
+            "Stores repository registration metadata; indexing is a separate command. Registering the same repository root with another alias preserves existing aliases for that repository id."
+        ],
     )
 }
 
@@ -442,7 +444,9 @@ fn repo_update() -> CliCommandSpec {
             ),
         ],
         &["relay-knowledge repo update core --base main --head HEAD --format json"],
-        &[],
+        &[
+            "`--base` may refer to any persisted matching indexed scope for the repository and filters; it does not need to be the currently active repository status."
+        ],
     )
 }
 

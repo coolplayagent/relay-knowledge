@@ -26,6 +26,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             degraded_reason TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_aliases (
+            alias TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS code_repository_scopes (
             source_scope TEXT PRIMARY KEY,
             repository_id TEXT NOT NULL,
@@ -202,7 +208,27 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         ",
     )?;
     ensure_code_repository_compat_columns(connection)?;
+    backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
+
+    Ok(())
+}
+
+fn backfill_code_repository_aliases(connection: &Connection) -> Result<(), StorageError> {
+    if !table_columns(connection, "code_repositories")?
+        .iter()
+        .any(|column| column == "alias")
+    {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT OR IGNORE INTO code_repository_aliases (alias, repository_id)
+        SELECT alias, repository_id
+        FROM code_repositories
+        ",
+        [],
+    )?;
 
     Ok(())
 }

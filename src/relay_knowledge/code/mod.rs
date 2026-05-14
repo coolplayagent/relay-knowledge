@@ -278,6 +278,7 @@ fn build_incremental_snapshot(
         changes.len(),
         0,
     );
+    build.base_resolved_commit_sha = Some(base_commit.clone());
 
     for change in changes {
         match change {
@@ -468,6 +469,7 @@ fn build_worktree_overlay_snapshot(
         changes.len(),
         skipped_unchanged_count,
     );
+    build.base_resolved_commit_sha = Some(commit);
     build.deleted_paths = deleted_paths;
 
     for (path, bytes) in files_to_parse {
@@ -590,6 +592,7 @@ fn parse_changed_path(
 pub(super) struct SnapshotBuild {
     pub(super) repository_id: String,
     pub(super) source_scope: String,
+    base_resolved_commit_sha: Option<String>,
     commit: String,
     tree_hash: String,
     path_filters: Vec<String>,
@@ -656,6 +659,7 @@ impl SnapshotBuild {
         Self {
             repository_id: registration.repository_id.clone(),
             source_scope,
+            base_resolved_commit_sha: None,
             commit,
             tree_hash,
             path_filters,
@@ -726,6 +730,7 @@ impl SnapshotBuild {
         CodeIndexSnapshot {
             repository_id: self.repository_id,
             source_scope: self.source_scope,
+            base_resolved_commit_sha: self.base_resolved_commit_sha,
             resolved_commit_sha: self.commit,
             tree_hash: self.tree_hash,
             path_filters: self.path_filters,

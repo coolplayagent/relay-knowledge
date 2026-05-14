@@ -172,9 +172,9 @@ pub fn retry_policy_v2() -> u32 {
 }
 
 #[tokio::test]
-async fn incremental_index_rejects_base_that_is_not_current_snapshot() {
+async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
     let repo = FixtureRepo::create("code-incremental-base");
-    repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 2 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let initial = repo.git_text(["rev-parse", "HEAD"]);
@@ -223,7 +223,7 @@ async fn incremental_index_rejects_base_that_is_not_current_snapshot() {
     repo.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "return to zero"]);
-    let error = service
+    let updated_from_persisted_base = service
         .index_code_repository(
             CodeIndexRequest {
                 repository: selector("fixture", "HEAD"),
@@ -231,12 +231,153 @@ async fn incremental_index_rejects_base_that_is_not_current_snapshot() {
                     .expect("incremental mode should validate"),
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
-            context("index-stale-base"),
+            context("index-persisted-base"),
         )
         .await
-        .expect_err("stale incremental base should be rejected");
+        .expect("persisted base scope should seed incremental update");
 
-    assert!(error.message.contains("incremental base ref"));
+    assert_eq!(updated_from_persisted_base.summary.changed_path_count, 1);
+    assert_eq!(
+        updated_from_persisted_base.summary.progress.blob_read_count,
+        1
+    );
+    assert!(
+        query(&service, "value", CodeQueryKind::Definition)
+            .await
+            .results
+            .iter()
+            .any(|hit| hit.path == "src/lib.rs")
+    );
+}
+
+#[tokio::test]
+async fn duplicate_root_registration_preserves_existing_aliases() {
+    let repo = FixtureRepo::create("code-aliases");
+    repo.write("src/lib.rs", "pub fn aliased() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-primary-alias").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-primary-alias"),
+        )
+        .await
+        .expect("repository should index under primary alias");
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture-web".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-secondary-alias"),
+        )
+        .await
+        .expect("same root should accept an additional alias");
+
+    let primary = service
+        .code_repository_status(selector("fixture", "HEAD"), context("status-primary-alias"))
+        .await
+        .expect("primary alias should still resolve");
+    let secondary = service
+        .code_repository_status(
+            selector("fixture-web", "HEAD"),
+            context("status-secondary-alias"),
+        )
+        .await
+        .expect("secondary alias should resolve");
+
+    assert_eq!(primary.status.repository_id, secondary.status.repository_id);
+    assert_eq!(primary.status.alias, "fixture");
+    assert_eq!(secondary.status.alias, "fixture-web");
+    assert_eq!(primary.status.indexed_file_count, 1);
+    assert_eq!(secondary.status.indexed_file_count, 1);
+}
+
+#[tokio::test]
+async fn alias_collision_across_repositories_is_rejected() {
+    let first = FixtureRepo::create("code-alias-collision-first");
+    first.write("src/lib.rs", "pub fn first_alias() -> u32 { 1 }\n");
+    first.git(["add", "."]);
+    first.git(["commit", "-m", "initial"]);
+    let second = FixtureRepo::create("code-alias-collision-second");
+    second.write("src/lib.rs", "pub fn second_alias() -> u32 { 2 }\n");
+    second.git(["add", "."]);
+    second.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: first.path.display().to_string(),
+                alias: "shared".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-shared-first"),
+        )
+        .await
+        .expect("first repository should register");
+    let error = service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: second.path.display().to_string(),
+                alias: "shared".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-shared-second"),
+        )
+        .await
+        .expect_err("same alias should not point at a different repository id");
+
+    assert!(error.message.contains("already registered"));
+}
+
+#[tokio::test]
+async fn health_graph_code_counters_include_repository_totals() {
+    let repo = FixtureRepo::create("code-health-totals");
+    repo.write("src/lib.rs", "pub fn health_total() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-health-totals").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-health-totals"),
+        )
+        .await
+        .expect("repository should index");
+
+    let health = service
+        .health(context("health-code-totals"))
+        .await
+        .expect("health should report code totals");
+
+    assert_eq!(health.repository_code_totals.indexed_file_count, 1);
+    assert_eq!(
+        health.graph.code_file_count,
+        health.repository_code_totals.indexed_file_count
+    );
+    assert_eq!(
+        health.graph.code_symbol_count,
+        health.repository_code_totals.symbol_count
+    );
+    assert_eq!(health.graph.code_parse_status_counts.parsed, 1);
 }
 
 #[tokio::test]

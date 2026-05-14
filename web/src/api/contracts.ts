@@ -121,6 +121,12 @@ export type HealthResponse = {
     reference_count: number;
     chunk_count: number;
     degraded_file_count: number;
+    parse_status_counts: {
+      parsed: number;
+      partial: number;
+      text_only: number;
+      failed: number;
+    };
   };
   indexes: IndexStatus[];
   index_cursors: IndexCursor[];

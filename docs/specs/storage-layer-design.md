@@ -330,13 +330,15 @@ CREATE TABLE code_chunk_symbols (...);
 ```
 
 当前 repository index 使用 `code_repositories` 保存注册信息和最近索引状态，使用
+`code_repository_aliases` 保存可解析到同一 repository id 的持久 alias，使用
 `code_repository_scopes` 保存每个 Git snapshot scope 的 commit、tree hash、有效
 path/language filters、计数和 degraded state。文件、符号、引用、import、call、chunk、
 diagnostic 和 tombstone 表都带 `source_scope`，查询按已解析 scope 过滤。对同一
 `source_scope + path` 的新解析结果在事务内替换；增量索引切到新 tree scope 时会先复制
-上一 scope 的未变行，再替换 changed/deleted path，因此新 scope 完整保留未变文件，旧
-scope 仍可显式查询。启动时如发现早期实验性 `code_*` 表缺少 v1 必需列，SQLite adapter
-会先把整组旧表重命名为 `*_legacy_N`，再创建当前 v1 表，避免旧本地状态阻塞服务启动。
+匹配 base commit/filter 的 persisted scope 的未变行，再替换 changed/deleted path，因此
+新 scope 完整保留未变文件，旧 scope 仍可显式查询。启动时如发现早期实验性 `code_*` 表
+缺少 v1 必需列，SQLite adapter 会先把整组旧表重命名为 `*_legacy_N`，再创建当前 v1 表，
+避免旧本地状态阻塞服务启动。
 
 ### 4.3 版本和变更日志
 

@@ -9,6 +9,7 @@ pub(super) fn upsert_repository(
     connection: &mut Connection,
     registration: CodeRepositoryRegistration,
 ) -> Result<CodeRepositoryStatus, StorageError> {
+    reject_alias_collision(connection, &registration)?;
     connection.execute(
         "
         INSERT INTO code_repositories (
@@ -18,7 +19,6 @@ pub(super) fn upsert_repository(
         )
         VALUES (?1, ?2, ?3, ?4, ?5, 'registered', 0, 0, 0, 0, 1, NULL)
         ON CONFLICT(repository_id) DO UPDATE SET
-            alias = excluded.alias,
             root_path = excluded.root_path,
             path_filters_json = excluded.path_filters_json,
             language_filters_json = excluded.language_filters_json,
@@ -34,10 +34,42 @@ pub(super) fn upsert_repository(
                 .map_err(|error| StorageError::InvalidInput(error.to_string()))?,
         ],
     )?;
+    connection.execute(
+        "
+        INSERT OR IGNORE INTO code_repository_aliases (alias, repository_id)
+        VALUES (?1, ?2)
+        ",
+        params![registration.alias, registration.repository_id],
+    )?;
 
-    repository_status(connection, &registration.repository_id)?.ok_or_else(|| {
+    repository_status(connection, &registration.alias)?.ok_or_else(|| {
         StorageError::InvalidInput("registered code repository was not persisted".to_owned())
     })
+}
+
+fn reject_alias_collision(
+    connection: &Connection,
+    registration: &CodeRepositoryRegistration,
+) -> Result<(), StorageError> {
+    let existing = connection
+        .query_row(
+            "
+            SELECT repository_id
+            FROM code_repository_aliases
+            WHERE alias = ?1
+            ",
+            params![registration.alias],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if existing.is_some_and(|repository_id| repository_id != registration.repository_id) {
+        return Err(StorageError::InvalidInput(format!(
+            "code repository alias '{}' is already registered for a different repository",
+            registration.alias
+        )));
+    }
+
+    Ok(())
 }
 
 pub(super) fn repository_status(
@@ -176,12 +208,13 @@ impl RepositoryLookupColumn {
             }
             Self::Alias => {
                 "
-                SELECT repository_id, alias, root_path, path_filters_json, language_filters_json,
-                       last_indexed_scope_id, last_indexed_commit, tree_hash,
-                       state, indexed_file_count, symbol_count, reference_count, chunk_count,
-                       stale, degraded_reason
-                FROM code_repositories
-                WHERE alias = ?1
+                SELECT r.repository_id, a.alias, r.root_path, r.path_filters_json, r.language_filters_json,
+                       r.last_indexed_scope_id, r.last_indexed_commit, r.tree_hash,
+                       r.state, r.indexed_file_count, r.symbol_count, r.reference_count, r.chunk_count,
+                       r.stale, r.degraded_reason
+                FROM code_repository_aliases a
+                JOIN code_repositories r ON r.repository_id = a.repository_id
+                WHERE a.alias = ?1
                 "
             }
         }

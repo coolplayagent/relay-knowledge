@@ -7,19 +7,19 @@ Test repository: `/opt/workspace/relay-teams`
 - Branch: `improve-memory-skill-draft-status-ui`
 - HEAD: `fa3c0ddc9d81400b8d5e58ab7600dd557a056816`
 - Base ref for incremental tests: `0a4e709c86f25d4fd475113f20d78f9a99498c37`
-- Runtime home: `/tmp/relay-knowledge-relay-teams-benchmark-20260514`
-- Update runtime home: `/tmp/relay-knowledge-relay-teams-update-benchmark-20260514`
+- Runtime home: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home`
+- Update runtime home: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/update-home`
+- Raw benchmark logs: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539`
 - Binary: `target/release/relay-knowledge`
 - Web bind: `127.0.0.1:8791`
 
-Related follow-up records:
+Related records:
 
 - [Optimization study](relay-teams-optimization-study-2026-05-14.md)
 - [Optimization issue checklist](relay-teams-optimization-issues-2026-05-14.md)
 
-The `relay-teams` worktree was not clean during this run. Git-backed indexing
-resolved refs to committed tree objects, so uncommitted worktree content is not
-included in the code index baseline.
+The `relay-teams` worktree was clean during this run. Git-backed indexing
+resolved refs to committed tree objects.
 
 ## Host and Toolchain
 
@@ -37,55 +37,68 @@ npm --prefix web install
 npm --prefix web run build
 ```
 
+Browser gate used during Web verification:
+
+```bash
+uv run --extra dev python -m playwright install chromium
+uv run --extra dev pytest tests/browser
+```
+
+Result: `1 passed in 1.80s`.
+
 ## Repository Scope
 
 `repo scope preview relay-teams --ref HEAD` selected:
 
-- Files: 1,658
-- Bytes: 32,888,900
-- Unsupported files: 223
-- Generated or heavy files: 3
-- Expected degraded files: 223
-- Languages: Python 1,430 files / 19,910,475 bytes; unknown 223 files /
-  12,970,961 bytes; JavaScript 3 files / 4,737 bytes; Bash 2 files / 2,727 bytes
+- Files: 1,653
+- Bytes: 22,063,153
+- Unsupported files: 218
+- Generated or heavy files: 0
+- Expected degraded files: 218
+- Languages: Python 1,430 files / 19,910,475 bytes; unknown 218 files /
+  2,145,214 bytes; JavaScript 3 files / 4,737 bytes; Bash 2 files / 2,727 bytes
 
 Largest selected files:
 
 | Path | Bytes |
 | --- | ---: |
-| `.agent_teams/evals/datasets/swebench-verified-full.jsonl` | 8,110,423 |
-| `.agent_teams/evals/datasets/swebench-verified-100.jsonl` | 1,626,235 |
-| `uv.lock` | 795,064 |
-| `.agent_teams/evals/datasets/swebench-verified-10.jsonl` | 289,697 |
 | `tests/unit_tests/frontend/test_project_view_ui.py` | 288,044 |
+| `tests/unit_tests/frontend/test_model_profiles_ui.py` | 224,391 |
+| `tests/unit_tests/boards/test_todo_service.py` | 204,354 |
+| `docs/core/api-design.md` | 200,851 |
+| `tests/unit_tests/sessions/runs/test_run_service_recovery.py` | 199,826 |
 
 ## Index Baseline
 
 Cold full index:
 
 - Command: `repo index relay-teams --ref HEAD --format json`
-- Wall time: 82.57s
-- User/sys time: 75.20s / 7.46s
-- Peak RSS: 357,508 KiB
-- SQLite data file: 255,684,608 bytes
-- Indexed files: 1,658
+- Wall time: 46.31s
+- Peak RSS: 360,460 KiB
+- SQLite data file: 438,763,520 bytes
+- Indexed files: 1,653
 - Symbols: 28,125
 - References: 187,993
-- Chunks: 28,441
-- SQLite writes: 445,966
-- Degraded files: 223
+- Chunks: 28,436
+- SQLite writes: 445,951
+- Degraded files: 218
 
 No-op HEAD reindex:
 
 - Command: `repo index relay-teams --ref HEAD --format json`
-- Wall time: 86.56s
-- Result still reported `changed_path_count=1658` and `skipped_unchanged_count=0`
+- Wall time: 0.39s
+- Peak RSS: 14,420 KiB
+- `changed_path_count=0`
+- `skipped_unchanged_count=1653`
+- Blob reads: 0
+- Parsed files: 0
+- SQLite writes: 0
 
 Incremental update, measured in a separate runtime by first indexing the base
 commit and then updating to HEAD:
 
-- Base full index: 82.93s
-- `repo update relay-teams --base 0a4e709... --head fa3c0dd...`: 4.87s
+- Base full index: 64.21s
+- `repo update relay-teams --base 0a4e709... --head fa3c0dd...`: 7.36s
 - Changed paths: 4
 - Blob reads: 1
 - Parsed files: 1
@@ -98,84 +111,102 @@ index was available unless stated otherwise.
 
 | Command case | Exit | ms |
 | --- | ---: | ---: |
-| `version` | 0 | 9 |
-| `status` | 0 | 47 |
-| `health` | 0 | 54 |
-| `graph inspect` | 0 | 59 |
-| `ingest` | 0 | 68 |
-| `query relay-teams --freshness wait-until-fresh` | 0 | 69 |
-| `query relay-teams --freshness graph-only` | 0 | 51 |
-| `index refresh` | 0 | 50 |
-| `index refresh --kind bm25` | 0 | 45 |
-| `repo status` | 0 | 44 |
-| `repo report --format json` | 0 | 4,222 |
-| `repo report --format markdown` | 0 | 3,558 |
-| `repo scope preview --ref HEAD` | 0 | 81 |
-| `repo query --kind hybrid` | 0 | 1,455 |
-| `repo query --kind symbol` | 0 | 165 |
-| `repo query --kind definition` | 0 | 160 |
-| `repo query --kind references` | 0 | 571 |
-| `repo query --kind callers` | 0 | 593 |
-| `repo query --kind callees` | 0 | 600 |
-| `repo query --kind imports` | 0 | 61 |
-| `repo impact base..HEAD` | 0 | 2,471 |
-| `provider probe` | 0 | 7 |
-| `worker status` | 0 | 40 |
-| `worker run-once --kind extractor` | 0 | 49 |
-| `proposal list` | 0 | 47 |
-| `proposal show` | 0 | 45 |
-| `proposal reject` | 0 | 47 |
-| `audit query` | 0 | 50 |
-| `service status` | 0 | 51 |
-| `service doctor` | 0 | 51 |
-| `service plan install` | 0 | 42 |
-| `service plan uninstall` | 0 | 35 |
-| `service definition write` | 0 | 38 |
-| `service operator status` | 0 | 32 |
-| `service operator pause` | 0 | 28 |
-| `service operator resume` | 0 | 35 |
+| `version` | 0 | 0 |
+| `help --format json` | 0 | 0 |
+| `status` | 0 | 80 |
+| `health` | 0 | 80 |
+| `graph inspect` | 0 | 90 |
+| `ingest` | 0 | 90 |
+| `query relay-teams --freshness wait-until-fresh` | 0 | 80 |
+| `query relay-teams --freshness graph-only` | 0 | 80 |
+| `query relay-teams benchmark` | 0 | 80 |
+| `index refresh --kind bm25 --kind semantic --kind vector` | 0 | 80 |
+| `index refresh --kind bm25` | 0 | 80 |
+| `repo status` | 0 | 80 |
+| `repo report --format json` | 0 | 260 |
+| `repo report --format markdown` | 0 | 260 |
+| `repo scope preview --ref HEAD` | 0 | 100 |
+| `repo query --kind hybrid` | 0 | 100 |
+| `repo query --kind symbol` | 0 | 90 |
+| `repo query --kind definition` | 0 | 90 |
+| `repo query --kind references` | 0 | 80 |
+| `repo query --kind callers` | 0 | 90 |
+| `repo query --kind callees` | 0 | 90 |
+| `repo query --kind imports` | 0 | 90 |
+| `repo impact base..HEAD` | 0 | 340 |
+| `repo update main..HEAD after indexing HEAD` | 1 | 80 |
+| `provider probe` | 0 | 0 |
+| `worker status` | 0 | 80 |
+| `worker run-once --kind extractor` | 0 | 80 |
+| `worker run-once --kind ocr` | 0 | 80 |
+| `worker run-once --kind vision` | 0 | 80 |
+| `proposal list` | 0 | 90 |
+| `proposal show` | 0 | 80 |
+| `proposal reject` | 0 | 80 |
+| `proposal accept` | 0 | 90 |
+| `proposal supersede` | 0 | 80 |
+| `audit query` | 0 | 80 |
+| `service status` | 0 | 80 |
+| `service doctor` | 0 | 80 |
+| `service plan install` | 0 | 80 |
+| `service plan uninstall` | 0 | 80 |
+| `service definition write` | 0 | 80 |
+| `service operator status` | 0 | 80 |
+| `service operator pause` | 0 | 90 |
+| `service operator resume` | 0 | 90 |
 
-`repo report` embeds representative hybrid query samples of 1,321ms, 1,272ms,
-and 1,209ms for `_make_graph_node`, `_make_role_definition`, and
-`_make_task_envelope`.
+The `repo update main..HEAD after indexing HEAD` failure is the documented
+precondition that the currently indexed scope must match the incremental base
+ref. The separate update runtime above measures the valid base-to-head path.
 
 ## Web HTTP Baseline
 
 The Web service was started with:
 
 ```bash
-RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-benchmark-20260514 \
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home \
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
-target/release/relay-knowledge service run --web
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src,frontend,relay-teams-benchmark \
+target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
 Measured with `curl` against same-origin HTTP endpoints:
 
 | Web case | HTTP | ms |
 | --- | ---: | ---: |
-| `GET /` | 200 | 18 |
-| `GET /api/health` | 200 | 33 |
-| `GET /api/project/status` | 200 | 21 |
-| `GET /api/service/status` | 200 | 21 |
-| `retrieve.context` | 200 | 30 |
-| `graph.ingest` | 200 | 43 |
-| `graph.inspect` | 200 | 24 |
-| `index.refresh` | 200 | 20 |
-| `provider.embedding.probe` | 200 | 28 |
-| `worker.status` | 200 | 21 |
-| `worker.run-once` | 200 | 25 |
-| `proposal.list` | 200 | 17 |
-| `proposal.show` | 200 | 19 |
-| `proposal.reject` | 200 | 21 |
-| `audit.query` | 200 | 14 |
-| `code.repo.status` | 200 | 15 |
-| `code.repo.query` hybrid | 200 | 1,498 |
-| `code.repo.query` symbol | 200 | 142 |
-| `code.repo.impact` | 200 | 2,512 |
-| `code.repo.index` | 408 | 30,015 |
-| `code.repo.update` | 400 | 21 |
-| `service.doctor` | 200 | 19 |
-| `service.run.streamable_http` | 200 | 18 |
+| `GET /` | 200 | 0 |
+| `GET /api/health` | 200 | 5 |
+| `GET /api/project/status` | 200 | 1 |
+| `GET /api/service/status` | 200 | 1 |
+| `GET /mcp/metrics` | 200 | 7 |
+| `retrieve.context` | 200 | 2 |
+| `graph.ingest` | 200 | 9 |
+| `graph.inspect` | 200 | 5 |
+| `index.refresh` | 200 | 1 |
+| `provider.embedding.probe` | 200 | 0 |
+| `worker.status` | 200 | 2 |
+| `worker.run-once` | 200 | 5 |
+| `proposal.list` | 200 | 1 |
+| `proposal.show` | 200 | 1 |
+| `proposal.reject` | 200 | 2 |
+| `proposal.accept` | 200 | 10 |
+| `proposal.supersede` | 200 | 2 |
+| `audit.query` | 200 | 1 |
+| `code.repo.register` | 200 | 5 |
+| `code.repo.status` | 200 | 2 |
+| `code.repo.query` hybrid | 200 | 24 |
+| `code.repo.query` symbol | 200 | 4 |
+| `code.repo.query` definition | 200 | 4 |
+| `code.repo.query` references | 200 | 5 |
+| `code.repo.query` callers | 200 | 4 |
+| `code.repo.query` callees | 200 | 8 |
+| `code.repo.query` imports | 200 | 6 |
+| `code.repo.impact` | 200 | 268 |
+| `code.repo.index` no-op | 200 | 170 |
+| `code.repo.update` HEAD..HEAD | 200 | 36 |
+| `code.repo.update` main..HEAD after indexing HEAD | 400 | 3 |
+| `service.doctor` | 200 | 1 |
+| `service.run.streamable_http` | 200 | 1 |
 
 Browser integration:
 
@@ -183,54 +214,66 @@ Browser integration:
 uv run --extra dev pytest tests/browser
 ```
 
-Result: `1 passed in 2.24s`.
+Result: `1 passed in 1.80s`.
 
 Headless Chromium live page-load baseline against `http://127.0.0.1:8791/`,
 5 samples with `wait_until="networkidle"`:
 
-- Mean: 573.19ms
-- Median: 575.00ms
-- Min: 556.68ms
-- Max: 598.24ms
-- Browser navigation `loadEventEnd`: 15.5ms to 29.2ms
+- Mean: 530.01ms
+- Median: 530.71ms
+- Min: 522.75ms
+- Max: 536.51ms
+- Browser navigation `loadEventEnd`: 12.1ms to 17.8ms
+- Live dashboard displayed repository code totals and did not show the previous
+  empty-code-graph state.
 
-## Issues Found
+## Issues Found During This Baseline
 
-1. No-op repository indexing does not skip unchanged files.
+1. Re-registering the same repository root under a different alias invalidates
+   the previous alias.
 
-   Re-running `repo index relay-teams --ref HEAD` after a fresh HEAD index took
-   86.56s and reported all 1,658 files as changed. This defeats the expected
-   refresh/no-op behavior and also makes Web code indexing exceed the default
-   30s HTTP request timeout.
+   Status after follow-up fix: resolved. Duplicate-root registration now adds a
+   persistent alias for the same repository id and preserves previous aliases.
 
-2. Web `code.repo.index` times out for this repository.
+   During Web testing, `code.repo.register` for `/opt/workspace/relay-teams`
+   with alias `relay-teams-web` updated the existing repository row, after
+   which `code.repo.status` for alias `relay-teams` returned
+   `code repository 'relay-teams' is not registered`. The repository id and
+   indexed totals were preserved under the new alias. This can surprise users
+   who expect aliases to be stable or additive.
 
-   `POST /api/web/operations/execute` with `operation=code.repo.index` returned
-   HTTP 408 after 30.015s. Full indexing continues to be a long-running
-   operation and should be exposed as queued/background work, or the Web composer
-   should use a progress/operation handle instead of a single request.
+2. `repo update --base main --head HEAD` remains brittle after indexing HEAD.
 
-3. Top-level CLI `query` rejects multi-word positional queries.
+   Status after follow-up fix: resolved when the base snapshot was indexed
+   earlier. Incremental update now clones the persisted matching base scope even
+   when the active repository status already points at HEAD.
 
-   `relay-knowledge query relay-teams benchmark --source relay-teams-benchmark`
-   failed with exit 2 and `unexpected argument 'benchmark'`. The repo query CLI
-   already collects multi-word query values, but the top-level GraphRAG query
-   only accepts one positional token unless callers use the `--` escape form.
+   CLI returned exit 1 and Web returned HTTP 400 when the currently indexed
+   scope was already HEAD. The valid sequence is to index the base ref in a
+   separate/current scope first, then update to HEAD. This is consistent with
+   current validation, but the Web composer and docs should make the precondition
+   explicit.
 
-4. `repo update` requires the currently indexed scope to be the base ref.
+3. Health still separates graph-code counters from repository-code totals.
 
-   After the main runtime was indexed at HEAD, `repo update --base 0a4e709...
-   --head fa3c0dd...` failed quickly because the repository was already indexed
-   at HEAD. This behavior is consistent with the current implementation, but it
-   is a usability trap for benchmarking and Web operation composition. The
-   operation should either document this precondition clearly in the UI/CLI or
-   support computing an incremental update from persisted base snapshots when
-   available.
+   Status after follow-up fix: resolved. Service-level `health` and
+   `graph inspect` now include repository code totals in graph code counters and
+   still expose `repository_code_totals` as the repository-specific breakdown.
 
-5. Scope preview includes large JSONL and lock files as `unknown`.
+   `/api/health` reported `graph.code_file_count=0` while
+   `repository_code_totals.indexed_file_count=1653`. The live Web dashboard now
+   displays repository code totals correctly, so this is no longer a dashboard
+   false-empty issue, but API consumers must use `repository_code_totals` for
+   code-repository data.
 
-   The selected scope includes multi-megabyte `.jsonl` fixtures and `uv.lock` as
-   unknown/text-like files. They contribute to selected bytes and degraded file
-   counts. This may be acceptable for full-repository baselines, but default
-   source presets should be reviewed if these files are not useful retrieval
-   targets.
+## Resolved Since Previous Baseline
+
+- Repeated full index now uses the no-op fast path: 0.39s, zero blob reads, zero
+  parses, zero SQLite writes.
+- Web no-op `code.repo.index` now returns HTTP 200 in 170ms instead of timing
+  out after 30s.
+- Top-level CLI GraphRAG query now accepts multi-word positional input.
+- Default scope no longer includes the large JSONL dataset dumps or `uv.lock`;
+  selected bytes dropped from 32,888,900 to 22,063,153.
+- Live Web dashboard no longer shows the code graph as empty after repository
+  indexing.

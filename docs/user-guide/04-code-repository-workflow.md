@@ -14,7 +14,7 @@ relay-knowledge repo register /path/to/repo \
 
 `--alias` 是后续命令使用的短名。`--path` 和 `--language` 可以重复，注册时定义的范围会限制索引、查询和影响分析，后续请求只能收窄范围，不能扩大范围。
 
-注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径必须指向本机可读 Git worktree；索引时再解析目标 ref 或 worktree overlay。
+注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径必须指向本机可读 Git worktree；索引时再解析目标 ref 或 worktree overlay。再次注册同一个 Git root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
 
 ## 4.2 Scope preview
 
@@ -89,24 +89,24 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --for
 relay-knowledge repo update core --base main --head HEAD --format json
 ```
 
-`repo update` 会把 `base` 到 `head` 的 diff 应用到当前已索引的
-`base` snapshot。也就是说，`base` 必须解析到当前仓库状态里已经索引的
-commit；如果你刚刚运行的是 `repo index core --ref HEAD`，且当前工作分支
-不是 `main`，直接使用 `--base main --head HEAD` 会因为已索引 commit 不是
-`main` 而失败。若只是验证增量命令本身或没有跨 ref 变化，可以使用:
+`repo update` 会把 `base` 到 `head` 的 diff 应用到已持久化的
+`base` snapshot。`base` 不需要是当前 active snapshot；只要同一
+repository id、path filter 和 language filter 下曾经索引过该 base
+commit，增量更新就会从对应 persisted scope 克隆并只解析变化文件。若只是
+验证增量命令本身或没有跨 ref 变化，可以使用:
 
 ```bash
 relay-knowledge repo update core --base HEAD --head HEAD --format json
 ```
 
-如果 CLI 报告 base/head 与已索引 commit 不匹配，先索引目标 base:
+如果 CLI 报告找不到 matching indexed base scope，先索引目标 base:
 
 ```bash
 relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 ```
 
-增量路径读取 `git diff --name-status --find-renames -z`，只重建新增、修改、复制、重命名或类型变化的文件。删除和重命名源路径会从 active index 移除，rename lineage 会保留为 tombstone。
+增量路径读取 `git diff --name-status --find-renames -z`，只重建新增、修改、复制、重命名或类型变化的文件。删除和重命名源路径会从 cloned base index 移除，rename lineage 会保留为 tombstone。
 
 ## 4.6 Worktree overlay
 
@@ -155,7 +155,7 @@ relay-knowledge repo report core --format json
 relay-knowledge repo status core --format json
 ```
 
-状态输出用于确认当前索引 ref、文件数量、symbol/reference/chunk 总量、诊断和 freshness。若 `repo status` 与 `graph inspect` 的 code counts 看起来不一致，以 `repo status` 为代码索引诊断入口；`graph inspect` 更偏向通用图状态。
+状态输出用于确认当前索引 ref、文件数量、symbol/reference/chunk 总量、诊断和 freshness。`graph inspect` 和 `health` 的 graph code counters 会包含 repository code totals；响应中的 `repository_code_totals` 仍保留同一组 repository 专用计数，方便脚本区分通用图事实和代码仓库索引。
 
 `repo report --format markdown` 还会汇总 edge resolution: resolved、ambiguous 和 unresolved 数量，用于判断当前代码图谱是否主要来自确定 AST 提取，还是存在大量需要人工或后续解析器改进的模糊边。
 

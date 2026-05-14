@@ -262,7 +262,7 @@ async fn incremental_update_matches_canonical_filter_baselines() {
 }
 
 #[tokio::test]
-async fn incremental_update_rejects_filter_baselines_from_older_commits() {
+async fn incremental_update_can_use_persisted_filter_baselines_from_older_commits() {
     let mut scoped_base = snapshot_with_chunk("repo", "src/lib.rs", "fn old_policy() {}");
     retarget_snapshot_scope(&mut scoped_base, "scope-src-a");
     scoped_base.resolved_commit_sha = "commit-a".to_owned();
@@ -283,16 +283,34 @@ async fn incremental_update_rejects_filter_baselines_from_older_commits() {
 
     let mut incremental = incremental_snapshot_for_parsed_file();
     retarget_snapshot_scope(&mut incremental, "scope-src-c");
+    incremental.base_resolved_commit_sha = Some("commit-a".to_owned());
     incremental.resolved_commit_sha = "commit-c".to_owned();
     incremental.tree_hash = "tree-c".to_owned();
     incremental.path_filters = vec!["src".to_owned()];
 
-    let error = store
+    store
         .apply_code_index_snapshot(incremental)
         .await
-        .expect_err("older filter baseline should not seed current incremental scope");
+        .expect("older persisted filter baseline should seed incremental scope");
 
-    assert!(error.to_string().contains("current base commit"));
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit-c", vec!["src".to_owned()], Vec::new())
+            .expect("selector should validate");
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "kept",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("incremental scope should be searchable");
+
+    assert_eq!(hits.len(), 1);
 }
 
 #[tokio::test]
