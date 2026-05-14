@@ -1,6 +1,6 @@
 # 第 8 章 高级配置参考
 
-[中文](../../zh/user-guide/08-advanced-configuration.md) | [English](../../en/user-guide/08-advanced-configuration.md)
+[中文](../../zh/user-guide/08-advanced-configuration.md) | [英文](../../en/user-guide/08-advanced-configuration.md)
 
 本章只面向需要隔离运行时目录、调试网络预算、开放 MCP 服务、接入外部 embedding worker 或复现 CI 问题的用户。普通本地使用不需要设置这些变量。
 
@@ -88,7 +88,7 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 
 非 loopback HTTP bind 应同时配置 MCP remote-client policy 和 origin/scope 限制。QoS budget 是 admission control，不是安全认证；它用于限制连接数、in-flight 请求、队列深度、超时和 overload 行为。
 
-## 8.5 MCP Policy
+## 8.5 MCP 策略
 
 本地 agent 工具服务通常只需要指定允许 scope:
 
@@ -113,7 +113,7 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 默认 policy 是只读且本机优先。远程监听、unspecified scope 和 index refresh 都需要显式开启。
 
-## 8.6 OTLP Telemetry
+## 8.6 OTLP 遥测
 
 常驻服务可把 traces 和 metrics 发送到 OpenTelemetry Collector 的 OTLP HTTP endpoint:
 
@@ -153,7 +153,7 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 
 未设置 worker endpoint 时，`worker run-once` 使用 deterministic fallback 生成 proposal。开启 audit sink 后，agent audit JSONL 写入 `paths` 管理的 log 目录；队列深度在运行时 capped 到 65536，队列满时持久镜像可以丢弃事件，内存 audit log 仍保留最近事件。
 
-## 8.8 Setup Interfaces
+## 8.8 Setup 接口
 
 高级配置不需要从文档手工拼接。当前 CLI 提供两个只读 setup 入口:
 

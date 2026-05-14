@@ -1,6 +1,6 @@
 # 统一 API 层与交互层架构
 
-[中文](../../zh/specs/unified-api-and-interface-architecture.md) | [English](../../en/specs/unified-api-and-interface-architecture.md)
+[中文](../../zh/specs/unified-api-and-interface-architecture.md) | [英文](../../en/specs/unified-api-and-interface-architecture.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11

@@ -1,6 +1,6 @@
 # 后台服务、静默更新与自愈设计
 
-[中文](../../zh/specs/background-service-and-self-healing.md) | [English](../../en/specs/background-service-and-self-healing.md)
+[中文](../../zh/specs/background-service-and-self-healing.md) | [英文](../../en/specs/background-service-and-self-healing.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11
@@ -33,7 +33,7 @@
 
 CLI 和 Web 不能复制后台逻辑。它们只通过 application service 发送命令、读取状态和展示诊断。
 
-### 2.1 Linux: systemd
+### 2.1 Linux：systemd
 
 Linux 默认使用 systemd user service；需要系统级部署时再使用 system service。推荐单元行为:
 
@@ -46,7 +46,7 @@ Linux 默认使用 systemd user service；需要系统级部署时再使用 syst
 
 应用内部必须把 service status 映射为简短可读的运行状态，例如 `ready: graph_version=42 index_lag_max=2 queue_depth=7`。这类状态应进入 diagnostics，便于用户区分“进程活着”和“工作真的在推进”。
 
-### 2.2 Windows: Windows Service
+### 2.2 Windows：Windows Service
 
 Windows 默认使用 Windows Service 托管后台进程。安装器或 `relay-knowledge service install` 必须配置:
 
@@ -58,7 +58,7 @@ Windows 默认使用 Windows Service 托管后台进程。安装器或 `relay-kn
 
 Windows 的服务恢复只负责进程生命周期。任务恢复必须仍由应用的持久化任务表、mutation log 和 index cursor 完成。
 
-### 2.3 macOS: launchd
+### 2.3 macOS：launchd
 
 macOS 默认使用 launchd agent；系统级服务再使用 launchd daemon。推荐配置:
 
@@ -247,7 +247,7 @@ last_error_message
 lease 必须进入 `dead_letter` 并把相关 cursor 标记为 failed。任务必须以
 `input_fingerprint` 和稳定 ID 保证幂等。
 
-### 5.4 Reconciler
+### 5.4 调和器
 
 后台服务启动后和周期性运行 reconciler:
 

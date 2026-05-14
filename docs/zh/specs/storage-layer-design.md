@@ -1,6 +1,6 @@
 # 存储层架构设计
 
-[中文](../../zh/specs/storage-layer-design.md) | [English](../../en/specs/storage-layer-design.md)
+[中文](../../zh/specs/storage-layer-design.md) | [英文](../../en/specs/storage-layer-design.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11
@@ -550,7 +550,7 @@ LIMIT :limit;
 | regression fixtures | 验证固定图查询、路径、stale 行为 | deterministic fixture |
 | failure tests | 验证中断、重复提交、索引失败、超时 | fault injection |
 
-### 7.2 Contract tests
+### 7.2 契约测试
 
 同一套 contract tests 应覆盖所有后端:
 

@@ -1,6 +1,6 @@
 # 安装部署与发布规格
 
-[中文](../../zh/specs/installation-and-release.md) | [English](../../en/specs/installation-and-release.md)
+[中文](../../zh/specs/installation-and-release.md) | [英文](../../en/specs/installation-and-release.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11

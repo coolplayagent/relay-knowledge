@@ -1,37 +1,37 @@
 # relay-teams 基线 2026-05-14
 
-[中文](../../zh/benchmarks/relay-teams-baseline-2026-05-14.md) | [English](../../en/benchmarks/relay-teams-baseline-2026-05-14.md)
+[中文](../../zh/benchmarks/relay-teams-baseline-2026-05-14.md) | [英文](../../en/benchmarks/relay-teams-baseline-2026-05-14.md)
 
-Date: 2026-05-14
+日期：2026-05-14
 
-Test repository: `/opt/workspace/relay-teams`
+测试仓库：`/opt/workspace/relay-teams`
 
-- Branch: `improve-memory-skill-draft-status-ui`
+- 分支：`improve-memory-skill-draft-status-ui`
 - HEAD: `fa3c0ddc9d81400b8d5e58ab7600dd557a056816`
-- Base ref for incremental tests: `0a4e709c86f25d4fd475113f20d78f9a99498c37`
-- Runtime home: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home`
-- Update runtime home: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/update-home`
-- Raw benchmark logs: `/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539`
-- Binary: `target/release/relay-knowledge`
-- Web bind: `127.0.0.1:8791`
+- 增量测试的基础引用：`0a4e709c86f25d4fd475113f20d78f9a99498c37`
+- 运行时主目录：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home`
+- 更新运行时主目录：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/update-home`
+- 原始基准日志：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539`
+- 二进制：`target/release/relay-knowledge`
+- Web 绑定地址：`127.0.0.1:8791`
 
-Related records:
+相关记录：
 
-- [Optimization study](relay-teams-optimization-study-2026-05-14.md)
-- [Optimization issue checklist](relay-teams-optimization-issues-2026-05-14.md)
+- [优化研究](relay-teams-optimization-study-2026-05-14.md)
+- [优化问题清单](relay-teams-optimization-issues-2026-05-14.md)
 
-The `relay-teams` worktree was clean during this run. Git-backed indexing
-resolved refs to committed tree objects.
+`relay-teams` 工作树在此次运行中保持干净。基于 Git 的索引
+将引用解析为已提交的树对象。
 
-## Host and Toolchain
+## 主机和工具链
 
 - OS: Linux 6.17.0-23-generic x86_64
-- CPU: 12th Gen Intel Core i7-1260P, 16 logical CPUs
+- CPU：第12代英特尔酷睿 i7-1260P，16个逻辑CPU
 - Rust: `rustc 1.95.0`, `cargo 1.95.0`
 - Node: `v24.14.0`
 - uv: `0.10.10`
 
-Build gates used before benchmarking:
+基准测试前使用的构建门控：
 
 ```bash
 cargo build --release
@@ -39,30 +39,30 @@ npm --prefix web install
 npm --prefix web run build
 ```
 
-Browser gate used during Web verification:
+Web 验证期间使用的浏览器门控：
 
 ```bash
 uv run --extra dev python -m playwright install chromium
 uv run --extra dev pytest tests/browser
 ```
 
-Result: `1 passed in 1.80s`.
+结果：`1 passed in 1.80s`。
 
-## Repository Scope
+## 仓库范围
 
-`repo scope preview relay-teams --ref HEAD` selected:
+`repo scope preview relay-teams --ref HEAD` 选中：
 
-- Files: 1,653
-- Bytes: 22,063,153
-- Unsupported files: 218
-- Generated or heavy files: 0
-- Expected degraded files: 218
-- Languages: Python 1,430 files / 19,910,475 bytes; unknown 218 files /
-  2,145,214 bytes; JavaScript 3 files / 4,737 bytes; Bash 2 files / 2,727 bytes
+- 文件数：1,653
+- 字节数：22,063,153
+- 不支持的文件：218
+- 生成的或大型文件：0
+- 预期降级的文件：218
+- 语言：Python 1,430 个文件 / 19,910,475 字节；未知 218 个文件 /
+  2,145,214 字节；JavaScript 3 个文件 / 4,737 字节；Bash 2 个文件 / 2,727 字节
 
-Largest selected files:
+最大选中文件：
 
-| Path | Bytes |
+| 路径 | 字节数 |
 | --- | ---: |
 | `tests/unit_tests/frontend/test_project_view_ui.py` | 288,044 |
 | `tests/unit_tests/frontend/test_model_profiles_ui.py` | 224,391 |
@@ -70,48 +70,48 @@ Largest selected files:
 | `docs/core/api-design.md` | 200,851 |
 | `tests/unit_tests/sessions/runs/test_run_service_recovery.py` | 199,826 |
 
-## Index Baseline
+## 索引基线
 
-Cold full index:
+冷全索引：
 
-- Command: `repo index relay-teams --ref HEAD --format json`
-- Wall time: 46.31s
-- Peak RSS: 360,460 KiB
-- SQLite data file: 438,763,520 bytes
-- Indexed files: 1,653
-- Symbols: 28,125
-- References: 187,993
-- Chunks: 28,436
-- SQLite writes: 445,951
-- Degraded files: 218
+- 命令：`repo index relay-teams --ref HEAD --format json`
+- 墙钟时间：46.31秒
+- 峰值 RSS：360,460 KiB
+- SQLite 数据文件：438,763,520 字节
+- 索引文件：1,653 个
+- 符号数：28,125
+- 引用数：187,993
+- 代码块数：28,436
+- SQLite 写入次数：445,951
+- 降级文件：218 个
 
-No-op HEAD reindex:
+无操作 HEAD 重新索引：
 
-- Command: `repo index relay-teams --ref HEAD --format json`
-- Wall time: 0.39s
-- Peak RSS: 14,420 KiB
+- 命令：`repo index relay-teams --ref HEAD --format json`
+- 墙钟时间：0.39 秒
+- 峰值 RSS：14,420 KiB
 - `changed_path_count=0`
 - `skipped_unchanged_count=1653`
-- Blob reads: 0
-- Parsed files: 0
-- SQLite writes: 0
+- Blob 读取次数：0
+- 解析文件数：0
+- SQLite 写入次数：0
 
-Incremental update, measured in a separate runtime by first indexing the base
-commit and then updating to HEAD:
+增量更新，通过首先索引基础数据，在单独的运行时中进行测量
+提交然后更新到 HEAD：
 
-- Base full index: 64.21s
+- 基础完整索引：64.21秒
 - `repo update relay-teams --base 0a4e709... --head fa3c0dd...`: 7.36s
-- Changed paths: 4
-- Blob reads: 1
-- Parsed files: 1
-- SQLite writes: 104
+- 更改的路径：4
+- Blob 读取次数：1
+- 解析的文件：1
+- SQLite 写入次数：104
 
-## CLI Baseline
+## CLI 基线
 
-All timings are single-process wall-clock samples in milliseconds after the cold
-index was available unless stated otherwise.
+所有时间均为单进程的墙钟时间采样，单位为毫秒，测量于冷启动后
+除非另有说明，否则索引可用。
 
-| Command case | Exit | ms |
+| 命令案例 | 退出 | 毫秒 |
 | --- | ---: | ---: |
 | `version` | 0 | 0 |
 | `help --format json` | 0 | 0 |
@@ -157,13 +157,13 @@ index was available unless stated otherwise.
 | `service operator pause` | 0 | 90 |
 | `service operator resume` | 0 | 90 |
 
-The `repo update main..HEAD after indexing HEAD` failure is the documented
-precondition that the currently indexed scope must match the incremental base
-ref. The separate update runtime above measures the valid base-to-head path.
+`repo update main..HEAD after indexing HEAD` 失败是有文档记录的
+当前已索引的范围必须与增量基准匹配的前提条件
+参考。上述单独的更新运行时测量有效的基底到头部路径。
 
-## Web HTTP Baseline
+## Web HTTP 基线
 
-The Web service was started with:
+Web 服务已启动，命令如下：
 
 ```bash
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home \
@@ -172,9 +172,9 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src,frontend,relay-teams-benchmark \
 target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-Measured with `curl` against same-origin HTTP endpoints:
+使用 `curl` 测量针对同源 HTTP 端点的情况：
 
-| Web case | HTTP | ms |
+| Web 场景 | HTTP | 毫秒 |
 | --- | ---: | ---: |
 | `GET /` | 200 | 0 |
 | `GET /api/health` | 200 | 5 |
@@ -196,86 +196,67 @@ Measured with `curl` against same-origin HTTP endpoints:
 | `audit.query` | 200 | 1 |
 | `code.repo.register` | 200 | 5 |
 | `code.repo.status` | 200 | 2 |
-| `code.repo.query` hybrid | 200 | 24 |
-| `code.repo.query` symbol | 200 | 4 |
-| `code.repo.query` definition | 200 | 4 |
-| `code.repo.query` references | 200 | 5 |
-| `code.repo.query` callers | 200 | 4 |
-| `code.repo.query` callees | 200 | 8 |
-| `code.repo.query` imports | 200 | 6 |
+| `code.repo.query` 混合查询 | 200 | 24 |
+| `code.repo.query` 符号查询 | 200 | 4 |
+| `code.repo.query` 定义查询 | 200 | 4 |
+| `code.repo.query` 引用查询 | 200 | 5 |
+| `code.repo.query` 调用方查询 | 200 | 4 |
+| `code.repo.query` 被调用方查询 | 200 | 8 |
+| `code.repo.query` 导入查询 | 200 | 6 |
 | `code.repo.impact` | 200 | 268 |
 | `code.repo.index` no-op | 200 | 170 |
 | `code.repo.update` HEAD..HEAD | 200 | 36 |
-| `code.repo.update` main..HEAD after indexing HEAD | 400 | 3 |
+| `code.repo.update` main..HEAD 在索引 HEAD 之后 | 400 | 3 |
 | `service.doctor` | 200 | 1 |
 | `service.run.streamable_http` | 200 | 1 |
 
-Browser integration:
+浏览器集成：
 
 ```bash
 uv run --extra dev pytest tests/browser
 ```
 
-Result: `1 passed in 1.80s`.
+结果：`1 passed in 1.80s`。
 
-Headless Chromium live page-load baseline against `http://127.0.0.1:8791/`,
-5 samples with `wait_until="networkidle"`:
+Headless Chromium 对 `http://127.0.0.1:8791/` 的实时页面加载基准测试，
+5 个使用 `wait_until="networkidle"` 的示例：
 
-- Mean: 530.01ms
-- Median: 530.71ms
-- Min: 522.75ms
-- Max: 536.51ms
-- Browser navigation `loadEventEnd`: 12.1ms to 17.8ms
-- Live dashboard displayed repository code totals and did not show the previous
-  empty-code-graph state.
+- 平均值：530.01ms
+- 中位数：530.71ms
+- 最小值：522.75ms
+- 最大值：536.51ms
+- 浏览器导航 `loadEventEnd`：12.1 毫秒到 17.8 毫秒
+- 实时仪表盘显示了仓库代码总量，但未显示之前的数据
+  代码图为空状态。
 
-## Issues Found During This Baseline
+## 本次基线发现的问题
 
-1. Re-registering the same repository root under a different alias invalidates
-   the previous alias.
+1. 使用不同 alias 重新注册同一个仓库根目录会使先前 alias 失效。
 
-   Status after follow-up fix: resolved. Duplicate-root registration now adds a
-   persistent alias for the same repository id and preserves previous aliases.
+   后续修复状态：已解决。重复根目录注册现在会为同一仓库 ID 添加持久 alias，并保留先前 alias。
 
-   During Web testing, `code.repo.register` for `/opt/workspace/relay-teams`
-   with alias `relay-teams-web` updated the existing repository row, after
-   which `code.repo.status` for alias `relay-teams` returned
-   `code repository 'relay-teams' is not registered`. The repository id and
-   indexed totals were preserved under the new alias. This can surprise users
-   who expect aliases to be stable or additive.
+   Web 测试期间，使用 alias `relay-teams-web` 对 `/opt/workspace/relay-teams`
+   执行 `code.repo.register` 会更新既有仓库行，随后使用 alias `relay-teams`
+   调用 `code.repo.status` 返回 `code repository 'relay-teams' is not registered`。
+   仓库 ID 和已索引总量会保留在新 alias 下。这会让期望 alias 稳定或可追加的用户感到意外。
 
-2. `repo update --base main --head HEAD` remains brittle after indexing HEAD.
+2. 在索引 HEAD 后，`repo update --base main --head HEAD` 仍较脆弱。
 
-   Status after follow-up fix: resolved when the base snapshot was indexed
-   earlier. Incremental update now clones the persisted matching base scope even
-   when the active repository status already points at HEAD.
+   后续修复状态：当基础快照此前已索引时已解决。即使活动仓库状态已指向 HEAD，增量更新现在也会克隆持久化的匹配基础 scope。
 
-   CLI returned exit 1 and Web returned HTTP 400 when the currently indexed
-   scope was already HEAD. The valid sequence is to index the base ref in a
-   separate/current scope first, then update to HEAD. This is consistent with
-   current validation, but the Web composer and docs should make the precondition
-   explicit.
+   当当前已索引 scope 已经是 HEAD 时，CLI 返回退出码 1，Web 返回 HTTP 400。有效顺序是先在单独或当前 scope 中索引基础引用，再更新到 HEAD。该行为符合当前校验，但 Web 编排器和文档应明确此前置条件。
 
-3. Health still separates graph-code counters from repository-code totals.
+3. 健康检查仍将图代码计数与仓库代码总量分开。
 
-   Status after follow-up fix: resolved. Service-level `health` and
-   `graph inspect` now include repository code totals in graph code counters and
-   still expose `repository_code_totals` as the repository-specific breakdown.
+   后续修复状态：已解决。服务级 `health` 和 `graph inspect` 现在会将仓库代码总量纳入图代码计数，同时仍通过 `repository_code_totals` 暴露仓库专用明细。
 
-   `/api/health` reported `graph.code_file_count=0` while
-   `repository_code_totals.indexed_file_count=1653`. The live Web dashboard now
-   displays repository code totals correctly, so this is no longer a dashboard
-   false-empty issue, but API consumers must use `repository_code_totals` for
-   code-repository data.
+   `/api/health` 报告 `graph.code_file_count=0`，同时
+   `repository_code_totals.indexed_file_count=1653`。实时 Web 仪表盘现在能正确显示仓库代码总量，因此这不再是仪表盘误报为空的问题，但 API consumer 仍必须使用 `repository_code_totals` 读取代码仓库数据。
 
-## Resolved Since Previous Baseline
+## 相比上一基线已解决
 
-- Repeated full index now uses the no-op fast path: 0.39s, zero blob reads, zero
-  parses, zero SQLite writes.
-- Web no-op `code.repo.index` now returns HTTP 200 in 170ms instead of timing
-  out after 30s.
-- Top-level CLI GraphRAG query now accepts multi-word positional input.
-- Default scope no longer includes the large JSONL dataset dumps or `uv.lock`;
-  selected bytes dropped from 32,888,900 to 22,063,153.
-- Live Web dashboard no longer shows the code graph as empty after repository
-  indexing.
+- 重复全量索引现在使用无操作快速路径：0.39 秒，blob 读取、解析和 SQLite 写入均为 0。
+- Web 无操作 `code.repo.index` 现在会在 170ms 内返回 HTTP 200，而不是 30 秒后超时。
+- 顶层 CLI GraphRAG 查询现在接受多词位置参数输入。
+- 默认 scope 不再包含大型 JSONL 数据集 dump 或 `uv.lock`；选中字节数从 32,888,900 降至 22,063,153。
+- 实时 Web 仪表盘在仓库索引后不再显示代码图为空。

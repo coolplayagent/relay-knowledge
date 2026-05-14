@@ -1,6 +1,6 @@
 # 工程硬约束
 
-[中文](../../zh/specs/engineering-hard-constraints.md) | [English](../../en/specs/engineering-hard-constraints.md)
+[中文](../../zh/specs/engineering-hard-constraints.md) | [英文](../../en/specs/engineering-hard-constraints.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11

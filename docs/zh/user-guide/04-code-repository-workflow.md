@@ -1,6 +1,6 @@
 # 第 4 章 代码仓库工作流
 
-[中文](../../zh/user-guide/04-code-repository-workflow.md) | [English](../../en/user-guide/04-code-repository-workflow.md)
+[中文](../../zh/user-guide/04-code-repository-workflow.md) | [英文](../../en/user-guide/04-code-repository-workflow.md)
 
 ## 4.1 注册仓库
 
@@ -18,7 +18,7 @@ relay-knowledge repo register /path/to/repo \
 
 注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径必须指向本机可读 Git worktree；索引时再解析目标 ref 或 worktree overlay。再次注册同一个 Git root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
 
-## 4.2 Scope preview
+## 4.2 Scope 预览
 
 索引前预览当前 scope 会覆盖哪些文件:
 
@@ -110,7 +110,7 @@ relay-knowledge repo update core --base main --head HEAD --format json
 
 增量路径读取 `git diff --name-status --find-renames -z`，只重建新增、修改、复制、重命名或类型变化的文件。删除和重命名源路径会从 cloned base index 移除，rename lineage 会保留为 tombstone。
 
-## 4.6 Worktree overlay
+## 4.6 Worktree overlay 覆盖层
 
 需要索引未提交工作区时使用 `--ref worktree`:
 

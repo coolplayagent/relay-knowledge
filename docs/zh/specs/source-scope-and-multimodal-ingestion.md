@@ -1,6 +1,6 @@
 # Source Scope 与多模态摄取规格
 
-[中文](../../zh/specs/source-scope-and-multimodal-ingestion.md) | [English](../../en/specs/source-scope-and-multimodal-ingestion.md)
+[中文](../../zh/specs/source-scope-and-multimodal-ingestion.md) | [英文](../../en/specs/source-scope-and-multimodal-ingestion.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11

@@ -1,6 +1,6 @@
 # 开放 Agent Runtime 与混合检索架构
 
-[中文](../../zh/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md) | [English](../../en/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
+[中文](../../zh/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md) | [英文](../../en/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11
@@ -109,7 +109,7 @@ agent_adapter -> api -> application -> domain
 | `domain` | 实体、关系、claim、evidence、scope、版本、领域错误 | 不依赖协议和后端实现 |
 | `observability` | traces、metrics、diagnostics、health 聚合 | 不改变业务决策 |
 
-## 4. Agent Runtime Port
+## 4. Agent Runtime 接入端口
 
 `relay-knowledge` 后续应定义面向 adapter 的知识端口。下面是能力边界，不是 v1 代码实现承诺。
 

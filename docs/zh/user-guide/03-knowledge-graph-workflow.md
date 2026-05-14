@@ -1,6 +1,6 @@
 # 第 3 章 知识图谱工作流
 
-[中文](../../zh/user-guide/03-knowledge-graph-workflow.md) | [English](../../en/user-guide/03-knowledge-graph-workflow.md)
+[中文](../../zh/user-guide/03-knowledge-graph-workflow.md) | [英文](../../en/user-guide/03-knowledge-graph-workflow.md)
 
 ## 3.1 写入 evidence
 

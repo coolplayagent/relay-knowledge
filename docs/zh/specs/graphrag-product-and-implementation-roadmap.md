@@ -1,6 +1,6 @@
 # GraphRAG 产品与实现路线规格
 
-[中文](../../zh/specs/graphrag-product-and-implementation-roadmap.md) | [English](../../en/specs/graphrag-product-and-implementation-roadmap.md)
+[中文](../../zh/specs/graphrag-product-and-implementation-roadmap.md) | [英文](../../en/specs/graphrag-product-and-implementation-roadmap.md)
 
 > 文档版本: 1.1
 > 编制日期: 2026-05-12

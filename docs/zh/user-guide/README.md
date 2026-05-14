@@ -1,6 +1,6 @@
 # relay-knowledge 使用指南
 
-[中文](../../zh/user-guide/README.md) | [English](../../en/user-guide/README.md)
+[中文](../../zh/user-guide/README.md) | [英文](../../en/user-guide/README.md)
 
 > 文档版本: 1.2
 > 编制日期: 2026-05-14
