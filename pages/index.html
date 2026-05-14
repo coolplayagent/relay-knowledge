@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="0; url=./en/" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+    <title>relay-knowledge documentation</title>
+    <script>
+      const language = navigator.language || "";
+      const target = language.toLowerCase().startsWith("zh") ? "./zh/" : "./en/";
+      window.location.replace(target);
+    </script>
+  </head>
+  <body>
+    <main class="page">
+      <section class="section">
+        <h1>relay-knowledge documentation</h1>
+        <p>Choose a documentation language.</p>
+        <p class="links">
+          <a href="./en/">English</a>
+          <a href="./zh/">中文</a>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
