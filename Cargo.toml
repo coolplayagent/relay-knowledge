@@ -6,6 +6,9 @@ rust-version = "1.85"
 description = "Graph-database-based knowledge graph project."
 license = "MIT"
 repository = "https://github.com/coolplayagent/relay-knowledge"
+readme = "README.md"
+keywords = ["knowledge-graph", "graphrag", "retrieval", "sqlite", "mcp"]
+categories = ["command-line-utilities", "database", "development-tools"]
 
 [lib]
 path = "src/relay_knowledge/lib.rs"

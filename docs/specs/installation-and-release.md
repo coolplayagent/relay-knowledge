@@ -26,9 +26,9 @@ GitHub Releases 是默认稳定分发渠道。每个 release tag 必须至少包
 
 | Artifact | 要求 |
 | --- | --- |
-| Linux binary archive | 包含 `relay-knowledge` 可执行文件、license、README 或安装说明 |
-| macOS binary archive | 同时规划 Apple Silicon 和 Intel，未支持的平台必须在 release note 中说明 |
-| Windows binary archive | 包含 `relay-knowledge.exe` 和 Windows 安装说明 |
+| Linux binary archive | 包含 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 的 `relay-knowledge` 可执行文件、license、README 或安装说明 |
+| macOS binary archive | 包含 `x86_64-apple-darwin` 和 `aarch64-apple-darwin` 的 `relay-knowledge` 可执行文件、license、README 或安装说明 |
+| Windows binary archive | 包含 `x86_64-pc-windows-msvc` 和 `aarch64-pc-windows-msvc` 的 `relay-knowledge.exe` 和 Windows 安装说明 |
 | `checksums.txt` | 覆盖所有二进制、安装脚本和服务模板 |
 | signature 或 provenance | 用于验证 artifact 来源，至少在稳定版发布前启用 |
 | release notes | 说明安装方式、升级注意事项、配置变更和迁移风险 |
@@ -88,6 +88,11 @@ relay-knowledge --version
 | Linux | distro package 或 installer script | 不把 state、cache、log 写入仓库或安装包目录 |
 
 包管理器 manifest 不应重新构建不同源码快照。它们应引用同一个 release tag 产生的 artifact，保证不同安装方式得到相同版本。
+
+第一版 release gate 必须生成 Windows ARM64 制品并纳入 checksum 和 provenance。
+在 GitHub-hosted Windows ARM64 runner 可用或接入自托管 runner 前，
+`aarch64-pc-windows-msvc` 的验收边界是 cross-build、归档、checksum 和上传成功；
+原生 Windows ARM64 smoke test 是后续 gate。
 
 ## 3. 安装体验
 
@@ -215,10 +220,10 @@ relay-knowledge uninstall --purge-data
 发布流水线应由 tag 触发，至少包含:
 
 1. 运行 `cargo fmt --all -- --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test --all-targets --all-features`。
-2. 构建目标平台 release 二进制。
+2. 构建目标平台 release 二进制，包括 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64。
 3. 生成 archives、checksums、签名或 provenance。
-4. 运行安装脚本 dry-run 和基础 smoke test。
-5. 执行 `cargo publish --dry-run`，正式发布时推送 crates.io。
+4. 运行安装脚本 dry-run 和基础 smoke test；Windows ARM64 在接入原生 runner 前只要求 cross-build artifact 验证。
+5. 执行 `cargo publish --dry-run`，正式稳定版发布时先推送 crates.io，再创建 GitHub Release。
 6. 创建 GitHub Release 并上传所有 artifact。
 7. 更新包管理器 manifest 或打开自动化 PR。
 
