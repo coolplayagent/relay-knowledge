@@ -1,4 +1,4 @@
-use super::{CliCommandSpec, CommandEffect, arg, opt};
+use super::{CliCommandSpec, CommandEffect, arg, command_syntax, opt};
 
 pub(super) fn command_specs() -> Vec<CliCommandSpec> {
     vec![

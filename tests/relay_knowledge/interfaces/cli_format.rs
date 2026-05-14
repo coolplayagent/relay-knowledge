@@ -212,9 +212,11 @@ fn binary_outputs_machine_readable_help() {
 
     let value: Value = serde_json::from_slice(&output.stdout).expect("help JSON");
 
+    assert_eq!(value["schema_version"], 2);
     assert_eq!(value["path"], serde_json::json!(["repo", "query"]));
     assert_eq!(value["operation"], "code.repo.query");
     assert_eq!(value["effect"], "read-only");
+    assert_eq!(value["syntax"]["kind"], "command");
     assert!(
         value["options"]
             .as_array()
@@ -401,15 +403,31 @@ fn binary_rejects_flag_style_actions_and_extra_command_words() {
         .expect("binary should run");
 
     assert_eq!(flag_action.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8_lossy(&flag_action.stderr).trim(),
-        "unexpected argument '--ingest'"
-    );
+    let flag_stderr = String::from_utf8_lossy(&flag_action.stderr);
+    assert!(flag_stderr.contains("unknown option '--ingest'; commands are positional"));
+    assert!(flag_stderr.contains("relay-knowledge ingest"));
     assert_eq!(extra.status.code(), Some(2));
-    assert_eq!(
-        String::from_utf8_lossy(&extra.stderr).trim(),
-        "unexpected argument 'health'"
+    assert!(
+        String::from_utf8_lossy(&extra.stderr)
+            .contains("unexpected argument 'health' for 'status'")
     );
+}
+
+#[test]
+fn binary_outputs_json_parse_diagnostic_on_json_format_errors() {
+    let output = relay_command()
+        .args(["--format", "json", "query", "--query", "SQLite"])
+        .output()
+        .expect("binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stderr).expect("stderr diagnostic JSON");
+
+    assert_eq!(value["matched_path"], serde_json::json!(["query"]));
+    assert_eq!(value["unexpected_token"], "--query");
+    assert_eq!(value["suggestion"], "relay-knowledge query SQLite");
 }
 
 fn relay_command() -> Command {

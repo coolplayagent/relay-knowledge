@@ -136,6 +136,12 @@ CLI 参数解释是接口 contract 的一部分。`relay-knowledge help --format
 工具应优先读取这份规格，而不是解析自然语言 help；新增或改变 CLI/API/config
 参数时必须同步更新自描述 metadata 和测试。
 
+CLI 参数解析必须以自描述语法树为来源。语法树同时驱动解析、文本 help、JSON help、
+错误诊断和测试夹具，避免 parser、文档和 LLM 使用说明各自漂移。解析失败时，CLI
+应根据已匹配的 command path 输出最接近的 `usage`、`expected` 和 `suggestion`。
+如果调用者请求 `--format json`，解析错误应在 stderr 输出单行 JSON diagnostic；
+成功业务响应仍只输出到 stdout。
+
 格式:
 
 | 格式 | 用途 | 输出形态 |

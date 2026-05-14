@@ -1,5 +1,7 @@
 //! CLI adapter for the shared application service.
 
+#[path = "cli_grammar.rs"]
+mod cli_grammar;
 #[path = "cli_render.rs"]
 mod cli_render;
 #[path = "cli_spec.rs"]
@@ -128,11 +130,15 @@ impl CliCommand {
             }
         } else if version {
             if let Some(token) = action_tokens.first() {
-                return Err(CliError::UnexpectedArgument(token.clone()));
+                let error = CliError::UnexpectedArgument(token.clone());
+                return Err(cli_grammar::diagnose(&action_tokens, error, format));
             }
             CliAction::Version
         } else {
-            parse_action(action_tokens)?
+            match parse_action(action_tokens.clone()) {
+                Ok(action) => action,
+                Err(error) => return Err(cli_grammar::diagnose(&action_tokens, error, format)),
+            }
         };
 
         Ok(Self {
@@ -270,6 +276,7 @@ pub enum ServiceMcpTransport {
 /// CLI adapter error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
+    Diagnostic(Box<CliDiagnostic>),
     InvalidFormat(String),
     InvalidCodeQueryKind(String),
     InvalidFreshness(String),
@@ -297,7 +304,8 @@ impl CliError {
     /// Returns the process exit code for the error.
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::InvalidFormat(_)
+            Self::Diagnostic(_)
+            | Self::InvalidFormat(_)
             | Self::InvalidCodeQueryKind(_)
             | Self::InvalidFreshness(_)
             | Self::InvalidIndexKind(_)
@@ -316,11 +324,20 @@ impl CliError {
             | Self::RenderFailed(_) => 1,
         }
     }
+
+    /// Renders the process stderr payload for this error.
+    pub fn render_stderr(&self) -> String {
+        match self {
+            Self::Diagnostic(diagnostic) => diagnostic.render_stderr(),
+            _ => self.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Diagnostic(diagnostic) => write!(formatter, "{}", diagnostic.render_text()),
             Self::InvalidFormat(format) => write!(
                 formatter,
                 "invalid --format value '{format}', expected text, json, markdown, or streaming-json"
@@ -374,6 +391,70 @@ impl fmt::Display for CliError {
 }
 
 impl Error for CliError {}
+
+/// Structured parse diagnostic produced from the CLI grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliDiagnostic {
+    message: String,
+    usage: Option<String>,
+    suggestion: Option<String>,
+    matched_path: Vec<String>,
+    unexpected_token: Option<String>,
+    expected: Vec<String>,
+    format: OutputFormat,
+}
+
+impl CliDiagnostic {
+    fn new(
+        message: String,
+        usage: Option<String>,
+        suggestion: Option<String>,
+        matched_path: Vec<String>,
+        unexpected_token: Option<String>,
+        expected: Vec<String>,
+        format: OutputFormat,
+    ) -> Self {
+        Self {
+            message,
+            usage,
+            suggestion,
+            matched_path,
+            unexpected_token,
+            expected,
+            format,
+        }
+    }
+
+    fn render_text(&self) -> String {
+        let mut output = self.message.clone();
+        if let Some(suggestion) = &self.suggestion {
+            output.push_str("\nTry: ");
+            output.push_str(suggestion);
+        }
+        if let Some(usage) = &self.usage {
+            output.push_str("\nUsage: ");
+            output.push_str(usage);
+        }
+
+        output
+    }
+
+    fn render_stderr(&self) -> String {
+        if self.format == OutputFormat::Json {
+            return serde_json::json!({
+                "error": self.message,
+                "usage": self.usage,
+                "suggestion": self.suggestion,
+                "matched_path": self.matched_path,
+                "unexpected_token": self.unexpected_token,
+                "expected": self.expected,
+            })
+            .to_string();
+        }
+
+        self.render_text()
+    }
+}
 
 /// Runs the CLI command and renders its response.
 pub async fn run<I, S>(args: I) -> Result<String, CliError>
