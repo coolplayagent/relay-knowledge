@@ -27,6 +27,7 @@ Use JSON output when scripting:
 ```bash
 target/debug/relay-knowledge status --format json
 target/debug/relay-knowledge health --format json
+target/debug/relay-knowledge help --format json
 ```
 
 ## Installing Releases
@@ -138,6 +139,7 @@ Current CLI commands use the compiled `relay-knowledge` binary with git-style su
 
 ```bash
 relay-knowledge status --format json
+relay-knowledge help repo query --format json
 relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
@@ -159,8 +161,14 @@ relay-knowledge service plan install --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp streamable-http
+relay-knowledge query --help
 relay-knowledge query -- --help
 ```
+
+CLI parameter meaning is part of the public contract. Skills and other LLM tools
+should inspect `relay-knowledge help --format json` before issuing commands; it
+describes each command path, operation, read/write effect, required parameters,
+defaults, allowed values, repeatability, examples, and notes.
 
 Semantic/vector read-model backend metadata is configured only through the
 `env` boundary. The default mode is local deterministic read models; external

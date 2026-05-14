@@ -146,6 +146,90 @@ fn binary_outputs_version_json_from_flag_alias() {
 }
 
 #[test]
+fn binary_outputs_root_help_without_runtime_configuration() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["--help"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Usage: relay-knowledge <command>"));
+    assert!(stdout.contains("help"));
+    assert!(stdout.contains("machine-readable parameter metadata"));
+}
+
+#[test]
+fn binary_outputs_command_help_text() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["repo", "query", "core", "--help"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Usage: relay-knowledge repo query"));
+    assert!(stdout.contains("--kind"));
+    assert!(stdout.contains("definition"));
+}
+
+#[test]
+fn binary_outputs_namespace_help_text() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["repo", "--help"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(stdout.contains("Usage: relay-knowledge repo <subcommand>"));
+    assert!(stdout.contains("repo query"));
+    assert!(stdout.contains("repo index"));
+}
+
+#[test]
+fn binary_outputs_machine_readable_help() {
+    let output = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["help", "repo", "query", "--format", "json"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let value: Value = serde_json::from_slice(&output.stdout).expect("help JSON");
+
+    assert_eq!(value["path"], serde_json::json!(["repo", "query"]));
+    assert_eq!(value["operation"], "code.repo.query");
+    assert_eq!(value["effect"], "read-only");
+    assert!(
+        value["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .any(|option| option["flag"] == "--kind"
+                && option["allowed_values"]
+                    .as_array()
+                    .expect("values")
+                    .iter()
+                    .any(|value| value == "definition"))
+    );
+}
+
+#[test]
 fn binary_rejects_streaming_json_version_format() {
     let output = relay_command()
         .args(["version", "--format", "streaming-json"])

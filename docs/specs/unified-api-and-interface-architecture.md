@@ -130,6 +130,12 @@ content 生成稳定 ID；哈希输入必须使用无歧义编码，不能用可
 
 CLI adapter 由 Tokio runtime 驱动，只做参数解析、调用 async application service、渲染输出和设置退出码。
 
+CLI 参数解释是接口 contract 的一部分。`relay-knowledge help --format json`
+必须提供机器可读命令规格，覆盖 command path、operation、读写影响、参数语义、
+是否必填、默认值、允许取值、是否可重复、示例和注意事项。skill、脚本和 LLM
+工具应优先读取这份规格，而不是解析自然语言 help；新增或改变 CLI/API/config
+参数时必须同步更新自描述 metadata 和测试。
+
 格式:
 
 | 格式 | 用途 | 输出形态 |
