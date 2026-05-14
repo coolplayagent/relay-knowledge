@@ -125,9 +125,9 @@ relay-knowledge status --format json
 relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
-relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
+relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json
