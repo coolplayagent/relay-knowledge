@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{
-    api::{IngestEvidence, IngestRequest},
+    api::{AuditQueryApiRequest, IngestEvidence, IngestRequest},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     env::{EnvironmentConfig, PlatformKind},
     interfaces::agent::AgentAuditStatus,
@@ -708,6 +708,85 @@ async fn resources_and_metrics_respect_runtime_timeout() {
         .expect("resources/read audit event");
     assert_eq!(resource_audit.status, AgentAuditStatus::Failed);
     assert_eq!(resource_audit.error_kind.as_deref(), Some("timeout"));
+}
+
+#[tokio::test]
+async fn method_level_reads_are_recorded_in_durable_audit() {
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    let mut router = server.router();
+
+    let resource = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "resource-audit",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/status"}
+        }),
+    )
+    .await;
+    let response = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "prompt-audit",
+            "method": "prompts/get",
+            "params": {
+                "name": "relay.retrieve-context",
+                "arguments": {"query": "audit", "source_scope": "docs"}
+            }
+        }),
+    )
+    .await;
+
+    assert!(resource["result"]["contents"][0]["text"].is_string());
+    assert_eq!(response["result"]["description"], "Retrieve Graph Context");
+
+    let resource_audit = service
+        .query_audit(
+            AuditQueryApiRequest {
+                operation: Some("resources/read".to_owned()),
+                limit: 1,
+            },
+            RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-resource-audit-query",
+                "trace-resource-audit-query",
+            ),
+        )
+        .await
+        .expect("durable resource audit should query");
+    let durable = service
+        .query_audit(
+            AuditQueryApiRequest {
+                operation: Some("prompts/get".to_owned()),
+                limit: 1,
+            },
+            RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-prompt-audit-query",
+                "trace-prompt-audit-query",
+            ),
+        )
+        .await
+        .expect("durable prompt audit should query");
+    let resource_event = resource_audit
+        .events
+        .first()
+        .expect("durable resource audit");
+    assert_eq!(resource_event.operation, "resources/read");
+    assert_eq!(resource_event.status, crate::domain::AuditStatus::Completed);
+    assert!(
+        resource_event
+            .request_id
+            .ends_with("|string:resource-audit")
+    );
+
+    let event = durable.events.first().expect("durable prompt audit");
+    assert_eq!(event.operation, "prompts/get");
+    assert_eq!(event.status, crate::domain::AuditStatus::Completed);
+    assert!(event.request_id.ends_with("|string:prompt-audit"));
 }
 
 #[test]

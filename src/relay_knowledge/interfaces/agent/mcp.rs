@@ -460,7 +460,7 @@ async fn handle_mcp_post(
             }
         }
         "prompts/list" => prompts::list_prompts(),
-        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id) {
+        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id).await {
             Ok(result) => result,
             Err(error) => return json_rpc_error(id, error.code, error.message),
         },

@@ -45,7 +45,7 @@ pub(super) fn list_prompts() -> Value {
     })
 }
 
-pub(super) fn get_prompt(
+pub(super) async fn get_prompt(
     server: &McpServer,
     params: Value,
     request_id: &str,
@@ -74,7 +74,8 @@ pub(super) fn get_prompt(
             elapsed_ms: elapsed_millis(started),
             error_kind: result.as_ref().err().map(|error| error.kind),
         },
-    );
+    )
+    .await;
 
     result
 }

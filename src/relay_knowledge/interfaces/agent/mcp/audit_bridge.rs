@@ -129,8 +129,8 @@ pub(super) struct McpMethodAudit<'a> {
     pub(super) error_kind: Option<&'a str>,
 }
 
-pub(super) fn record_mcp_method_audit(server: &McpServer, input: McpMethodAudit<'_>) {
-    server.audit.record(AgentAuditEvent {
+pub(super) async fn record_mcp_method_audit(server: &McpServer, input: McpMethodAudit<'_>) {
+    let event = AgentAuditEvent {
         sequence: 0,
         protocol: AgentProtocolKind::Mcp,
         operation: input.operation.to_owned(),
@@ -146,7 +146,9 @@ pub(super) fn record_mcp_method_audit(server: &McpServer, input: McpMethodAudit<
         truncated: false,
         elapsed_ms: input.elapsed_ms,
         error_kind: input.error_kind.map(str::to_owned),
-    });
+    };
+    server.audit.record(event.clone());
+    persist_agent_audit(server, &event, 0).await;
 }
 
 fn audit_source_scope(structured: &Value) -> Option<String> {
