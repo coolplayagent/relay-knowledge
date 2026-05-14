@@ -24,6 +24,10 @@ chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
 cannot be confused with hybrid search.
 `repo query` also accepts `--limit`, `--ref`, repeated `--path`, repeated
 `--language`, and `--freshness allow-stale|wait-until-fresh|graph-only`.
+Symbol hits include both snapshot-bound `symbol_snapshot_id` and stable
+`canonical_symbol_id`. Reference, caller/callee, import, and impact hits expose
+edge metadata: `edge_kind`, `edge_resolution_state`, `edge_target_hint`,
+`edge_confidence_basis_points`, and `edge_confidence_tier`.
 
 ## relay-teams E2E Findings
 
@@ -139,7 +143,10 @@ deterministic semantic/vector retrieval baseline is maintained in
 - Request path/language filters are intersected with the registered repository
   scope and cannot widen ingestion, retrieval, or impact analysis. `.` and `./`
   path filters select the repository root, and leading `./` is normalized for
-  relative filters such as `./src`.
+  relative filters such as `./src`. After that normalization, the resolved
+  request filters must match an indexed snapshot scope exactly; querying or
+  impact-analyzing a narrower or broader filter set requires indexing that
+  scope first.
 - `wait-until-fresh` code queries reject stale repository status. `graph-only`
   returns no repository-index rows and reports that the graph-only policy was
   selected.

@@ -861,6 +861,7 @@ fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
         repository_id: "repo".to_owned(),
         source_scope: "git_snapshot:test".to_owned(),
         symbol_snapshot_id: id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
         file_id: format!("file-{id}"),
         path: path.to_owned(),
         language_id: "rust".to_owned(),
@@ -884,6 +885,10 @@ fn reference(id: &str, path: &str, name: &str) -> RepositoryCodeReferenceRecord 
         name: name.to_owned(),
         kind: "call".to_owned(),
         target_symbol_snapshot_id: None,
+        target_hint: Some(name.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 2_500,
+        confidence_tier: "ambiguous".to_owned(),
         byte_range: crate::domain::RepositoryCodeRange { start: 0, end: 8 },
         line_range: crate::domain::RepositoryCodeRange { start: 1, end: 1 },
     }

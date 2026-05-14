@@ -97,6 +97,7 @@ CodeSnapshotScope {
 - branch、tag、HEAD、PR ref 和 worktree selector 必须先解析为 commit/tree，再构造 scope。用户输入的 ref 不能以 `-` 开头，必须在调用 Git 前拒绝，避免被解释为 Git 选项。
 - 同一 tree hash 可复用索引分区，即使来自不同 branch 名。
 - rebase 后的新 head 必须产生新 scope；旧 scope 只能用于历史审计或显式 diff。
+- 请求 path/language filters 与注册 scope 合并后，必须先规范化等价 path filter 拼写，再精确匹配一个已索引 snapshot scope。查询或影响分析不得回退到同 commit 的其他 filter scope，也不得用宽 scope 伪装窄 scope；需要新 filter 组合时必须先索引该 scope。
 - dirty worktree 必须显式建模为 `git_changeset` 或 `worktree_overlay`，不能混入 clean snapshot。`worktree_overlay` 必须有显式 overlay identity；查询 clean commit ref 时不能返回 overlay 内容。
 
 ### 3.3 Changeset scope
@@ -160,6 +161,13 @@ v1 必须支持的边:
 | `CHANGED_IN` | Git diff | changeset 到文件/符号 |
 
 如果目标符号无法唯一解析，边必须保留 `target_hint`、`resolution_state=unresolved|ambiguous|resolved` 和候选列表。不能把猜测写成确定调用。
+
+当前实现已经把该约束落到代码仓库索引读模型: `RepositoryCodeSymbolRecord`
+持久化 `canonical_symbol_id` 与 `symbol_snapshot_id`，SQLite 中的
+reference/call/import 行持久化 `target_hint`、`resolution_state`、
+`confidence_basis_points` 和 `confidence_tier`。`repo query`、Web operation
+和 MCP `relay.code_query` 返回的 `CodeRetrievalHit` 会透出这些 edge metadata；
+无法唯一解析的调用保持 `ambiguous` 或 `unresolved`，不会升级成 resolved。
 
 ## 5. Tree-sitter 解析与抽取
 
@@ -528,7 +536,7 @@ relay-knowledge repo status <alias> --format json
 - `repo update`: 解析 `git diff --name-status --find-renames -z`，仅重解析 changed/copied/renamed/type-changed path，删除 selected deleted/renamed old path，并记录 rename tombstone。copy source path 不能作为 impact changed seed。worktree overlay 必须删除 selected rename source path，synthetic tree hash 只由 selector 范围内的 changed path/content 计算；clean 或 out-of-scope-only overlay 必须回到 clean snapshot，不得重标记旧数据。
 - `repo query`: 支持 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees` 和 `imports` query kind。`impact` 不是普通查询模式，必须通过 `repo impact` 执行。
 - `repo query`: 请求 ref 先解析为 commit，再按 `repository_id + tree_hash + path/language filters` 查找已索引 scope；显式 `worktree` ref 才能读取 worktree overlay。查询未索引的新 commit、branch、tag 或 rebase head 会失败，避免返回错误 revision 的 code context。已经索引过的旧 commit 可显式查询，结果不会被后续 branch 索引覆盖。
-- `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
+- `repo query`: request path/language filters 只能收窄 registration scope，不能替代或扩大注册时授权的 path/language filters；合并后的 filters 必须在规范化 `src`、`src/`、`./src` 等等价 path 写法后精确命中已索引 scope，未命中时返回错误而不是回退到同 commit 的其他 scope。`wait-until-fresh` 必须拒绝 stale code index；`graph-only` 不返回 repository-index rows。
 - `repo impact`: 根据 Git diff changed paths，从 changed chunks、call graph 和 import graph 返回有界影响结果；结果绑定到已索引 head snapshot scope，changeset 本身不是事实真源。
 - `repo impact`: changed path seed 必须先按 registration/request selector 过滤；删除文件没有 active file row 时，必须根据路径扩展名推断已注册 tree-sitter language id，再执行 language filters；`head_ref` 必须解析到一个已索引 snapshot；caller expansion 必须优先使用 resolved symbol identity，删除文件的 symbol names 必须进入 impact seed，避免漏报 removed API 的调用方。
 - `repo impact`: import graph seed 必须包含 changed path module key、语言原生 module key、symbol qualified name 和 symbol name。Rust 路径必须能生成 `crate::...` key，例如 `src/lib.rs` 中的 `retry_policy` 影响 `use crate::retry_policy;`。import graph 匹配必须按 module boundary 判断，不能用裸 substring 扩大影响面；underscore 和 hyphen 不能被视为 module boundary。
@@ -611,11 +619,11 @@ Health/status 必须能回答:
 
 建议阶段:
 
-1. **v1 数据 contract**: 增加 code source scope、代码图实体、diff contract、scoped index metadata。当前实现已落地 tree-sitter 输出承接层: `CodeFileRecord`、`CodeSymbolRecord`、`CodeReferenceRecord`、`CodeChunkRecord`、parse status 计数、代码图存储 trait 和 SQLite 表；Git diff contract 与 scoped index metadata 仍在后续阶段。
-2. **v1 parser adapter**: 接入主流语言 grammar registry，支持 definitions/references/imports/chunks，并为没有上游 tags query 的语言维护受控 query。
-3. **v1 full build + BM25**: Git tracked files 全量构建，代码 chunk 和 symbol BM25 可查询。
-4. **v1 incremental update**: Git diff/status + content hash + 局部 graph/index refresh。
-5. **v1 graph queries**: 定义/引用/调用/import/impact 半径。
+1. **v1 数据 contract**: 已落地 code repository registration、Git snapshot/worktree scope、代码图实体、`canonical_symbol_id` / `symbol_snapshot_id` 分离、edge resolution/confidence metadata、parse status 计数、代码图存储 trait 和 SQLite 兼容迁移。
+2. **v1 parser adapter**: 已接入主流语言 grammar registry，支持 definitions/references/imports/chunks、doc comment 和降级 diagnostics；没有上游 tags query 的语言使用受控 query。
+3. **v1 full build + BM25**: 已支持 Git tracked files 全量构建，代码 chunk 和 symbol 写入 BM25、local semantic 和 local vector read model。
+4. **v1 incremental update**: 已支持 Git diff/status、content hash skip、delete/rename tombstone 和局部 graph/index refresh。
+5. **v1 graph queries**: 已支持定义、引用、调用、import、impact 半径和 report 级 edge resolution 诊断。
 6. **v2 hybrid retrieval**: semantic/vector、rerank、context pack、跨仓库检索。
 7. **v2 background service**: watch、leases、自愈、dead-letter、维护窗口和用户可控静默更新。
 

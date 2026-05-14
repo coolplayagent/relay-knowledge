@@ -536,6 +536,7 @@ macro_rules! unsupported_code_method {
 impl CodeRepositoryStore for RefreshFailStore {
     unsupported_code_method!(upsert_code_repository(registration: CodeRepositoryRegistration) -> CodeRepositoryStatus);
     unsupported_code_method!(code_repository_status(repository: String) -> Option<CodeRepositoryStatus>);
+    unsupported_code_method!(code_repository_scope_status(repository: String, resolved_commit_sha: String, path_filters: Vec<String>, language_filters: Vec<String>) -> Option<CodeRepositoryStatus>);
     unsupported_code_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
     unsupported_code_method!(apply_code_index_snapshot(snapshot: CodeIndexSnapshot) -> CodeIndexSummary);
     unsupported_code_method!(search_code(request: CodeRetrievalRequest) -> Vec<CodeRetrievalHit>);
