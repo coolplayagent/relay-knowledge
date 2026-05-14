@@ -10,6 +10,7 @@ use crate::{
     storage::StorageError,
 };
 
+#[cfg(test)]
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
@@ -62,31 +63,30 @@ fn search_symbols(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let (candidate_condition, candidate_values) = candidate_condition(
-        &[
-            "lower(name)",
-            "lower(qualified_name)",
-            "lower(signature)",
-            "lower(coalesce(doc_comment, ''))",
-            "lower(path)",
-        ],
-        &request.query,
-    );
-    let sql = format!(
-        "
+    let fts_query = fts_match_query(&request.query);
+    let sql = "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name
         FROM code_repository_symbols
         WHERE source_scope = ?
-          AND ({candidate_condition})
+          AND symbol_snapshot_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'symbol'
+              LIMIT ?
+          )
         ORDER BY path ASC, line_start ASC
-        ",
-    );
-    let mut statement = connection.prepare(&sql)?;
+        LIMIT ?
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(candidate_values_for(
+        params_from_iter(fts_values_for_limited(
             required_scope(status)?,
-            candidate_values,
+            &fts_query,
+            candidate_limit(request),
+            candidate_limit(request),
         )),
         |row| {
             Ok(SymbolRow {
@@ -168,12 +168,8 @@ fn search_references(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let (candidate_condition, candidate_values) = candidate_condition(
-        &["lower(r.name)", "lower(r.kind)", "lower(r.path)"],
-        &request.query,
-    );
-    let sql = format!(
-        "
+    let fts_query = fts_match_query(&request.query);
+    let sql = "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
                r.line_start, r.line_end, r.target_hint, r.resolution_state,
@@ -185,15 +181,24 @@ fn search_references(
             ON s.source_scope = r.source_scope
            AND s.symbol_snapshot_id = r.target_symbol_snapshot_id
         WHERE r.source_scope = ?
-          AND ({candidate_condition})
+          AND r.reference_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'reference'
+              LIMIT ?
+          )
         ORDER BY r.path ASC, r.line_start ASC
-        ",
-    );
-    let mut statement = connection.prepare(&sql)?;
+        LIMIT ?
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(candidate_values_for(
+        params_from_iter(fts_values_for_limited(
             required_scope(status)?,
-            candidate_values,
+            &fts_query,
+            candidate_limit(request),
+            candidate_limit(request),
         )),
         |row| {
             Ok(ReferenceRow {
@@ -261,16 +266,8 @@ fn search_calls(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let (candidate_condition, candidate_values) = candidate_condition(
-        &[
-            "lower(coalesce(c.caller_name, ''))",
-            "lower(c.callee_name)",
-            "lower(c.path)",
-        ],
-        &request.query,
-    );
-    let sql = format!(
-        "
+    let fts_query = fts_match_query(&request.query);
+    let sql = "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
@@ -286,15 +283,24 @@ fn search_calls(
             ON callee.source_scope = c.source_scope
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
         WHERE c.source_scope = ?
-          AND ({candidate_condition})
+          AND c.call_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'call'
+              LIMIT ?
+          )
         ORDER BY c.path ASC, c.line_start ASC
-        ",
-    );
-    let mut statement = connection.prepare(&sql)?;
+        LIMIT ?
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(candidate_values_for(
+        params_from_iter(fts_values_for_limited(
             required_scope(status)?,
-            candidate_values,
+            &fts_query,
+            candidate_limit(request),
+            candidate_limit(request),
         )),
         |row| {
             Ok(CallRow {
@@ -378,25 +384,32 @@ fn search_imports(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let (candidate_condition, candidate_values) =
-        candidate_condition(&["lower(i.module)", "lower(i.path)"], &request.query);
-    let sql = format!(
-        "
+    let fts_query = fts_match_query(&request.query);
+    let sql = "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
         WHERE i.source_scope = ?
-          AND ({candidate_condition})
+          AND i.import_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'import'
+              LIMIT ?
+          )
         ORDER BY i.path ASC, i.line_start ASC
-        ",
-    );
-    let mut statement = connection.prepare(&sql)?;
+        LIMIT ?
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(candidate_values_for(
+        params_from_iter(fts_values_for_limited(
             required_scope(status)?,
-            candidate_values,
+            &fts_query,
+            candidate_limit(request),
+            candidate_limit(request),
         )),
         |row| {
             Ok(ImportRow {
@@ -456,10 +469,8 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let (candidate_condition, candidate_values) =
-        candidate_condition(&["lower(c.content)", "lower(c.path)"], &request.query);
-    let sql = format!(
-        "
+    let fts_query = fts_match_query(&request.query);
+    let sql = "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
                symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
@@ -470,15 +481,24 @@ fn search_chunks(
             ON symbol.source_scope = c.source_scope
            AND symbol.symbol_snapshot_id = c.symbol_snapshot_id
         WHERE c.source_scope = ?
-          AND ({candidate_condition})
+          AND c.chunk_id IN (
+              SELECT record_id
+              FROM code_repository_search
+              WHERE code_repository_search MATCH ?
+                AND source_scope = ?
+                AND document_kind = 'chunk'
+              LIMIT ?
+          )
         ORDER BY c.path ASC, c.line_start ASC
-        ",
-    );
-    let mut statement = connection.prepare(&sql)?;
+        LIMIT ?
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(candidate_values_for(
+        params_from_iter(fts_values_for_limited(
             required_scope(status)?,
-            candidate_values,
+            &fts_query,
+            candidate_limit(request),
+            candidate_limit(request),
         )),
         |row| {
             Ok(ChunkRow {
@@ -771,6 +791,7 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     score
 }
 
+#[cfg(test)]
 fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
     let max_patterns = (MAX_CANDIDATE_BIND_VALUES / fields.len().max(1)).max(1);
     let patterns = candidate_patterns(query, max_patterns);
@@ -796,6 +817,7 @@ fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<Value>) {
     (groups.join(" OR "), values)
 }
 
+#[cfg(test)]
 fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
     let mut patterns = Vec::new();
     for token in query.to_lowercase().split_whitespace() {
@@ -815,11 +837,38 @@ fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
     patterns
 }
 
-fn candidate_values_for(repository_id: &str, candidate_values: Vec<Value>) -> Vec<Value> {
-    let mut values = Vec::with_capacity(candidate_values.len() + 1);
-    values.push(Value::Text(repository_id.to_owned()));
-    values.extend(candidate_values);
-    values
+fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    request.limit.saturating_mul(100).clamp(500, 2000)
+}
+
+fn fts_match_query(query: &str) -> String {
+    let terms = query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+
+    if terms.is_empty() {
+        "relayknowledgeunlikelyemptyquerytoken".to_owned()
+    } else {
+        terms.join(" ")
+    }
+}
+
+fn fts_values_for_limited(
+    repository_id: &str,
+    fts_query: &str,
+    fts_limit: usize,
+    limit: usize,
+) -> Vec<Value> {
+    vec![
+        Value::Text(repository_id.to_owned()),
+        Value::Text(fts_query.to_owned()),
+        Value::Text(repository_id.to_owned()),
+        Value::Integer(fts_limit as i64),
+        Value::Integer(limit as i64),
+    ]
 }
 
 struct SymbolRow {

@@ -240,6 +240,81 @@ async fn incremental_index_rejects_base_that_is_not_current_snapshot() {
 }
 
 #[tokio::test]
+async fn full_index_reuses_fresh_matching_scope_without_rebuilding() {
+    let repo = FixtureRepo::create("code-full-noop");
+    repo.write("src/lib.rs", "pub fn stable_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-full-noop").await;
+    let first = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-full-noop-first"),
+        )
+        .await
+        .expect("initial full index should succeed");
+    let second = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-full-noop-second"),
+        )
+        .await
+        .expect("fresh full index should reuse scope");
+
+    assert_eq!(second.summary.source_scope, first.summary.source_scope);
+    assert_eq!(second.summary.changed_path_count, 0);
+    assert_eq!(second.summary.skipped_unchanged_count, 1);
+    assert_eq!(second.summary.progress.blob_read_count, 0);
+    assert_eq!(second.summary.progress.parsed_file_count, 0);
+    assert_eq!(second.summary.progress.sqlite_write_count, 0);
+}
+
+#[tokio::test]
+async fn repository_report_does_not_run_latency_samples_by_default() {
+    let repo = FixtureRepo::create("code-report-fast");
+    repo.write("src/lib.rs", "pub fn report_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-report-fast").await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-report-fast"),
+        )
+        .await
+        .expect("repository should index");
+    let report = service
+        .code_repository_report(selector("fixture", "HEAD"), context("report-fast"))
+        .await
+        .expect("report should succeed");
+
+    assert!(report.report.latency_samples.is_empty());
+    assert!(
+        report
+            .report
+            .representative_queries
+            .iter()
+            .any(|query| query == "report_policy")
+    );
+}
+
+#[tokio::test]
 async fn callee_query_does_not_reuse_caller_symbol_identity_for_unresolved_edges() {
     let repo = FixtureRepo::create("code-unresolved-callee");
     repo.write(

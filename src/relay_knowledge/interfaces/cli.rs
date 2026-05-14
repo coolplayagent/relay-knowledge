@@ -703,8 +703,13 @@ fn parse_query(tokens: &[String]) -> Result<CliAction, CliError> {
                 index += 2;
             }
             other if !other.starts_with('-') && query.is_none() => {
-                query = Some(other.to_owned());
+                let mut values = vec![other.to_owned()];
                 index += 1;
+                while index < tokens.len() && !tokens[index].starts_with('-') {
+                    values.push(tokens[index].clone());
+                    index += 1;
+                }
+                query = Some(values.join(" "));
             }
             other => return Err(CliError::UnexpectedArgument(other.to_owned())),
         }
