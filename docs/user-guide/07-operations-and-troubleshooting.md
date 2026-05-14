@@ -11,11 +11,12 @@ relay-knowledge status --format json
 再看健康和服务诊断:
 
 ```bash
+relay-knowledge setup doctor --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-重点关注 graph version、index lag、refresh queue diagnostics、`index_refresh.stale_reasons`、runtime directories、HTTP bind、QoS budgets、agent protocol status、telemetry status 和 degraded reason。
+优先看 `setup doctor` 的 `configuration_ready`、`live_health_checked`、`checks` 和 `recommended_actions`。`setup doctor` 的配置通过不代表 live health 通过；随后重点关注 `health`/`service doctor` 中的 graph version、index lag、refresh queue diagnostics、`index_refresh.stale_reasons`、runtime directories、HTTP bind、QoS budgets、agent protocol status、telemetry status 和 degraded reason。
 
 ## 7.2 索引新鲜度
 
@@ -72,6 +73,13 @@ MCP resource 读取返回 404 或 session unknown: 客户端可能已经发送 `
 MCP 返回 HTTP 400: 常见原因是缺少 `Mcp-Session-Id`、缺少 `MCP-Protocol-Version`、初始化 payload 不合法或 session 流程没有先发送 `notifications/initialized`。
 
 MCP 返回 HTTP 404: 常见原因是 session id 未知、过期或被淘汰。重新执行 initialize 流程并保存新的 `Mcp-Session-Id`。
+
+`health` 或 `service doctor` 在旧本地库上提示 `no such column:
+created_at_ms` 或 `updated_at_ms`: 这是早期 index refresh task 表结构缺少
+queue 时间戳列的迁移问题。当前版本启动时会补齐这两个列，并用迁移时刻回填旧任务；
+若仍复现，先运行 `relay-knowledge health --format json` 获取完整错误，再用隔离
+`RELAY_KNOWLEDGE_HOME` 判断是否只影响旧数据目录。`setup doctor` 不打开 SQLite，
+适合在 storage 诊断失败时先检查 runtime configuration。
 
 ## 7.4 隔离复现
 
@@ -132,10 +140,11 @@ Web Operations 或 `/api/web/operations/execute` 变更时，PR 至少要覆盖 
 遇到结果不符合预期时，按这个顺序缩小范围:
 
 1. `status --format json`: 确认运行时目录、配置和项目状态。
-2. `health --format json`: 确认 graph version、index freshness、queue/dead-letter、provider 和 QoS 状态。
-3. `graph inspect --format json`: 确认 evidence、entity、structured facts 和 code counts。
-4. `index refresh --format json`: 尝试显式刷新并读取 stale reasons。
-5. 对应业务命令加 `--format json`: 保留完整 metadata、degraded reason 和 audit correlation。
-6. `audit query --limit 50 --format json`: 查看最近 CLI/Web/service/agent 操作是否到达统一 API。
+2. `setup doctor --format json`: 读取配置 checks、`configuration_ready` 和 recommended actions。
+3. `health --format json`: 确认 graph version、index freshness、queue/dead-letter、provider 和 QoS 状态。
+4. `graph inspect --format json`: 确认 evidence、entity、structured facts 和 code counts。
+5. `index refresh --format json`: 尝试显式刷新并读取 stale reasons。
+6. 对应业务命令加 `--format json`: 保留完整 metadata、degraded reason 和 audit correlation。
+7. `audit query --limit 50 --format json`: 查看最近 CLI/Web/service/agent 操作是否到达统一 API。
 
 不要只凭 Web 页面摘要判断根因；Web 摘要会挑选最重要字段展示，完整诊断仍在 JSON API 和 CLI 响应中。

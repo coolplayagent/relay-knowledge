@@ -8,11 +8,11 @@ use serde::Serialize;
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, EmbeddingProviderProbeResponse, GraphInspectionRequest,
-        GraphInspectionResponse, HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse,
-        IndexRefreshRequest, IndexRefreshResponse, IngestRequest, IngestResponse,
-        MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
-        RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        AgentProtocolStatus, ApiError, ApiMetadata, EmbeddingProviderProbeResponse,
+        GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
+        HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestRequest,
+        IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
+        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
         AuditStatus, ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics,
@@ -159,6 +159,21 @@ impl RelayKnowledgeService {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             runtime: runtime_status(&self.runtime),
         })
+    }
+
+    /// Returns runtime diagnostics without opening or migrating graph storage.
+    pub fn runtime_diagnostics(
+        &self,
+        context: RequestContext,
+    ) -> (ProjectStatusResponse, AgentProtocolStatus) {
+        (
+            ProjectStatusResponse {
+                project_name: PROJECT_NAME.to_owned(),
+                metadata: ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO),
+                runtime: runtime_status(&self.runtime),
+            },
+            agent_protocol_status(&self.runtime),
+        )
     }
 
     /// Commits evidence into graph storage and refreshes all v1 index metadata.

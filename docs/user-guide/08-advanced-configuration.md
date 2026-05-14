@@ -151,9 +151,9 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 
 未设置 worker endpoint 时，`worker run-once` 使用 deterministic fallback 生成 proposal。开启 audit sink 后，agent audit JSONL 写入 `paths` 管理的 log 目录；队列深度在运行时 capped 到 65536，队列满时持久镜像可以丢弃事件，内存 audit log 仍保留最近事件。
 
-## 8.8 Planned Setup Interfaces
+## 8.8 Setup Interfaces
 
-后续易用性改造应新增两个 CLI 入口，本章先记录接口意图:
+高级配置不需要从文档手工拼接。当前 CLI 提供两个只读 setup 入口:
 
 ```bash
 relay-knowledge setup doctor
@@ -163,4 +163,21 @@ relay-knowledge setup profile service
 relay-knowledge setup profile external-embedding
 ```
 
-`setup doctor` 应检查运行时目录、SQLite、索引 freshness、Web 诊断、MCP policy 和服务安装状态，并给出下一步命令。`setup profile` 应输出推荐配置和安全提示，不应把用户引导到手写大量环境变量。
+`setup doctor` 会检查运行时目录、network/QoS budget、retrieval backend
+metadata、MCP policy、service directory 和 worker budget，并在 JSON 响应中返回
+`configuration_ready`、`live_health_checked=false`、`live_health_commands` 和
+`recommended_actions`。它不打开 SQLite，不迁移 schema，也不刷新索引；需要检查
+graph version、storage health、index freshness 或 worker/service live health 时继续运行
+`health` 或 `service doctor`。如果旧本地数据库缺少早期 index refresh task 时间戳列，
+启动时 schema migration 会补齐 `created_at_ms` 和 `updated_at_ms`，并用迁移时刻
+回填旧任务，避免健康诊断因旧队列表结构失败或显示接近 epoch 的队列年龄。
+
+`setup profile` 输出推荐环境变量、命令和安全提示，不写 `.env`，不修改 shell
+profile，也不执行 service manager 安装。支持的 profile:
+
+| Profile | 用途 |
+| --- | --- |
+| `local` | 零配置本地 CLI/Web 诊断循环，可选隔离 `RELAY_KNOWLEDGE_HOME`。 |
+| `agent-readonly` | 本机 MCP Streamable HTTP 只读 agent 接入，要求显式 scope。 |
+| `service` | 平台 service manager plan、definition write 和 operator 检查。 |
+| `external-embedding` | 外部 OpenAI-compatible embedding provider metadata、probe 和 refresh 验证。 |

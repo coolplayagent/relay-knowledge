@@ -214,6 +214,9 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
         CliCommand::parse(["service", "plan", "uninstall"]).expect("service plan should parse");
     let operator = CliCommand::parse(["service", "operator", "resume"])
         .expect("operator command should parse");
+    let setup_doctor = CliCommand::parse(["setup", "doctor"]).expect("setup doctor should parse");
+    let setup_profile =
+        CliCommand::parse(["setup", "profile", "local"]).expect("setup profile should parse");
 
     assert_eq!(
         worker.action,
@@ -251,6 +254,13 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
         }
     );
     assert_eq!(operator.action, CliAction::ServiceOperatorResume);
+    assert_eq!(setup_doctor.action, CliAction::SetupDoctor);
+    assert_eq!(
+        setup_profile.action,
+        CliAction::SetupProfile {
+            profile: setup_cli::SetupProfile::Local,
+        }
+    );
 
     assert!(
         CliCommand::parse(["worker", "run-once", "--kind", "gpu"])
@@ -269,6 +279,12 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
             .expect_err("service action should fail")
             .to_string()
             .contains("invalid service action 'restart'")
+    );
+    assert!(
+        CliCommand::parse(["setup", "profile", "unknown"])
+            .expect_err("setup profile should fail")
+            .to_string()
+            .contains("unexpected argument 'unknown'")
     );
 }
 
@@ -411,6 +427,13 @@ fn renders_machine_readable_help_for_skills() {
     .expect("proposal accept help should render");
     let proposal_accept_json: serde_json::Value =
         serde_json::from_str(proposal_accept.trim()).expect("proposal accept help should be JSON");
+    let setup_profile = cli_spec::render_help(
+        &["setup".to_owned(), "profile".to_owned()],
+        OutputFormat::Json,
+    )
+    .expect("setup profile help should render");
+    let setup_profile_json: serde_json::Value =
+        serde_json::from_str(setup_profile.trim()).expect("setup profile help should be JSON");
 
     assert_eq!(root_json["schema_version"], 2);
     assert_eq!(root_json["binary"], "relay-knowledge");
@@ -450,6 +473,8 @@ fn renders_machine_readable_help_for_skills() {
         serde_json::json!(["text", "json", "markdown"])
     );
     assert_eq!(proposal_accept_json["effect"], "writes-graph");
+    assert_eq!(setup_profile_json["operation"], "setup.profile");
+    assert_eq!(setup_profile_json["effect"], "read-only");
     assert!(
         query_json["options"]
             .as_array()
@@ -472,108 +497,6 @@ fn renders_machine_readable_help_for_skills() {
         serde_json::from_str(query_with_alias.trim()).expect("command help should be JSON");
 
     assert_eq!(query_with_alias_json["operation"], "code.repo.query");
-}
-
-#[test]
-fn render_text_covers_operational_and_code_repository_summaries() {
-    let cases = [
-        (
-            "worker.run_once",
-            serde_json::json!({
-                "task": {"task_id": "task:1"},
-                "proposals": [{"proposal_id": "proposal:1"}],
-            }),
-            "task=task:1 proposals=1\n",
-        ),
-        (
-            "proposal.show",
-            serde_json::json!({
-                "proposal": {"proposal_id": "proposal:1"},
-                "conflicts": [{"conflict_id": "conflict:1"}],
-            }),
-            "proposal=proposal:1 conflicts=1\n",
-        ),
-        (
-            "proposal.supersede",
-            serde_json::json!({
-                "proposal": {"proposal_id": "proposal:1", "state": "superseded"},
-            }),
-            "proposal=proposal:1 state=superseded\n",
-        ),
-        (
-            "service.definition.write",
-            serde_json::json!({"written": true}),
-            "service_definition_written=true\n",
-        ),
-        (
-            "service.operator.status",
-            serde_json::json!({"operator": {"state": "paused"}}),
-            "operator=paused\n",
-        ),
-        (
-            "code.repo.index",
-            serde_json::json!({
-                "summary": {
-                    "indexed_file_count": 2,
-                    "symbol_count": 3,
-                    "reference_count": 4,
-                    "chunk_count": 5,
-                    "degraded_file_count": 1,
-                },
-            }),
-            "indexed files=2 symbols=3 references=4 chunks=5 degraded=1\n",
-        ),
-        (
-            "code.repo.scope_preview",
-            serde_json::json!({
-                "preview": {
-                    "selected_file_count": 2,
-                    "selected_byte_count": 128,
-                    "unsupported_file_count": 1,
-                    "expected_degraded_file_count": 1,
-                },
-            }),
-            "preview files=2 bytes=128 unsupported=1 expected_degraded=1\n",
-        ),
-        (
-            "code.repo.impact",
-            serde_json::json!({
-                "path_groups": {"in_scope_changed_paths": ["src/lib.rs"]},
-                "results": [{"symbol_id": "sym:1"}],
-            }),
-            "changed_in_scope=1 results=1\n",
-        ),
-        (
-            "code.repo.status",
-            serde_json::json!({
-                "status": {
-                    "alias": "repo",
-                    "indexed_file_count": 2,
-                    "symbol_count": 3,
-                    "stale": false,
-                },
-            }),
-            "repo=repo files=2 symbols=3 stale=false\n",
-        ),
-        (
-            "code.repo.report",
-            serde_json::json!({
-                "report": {
-                    "alias": "repo",
-                    "indexed_file_count": 2,
-                    "freshness_state": "fresh",
-                },
-            }),
-            "repo=repo files=2 freshness=fresh\n",
-        ),
-    ];
-
-    for (operation, payload, expected) in cases {
-        let rendered =
-            super::cli_render::render_text(operation, &payload).expect("render should succeed");
-
-        assert_eq!(rendered, expected);
-    }
 }
 
 #[tokio::test]

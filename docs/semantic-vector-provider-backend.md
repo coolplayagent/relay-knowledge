@@ -17,6 +17,10 @@ when semantic/vector backends are disabled or degraded.
 All provider settings are read through the `env` boundary:
 
 ```bash
+relay-knowledge setup profile external-embedding --format json
+```
+
+```bash
 RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
 RELAY_KNOWLEDGE_VECTOR_BACKEND=external
 RELAY_KNOWLEDGE_LLM_PROVIDER=openai_compatible

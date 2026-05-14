@@ -1,7 +1,7 @@
 # relay-knowledge 使用指南
 
-> 文档版本: 1.1
-> 编制日期: 2026-05-13
+> 文档版本: 1.2
+> 编制日期: 2026-05-14
 > 范围: 面向本地开发、CLI 操作、知识图谱检索、代码仓库索引、Web 操作工作区、MCP/ACP agent 接入、常驻服务、日常排障和高级配置的使用说明。
 
 本使用指南按可执行工作流组织，优先描述用户当前能直接运行和验证的路径。规格、研究材料和能力参考仍保留在 `docs/specs/`、`docs/research/` 和功能文档中；本目录负责把这些能力落到命令、配置、运行状态和排障步骤上。
@@ -16,6 +16,7 @@
 - 静态 Web 诊断与同源操作执行，覆盖 retrieval、ingest、repo、index、provider、worker、proposal、audit 和 service snapshot。
 - MCP Streamable HTTP、兼容 HTTP+SSE、只读 resources/prompts、本地 ACP adapter、QoS、scope policy、取消和审计。
 - service manager 计划和 definition 生成、silent-update operator 状态、worker/proposal/audit 运维入口。
+- setup doctor 和 setup profile，用于聚合本地配置 readiness 诊断并输出可执行配置画像。
 
 ## 章节目录
 
@@ -26,7 +27,7 @@
 - [第 5 章 Web 工作区](05-web-workspace.md): 静态 Web 构建、诊断面板、stale reasons 和同源操作执行。
 - [第 6 章 Agent 与常驻服务](06-agent-and-service.md): MCP Streamable HTTP、权限、会话和 agent 工具面。
 - [第 7 章 运维与排障](07-operations-and-troubleshooting.md): 健康检查、索引新鲜度、常见错误和 PR 验证命令。
-- [第 8 章 高级配置参考](08-advanced-configuration.md): 运行时目录、检索后端、网络/QoS、MCP policy 和后续 setup profile 计划。
+- [第 8 章 高级配置参考](08-advanced-configuration.md): 运行时目录、检索后端、网络/QoS、MCP policy、setup doctor/profile 和高级运维变量。
 
 ## 推荐阅读顺序
 
@@ -37,6 +38,7 @@ cargo build
 target/debug/relay-knowledge status --format json
 target/debug/relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust --format json
 target/debug/relay-knowledge query SQLite --source docs --freshness wait-until-fresh --format json
+target/debug/relay-knowledge setup doctor --format json
 ```
 
 如果需要把代码仓库作为检索源，继续阅读第 4 章。如果需要浏览器操作面，继续阅读第 5 章。如果需要给外部 agent 暴露本地图检索能力，继续阅读第 6 章。只有需要接入外部后端、调整网络预算或部署常驻服务时，才阅读第 8 章。

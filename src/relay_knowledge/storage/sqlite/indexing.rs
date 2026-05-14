@@ -98,6 +98,34 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     super::ensure_column(connection, "index_cursors", "backend_cursor", "TEXT")?;
     super::ensure_column(connection, "index_cursors", "model_name", "TEXT")?;
     super::ensure_column(connection, "index_cursors", "model_dimension", "INTEGER")?;
+    super::ensure_column(
+        connection,
+        "index_refresh_tasks",
+        "created_at_ms",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::ensure_column(
+        connection,
+        "index_refresh_tasks",
+        "updated_at_ms",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    connection.execute(
+        "
+        UPDATE index_refresh_tasks
+        SET created_at_ms = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+        WHERE created_at_ms = 0
+        ",
+        [],
+    )?;
+    connection.execute(
+        "
+        UPDATE index_refresh_tasks
+        SET updated_at_ms = created_at_ms
+        WHERE updated_at_ms = 0
+        ",
+        [],
+    )?;
 
     for kind in IndexKind::ALL {
         connection.execute(

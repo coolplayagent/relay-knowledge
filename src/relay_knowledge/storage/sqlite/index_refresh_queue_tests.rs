@@ -5,6 +5,79 @@ use crate::storage::{
     IndexRefreshQueueRequest, IndexRefreshTaskState,
 };
 
+#[test]
+fn initialization_adds_task_timestamps_to_legacy_refresh_queue() {
+    let connection = rusqlite::Connection::open_in_memory().expect("connection should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE graph_mutations (
+                graph_version INTEGER PRIMARY KEY,
+                evidence_count INTEGER NOT NULL,
+                entity_count INTEGER NOT NULL,
+                relation_count INTEGER NOT NULL DEFAULT 0,
+                claim_count INTEGER NOT NULL DEFAULT 0,
+                event_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE evidence (
+                id TEXT PRIMARY KEY,
+                source_scope TEXT NOT NULL
+            );
+            CREATE TABLE index_refresh_tasks (
+                task_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                modality TEXT NOT NULL,
+                target_graph_version INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at_ms INTEGER,
+                attempt_count INTEGER NOT NULL,
+                next_retry_at_ms INTEGER NOT NULL,
+                input_fingerprint TEXT NOT NULL,
+                cursor_before INTEGER NOT NULL,
+                cursor_after INTEGER,
+                last_error_kind TEXT,
+                last_error_message TEXT
+            );
+            INSERT INTO index_refresh_tasks (
+                task_id, kind, source_scope, modality, target_graph_version, state,
+                lease_owner, lease_expires_at_ms, attempt_count, next_retry_at_ms,
+                input_fingerprint, cursor_before, cursor_after, last_error_kind,
+                last_error_message
+            )
+            VALUES (
+                'bm25:graph:text', 'bm25', 'graph', 'text', 1, 'queued',
+                NULL, NULL, 0, 0, 'fingerprint', 0, NULL, NULL, NULL
+            );
+            ",
+        )
+        .expect("legacy schema should be created");
+
+    indexing::initialize_schema(&connection).expect("schema should migrate");
+    let columns = connection
+        .prepare("PRAGMA table_info(index_refresh_tasks)")
+        .expect("table info should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("columns should read")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("columns should collect");
+
+    assert!(columns.iter().any(|column| column == "created_at_ms"));
+    assert!(columns.iter().any(|column| column == "updated_at_ms"));
+
+    let (created_at_ms, updated_at_ms) = connection
+        .query_row(
+            "SELECT created_at_ms, updated_at_ms FROM index_refresh_tasks WHERE task_id = 'bm25:graph:text'",
+            [],
+            |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
+        )
+        .expect("migrated timestamps should read");
+
+    assert!(created_at_ms > 0);
+    assert_eq!(updated_at_ms, created_at_ms);
+}
+
 #[tokio::test]
 async fn background_queue_rejects_when_capacity_is_exceeded() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");

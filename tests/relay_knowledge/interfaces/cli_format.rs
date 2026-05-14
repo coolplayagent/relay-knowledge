@@ -392,6 +392,55 @@ fn binary_reports_health_and_service_status() {
 }
 
 #[test]
+fn binary_reports_setup_doctor_and_profiles() {
+    let home = isolated_home("binary-setup");
+
+    let doctor = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args(["setup", "doctor", "--format", "json"])
+        .output()
+        .expect("setup doctor should run");
+
+    assert!(doctor.status.success());
+    assert!(doctor.stderr.is_empty());
+    let doctor_json: Value = serde_json::from_slice(&doctor.stdout).expect("doctor JSON");
+    assert_eq!(doctor_json["configuration_ready"], true);
+    assert_eq!(doctor_json["live_health_checked"], false);
+    assert!(
+        doctor_json["checks"]
+            .as_array()
+            .expect("checks")
+            .iter()
+            .any(|check| check["name"] == "network_budget")
+    );
+    assert!(
+        doctor_json["live_health_commands"]
+            .as_array()
+            .expect("live health commands")
+            .iter()
+            .any(|command| command == "relay-knowledge health --format json")
+    );
+
+    let profile = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, &home)
+        .args(["setup", "profile", "agent-readonly", "--format", "json"])
+        .output()
+        .expect("setup profile should run");
+
+    assert!(profile.status.success());
+    assert!(profile.stderr.is_empty());
+    let profile_json: Value = serde_json::from_slice(&profile.stdout).expect("profile JSON");
+    assert_eq!(profile_json["profile"], "agent-readonly");
+    assert!(
+        profile_json["environment"]
+            .as_array()
+            .expect("environment")
+            .iter()
+            .any(|variable| variable["name"] == "RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES")
+    );
+}
+
+#[test]
 fn binary_rejects_flag_style_actions_and_extra_command_words() {
     let flag_action = relay_command()
         .args(["--ingest", "--source", "docs", "--content", "x"])

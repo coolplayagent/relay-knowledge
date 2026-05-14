@@ -20,6 +20,7 @@
 - [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为。
 - [Semantic/Vector Provider Backend](semantic-vector-provider-backend.md): 远端 OpenAI-compatible embedding provider 配置、脱敏诊断、Web Providers 面板和降级行为。
 - [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、`canonical_symbol_id`、edge resolution/confidence metadata、检索返回字段和测试覆盖。
+- [文档刷新审计 2026-05-14](documentation-refresh-audit-2026-05-14.md): 本轮对 README、用户指南、功能文档、规格、研究材料、benchmark 和 verification 文档的状态盘点、已刷新项与剩余实现项。
 
 ## Research
 
