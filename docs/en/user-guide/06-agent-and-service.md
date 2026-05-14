@@ -55,7 +55,6 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES
 RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE
 RELAY_KNOWLEDGE_MCP_MAX_LIMIT
 RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES
-RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH
 RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
 RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
@@ -63,7 +62,7 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 
 默认 policy 要求配置允许 scope。未设置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
 
-`relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。完整 MCP policy 变量见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
+MCP 不暴露 index refresh 或 repository indexing。仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`；derived index refresh 需要通过 CLI/Web 的显式运维 workflow 触发。
 
 允许远程客户端前应同时确认 HTTP bind、origin allow-list、scope allow-list、QoS budget 和审计策略。不要用远程 bind 加 unspecified scope 作为默认配置。
 
@@ -132,7 +131,6 @@ MCP tool surface 当前包括:
 - index status
 - authorized code graph query
 - authorized code impact analysis
-- permission-gated index refresh
 
 MCP resource surface 当前包括:
 
@@ -144,12 +142,12 @@ MCP resource surface 当前包括:
 
 MCP prompt surface 当前包括:
 
-- `relay.retrieve-context`
-- `relay.code-impact`
+- `relay_retrieve_context_prompt`
+- `relay_code_impact_prompt`
 
-Resources 和 prompts 只提供只读诊断、上下文和调用模板，不能绕过 access policy，也不会开启 mutation 或 index refresh 权限。
+Resources 和 prompts 只提供只读诊断、上下文和调用模板，不能绕过 access policy，也不会开启 mutation、index refresh 或 repository indexing 权限。
 
-工具调用的写权限边界由 tool 本身和 policy 共同控制。默认 graph retrieval、inspection、health、service status、index status、code query 和 code impact 是主要暴露面；index refresh 需要显式开启。mutation 类能力应通过受控 CLI/Web/API workflow 执行，并保留 audit。
+工具调用的写权限边界由 tool 本身和 policy 共同控制。默认 graph retrieval、inspection、health、service status、index status、code query 和 code impact 是主要暴露面；index refresh、repository indexing 和 mutation 类能力应通过受控 CLI/Web/API workflow 执行，并保留 audit。
 
 ## 6.7 Metrics、兼容端点和审计
 

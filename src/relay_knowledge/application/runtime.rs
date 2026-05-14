@@ -167,7 +167,6 @@ impl AgentRuntimeConfig {
                 .mcp_max_context_bytes
                 .unwrap_or(AgentAccessPolicy::DEFAULT_MAX_CONTEXT_BYTES),
             max_runtime_ms,
-            environment.agent.mcp_allow_index_refresh.unwrap_or(false),
             environment.agent.mcp_allow_remote_clients.unwrap_or(false),
         )
         .map_err(AgentRuntimeConfigError::Policy)?;
@@ -539,7 +538,6 @@ mod tests {
                 ("RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE", "true"),
                 ("RELAY_KNOWLEDGE_MCP_MAX_LIMIT", "3"),
                 ("RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES", "4096"),
-                ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
                 ("RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS", "true"),
                 ("RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED", "true"),
                 ("RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH", "128"),
@@ -558,7 +556,6 @@ mod tests {
         assert!(runtime.agent.access_policy.allow_unspecified_scope);
         assert_eq!(runtime.agent.access_policy.max_limit, 3);
         assert_eq!(runtime.agent.access_policy.max_context_bytes, 4096);
-        assert!(runtime.agent.access_policy.allow_index_refresh);
         assert!(runtime.agent.access_policy.allow_remote_clients);
         assert!(runtime.agent.audit_sink_enabled);
         assert_eq!(runtime.agent.audit_queue_depth, 128);

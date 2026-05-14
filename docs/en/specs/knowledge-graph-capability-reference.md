@@ -513,7 +513,7 @@ dependencies = [
 - **SQLite 本地图谱读写**: code repository 文件、symbol、reference、call、import、chunk、diagnostic 和 rename tombstone 通过 storage trait 写入 SQLite，并同步写入 BM25、local semantic 和 local vector read model。
 - **符号身份**: `symbol_snapshot_id` 表示某一 Git snapshot 中的符号实例，`canonical_symbol_id` 表示 `repo://{repository_id}/{qualified_name}` 形式的逻辑符号身份；类方法使用 `路径::Class.method` 层级限定名。
 - **边解析与置信度**: reference、call 和 import 均持久化 `target_hint`、`resolution_state`、`confidence_basis_points` 和 `confidence_tier`。无法唯一解析时保持 `ambiguous` 或 `unresolved`，不会被报告为确定调用。
-- **接口暴露**: CLI `repo query` / `repo impact` / `repo report`、Web operation 和 MCP `relay.code_query` / `relay.code_impact` 共用 application service，查询命中会返回 symbol identity 与 edge metadata。
+- **接口暴露**: CLI `repo query` / `repo impact` / `repo report`、Web operation 和 MCP `relay_code_query` / `relay_code_impact` 共用 application service，查询命中会返回 symbol identity 与 edge metadata。
 
 仍明确属于后续 v2 或更高阶段的能力: 社区检测、wiki/export、真实外部 embedding 索引刷新、多仓库联邦调用解析、reranker、watch/daemon 静默更新和完整时间旅行查询。
 

@@ -77,7 +77,6 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE` | 是否允许 MCP 请求省略 source scope，默认 `false` |
 | `RELAY_KNOWLEDGE_MCP_MAX_LIMIT` | MCP 检索结果上限，默认 `10` |
 | `RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES` | MCP 返回 context 文本预算，默认 `65536` |
-| `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH` | 是否暴露 `relay.refresh_indexes`，默认 `false` |
 | `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS` | 是否允许非本机 bind 对外服务，默认 `false` |
 | `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED` | 是否启用 agent audit JSONL 持久 sink，默认 `false` |
 | `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` | agent audit 持久 sink 队列深度，默认 `1024`，运行时上限 `65536` |

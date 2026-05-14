@@ -24,8 +24,6 @@ use crate::{
     storage::SqliteGraphStore,
 };
 
-use super::mcp_test_support::RefreshFailStore;
-
 #[tokio::test]
 async fn code_query_tool_returns_indexed_repository_hits_and_audit() {
     let repo = FixtureRepo::create("mcp-code-query");
@@ -48,7 +46,7 @@ pub fn retry_policy() -> u32 {
     let response = tool_call(
         &mut router,
         "code-query",
-        "relay.code_query",
+        "relay_code_query",
         json!({
             "repository": "fixture",
             "query": "retry_policy",
@@ -66,7 +64,7 @@ pub fn retry_policy() -> u32 {
 
     let audit = server.audit_snapshot();
     let event = audit.last().expect("tool call should write audit event");
-    assert_eq!(event.operation, "relay.code_query");
+    assert_eq!(event.operation, "relay_code_query");
     assert_eq!(event.source_scope.as_deref(), Some("fixture"));
     assert_eq!(event.result_count, Some(1));
     assert_eq!(event.status, AgentAuditStatus::Completed);
@@ -133,7 +131,7 @@ pub fn retry_policy() -> u32 {
     let response = tool_call(
         &mut router,
         "code-impact",
-        "relay.code_impact",
+        "relay_code_impact",
         json!({
             "repository": "fixture",
             "base_ref": base_ref,
@@ -155,7 +153,7 @@ pub fn retry_policy() -> u32 {
 
     let audit = server.audit_snapshot();
     let event = audit.last().expect("tool call should write audit event");
-    assert_eq!(event.operation, "relay.code_impact");
+    assert_eq!(event.operation, "relay_code_impact");
     assert_eq!(event.source_scope.as_deref(), Some("fixture"));
     assert_eq!(event.status, AgentAuditStatus::Completed);
 }
@@ -191,13 +189,13 @@ async fn diagnostic_tools_return_structured_content() {
     let inspect = tool_call(
         &mut router,
         "inspect",
-        "relay.inspect_graph",
+        "relay_inspect_graph",
         json!({"source_scope": "docs"}),
     )
     .await;
-    let health = tool_call(&mut router, "health", "relay.health", json!({})).await;
-    let service_status = tool_call(&mut router, "service", "relay.service_status", json!({})).await;
-    let index_status = tool_call(&mut router, "index", "relay.index_status", json!({})).await;
+    let health = tool_call(&mut router, "health", "relay_health", json!({})).await;
+    let service_status = tool_call(&mut router, "service", "relay_service_status", json!({})).await;
+    let index_status = tool_call(&mut router, "index", "relay_index_status", json!({})).await;
 
     assert_eq!(
         inspect["result"]["structuredContent"]["graph"]["evidence_count"],
@@ -218,25 +216,15 @@ async fn diagnostic_tools_return_structured_content() {
 }
 
 #[tokio::test]
-async fn refresh_indexes_tool_requires_policy_and_valid_kinds() {
-    let disabled = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    let mut disabled_router = disabled.router();
-    let denied = tool_call(
-        &mut disabled_router,
-        "refresh-denied",
-        "relay.refresh_indexes",
-        json!({"kinds": ["bm25"]}),
-    )
-    .await;
-
-    let enabled = server_with_env([
+async fn mcp_never_lists_or_runs_index_refresh_tools() {
+    let server = server_with_env([
         ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
         ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
     ])
     .await;
-    let mut enabled_router = enabled.router();
+    let mut router = server.router();
     let listed = call_mcp(
-        &mut enabled_router,
+        &mut router,
         json!({
             "jsonrpc": "2.0",
             "id": "tools",
@@ -244,61 +232,38 @@ async fn refresh_indexes_tool_requires_policy_and_valid_kinds() {
         }),
     )
     .await;
-    let invalid = tool_call(
-        &mut enabled_router,
-        "refresh-invalid",
-        "relay.refresh_indexes",
-        json!({"kinds": ["other"]}),
-    )
-    .await;
-    let refreshed = tool_call(
-        &mut enabled_router,
-        "refresh-ok",
-        "relay.refresh_indexes",
-        json!({"kinds": ["semantic"]}),
-    )
-    .await;
-
-    assert_eq!(
-        denied["result"]["structuredContent"]["error_kind"],
-        "permission_denied"
-    );
-    assert!(tool_names(&listed).contains(&"relay.refresh_indexes".to_owned()));
-    assert_eq!(
-        invalid["result"]["structuredContent"]["error_kind"],
-        "invalid_argument"
-    );
-    assert_eq!(
-        refreshed["result"]["structuredContent"]["indexes"][0]["kind"],
-        "semantic"
-    );
-}
-
-#[tokio::test]
-async fn service_api_errors_preserve_error_kind_in_tool_results() {
-    let store = Arc::new(RefreshFailStore);
-    let (server, _service) = server_and_service_with_store(
-        [
-            ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
-            ("RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH", "true"),
-        ],
-        store,
-    )
-    .await;
-    let mut router = server.router();
-
-    let response = tool_call(
+    let old_name = call_mcp(
         &mut router,
-        "refresh-fails",
-        "relay.refresh_indexes",
-        json!({"kinds": ["bm25"]}),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "refresh-old",
+            "method": "tools/call",
+            "params": {
+                "name": "relay.refresh_indexes",
+                "arguments": {"kinds": ["bm25"]}
+            }
+        }),
+    )
+    .await;
+    let snake_name = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "refresh-snake",
+            "method": "tools/call",
+            "params": {
+                "name": "relay_refresh_indexes",
+                "arguments": {"kinds": ["bm25"]}
+            }
+        }),
     )
     .await;
 
-    assert_eq!(
-        response["result"]["structuredContent"]["error_kind"],
-        "storage_unavailable"
-    );
+    let names = tool_names(&listed);
+    assert!(!names.contains(&"relay.refresh_indexes".to_owned()));
+    assert!(!names.contains(&"relay_refresh_indexes".to_owned()));
+    assert_eq!(old_name["error"]["code"], -32602);
+    assert_eq!(snake_name["error"]["code"], -32602);
 }
 
 #[tokio::test]
@@ -314,13 +279,13 @@ async fn persistent_audit_sink_writes_jsonl_events_when_enabled() {
     .await;
     let mut router = server.router();
 
-    let response = tool_call(&mut router, "audit-health", "relay.health", json!({})).await;
+    let response = tool_call(&mut router, "audit-health", "relay_health", json!({})).await;
     let audit_path = runtime_root.path.join("logs").join("agent-audit.jsonl");
-    let audit = wait_for_audit_line(&audit_path, "relay.health").await;
+    let audit = wait_for_audit_line(&audit_path, "relay_health").await;
     let event: Value = serde_json::from_str(&audit).expect("audit event should be json");
 
     assert_eq!(response["result"]["isError"], false);
-    assert_eq!(event["operation"], "relay.health");
+    assert_eq!(event["operation"], "relay_health");
     assert_eq!(event["status"], "completed");
     assert_eq!(event["qos_decision"], "admitted");
 }
@@ -356,7 +321,7 @@ async fn durable_mcp_audit_records_result_graph_version() {
     let response = tool_call(
         &mut router,
         "audit-health-version",
-        "relay.health",
+        "relay_health",
         json!({}),
     )
     .await;
@@ -365,7 +330,7 @@ async fn durable_mcp_audit_records_result_graph_version() {
     let audit = service
         .query_audit(
             AuditQueryApiRequest {
-                operation: Some("relay.health".to_owned()),
+                operation: Some("relay_health".to_owned()),
                 limit: 1,
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-audit-query", "trace-audit-query"),

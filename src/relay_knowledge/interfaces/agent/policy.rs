@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     fn policy() -> AgentAccessPolicy {
-        AgentAccessPolicy::new(vec!["docs".to_owned()], false, 10, 1024, 1000, false, false)
+        AgentAccessPolicy::new(vec!["docs".to_owned()], false, 10, 1024, 1000, false)
             .expect("policy should build")
     }
 

@@ -293,12 +293,6 @@ fn setup_profile(profile: SetupProfile, metadata: ApiMetadata) -> SetupProfileRe
                     meaning: "Comma-separated source scopes that agent tools may read.",
                 },
                 SetupEnvVar {
-                    name: "RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH",
-                    value: "false",
-                    required: false,
-                    meaning: "Keep agent-triggered index refresh hidden unless explicitly needed.",
-                },
-                SetupEnvVar {
                     name: "RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED",
                     value: "true",
                     required: false,

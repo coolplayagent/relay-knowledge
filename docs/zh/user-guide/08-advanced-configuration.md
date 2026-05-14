@@ -107,11 +107,10 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES
 RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE
 RELAY_KNOWLEDGE_MCP_MAX_LIMIT
 RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES
-RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH
 RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 ```
 
-默认 policy 是只读且本机优先。远程监听、unspecified scope 和 index refresh 都需要显式开启。
+默认 policy 是只读且本机优先。远程监听和 unspecified scope 都需要显式开启。MCP 不提供 index refresh 或 repository indexing；这些操作必须通过 CLI/Web 的显式 workflow 触发。
 
 ## 8.6 OTLP 遥测
 

@@ -168,7 +168,7 @@ v1 必须支持的边:
 持久化 `canonical_symbol_id` 与 `symbol_snapshot_id`，SQLite 中的
 reference/call/import 行持久化 `target_hint`、`resolution_state`、
 `confidence_basis_points` 和 `confidence_tier`。`repo query`、Web operation
-和 MCP `relay.code_query` 返回的 `CodeRetrievalHit` 会透出这些 edge metadata；
+和 MCP `relay_code_query` 返回的 `CodeRetrievalHit` 会透出这些 edge metadata；
 无法唯一解析的调用保持 `ambiguous` 或 `unresolved`，不会升级成 resolved。
 
 ## 5. Tree-sitter 解析与抽取

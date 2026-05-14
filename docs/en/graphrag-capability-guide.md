@@ -160,7 +160,7 @@ http://127.0.0.1:8791/mcp
 - 发送 `notifications/initialized` 后再调用工具。
 
 默认 agent policy 要求配置允许 scope。未配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。
-`relay.refresh_indexes` 默认隐藏，只有设置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` 后才会出现在 tool list 中。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
+MCP 不暴露 index refresh 或 repository indexing；仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
 
 ## 5. Freshness 和降级语义
 
