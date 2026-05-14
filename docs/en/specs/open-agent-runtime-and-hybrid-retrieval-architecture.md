@@ -180,7 +180,7 @@ MCP server adapter 推荐暴露:
 
 | MCP primitive | `relay-knowledge` 映射 |
 | --- | --- |
-| tools | `relay.retrieve_context`、`relay.inspect_graph`、`relay.propose_mutation`、`relay.validate_mutation`、`relay.commit_approved_mutation`、`relay.refresh_indexes`、`relay.explain_trace` |
+| tools | `relay_retrieve_context`、`relay_inspect_graph`、`relay_propose_mutation`、`relay_validate_mutation`、`relay_commit_approved_mutation`、`relay_explain_trace`；index refresh 和 repository indexing 不通过 MCP tool 暴露 |
 | resources | graph schema、source scopes、graph snapshot metadata、index health、retrieval diagnostics、pending mutation proposals |
 | prompts | entity extraction、claim normalization、conflict analysis、context planning、grounded answer drafting |
 

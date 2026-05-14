@@ -38,10 +38,10 @@ use state::{CancellationRegistry, SessionCreateError, SessionLookupError, Sessio
 use crate::{
     api::{
         AgentRetrievalResult, ApiError, ErrorKind, GraphInspectionRequest, HybridRetrievalRequest,
-        IndexRefreshRequest, InterfaceKind, RequestContext, RuntimeIdentity, freshness_label,
+        InterfaceKind, RequestContext, RuntimeIdentity, freshness_label,
     },
     application::{AgentRuntimeConfig, RelayKnowledgeService},
-    domain::{FreshnessPolicy, IndexKind},
+    domain::FreshnessPolicy,
     net::{
         NetworkRuntime,
         http::HttpServeError,
@@ -57,7 +57,10 @@ use super::{
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
 use code_tools::run_code_tool;
-use tool_registry::{is_known_tool, tools_list_result};
+use tool_registry::{
+    CODE_IMPACT_TOOL, CODE_QUERY_TOOL, HEALTH_TOOL, INDEX_STATUS_TOOL, INSPECT_GRAPH_TOOL,
+    RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL, is_known_tool, tools_list_result,
+};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
@@ -240,12 +243,6 @@ struct RetrieveContextArgs {
 struct InspectGraphArgs {
     #[serde(default)]
     source_scope: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RefreshIndexesArgs {
-    #[serde(default)]
-    kinds: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -451,7 +448,7 @@ async fn handle_mcp_post(
     let mut pending_tool_audit = None;
     let result = match method {
         "ping" => json!({}),
-        "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
+        "tools/list" => json!(tools_list_result()),
         "resources/list" => resources::list_resources(&server),
         "resources/read" => {
             match resources::read_resource_with_timeout(&server, request.params, &request_id).await
@@ -668,17 +665,14 @@ async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {
 
 async fn run_tool_call(server: &McpServer, params: ToolCallParams, request_id: String) -> Value {
     match params.name.as_str() {
-        "relay.retrieve_context" => {
-            retrieve_context_tool(server, params.arguments, request_id).await
-        }
-        "relay.inspect_graph" => inspect_graph_tool(server, params.arguments, request_id).await,
-        "relay.health" => health_tool(server, request_id).await,
-        "relay.service_status" => service_status_tool(server, request_id).await,
-        "relay.index_status" => index_status_tool(server, request_id).await,
-        "relay.code_query" | "relay.code_impact" => {
+        RETRIEVE_CONTEXT_TOOL => retrieve_context_tool(server, params.arguments, request_id).await,
+        INSPECT_GRAPH_TOOL => inspect_graph_tool(server, params.arguments, request_id).await,
+        HEALTH_TOOL => health_tool(server, request_id).await,
+        SERVICE_STATUS_TOOL => service_status_tool(server, request_id).await,
+        INDEX_STATUS_TOOL => index_status_tool(server, request_id).await,
+        CODE_QUERY_TOOL | CODE_IMPACT_TOOL => {
             run_code_tool(server, params.name.as_str(), params.arguments, request_id).await
         }
-        "relay.refresh_indexes" => refresh_indexes_tool(server, params.arguments, request_id).await,
         _ => json!({
             "content": [{"type": "text", "text": "unknown MCP tool"}],
             "isError": true
@@ -803,32 +797,6 @@ async fn index_status_tool(server: &McpServer, request_id: String) -> Value {
     }
 }
 
-async fn refresh_indexes_tool(server: &McpServer, arguments: Value, request_id: String) -> Value {
-    if !server.agent.access_policy.allow_index_refresh {
-        return tool_error_result(AgentAdapterError::new(
-            AgentAdapterErrorKind::PermissionDenied,
-            "relay.refresh_indexes is disabled by MCP access policy",
-        ));
-    }
-    let args = match serde_json::from_value::<RefreshIndexesArgs>(arguments) {
-        Ok(args) => args,
-        Err(error) => return tool_error_result(invalid_arguments(error)),
-    };
-    let kinds = match parse_index_kinds(&args.kinds) {
-        Ok(kinds) => kinds,
-        Err(error) => return tool_error_result(error),
-    };
-
-    match server
-        .service
-        .refresh_indexes(IndexRefreshRequest { kinds }, request_context(request_id))
-        .await
-    {
-        Ok(response) => tool_success_result("indexes refreshed", json!(response)),
-        Err(error) => api_error_result(error),
-    }
-}
-
 fn initialize_result() -> Value {
     json!({
         "protocolVersion": MCP_PROTOCOL_VERSION,
@@ -854,21 +822,6 @@ fn parse_freshness(value: Option<&str>) -> Result<FreshnessPolicy, AgentAdapterE
             format!("invalid freshness '{other}'"),
         )),
     }
-}
-
-fn parse_index_kinds(values: &[String]) -> Result<Vec<IndexKind>, AgentAdapterError> {
-    values
-        .iter()
-        .map(|value| match value.as_str() {
-            "bm25" => Ok(IndexKind::Bm25),
-            "semantic" => Ok(IndexKind::Semantic),
-            "vector" => Ok(IndexKind::Vector),
-            other => Err(AgentAdapterError::new(
-                AgentAdapterErrorKind::InvalidArgument,
-                format!("invalid index kind '{other}'"),
-            )),
-        })
-        .collect()
 }
 
 fn tool_success_result(summary: impl Into<String>, structured_content: Value) -> Value {

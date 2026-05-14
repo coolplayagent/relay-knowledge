@@ -21,7 +21,7 @@ pub(super) fn list_prompts() -> Value {
     json!({
         "prompts": [
             {
-                "name": "relay.retrieve-context",
+                "name": "relay_retrieve_context_prompt",
                 "title": "Retrieve Graph Context",
                 "description": "Prepare a grounded relay-knowledge retrieval request.",
                 "arguments": [
@@ -32,7 +32,7 @@ pub(super) fn list_prompts() -> Value {
                 ]
             },
             {
-                "name": "relay.code-impact",
+                "name": "relay_code_impact_prompt",
                 "title": "Analyze Code Impact",
                 "description": "Prepare a code impact request for an indexed repository.",
                 "arguments": [
@@ -55,8 +55,8 @@ pub(super) async fn get_prompt(
         McpMethodError::invalid_params(format!("invalid prompts/get params: {error}"))
     })?;
     let result = match params.name.as_str() {
-        "relay.retrieve-context" => retrieve_context_prompt(&params.arguments),
-        "relay.code-impact" => code_impact_prompt(&params.arguments),
+        "relay_retrieve_context_prompt" => retrieve_context_prompt(&params.arguments),
+        "relay_code_impact_prompt" => code_impact_prompt(&params.arguments),
         _ => Err(McpMethodError::invalid_params("unknown prompt name")),
     };
     record_mcp_method_audit(
@@ -88,7 +88,7 @@ fn retrieve_context_prompt(arguments: &HashMap<String, Value>) -> Result<Value, 
     Ok(prompt_result(
         "Retrieve Graph Context",
         format!(
-            "Use relay.retrieve_context with query `{query}`, source_scope `{source_scope}`, freshness `{freshness}`, and limit `{limit}`. Cite returned evidence ids, source spans, graph facts, graph_paths, backend status, and truncation metadata in the answer."
+            "Use relay_retrieve_context with query `{query}`, source_scope `{source_scope}`, freshness `{freshness}`, and limit `{limit}`. Cite returned evidence ids, source spans, graph facts, graph_paths, backend status, and truncation metadata in the answer."
         ),
     ))
 }
@@ -100,7 +100,7 @@ fn code_impact_prompt(arguments: &HashMap<String, Value>) -> Result<Value, McpMe
     Ok(prompt_result(
         "Analyze Code Impact",
         format!(
-            "Use relay.code_impact for repository `{repository}` from base_ref `{base_ref}` to head_ref `{head_ref}`. Summarize changed paths, impacted symbols, stale scope metadata, and any degraded retrieval reason."
+            "Use relay_code_impact for repository `{repository}` from base_ref `{base_ref}` to head_ref `{head_ref}`. Summarize changed paths, impacted symbols, stale scope metadata, and any degraded retrieval reason."
         ),
     ))
 }

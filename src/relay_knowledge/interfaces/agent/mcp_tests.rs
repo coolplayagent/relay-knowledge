@@ -53,7 +53,7 @@ async fn retrieve_context_returns_canonical_structured_content() {
             "id": "call-1",
             "method": "tools/call",
             "params": {
-                "name": "relay.retrieve_context",
+                "name": "relay_retrieve_context",
                 "arguments": {
                     "query": "Streamable HTTP",
                     "source_scope": "docs",
@@ -92,7 +92,7 @@ async fn retrieve_context_rejects_scope_and_limit_before_service_call() {
             "id": "missing-scope",
             "method": "tools/call",
             "params": {
-                "name": "relay.retrieve_context",
+                "name": "relay_retrieve_context",
                 "arguments": {"query": "anything"}
             }
         }),
@@ -105,7 +105,7 @@ async fn retrieve_context_rejects_scope_and_limit_before_service_call() {
             "id": "limit",
             "method": "tools/call",
             "params": {
-                "name": "relay.retrieve_context",
+                "name": "relay_retrieve_context",
                 "arguments": {"query": "anything", "source_scope": "docs", "limit": 2}
             }
         }),
@@ -176,7 +176,7 @@ async fn qos_rejection_returns_tool_error_and_releases_permit() {
             "id": "qos",
             "method": "tools/call",
             "params": {
-                "name": "relay.health",
+                "name": "relay_health",
                 "arguments": {}
             }
         }),
@@ -381,7 +381,7 @@ async fn resources_prompts_and_delete_session_are_supported() {
             "id": "prompt",
             "method": "prompts/get",
             "params": {
-                "name": "relay.retrieve-context",
+                "name": "relay_retrieve_context_prompt",
                 "arguments": {"query": "metadata", "source_scope": "docs"}
             }
         }),
@@ -421,7 +421,7 @@ async fn resources_prompts_and_delete_session_are_supported() {
     );
     assert_eq!(
         prompts["result"]["prompts"][0]["name"],
-        "relay.retrieve-context"
+        "relay_retrieve_context_prompt"
     );
     assert!(
         prompt["result"]["messages"][0]["content"]["text"]
@@ -654,7 +654,7 @@ async fn tool_timeout_returns_json_rpc_tool_error() {
     let response = tool_call(
         &mut router,
         "slow-search",
-        "relay.retrieve_context",
+        "relay_retrieve_context",
         json!({"query": "slow", "source_scope": "docs"}),
     )
     .await;
@@ -743,7 +743,7 @@ async fn method_level_reads_are_recorded_in_durable_audit() {
             "id": "prompt-audit",
             "method": "prompts/get",
             "params": {
-                "name": "relay.retrieve-context",
+                "name": "relay_retrieve_context_prompt",
                 "arguments": {"query": "audit", "source_scope": "docs"}
             }
         }),

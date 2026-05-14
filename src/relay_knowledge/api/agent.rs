@@ -93,8 +93,6 @@ pub struct AgentAccessPolicy {
     pub max_limit: usize,
     pub max_context_bytes: usize,
     pub max_runtime_ms: u64,
-    pub allow_index_refresh: bool,
-    pub require_permission_for_refresh: bool,
     pub allow_remote_clients: bool,
 }
 
@@ -109,7 +107,6 @@ impl AgentAccessPolicy {
         max_limit: usize,
         max_context_bytes: usize,
         max_runtime_ms: u64,
-        allow_index_refresh: bool,
         allow_remote_clients: bool,
     ) -> Result<Self, AgentPolicyError> {
         if max_limit == 0 {
@@ -128,8 +125,6 @@ impl AgentAccessPolicy {
             max_limit,
             max_context_bytes,
             max_runtime_ms,
-            allow_index_refresh,
-            require_permission_for_refresh: true,
             allow_remote_clients,
         })
     }
@@ -142,7 +137,6 @@ impl AgentAccessPolicy {
             max_limit: self.max_limit,
             max_context_bytes: self.max_context_bytes,
             max_runtime_ms: self.max_runtime_ms,
-            allow_index_refresh: self.allow_index_refresh,
             allow_remote_clients: self.allow_remote_clients,
         }
     }
@@ -178,7 +172,6 @@ pub struct AgentAccessPolicySummary {
     pub max_limit: usize,
     pub max_context_bytes: usize,
     pub max_runtime_ms: u64,
-    pub allow_index_refresh: bool,
     pub allow_remote_clients: bool,
 }
 
@@ -471,8 +464,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_policy_budgets() {
-        let error =
-            AgentAccessPolicy::new(Vec::new(), false, 0, 1, 1, false, false).expect_err("zero");
+        let error = AgentAccessPolicy::new(Vec::new(), false, 0, 1, 1, false).expect_err("zero");
 
         assert_eq!(error, AgentPolicyError::ZeroMaxLimit);
     }

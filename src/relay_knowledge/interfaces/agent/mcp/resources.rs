@@ -27,7 +27,7 @@ pub(super) fn list_resources(server: &McpServer) -> Value {
     let graph_summary = server.agent.access_policy.allow_unspecified_scope.then(|| {
         resource_descriptor(
             GRAPH_SUMMARY_URI,
-            "relay.graph_summary",
+            "relay_graph_summary",
             "Graph aggregate counts",
             "application/json",
         )
@@ -35,25 +35,25 @@ pub(super) fn list_resources(server: &McpServer) -> Value {
     let mut resources = vec![
         resource_descriptor(
             SERVICE_STATUS_URI,
-            "relay.service_status",
+            "relay_service_status",
             "Resident service status",
             "application/json",
         ),
         resource_descriptor(
             HEALTH_URI,
-            "relay.health",
+            "relay_health",
             "Graph and index health",
             "application/json",
         ),
         resource_descriptor(
             INDEX_STATUS_URI,
-            "relay.index_status",
+            "relay_index_status",
             "Derived retrieval index status",
             "application/json",
         ),
         resource_descriptor(
             METRICS_URI,
-            "relay.metrics",
+            "relay_metrics",
             "Prometheus text metrics",
             "text/plain",
         ),

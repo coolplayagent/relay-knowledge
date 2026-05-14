@@ -226,8 +226,10 @@ Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
 The MCP tool surface includes graph retrieval, graph inspection, health,
 service status, index status, authorized code graph queries, and authorized
-code impact analysis. `relay.refresh_indexes` remains hidden unless
-`RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` is explicitly configured.
+code impact analysis. MCP does not expose index refresh or repository indexing;
+run `relay-knowledge repo index`, `relay-knowledge repo update`, or
+`relay-knowledge index refresh` from an explicit CLI/Web workflow before MCP
+queries depend on fresh indexes.
 The MCP server also advertises resources and prompts: resources expose service
 status, health, index status, and Prometheus text metrics; the graph-wide
 summary resource is advertised only when

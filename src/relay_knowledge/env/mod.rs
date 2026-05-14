@@ -41,7 +41,6 @@ pub const RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE";
 pub const RELAY_KNOWLEDGE_MCP_MAX_LIMIT: &str = "RELAY_KNOWLEDGE_MCP_MAX_LIMIT";
 pub const RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES: &str = "RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES";
-pub const RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH: &str = "RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH";
 pub const RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS: &str =
     "RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS";
 pub const RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED: &str =
@@ -173,7 +172,6 @@ pub struct AgentEnvOverrides {
     pub mcp_allow_unspecified_scope: Option<bool>,
     pub mcp_max_limit: Option<usize>,
     pub mcp_max_context_bytes: Option<usize>,
-    pub mcp_allow_index_refresh: Option<bool>,
     pub mcp_allow_remote_clients: Option<bool>,
     pub audit_sink_enabled: Option<bool>,
     pub audit_queue_depth: Option<usize>,
@@ -331,10 +329,6 @@ impl EnvironmentConfig {
                 mcp_max_context_bytes: positive_usize_var(
                     &values,
                     RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES,
-                )?,
-                mcp_allow_index_refresh: bool_var(
-                    &values,
-                    RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH,
                 )?,
                 mcp_allow_remote_clients: bool_var(
                     &values,
@@ -645,7 +639,6 @@ mod tests {
                 (RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE, "true"),
                 (RELAY_KNOWLEDGE_MCP_MAX_LIMIT, "5"),
                 (RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES, "8192"),
-                (RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH, "true"),
                 (RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS, "false"),
                 (RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED, "true"),
                 (RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH, "256"),
@@ -688,7 +681,6 @@ mod tests {
         assert_eq!(config.agent.mcp_allow_unspecified_scope, Some(true));
         assert_eq!(config.agent.mcp_max_limit, Some(5));
         assert_eq!(config.agent.mcp_max_context_bytes, Some(8192));
-        assert_eq!(config.agent.mcp_allow_index_refresh, Some(true));
         assert_eq!(config.agent.mcp_allow_remote_clients, Some(false));
         assert_eq!(config.agent.audit_sink_enabled, Some(true));
         assert_eq!(config.agent.audit_queue_depth, Some(256));

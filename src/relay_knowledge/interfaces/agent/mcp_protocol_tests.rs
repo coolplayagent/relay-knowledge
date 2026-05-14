@@ -19,7 +19,7 @@ use super::{
 };
 
 #[tokio::test]
-async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
+async fn initialize_and_tools_list_use_snake_case_names_without_refresh() {
     let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
 
@@ -49,10 +49,17 @@ async fn initialize_and_tools_list_hide_refresh_when_policy_disables_it() {
         MCP_PROTOCOL_VERSION
     );
     assert_eq!(initialize["result"]["capabilities"]["tools"], json!({}));
-    assert!(tool_names(&tools).contains(&"relay.retrieve_context".to_owned()));
-    assert!(tool_names(&tools).contains(&"relay.code_query".to_owned()));
-    assert!(tool_names(&tools).contains(&"relay.code_impact".to_owned()));
-    assert!(!tool_names(&tools).contains(&"relay.refresh_indexes".to_owned()));
+    let names = tool_names(&tools);
+    assert!(names.contains(&"relay_retrieve_context".to_owned()));
+    assert!(names.contains(&"relay_code_query".to_owned()));
+    assert!(names.contains(&"relay_code_impact".to_owned()));
+    assert!(!names.contains(&"relay_refresh_indexes".to_owned()));
+    assert!(
+        names.iter().all(|name| name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')),
+        "MCP tool names must avoid special characters"
+    );
     assert_eq!(
         initialize["result"]["capabilities"]["resources"]["listChanged"],
         false
@@ -194,7 +201,7 @@ async fn resources_and_prompts_expose_agent_context_surfaces() {
             "id": "prompt",
             "method": "prompts/get",
             "params": {
-                "name": "relay.retrieve-context",
+                "name": "relay_retrieve_context_prompt",
                 "arguments": {
                     "query": "index freshness",
                     "source_scope": "docs"
@@ -241,12 +248,12 @@ async fn resources_and_prompts_expose_agent_context_surfaces() {
             .contains("allow_unspecified_scope")
     );
     assert_eq!(health_value["healthy"], true);
-    assert!(prompt_names.contains(&"relay.retrieve-context"));
+    assert!(prompt_names.contains(&"relay_retrieve_context_prompt"));
     assert!(
         prompt["result"]["messages"][0]["content"]["text"]
             .as_str()
             .expect("prompt text")
-            .contains("relay.retrieve_context")
+            .contains("relay_retrieve_context")
     );
 }
 
@@ -373,7 +380,7 @@ async fn resources_and_prompts_cover_all_readonly_variants_and_errors() {
             "id": "code-impact-prompt",
             "method": "prompts/get",
             "params": {
-                "name": "relay.code-impact",
+                "name": "relay_code_impact_prompt",
                 "arguments": {
                     "repository": "repo",
                     "base_ref": "main",
@@ -390,7 +397,7 @@ async fn resources_and_prompts_cover_all_readonly_variants_and_errors() {
             "id": "missing-prompt-argument",
             "method": "prompts/get",
             "params": {
-                "name": "relay.retrieve-context",
+                "name": "relay_retrieve_context_prompt",
                 "arguments": {"query": "   "}
             }
         }),
@@ -425,7 +432,7 @@ async fn resources_and_prompts_cover_all_readonly_variants_and_errors() {
     assert_eq!(service_value["service_name"], "relay-knowledge");
     assert!(index_value["indexes"].as_array().expect("indexes").len() >= 3);
     assert!(metrics_text.contains("relay_knowledge_graph_version"));
-    assert!(prompt_text.contains("relay.code_impact"));
+    assert!(prompt_text.contains("relay_code_impact"));
     assert_eq!(unknown_resource["error"]["code"], -32602);
     assert_eq!(invalid_resource_params["error"]["code"], -32602);
     assert_eq!(missing_prompt_argument["error"]["code"], -32602);
@@ -650,17 +657,17 @@ async fn legacy_message_rejects_before_tool_execution_when_sse_stream_is_closed(
     .await;
     drop(sse_stream);
 
-    let refresh_after_close = raw_custom_response(
+    let tool_after_close = raw_custom_response(
         &mut router,
         "POST",
         &format!("/mcp/message?sessionId={session_id}"),
         &json!({
             "jsonrpc": "2.0",
-            "id": "closed-refresh",
+            "id": "closed-tool",
             "method": "tools/call",
             "params": {
-                "name": "relay.refresh_indexes",
-                "arguments": {"kinds": []}
+                "name": "relay_inspect_graph",
+                "arguments": {"source_scope": "docs"}
             }
         })
         .to_string(),
@@ -670,12 +677,12 @@ async fn legacy_message_rejects_before_tool_execution_when_sse_stream_is_closed(
 
     assert_eq!(initialize.0, StatusCode::ACCEPTED);
     assert_eq!(initialized.0, StatusCode::ACCEPTED);
-    assert_eq!(refresh_after_close.0, StatusCode::NOT_FOUND);
+    assert_eq!(tool_after_close.0, StatusCode::NOT_FOUND);
     assert!(
         !server
             .audit_snapshot()
             .iter()
-            .any(|event| event.operation == "relay.refresh_indexes"),
+            .any(|event| event.operation == "relay_inspect_graph"),
         "legacy /message must reject unavailable SSE delivery before tool execution"
     );
 }
@@ -744,7 +751,7 @@ async fn legacy_message_acknowledges_before_slow_mcp_execution_completes() {
                 "id": "slow-inspect",
                 "method": "tools/call",
                 "params": {
-                    "name": "relay.inspect_graph",
+                    "name": "relay_inspect_graph",
                     "arguments": {"source_scope": "docs"}
                 }
             })

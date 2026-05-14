@@ -8,7 +8,9 @@ use crate::domain::{
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, McpServer, api_error_result, authorize_limit,
     authorize_scope, domain_argument_error, invalid_arguments, parse_freshness, request_context,
-    tool_error_result, tool_success_result,
+    tool_error_result,
+    tool_registry::{CODE_IMPACT_TOOL, CODE_QUERY_TOOL},
+    tool_success_result,
 };
 
 #[derive(Debug, Deserialize)]
@@ -49,8 +51,8 @@ pub(super) async fn run_code_tool(
     request_id: String,
 ) -> Value {
     match name {
-        "relay.code_query" => code_query_tool(server, arguments, request_id).await,
-        "relay.code_impact" => code_impact_tool(server, arguments, request_id).await,
+        CODE_QUERY_TOOL => code_query_tool(server, arguments, request_id).await,
+        CODE_IMPACT_TOOL => code_impact_tool(server, arguments, request_id).await,
         _ => tool_error_result(AgentAdapterError::new(
             AgentAdapterErrorKind::UnsupportedOperation,
             "unknown code tool",
@@ -68,7 +70,7 @@ async fn code_query_tool(server: &McpServer, arguments: Value, request_id: Strin
         Ok(None) => {
             return tool_error_result(AgentAdapterError::new(
                 AgentAdapterErrorKind::InvalidScope,
-                "repository is required for relay.code_query",
+                "repository is required for relay_code_query",
             ));
         }
         Err(error) => return tool_error_result(error),
@@ -122,7 +124,7 @@ async fn code_impact_tool(server: &McpServer, arguments: Value, request_id: Stri
         Ok(None) => {
             return tool_error_result(AgentAdapterError::new(
                 AgentAdapterErrorKind::InvalidScope,
-                "repository is required for relay.code_impact",
+                "repository is required for relay_code_impact",
             ));
         }
         Err(error) => return tool_error_result(error),
@@ -160,7 +162,7 @@ async fn code_impact_tool(server: &McpServer, arguments: Value, request_id: Stri
 
 pub(super) fn code_query_tool_definition() -> Value {
     json!({
-        "name": "relay.code_query",
+        "name": CODE_QUERY_TOOL,
         "description": "Query an authorized indexed code graph repository.",
         "inputSchema": {
             "type": "object",
@@ -187,7 +189,7 @@ pub(super) fn code_query_tool_definition() -> Value {
 
 pub(super) fn code_impact_tool_definition() -> Value {
     json!({
-        "name": "relay.code_impact",
+        "name": CODE_IMPACT_TOOL,
         "description": "Analyze impact for a Git diff against an authorized indexed code repository.",
         "inputSchema": {
             "type": "object",
