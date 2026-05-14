@@ -130,10 +130,38 @@ relay-knowledge service plan install|uninstall
 relay-knowledge service definition write
 relay-knowledge service operator status|pause|resume
 relay-knowledge service run [--web] [--mcp streamable-http]
+relay-knowledge setup doctor
+relay-knowledge setup profile local|agent-readonly|service|external-embedding
 relay-knowledge version
 ```
 
-## 2.6 参数边界
+## 2.6 Setup 诊断与配置画像
+
+`setup doctor` 是 storage-free 的只读诊断命令。它只读取已解析 runtime
+configuration，不打开或迁移 SQLite，也不刷新索引；检查项覆盖 runtime paths、
+network/QoS budget、retrieval backend metadata、MCP scope policy、service
+directory 和 worker budget。JSON 的 `configuration_ready` 只表示这些配置检查通过；
+`live_health_checked=false` 表示 graph storage、index freshness 和 worker/service live
+health 仍需通过 `health` 或 `service doctor` 检查。`recommended_actions` 中会给出可直接运行的后续命令:
+
+```bash
+relay-knowledge setup doctor --format json
+```
+
+`setup profile` 不写文件、不安装服务，只输出推荐环境变量、命令和注意事项:
+
+```bash
+relay-knowledge setup profile local --format json
+relay-knowledge setup profile agent-readonly --format json
+relay-knowledge setup profile service --format json
+relay-knowledge setup profile external-embedding --format json
+```
+
+这些 profile 分别覆盖零配置本地循环、只读 MCP agent 接入、平台 service
+manager 预览和外部 embedding provider metadata。需要把建议固化到 shell、
+service manager 或部署工具时，由调用方显式写入自己的配置面。
+
+## 2.7 参数边界
 
 `--limit` 必须是正整数并由各 API 层继续执行上限校验；`0` 会被 retrieval、repository 和 audit/proposal 等请求校验拒绝。`--kind` 在不同命令中含义不同: `index refresh` 只接受 `bm25`、`semantic`、`vector`；`worker` 只接受 `embedding`、`ocr`、`vision`、`extractor`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`。当查询文本或 reason 中包含以 `-` 开头的词时，使用 `--` 或引号避免被解析成选项。
 

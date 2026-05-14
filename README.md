@@ -70,6 +70,8 @@ relay-knowledge service doctor
   with local diagnostics when Collector export fails.
 - Static Web diagnostics and operation composers served by the Rust HTTP
   service on the same local port as `/api/*` and MCP when enabled.
+- Setup diagnostics and named setup profiles for local, read-only agent,
+  platform service, and external embedding configurations.
 
 ## Documentation
 
@@ -91,6 +93,9 @@ relay-knowledge service doctor
   and degradation behavior.
 - [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md):
   repository indexing, retrieval, reports, and impact analysis.
+- [文档刷新审计 2026-05-14](docs/documentation-refresh-audit-2026-05-14.md):
+  current documentation status, refreshed gaps, and remaining implementation
+  work.
 
 Key specs:
 
@@ -160,6 +165,8 @@ relay-knowledge service doctor --format json
 relay-knowledge service plan install --format json
 relay-knowledge service definition write --format json
 relay-knowledge service operator pause
+relay-knowledge setup doctor --format json
+relay-knowledge setup profile agent-readonly --format json
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp streamable-http
 relay-knowledge query --help
 relay-knowledge query -- --help

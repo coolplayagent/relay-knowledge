@@ -191,6 +191,19 @@ where
                 value["operator"]["state"].as_str().unwrap_or("disabled")
             )
         }
+        "setup.doctor" => format!(
+            "setup_configuration_ready={} live_health_checked={} checks={} actions={}",
+            value["configuration_ready"].as_bool().unwrap_or(false),
+            value["live_health_checked"].as_bool().unwrap_or(false),
+            value["checks"].as_array().map_or(0, Vec::len),
+            value["recommended_actions"].as_array().map_or(0, Vec::len)
+        ),
+        "setup.profile" => format!(
+            "setup_profile={} env_vars={} commands={}",
+            value["profile"].as_str().unwrap_or("unknown"),
+            value["environment"].as_array().map_or(0, Vec::len),
+            value["commands"].as_array().map_or(0, Vec::len)
+        ),
         _ => operation.to_owned(),
     };
 
@@ -237,6 +250,10 @@ where
 
     Ok(output)
 }
+
+#[cfg(test)]
+#[path = "cli_render_tests.rs"]
+mod cli_render_tests;
 
 fn render_streaming_project_status(response: &ProjectStatusResponse) -> Result<String, CliError> {
     let events = [

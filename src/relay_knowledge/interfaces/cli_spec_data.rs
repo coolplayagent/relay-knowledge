@@ -230,6 +230,37 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         service_operator(),
         service_run(),
         command!(
+            &["setup", "doctor"],
+            "relay-knowledge setup doctor",
+            "Check local runtime readiness and print concrete remediation commands.",
+            "setup.doctor",
+            CommandEffect::ReadOnly,
+            &[],
+            &[],
+            &["relay-knowledge setup doctor --format json"],
+            &["Aggregates status, health, index freshness, service, MCP, and worker diagnostics."],
+        ),
+        command!(
+            &["setup", "profile"],
+            "relay-knowledge setup profile <local|agent-readonly|service|external-embedding>",
+            "Print recommended environment variables and commands for a setup profile.",
+            "setup.profile",
+            CommandEffect::ReadOnly,
+            &[arg(
+                "profile",
+                true,
+                false,
+                "Named setup profile to render.",
+                None,
+                &["local", "agent-readonly", "service", "external-embedding"],
+            )],
+            &[],
+            &["relay-knowledge setup profile agent-readonly --format json"],
+            &[
+                "Profiles are recommendations only; they do not write environment files or install services."
+            ],
+        ),
+        command!(
             @formats &["text", "json", "markdown"],
             &["version"],
             "relay-knowledge version [--format text|json|markdown]",

@@ -32,6 +32,7 @@
 cargo build
 target/debug/relay-knowledge status
 target/debug/relay-knowledge --version
+target/debug/relay-knowledge setup doctor --format json
 ```
 
 也可以通过 Cargo 运行:
@@ -76,6 +77,11 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
 ```
 
 设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
+不确定当前机器的基础配置是否 ready 时，先运行 `relay-knowledge setup doctor --format json`；
+它会把 runtime path、network/QoS budget、retrieval backend metadata、MCP
+policy、service directory 和 worker budget 检查聚合到一个不触碰 SQLite 的只读响应里。
+随后用 `relay-knowledge health --format json` 或 `relay-knowledge service doctor --format json`
+确认 graph storage、index freshness 和 worker/service live health。
 
 ## 1.4 网络与 QoS
 

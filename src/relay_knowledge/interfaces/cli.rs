@@ -10,6 +10,8 @@ mod cli_spec;
 mod ops_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
+#[path = "setup_cli.rs"]
+mod setup_cli;
 
 use std::{error::Error, fmt};
 
@@ -189,6 +191,7 @@ fn is_command_word(token: &str) -> bool {
             | "provider"
             | "health"
             | "service"
+            | "setup"
             | "version"
             | "help"
     )
@@ -259,6 +262,10 @@ pub enum CliAction {
     ServiceRun {
         mcp: ServiceMcpTransport,
         web: bool,
+    },
+    SetupDoctor,
+    SetupProfile {
+        profile: setup_cli::SetupProfile,
     },
     Version,
     Help {
@@ -493,6 +500,11 @@ pub async fn run_with_service(
     {
         return Ok(output);
     }
+    if let Some(output) =
+        setup_cli::run_setup_action(service, &command.action, context.clone(), format)?
+    {
+        return Ok(output);
+    }
     match command.action {
         CliAction::Status => {
             let response = service
@@ -633,7 +645,9 @@ pub async fn run_with_service(
         | CliAction::ServiceDefinitionWrite
         | CliAction::ServiceOperatorStatus
         | CliAction::ServiceOperatorPause
-        | CliAction::ServiceOperatorResume => Err(CliError::ApiFailed(
+        | CliAction::ServiceOperatorResume
+        | CliAction::SetupDoctor
+        | CliAction::SetupProfile { .. } => Err(CliError::ApiFailed(
             "operational command was not handled by the service adapter".to_owned(),
         )),
         CliAction::Version => render_version(command.format),
@@ -681,6 +695,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "provider" => parse_provider(&tokens[1..]),
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
         "service" => ops_cli::parse_service(&tokens[1..]),
+        "setup" => setup_cli::parse_setup(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
         "help" => Ok(CliAction::Help {
             path: help_path(tokens[1..].to_vec()),
