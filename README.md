@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README.zh-CN.md)
+
 # relay-knowledge
 
 `relay-knowledge` is a local-first knowledge substrate for graph-backed
@@ -75,36 +77,36 @@ relay-knowledge service doctor
 
 ## Documentation
 
-- [使用指南](docs/user-guide/README.md): executable local workflows for
+- [User Guide](docs/en/user-guide/README.md): executable local workflows for
   install/runtime directories, CLI output modes, GraphRAG, code repository
   indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
   and advanced configuration.
-- [2026 行业能力快照](docs/research/industry-capability-snapshot-2026.md):
+- [2026 Industry Capability Snapshot](docs/en/research/industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.
-- [GraphRAG 功能文档](docs/graphrag-capability-guide.md): current context-pack,
+- [GraphRAG Capability Guide](docs/en/graphrag-capability-guide.md): current context-pack,
   freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
   behavior.
-- [混合检索 Context Pack 功能文档](docs/hybrid-retrieval-context-pack.md):
+- [Hybrid Retrieval Context Pack](docs/en/hybrid-retrieval-context-pack.md):
   retriever sources, RRF fusion, structured graph facts, graph paths, and
   backend status.
-- [Semantic/Vector Provider Backend](docs/semantic-vector-provider-backend.md):
+- [Semantic/Vector Provider Backend](docs/en/semantic-vector-provider-backend.md):
   external embedding provider setup, redacted diagnostics, Web provider panels,
   and degradation behavior.
-- [代码仓库 Tree-sitter 检索功能文档](docs/code-repository-tree-sitter-retrieval.md):
+- [Code Repository Tree-sitter Retrieval](docs/en/code-repository-tree-sitter-retrieval.md):
   repository indexing, retrieval, reports, and impact analysis.
-- [文档刷新审计 2026-05-14](docs/documentation-refresh-audit-2026-05-14.md):
+- [Documentation Refresh Audit 2026-05-14](docs/en/documentation-refresh-audit-2026-05-14.md):
   current documentation status, refreshed gaps, and remaining implementation
   work.
 
 Key specs:
 
-- [工程硬约束](docs/specs/engineering-hard-constraints.md)
-- [GraphRAG 产品与实现路线规格](docs/specs/graphrag-product-and-implementation-roadmap.md)
-- [开放 Agent Runtime 与混合检索架构](docs/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Semantic/Vector Provider Backend 规格](docs/specs/semantic-vector-provider-backend.md)
-- [常驻进程 Agent 图检索访问规格](docs/specs/resident-agent-graph-retrieval-access.md)
-- [安装部署与发布规格](docs/specs/installation-and-release.md)
+- [Engineering Hard Constraints](docs/en/specs/engineering-hard-constraints.md)
+- [GraphRAG Product and Implementation Roadmap](docs/en/specs/graphrag-product-and-implementation-roadmap.md)
+- [Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [Semantic/Vector Provider Backend Specification](docs/en/specs/semantic-vector-provider-backend.md)
+- [Resident Agent Graph Retrieval Access Specification](docs/en/specs/resident-agent-graph-retrieval-access.md)
+- [Installation and Release Specification](docs/en/specs/installation-and-release.md)
 
 ## Development
 
