@@ -86,7 +86,8 @@ pub(super) async fn read_resource_with_timeout(
                     elapsed_ms: elapsed_millis(started),
                     error_kind: Some("timeout"),
                 },
-            );
+            )
+            .await;
             Err(McpMethodError::timeout(
                 "resources/read exceeded max_runtime_ms",
             ))
@@ -129,7 +130,8 @@ async fn read_resource(
             elapsed_ms: elapsed_millis(started),
             error_kind: result.as_ref().err().map(|error| error.kind),
         },
-    );
+    )
+    .await;
 
     result
 }

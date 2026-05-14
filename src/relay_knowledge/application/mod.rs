@@ -13,4 +13,4 @@ pub use runtime::{
     AgentRuntimeConfig, RetrievalRuntimeConfigError, RuntimeConfiguration,
     RuntimeConfigurationError, WorkerRuntimeConfig,
 };
-pub use service::RelayKnowledgeService;
+pub use service::{AgentDurableAuditInput, RelayKnowledgeService};

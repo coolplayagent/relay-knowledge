@@ -30,7 +30,8 @@ use tokio::sync::watch;
 use tower_http::{limit::RequestBodyLimitLayer, trace::TraceLayer};
 
 use http_contract::{
-    ensure_remote_bind_allowed, validate_http_headers, validate_protocol_version_header,
+    ensure_remote_bind_allowed, validate_http_headers, validate_origin,
+    validate_protocol_version_header,
 };
 use state::{CancellationRegistry, SessionCreateError, SessionLookupError, SessionRegistry};
 
@@ -46,6 +47,7 @@ use crate::{
         http::HttpServeError,
         qos::{QosPermit, QosRuntime, RejectReason},
     },
+    observability::AgentProtocolMetrics,
     project::PROJECT_NAME,
 };
 
@@ -69,6 +71,7 @@ pub struct McpServer {
     agent: AgentRuntimeConfig,
     qos: QosRuntime,
     audit: AgentAuditLog,
+    metrics: AgentProtocolMetrics,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
     legacy_sse: legacy_http::LegacySseRegistry,
@@ -81,6 +84,7 @@ impl McpServer {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let metrics = service.observability().agent_metrics();
         let audit = if agent.audit_sink_enabled {
             AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
                 .map(AgentAuditLog::with_sink)
@@ -95,6 +99,7 @@ impl McpServer {
             agent,
             qos: QosRuntime::default(),
             audit,
+            metrics,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
             legacy_sse: legacy_http::LegacySseRegistry::default(),
@@ -112,6 +117,7 @@ impl McpServer {
 
         Router::new()
             .route(&endpoint, post(handle_mcp_post))
+            .route(&endpoint, axum::routing::delete(handle_mcp_delete))
             .route(
                 &legacy_sse_endpoint,
                 get(legacy_http::handle_legacy_sse_get),
@@ -432,6 +438,7 @@ async fn handle_mcp_post(
             let error =
                 AgentAdapterError::new(AgentAdapterErrorKind::QosRejected, qos_message(reason));
             record_mcp_qos_rejection(&server, method, &id, error.kind.as_str());
+            server.metrics.record_rejection("mcp", error.kind.as_str());
             return if method == "tools/call" {
                 json_rpc_success(id, tool_error_result(error))
             } else {
@@ -440,6 +447,8 @@ async fn handle_mcp_post(
         }
     };
 
+    let started = Instant::now();
+    let mut pending_tool_audit = None;
     let result = match method {
         "ping" => json!({}),
         "tools/list" => json!(tools_list_result(&server.agent.access_policy)),
@@ -452,7 +461,7 @@ async fn handle_mcp_post(
             }
         }
         "prompts/list" => prompts::list_prompts(),
-        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id) {
+        "prompts/get" => match prompts::get_prompt(&server, request.params, &request_id).await {
             Ok(result) => result,
             Err(error) => return json_rpc_error(id, error.code, error.message),
         },
@@ -470,13 +479,53 @@ async fn handle_mcp_post(
             if !is_known_tool(&params.name) {
                 return json_rpc_error(id, -32602, "unknown tool name");
             }
-            run_cancellable_tool_call(&server, params, request_id).await
+            let outcome = run_cancellable_tool_call(&server, params, request_id).await;
+            pending_tool_audit = Some((
+                outcome.operation,
+                outcome.request_id,
+                outcome.result.clone(),
+                outcome.duration_ms,
+            ));
+            outcome.result
         }
         _ => return json_rpc_error(id, -32601, "method not found"),
     };
 
     drop(permit);
+    if let Some((operation, request_id, result, duration_ms)) = pending_tool_audit {
+        record_mcp_tool_audit(&server, &operation, &request_id, &result, duration_ms).await;
+    } else if !matches!(method, "resources/read" | "prompts/get") {
+        server
+            .metrics
+            .record_request("mcp", method, "completed", elapsed_millis(started), false);
+    }
     json_rpc_success(id, result)
+}
+
+async fn handle_mcp_delete(State(server): State<McpServer>, headers: HeaderMap) -> Response {
+    if let Err(status) = validate_origin(&server, &headers) {
+        return status.into_response();
+    }
+    if let Err(status) = validate_protocol_version_header(&headers, true) {
+        return status.into_response();
+    }
+    let permit = match admit_mcp_request(&server) {
+        Ok(permit) => permit,
+        Err(_) => {
+            server.metrics.record_rejection("mcp", "qos_rejected");
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+    };
+    match server.sessions.terminate_session(&headers) {
+        Ok(()) => {
+            drop(permit);
+            StatusCode::ACCEPTED.into_response()
+        }
+        Err(error) => {
+            drop(permit);
+            session_lookup_error_response(error)
+        }
+    }
 }
 
 fn is_valid_json_rpc_response(payload: &Value) -> bool {
@@ -569,7 +618,7 @@ async fn run_cancellable_tool_call(
     server: &McpServer,
     params: ToolCallParams,
     request_id: String,
-) -> Value {
+) -> ToolCallOutcome {
     let started = Instant::now();
     let operation = params.name.clone();
     let (mut cancellation, _registration) = server.cancellations.register(request_id.clone());
@@ -592,14 +641,19 @@ async fn run_cancellable_tool_call(
         }
     };
 
-    record_mcp_tool_audit(
-        server,
-        &operation,
-        &request_id,
-        &result,
-        elapsed_millis(started),
-    );
-    result
+    ToolCallOutcome {
+        operation,
+        request_id,
+        result,
+        duration_ms: elapsed_millis(started),
+    }
+}
+
+struct ToolCallOutcome {
+    operation: String,
+    request_id: String,
+    result: Value,
+    duration_ms: u64,
 }
 
 async fn wait_for_cancellation(cancellation: &mut watch::Receiver<bool>) {

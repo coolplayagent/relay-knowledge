@@ -18,6 +18,9 @@ path = "src/relay_knowledge/main.rs"
 axum = "0.8.9"
 futures-util = "0.3"
 getrandom = "0.2"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "metrics", "reqwest-client", "reqwest-rustls", "trace"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -25,6 +28,9 @@ serde_json = "1.0"
 tokio = { version = "1.48", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6.10", features = ["limit", "timeout", "trace"] }
+tracing = "0.1"
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tree-sitter = "0.26.8"
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.2"

@@ -15,7 +15,7 @@ relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-重点关注 graph version、index lag、refresh queue diagnostics、`index_refresh.stale_reasons`、runtime directories、HTTP bind、QoS budgets、agent protocol status 和 degraded reason。
+重点关注 graph version、index lag、refresh queue diagnostics、`index_refresh.stale_reasons`、runtime directories、HTTP bind、QoS budgets、agent protocol status、telemetry status 和 degraded reason。
 
 ## 7.2 索引新鲜度
 
@@ -60,6 +60,10 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL must not be blank` 或
 `RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL must not be blank`: 模型名环境变量不能只包含空白字符；删除该变量可回到默认本地 deterministic model。
+
+OTLP Collector 不可用: `service doctor --format json` 的 `runtime.telemetry.last_error` 会记录最近 exporter 初始化或导出错误。该错误只影响 observability，不表示 graph retrieval 不可用。先确认 `RELAY_OTEL_ENDPOINT` 是否指向 Collector OTLP HTTP 端口，默认是 `http://127.0.0.1:4318`。
+
+MCP resource 读取返回 404 或 session unknown: 客户端可能已经发送 `DELETE /mcp`，或 session 被淘汰。`DELETE /mcp` 也受 Origin allow-list、protocol version 和 QoS admission 约束；若返回 403 或 429，分别检查 `RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS` 和 QoS budget。重新执行 `initialize` 并发送 `notifications/initialized`。
 
 `version does not support --format streaming-json`: `version` 按 CLI 帮助公开支持 `text` 和 `json`。
 

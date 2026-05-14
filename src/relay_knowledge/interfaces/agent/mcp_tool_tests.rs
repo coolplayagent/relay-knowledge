@@ -16,7 +16,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{
-    api::{CodeRepositoryRegisterRequest, IngestEvidence, IngestRequest},
+    api::{AuditQueryApiRequest, CodeRepositoryRegisterRequest, IngestEvidence, IngestRequest},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, FreshnessPolicy},
     env::{EnvironmentConfig, PlatformKind},
@@ -323,6 +323,58 @@ async fn persistent_audit_sink_writes_jsonl_events_when_enabled() {
     assert_eq!(event["operation"], "relay.health");
     assert_eq!(event["status"], "completed");
     assert_eq!(event["qos_decision"], "admitted");
+}
+
+#[tokio::test]
+async fn durable_mcp_audit_records_result_graph_version() {
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-audit-version".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
+                    content: "Audit graph version should follow tool results".to_owned(),
+                    entity_labels: Vec::new(),
+                    extraction: None,
+                }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-audit-ingest", "trace-audit-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+    let mut router = server.router();
+
+    let response = tool_call(
+        &mut router,
+        "audit-health-version",
+        "relay.health",
+        json!({}),
+    )
+    .await;
+    assert_eq!(response["result"]["isError"], false);
+
+    let audit = service
+        .query_audit(
+            AuditQueryApiRequest {
+                operation: Some("relay.health".to_owned()),
+                limit: 1,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-audit-query", "trace-audit-query"),
+        )
+        .await
+        .expect("durable audit should query");
+
+    let event = audit.events.first().expect("durable audit event");
+    assert_eq!(event.graph_version, 1);
 }
 
 async fn register_and_index_fixture(

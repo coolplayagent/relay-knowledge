@@ -152,6 +152,16 @@ impl SessionRegistry {
         Ok(())
     }
 
+    pub(super) fn terminate_session(&self, headers: &HeaderMap) -> Result<(), SessionLookupError> {
+        let lookup = self.require_session(headers)?;
+        self.active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .issued
+            .remove(lookup.session_id());
+        Ok(())
+    }
+
     #[cfg(test)]
     fn contains_session(&self, session_id: &str) -> bool {
         self.active

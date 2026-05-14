@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 use super::*;
 use crate::{
-    api::{IngestEvidence, IngestRequest},
+    api::{AuditQueryApiRequest, IngestEvidence, IngestRequest},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     env::{EnvironmentConfig, PlatformKind},
     interfaces::agent::AgentAuditStatus,
@@ -312,6 +312,247 @@ async fn notifications_and_protocol_errors_use_http_contract() {
 }
 
 #[tokio::test]
+async fn resources_prompts_and_delete_session_are_supported() {
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "docs".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-resource".to_owned()),
+                    source_path: Some("docs/guide.md".to_owned()),
+                    span: None,
+                    confidence: None,
+                    status: None,
+                    content: "MCP resources expose metadata".to_owned(),
+                    entity_labels: Vec::new(),
+                    extraction: None,
+                }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+    let mut router = server.router();
+    let session_id = initialize_session(&mut router).await;
+
+    let resources = call_mcp_with_session(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "resources", "method": "resources/list"}),
+        &session_id,
+    )
+    .await;
+    let service_status = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "service-status",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/status"}
+        }),
+        &session_id,
+    )
+    .await;
+    let index_status = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "index-status",
+            "method": "resources/read",
+            "params": {"uri": "relay://indexes/status"}
+        }),
+        &session_id,
+    )
+    .await;
+    let prompts = call_mcp_with_session(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "prompts", "method": "prompts/list"}),
+        &session_id,
+    )
+    .await;
+    let prompt = call_mcp_with_session(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "prompt",
+            "method": "prompts/get",
+            "params": {
+                "name": "relay.retrieve-context",
+                "arguments": {"query": "metadata", "source_scope": "docs"}
+            }
+        }),
+        &session_id,
+    )
+    .await;
+    let delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    let after_delete = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+
+    assert_eq!(
+        resources["result"]["resources"][0]["uri"],
+        "relay://service/status"
+    );
+    assert!(
+        service_status["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("resource text")
+            .contains("agent_protocols")
+    );
+    assert!(
+        index_status["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("index status text")
+            .contains("indexes")
+    );
+    assert_eq!(
+        prompts["result"]["prompts"][0]["name"],
+        "relay.retrieve-context"
+    );
+    assert!(
+        prompt["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .expect("prompt text")
+            .contains("evidence")
+    );
+    assert_eq!(delete.0, StatusCode::ACCEPTED);
+    assert_eq!(after_delete.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_session_enforces_origin_allowlist() {
+    let server = server_with_env([
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        (
+            "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS",
+            "https://trusted.example",
+        ),
+    ])
+    .await;
+    let mut router = server.router();
+    let (init_status, init_headers, init_response) = raw_mcp_response(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": initialize_params()
+        }),
+        [("origin", "https://trusted.example")],
+    )
+    .await;
+    assert_eq!(init_status, StatusCode::OK);
+    assert_eq!(
+        init_response["result"]["protocolVersion"],
+        MCP_PROTOCOL_VERSION
+    );
+    let session_id = init_headers
+        .get(MCP_SESSION_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .expect("initialize should issue a session")
+        .to_owned();
+    let initialized = raw_mcp_request(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }),
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://trusted.example"),
+        ],
+    )
+    .await;
+    let rejected_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://attacker.example"),
+        ],
+    )
+    .await;
+    let still_active = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [
+            (MCP_SESSION_ID_HEADER, session_id.as_str()),
+            ("origin", "https://trusted.example"),
+        ],
+    )
+    .await;
+
+    assert_eq!(initialized.0, StatusCode::ACCEPTED);
+    assert_eq!(rejected_delete.0, StatusCode::FORBIDDEN);
+    assert_eq!(still_active.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn delete_session_uses_qos_admission_and_releases_permit() {
+    let server = server_with_env([
+        ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
+        ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
+    ])
+    .await;
+    let session_id = {
+        let mut setup_router = server.clone().router();
+        initialize_session(&mut setup_router).await
+    };
+    let policy = server.network.current().qos;
+    let occupied = server
+        .qos
+        .admit_request(&policy)
+        .expect("test should occupy budget");
+    let mut router = server.clone().router();
+
+    let rejected_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    drop(occupied);
+    let still_active = raw_mcp_request(
+        &mut router,
+        json!({"jsonrpc": "2.0", "id": "ping", "method": "ping"}),
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+    let accepted_delete = raw_custom_request(
+        &mut router,
+        "DELETE",
+        "/mcp",
+        "",
+        [(MCP_SESSION_ID_HEADER, session_id.as_str())],
+    )
+    .await;
+
+    assert_eq!(rejected_delete.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(still_active.0, StatusCode::OK);
+    assert_eq!(accepted_delete.0, StatusCode::ACCEPTED);
+    assert_eq!(server.qos_snapshot().in_flight_requests, 0);
+}
+
+#[tokio::test]
 async fn http_headers_and_body_budget_are_enforced() {
     let server = server_with_env([
         ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
@@ -467,6 +708,100 @@ async fn resources_and_metrics_respect_runtime_timeout() {
         .expect("resources/read audit event");
     assert_eq!(resource_audit.status, AgentAuditStatus::Failed);
     assert_eq!(resource_audit.error_kind.as_deref(), Some("timeout"));
+}
+
+#[tokio::test]
+async fn method_level_reads_are_recorded_in_durable_audit() {
+    let (server, service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
+    let mut router = server.router();
+
+    let tools = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "tools-list-metrics",
+            "method": "tools/list",
+            "params": {}
+        }),
+    )
+    .await;
+    let resource = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "resource-audit",
+            "method": "resources/read",
+            "params": {"uri": "relay://service/status"}
+        }),
+    )
+    .await;
+    let response = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "prompt-audit",
+            "method": "prompts/get",
+            "params": {
+                "name": "relay.retrieve-context",
+                "arguments": {"query": "audit", "source_scope": "docs"}
+            }
+        }),
+    )
+    .await;
+
+    assert!(tools["result"]["tools"].as_array().expect("tools").len() > 1);
+    assert!(resource["result"]["contents"][0]["text"].is_string());
+    assert_eq!(response["result"]["description"], "Retrieve Graph Context");
+
+    let resource_audit = service
+        .query_audit(
+            AuditQueryApiRequest {
+                operation: Some("resources/read".to_owned()),
+                limit: 1,
+            },
+            RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-resource-audit-query",
+                "trace-resource-audit-query",
+            ),
+        )
+        .await
+        .expect("durable resource audit should query");
+    let durable = service
+        .query_audit(
+            AuditQueryApiRequest {
+                operation: Some("prompts/get".to_owned()),
+                limit: 1,
+            },
+            RequestContext::with_ids(
+                InterfaceKind::Cli,
+                "req-prompt-audit-query",
+                "trace-prompt-audit-query",
+            ),
+        )
+        .await
+        .expect("durable prompt audit should query");
+    let resource_event = resource_audit
+        .events
+        .first()
+        .expect("durable resource audit");
+    assert_eq!(resource_event.operation, "resources/read");
+    assert_eq!(resource_event.status, crate::domain::AuditStatus::Completed);
+    assert!(
+        resource_event
+            .request_id
+            .ends_with("|string:resource-audit")
+    );
+
+    let event = durable.events.first().expect("durable prompt audit");
+    assert_eq!(event.operation, "prompts/get");
+    assert_eq!(event.status, crate::domain::AuditStatus::Completed);
+    assert!(event.request_id.ends_with("|string:prompt-audit"));
+
+    let metrics = service.observability().status().agent_protocol;
+    assert_eq!(metrics.requests_total, 3);
+    assert_eq!(metrics.rejections_total, 0);
 }
 
 #[test]

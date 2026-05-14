@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::ApiMetadata;
+use crate::observability::TelemetryStatus;
 
 /// Resolved runtime paths and network budgets exposed for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +41,7 @@ pub struct RuntimeStatus {
     pub embedding_batch_size: Option<usize>,
     pub embedding_timeout_ms: Option<u64>,
     pub embedding_max_concurrency: Option<usize>,
+    pub telemetry: TelemetryStatus,
 }
 
 /// Minimal project status response exposed through the unified API layer.

@@ -20,6 +20,7 @@ use crate::{
         NetworkRuntime,
         qos::{QosPermit, QosRuntime, RejectReason},
     },
+    observability::AgentProtocolMetrics,
 };
 
 use super::{
@@ -35,6 +36,7 @@ pub struct LocalAcpSessionAdapter {
     agent: AgentRuntimeConfig,
     qos: QosRuntime,
     audit: AgentAuditLog,
+    metrics: AgentProtocolMetrics,
     sessions: AcpSessionRegistry,
 }
 
@@ -45,6 +47,7 @@ impl LocalAcpSessionAdapter {
         network: NetworkRuntime,
         agent: AgentRuntimeConfig,
     ) -> Self {
+        let metrics = service.observability().agent_metrics();
         let audit = if agent.audit_sink_enabled {
             AgentAuditSink::jsonl(service.agent_audit_log_path(), agent.audit_queue_depth)
                 .map(AgentAuditLog::with_sink)
@@ -59,6 +62,7 @@ impl LocalAcpSessionAdapter {
             agent,
             qos: QosRuntime::default(),
             audit,
+            metrics,
             sessions: AcpSessionRegistry::default(),
         }
     }
@@ -352,7 +356,7 @@ impl LocalAcpSessionAdapter {
     }
 
     fn record_audit(&self, input: AcpAuditInput<'_>) {
-        self.audit.record(AgentAuditEvent {
+        let event = AgentAuditEvent {
             sequence: 0,
             protocol: AgentProtocolKind::Acp,
             operation: input.operation.to_owned(),
@@ -370,7 +374,28 @@ impl LocalAcpSessionAdapter {
             truncated: input.truncated,
             elapsed_ms: input.elapsed_ms,
             error_kind: input.error_kind.map(str::to_owned),
-        });
+        };
+        self.audit.record(event.clone());
+        if input.qos_decision == AgentAuditQosDecision::Rejected {
+            self.metrics
+                .record_rejection("acp", input.error_kind.unwrap_or("qos_rejected"));
+            return;
+        }
+        let status_label = match event.status {
+            AgentAuditStatus::Completed => "completed",
+            AgentAuditStatus::Failed => "failed",
+            AgentAuditStatus::Cancelled => "cancelled",
+        };
+        self.metrics.record_request(
+            "acp",
+            input.operation,
+            status_label,
+            input.elapsed_ms,
+            input.truncated,
+        );
+        if event.status == AgentAuditStatus::Cancelled {
+            self.metrics.record_cancelled("acp");
+        }
     }
 }
 

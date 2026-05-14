@@ -15,11 +15,13 @@ use crate::{
         RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
-        ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics, IndexKind,
-        ProposalState, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus, RetrievalBudgetUsed,
-        RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
+        AuditStatus, ContextGraphPath, ContextPackItem, FreshnessPolicy, FusionDiagnostics,
+        IndexKind, ProposalState, RECIPROCAL_RANK_FUSION_K, RetrievalBackendStatus,
+        RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
+        SourceScope,
     },
     env::EnvironmentConfig,
+    observability::ObservabilityRuntime,
     project::{
         DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
         PROJECT_NAME, WINDOWS_SERVICE_DEFINITION_FILE_NAME,
@@ -30,7 +32,8 @@ use crate::{
         read_model_backend_statuses,
     },
     storage::{
-        GraphSearchRequest, KnowledgeStore, ProposalListRequest, SqliteGraphStore, StorageError,
+        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore,
+        StorageError,
     },
 };
 
@@ -111,6 +114,33 @@ impl RelayKnowledgeService {
             .refresh_from_process_environment()
             .map(|_| ())
             .map_err(RuntimeConfigurationError::NetworkRuntime)
+    }
+
+    /// Returns the shared observability runtime for interface adapters.
+    pub fn observability(&self) -> ObservabilityRuntime {
+        self.runtime.observability.clone()
+    }
+
+    /// Persists a redacted agent protocol audit event through the durable sink.
+    pub async fn record_agent_audit(&self, event: AgentDurableAuditInput) -> Result<(), ApiError> {
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        store
+            .insert_audit_event(NewAuditEvent {
+                operation: event.operation,
+                interface: event.interface,
+                request_id: event.request_id,
+                trace_id: event.trace_id,
+                status: event.status,
+                actor: event.actor,
+                source_scope: event.source_scope,
+                graph_version: event.graph_version,
+                detail_json: event.detail_json,
+                message: event.message,
+                now_ms: current_time_millis(),
+            })
+            .await
+            .map(|_| ())
+            .map_err(storage_api_error)
     }
 
     /// Returns the current project status through the unified API contract.
@@ -621,6 +651,29 @@ impl RelayKnowledgeService {
     pub fn agent_audit_log_path(&self) -> PathBuf {
         self.runtime.paths.agent_audit_log_file()
     }
+}
+
+/// Durable audit event input accepted from resident agent adapters.
+#[derive(Debug, Clone)]
+pub struct AgentDurableAuditInput {
+    pub operation: String,
+    pub interface: String,
+    pub request_id: String,
+    pub trace_id: String,
+    pub status: AuditStatus,
+    pub actor: Option<String>,
+    pub source_scope: Option<String>,
+    pub graph_version: u64,
+    pub detail_json: String,
+    pub message: Option<String>,
+}
+
+fn current_time_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 #[derive(Clone)]

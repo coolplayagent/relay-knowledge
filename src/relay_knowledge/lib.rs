@@ -9,6 +9,7 @@ pub mod evaluation;
 pub mod indexing;
 pub mod interfaces;
 pub mod net;
+pub mod observability;
 pub mod paths;
 pub mod project;
 pub mod retrieval;
