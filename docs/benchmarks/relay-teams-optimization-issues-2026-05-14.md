@@ -40,7 +40,9 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 - Acceptance: relay-teams base-to-HEAD impact completes under 500ms.
 - Tests: existing impact behavior tests must continue to pass.
 - Status: implemented. Relay-teams optimized sample is 511ms, just above the
-  original target but far below the 2.47s baseline.
+  original target but far below the 2.47s baseline. Follow-up hardening batches
+  changed-path language lookups so impact planning no longer issues one SQLite
+  query per changed path before the pushed-down chunk/call/import queries.
 
 ## RK-PERF-004: Repository report runs expensive latency samples by default
 

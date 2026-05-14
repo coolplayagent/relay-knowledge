@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
+use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -52,6 +52,7 @@ const CODE_PATH_LANGUAGE_SUFFIXES: &[(&str, &str)] = &[
     (".c", "c"),
     (".h", "c"),
 ];
+const SQLITE_BIND_BATCH_SIZE: usize = 500;
 
 pub(super) fn analyze_impact(
     connection: &mut Connection,
@@ -436,25 +437,24 @@ fn selected_changed_paths(
     request: &CodeImpactRequest,
     changed_paths: Vec<String>,
 ) -> Result<BTreeSet<String>, StorageError> {
-    let mut statement = connection.prepare(
-        "
-        SELECT language_id
-        FROM code_repository_files
-        WHERE source_scope = ?1 AND path = ?2
-        ",
-    )?;
     let source_scope = required_scope(status)?;
-    let mut selected = BTreeSet::new();
+    let mut candidate_paths = BTreeSet::new();
     for path in changed_paths {
         if !path_filter_allows(&path, &status.path_filters)
             || !path_filter_allows(&path, &request.repository.path_filters)
         {
             continue;
         }
-        let stored_language_id = statement
-            .query_row(params![source_scope, &path], |row| row.get::<_, String>(0))
-            .optional()?;
-        let language_id = stored_language_id.or_else(|| language_id_for_path(&path));
+        candidate_paths.insert(path);
+    }
+
+    let stored_languages = stored_languages_for_paths(connection, source_scope, &candidate_paths)?;
+    let mut selected = BTreeSet::new();
+    for path in candidate_paths {
+        let language_id = stored_languages
+            .get(&path)
+            .cloned()
+            .or_else(|| language_id_for_path(&path));
         if language_id
             .as_deref()
             .map(|language| {
@@ -470,6 +470,47 @@ fn selected_changed_paths(
     }
 
     Ok(selected)
+}
+
+fn stored_languages_for_paths(
+    connection: &Connection,
+    source_scope: &str,
+    paths: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, StorageError> {
+    let mut languages = BTreeMap::new();
+    for batch in batched_path_values(paths) {
+        let path_clause = placeholders(batch.len());
+        let sql = format!(
+            "
+            SELECT path, language_id
+            FROM code_repository_files
+            WHERE source_scope = ?1
+              AND path IN ({path_clause})
+            ",
+        );
+        let mut values = vec![Value::Text(source_scope.to_owned())];
+        values.extend(batch.into_iter().map(Value::Text));
+        let mut statement = connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (path, language_id) = row?;
+            languages.insert(path, language_id);
+        }
+    }
+
+    Ok(languages)
+}
+
+fn batched_path_values(paths: &BTreeSet<String>) -> Vec<Vec<String>> {
+    paths
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .chunks(SQLITE_BIND_BATCH_SIZE)
+        .map(<[String]>::to_vec)
+        .collect()
 }
 
 fn selected_impact_row(
