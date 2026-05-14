@@ -52,22 +52,22 @@ relay-knowledge service doctor
 
 ## 文档
 
-- [使用指南](docs/zh/user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
-- [2026 行业能力快照](docs/zh/research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
-- [GraphRAG 功能文档](docs/zh/graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
-- [混合检索上下文包](docs/zh/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
-- [Semantic/Vector Provider 后端](docs/zh/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
-- [代码仓库 Tree-sitter 检索](docs/zh/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
-- [文档刷新审计 2026-05-14](docs/zh/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
+- [使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
+- [2026 行业能力快照](docs/zh/04-research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
+- [GraphRAG 功能文档](docs/zh/02-capabilities/graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
+- [混合检索上下文包](docs/zh/02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
+- [Semantic/Vector Provider 后端](docs/zh/02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
+- [代码仓库 Tree-sitter 检索](docs/zh/02-capabilities/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
+- [文档刷新审计 2026-05-14](docs/zh/02-capabilities/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
 
 关键规格：
 
-- [工程硬约束](docs/zh/specs/engineering-hard-constraints.md)
-- [GraphRAG 产品与实现路线规格](docs/zh/specs/graphrag-product-and-implementation-roadmap.md)
-- [开放 Agent Runtime 与混合检索架构](docs/zh/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Semantic/Vector Provider Backend 规格](docs/zh/specs/semantic-vector-provider-backend.md)
-- [常驻进程 Agent 图检索访问规格](docs/zh/specs/resident-agent-graph-retrieval-access.md)
-- [安装部署与发布规格](docs/zh/specs/installation-and-release.md)
+- [工程硬约束](docs/zh/03-architecture-specs/engineering-hard-constraints.md)
+- [GraphRAG 产品与实现路线规格](docs/zh/03-architecture-specs/graphrag-product-and-implementation-roadmap.md)
+- [开放 Agent Runtime 与混合检索架构](docs/zh/03-architecture-specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [Semantic/Vector Provider Backend 规格](docs/zh/03-architecture-specs/semantic-vector-provider-backend.md)
+- [常驻进程 Agent 图检索访问规格](docs/zh/03-architecture-specs/resident-agent-graph-retrieval-access.md)
+- [安装部署与发布规格](docs/zh/03-architecture-specs/installation-and-release.md)
 
 ## 开发
 

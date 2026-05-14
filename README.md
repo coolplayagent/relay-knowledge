@@ -77,36 +77,36 @@ relay-knowledge service doctor
 
 ## Documentation
 
-- [User Guide](docs/en/user-guide/README.md): executable local workflows for
+- [User Guide](docs/en/01-user-guide/README.md): executable local workflows for
   install/runtime directories, CLI output modes, GraphRAG, code repository
   indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
   and advanced configuration.
-- [2026 Industry Capability Snapshot](docs/en/research/industry-capability-snapshot-2026.md):
+- [2026 Industry Capability Snapshot](docs/en/04-research/industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.
-- [GraphRAG Capability Guide](docs/en/graphrag-capability-guide.md): current context-pack,
+- [GraphRAG Capability Guide](docs/en/02-capabilities/graphrag-capability-guide.md): current context-pack,
   freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
   behavior.
-- [Hybrid Retrieval Context Pack](docs/en/hybrid-retrieval-context-pack.md):
+- [Hybrid Retrieval Context Pack](docs/en/02-capabilities/hybrid-retrieval-context-pack.md):
   retriever sources, RRF fusion, structured graph facts, graph paths, and
   backend status.
-- [Semantic/Vector Provider Backend](docs/en/semantic-vector-provider-backend.md):
+- [Semantic/Vector Provider Backend](docs/en/02-capabilities/semantic-vector-provider-backend.md):
   external embedding provider setup, redacted diagnostics, Web provider panels,
   and degradation behavior.
-- [Code Repository Tree-sitter Retrieval](docs/en/code-repository-tree-sitter-retrieval.md):
+- [Code Repository Tree-sitter Retrieval](docs/en/02-capabilities/code-repository-tree-sitter-retrieval.md):
   repository indexing, retrieval, reports, and impact analysis.
-- [Documentation Refresh Audit 2026-05-14](docs/en/documentation-refresh-audit-2026-05-14.md):
+- [Documentation Refresh Audit 2026-05-14](docs/en/02-capabilities/documentation-refresh-audit-2026-05-14.md):
   current documentation status, refreshed gaps, and remaining implementation
   work.
 
 Key specs:
 
-- [Engineering Hard Constraints](docs/en/specs/engineering-hard-constraints.md)
-- [GraphRAG Product and Implementation Roadmap](docs/en/specs/graphrag-product-and-implementation-roadmap.md)
-- [Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Semantic/Vector Provider Backend Specification](docs/en/specs/semantic-vector-provider-backend.md)
-- [Resident Agent Graph Retrieval Access Specification](docs/en/specs/resident-agent-graph-retrieval-access.md)
-- [Installation and Release Specification](docs/en/specs/installation-and-release.md)
+- [Engineering Hard Constraints](docs/en/03-architecture-specs/engineering-hard-constraints.md)
+- [GraphRAG Product and Implementation Roadmap](docs/en/03-architecture-specs/graphrag-product-and-implementation-roadmap.md)
+- [Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/03-architecture-specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [Semantic/Vector Provider Backend Specification](docs/en/03-architecture-specs/semantic-vector-provider-backend.md)
+- [Resident Agent Graph Retrieval Access Specification](docs/en/03-architecture-specs/resident-agent-graph-retrieval-access.md)
+- [Installation and Release Specification](docs/en/03-architecture-specs/installation-and-release.md)
 
 ## Development
 
