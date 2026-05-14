@@ -70,11 +70,12 @@ Follow-up improvements from this run:
 - Add progress and budget reporting during full indexing, including Git file
   enumeration, blob reads, parser work, SQLite writes, elapsed time, skipped
   files, degraded files, and active scope.
-- Add practical source presets and exclusion support. A source preset should
-  exclude common generated or heavyweight paths such as `dist`, build outputs,
-  cache directories, PDFs, and vendored assets unless users explicitly opt in.
-  A repository-local ignore file, such as `.relay-knowledgeignore`, should make
-  these exclusions repeatable.
+- Keep practical source presets and exclusion support aligned with indexing
+  costs. The default source preset excludes common generated or heavyweight
+  paths such as `dist`, build outputs, cache directories, PDFs, vendored assets,
+  `*.jsonl` dataset dumps, and `uv.lock` unless users explicitly opt in with a
+  path filter. A repository-local ignore file, such as
+  `.relay-knowledgeignore`, makes additional exclusions repeatable.
 - Make `graph inspect` and `health` code counts either include code repository
   index totals or clearly label those fields as graph-evidence counts only.
   During the E2E run, `repo status` reported code index totals while

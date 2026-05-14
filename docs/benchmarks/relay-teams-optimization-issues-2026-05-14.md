@@ -85,7 +85,12 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 
 - Baseline: scope selected large JSONL fixtures and `uv.lock` as unknown files.
 - Root cause: source preset includes some large non-code text-like assets.
-- Fix: not implemented in the first optimization patch; requires a product
-  decision on whether these assets are useful retrieval targets.
-- Acceptance: future scope preset decision is documented and reflected in
-  preview counts.
+- Fix: exclude `*.jsonl` dataset dumps and `uv.lock` from the default source
+  preset while allowing explicit path-filter opt-in for users who need those
+  assets as retrieval targets.
+- Acceptance: scope preview reports these paths under `excluded_paths` with
+  reason `excluded by source preset`; they no longer contribute to selected,
+  unsupported, large/heavy, or degraded counts unless explicitly selected.
+- Tests: scope selection and preview tests cover `.jsonl`, `uv.lock`, and
+  explicit opt-in.
+- Status: implemented.

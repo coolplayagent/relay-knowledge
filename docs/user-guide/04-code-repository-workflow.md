@@ -31,6 +31,10 @@ relay-knowledge repo index core --ref HEAD --dry-run --format json
 ```
 
 preview 适合在收窄 `--path` 或 `--language` 后确认不会把无关目录写入代码图谱。
+默认 source preset 会排除常见生成目录、二进制/媒体资产、`*.jsonl`
+数据集转储和 `uv.lock` 这类锁文件快照；这些文件会出现在
+`excluded_paths`，不会计入 selected 或 degraded 计数。确实需要检索时，
+用精确 `--path` 注册或请求对应文件即可显式纳入。
 
 ## 4.3 全量索引
 

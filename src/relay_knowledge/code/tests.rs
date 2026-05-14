@@ -176,6 +176,53 @@ fn explicit_default_exclusion_opt_in_normalizes_extension_case() {
 }
 
 #[test]
+fn default_source_preset_excludes_dataset_dumps_and_uv_lock() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(!path_is_selected(
+        ".agent_teams/evals/datasets/swebench-verified-full.jsonl",
+        &registration,
+        &selector
+    ));
+    assert!(!path_is_selected("uv.lock", &registration, &selector));
+}
+
+#[test]
+fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec!["data/events.jsonl".to_owned(), "uv.lock".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    assert!(path_is_selected(
+        "data/events.jsonl",
+        &registration,
+        &selector
+    ));
+    assert!(path_is_selected("uv.lock", &registration, &selector));
+    assert!(!path_is_selected(
+        "other/events.jsonl",
+        &registration,
+        &selector
+    ));
+}
+
+#[test]
 fn anchored_ignore_rules_only_match_repo_root_paths() {
     let repo = TempGitRepo::create("anchored-ignore-rules");
     repo.write(".relay-knowledgeignore", "/docs\n");
@@ -705,8 +752,10 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
     let repo = TempGitRepo::create("scope-preview");
     repo.write("src/lib.rs", "fn kept() {}\n");
     repo.write("dist/bundle.js", "function generated() {}\n");
+    repo.write("data/events.jsonl", "{\"kind\":\"fixture\"}\n");
     repo.write("docs/notes.rs", "fn ignored() {}\n");
     repo.write("manual.pdf", "%PDF-1.7\n");
+    repo.write("uv.lock", "version = 1\n");
     repo.write(".relay-knowledgeignore", "docs\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
@@ -728,6 +777,15 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
     assert!(preview.excluded_paths.iter().any(|path| {
         path.path == "dist/bundle.js" && path.reason == "excluded by source preset"
     }));
+    assert!(preview.excluded_paths.iter().any(|path| {
+        path.path == "data/events.jsonl" && path.reason == "excluded by source preset"
+    }));
+    assert!(
+        preview
+            .excluded_paths
+            .iter()
+            .any(|path| { path.path == "uv.lock" && path.reason == "excluded by source preset" })
+    );
     assert!(preview.excluded_paths.iter().any(|path| {
         path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
     }));

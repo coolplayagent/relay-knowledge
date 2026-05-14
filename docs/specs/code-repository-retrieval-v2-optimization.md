@@ -25,7 +25,9 @@ versions, freshness, and degradation.
   file estimates, and expected degraded files.
 - The default source preset excludes common generated or heavyweight paths and
   assets such as `dist`, `build`, `target`, `node_modules`, caches, vendored
-  directories, PDFs, archives, fonts, images, videos, source maps, and wasm.
+  directories, PDFs, archives, fonts, images, videos, source maps, wasm,
+  line-oriented dataset dumps such as `*.jsonl`, and lockfile snapshots such as
+  `uv.lock`.
 - `.relay-knowledgeignore` at the Git repository root provides repeatable
   repository-local exclusions. Blank lines, comments, directory names, anchored
   paths, and `*.extension` patterns are supported. Ignore rules only narrow the
@@ -107,7 +109,8 @@ cargo test --all-targets --all-features
 
 - No external embedding provider is configured in this phase.
 - Default source presets are active unless a user explicitly narrows the
-  registered/requested path to a generated area.
+  registered/requested path to a generated area or excluded asset such as a
+  specific `*.jsonl` file or `uv.lock`.
 - `.relay-knowledgeignore` exclusions cannot expand the registered scope and do
   not replace Git authorization or selector validation.
 - Real embeddings, cross-repository retrieval, LLM reranking, and multimodal
