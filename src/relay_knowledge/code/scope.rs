@@ -40,11 +40,11 @@ const DEFAULT_EXCLUDED_SEGMENTS: &[&str] = &[
     "venv",
 ];
 const DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
-    "7z", "avif", "bmp", "bz2", "class", "eot", "gif", "gz", "ico", "jar", "jpeg", "jpg", "lockb",
-    "map", "mov", "mp4", "otf", "pdf", "png", "svg", "tar", "tgz", "ttf", "wasm", "webm", "woff",
-    "woff2", "zip", "zst",
+    "7z", "avif", "bmp", "bz2", "class", "eot", "gif", "gz", "ico", "jar", "jpeg", "jpg", "jsonl",
+    "lockb", "map", "mov", "mp4", "otf", "pdf", "png", "svg", "tar", "tgz", "ttf", "wasm", "webm",
+    "woff", "woff2", "zip", "zst",
 ];
-const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &[".relay-knowledgeignore"];
+const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &[".relay-knowledgeignore", "uv.lock"];
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
 pub fn preview_repository_scope(
@@ -395,6 +395,7 @@ fn explicit_path_filter_opts_into_default_exclusion<'a>(
         let filter_segments = filter.split('/').collect::<Vec<_>>();
         let targets_default_exclusion = filter_segments.iter().any(|segment| {
             DEFAULT_EXCLUDED_SEGMENTS.contains(segment)
+                || DEFAULT_EXCLUDED_FILENAMES.contains(segment)
                 || segment
                     .rsplit_once('.')
                     .map(|(_, ext)| ext.to_ascii_lowercase())
