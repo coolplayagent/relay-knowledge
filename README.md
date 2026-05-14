@@ -29,6 +29,22 @@ target/debug/relay-knowledge status --format json
 target/debug/relay-knowledge health --format json
 ```
 
+## Installing Releases
+
+Stable releases are distributed through GitHub Releases with prebuilt archives
+for Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64. Verify
+the downloaded archive with `checksums.txt` before placing the binary on your
+PATH. Windows ARM64 archives are produced by the release workflow as
+cross-built artifacts until native Windows ARM64 CI runners are available.
+
+Rust users can install the crate from crates.io:
+
+```bash
+cargo install relay-knowledge
+relay-knowledge --version
+relay-knowledge service doctor
+```
+
 ## What Works Today
 
 - Hybrid GraphRAG context packs with BM25, local semantic signatures,

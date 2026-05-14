@@ -1,0 +1,356 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      dry_run_tag:
+        description: Tag-like version to validate without creating a release.
+        required: true
+        default: v0.1.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: relay-knowledge
+
+jobs:
+  verify:
+    name: Verify release inputs and quality gates
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish_crate: ${{ steps.version.outputs.publish_crate }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.dry_run_tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0 or v0.1.0-rc.1: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          manifest_version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+
+          if [[ "$version" != "$manifest_version" ]]; then
+            echo "Tag $tag does not match Cargo.toml package.version $manifest_version" >&2
+            exit 1
+          fi
+
+          prerelease=false
+          publish_crate=true
+          if [[ "$version" == *-* || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            prerelease=true
+            publish_crate=false
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "publish_crate=$publish_crate"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Format gate
+        run: cargo fmt --all -- --check
+
+      - name: Clippy gate
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Unit and integration test suite
+        run: cargo test --all-targets --all-features
+
+      - name: Package crate
+        run: cargo package
+
+      - name: Publish dry run
+        run: cargo publish --dry-run
+
+      - name: Verify repository is unchanged after checks
+        run: git diff --exit-code
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            cross: false
+            msvc_arch: amd64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            cross: false
+            msvc_arch: amd64_arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+
+      - name: Set up Linux cross toolchain
+        if: matrix.cross == true
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Set up MSVC toolchain
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke test release binary
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target/${{ matrix.target }}/release/${BIN_NAME} --version
+          target/${{ matrix.target }}/release/${BIN_NAME} status --format json
+          target/${{ matrix.target }}/release/${BIN_NAME} service doctor --format json
+
+      - name: Smoke test Windows x64 release binary
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe --version
+          target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe status --format json
+          target\${{ matrix.target }}\release\${{ env.BIN_NAME }}.exe service doctor --format json
+
+      - name: Prepare archive directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${BIN_NAME}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}"
+          mkdir -p "dist/$package"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "target/${{ matrix.target }}/release/${BIN_NAME}.exe" "dist/$package/"
+          else
+            cp "target/${{ matrix.target }}/release/${BIN_NAME}" "dist/$package/"
+          fi
+          cp README.md LICENSE "dist/$package/"
+
+      - name: Create tar archive
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${BIN_NAME}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Create zip archive
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = "${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}"
+          Compress-Archive -Path "dist\$package" -DestinationPath "dist\$package.zip" -Force
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}
+          path: dist/${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish-crate:
+    name: Publish crate
+    if: github.event_name == 'push' && needs.verify.outputs.publish_crate == 'true'
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Publish crate to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          published="$(python3 - "$version" <<'PY'
+          import json
+          import sys
+          import urllib.error
+          import urllib.request
+
+          version = sys.argv[1]
+          try:
+              with urllib.request.urlopen("https://crates.io/api/v1/crates/relay-knowledge", timeout=30) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code == 404:
+                  print(False)
+                  raise SystemExit(0)
+              raise
+
+          print(any(item["num"] == version for item in payload["versions"]))
+          PY
+          )"
+
+          if [[ "$published" == "True" ]]; then
+            echo "relay-knowledge $version is already published on crates.io; skipping."
+            exit 0
+          fi
+
+          cargo publish
+
+  release:
+    name: Publish GitHub release
+    if: always() && github.event_name == 'push' && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.publish-crate.result == 'success' || needs.publish-crate.result == 'skipped')
+    needs:
+      - verify
+      - build
+      - publish-crate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          ## Install
+
+          Download the archive for your platform from this release, verify it with `checksums.txt`, and place the `relay-knowledge` binary on your PATH.
+
+          Rust users can install from crates.io after the crate is published:
+
+          ```bash
+          cargo install relay-knowledge
+          ```
+
+          ## Verification
+
+          ```bash
+          sha256sum -c checksums.txt
+          gh attestation verify <artifact> -R coolplayagent/relay-knowledge
+          relay-knowledge --version
+          relay-knowledge status --format json
+          relay-knowledge service doctor --format json
+          ```
+
+          ## Platform Artifacts
+
+          - Linux x64: `x86_64-unknown-linux-gnu`
+          - Linux ARM64: `aarch64-unknown-linux-gnu`
+          - macOS Intel: `x86_64-apple-darwin`
+          - macOS Apple Silicon: `aarch64-apple-darwin`
+          - Windows x64: `x86_64-pc-windows-msvc`
+          - Windows ARM64: `aarch64-pc-windows-msvc`
+
+          Windows ARM64 is validated as a cross-built release artifact in this workflow. Native Windows ARM64 smoke tests require a future ARM64 Windows runner.
+          NOTES
+
+      - name: Attest release archives
+        uses: actions/attest@v3
+        with:
+          subject-path: dist/*
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify.outputs.tag }}"
+          prerelease_args=()
+          if [[ "${{ needs.verify.outputs.prerelease }}" == "true" ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "$tag" \
+              --notes-file release-notes.md \
+              "${prerelease_args[@]}"
+            gh release upload "$tag" --clobber dist/*
+            exit 0
+          fi
+
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file release-notes.md \
+            "${prerelease_args[@]}" \
+            dist/*
