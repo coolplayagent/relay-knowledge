@@ -1,6 +1,6 @@
 # 代码知识图谱能力参考
 
-[中文](../../zh/specs/knowledge-graph-capability-reference.md) | [English](../../en/specs/knowledge-graph-capability-reference.md)
+[中文](../../zh/specs/knowledge-graph-capability-reference.md) | [英文](../../en/specs/knowledge-graph-capability-reference.md)
 
 > **文档版本**: 1.0
 > **编制日期**: 2026-05-10

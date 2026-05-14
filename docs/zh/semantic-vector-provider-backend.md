@@ -1,22 +1,18 @@
-# Semantic/Vector Provider Backend
+# Semantic/Vector Provider 后端
 
-[中文](../zh/semantic-vector-provider-backend.md) | [English](../en/semantic-vector-provider-backend.md)
+[中文](../zh/semantic-vector-provider-backend.md) | [英文](../en/semantic-vector-provider-backend.md)
 
-`relay-knowledge` supports two semantic/vector read-model modes:
+`relay-knowledge` 支持三种 semantic/vector 读模型模式：
 
-- `local`: deterministic in-process token and hashed-vector read models.
-- `external`: remote embedding provider metadata and provider probe support for
-  OpenAI-compatible embedding APIs.
-- `disabled`: skip the read model family and report fallback status.
+- `local`：进程内确定性 token 读模型和哈希向量读模型。
+- `external`：远端 embedding provider 元数据，以及面向 OpenAI 兼容 embedding API 的 provider 探测支持。
+- `disabled`：跳过该读模型族，并报告回退状态。
 
-The query path never calls a remote model. Remote provider work belongs to index
-refresh, startup recovery, maintenance workers, and explicit probes. BM25,
-graph evidence, graph path, temporal, and community retrieval remain available
-when semantic/vector backends are disabled or degraded.
+查询路径从不调用远端模型。远端 provider 工作只属于索引刷新、启动恢复、维护 worker 和显式探测。semantic/vector 后端被禁用或降级时，BM25、图证据、图路径、时序和社区检索仍可使用。
 
-## Configuration
+## 配置
 
-All provider settings are read through the `env` boundary:
+所有 provider 设置都通过 `env` 边界读取：
 
 ```bash
 relay-knowledge setup profile external-embedding --format json
@@ -36,13 +32,11 @@ RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS=30000
 RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY=4
 ```
 
-`external` mode requires base URL, API key, model name, and dimension. Status
-and health responses expose only a redacted endpoint, provider name, model
-metadata, budgets, and whether a key is configured.
+`external` 模式要求提供 base URL、API key、模型名称和维度。状态与健康检查响应只暴露脱敏后的 endpoint、provider 名称、模型元数据、预算，以及是否已配置 key。
 
-## Runtime Behavior
+## 运行时行为
 
-OpenAI-compatible providers use `POST /v1/embeddings` with:
+OpenAI 兼容 provider 使用 `POST /v1/embeddings`：
 
 ```json
 {
@@ -51,25 +45,18 @@ OpenAI-compatible providers use `POST /v1/embeddings` with:
 }
 ```
 
-Responses must include exactly one embedding per input, with the configured
-dimension and finite float values. HTTP 408, 429, 5xx, timeout, and transport
-errors are retryable. HTTP 400, 401, 403, and 404 are permanent configuration or
-authorization failures.
+响应必须为每个输入返回且只返回一个 embedding，维度必须与配置一致，数值必须是有限浮点数。HTTP 408、429、5xx、超时和传输错误可重试。HTTP 400、401、403 和 404 视为永久配置或授权失败。
 
-Index cursors persist model name, dimension, source hash, and backend cursor so
-health diagnostics can explain stale, degraded, or failed states by index
-family, scope, and modality.
+索引游标会持久化模型名称、维度、来源哈希和后端游标，使健康诊断能够按索引族、scope 和模态解释过期、降级或失败状态。
 
-## Web UI
+## Web UI 用户界面
 
-The Web diagnostics workspace includes a `Providers` section showing:
+Web 诊断工作区包含 `Providers` 区域，展示：
 
-- semantic and vector backend mode;
-- model and dimension metadata;
-- redacted remote endpoint and key-configured state;
-- batch, timeout, and concurrency budgets;
-- semantic/vector cursor rows with model, dimension, scope, and backend cursor.
+- semantic 和 vector 后端模式。
+- 模型和维度元数据。
+- 脱敏后的远端 endpoint 和 key 配置状态。
+- batch、timeout 和 concurrency 预算。
+- 带有模型、维度、scope 和后端游标的 semantic/vector 游标行。
 
-The Web UI does not save provider settings or submit API keys. Provider
-configuration remains an installation/runtime concern until a secret store is
-introduced.
+Web UI 不保存 provider 设置，也不提交 API key。在引入 secret store 前，provider 配置仍属于安装和运行时关注点。

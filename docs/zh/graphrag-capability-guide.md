@@ -1,6 +1,6 @@
 # GraphRAG 功能文档
 
-[中文](../zh/graphrag-capability-guide.md) | [English](../en/graphrag-capability-guide.md)
+[中文](../zh/graphrag-capability-guide.md) | [英文](../en/graphrag-capability-guide.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-12
@@ -119,7 +119,7 @@ Web workspace 从同源服务读取:
 
 当前 Web 页面展示:
 
-- Status: graph version、health、index lag、mutation count 和图谱计数。
+- 状态：graph version、health、index lag、mutation count 和图谱计数。
 - GraphRAG readiness: evidence graph、BM25 read model、semantic cursor、vector cursor、code graph、runtime budgets、refresh recovery 和 stale reasons。
 - Operations: retrieve、ingest、graph、code、index 和 service 操作的命令与 payload 预览，以及同源执行结果。
 - Indexes: BM25、semantic、vector 的 index version、indexed graph version、state 和 lag。
@@ -183,7 +183,7 @@ evidence ids、confidence、status 和 version range，方便 agent 在引用关
 - `metadata.graph_version`: 查询绑定的图提交版本。
 - `metadata.indexed_graph_version`: 参与检索的最低索引图版本。
 - `retrieval_mode`: `hybrid` 或 `graph_only`。
-- `source_scope`: source filter。
+- `source_scope`：来源过滤条件。
 - `freshness`: 调用方请求的 freshness policy。
 - `results`: evidence、code symbol 或 code chunk 命中。
 - `context_pack.backend_statuses`: semantic/vector 等后端可用性、scope post-filter 和降级原因。
@@ -194,10 +194,10 @@ evidence ids、confidence、status 和 version range，方便 agent 在引用关
 - `truncated`: 结果或 context pack 是否被预算截断。
 
 Health 和 index refresh 响应额外返回 `index_cursors[*]`，包含 kind、source scope、
-modality、indexed graph version、source hash、backend cursor，以及后端提供时的
-model name/dimension。`index_refresh.stale_reasons[*]` 会按索引族和 scoped cursor
-解释未新鲜或失败的原因，包含 kind、可选 source scope、可选 modality、reason、
-lag versions 和 last error；排障时先看 failed/dead-letter reason，再看 lag reason。
+modality、索引图版本、源哈希、后端游标，以及后端提供时的
+模型名称/维度。`index_refresh.stale_reasons[*]` 会按索引族和作用域游标
+解释未新鲜或失败的原因，包含类型（kind）、可选的源作用域（source scope）、可选的模态（modality）、原因（reason）、
+滞后版本（lag versions）和最后错误（last error）；排障时先看失败/死信原因，再看滞后原因。
 
 ## 7. 运维检查
 
@@ -212,4 +212,4 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG readiness、operation composer、同源执行结果、index table、runtime panel 和移动端布局。
+浏览器集成测试必须先构建 `web/dist`，再启动静态目录服务并验证 diagnostics、GraphRAG 准备状态、操作组合器、同源执行结果、索引表、运行时面板和移动端布局。

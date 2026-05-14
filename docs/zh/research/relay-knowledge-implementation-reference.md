@@ -1,6 +1,6 @@
 # relay-knowledge 实现借鉴落地路线
 
-[中文](../../zh/research/relay-knowledge-implementation-reference.md) | [English](../../en/research/relay-knowledge-implementation-reference.md)
+[中文](../../zh/research/relay-knowledge-implementation-reference.md) | [英文](../../en/research/relay-knowledge-implementation-reference.md)
 
 > 编制日期: 2026-05-13
 > 进展刷新: 2026-05-13

@@ -1,6 +1,6 @@
 # 第 7 章 运维与排障
 
-[中文](../../zh/user-guide/07-operations-and-troubleshooting.md) | [English](../../en/user-guide/07-operations-and-troubleshooting.md)
+[中文](../../zh/user-guide/07-operations-and-troubleshooting.md) | [英文](../../en/user-guide/07-operations-and-troubleshooting.md)
 
 ## 7.1 健康检查
 

@@ -1,6 +1,6 @@
 # Agent 协议图检索接入研究
 
-[中文](../../zh/research/agent-protocol-graph-retrieval-research.md) | [English](../../en/research/agent-protocol-graph-retrieval-research.md)
+[中文](../../zh/research/agent-protocol-graph-retrieval-research.md) | [英文](../../en/research/agent-protocol-graph-retrieval-research.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-12

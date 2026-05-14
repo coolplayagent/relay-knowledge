@@ -1,6 +1,6 @@
 # 第 2 章 CLI 基础
 
-[中文](../../zh/user-guide/02-cli-basics.md) | [English](../../en/user-guide/02-cli-basics.md)
+[中文](../../zh/user-guide/02-cli-basics.md) | [英文](../../en/user-guide/02-cli-basics.md)
 
 ## 2.1 命令结构
 

@@ -1,6 +1,6 @@
 # 基础运行时层规格
 
-[中文](../../zh/specs/foundational-runtime.md) | [English](../../en/specs/foundational-runtime.md)
+[中文](../../zh/specs/foundational-runtime.md) | [英文](../../en/specs/foundational-runtime.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-11

@@ -1,6 +1,6 @@
 # 知识图谱技术研究总结
 
-[中文](../../zh/research/knowledge-graph-research.md) | [English](../../en/research/knowledge-graph-research.md)
+[中文](../../zh/research/knowledge-graph-research.md) | [英文](../../en/research/knowledge-graph-research.md)
 
 > 项目: `relay-knowledge`
 > 日期: 2026-05-11

@@ -1,6 +1,6 @@
 # 第 1 章 安装与运行时目录
 
-[中文](../../zh/user-guide/01-install-and-runtime.md) | [English](../../en/user-guide/01-install-and-runtime.md)
+[中文](../../zh/user-guide/01-install-and-runtime.md) | [英文](../../en/user-guide/01-install-and-runtime.md)
 
 ## 1.1 前置条件
 

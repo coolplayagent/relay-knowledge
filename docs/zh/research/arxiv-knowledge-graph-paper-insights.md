@@ -1,6 +1,6 @@
 # arXiv 知识图谱论文深度洞察
 
-[中文](../../zh/research/arxiv-knowledge-graph-paper-insights.md) | [English](../../en/research/arxiv-knowledge-graph-paper-insights.md)
+[中文](../../zh/research/arxiv-knowledge-graph-paper-insights.md) | [英文](../../en/research/arxiv-knowledge-graph-paper-insights.md)
 
 > 项目: `relay-knowledge`
 > 归档日期: 2026-05-11
@@ -197,7 +197,7 @@ GraphRAG 综述 [A11][A12][A13] 把系统拆成图索引、图引导检索和图
 1. `keyword`: BM25，适合实体名、术语、代码符号、source path。
 2. `semantic`: embedding 召回，适合同义表达和自然语言问题。
 3. `entity_local`: 实体链接后做受限邻域扩展。
-4. `path`: 根据 source/target 或 query schema 做路径搜索。
+4. `path`：根据 source/target 或 query schema 进行路径搜索。
 5. `temporal`: 带 `as_of` 或 `time_range` 的时间过滤检索。
 
 融合策略:
@@ -212,7 +212,7 @@ GraphRAG 综述 [A11][A12][A13] 把系统拆成图索引、图引导检索和图
 
 - 每个 mutation 都生成 `GraphEvent`。
 - 索引器消费 graph mutation log，记录最后处理到的 `graph_version`。
-- 查询时如果 index lag > threshold，返回 stale warning 或等待刷新。
+- 查询时如果索引滞后超过阈值，则返回过期警告或等待刷新。
 - 对 summary/community/tag/time tree 类索引做局部失效，不做默认全量重建。
 
 ### 4.5 评估清单
@@ -230,18 +230,18 @@ GraphRAG 综述 [A11][A12][A13] 把系统拆成图索引、图引导检索和图
 指标:
 
 - `recall@k`、`MRR`、`nDCG`。
-- path hit rate、evidence completeness。
-- stale answer rate。
-- entity duplicate rate。
-- graph mutation -> index refresh latency p95。
+- path 命中率、证据完整性。
+- 过期答案率。
+- 实体重复率。
+- 图变更 -> 索引刷新延迟 p95。
 
 ## 5. 优先阅读路线
 
 P0: 直接决定架构边界
 
-- [A5] Unifying LLMs and KGs: Roadmap
-- [A3] Automatic KG Construction Survey
-- [A13] Retrieval-Augmented Generation with Graphs
+- [A5] 统一大语言模型与知识图谱：路线图
+- [A3] 自动知识图谱构建综述
+- [A13] 基于图的检索增强生成
 - [A16] Practical GraphRAG
 - [A25] TG-RAG
 
@@ -255,54 +255,54 @@ P1: 决定检索和上下文组织
 
 P2: 决定质量、可信和解释
 
-- [A8] Are LLMs Effective KG Constructors?
+- [A8] 大型语言模型是有效的知识图谱构建器吗？
 - [A30] KG-LLM-Bench
-- [A31] Robust KG-RAG
+- [A31] 鲁棒知识图谱-检索增强生成
 - [A32] XGRAG
 
 P3: 后续增强
 
-- [A2] KGE Survey
+- [A2] 知识图谱嵌入综述
 - [A27] KICGPT
 - [A28] OL-KGC
 - [A36] OptimusKG
 
 ## 6. 参考文献
 
-- [A1] Shaoxiong Ji, Shirui Pan, Erik Cambria, Pekka Marttinen, Philip S. Yu. “A Survey on Knowledge Graphs: Representation, Acquisition and Applications.” arXiv:2002.00388. <https://arxiv.org/abs/2002.00388>
-- [A2] Jiahang Cao, Jinyuan Fang, Zaiqiao Meng, Shangsong Liang. “Knowledge Graph Embedding: A Survey from the Perspective of Representation Spaces.” arXiv:2211.03536. <https://arxiv.org/abs/2211.03536>
-- [A3] Lingfeng Zhong, Jia Wu, Qian Li, Hao Peng, Xindong Wu. “A Comprehensive Survey on Automatic Knowledge Graph Construction.” arXiv:2302.05019. <https://arxiv.org/abs/2302.05019>
-- [A4] Jiapu Wang et al. “A Survey on Temporal Knowledge Graph Completion: Taxonomy, Progress, and Prospects.” arXiv:2308.02457. <https://arxiv.org/abs/2308.02457>
-- [A5] Shirui Pan, Linhao Luo, Yufei Wang, Chen Chen, Jiapu Wang, Xindong Wu. “Unifying Large Language Models and Knowledge Graphs: A Roadmap.” arXiv:2306.08302. <https://arxiv.org/abs/2306.08302>
-- [A6] Jeff Z. Pan et al. “Large Language Models and Knowledge Graphs: Opportunities and Challenges.” arXiv:2308.06374. <https://arxiv.org/abs/2308.06374>
-- [A7] Haonan Bian. “LLM-empowered knowledge graph construction: A survey.” arXiv:2510.20345. <https://arxiv.org/abs/2510.20345>
-- [A8] Ruirui Chen et al. “Are Large Language Models Effective Knowledge Graph Constructors?” arXiv:2510.11297. <https://arxiv.org/abs/2510.11297>
-- [A9] Jian Zhang et al. “GKG-LLM: A Unified Framework for Generalized Knowledge Graph Construction.” arXiv:2503.11227. <https://arxiv.org/abs/2503.11227>
-- [A10] Cogan Shimizu, Pascal Hitzler. “Accelerating Knowledge Graph and Ontology Engineering with Large Language Models.” arXiv:2411.09601. <https://arxiv.org/abs/2411.09601>
-- [A11] Boci Peng et al. “Graph Retrieval-Augmented Generation: A Survey.” arXiv:2408.08921. <https://arxiv.org/abs/2408.08921>
-- [A12] Qinggang Zhang et al. “A Survey of Graph Retrieval-Augmented Generation for Customized Large Language Models.” arXiv:2501.13958. <https://arxiv.org/abs/2501.13958>
-- [A13] Haoyu Han et al. “Retrieval-Augmented Generation with Graphs (GraphRAG).” arXiv:2501.00309. <https://arxiv.org/abs/2501.00309>
-- [A14] Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, Chao Huang. “LightRAG: Simple and Fast Retrieval-Augmented Generation.” arXiv:2410.05779. <https://arxiv.org/abs/2410.05779>
-- [A15] Yibo Zhao, Jiapeng Zhu, Ye Guo, Kangkang He, Xiang Li. “E^2GraphRAG: Streamlining Graph-based RAG for High Efficiency and Effectiveness.” arXiv:2505.24226. <https://arxiv.org/abs/2505.24226>
-- [A16] Congmin Min et al. “Towards Practical GraphRAG: Efficient Knowledge Graph Construction and Hybrid Retrieval at Scale.” arXiv:2507.03226. <https://arxiv.org/abs/2507.03226>
-- [A17] Wenbiao Tao, Xinyuan Li, Yunshi Lan, Weining Qian. “TagRAG: Tag-guided Hierarchical Knowledge Graph Retrieval-Augmented Generation.” arXiv:2601.05254. <https://arxiv.org/abs/2601.05254>
-- [A18] Xiangrong Zhu, Yuexiang Xie, Yi Liu, Yaliang Li, Wei Hu. “Knowledge Graph-Guided Retrieval Augmented Generation.” arXiv:2502.06864. <https://arxiv.org/abs/2502.06864>
-- [A19] Xiaoxin He et al. “G-Retriever: Retrieval-Augmented Generation for Textual Graph Understanding and Question Answering.” arXiv:2402.07630. <https://arxiv.org/abs/2402.07630>
-- [A20] Tengjun Ni et al. “StepChain GraphRAG: Reasoning Over Knowledge Graphs for Multi-Hop Question Answering.” arXiv:2510.02827. <https://arxiv.org/abs/2510.02827>
-- [A21] Peng Yu, En Xu, Bin Chen, Haibiao Chen, Yinfei Xu. “STEM: Structure-Tracing Evidence Mining for Knowledge Graphs-Driven Retrieval-Augmented Generation.” arXiv:2604.22282. <https://arxiv.org/abs/2604.22282>
-- [A22] Borui Cai et al. “Temporal Knowledge Graph Completion: A Survey.” arXiv:2201.08236. <https://arxiv.org/abs/2201.08236>
-- [A23] He Chang et al. “Integrate Temporal Graph Learning into LLM-based Temporal Knowledge Graph Model.” arXiv:2501.11911. <https://arxiv.org/abs/2501.11911>
-- [A24] Dong Li et al. “T-GRAG: A Dynamic GraphRAG Framework for Resolving Temporal Conflicts and Redundancy in Knowledge Retrieval.” arXiv:2508.01680. <https://arxiv.org/abs/2508.01680>
-- [A25] Jiale Han et al. “RAG Meets Temporal Graphs: Time-Sensitive Modeling and Retrieval for Evolving Knowledge.” arXiv:2510.13590. <https://arxiv.org/abs/2510.13590>
-- [A26] Wang Xing et al. “LLM-Guided Knowledge Distillation for Temporal Knowledge Graph Reasoning.” arXiv:2602.14428. <https://arxiv.org/abs/2602.14428>
-- [A27] Yanbin Wei, Qiushi Huang, James T. Kwok, Yu Zhang. “KICGPT: Large Language Model with Knowledge in Context for Knowledge Graph Completion.” arXiv:2402.02389. <https://arxiv.org/abs/2402.02389>
-- [A28] Wenbin Guo, Xin Wang, Jiaoyan Chen, Zhao Li, Zirui Chen. “Ontology-Enhanced Knowledge Graph Completion using Large Language Models.” arXiv:2507.20643. <https://arxiv.org/abs/2507.20643>
-- [A29] Ziwei Zhang et al. “Graph Meets LLMs: Towards Large Graph Models.” arXiv:2308.14522. <https://arxiv.org/abs/2308.14522>
-- [A30] Elan Markowitz, Krupa Galiya, Greg Ver Steeg, Aram Galstyan. “KG-LLM-Bench: A Scalable Benchmark for Evaluating LLM Reasoning on Textualized Knowledge Graphs.” arXiv:2504.07087. <https://arxiv.org/abs/2504.07087>
-- [A31] Hazem Amamou, Stéphane Gagnon, Alan Davoust, Anderson R. Avila. “Towards Robust Retrieval-Augmented Generation Based on Knowledge Graph: A Comparative Analysis.” arXiv:2603.05698. <https://arxiv.org/abs/2603.05698>
-- [A32] Zhuoling Li, Ha Linh Hong Tran Nguyen, Valeria Bladinieres, Maxim Romanovsky. “XGRAG: A Graph-Native Framework for Explaining KG-based Retrieval-Augmented Generation.” arXiv:2604.24623. <https://arxiv.org/abs/2604.24623>
-- [A33] Koushik Chakraborty, Koyel Guha. “Knowledge Graph RAG: Agentic Crawling and Graph Construction in Enterprise Documents.” arXiv:2604.14220. <https://arxiv.org/abs/2604.14220>
-- [A34] Udiptaman Das et al. “Clinical Knowledge Graph Construction and Evaluation with Multi-LLMs via Retrieval-Augmented Generation.” arXiv:2601.01844. <https://arxiv.org/abs/2601.01844>
-- [A35] Luca Cotti et al. “OntoLogX: Ontology-Guided Knowledge Graph Extraction from Cybersecurity Logs with Large Language Models.” arXiv:2510.01409. <https://arxiv.org/abs/2510.01409>
-- [A36] Lucas Vittor et al. “OptimusKG: Unifying biomedical knowledge in a modern multimodal graph.” arXiv:2604.27269. <https://arxiv.org/abs/2604.27269>
-- [A37] Yang Zhao et al. “CLAUSE: Agentic Neuro-Symbolic Knowledge Graph Reasoning via Dynamic Learnable Context Engineering.” arXiv:2509.21035. <https://arxiv.org/abs/2509.21035>
+- [A1] Shaoxiong Ji, Shirui Pan, Erik Cambria, Pekka Marttinen, Philip S. Yu. “知识图谱综述：表示、获取与应用。” arXiv:2002.00388. <https://arxiv.org/abs/2002.00388>
+- [A2] Jiahang Cao, Jinyuan Fang, Zaiqiao Meng, Shangsong Liang. “知识图谱嵌入：从表示空间视角的综述。” arXiv:2211.03536. <https://arxiv.org/abs/2211.03536>
+- [A3] Lingfeng Zhong, Jia Wu, Qian Li, Hao Peng, Xindong Wu. “自动知识图谱构建的综合综述。” arXiv:2302.05019. <https://arxiv.org/abs/2302.05019>
+- [A4] Jiapu Wang 等. “时序知识图谱补全综述：分类、进展与展望。” arXiv:2308.02457. <https://arxiv.org/abs/2308.02457>
+- [A5] 潘世睿，罗林浩，王宇飞，陈晨，王家璞，吴新东。“统一大型语言模型与知识图谱：一条路线图。”arXiv:2306.08302。<https://arxiv.org/abs/2306.08302>
+- [A6] Jeff Z. Pan 等。“大型语言模型与知识图谱：机遇与挑战。”arXiv:2308.06374。<https://arxiv.org/abs/2308.06374>
+- [A7] 卞浩南。“LLM赋能的知识图谱构建综述。”arXiv:2510.20345。<https://arxiv.org/abs/2510.20345>
+- [A8] 陈睿睿 等。“大型语言模型是有效的知识图谱构建者吗？”arXiv:2510.11297。<https://arxiv.org/abs/2510.11297>
+- [A9] 张健 等。“GKG-LLM：通用知识图谱构建的统一框架。”arXiv:2503.11227。<https://arxiv.org/abs/2503.11227>
+- [A10] Cogan Shimizu，Pascal Hitzler。“利用大型语言模型加速知识图谱与本体工程。”arXiv:2411.09601。<https://arxiv.org/abs/2411.09601>
+- [A11] 彭博慈 等。“图检索增强生成综述。”arXiv:2408.08921。<https://arxiv.org/abs/2408.08921>
+- [A12] 张庆刚 等。“定制大型语言模型的图检索增强生成综述。”arXiv:2501.13958。<https://arxiv.org/abs/2501.13958>
+- [A13] Haoyu Han 等人。“基于图的检索增强生成（GraphRAG）。”arXiv:2501.00309。<https://arxiv.org/abs/2501.00309>
+- [A14] Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, Chao Huang。“LightRAG：简单且快速的检索增强生成。”arXiv:2410.05779。<https://arxiv.org/abs/2410.05779>
+- [A15] Yibo Zhao, Jiapeng Zhu, Ye Guo, Kangkang He, Xiang Li。“E^2GraphRAG：高效且有效的图基RAG简化。”arXiv:2505.24226。<https://arxiv.org/abs/2505.24226>
+- [A16] Congmin Min 等人。“迈向实用的GraphRAG：高效知识图谱构建与混合检索大规模实现。”arXiv:2507.03226。<https://arxiv.org/abs/2507.03226>
+- [A17] Wenbiao Tao, Xinyuan Li, Yunshi Lan, Weining Qian。“TagRAG：标签引导的分层知识图谱检索增强生成。”arXiv:2601.05254。<https://arxiv.org/abs/2601.05254>
+- [A18] Xiangrong Zhu, Yuexiang Xie, Yi Liu, Yaliang Li, Wei Hu。“知识图谱引导的检索增强生成。”arXiv:2502.06864。<https://arxiv.org/abs/2502.06864>
+- [A19] Xiaoxin He 等人。“G-Retriever：用于文本图理解与问答的检索增强生成。”arXiv:2402.07630。<https://arxiv.org/abs/2402.07630>
+- [A20] Tengjun Ni 等人。“StepChain GraphRAG：基于知识图谱的多跳问答推理。”arXiv:2510.02827。<https://arxiv.org/abs/2510.02827>
+- [A21] 彭宇，徐恩，陈斌，陈海彪，徐银飞。“STEM：面向知识图谱驱动的检索增强生成的结构追踪证据挖掘。”arXiv:2604.22282。<https://arxiv.org/abs/2604.22282>
+- [A22] 蔡博睿 等。“时序知识图谱补全综述。”arXiv:2201.08236。<https://arxiv.org/abs/2201.08236>
+- [A23] 何畅 等。“将时序图学习整合进基于大语言模型的时序知识图谱模型。”arXiv:2501.11911。<https://arxiv.org/abs/2501.11911>
+- [A24] 李东 等。“T-GRAG：一种用于解决知识检索中时序冲突和冗余的动态图RAG框架。”arXiv:2508.01680。<https://arxiv.org/abs/2508.01680>
+- [A25] 韩佳乐 等。“RAG遇见时序图：面向演化知识的时间敏感建模与检索。”arXiv:2510.13590。<https://arxiv.org/abs/2510.13590>
+- [A26] 王星 等。“基于大语言模型指导的时序知识图推理知识蒸馏。”arXiv:2602.14428。<https://arxiv.org/abs/2602.14428>
+- [A27] 魏彦斌，黄秋实，郭志明，张宇。“KICGPT：具备上下文知识的大语言模型用于知识图谱补全。”arXiv:2402.02389。<https://arxiv.org/abs/2402.02389>
+- [A28] 郭文斌，王鑫，陈教研，李钊，陈子睿。“基于本体增强的大语言模型知识图谱补全。”arXiv:2507.20643。<https://arxiv.org/abs/2507.20643>
+- [A29] 张紫薇 等人。“图遇见大语言模型：迈向大型图模型。” arXiv:2308.14522。<https://arxiv.org/abs/2308.14522>
+- [A30] Elan Markowitz, Krupa Galiya, Greg Ver Steeg, Aram Galstyan。“KG-LLM-Bench：用于评估大语言模型在文本化知识图谱上推理能力的可扩展基准。” arXiv:2504.07087。<https://arxiv.org/abs/2504.07087>
+- [A31] Hazem Amamou, Stéphane Gagnon, Alan Davoust, Anderson R. Avila。“基于知识图谱的鲁棒检索增强生成：一项比较分析。” arXiv:2603.05698。<https://arxiv.org/abs/2603.05698>
+- [A32] 李卓灵, Ha Linh Hong Tran Nguyen, Valeria Bladinieres, Maxim Romanovsky。“XGRAG：一种基于图的知识图谱检索增强生成解释框架。” arXiv:2604.24623。<https://arxiv.org/abs/2604.24623>
+- [A33] Koushik Chakraborty, Koyel Guha。“知识图谱RAG：企业文档中的主动爬取与图构建。” arXiv:2604.14220。<https://arxiv.org/abs/2604.14220>
+- [A34] Udiptaman Das 等人。“通过多大语言模型的检索增强生成构建与评估临床知识图谱。” arXiv:2601.01844。<https://arxiv.org/abs/2601.01844>
+- [A35] Luca Cotti 等人。“OntoLogX：基于本体指导的大语言模型网络安全日志知识图谱抽取。” arXiv:2510.01409。<https://arxiv.org/abs/2510.01409>
+- [A36] Lucas Vittor 等人。“OptimusKG：统一现代多模态图中的生物医学知识。” arXiv:2604.27269。<https://arxiv.org/abs/2604.27269>
+- [A37] 赵阳 等人。“CLAUSE：通过动态可学习上下文工程实现的能动神经符号知识图推理。” arXiv:2509.21035。<https://arxiv.org/abs/2509.21035>

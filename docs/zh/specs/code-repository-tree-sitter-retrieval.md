@@ -1,6 +1,6 @@
 # 代码仓库 Tree-sitter 检索规格
 
-[中文](../../zh/specs/code-repository-tree-sitter-retrieval.md) | [English](../../en/specs/code-repository-tree-sitter-retrieval.md)
+[中文](../../zh/specs/code-repository-tree-sitter-retrieval.md) | [英文](../../en/specs/code-repository-tree-sitter-retrieval.md)
 
 > 文档版本: 1.0
 > 编制日期: 2026-05-12
@@ -53,7 +53,7 @@ interfaces / agent_adapter
 
 ## 3. Source 和仓库模型
 
-### 3.1 Repository identity
+### 3.1 仓库身份
 
 每个仓库注册后产生稳定 `repository_id`。推荐来源:
 
@@ -80,7 +80,7 @@ alias、status lookup 或本地授权范围互相混淆。查询键必须先按
 
 `worktree_root` 只能由路径边界模块管理。运行时状态、索引、缓存、dead-letter 和日志不能默认写入仓库目录。
 
-### 3.2 Snapshot scope
+### 3.2 快照 scope
 
 代码检索默认使用:
 
@@ -199,7 +199,7 @@ LanguageDefinition {
 
 grammar 版本必须写入 extractor metadata。grammar 升级后，同一文件的抽取结果可能变化，必须触发 scoped re-index 或标记 extractor drift。
 
-### 5.2 Query capture contract
+### 5.2 查询捕获契约
 
 tree-sitter query capture 推荐命名:
 
@@ -379,7 +379,7 @@ v1 代码仓库检索至少覆盖:
 | 代码片段问答 | BM25 + semantic + vector + graph expansion |
 | onboarding/架构概览 | symbols + dependencies + communities/summaries |
 
-### 8.2 Hybrid retrieval
+### 8.2 混合检索
 
 代码检索必须参与统一 hybrid pipeline:
 
@@ -410,7 +410,7 @@ query
 - `index_versions`
 - `stale` 和 `degraded_reason`
 
-### 8.3 Context packing
+### 8.3 上下文打包
 
 代码 context pack 以可引用、可审计为目标:
 
@@ -565,7 +565,7 @@ relay-knowledge repo status <alias> --format json
 - `indexed_graph_version`
 - `degraded_reason`
 
-Metrics:
+指标：
 
 | 指标 | 类型 | 含义 |
 | --- | --- | --- |

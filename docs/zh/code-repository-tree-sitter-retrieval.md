@@ -1,12 +1,10 @@
 # 代码仓库 Tree-sitter 检索功能文档
 
-[中文](../zh/code-repository-tree-sitter-retrieval.md) | [English](../en/code-repository-tree-sitter-retrieval.md)
+[中文](../zh/code-repository-tree-sitter-retrieval.md) | [英文](../en/code-repository-tree-sitter-retrieval.md)
 
-`relay-knowledge` now treats Git repositories as first-class code sources. The
-CLI and application service share the same async API for repository
-registration, tree-sitter indexing, code retrieval, and impact analysis.
+`relay-knowledge` 将 Git 仓库作为一等代码来源。CLI 与 application service 共用同一组 async API，覆盖仓库注册、tree-sitter 索引、代码检索和影响分析。
 
-## Commands
+## 命令
 
 ```bash
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust
@@ -19,23 +17,13 @@ relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 ```
 
-`--kind hybrid` searches symbols, definitions, references, imports, calls, and
-chunks. Narrow kinds are `symbol`, `definition`, `references`, `callers`,
-`callees`, and `imports`. Diff-based impact analysis is served by
-`repo impact`; `impact` is rejected as a plain query kind so changeset results
-cannot be confused with hybrid search.
-`repo query` also accepts `--limit`, `--ref`, repeated `--path`, repeated
-`--language`, and `--freshness allow-stale|wait-until-fresh|graph-only`.
-Symbol hits include both snapshot-bound `symbol_snapshot_id` and stable
-`canonical_symbol_id`. Reference, caller/callee, import, and impact hits expose
-edge metadata: `edge_kind`, `edge_resolution_state`, `edge_target_hint`,
-`edge_confidence_basis_points`, and `edge_confidence_tier`.
+`--kind hybrid` 会同时检索 symbol、definition、reference、import、call 和 chunk。窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。基于 diff 的影响分析通过 `repo impact` 提供；普通 `repo query` 不接受 `impact` 类型，避免把变更集结果与混合检索结果混淆。
 
-## relay-teams E2E Findings
+`repo query` 还支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language`，以及 `--freshness allow-stale|wait-until-fresh|graph-only`。Symbol 命中同时包含 snapshot 绑定的 `symbol_snapshot_id` 和稳定的 `canonical_symbol_id`。Reference、caller/callee、import 和 impact 命中会暴露边元数据：`edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。
 
-The `relay-teams` repository was exercised through the CLI as an end-to-end
-code retrieval source. The successful interactive baseline used an immutable
-commit ref so the exact index totals remain reproducible:
+## relay-teams E2E 结论
+
+`relay-teams` 仓库已经通过 CLI 作为端到端代码检索来源验证。可复现的交互式基线使用不可变 commit ref：
 
 ```bash
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
@@ -51,151 +39,39 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
   --format json
 ```
 
-That run indexed commit `a6063949f4c526ce0e4eddf09d627f5f26c69df7` for the
-Python production source scope: 691 files, 13,399 symbols, 82,460 references,
-and 13,402 chunks with no degraded files. Definition, reference, import, caller,
-and hybrid queries all returned revision-scoped hits with resolved commit, tree
-hash, path, line range, retrieval layer, index version, freshness, score, and
-excerpt metadata.
+该运行在 Python 生产源码范围内索引了 691 个文件、13,399 个 symbol、82,460 个 reference 和 13,402 个 chunk，没有降级文件。Definition、reference、import、caller 和 hybrid 查询都返回了按 revision 约束的命中，并携带 resolved commit、tree hash、path、line range、retrieval layer、index version、freshness、score 和 excerpt metadata。
 
-The wider trial scope, `src`, `tests`, `docs`, and `frontend`, was not suitable
-for interactive CLI indexing because it pulled in generated frontend assets,
-PDFs, large documentation files, and large UI test fixtures. The current CLI
-does not expose enough preflight or progress information for users to understand
-that cost before starting a long full-index operation.
+较宽的试验范围 `src`、`tests`、`docs` 和 `frontend` 不适合交互式全量索引，因为它会纳入生成的前端资产、PDF、大型文档和大型 UI test fixture。当前 CLI 需要在长时间 full-index 操作开始前提供更多 preflight 和 progress 信息。
 
-Follow-up improvements from this run:
+后续改进项：
 
-- Add `repo index --dry-run` or `repo scope preview` so users can see selected
-  file count, byte count, language distribution, largest files, unsupported
-  files, generated assets, and expected degraded files before indexing.
-- Add progress and budget reporting during full indexing, including Git file
-  enumeration, blob reads, parser work, SQLite writes, elapsed time, skipped
-  files, degraded files, and active scope.
-- Keep practical source presets and exclusion support aligned with indexing
-  costs. The default source preset excludes common generated or heavyweight
-  paths such as `dist`, build outputs, cache directories, PDFs, vendored assets,
-  `*.jsonl` dataset dumps, and `uv.lock` unless users explicitly opt in with a
-  path filter. A repository-local ignore file, such as
-  `.relay-knowledgeignore`, makes additional exclusions repeatable.
-- Make `graph inspect` and `health` code counts either include code repository
-  index totals or clearly label those fields as graph-evidence counts only.
-  During the E2E run, `repo status` reported code index totals while
-  `graph inspect` reported zero code files and symbols, which is easy to
-  misread as a failed code index.
-- Split `repo impact` path reporting into in-scope and out-of-scope changes, or
-  default the visible `changed_paths` list to the registered scope. The impact
-  hits respected the registered source scope, but the path report still included
-  unrelated docs, frontend, and test changes.
-- Optimize query execution for larger code indexes. The measured Python source
-  baseline was acceptable for focused use, but hybrid retrieval was materially
-  slower than definition and reference lookup. Symbol, reference, call, import,
-  and chunk search should use indexed SQLite predicates or FTS-backed candidate
-  selection before in-memory scoring.
-- Improve CLI argument ergonomics for multi-word queries. A command such as
-  `repo query relay-teams-src --query runtime tools role` currently fails after
-  `runtime`; the error should explain quoting, or the CLI should accept the
-  remaining words as the query when doing so is unambiguous.
-- Add `repo report <alias> --format markdown|json` to emit a reusable
-  operations report with registration scope, resolved commit, tree hash, index
-  totals, degradation summary, representative queries, latency samples, and
-  freshness state.
+- 增加 `repo index --dry-run` 或 `repo scope preview`，在索引前展示文件数量、字节数、语言分布、最大文件、不支持文件、生成资产和预期降级文件。
+- 全量索引时展示 progress 和 budget，包括 Git 文件枚举、blob 读取、parser 工作、SQLite 写入、耗时、跳过文件、降级文件和当前 scope。
+- 让默认 source preset 和排除规则匹配实际索引成本。默认 preset 排除 `dist`、build output、cache directory、PDF、vendored asset、`*.jsonl` 数据集 dump 和 `uv.lock`；用户可通过显式 path filter opt in。仓库本地 `.relay-knowledgeignore` 可让额外排除规则可重复。
+- `graph inspect` 和 `health` 的代码计数应包含代码仓库索引总量，或明确标注为 graph evidence 计数。E2E 运行中 `repo status` 已显示代码索引总量，但 `graph inspect` 显示零代码文件和零 symbol，容易误读为索引失败。
+- `repo impact` 的路径报告应区分 scope 内外变更，或默认只展示注册 scope 内的 `changed_paths`。当前 impact 命中遵守注册 scope，但路径报告仍包含无关 docs、frontend 和 test 变更。
+- 大型代码索引需要优化查询执行。Python 源码基线对聚焦场景可接受，但 hybrid retrieval 明显慢于 definition 和 reference lookup。Symbol、reference、call、import 和 chunk search 应先使用 SQLite predicate 或 FTS-backed candidate selection，再进入内存评分。
+- 改善多词查询参数体验。类似 `repo query relay-teams-src --query runtime tools role` 的命令目前会在 `runtime` 后失败；错误应解释引号用法，或在无歧义时接受剩余词作为 query。
+- 增加 `repo report <alias> --format markdown|json`，输出可复用运维报告，包含注册 scope、resolved commit、tree hash、index totals、degradation summary、representative queries、latency samples 和 freshness state。
 
-The v2 implementation specification for these follow-ups and the local
-deterministic semantic/vector retrieval baseline is maintained in
-[`docs/specs/code-repository-retrieval-v2-optimization.md`](specs/code-repository-retrieval-v2-optimization.md).
+v2 实现规格和本地 deterministic semantic/vector 检索基线维护在 [代码仓库检索 v2 优化规格](specs/code-repository-retrieval-v2-optimization.md)。
 
-## Implementation
+## 实现
 
-- Git registration resolves the repository root and derives a stable
-  `repository_id` from both `remote.origin.url` and the local repository root,
-  falling back to the absolute root path when no origin is configured. Status
-  lookup checks `repository_id` first and then falls back to alias lookup, so
-  `repo:` aliases remain reachable when they do not collide with a repository
-  id.
-- Full indexing reads a clean Git tree using `git ls-tree` and `git show`.
-- Incremental indexing reads `git diff --name-status --find-renames -z` and
-  only reparses changed, copied, renamed, or type-changed paths. Selected
-  deleted and renamed paths are removed from the active index, copy sources do
-  not seed impact analysis, and rename lineage is kept as tombstones. The
-  incremental base ref must resolve to the currently indexed snapshot before
-  previous file fingerprints are reused.
-- Worktree overlay mode indexes changed worktree files under a synthetic
-  `worktree:<hash>` tree id and `worktree:<commit>:<hash>` resolved snapshot
-  identity. Queries must use `--ref worktree` to read overlay rows; clean commit
-  refs are rejected while an overlay is active so uncommitted content is not
-  mislabeled as a clean Git snapshot. Clean or out-of-scope-only worktree status
-  falls back to a clean full snapshot. Overlay indexing is bound to the
-  checked-out `HEAD`, forces untracked-file visibility, expands untracked
-  directories to file-level changes, skips non-file status entries, and removes
-  selected rename sources from the active overlay index.
-- Parser work runs behind application-level `spawn_blocking` boundaries.
-  SQLite writes also remain behind the storage blocking worker.
-- Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C,
-  C++, C#, Ruby, PHP, Swift, and Bash files use tree-sitter grammars. Syntax
-  trees containing error nodes are indexed as `partial` with file diagnostics
-  while retaining reliable symbols, references, imports, calls, and chunks.
-  Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only
-  chunks where possible. Parser or query failures are isolated to the affected
-  file as `failed` diagnostics so one bad file cannot abort a repository batch.
-- Revision-scoped queries are served only when the requested ref resolves to the
-  currently indexed commit or to the explicit `worktree` overlay ref; callers
-  must index another ref before querying it. Refs beginning with `-` are
-  rejected before invoking Git so user-supplied ref names cannot be parsed as
-  Git options.
-- Request path/language filters are intersected with the registered repository
-  scope and cannot widen ingestion, retrieval, or impact analysis. `.` and `./`
-  path filters select the repository root, and leading `./` is normalized for
-  relative filters such as `./src`. After that normalization, the resolved
-  request filters must match an indexed snapshot scope exactly; querying or
-  impact-analyzing a narrower or broader filter set requires indexing that
-  scope first.
-- `wait-until-fresh` code queries reject stale repository status. `graph-only`
-  returns no repository-index rows and reports that the graph-only policy was
-  selected.
-- Impact analysis validates that `head_ref` resolves to the indexed snapshot,
-  filters changed paths before deriving module/symbol seeds, matches callers by
-  resolved symbol identity, and carries deleted symbol names so callers of
-  removed APIs remain visible. Deleted paths that no longer have file rows fall
-  back to extension-based language inference for path/language filtering.
-- Import impact seeds include path modules, Rust `crate::...` module keys,
-  symbol qualified names, and symbol names. Import matches require module
-  boundaries such as punctuation or whitespace; `_` and `-` remain part of a
-  module token.
-- Retrieval hits include repository id, scope alias, resolved commit, tree hash,
-  path, language id, byte and line ranges, symbol/file identifiers, retrieval
-  layers, index version, stale flag, degraded reason, score, and excerpt.
+- Git registration 解析 repository root，并从 `remote.origin.url` 与本地 root 派生稳定 `repository_id`；无 origin 时回退到绝对 root path。Status lookup 先查 `repository_id`，再回退到 alias lookup，因此不与 repository id 冲突的 `repo:` alias 仍可访问。
+- Full indexing 使用 `git ls-tree` 和 `git show` 读取干净 Git tree。
+- Incremental indexing 使用 `git diff --name-status --find-renames -z`，只重新解析 changed、copied、renamed 或 type-changed path。被选中的 deleted 和 renamed path 会从 active index 删除，copy source 不参与 impact seed，rename lineage 以 tombstone 保留。复用旧 file fingerprint 前，incremental base ref 必须解析到当前已索引 snapshot。
+- Worktree overlay 模式会把变更的 worktree file 索引到 synthetic `worktree:<hash>` tree id 和 `worktree:<commit>:<hash>` resolved snapshot identity。查询必须使用 `--ref worktree` 读取 overlay row；overlay 激活时拒绝 clean commit ref，避免把未提交内容标记为干净 Git snapshot。
+- Parser work 通过 application-level `spawn_blocking` 边界执行，SQLite 写入也保留在 storage blocking worker 后面。
+- Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash 文件使用 tree-sitter grammar。包含 error node 的 syntax tree 会以 `partial` 状态索引并记录 file diagnostic，同时保留可靠的 symbol、reference、import、call 和 chunk。不支持、非法 UTF-8、二进制或超大文件会在可能时降级为 text-only chunk。Parser 或 query failure 只隔离到受影响文件的 `failed` diagnostic，不会中止整个仓库 batch。
 
-## Storage Model
+## 存储和检索
 
-SQLite stores the active code index in dedicated tables:
+- 存储层以 repository、scope、file、symbol、reference、chunk、parse status 和 index cursor 为边界建模。
+- BM25 read model 会写入代码 symbol 和 chunk document，使代码图命中可以与 graph evidence、semantic 和 vector 命中一起融合。
+- Code query 返回 revision-scoped hit，包含 path、line range、kind、score、freshness、symbol identity、edge diagnostics 和 excerpt。
+- Impact analysis 从 changed path、deleted symbol name、callee identity 和 import/module seed 出发，避免扫描整个 scope table。
 
-- `code_repositories`
-- `code_repository_files`
-- `code_repository_symbols`
-- `code_repository_references`
-- `code_repository_imports`
-- `code_repository_calls`
-- `code_repository_chunks`
-- `code_repository_file_diagnostics`
-- `code_repository_path_tombstones`
+## 测试
 
-The storage boundary exposes code repository methods through
-`CodeRepositoryStore`; CLI and application code do not access SQLite directly.
-
-## Testing
-
-The Rust test suite covers:
-
-- selector validation and query limits,
-- Git name-status parsing for add/modify/delete/rename/copy/type-change,
-- tree-sitter symbol, reference, import, chunk extraction, mainstream language
-  grammar coverage, and partial-parse diagnostics,
-- text-only and failed-file degradation for unsupported, malformed, or parser
-  failure cases,
-- SQLite code repository persistence and query retrieval,
-- worktree overlay scope, freshness policy, provenance, and impact-analysis
-  edge cases,
-- end-to-end Git fixture registration, full indexing, definition/reference/import
-  query, incremental update, and impact analysis through
-  `RelayKnowledgeService`.
+测试覆盖注册、重复注册 alias、full index no-op、incremental update、worktree overlay、symbol/reference/import/call/chunk query、impact analysis、unsupported/degraded file、scope filtering、freshness policy，以及 CLI/Web 共享 application service 行为。

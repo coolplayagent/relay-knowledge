@@ -2,17 +2,11 @@
 
 # relay-knowledge
 
-`relay-knowledge` is a local-first knowledge substrate for graph-backed
-retrieval. It stores evidence, graph facts, code-repository structure, derived
-indexes, freshness state, diagnostics, worker proposals, audit records, and
-agent-facing context packs. It does not try to be a general agent runtime or
-final-answer generator.
+`relay-knowledge` 是一个本地优先、基于图数据库能力的知识检索底座。它负责存储证据（evidence）、图事实、代码仓库结构、派生索引、新鲜度状态、诊断信息、worker 提案、审计记录，以及面向 agent 的上下文包（context pack）。它不是通用 agent 运行时，也不负责生成最终答案。
 
-## Quick Start
+## 快速开始
 
-The default local profile is zero configuration: runtime directories are
-resolved from platform defaults, SQLite is used locally, and deterministic
-semantic/vector read models are enabled without external services.
+默认本地配置不需要额外设置：运行时目录按平台默认位置解析，本地使用 SQLite，并启用确定性的本地 semantic/vector 读模型，不依赖外部服务。
 
 ```bash
 cargo build
@@ -24,7 +18,7 @@ target/debug/relay-knowledge query SQLite --source docs \
   --freshness wait-until-fresh
 ```
 
-Use JSON output when scripting:
+脚本集成时优先使用 JSON 输出：
 
 ```bash
 target/debug/relay-knowledge status --format json
@@ -32,15 +26,11 @@ target/debug/relay-knowledge health --format json
 target/debug/relay-knowledge help --format json
 ```
 
-## Installing Releases
+## 安装发布版
 
-Stable releases are distributed through GitHub Releases with prebuilt archives
-for Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64. Verify
-the downloaded archive with `checksums.txt` before placing the binary on your
-PATH. Windows ARM64 archives are produced by the release workflow as
-cross-built artifacts until native Windows ARM64 CI runners are available.
+稳定版本通过 GitHub Releases 发布，包含 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64 的预构建压缩包。下载后先用 `checksums.txt` 校验，再将二进制文件放入 `PATH`。在原生 Windows ARM64 CI runner 可用之前，Windows ARM64 压缩包由 release workflow 交叉构建生成。
 
-Rust users can install the crate from crates.io:
+Rust 用户也可以从 crates.io 安装：
 
 ```bash
 cargo install relay-knowledge
@@ -48,58 +38,29 @@ relay-knowledge --version
 relay-knowledge service doctor
 ```
 
-## What Works Today
+## 当前能力
 
-- Hybrid GraphRAG context packs with BM25, local semantic signatures,
-  local hashed-vector retrieval, graph evidence fallback, schema paths,
-  temporal/community context, freshness metadata, truncation state, and ranking
-  explanations.
-- Structured graph facts for evidence, entities, typed relations, claims,
-  events, source spans, confidence, graph versions, and accepted/proposed
-  grounding status.
-- Code repository registration, tree-sitter indexing, full and incremental
-  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
-  impact analysis.
-- Bounded index refresh queues, persistent leases, retry/dead-letter handling,
-  startup reconciliation, stale diagnostics, and scoped cursor metadata.
-- Worker queues, deterministic fallback proposals, manual proposal acceptance,
-  persistent audit events, silent-update operator state, and service definition
-  generation for platform service managers.
-- MCP Streamable HTTP and local ACP adapter access through the shared
-  application service, with scope policy, QoS admission, cancellation,
-  resources/prompts, durable audit metadata, and OTLP-ready agent metrics.
-- Real OTLP HTTP/protobuf traces and metrics export for resident service mode,
-  with local diagnostics when Collector export fails.
-- Static Web diagnostics and operation composers served by the Rust HTTP
-  service on the same local port as `/api/*` and MCP when enabled.
-- Setup diagnostics and named setup profiles for local, read-only agent,
-  platform service, and external embedding configurations.
+- 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
+- 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
+- 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索和影响分析。
+- 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
+- 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
+- Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标。
+- 可观测性：常驻服务模式支持真实 OTLP HTTP/protobuf 跟踪和指标导出；Collector 导出失败时提供本地诊断。
+- Web 工作区：Rust HTTP 服务可在同一端口提供静态 Web 诊断、操作组合器、`/api/*` 和可选 MCP 端点。
+- 设置诊断：提供 local、只读 agent、平台服务、外部嵌入等命名设置配置文件。
 
-## Documentation
+## 文档
 
-- [使用指南](docs/zh/user-guide/README.md): executable local workflows for
-  install/runtime directories, CLI output modes, GraphRAG, code repository
-  indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
-  and advanced configuration.
-- [2026 行业能力快照](docs/zh/research/industry-capability-snapshot-2026.md):
-  current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
-  signals, plus relay-knowledge gaps.
-- [GraphRAG 功能文档](docs/zh/graphrag-capability-guide.md): current context-pack,
-  freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
-  behavior.
-- [混合检索 Context Pack 功能文档](docs/zh/hybrid-retrieval-context-pack.md):
-  retriever sources, RRF fusion, structured graph facts, graph paths, and
-  backend status.
-- [Semantic/Vector Provider Backend](docs/zh/semantic-vector-provider-backend.md):
-  external embedding provider setup, redacted diagnostics, Web provider panels,
-  and degradation behavior.
-- [代码仓库 Tree-sitter 检索功能文档](docs/zh/code-repository-tree-sitter-retrieval.md):
-  repository indexing, retrieval, reports, and impact analysis.
-- [文档刷新审计 2026-05-14](docs/zh/documentation-refresh-audit-2026-05-14.md):
-  current documentation status, refreshed gaps, and remaining implementation
-  work.
+- [使用指南](docs/zh/user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
+- [2026 行业能力快照](docs/zh/research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
+- [GraphRAG 功能文档](docs/zh/graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
+- [混合检索上下文包](docs/zh/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
+- [Semantic/Vector Provider 后端](docs/zh/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
+- [代码仓库 Tree-sitter 检索](docs/zh/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
+- [文档刷新审计 2026-05-14](docs/zh/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
 
-Key specs:
+关键规格：
 
 - [工程硬约束](docs/zh/specs/engineering-hard-constraints.md)
 - [GraphRAG 产品与实现路线规格](docs/zh/specs/graphrag-product-and-implementation-roadmap.md)
@@ -108,9 +69,9 @@ Key specs:
 - [常驻进程 Agent 图检索访问规格](docs/zh/specs/resident-agent-graph-retrieval-access.md)
 - [安装部署与发布规格](docs/zh/specs/installation-and-release.md)
 
-## Development
+## 开发
 
-Use the repository scripts by responsibility:
+按职责使用仓库脚本：
 
 ```bash
 ./setup.sh
@@ -121,7 +82,7 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
-The underlying quality gates are:
+底层质量门禁：
 
 ```bash
 cargo fmt --all -- --check
@@ -132,18 +93,23 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
-The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
-SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
-The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
-Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
-Code graph v1 responses distinguish stable `canonical_symbol_id` values from snapshot-bound `symbol_snapshot_id` values. Reference, call, and import hits expose `target_hint`, `resolution_state`, confidence basis points, and confidence tier so unresolved or ambiguous edges are visible instead of being reported as certain calls.
-Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion and returns a context pack with retriever sources, ranking explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
-Evidence can carry multimodal extraction metadata for text spans, image assets, OCR text, captions, image embeddings, tables, and layout regions. Derived OCR/caption/image evidence references a parent evidence item, retrieval groups those hits by parent to avoid duplicate context items, and background or maintenance workers commit OCR/caption/table/layout outputs through `commit_multimodal_extraction` rather than query hot paths.
-Operational productization persists worker tasks, manual proposals, audit events, and silent-update operator state. Multimodal ingest queues embedding/OCR/vision/extractor work; `worker run-once` calls a configured HTTP endpoint when available or creates a deterministic fallback proposal; `proposal accept` commits through the same graph mutation path; and service manager commands generate platform service definitions without running privileged installation.
-The `evaluation` module provides a pure GraphRAG harness plus a CI fixture gate for exact fact, multi-hop, temporal, negative rejection, stale index, ambiguous entity, and code impact observations.
-Graph commits also persist Phase 2 index recovery metadata: mutation log entries record affected scopes, entity ids, evidence ids, and source hashes, including scope moves and structured-fact evidence references; scoped index cursors track kind/scope/modality freshness plus source hash, backend cursor, and optional model name/dimension metadata for semantic/vector workers; and `ingest`, `query --freshness wait-until-fresh`, `index refresh`, `health`, and `service doctor` share the bounded refresh queue, active lease/attempt guards, retry/dead-letter, and stale diagnostics path. Diagnostic reconcilers preserve dead-letter isolation, explicit refresh paths surface queue-cap failures instead of reporting false freshness, and `index_refresh.stale_reasons` explains index-family and scoped-cursor lag or failure by kind, scope, modality, lag versions, and last error.
+二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
 
-Current CLI commands use the compiled `relay-knowledge` binary with git-style subcommands:
+存储契约包含 v1 代码图数据面：tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；不支持或降级的文件会回退为文本代码块。Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照；已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
+
+代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用和导入命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析或有歧义的边误报为确定调用。
+
+混合检索使用基于 SQLite 的 BM25、本地语义令牌签名、本地哈希向量近似最近邻、可配置的外部语义/向量后端元数据、图证据回退、schema 指导路径遍历、时间事件检索、社区摘要和代码图文档。候选结果通过互惠排名融合，最终返回包含检索器来源、排序解释、实体、来源范围、结构化图事实、直接图路径证据、代码工件、后端可用性、新鲜度、截断和预算元数据的上下文包。BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不会将这些别名作为规范标签返回。
+
+证据可携带多模态提取元数据，包括文本范围、图像资源、OCR 文本、标题、图像嵌入、表格和布局区域。派生的 OCR/标题/图像证据会引用父证据项；检索时按父项聚合这些命中，避免重复上下文项；后台或维护 worker 必须通过 `commit_multimodal_extraction` 提交 OCR/标题/表格/布局输出，不能阻塞查询热路径。
+
+运维产品化能力会持久化 worker 任务、人工提案、审计事件和静默更新操作员状态。多模态摄取会排队 embedding/OCR/视觉/提取器工作；`worker run-once` 在配置 HTTP 端点时调用远端 worker，否则创建确定性回退提案；`proposal accept` 通过同一图变更路径提交；服务管理器命令仅生成平台服务定义，不执行特权安装。
+
+`evaluation` 模块提供纯 GraphRAG 测试框架和 CI 夹具门控，覆盖精确事实、多跳、时间、负面拒绝、过期索引、歧义实体和代码影响观察。
+
+图提交还会持久化第二阶段索引恢复元数据：变更日志条目记录受影响作用域、实体 ID、证据 ID 和来源哈希，包括作用域移动和结构化事实证据引用；作用域索引游标跟踪种类/作用域/模态新鲜度、来源哈希、后端游标，以及语义/向量 worker 可选的模型名称/维度元数据。`ingest`、`query --freshness wait-until-fresh`、`index refresh`、`health` 和 `service doctor` 共享有界刷新队列、活动租约/尝试保护、重试/死信和过期诊断路径。
+
+当前 CLI 使用编译后的 `relay-knowledge` 二进制和 git 风格子命令：
 
 ```bash
 relay-knowledge status --format json
@@ -175,14 +141,9 @@ relay-knowledge query --help
 relay-knowledge query -- --help
 ```
 
-CLI parameter meaning is part of the public contract. Skills and other LLM tools
-should inspect `relay-knowledge help --format json` before issuing commands; it
-describes each command path, operation, read/write effect, required parameters,
-defaults, allowed values, repeatability, examples, and notes.
+CLI 参数含义是公开契约的一部分。Skills 和其它 LLM 工具在发出命令前应先读取 `relay-knowledge help --format json`；该输出会描述每条 command path、operation、读写影响、必填参数、默认值、允许值、可重复性、示例和注意事项。
 
-Semantic/vector read-model backend metadata is configured only through the
-`env` boundary. The default mode is local deterministic read models; external
-worker metadata can be selected with:
+Semantic/vector 读模型 backend 元数据只能通过 `env` 边界配置。默认模式是本地确定性读模型；可以用以下变量选择外部 worker metadata：
 
 ```bash
 RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external
@@ -195,61 +156,21 @@ RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL=clip-vit-b32
 RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 ```
 
-`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` and
-`RELAY_KNOWLEDGE_VECTOR_BACKEND` also accept `local` and `disabled`. Disabled
-read-model backends are excluded from semantic/vector retrieval execution and
-refresh scheduling; blank embedding model names fail during runtime
-configuration.
+`RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 也接受 `local` 与 `disabled`。禁用的 read-model backend 不参与 semantic/vector 检索执行和刷新调度；空 embedding model name 会在运行时配置阶段失败。
 
-The CLI ingest command writes evidence plus entity labels. The shared API also
-accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source
-`span`, confidence, lifecycle status, typed relations, claims, and events that
-reference evidence ids. Structured facts must cite supporting evidence, supplied
-confidence, span, and version-range fields are revalidated after deserialization,
-and retrieval only uses `accepted` or `proposed` evidence as context. Context
-pack items now expose direct `graph_paths` derived from those structured facts
-so agent callers can cite one-hop relation, claim, or event paths alongside raw
-fact provenance.
+CLI `ingest` 命令会写入 evidence 和 entity label。共享 API 还接受面向 adapter 的更丰富 Phase 1 graph fact：evidence `source_path`、source `span`、confidence、lifecycle status、类型化 relation、claim，以及引用 evidence id 的 event。结构化事实必须引用 supporting evidence；反序列化后会重新校验 supplied confidence、span 和 version-range 字段；检索只使用 `accepted` 或 `proposed` evidence 作为上下文。Context pack item 现在会暴露从这些结构化事实派生的直接 `graph_paths`，方便 agent caller 在 raw fact provenance 旁边引用一跳 relation、claim 或 event path。
 
-`service run --web --mcp streamable-http` starts the same-port Web diagnostics,
-`/api/*`, and resident MCP Streamable HTTP adapters on the configured local HTTP
-bind, defaulting to `http://127.0.0.1:8791/` and
-`http://127.0.0.1:8791/mcp`. MCP is disabled unless requested by the command or
-`RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
-`RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
-`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured.
-The adapter validates `initialize` params, then issues an unpredictable
-`Mcp-Session-Id`. Clients must send `notifications/initialized`, then include
-that session header and `MCP-Protocol-Version` on later calls so `ping`, tool
-requests and `notifications/cancelled` stay bound to the issued session.
-Missing session headers are rejected with HTTP 400; unknown or evicted session
-IDs are rejected with HTTP 404.
-The MCP tool surface includes graph retrieval, graph inspection, health,
-service status, index status, authorized code graph queries, and authorized
-code impact analysis. `relay.refresh_indexes` remains hidden unless
-`RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true` is explicitly configured.
-The MCP server also advertises resources and prompts: resources expose service
-status, health, index status, and Prometheus text metrics; the graph-wide
-summary resource is advertised only when
-`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`. Prompts provide retrieval
-and code-impact planning templates. Legacy HTTP+SSE
-clients can keep `/mcp/sse` open for `endpoint` and `message` events, then post
-JSON-RPC payloads to `/mcp/message`; the native Streamable HTTP endpoint remains
-preferred. `/mcp/metrics` exports a
-small Prometheus-compatible snapshot for graph version, index refresh backlog,
-dead letters, QoS request counts, and per-index stale state.
-Agent requests write bounded in-process audit events with runtime identity,
-scope, freshness, QoS decision, budget, truncation, result count, and status.
-Set `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` to mirror those events to
-the path-owned JSONL file `logs/agent-audit.jsonl`; the sink uses a bounded
-async queue controlled by `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` and capped
-at 65536 entries.
-The local ACP session adapter exposes the same retrieval contract for
-agent-client sessions, including progress updates, cancellation, and context
-artifacts. Foreground service startup runs a recovery pass that refreshes stale
-index cursors before accepting resident adapter work.
+`service run --web --mcp streamable-http` 会在同一端口启动 Web 诊断、`/api/*` 和常驻 MCP Streamable HTTP adapter。默认绑定为 `http://127.0.0.1:8791/` 和 `http://127.0.0.1:8791/mcp`。除非通过命令或 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true` 显式启用，MCP 默认关闭；graph tool 需要 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`，除非显式配置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。
 
-Web diagnostics, operation workspace, and browser integration checks:
+Adapter 会校验 `initialize` 参数，然后签发不可预测的 `Mcp-Session-Id`。客户端必须发送 `notifications/initialized`，之后调用需要携带该 session header 和 `MCP-Protocol-Version`，确保 `ping`、工具请求和 `notifications/cancelled` 绑定到已签发的 session。缺少 session header 会返回 HTTP 400；未知或已驱逐的 session ID 会返回 HTTP 404。
+
+MCP 工具界面包含图检索、图检查、健康状况、服务状态、索引状态、授权代码图查询和授权代码影响分析。除非显式配置 `RELAY_KNOWLEDGE_MCP_ALLOW_INDEX_REFRESH=true`，`relay.refresh_indexes` 会保持隐藏。MCP 服务器也会发布资源和提示：资源暴露服务状态、健康状况、索引状态和 Prometheus 文本指标；只有在 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` 时才发布全图摘要资源。提示提供检索和代码影响规划模板。旧版 HTTP+SSE 客户端可以保持 `/mcp/sse` 打开接收 `endpoint` 和 `message` 事件，再向 `/mcp/message` 发送 JSON-RPC 负载；原生可流式 HTTP 端点仍是首选。
+
+Agent 请求会写入有界进程内审计事件，包含运行时身份、作用域、新鲜度、QoS 决策、预算、截断、结果数和状态。设置 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，这些事件会镜像到由 `paths` 管理的 JSONL 文件 `logs/agent-audit.jsonl`；sink 使用由 `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` 控制的有界异步队列，最多允许 65536 条。
+
+本地 ACP session adapter 通过 agent-client session 暴露同一检索契约，包括进度更新、取消和上下文工件。前台服务启动时会先执行恢复流程，刷新过期的索引游标，然后再接受常驻 adapter 工作。
+
+Web diagnostics、operation workspace 和浏览器集成检查：
 
 ```bash
 ./build.sh
@@ -260,22 +181,9 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-The static Web workspace renders project health, GraphRAG readiness, graph
-counts, scoped index freshness, refresh queue diagnostics, stale reasons,
-runtime budgets, and interactive operation composers for retrieval, ingestion,
-graph inspection, code repository workflows, index refresh, provider probes,
-worker/proposal/audit operations, and service runtime commands. The same Rust
-HTTP service serves static Web assets plus
-`/api/project/status`, `/api/health`, `/api/service/status`, and
-`/api/web/operations/execute` on one local port. The execute endpoint accepts
-the current composer snapshot, calls the shared application service, and returns
-operation metadata plus result JSON for the page to display. Web `service run`
-returns a service runtime snapshot rather than starting a resident loop from the
-browser. Web execute requests are bounded by
-`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`, and non-loopback HTTP binds require the
-remote-client access policy to be enabled explicitly.
+静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库工作流、索引刷新、提供者探测、worker/提案/审计操作和服务运行时命令的交互式操作编排器。同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
 
-Optional local hooks:
+可选本地 hooks：
 
 ```bash
 pre-commit install

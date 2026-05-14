@@ -1,62 +1,50 @@
 # 文档刷新审计 2026-05-14
 
-[中文](../zh/documentation-refresh-audit-2026-05-14.md) | [English](../en/documentation-refresh-audit-2026-05-14.md)
+[中文](../zh/documentation-refresh-audit-2026-05-14.md) | [英文](../en/documentation-refresh-audit-2026-05-14.md)
 
-This audit records the documentation pass for the current `relay-knowledge`
-implementation on 2026-05-14. The source of truth for command availability is
-`relay-knowledge help --format json`; status and health behavior were checked
-against the compiled binary.
+本审计记录 2026-05-14 对当前 `relay-knowledge` 实现所做的文档刷新。命令可用性的权威来源是 `relay-knowledge help --format json`；状态和健康检查行为已根据编译后的二进制进行核对。
 
-## Refreshed In This Pass
+## 本轮刷新内容
 
-| Area | Refresh |
+| 范围 | 刷新内容 |
 | --- | --- |
-| README | Added setup diagnostics/profile commands to current capabilities and CLI examples. |
-| User guide | Bumped the guide version to 1.2, added `setup doctor`, documented setup profiles, and removed the planned-only setup wording. |
-| Advanced configuration | Replaced the old planned setup section with the implemented `setup doctor` and `setup profile` behavior. |
-| Operations troubleshooting | Added setup doctor to the diagnostic order and documented legacy refresh-task timestamp migration symptoms. |
-| Semantic/vector backend | Added the external embedding setup profile as the recommended starting point. |
-| Unified API spec | Added setup commands to the current CLI surface and clarified that setup profile is read-only recommendation output. |
-| Installation/release spec | Updated service-install guidance to match the implemented `service plan`, `service definition write`, and `setup profile service` flow. |
-| Storage migration | Added compatibility migration for legacy `index_refresh_tasks` tables missing `created_at_ms` and `updated_at_ms`. |
+| README | 将设置诊断、设置配置文件命令补充到当前能力和 CLI 示例中。 |
+| 用户指南 | 将指南版本提升到 1.2，补充 `setup doctor`，记录设置配置文件，并移除仅规划阶段的设置表述。 |
+| 高级配置 | 用已实现的 `setup doctor` 和 `setup profile` 行为替换旧的规划中设置章节。 |
+| 运维排障 | 将 setup doctor 加入诊断顺序，并记录旧版刷新任务时间戳迁移症状。 |
+| Semantic/vector 后端 | 将外部 embedding 设置配置文件记录为推荐起点。 |
+| 统一 API 规格 | 将 setup 命令加入当前 CLI 表面，并说明 setup profile 是只读推荐输出。 |
+| 安装发布规格 | 更新服务安装说明，使其匹配已实现的 `service plan`、`service definition write` 和 `setup profile service` 流程。 |
+| 存储迁移 | 为缺少 `created_at_ms` 和 `updated_at_ms` 的旧版 `index_refresh_tasks` 表补充兼容迁移。 |
 
-## Current Documentation Status
+## 当前文档状态
 
-| Document Group | Status |
+| 文档组 | 状态 |
 | --- | --- |
-| Root README and docs index | Current for the implemented CLI/Web/MCP/service/setup surfaces. |
-| User guide | Current for local install, CLI basics, GraphRAG, code repository workflows, Web workspace, agent/service operation, troubleshooting, and advanced configuration. |
-| Feature docs | Current for GraphRAG context packs, semantic/vector providers, and tree-sitter repository retrieval. |
-| Specs | Mixed by design: hard constraints and interface specs are current contracts; product, storage, background service, architecture, and installation specs still include forward-looking requirements. |
-| Research docs | Historical/reference material. They intentionally retain roadmap and gap-analysis language rather than being rewritten as user instructions. |
-| Benchmarks and verification notes | Snapshot records from 2026-05-14. They should remain dated evidence unless a new benchmark run supersedes them. |
+| 根 README 与文档索引 | 已覆盖当前 CLI、Web、MCP、服务和 setup 能力。 |
+| 用户指南 | 已覆盖本地安装、CLI 基础、GraphRAG、代码仓库工作流、Web 工作区、agent/service 运行、排障和高级配置。 |
+| 功能文档 | 已覆盖 GraphRAG context pack、semantic/vector provider 和 tree-sitter 仓库检索。 |
+| 规格 | 按设计混合存在：硬约束和接口规格是当前契约；产品、存储、后台服务、架构和安装规格仍包含前瞻要求。 |
+| 研究材料 | 作为历史和参考资料保留，仍刻意保留路线图与差距分析语气，而不是改写成用户操作手册。 |
+| 基准与验证记录 | 是 2026-05-14 的快照记录。除非新的基准运行取代它们，否则应继续作为带日期的证据保留。 |
 
-## Implemented From Previous Planned Wording
+## 已从规划表述落地
 
-- `relay-knowledge setup doctor`: storage-free read-only configuration readiness check over
-  runtime paths, network/QoS budget, retrieval backend metadata, MCP scope
-  policy, service directory, and worker budget, with `configuration_ready`,
-  `live_health_checked=false`, `live_health_commands`, and `recommended_actions`
-  for remediation.
-- `relay-knowledge setup profile local|agent-readonly|service|external-embedding`:
-  read-only environment and command recommendations that do not write files,
-  mutate shell profiles, or install services.
-- Legacy index refresh queue migration: startup schema initialization now
-  backfills missing task timestamp columns with the migration time so `health`
-  and `service doctor` can read older local databases without misleading
-  near-epoch queue ages.
+- `relay-knowledge setup doctor`：不触碰存储的只读配置就绪检查，覆盖运行时路径、网络/QoS 预算、检索后端元数据、MCP 作用域策略、服务目录和 worker 预算，并返回 `configuration_ready`、`live_health_checked=false`、`live_health_commands` 和修复用的 `recommended_actions`。
+- `relay-knowledge setup profile local|agent-readonly|service|external-embedding`：输出只读环境变量和命令建议，不写文件、不修改 shell profile，也不安装服务。
+- 旧版索引刷新队列迁移：启动 schema 初始化现在会补齐缺失的任务时间戳列，并使用迁移时间作为默认值，使 `health` 和 `service doctor` 可以读取旧本地数据库，而不会给出接近 epoch 的误导性队列年龄。
 
-## Remaining Implementation Work
+## 剩余实现工作
 
-| Capability | Current State | Remaining Work |
+| 能力 | 当前状态 | 剩余工作 |
 | --- | --- | --- |
-| Privileged service install/uninstall | `service plan` and `service definition write` are implemented. | Installer or operator flow must execute platform service-manager commands with rollback and uninstall semantics. |
-| Package manager distribution | Release workflow produces artifacts; specs describe Homebrew/Scoop/winget/distro expectations. | Publish and maintain package-manager manifests that reference release artifacts. |
-| External embedding/OCR/vision providers | Runtime config, provider probe, worker endpoint contracts, deterministic fallback proposals, and setup profile exist. | Productize concrete provider adapters, model coexistence policy, and operator docs for production deployments. |
-| Larger evaluation datasets | CI fixture gate exists for GraphRAG behavior. | Add larger real-world datasets, longitudinal reports, and release-facing quality thresholds. |
-| Remote ACP productization | Local ACP adapter exists. | Build remote host integration, authentication, and installation guidance when the product surface is ready. |
+| 特权服务安装/卸载 | 已实现 `service plan` 和 `service definition write`。 | 安装器或运维流程仍需执行平台服务管理器命令，并提供回滚和卸载语义。 |
+| 包管理器分发 | Release workflow 会产出构件；规格描述了 Homebrew、Scoop、winget 和发行版包要求。 | 发布并维护引用 release 构件的包管理器 manifest。 |
+| 外部 embedding/OCR/vision provider | 已具备运行时配置、provider 探测、worker 端点契约、确定性回退提案和设置配置文件。 | 产品化具体 provider adapter、模型共存策略，以及生产部署运维文档。 |
+| 更大的评测数据集 | CI 中已有 GraphRAG 行为夹具门禁。 | 增加更大规模真实世界数据集、长期报告和面向 release 的质量阈值。 |
+| 远端 ACP 产品化 | 已有本地 ACP adapter。 | 在产品表面成熟后补充远端 host 集成、认证和安装指南。 |
 
-## Verification Commands
+## 验证命令
 
 ```bash
 relay-knowledge help --format json
