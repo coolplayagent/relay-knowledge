@@ -192,6 +192,7 @@ function statusPill(text: string, tone: "good" | "warn" | "bad"): HTMLElement {
 
 function statusSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
   const lag = maxIndexLag(health.indexes, status.metadata.graph_version);
+  const codeTotals = codeRepositoryTotals(health);
   const section = sectionShell("status", "Status");
   const statusLine = element("div", "status-line");
   statusLine.append(
@@ -209,9 +210,9 @@ function statusSection(status: ProjectStatusResponse, health: HealthResponse): H
     metricItem("Relations", health.graph.relation_count),
     metricItem("Claims", health.graph.claim_count),
     metricItem("Events", health.graph.event_count),
-    metricItem("Code files", health.graph.code_file_count),
-    metricItem("Symbols", health.graph.code_symbol_count),
-    metricItem("References", health.graph.code_reference_count)
+    metricItem("Code files", codeTotals.indexed_file_count),
+    metricItem("Symbols", codeTotals.symbol_count),
+    metricItem("References", codeTotals.reference_count)
   );
   section.append(statusLine, metrics);
 
@@ -233,12 +234,13 @@ function readinessSection(
   const section = sectionShell("readiness", "GraphRAG readiness");
   const grid = element("div", "readiness-grid");
   const graph = health.graph;
+  const codeTotals = codeRepositoryTotals(health);
   const graphVersion = health.metadata.graph_version;
   const bm25 = health.indexes.find((index) => index.kind === "bm25");
   const semantic = health.indexes.find((index) => index.kind === "semantic");
   const vector = health.indexes.find((index) => index.kind === "vector");
   const hasEvidence = graph.entity_count > 0 || graph.evidence_count > 0;
-  const hasCodeGraph = graph.code_file_count > 0 || graph.code_symbol_count > 0;
+  const hasCodeGraph = codeTotals.indexed_file_count > 0 || codeTotals.symbol_count > 0;
   const staleSummary = staleReasonSummary(health);
 
   grid.append(
@@ -270,7 +272,7 @@ function readinessSection(
       "Code graph",
       hasCodeGraph ? "indexed" : "empty",
       hasCodeGraph ? "good" : "warn",
-      `${graph.code_file_count} files / ${graph.code_symbol_count} symbols`
+      `${codeTotals.indexed_file_count} files / ${codeTotals.symbol_count} symbols`
     ),
     readinessItem(
       "Runtime budgets",
@@ -302,6 +304,19 @@ function readinessSection(
   section.append(grid);
 
   return section;
+}
+
+function codeRepositoryTotals(health: HealthResponse): HealthResponse["repository_code_totals"] {
+  return (
+    health.repository_code_totals ?? {
+      repository_count: 0,
+      indexed_file_count: health.graph.code_file_count,
+      symbol_count: health.graph.code_symbol_count,
+      reference_count: health.graph.code_reference_count,
+      chunk_count: health.graph.code_chunk_count,
+      degraded_file_count: health.graph.code_parse_status_counts.failed
+    }
+  );
 }
 
 function serviceTone(service: ServiceStatusResponse | null): Tone {

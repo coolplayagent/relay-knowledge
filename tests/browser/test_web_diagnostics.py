@@ -24,7 +24,8 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("Graph version 7")).to_be_visible()
         expect(page.get_by_text("degraded").first).to_be_visible()
         expect(page.get_by_text("Code files")).to_be_visible()
-        expect(page.get_by_text("12", exact=True)).to_be_visible()
+        expect(page.get_by_text("738", exact=True)).to_be_visible()
+        expect(page.get_by_text("738 files / 14286 symbols")).to_be_visible()
         expect(page.get_by_role("heading", name="GraphRAG readiness")).to_be_visible()
         expect(page.get_by_text("BM25 read model")).to_be_visible()
         expect(page.get_by_text("Semantic cursor")).to_be_visible()
@@ -216,6 +217,14 @@ HEALTH_RESPONSE = {
             "text_only": 1,
             "failed": 0,
         },
+    },
+    "repository_code_totals": {
+        "repository_count": 1,
+        "indexed_file_count": 738,
+        "symbol_count": 14286,
+        "reference_count": 88082,
+        "chunk_count": 14296,
+        "degraded_file_count": 0,
     },
     "indexes": [
         {

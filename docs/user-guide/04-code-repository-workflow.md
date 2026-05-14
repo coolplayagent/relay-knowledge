@@ -85,6 +85,23 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --for
 relay-knowledge repo update core --base main --head HEAD --format json
 ```
 
+`repo update` 会把 `base` 到 `head` 的 diff 应用到当前已索引的
+`base` snapshot。也就是说，`base` 必须解析到当前仓库状态里已经索引的
+commit；如果你刚刚运行的是 `repo index core --ref HEAD`，且当前工作分支
+不是 `main`，直接使用 `--base main --head HEAD` 会因为已索引 commit 不是
+`main` 而失败。若只是验证增量命令本身或没有跨 ref 变化，可以使用:
+
+```bash
+relay-knowledge repo update core --base HEAD --head HEAD --format json
+```
+
+如果 CLI 报告 base/head 与已索引 commit 不匹配，先索引目标 base:
+
+```bash
+relay-knowledge repo index core --ref main --format json
+relay-knowledge repo update core --base main --head HEAD --format json
+```
+
 增量路径读取 `git diff --name-status --find-renames -z`，只重建新增、修改、复制、重命名或类型变化的文件。删除和重命名源路径会从 active index 移除，rename lineage 会保留为 tombstone。
 
 ## 4.6 Worktree overlay
