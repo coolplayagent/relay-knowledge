@@ -12,7 +12,9 @@ relay-knowledge [command] [command options] [--format text|json|markdown|streami
 
 ```bash
 relay-knowledge --help
-relay-knowledge query -- --help
+relay-knowledge query --help
+relay-knowledge repo query --help
+relay-knowledge help repo query --format json
 ```
 
 查询文本如果以 `-` 开头，使用 `--` 分隔:
@@ -20,6 +22,15 @@ relay-knowledge query -- --help
 ```bash
 relay-knowledge query -- "--help" --format json
 ```
+
+面向 skill、脚本和 LLM 工具时，优先读取机器可消费的 CLI 规格:
+
+```bash
+relay-knowledge help --format json
+relay-knowledge help repo query --format json
+```
+
+该 JSON 规格包含 command path、operation、读写影响、参数语义、是否必填、默认值、允许取值、是否可重复、示例和注意事项。后续新增或修改 CLI 参数时，必须同步更新这份自描述规格。
 
 ## 2.2 输出格式
 
@@ -91,6 +102,7 @@ relay-knowledge provider probe --format json
 
 ```bash
 relay-knowledge status
+relay-knowledge help [command...] [--format text|json]
 relay-knowledge ingest --source <scope> --content <text> [--entity <label>]
 relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]
 relay-knowledge repo register <path> --alias <name> [--path <filter>] [--language <id>]
@@ -122,3 +134,5 @@ relay-knowledge version
 ## 2.6 参数边界
 
 `--limit` 必须是正整数并由各 API 层继续执行上限校验；`0` 会被 retrieval、repository 和 audit/proposal 等请求校验拒绝。`--kind` 在不同命令中含义不同: `index refresh` 只接受 `bm25`、`semantic`、`vector`；`worker` 只接受 `embedding`、`ocr`、`vision`、`extractor`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`。当查询文本或 reason 中包含以 `-` 开头的词时，使用 `--` 或引号避免被解析成选项。
+
+参数解释是 CLI contract 的一部分。新增命令或参数必须在 `relay-knowledge help --format json` 中说明语义、默认值、取值范围、是否必填、是否可重复、读写影响、失败模式和示例，避免 skill 或 LLM 只能凭参数名猜测行为。

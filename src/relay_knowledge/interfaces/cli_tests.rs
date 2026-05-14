@@ -319,6 +319,117 @@ fn parses_version_without_other_arguments() {
 }
 
 #[test]
+fn parses_help_actions_without_runtime_configuration() {
+    let root = CliCommand::parse(["--help"]).expect("root help should parse");
+    let command = CliCommand::parse(["repo", "query", "--help", "--format", "json"])
+        .expect("command help should parse");
+    let explicit =
+        CliCommand::parse(["help", "proposal", "accept"]).expect("explicit help should parse");
+
+    assert_eq!(root.action, CliAction::Help { path: Vec::new() });
+    assert_eq!(root.format, OutputFormat::Text);
+    assert!(root.help);
+    assert_eq!(
+        command.action,
+        CliAction::Help {
+            path: vec!["repo".to_owned(), "query".to_owned()],
+        }
+    );
+    assert_eq!(command.format, OutputFormat::Json);
+    assert_eq!(
+        explicit.action,
+        CliAction::Help {
+            path: vec!["proposal".to_owned(), "accept".to_owned()],
+        }
+    );
+}
+
+#[test]
+fn renders_machine_readable_help_for_skills() {
+    let root = cli_spec::render_help(&[], OutputFormat::Json).expect("root help should render");
+    let root_json: serde_json::Value =
+        serde_json::from_str(root.trim()).expect("root help should be JSON");
+    let query = cli_spec::render_help(&["repo".to_owned(), "query".to_owned()], OutputFormat::Json)
+        .expect("repo query help should render");
+    let query_json: serde_json::Value =
+        serde_json::from_str(query.trim()).expect("command help should be JSON");
+    let repo_namespace = cli_spec::render_help(&["repo".to_owned()], OutputFormat::Json)
+        .expect("repo namespace help should render");
+    let repo_namespace_json: serde_json::Value =
+        serde_json::from_str(repo_namespace.trim()).expect("namespace help should be JSON");
+    let version = cli_spec::render_help(&["version".to_owned()], OutputFormat::Json)
+        .expect("version help should render");
+    let version_json: serde_json::Value =
+        serde_json::from_str(version.trim()).expect("version help should be JSON");
+    let proposal_accept = cli_spec::render_help(
+        &["proposal".to_owned(), "accept".to_owned()],
+        OutputFormat::Json,
+    )
+    .expect("proposal accept help should render");
+    let proposal_accept_json: serde_json::Value =
+        serde_json::from_str(proposal_accept.trim()).expect("proposal accept help should be JSON");
+
+    assert_eq!(root_json["schema_version"], 1);
+    assert_eq!(root_json["binary"], "relay-knowledge");
+    assert!(
+        root_json["commands"]
+            .as_array()
+            .expect("commands")
+            .iter()
+            .any(|command| command["path"]
+                .as_array()
+                .expect("path")
+                .iter()
+                .map(|value| value.as_str().expect("path segment"))
+                .collect::<Vec<_>>()
+                == vec!["repo", "query"])
+    );
+    assert_eq!(query_json["operation"], "code.repo.query");
+    assert_eq!(query_json["effect"], "read-only");
+    assert_eq!(repo_namespace_json["kind"], "namespace");
+    assert!(
+        repo_namespace_json["commands"]
+            .as_array()
+            .expect("namespace commands")
+            .iter()
+            .any(|command| command["path"]
+                .as_array()
+                .expect("path")
+                .iter()
+                .map(|value| value.as_str().expect("path segment"))
+                .collect::<Vec<_>>()
+                == vec!["repo", "query"])
+    );
+    assert_eq!(
+        version_json["output_formats"],
+        serde_json::json!(["text", "json", "markdown"])
+    );
+    assert_eq!(proposal_accept_json["effect"], "writes-graph");
+    assert!(
+        query_json["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .any(|option| option["flag"] == "--kind"
+                && option["allowed_values"]
+                    .as_array()
+                    .expect("values")
+                    .iter()
+                    .any(|value| value == "definition"))
+    );
+
+    let query_with_alias = cli_spec::render_help(
+        &["repo".to_owned(), "query".to_owned(), "core".to_owned()],
+        OutputFormat::Json,
+    )
+    .expect("help should ignore positional command values");
+    let query_with_alias_json: serde_json::Value =
+        serde_json::from_str(query_with_alias.trim()).expect("command help should be JSON");
+
+    assert_eq!(query_with_alias_json["operation"], "code.repo.query");
+}
+
+#[test]
 fn render_text_covers_operational_and_code_repository_summaries() {
     let cases = [
         (

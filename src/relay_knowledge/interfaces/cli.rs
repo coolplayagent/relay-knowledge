@@ -2,6 +2,8 @@
 
 #[path = "cli_render.rs"]
 mod cli_render;
+#[path = "cli_spec.rs"]
+mod cli_spec;
 #[path = "ops_cli.rs"]
 mod ops_cli;
 #[path = "repo_cli.rs"]
@@ -121,7 +123,9 @@ impl CliCommand {
         }
 
         let action = if help {
-            CliAction::Status
+            CliAction::Help {
+                path: help_path(action_tokens),
+            }
         } else if version {
             if let Some(token) = action_tokens.first() {
                 return Err(CliError::UnexpectedArgument(token.clone()));
@@ -180,6 +184,7 @@ fn is_command_word(token: &str) -> bool {
             | "health"
             | "service"
             | "version"
+            | "help"
     )
 }
 
@@ -250,6 +255,9 @@ pub enum CliAction {
         web: bool,
     },
     Version,
+    Help {
+        path: Vec<String>,
+    },
 }
 
 /// MCP transport option for foreground service mode.
@@ -273,6 +281,7 @@ pub enum CliError {
     MissingFormatValue,
     MissingValue(&'static str),
     UnsupportedVersionFormat(OutputFormat),
+    UnknownHelpTopic(String),
     UnexpectedArgument(String),
     RuntimeConfigFailed(String),
     ApiFailed(String),
@@ -299,6 +308,7 @@ impl CliError {
             | Self::MissingFormatValue
             | Self::MissingValue(_)
             | Self::UnsupportedVersionFormat(_)
+            | Self::UnknownHelpTopic(_)
             | Self::UnexpectedArgument(_) => 2,
             Self::RuntimeConfigFailed(_)
             | Self::ApiFailed(_)
@@ -349,6 +359,7 @@ impl fmt::Display for CliError {
                     format.as_str()
                 )
             }
+            Self::UnknownHelpTopic(topic) => write!(formatter, "unknown help topic '{topic}'"),
             Self::UnexpectedArgument(argument) => {
                 write!(formatter, "unexpected argument '{argument}'")
             }
@@ -371,8 +382,8 @@ where
     S: Into<String>,
 {
     let command = CliCommand::parse(args)?;
-    if command.help {
-        return Ok(help_text().to_owned());
+    if let CliAction::Help { path } = &command.action {
+        return cli_spec::render_help(path, command.format);
     }
     if command.action == CliAction::Version {
         return render_version(command.format);
@@ -527,6 +538,7 @@ pub async fn run_with_service(
         CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
             "service run requires process runtime".to_owned(),
         )),
+        CliAction::Help { path } => cli_spec::render_help(&path, format),
         CliAction::WorkerStatus { .. }
         | CliAction::WorkerRunOnce { .. }
         | CliAction::ProposalList { .. }
@@ -545,43 +557,6 @@ pub async fn run_with_service(
         )),
         CliAction::Version => render_version(command.format),
     }
-}
-
-/// Returns the CLI help text.
-pub fn help_text() -> &'static str {
-    concat!(
-        "Usage: relay-knowledge [status] [--format text|json|markdown|streaming-json]\n",
-        "Commands:\n",
-        "  status\n",
-        "  ingest --source <scope> --content <text> [--entity <label>]\n",
-        "  query <text> [--source <scope>] [--limit <n>] ",
-        "[--freshness allow-stale|wait-until-fresh|graph-only]\n",
-        "  repo register <path> --alias <name> [--path <filter>] [--language <id>]\n",
-        "  repo index <alias> [--ref <ref>] [--dry-run]\n",
-        "  repo scope preview <alias> [--ref <ref>]\n",
-        "  repo update <alias> --base <ref> --head <ref>\n",
-        "  repo query <alias> --query <text> ",
-        "[--kind hybrid|symbol|definition|references|callers|callees|imports]\n",
-        "  repo impact <alias> --base <ref> --head <ref>\n",
-        "  repo report <alias> [--format markdown|json]\n",
-        "  repo status <alias>\n",
-        "  graph inspect\n",
-        "  index refresh [--kind bm25|semantic|vector]\n",
-        "  worker status|run-once [--kind embedding|ocr|vision|extractor]\n",
-        "  proposal list [--state proposed|accepted|rejected|superseded] [--limit <n>]\n",
-        "  proposal show <id>\n",
-        "  proposal accept|reject|supersede <id> --by <actor> [--reason <text>]\n",
-        "  audit query [--operation <name>] [--limit <n>]\n",
-        "  provider probe\n",
-        "  health\n",
-        "  service status|doctor\n",
-        "  service plan install|uninstall\n",
-        "  service definition write\n",
-        "  service operator status|pause|resume\n",
-        "  service run [--web] [--mcp streamable-http]\n",
-        "  version [--format text|json]\n",
-        "  --version [--format text|json]\n",
-    )
 }
 
 #[derive(serde::Serialize)]
@@ -626,8 +601,19 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "health" if tokens.len() == 1 => Ok(CliAction::Health),
         "service" => ops_cli::parse_service(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
+        "help" => Ok(CliAction::Help {
+            path: help_path(tokens[1..].to_vec()),
+        }),
         other => Err(CliError::UnexpectedArgument(other.to_owned())),
     }
+}
+
+fn help_path(tokens: Vec<String>) -> Vec<String> {
+    tokens
+        .into_iter()
+        .filter(|token| token != "--")
+        .filter(|token| !token.starts_with('-'))
+        .collect()
 }
 
 fn parse_provider(tokens: &[String]) -> Result<CliAction, CliError> {
