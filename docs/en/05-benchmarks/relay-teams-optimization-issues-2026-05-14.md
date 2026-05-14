@@ -25,8 +25,10 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   reads, zero parses, zero SQLite writes, and completes under 300ms on
   relay-teams.
 - Tests: application service test for repeated full index on the same HEAD.
-- Status: implemented and re-verified. Relay-teams optimized sample is 390ms with zero blob
-  reads, parses, and SQLite writes.
+- Status: implemented and re-verified for correctness, with zero blob reads,
+  parses, and SQLite writes. The latest relay-teams sample is 380ms, so this
+  run does not meet the original 300ms latency target and should remain under
+  performance watch.
 
 ## RK-PERF-002: Hybrid code query materializes too many candidates
 
@@ -38,8 +40,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 - Acceptance: relay-teams `project` hybrid query completes under 500ms without
   changing the response schema.
 - Tests: existing code query behavior tests must continue to pass.
-- Status: implemented and re-verified. Relay-teams optimized samples are 100ms
-  through CLI and 24ms through Web for `_make_task_envelope`.
+- Status: implemented and re-verified. Latest relay-teams samples for the
+  accepted `project` hybrid query are 160ms through CLI and 64ms through Web.
 
 ## RK-PERF-003: Impact analysis scans full scope tables
 
@@ -50,8 +52,10 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   into SQL.
 - Acceptance: relay-teams base-to-HEAD impact completes under 500ms.
 - Tests: existing impact behavior tests must continue to pass.
-- Status: implemented and re-verified. Relay-teams optimized samples are 340ms
-  through CLI and 268ms through Web.
+- Status: implemented and re-verified. Latest relay-teams samples are 521ms
+  through CLI and 269ms through Web. The CLI single sample is slightly above
+  the original 500ms target, while the Web path remains below target; keep
+  watching this for run-to-run variance.
 
 ## RK-PERF-004: Repository report runs expensive latency samples by default
 
@@ -64,8 +68,9 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   returns an empty `latency_samples` list by default.
 - Tests: application service test that report keeps representative query names
   but omits latency samples.
-- Status: implemented and re-verified. Relay-teams optimized sample is 260ms and returns
-  `latency_samples=[]`.
+- Status: implemented and re-verified. Latest relay-teams sample is 400ms and
+  returns `latency_samples=[]`. The default report still skips expensive
+  latency samples, but this host sample is above the original 300ms target.
 
 ## RK-PERF-005: Web code index times out
 
@@ -78,8 +83,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   HTTP 200 under 1s.
 - Follow-up: cold full indexing should become a queued/background operation with
   progress rather than a single request.
-- Status: implemented for no-op Web index and re-verified. Relay-teams optimized
-  sample is HTTP 200 in 170ms.
+- Status: implemented for no-op Web index and re-verified. Latest relay-teams
+  sample is HTTP 200 in 162ms.
 
 ## RK-PERF-006: Top-level GraphRAG CLI query rejected multi-word input
 
@@ -90,8 +95,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 - Acceptance: `relay-knowledge query relay-teams benchmark --source docs`
   parses as query text `relay-teams benchmark`.
 - Tests: CLI parser unit test for multi-word query text.
-- Status: implemented and re-verified. Relay-teams optimized sample exits 0 in
-  80ms.
+- Status: implemented and re-verified. Latest relay-teams sample exits 0 in
+  129ms.
 
 ## RK-PERF-007: Default scope includes large unknown files
 
@@ -129,8 +134,10 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 
 - Baseline: `repo update relay-teams --base main --head HEAD` returned exit 1
   after the repository was indexed at HEAD; the equivalent Web operation
-  returned HTTP 400 in 3ms. A separate runtime that first indexed the base commit
-  completed `main -> HEAD` update in 7.36s.
+  returned HTTP 400. The latest re-test reproduced that documented precondition
+  in 134ms through CLI and 4ms through Web when no base scope existed in that
+  runtime. A separate runtime that first indexed the base commit completed
+  `main -> HEAD` update in 7.56s.
 - Fix: incremental snapshots now carry their resolved base commit, storage
   clones the matching persisted base scope instead of the active repository
   status, and the service reads previous file fingerprints from that base scope.

@@ -13,7 +13,7 @@
 - 修复：增加快速路径，先解析 commit/tree；当请求的 full index 已经 fresh 时，直接返回持久化 scope metadata。
 - 验收：重复 full index 返回 `changed_path_count=0`，blob read、parse 和 SQLite write 都为 0，并在 relay-teams 上 300ms 内完成。
 - 测试：application service 覆盖同一 HEAD 的重复 full index。
-- 状态：已实现并重新验证；优化样本为 390ms，blob read、parse 和 SQLite write 都为 0。
+- 状态：正确性已实现并重新验证，blob read、parse 和 SQLite write 都为 0。最新样本为 380ms，因此本轮未达到原 300ms 延迟目标，仍应继续作为性能观察项。
 
 ## RK-PERF-002：混合代码查询物化过多候选
 
@@ -22,7 +22,7 @@
 - 修复：索引时填充 code-repository FTS5 candidate table，并用它为 typed query-layer lookup 提供 seed，再进入 Rust scoring/dedupe。
 - 验收：relay-teams `project` hybrid query 在 500ms 内完成，且不改变响应 schema。
 - 测试：现有 code query 行为测试继续通过。
-- 状态：已实现并重新验证；`_make_task_envelope` 优化样本为 CLI 100ms、Web 24ms。
+- 状态：已实现并重新验证；验收口径的 `project` hybrid query 最新样本为 CLI 160ms、Web 64ms。
 
 ## RK-PERF-003：影响分析扫描完整 scope table
 
@@ -31,7 +31,7 @@
 - 修复：把 changed-path、callee-symbol、deleted-name 和 broad module filter 下推到 SQL。
 - 验收：relay-teams base-to-HEAD impact 在 500ms 内完成。
 - 测试：现有 impact 行为测试继续通过。
-- 状态：已实现并重新验证；优化样本为 CLI 340ms、Web 268ms。
+- 状态：已实现并重新验证；最新样本为 CLI 521ms、Web 269ms。该轮 CLI 单样本略高于 500ms 目标，Web 路径仍低于目标；后续复测应继续观察抖动。
 
 ## RK-PERF-004：仓库报告默认运行昂贵延迟样本
 
@@ -40,7 +40,7 @@
 - 修复：默认 report 只输出 metadata，latency sampling 留给显式 benchmark workflow。
 - 验收：relay-teams `repo report --format json` 在 300ms 内完成，并默认返回空 `latency_samples`。
 - 测试：application service 验证 report 保留 representative query name，但省略 latency sample。
-- 状态：已实现并重新验证；优化样本为 260ms，返回 `latency_samples=[]`。
+- 状态：已实现并重新验证；最新样本为 400ms，返回 `latency_samples=[]`。默认报告仍不运行昂贵 latency sample，但本机单样本高于原 300ms 目标。
 
 ## RK-PERF-005：Web 代码索引超时
 
@@ -49,7 +49,7 @@
 - 修复：no-op fast path 让重复 Web index request 提前完成。
 - 验收：已 fresh 的 relay-teams scope 重复 Web index 返回 HTTP 200 且耗时小于 1 秒。
 - 后续：cold full indexing 仍应迁移为 queue/progress handle，而不是单个 blocking request。
-- 状态：no-op Web indexing 已实现并重新验证；优化样本为 HTTP 200、170ms。
+- 状态：no-op Web indexing 已实现并重新验证；最新样本为 HTTP 200、162ms。
 
 ## RK-PERF-006：顶层 GraphRAG CLI 查询拒绝多词输入
 
@@ -78,7 +78,7 @@
 - 根因：在 active status 已经指向 HEAD 时，`repo update --base main --head HEAD` 不能从持久 base scope 读取 previous fingerprint。
 - 修复：incremental snapshot 携带 resolved base commit；storage 复制匹配的 persisted base scope；service 从 base scope 读取旧 fingerprint。
 - 验收：先索引 base commit，再索引不同 active HEAD 后，仍可从 persisted base snapshot 成功 update。
-- 状态：已实现。
+- 状态：已实现。最新复测中，未在同一运行时索引 base scope 时仍会按前置条件失败：CLI 134ms、Web HTTP 400 / 4ms；单独运行时先索引 base 后再更新到 HEAD 成功，耗时 7.56s。
 
 ## RK-PERF-010：health 代码计数可能显示为空
 

@@ -14,22 +14,27 @@
 
 运行时隔离：
 
-- `RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-e2e-20260514092854/home`
-- Web 绑定地址：`127.0.0.1:8897`
-- MCP scope：`docs,src,frontend`
-- 原始命令日志：`/tmp/relay-knowledge-e2e-20260514092854`
+- `RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/home`
+- Web 绑定地址：`127.0.0.1:8791`
+- MCP scope：`docs,src,frontend,relay-teams-benchmark`
+- 原始命令日志：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214`
 
 ## 构建与浏览器门禁
 
 已通过：
 
 - `./build.sh`
-- `uv sync --extra dev --no-default-groups`
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --all-targets --all-features`：400 个库单元测试、1 个 benchmark 测试、41 个集成测试通过
+- `cargo test --test benchmarks --all-features -- --nocapture`
 - `uv run --extra dev python -m playwright install chromium`
 - `uv run --extra dev pytest tests/browser`
-- 针对 `http://127.0.0.1:8897` 的实时 Playwright 冒烟测试
+- 针对 `http://127.0.0.1:8791` 的实时 Playwright 冒烟测试
 
 实时浏览器检查打开了由 Rust 服务提供的真实 Web 工作区，并覆盖检索、代码状态、worker 状态和移动端布局检查。
+5 次 `wait_until="networkidle"` 页面加载样本平均为 528.36ms，页面文本包含
+`1653 files / 28125 symbols`，未出现 `Code graph empty`。
 
 ## CLI 覆盖
 
@@ -56,8 +61,10 @@
 - `proposal list --state proposed --format json`
 - `proposal show <proposal-id> --format json`
 - `proposal reject <proposal-id> --by e2e --reason ... --format json`
+- `proposal accept <proposal-id> --by benchmark --reason ... --format json`
+- `proposal supersede <proposal-id> --by benchmark --reason ... --format json`
 - `audit query --limit 20 --format json`
-- `repo register /opt/workspace/relay-teams --alias relay-teams --path src --path frontend --language python --language typescript --format json`
+- `repo register /opt/workspace/relay-teams --alias relay-teams --format json`
 - `repo scope preview relay-teams --ref HEAD --format json`
 - `repo index relay-teams --ref HEAD --dry-run --format json`
 - `repo index relay-teams --ref HEAD --format json`
@@ -75,11 +82,11 @@
 
 `relay-teams` 的代码索引结果：
 
-- 已索引文件：738
-- 符号数：14,286
-- 引用数：88,082
-- 代码块数：14,296
-- 降级文件：0
+- 已索引文件：1,653
+- 符号数：28,125
+- 引用数：187,993
+- 代码块数：28,436
+- 降级文件：218
 
 预期的降级/默认行为：
 
@@ -104,7 +111,9 @@
   - `worker.run-once`
   - `proposal.list`
   - `proposal.show`
+  - `proposal.reject`
   - `proposal.accept`
+  - `proposal.supersede`
   - `audit.query`
   - `code.repo.register`
   - `code.repo.index`
@@ -112,13 +121,16 @@
   - `code.repo.status`
   - `code.repo.query`
   - `code.repo.impact`
+  - `service.doctor`
   - `service.run.streamable_http`
 
-Web 代码工作流也使用单独 alias `relay-teams-web` 完成验证；该 alias 指向 `/opt/workspace/relay-teams`，并使用 `src` 与 `python` 过滤条件注册。
+Web 代码工作流也使用单独 alias `relay-teams-web` 完成验证；该 alias 指向
+`/opt/workspace/relay-teams`。重复注册同一个 Git root 会保留既有
+`relay-teams` alias，并把新 alias 解析到同一个 repository id。
 
 ## MCP 覆盖
 
-针对同一个 `127.0.0.1:8897` 服务已通过：
+针对同一个 `127.0.0.1:8791` 服务已通过：
 
 - `initialize`
 - `notifications/initialized`
@@ -138,10 +150,11 @@ Web 代码工作流也使用单独 alias `relay-teams-web` 完成验证；该 al
 
 严重性：中
 
-状态：后续 benchmark 未复现。该发现保留为
-早期过滤 scope 运行的历史证据；当前性能数字应以 benchmark 基线为准。
+状态：已解决并重新验证。该发现保留为早期过滤 scope 运行的历史证据；当前复测中
+`/api/health` 的 graph code counters 与 `repository_code_totals` 一致，实时页面显示
+`1653 files / 28125 symbols`。
 
-索引 `/opt/workspace/relay-teams` 后，`/api/health` 报告
+早期过滤 scope 运行索引 `/opt/workspace/relay-teams` 后，`/api/health` 报告
 `repository_code_totals.indexed_file_count=738`,
 `symbol_count=14286`、`reference_count=88082` 和 `chunk_count=14296`。
 但 Web 页面仍显示：
@@ -156,27 +169,34 @@ Web 代码工作流也使用单独 alias `relay-teams-web` 完成验证；该 al
 
 证据：
 
-- API 输出：`/tmp/relay-knowledge-e2e-20260514092854/api_health.out`
-- 实时页面文本 dump：
+- 历史 API 输出：`/tmp/relay-knowledge-e2e-20260514092854/api_health.out`
+- 历史实时页面文本 dump：
   `/tmp/relay-knowledge-e2e-20260514092854/live_page_text.out`
+- 复测 API 输出：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/web_health.out`
+- 复测实时页面文本 dump：
+  `/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/live_page_text.out`
 
 ### RK-E2E-2026-05-14-2：文档中的 `repo update --base main --head HEAD` 路径在非 main 分支上较脆弱
 
 严重性：低
 
-在测试分支索引 `HEAD` 后，`repo update relay-teams --base main --head HEAD --format json` 失败：
+状态：按文档前置条件重新验证。在只索引 `HEAD` 的运行时中，
+`repo update relay-teams --base main --head HEAD --format json` 仍会失败：
 
 ```text
 incremental base ref 'main' resolves to 0a4e709c86f25d4fd475113f20d78f9a99498c37,
 but code repository 'relay-teams' is indexed at fa3c0ddc9d81400b8d5e58ab7600dd557a056816
 ```
 
-`repo update relay-teams --base HEAD --head HEAD --format json` 已通过，`repo impact relay-teams --base main --head HEAD --format json` 也已通过。
+`repo update relay-teams --base HEAD --head HEAD --format json` 已通过，
+`repo impact relay-teams --base main --head HEAD --format json` 也已通过。单独运行时先索引
+`0a4e709c86f25d4fd475113f20d78f9a99498c37`，再更新到
+`fa3c0ddc9d81400b8d5e58ab7600dd557a056816` 已通过，耗时 7.56s。
 
 影响：用户验证 feature 分支时，如果未先索引基础引用，或未使用与已索引 scope 匹配的 base/head 组合，README 风格工作流可能失败。这很可能是预期校验行为，但文档或 CLI 错误可以更清楚地解释所需顺序。
 
 证据：
 
-- 失败命令：`/tmp/relay-knowledge-e2e-20260514092854/repo_update.err`
+- 失败命令：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/out/repo_update_main_head_after_head_indexed.err`
 - 通过命令：
-  `/tmp/relay-knowledge-e2e-20260514092854/repo_update_head.out`
+  `/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/out/update_base_to_head.out`
