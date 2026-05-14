@@ -1,59 +1,68 @@
-# Documentation Index
+# relay-knowledge English Documentation
 
 [English](../en/README.md) | [中文](../zh/README.md)
 
-This is the English documentation page for `README.md`. It follows the same structure, examples, commands, and implementation contracts as the Chinese edition so readers can switch languages without changing document location.
+This edition follows the same numbered book structure as the Chinese edition:
+user workflows first, feature behavior second, then architecture specifications,
+research notes, benchmark records, and verification records.
 
-> Translation status: the English edition preserves the current technical source text below while the full prose translation is maintained incrementally. Command examples, API paths, environment variables, filenames, and configuration contracts are authoritative.
+> Translation status: several English pages still preserve Chinese source prose
+> while the full translation is maintained incrementally. Commands, API paths,
+> environment variables, filenames, and configuration contracts are authoritative.
 
-[Documentation index](../en/README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
+## Book 1: User Guide
 
-## Source Content
+- [User Guide Overview](01-user-guide/README.md): install, CLI, GraphRAG, code repositories, Web, agent services, troubleshooting, and advanced configuration.
+- [Chapter 1: Installation and Runtime Directories](01-user-guide/01-install-and-runtime.md)
+- [Chapter 2: CLI Basics](01-user-guide/02-cli-basics.md)
+- [Chapter 3: Knowledge Graph Workflow](01-user-guide/03-knowledge-graph-workflow.md)
+- [Chapter 4: Code Repository Workflow](01-user-guide/04-code-repository-workflow.md)
+- [Chapter 5: Web Workspace](01-user-guide/05-web-workspace.md)
+- [Chapter 6: Agent and Resident Service](01-user-guide/06-agent-and-service.md)
+- [Chapter 7: Operations and Troubleshooting](01-user-guide/07-operations-and-troubleshooting.md)
+- [Chapter 8: Advanced Configuration](01-user-guide/08-advanced-configuration.md)
 
-本目录按文档用途归档，避免研究资料、能力规格和后续设计文档混放。
+## Book 2: Capabilities
 
-## User Guide
+- [GraphRAG Capability Guide](02-capabilities/graphrag-capability-guide.md): context packs, freshness, backends, multimodal evidence, code graph, recovery, Web, MCP, and ACP behavior.
+- [Hybrid Retrieval Context Pack](02-capabilities/hybrid-retrieval-context-pack.md): retriever sources, RRF fusion, structured graph facts, graph paths, and backend status.
+- [Semantic/Vector Provider Backend](02-capabilities/semantic-vector-provider-backend.md): external embedding provider setup, redacted diagnostics, Web provider panels, and degradation behavior.
+- [Code Repository Tree-sitter Retrieval](02-capabilities/code-repository-tree-sitter-retrieval.md): repository indexing, retrieval, reports, and impact analysis.
+- [Documentation Refresh Audit 2026-05-14](02-capabilities/documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and remaining implementation work.
 
-- [使用指南总览](user-guide/README.md): 按章节拆分的安装、CLI、知识图谱、代码仓库、Web、MCP/Agent 和运维排障说明。
-- [第 1 章 安装与运行时目录](user-guide/01-install-and-runtime.md)
-- [第 2 章 CLI 基础](user-guide/02-cli-basics.md)
-- [第 3 章 知识图谱工作流](user-guide/03-knowledge-graph-workflow.md)
-- [第 4 章 代码仓库工作流](user-guide/04-code-repository-workflow.md)
-- [第 5 章 Web 工作区](user-guide/05-web-workspace.md)
-- [第 6 章 Agent 与常驻服务](user-guide/06-agent-and-service.md)
-- [第 7 章 运维与排障](user-guide/07-operations-and-troubleshooting.md)
-- [第 8 章 高级配置参考](user-guide/08-advanced-configuration.md)
+## Book 3: Architecture Specifications
 
-## Features
+- [Engineering Hard Constraints](03-architecture-specs/engineering-hard-constraints.md)
+- [Foundational Runtime](03-architecture-specs/foundational-runtime.md)
+- [Storage Layer Design](03-architecture-specs/storage-layer-design.md)
+- [Unified API and Interface Architecture](03-architecture-specs/unified-api-and-interface-architecture.md)
+- [GraphRAG Product and Implementation Roadmap](03-architecture-specs/graphrag-product-and-implementation-roadmap.md)
+- [Source Scope and Multimodal Ingestion](03-architecture-specs/source-scope-and-multimodal-ingestion.md)
+- [Code Repository Tree-sitter Retrieval Specification](03-architecture-specs/code-repository-tree-sitter-retrieval.md)
+- [Code Repository Retrieval v2 Optimization](03-architecture-specs/code-repository-retrieval-v2-optimization.md)
+- [Knowledge Graph Capability Reference](03-architecture-specs/knowledge-graph-capability-reference.md)
+- [Semantic/Vector Provider Backend Specification](03-architecture-specs/semantic-vector-provider-backend.md)
+- [Open Agent Runtime and Hybrid Retrieval Architecture](03-architecture-specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [Resident Agent Graph Retrieval Access](03-architecture-specs/resident-agent-graph-retrieval-access.md)
+- [Background Service, Silent Updates, and Self-Healing](03-architecture-specs/background-service-and-self-healing.md)
+- [Advanced Architecture and Observability](03-architecture-specs/advanced-architecture-observability.md)
+- [Installation and Release](03-architecture-specs/installation-and-release.md)
 
-- [GraphRAG 功能文档](graphrag-capability-guide.md): 当前 evidence ingest、hybrid retrieval、local/external semantic/vector backend contract、schema path、temporal/community、多模态 evidence maintenance、代码图、index recovery、Web readiness、MCP/ACP 接入和 freshness/truncation 行为说明。
-- [混合检索 Context Pack 功能文档](hybrid-retrieval-context-pack.md): 当前 BM25、semantic/vector、path/temporal/community、RRF 融合、结构化图事实、多模态 grouping、context pack 响应字段、backend 状态和 freshness/truncation 行为。
-- [Semantic/Vector Provider Backend](semantic-vector-provider-backend.md): 远端 OpenAI-compatible embedding provider 配置、脱敏诊断、Web Providers 面板和降级行为。
-- [代码仓库 Tree-sitter 检索功能文档](code-repository-tree-sitter-retrieval.md): 当前 CLI/API 实现、存储模型、`canonical_symbol_id`、edge resolution/confidence metadata、检索返回字段和测试覆盖。
-- [文档刷新审计 2026-05-14](documentation-refresh-audit-2026-05-14.md): 本轮对 README、用户指南、功能文档、规格、研究材料、benchmark 和 verification 文档的状态盘点、已刷新项与剩余实现项。
+## Book 4: Research
 
-## Research
+- [Knowledge Graph Research Summary](04-research/knowledge-graph-research.md)
+- [arXiv Knowledge Graph Paper Insights](04-research/arxiv-knowledge-graph-paper-insights.md)
+- [Code Repository Tree-sitter Retrieval Research](04-research/code-repository-tree-sitter-retrieval-research.md)
+- [Agent Protocol Graph Retrieval Research](04-research/agent-protocol-graph-retrieval-research.md)
+- [relay-knowledge Implementation Reference](04-research/relay-knowledge-implementation-reference.md)
+- [Industry Capability Snapshot 2026](04-research/industry-capability-snapshot-2026.md)
 
-- [知识图谱技术研究总结](research/knowledge-graph-research.md): 面向 `relay-knowledge` 架构的技术研究总结。
-- [arXiv 知识图谱论文深度洞察](research/arxiv-knowledge-graph-paper-insights.md): 以 arXiv 论文为主的论文归档与工程洞察。
-- [代码仓库 Tree-sitter 检索研究材料](research/code-repository-tree-sitter-retrieval-research.md): tree-sitter、Git 增量、代码知识图谱和高性能检索的资料依据与工程取舍。
-- [Agent 协议图检索接入研究](research/agent-protocol-graph-retrieval-research.md): MCP server 与 Agent Client Protocol adapter 暴露常驻图检索能力的协议研究和取舍。
-- [relay-knowledge 实现借鉴落地路线](research/relay-knowledge-implementation-reference.md): 结合 docs/PDF 研究材料和当前 Rust 实现的已落地基线、剩余差距和阶段性路线。
-- [2026 行业能力快照与差距分析](research/industry-capability-snapshot-2026.md): GraphRAG、MCP、A2A、托管检索和图谱 agent 生态的当前信号，以及 relay-knowledge 的产品差距。
+## Appendix A: Benchmarks
 
-## Specs
+- [relay-teams Baseline 2026-05-14](05-benchmarks/relay-teams-baseline-2026-05-14.md)
+- [relay-teams Optimization Study 2026-05-14](05-benchmarks/relay-teams-optimization-study-2026-05-14.md)
+- [relay-teams Optimization Issues 2026-05-14](05-benchmarks/relay-teams-optimization-issues-2026-05-14.md)
 
-- [代码知识图谱能力参考](specs/knowledge-graph-capability-reference.md): 代码知识图谱系统能力规格与参考分析。
-- [GraphRAG 产品与实现路线规格](specs/graphrag-product-and-implementation-roadmap.md): relay-knowledge 的 GraphRAG 产品边界、当前实现基线、优化措施和分阶段路线。
-- [存储层架构设计](specs/storage-layer-design.md): 高性能、可测试、可替换的图谱存储层设计。
-- [安装部署与发布规格](specs/installation-and-release.md): GitHub Releases、crates.io、包管理器、服务安装、升级卸载和 release CI 的交付要求。
-- [工程硬约束](specs/engineering-hard-constraints.md): 禁止浅函数、死代码和循环依赖，要求文档完整、文件不超过 1000 行、UT 覆盖率大于 90%，并规定 `env`、`paths`、`net`、HTTP 事件驱动、QoS、UT+集成测试分层与 Playwright Chromium 浏览器集成测试门禁。
-- [基础运行时层规格](specs/foundational-runtime.md): `env`、`paths`、`net::http` 和 `net::qos` 的环境变量、路径默认值、网络预算、失败模式和测试策略。
-- [先进架构与可观测性设计](specs/advanced-architecture-observability.md): 本地优先、日志、telemetry、Grafana 和模块解耦设计。
-- [后台服务、静默更新与自愈设计](specs/background-service-and-self-healing.md): 安装后常驻进程、静默图谱/索引更新、资源治理、假死检测和自愈恢复设计。
-- [统一 API 层与交互层架构](specs/unified-api-and-interface-architecture.md): CLI/Web 收口到统一 API、Web 同源操作执行 endpoint 和 `streaming-json` 输出协议。
-- [Source Scope 与多模态摄取规格](specs/source-scope-and-multimodal-ingestion.md): Git 分支/rebase 快照隔离、检索 scope 和文档文字/图片多模态 evidence 设计。
-- [代码仓库 Tree-sitter 检索规格](specs/code-repository-tree-sitter-retrieval.md): Git 代码仓库基于 tree-sitter 的结构化解析、全量/增量更新、高并发检索、代码图和影响分析设计。
-- [开放 Agent Runtime 与混合检索架构](specs/open-agent-runtime-and-hybrid-retrieval-architecture.md): 支持外部 agent runtime 驱动 LLM 知识处理，同时保持 core 不实现 runtime，并明确 BM25、semantic、vector 和 graph expansion 的混合检索边界。
-- [Semantic/Vector Provider Backend 规格](specs/semantic-vector-provider-backend.md): semantic/vector 外部 embedding provider 的配置、HTTP 边界、错误分类、Web contract 和测试要求。
-- [常驻进程 Agent 图检索访问规格](specs/resident-agent-graph-retrieval-access.md): 常驻进程通过 MCP server 和 Agent Client Protocol adapter 向其它 agent 暴露图检索能力的接口、权限、QoS、审计和测试要求。
+## Appendix B: Verification
+
+- [relay-teams E2E Verification 2026-05-14](06-verification/relay-teams-e2e-2026-05-14.md)
