@@ -32,6 +32,8 @@ relay-knowledge help repo query --format json
 
 该 JSON 规格包含 command path、operation、读写影响、参数语义、是否必填、默认值、允许取值、是否可重复、示例和注意事项。后续新增或修改 CLI 参数时，必须同步更新这份自描述规格。
 
+CLI 输入会先按这份自描述规格解析成内部语法树，再映射到运行时命令。这个语法树是 CLI 自举入口: 人类可以读文本 help，脚本、skill 和 LLM 工具应读取 `help --format json`，解析失败时也应优先使用结构化 diagnostic 中的 `matched_path`、`expected`、`usage` 和 `suggestion` 字段，而不是猜测参数含义。
+
 ## 2.2 输出格式
 
 支持四种输出:
@@ -136,3 +138,31 @@ relay-knowledge version
 `--limit` 必须是正整数并由各 API 层继续执行上限校验；`0` 会被 retrieval、repository 和 audit/proposal 等请求校验拒绝。`--kind` 在不同命令中含义不同: `index refresh` 只接受 `bm25`、`semantic`、`vector`；`worker` 只接受 `embedding`、`ocr`、`vision`、`extractor`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports`。当查询文本或 reason 中包含以 `-` 开头的词时，使用 `--` 或引号避免被解析成选项。
 
 参数解释是 CLI contract 的一部分。新增命令或参数必须在 `relay-knowledge help --format json` 中说明语义、默认值、取值范围、是否必填、是否可重复、读写影响、失败模式和示例，避免 skill 或 LLM 只能凭参数名猜测行为。
+
+## 2.7 语法诊断
+
+CLI 解析错误会根据语法树返回最接近的上下文。文本模式下，错误输出到 stderr，并尽量包含 `Try:` 和 `Usage:`:
+
+```bash
+relay-knowledge repo qurey core --query rust
+```
+
+会提示未知命令 `repo qurey`，并建议 `repo query`。
+
+```bash
+relay-knowledge query --query SQLite
+```
+
+会提示 `query` 的查询文本是位置参数，并建议:
+
+```bash
+relay-knowledge query SQLite
+```
+
+当请求中包含 `--format json` 且解析失败时，stderr 输出单行 JSON diagnostic，包含:
+
+```json
+{"error":"...","matched_path":["query"],"unexpected_token":"--query","expected":["<text>","--source","--limit","--freshness"],"suggestion":"relay-knowledge query SQLite","usage":"relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness <policy>]"}
+```
+
+该 JSON 只描述解析错误，不代表业务 API 响应；成功响应仍输出到 stdout。

@@ -25,6 +25,7 @@ macro_rules! command {
             output_formats: $formats.to_vec(),
             examples: $examples.to_vec(),
             notes: $notes.to_vec(),
+            syntax: command_syntax(),
         }
     };
     (
@@ -56,34 +57,45 @@ macro_rules! command {
 #[path = "cli_spec_data.rs"]
 mod cli_spec_data;
 
-const CLI_SPEC_SCHEMA_VERSION: u16 = 1;
+const CLI_SPEC_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(super) struct CliSpec {
     schema_version: u16,
     binary: &'static str,
     version: &'static str,
+    syntax: CliSyntaxSpec,
     global_options: Vec<CliOptionSpec>,
-    commands: Vec<CliCommandSpec>,
+    pub(super) commands: Vec<CliCommandSpec>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(super) struct CliCommandSpec {
-    path: Vec<&'static str>,
-    usage: &'static str,
+    pub(super) path: Vec<&'static str>,
+    pub(super) usage: &'static str,
     summary: &'static str,
     operation: &'static str,
     effect: CommandEffect,
-    arguments: Vec<CliArgumentSpec>,
-    options: Vec<CliOptionSpec>,
+    pub(super) arguments: Vec<CliArgumentSpec>,
+    pub(super) options: Vec<CliOptionSpec>,
     output_formats: Vec<&'static str>,
     examples: Vec<&'static str>,
     notes: Vec<&'static str>,
+    syntax: CliSyntaxSpec,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub(super) struct CliSyntaxSpec {
+    kind: &'static str,
+    command_style: &'static str,
+    global_options: &'static str,
+    option_scope: &'static str,
+    diagnostic_contract: &'static str,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(super) struct CliArgumentSpec {
-    name: &'static str,
+    pub(super) name: &'static str,
     required: bool,
     repeatable: bool,
     meaning: &'static str,
@@ -93,13 +105,13 @@ pub(super) struct CliArgumentSpec {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(super) struct CliOptionSpec {
-    flag: &'static str,
+    pub(super) flag: &'static str,
     value_name: Option<&'static str>,
     required: bool,
     repeatable: bool,
     meaning: &'static str,
     default: Option<&'static str>,
-    allowed_values: Vec<&'static str>,
+    pub(super) allowed_values: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -127,6 +139,7 @@ pub(super) fn cli_spec() -> CliSpec {
         schema_version: CLI_SPEC_SCHEMA_VERSION,
         binary: PROJECT_NAME,
         version: env!("CARGO_PKG_VERSION"),
+        syntax: root_syntax(),
         global_options: vec![
             opt(
                 "--format",
@@ -160,14 +173,33 @@ pub(super) fn cli_spec() -> CliSpec {
     }
 }
 
+fn root_syntax() -> CliSyntaxSpec {
+    CliSyntaxSpec {
+        kind: "root",
+        command_style: "git-style-subcommands",
+        global_options: "accepted before or after command tokens",
+        option_scope: "global options are shared; command options are command-local",
+        diagnostic_contract: "parse errors include matched path, expected terms, usage, and suggestion when available",
+    }
+}
+
+fn command_syntax() -> CliSyntaxSpec {
+    CliSyntaxSpec {
+        kind: "command",
+        command_style: "path plus command-local options and positionals",
+        global_options: "accepted before or after command tokens",
+        option_scope: "same flag names can have command-local meanings",
+        diagnostic_contract: "diagnostics are derived from this command syntax rather than natural-language help",
+    }
+}
+
 fn select_spec(spec: &CliSpec, path: &[String]) -> Result<serde_json::Value, CliError> {
     if path.is_empty() {
         return serde_json::to_value(spec)
             .map_err(|error| CliError::RenderFailed(error.to_string()));
     }
     if let Some(command) = find_command(&spec.commands, path) {
-        return serde_json::to_value(command)
-            .map_err(|error| CliError::RenderFailed(error.to_string()));
+        return command_value(spec, command);
     }
     let namespace = find_namespace(&spec.commands, path)
         .ok_or_else(|| CliError::UnknownHelpTopic(path.join(" ")))?;
@@ -180,6 +212,21 @@ fn select_spec(spec: &CliSpec, path: &[String]) -> Result<serde_json::Value, Cli
         "path": path,
         "commands": namespace,
     }))
+}
+
+fn command_value(spec: &CliSpec, command: &CliCommandSpec) -> Result<serde_json::Value, CliError> {
+    let mut value =
+        serde_json::to_value(command).map_err(|error| CliError::RenderFailed(error.to_string()))?;
+    if let serde_json::Value::Object(fields) = &mut value {
+        fields.insert(
+            "schema_version".to_owned(),
+            serde_json::json!(spec.schema_version),
+        );
+        fields.insert("binary".to_owned(), serde_json::json!(spec.binary));
+        fields.insert("version".to_owned(), serde_json::json!(spec.version));
+    }
+
+    Ok(value)
 }
 
 fn render_help_text(spec: &CliSpec, path: &[String]) -> Result<String, CliError> {

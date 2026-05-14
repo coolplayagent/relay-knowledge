@@ -252,18 +252,24 @@ fn parses_operational_worker_proposal_audit_and_service_actions() {
     );
     assert_eq!(operator.action, CliAction::ServiceOperatorResume);
 
-    assert!(matches!(
-        CliCommand::parse(["worker", "run-once", "--kind", "gpu"]),
-        Err(CliError::InvalidWorkerKind(_))
-    ));
-    assert!(matches!(
-        CliCommand::parse(["proposal", "list", "--state", "merged"]),
-        Err(CliError::InvalidProposalState(_))
-    ));
-    assert!(matches!(
-        CliCommand::parse(["service", "plan", "restart"]),
-        Err(CliError::InvalidServiceAction(_))
-    ));
+    assert!(
+        CliCommand::parse(["worker", "run-once", "--kind", "gpu"])
+            .expect_err("worker kind should fail")
+            .to_string()
+            .contains("invalid worker kind 'gpu'")
+    );
+    assert!(
+        CliCommand::parse(["proposal", "list", "--state", "merged"])
+            .expect_err("proposal state should fail")
+            .to_string()
+            .contains("invalid proposal state 'merged'")
+    );
+    assert!(
+        CliCommand::parse(["service", "plan", "restart"])
+            .expect_err("service action should fail")
+            .to_string()
+            .contains("invalid service action 'restart'")
+    );
 }
 
 #[test]
@@ -284,7 +290,7 @@ fn rejects_missing_ingest_values_and_bad_index_kind() {
     let kind =
         CliCommand::parse(["index", "refresh", "--kind", "other"]).expect_err("kind should fail");
 
-    assert_eq!(source.to_string(), "missing value for --source");
+    assert!(source.to_string().contains("missing value for --source"));
     assert_eq!(kind.exit_code(), 2);
 }
 
@@ -295,8 +301,17 @@ fn rejects_flag_style_actions_and_extra_command_words() {
     let extra =
         CliCommand::parse(["status", "health"]).expect_err("extra command words should fail");
 
-    assert_eq!(flag_action.to_string(), "unexpected argument '--ingest'");
-    assert_eq!(extra.to_string(), "unexpected argument 'health'");
+    assert!(
+        flag_action
+            .to_string()
+            .contains("unknown option '--ingest'; commands are positional")
+    );
+    assert!(flag_action.to_string().contains("relay-knowledge ingest"));
+    assert!(
+        extra
+            .to_string()
+            .contains("unexpected argument 'health' for 'status'")
+    );
     assert_eq!(flag_action.exit_code(), 2);
 }
 
@@ -305,8 +320,36 @@ fn rejects_legacy_query_flag_form() {
     let error = CliCommand::parse(["query", "--query", "SQLite"])
         .expect_err("query text should be positional");
 
-    assert_eq!(error.to_string(), "unexpected argument '--query'");
+    assert!(
+        error
+            .to_string()
+            .contains("unexpected option '--query' for 'query'")
+    );
+    assert!(error.to_string().contains("relay-knowledge query SQLite"));
     assert_eq!(error.exit_code(), 2);
+}
+
+#[test]
+fn parse_errors_render_machine_readable_diagnostics_when_json_format_is_requested() {
+    let error = CliCommand::parse(["--format", "json", "query", "--query", "SQLite"])
+        .expect_err("legacy query flag should fail");
+    let value: serde_json::Value =
+        serde_json::from_str(&error.render_stderr()).expect("diagnostic should be JSON");
+
+    assert_eq!(
+        value["error"],
+        "unexpected option '--query' for 'query'; query text is positional"
+    );
+    assert_eq!(value["matched_path"], serde_json::json!(["query"]));
+    assert_eq!(value["unexpected_token"], "--query");
+    assert_eq!(value["suggestion"], "relay-knowledge query SQLite");
+    assert!(
+        value["expected"]
+            .as_array()
+            .expect("expected terms")
+            .iter()
+            .any(|term| term == "--freshness")
+    );
 }
 
 #[test]
@@ -369,8 +412,9 @@ fn renders_machine_readable_help_for_skills() {
     let proposal_accept_json: serde_json::Value =
         serde_json::from_str(proposal_accept.trim()).expect("proposal accept help should be JSON");
 
-    assert_eq!(root_json["schema_version"], 1);
+    assert_eq!(root_json["schema_version"], 2);
     assert_eq!(root_json["binary"], "relay-knowledge");
+    assert_eq!(root_json["syntax"]["kind"], "root");
     assert!(
         root_json["commands"]
             .as_array()
@@ -386,6 +430,7 @@ fn renders_machine_readable_help_for_skills() {
     );
     assert_eq!(query_json["operation"], "code.repo.query");
     assert_eq!(query_json["effect"], "read-only");
+    assert_eq!(query_json["syntax"]["kind"], "command");
     assert_eq!(repo_namespace_json["kind"], "namespace");
     assert!(
         repo_namespace_json["commands"]
