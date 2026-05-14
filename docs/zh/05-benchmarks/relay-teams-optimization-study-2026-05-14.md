@@ -13,7 +13,8 @@
 - full indexing 前先解析目标 commit 和 tree hash。
 - 如果 storage 已经存在 matching repository scope，且 commit、effective filter 和 indexed status 都 fresh，则直接从持久 status 构造 response。
 - no-op full index 应报告 `changed_path_count=0`、`skipped_unchanged_count=indexed_file_count`、0 blob read、0 parse、0 SQLite write。
-- relay-teams no-op full index 目标小于 300ms。
+- relay-teams no-op full index 目标小于 300ms；2026-05-14 最新复测样本为
+  0.38s，验证了零 blob 读取、零解析和零 SQLite 写入的快速路径，但未达到原延迟目标。
 
 ## 2. Hybrid query 候选集过大
 
@@ -61,15 +62,18 @@
 
 ## 6. 优化后验证
 
-优化后使用相同 release binary 和 runtime pattern 重新运行基准。关键结果：
+优化后使用相同 release binary 和 runtime pattern 重新运行基准。最新复测原始日志位于
+`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214`。关键结果：
 
 | 场景 | 基线 | 优化后 |
 | --- | ---: | ---: |
-| 重复 full index | 86.56s | 0.39s |
-| 混合查询 | 1.46s | 0.10s |
-| 影响分析 | 2.47s | 0.34s |
-| JSON 报告 | 4.22s | 0.26s |
-| Web 无操作索引 | HTTP 408 / 30.015s | HTTP 200 / 0.17s |
-| 顶层多词 `query` | exit 2 | exit 0 |
+| 重复 full index | 86.56s | 0.38s |
+| 混合查询 | 1.46s | 0.160s CLI / 0.064s Web |
+| 影响分析 | 2.47s | 0.521s CLI / 0.269s Web |
+| JSON 报告 | 4.22s | 0.400s |
+| Web 无操作索引 | HTTP 408 / 30.015s | HTTP 200 / 0.162s |
+| 顶层多词 `query` | exit 2 | exit 0 / 0.129s |
 
-Cold full index 在该轮从 82.57s 变为 90.43s，因为优化后索引会额外填充 code-repository FTS candidate table。这是为查询延迟做出的有意取舍；如果 cold indexing budget 成为主要瓶颈，需要重新评估。
+最新冷 full index 样本为 47.45s，峰值 RSS 为 360,504 KiB。索引仍会填充
+code-repository FTS candidate table，这是为查询延迟做出的有意取舍；如果
+cold indexing budget 成为主要瓶颈，需要继续用同一外部仓库复测。

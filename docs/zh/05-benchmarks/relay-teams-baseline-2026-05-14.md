@@ -9,9 +9,9 @@
 - 分支：`improve-memory-skill-draft-status-ui`
 - HEAD: `fa3c0ddc9d81400b8d5e58ab7600dd557a056816`
 - 增量测试的基础引用：`0a4e709c86f25d4fd475113f20d78f9a99498c37`
-- 运行时主目录：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home`
-- 更新运行时主目录：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/update-home`
-- 原始基准日志：`/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539`
+- 运行时主目录：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/home`
+- 更新运行时主目录：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/update-home`
+- 原始基准日志：`/tmp/relay-knowledge-relay-teams-refresh-20260514-224214`
 - 二进制：`target/release/relay-knowledge`
 - Web 绑定地址：`127.0.0.1:8791`
 
@@ -46,7 +46,7 @@ uv run --extra dev python -m playwright install chromium
 uv run --extra dev pytest tests/browser
 ```
 
-结果：`1 passed in 1.80s`。
+结果：`1 passed in 2.04s`。
 
 ## 仓库范围
 
@@ -75,9 +75,9 @@ uv run --extra dev pytest tests/browser
 冷全索引：
 
 - 命令：`repo index relay-teams --ref HEAD --format json`
-- 墙钟时间：46.31秒
-- 峰值 RSS：360,460 KiB
-- SQLite 数据文件：438,763,520 字节
+- 墙钟时间：47.45秒
+- 峰值 RSS：360,504 KiB
+- SQLite 数据文件：438,771,712 字节
 - 索引文件：1,653 个
 - 符号数：28,125
 - 引用数：187,993
@@ -88,8 +88,8 @@ uv run --extra dev pytest tests/browser
 无操作 HEAD 重新索引：
 
 - 命令：`repo index relay-teams --ref HEAD --format json`
-- 墙钟时间：0.39 秒
-- 峰值 RSS：14,420 KiB
+- 墙钟时间：0.38 秒
+- 峰值 RSS：14,512 KiB
 - `changed_path_count=0`
 - `skipped_unchanged_count=1653`
 - Blob 读取次数：0
@@ -99,8 +99,8 @@ uv run --extra dev pytest tests/browser
 增量更新，通过首先索引基础数据，在单独的运行时中进行测量
 提交然后更新到 HEAD：
 
-- 基础完整索引：64.21秒
-- `repo update relay-teams --base 0a4e709... --head fa3c0dd...`: 7.36s
+- 基础完整索引：60.77秒
+- `repo update relay-teams --base 0a4e709... --head fa3c0dd...`: 7.56s
 - 更改的路径：4
 - Blob 读取次数：1
 - 解析的文件：1
@@ -115,47 +115,47 @@ uv run --extra dev pytest tests/browser
 | --- | ---: | ---: |
 | `version` | 0 | 0 |
 | `help --format json` | 0 | 0 |
-| `status` | 0 | 80 |
-| `health` | 0 | 80 |
-| `graph inspect` | 0 | 90 |
-| `ingest` | 0 | 90 |
-| `query relay-teams --freshness wait-until-fresh` | 0 | 80 |
-| `query relay-teams --freshness graph-only` | 0 | 80 |
-| `query relay-teams benchmark` | 0 | 80 |
-| `index refresh --kind bm25 --kind semantic --kind vector` | 0 | 80 |
-| `index refresh --kind bm25` | 0 | 80 |
-| `repo status` | 0 | 80 |
-| `repo report --format json` | 0 | 260 |
-| `repo report --format markdown` | 0 | 260 |
-| `repo scope preview --ref HEAD` | 0 | 100 |
-| `repo query --kind hybrid` | 0 | 100 |
-| `repo query --kind symbol` | 0 | 90 |
-| `repo query --kind definition` | 0 | 90 |
-| `repo query --kind references` | 0 | 80 |
-| `repo query --kind callers` | 0 | 90 |
-| `repo query --kind callees` | 0 | 90 |
-| `repo query --kind imports` | 0 | 90 |
-| `repo impact base..HEAD` | 0 | 340 |
-| `repo update main..HEAD after indexing HEAD` | 1 | 80 |
-| `provider probe` | 0 | 0 |
-| `worker status` | 0 | 80 |
-| `worker run-once --kind extractor` | 0 | 80 |
-| `worker run-once --kind ocr` | 0 | 80 |
-| `worker run-once --kind vision` | 0 | 80 |
-| `proposal list` | 0 | 90 |
-| `proposal show` | 0 | 80 |
-| `proposal reject` | 0 | 80 |
-| `proposal accept` | 0 | 90 |
-| `proposal supersede` | 0 | 80 |
-| `audit query` | 0 | 80 |
-| `service status` | 0 | 80 |
-| `service doctor` | 0 | 80 |
-| `service plan install` | 0 | 80 |
-| `service plan uninstall` | 0 | 80 |
-| `service definition write` | 0 | 80 |
-| `service operator status` | 0 | 80 |
-| `service operator pause` | 0 | 90 |
-| `service operator resume` | 0 | 90 |
+| `status` | 0 | 129 |
+| `health` | 0 | 134 |
+| `graph inspect` | 0 | 134 |
+| `ingest` | 0 | 145 |
+| `query relay-teams --freshness wait-until-fresh` | 0 | 129 |
+| `query relay-teams --freshness graph-only` | 0 | 131 |
+| `query relay-teams benchmark` | 0 | 129 |
+| `index refresh --kind bm25 --kind semantic --kind vector` | 0 | 131 |
+| `index refresh --kind bm25` | 0 | 143 |
+| `repo status` | 0 | 130 |
+| `repo report --format json` | 0 | 400 |
+| `repo report --format markdown` | 0 | 384 |
+| `repo scope preview --ref HEAD` | 0 | 167 |
+| `repo query --kind hybrid` | 0 | 156 |
+| `repo query --kind symbol` | 0 | 141 |
+| `repo query --kind definition` | 0 | 143 |
+| `repo query --kind references` | 0 | 130 |
+| `repo query --kind callers` | 0 | 138 |
+| `repo query --kind callees` | 0 | 141 |
+| `repo query --kind imports` | 0 | 144 |
+| `repo impact base..HEAD` | 0 | 521 |
+| `repo update main..HEAD after indexing HEAD` | 1 | 134 |
+| `provider probe` | 0 | 6 |
+| `worker status` | 0 | 134 |
+| `worker run-once --kind extractor` | 0 | 132 |
+| `worker run-once --kind ocr` | 0 | 127 |
+| `worker run-once --kind vision` | 0 | 134 |
+| `proposal list` | 0 | 89 |
+| `proposal show` | 0 | 90 |
+| `proposal reject` | 0 | 87 |
+| `proposal accept` | 0 | 104 |
+| `proposal supersede` | 0 | 84 |
+| `audit query` | 0 | 131 |
+| `service status` | 0 | 132 |
+| `service doctor` | 0 | 131 |
+| `service plan install` | 0 | 132 |
+| `service plan uninstall` | 0 | 126 |
+| `service definition write` | 0 | 126 |
+| `service operator status` | 0 | 134 |
+| `service operator pause` | 0 | 135 |
+| `service operator resume` | 0 | 132 |
 
 `repo update main..HEAD after indexing HEAD` 失败是有文档记录的
 当前已索引的范围必须与增量基准匹配的前提条件
@@ -166,7 +166,7 @@ uv run --extra dev pytest tests/browser
 Web 服务已启动，命令如下：
 
 ```bash
-RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-benchmark-20260514-144539/home \
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-refresh-20260514-224214/home \
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs,src,frontend,relay-teams-benchmark \
 target/release/relay-knowledge service run --web --mcp streamable-http
@@ -177,38 +177,38 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 | Web 场景 | HTTP | 毫秒 |
 | --- | ---: | ---: |
 | `GET /` | 200 | 0 |
-| `GET /api/health` | 200 | 5 |
-| `GET /api/project/status` | 200 | 1 |
-| `GET /api/service/status` | 200 | 1 |
+| `GET /api/health` | 200 | 6 |
+| `GET /api/project/status` | 200 | 0 |
+| `GET /api/service/status` | 200 | 0 |
 | `GET /mcp/metrics` | 200 | 7 |
-| `retrieve.context` | 200 | 2 |
-| `graph.ingest` | 200 | 9 |
-| `graph.inspect` | 200 | 5 |
-| `index.refresh` | 200 | 1 |
+| `retrieve.context` | 200 | 1 |
+| `graph.ingest` | 200 | 10 |
+| `graph.inspect` | 200 | 8 |
+| `index.refresh` | 200 | 2 |
 | `provider.embedding.probe` | 200 | 0 |
-| `worker.status` | 200 | 2 |
-| `worker.run-once` | 200 | 5 |
+| `worker.status` | 200 | 1 |
+| `worker.run-once` | 200 | 4 |
 | `proposal.list` | 200 | 1 |
-| `proposal.show` | 200 | 1 |
+| `proposal.show` | 200 | 0 |
 | `proposal.reject` | 200 | 2 |
-| `proposal.accept` | 200 | 10 |
+| `proposal.accept` | 200 | 12 |
 | `proposal.supersede` | 200 | 2 |
-| `audit.query` | 200 | 1 |
-| `code.repo.register` | 200 | 5 |
-| `code.repo.status` | 200 | 2 |
-| `code.repo.query` 混合查询 | 200 | 24 |
-| `code.repo.query` 符号查询 | 200 | 4 |
-| `code.repo.query` 定义查询 | 200 | 4 |
+| `audit.query` | 200 | 0 |
+| `code.repo.register` | 200 | 10 |
+| `code.repo.status` | 200 | 0 |
+| `code.repo.query` 混合查询 | 200 | 17 |
+| `code.repo.query` 符号查询 | 200 | 5 |
+| `code.repo.query` 定义查询 | 200 | 5 |
 | `code.repo.query` 引用查询 | 200 | 5 |
 | `code.repo.query` 调用方查询 | 200 | 4 |
-| `code.repo.query` 被调用方查询 | 200 | 8 |
-| `code.repo.query` 导入查询 | 200 | 6 |
-| `code.repo.impact` | 200 | 268 |
-| `code.repo.index` no-op | 200 | 170 |
-| `code.repo.update` HEAD..HEAD | 200 | 36 |
-| `code.repo.update` main..HEAD 在索引 HEAD 之后 | 400 | 3 |
-| `service.doctor` | 200 | 1 |
-| `service.run.streamable_http` | 200 | 1 |
+| `code.repo.query` 被调用方查询 | 200 | 5 |
+| `code.repo.query` 导入查询 | 200 | 9 |
+| `code.repo.impact` | 200 | 269 |
+| `code.repo.index` no-op | 200 | 162 |
+| `code.repo.update` HEAD..HEAD | 200 | 37 |
+| `code.repo.update` main..HEAD 在索引 HEAD 之后 | 400 | 4 |
+| `service.doctor` | 200 | 2 |
+| `service.run.streamable_http` | 200 | 2 |
 
 浏览器集成：
 
@@ -216,20 +216,20 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 uv run --extra dev pytest tests/browser
 ```
 
-结果：`1 passed in 1.80s`。
+结果：`1 passed in 2.04s`。
 
 Headless Chromium 对 `http://127.0.0.1:8791/` 的实时页面加载基准测试，
 5 个使用 `wait_until="networkidle"` 的示例：
 
-- 平均值：530.01ms
-- 中位数：530.71ms
-- 最小值：522.75ms
-- 最大值：536.51ms
-- 浏览器导航 `loadEventEnd`：12.1 毫秒到 17.8 毫秒
+- 平均值：528.36ms
+- 中位数：527.74ms
+- 最小值：521.41ms
+- 最大值：536.21ms
+- 浏览器导航 `loadEventEnd`：9.6 毫秒到 16.2 毫秒
 - 实时仪表盘显示了仓库代码总量，但未显示之前的数据
   代码图为空状态。
 
-## 本次基线发现的问题
+## 历史基线问题和本次复测状态
 
 1. 使用不同 alias 重新注册同一个仓库根目录会使先前 alias 失效。
 
@@ -255,8 +255,8 @@ Headless Chromium 对 `http://127.0.0.1:8791/` 的实时页面加载基准测试
 
 ## 相比上一基线已解决
 
-- 重复全量索引现在使用无操作快速路径：0.39 秒，blob 读取、解析和 SQLite 写入均为 0。
-- Web 无操作 `code.repo.index` 现在会在 170ms 内返回 HTTP 200，而不是 30 秒后超时。
+- 重复全量索引现在使用无操作快速路径：0.38 秒，blob 读取、解析和 SQLite 写入均为 0。
+- Web 无操作 `code.repo.index` 现在会在 162ms 内返回 HTTP 200，而不是 30 秒后超时。
 - 顶层 CLI GraphRAG 查询现在接受多词位置参数输入。
 - 默认 scope 不再包含大型 JSONL 数据集 dump 或 `uv.lock`；选中字节数从 32,888,900 降至 22,063,153。
 - 实时 Web 仪表盘在仓库索引后不再显示代码图为空。

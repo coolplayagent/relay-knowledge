@@ -49,12 +49,14 @@ Expected optimized behavior:
 - Same-ref no-op full index should report `changed_path_count=0`,
   `skipped_unchanged_count=indexed_file_count`, zero blob reads, zero parses,
   and zero SQLite writes.
-- Target: under 300ms for relay-teams no-op full index.
+- Target: under 300ms for relay-teams no-op full index. The latest
+  2026-05-14 re-test sample was 0.38s, which verifies the fast path with zero
+  blob reads, parses, and SQLite writes but misses the original latency target.
 
-Optimized result from `/tmp/relay-knowledge-relay-teams-benchmark-after-fts-20260514`:
+Latest optimized result from `/tmp/relay-knowledge-relay-teams-refresh-20260514-224214`:
 
-- No-op full index: 387ms.
-- `changed_path_count=0`, `skipped_unchanged_count=1658`.
+- No-op full index: 380ms.
+- `changed_path_count=0`, `skipped_unchanged_count=1653`.
 - `blob_read_count=0`, `parsed_file_count=0`, `sqlite_write_count=0`.
 
 ### Code hybrid query
@@ -87,10 +89,10 @@ Expected optimized behavior:
   common tokens.
 - Target: under 500ms for the relay-teams `project` hybrid query.
 
-Optimized result:
+Latest optimized result:
 
-- `repo query relay-teams --query project --kind hybrid --ref HEAD --limit 10`:
-  168ms.
+- `repo query relay-teams --query project --kind hybrid --ref HEAD`: 160ms
+  through CLI and 64ms through Web.
 
 ### Code impact analysis
 
@@ -121,9 +123,10 @@ Expected optimized behavior:
   full scope table sizes.
 - Target: under 500ms for the relay-teams base-to-HEAD impact case.
 
-Optimized result:
+Latest optimized result:
 
-- `repo impact` for `0a4e709...` to `fa3c0dd...`: 511ms.
+- `repo impact` for `0a4e709...` to `fa3c0dd...`: 521ms through CLI and
+  269ms through Web.
 
 ### Repository report
 
@@ -151,9 +154,9 @@ Expected optimized behavior:
 - Default report should be metadata-only and fast.
 - Target: under 300ms for relay-teams report generation.
 
-Optimized result:
+Latest optimized result:
 
-- `repo report relay-teams --format json`: 355ms.
+- `repo report relay-teams --format json`: 400ms.
 - `latency_samples=[]`.
 
 ### Web code indexing
@@ -181,10 +184,10 @@ Expected optimized behavior:
   before the HTTP timeout.
 - Cold full indexing remains a background-operation follow-up.
 
-Optimized result:
+Latest optimized result:
 
 - Web `code.repo.index` against the already fresh relay-teams scope returned
-  HTTP 200 in 401ms.
+  HTTP 200 in 162ms.
 
 ## Re-test Checklist
 
@@ -214,14 +217,14 @@ the performance issue as closed.
 
 | Case | Baseline | Optimized |
 | --- | ---: | ---: |
-| No-op `repo index` | 86.56s | 0.387s |
-| `repo query --kind hybrid` | 1.46s | 0.168s |
-| `repo impact` | 2.47s | 0.511s |
-| `repo report --format json` | 4.22s | 0.355s |
-| Web no-op `code.repo.index` | 30.015s / HTTP 408 | 0.401s / HTTP 200 |
-| Top-level multi-word `query` | exit 2 | 0.043s / exit 0 |
+| No-op `repo index` | 86.56s | 0.38s |
+| `repo query --kind hybrid` | 1.46s | 0.160s CLI / 0.064s Web |
+| `repo impact` | 2.47s | 0.521s CLI / 0.269s Web |
+| `repo report --format json` | 4.22s | 0.400s |
+| Web no-op `code.repo.index` | 30.015s / HTTP 408 | 0.162s / HTTP 200 |
+| Top-level multi-word `query` | exit 2 | 0.129s / exit 0 |
 
-Cold full index changed from 82.57s to 90.43s in this run because the optimized
-index now populates the code-repository FTS candidate table. This is an
-intentional tradeoff for query latency and should be revisited if cold indexing
-budget becomes the primary bottleneck.
+The latest cold full index sample was 47.45s with 360,504 KiB peak RSS. The
+index still populates the code-repository FTS candidate table as the query
+latency tradeoff; continue measuring the same external repository if cold
+indexing becomes the primary bottleneck.
