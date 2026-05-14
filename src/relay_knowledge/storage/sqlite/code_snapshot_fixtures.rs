@@ -53,6 +53,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_chunk_status(
     CodeIndexSnapshot {
         repository_id: repository_id.to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -92,6 +93,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_symbol_and_matching_chunk(
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -156,6 +158,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_degraded_files(
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -179,6 +182,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_language_edges() -> CodeIn
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -226,6 +230,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_resolved_reference() -> Co
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -275,6 +280,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_duplicate_callee_names() -
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -347,6 +353,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_out_of_scope_seed() -> Cod
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -390,6 +397,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_rust_symbol_importer() -> 
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -439,6 +447,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_rust_module_import
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -474,6 +483,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_go_module_importer
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -508,6 +518,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_unresolved_caller() -> Cod
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path_filters: Vec::new(),
@@ -564,6 +575,7 @@ pub(in crate::storage::sqlite::code) fn incremental_snapshot_for_parsed_file() -
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: Some("commit".to_owned()),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree-2".to_owned(),
         path_filters: Vec::new(),

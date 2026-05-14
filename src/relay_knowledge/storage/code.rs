@@ -40,6 +40,17 @@ pub trait CodeRepositoryStore: Send + Sync {
         repository_id: String,
     ) -> StorageFuture<'_, Vec<CodeFileFingerprint>>;
 
+    fn code_file_fingerprints_for_scope(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code file fingerprints for scope '{source_scope}' are unavailable"
+            )))
+        })
+    }
+
     fn apply_code_index_snapshot(
         &self,
         snapshot: CodeIndexSnapshot,

@@ -225,6 +225,12 @@ HEALTH_RESPONSE = {
         "reference_count": 88082,
         "chunk_count": 14296,
         "degraded_file_count": 0,
+        "parse_status_counts": {
+            "parsed": 738,
+            "partial": 0,
+            "text_only": 0,
+            "failed": 0,
+        },
     },
     "indexes": [
         {

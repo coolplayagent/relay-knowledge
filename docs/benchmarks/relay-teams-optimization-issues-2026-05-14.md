@@ -15,7 +15,7 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   reads, zero parses, zero SQLite writes, and completes under 300ms on
   relay-teams.
 - Tests: application service test for repeated full index on the same HEAD.
-- Status: implemented. Relay-teams optimized sample is 387ms with zero blob
+- Status: implemented and re-verified. Relay-teams optimized sample is 390ms with zero blob
   reads, parses, and SQLite writes.
 
 ## RK-PERF-002: Hybrid code query materializes too many candidates
@@ -28,7 +28,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 - Acceptance: relay-teams `project` hybrid query completes under 500ms without
   changing the response schema.
 - Tests: existing code query behavior tests must continue to pass.
-- Status: implemented. Relay-teams optimized sample is 168ms.
+- Status: implemented and re-verified. Relay-teams optimized samples are 100ms
+  through CLI and 24ms through Web for `_make_task_envelope`.
 
 ## RK-PERF-003: Impact analysis scans full scope tables
 
@@ -39,10 +40,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   into SQL.
 - Acceptance: relay-teams base-to-HEAD impact completes under 500ms.
 - Tests: existing impact behavior tests must continue to pass.
-- Status: implemented. Relay-teams optimized sample is 511ms, just above the
-  original target but far below the 2.47s baseline. Follow-up hardening batches
-  changed-path language lookups so impact planning no longer issues one SQLite
-  query per changed path before the pushed-down chunk/call/import queries.
+- Status: implemented and re-verified. Relay-teams optimized samples are 340ms
+  through CLI and 268ms through Web.
 
 ## RK-PERF-004: Repository report runs expensive latency samples by default
 
@@ -55,7 +54,7 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   returns an empty `latency_samples` list by default.
 - Tests: application service test that report keeps representative query names
   but omits latency samples.
-- Status: implemented. Relay-teams optimized sample is 355ms and returns
+- Status: implemented and re-verified. Relay-teams optimized sample is 260ms and returns
   `latency_samples=[]`.
 
 ## RK-PERF-005: Web code index times out
@@ -69,8 +68,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   HTTP 200 under 1s.
 - Follow-up: cold full indexing should become a queued/background operation with
   progress rather than a single request.
-- Status: implemented for no-op Web index. Relay-teams optimized sample is HTTP
-  200 in 401ms.
+- Status: implemented for no-op Web index and re-verified. Relay-teams optimized
+  sample is HTTP 200 in 170ms.
 
 ## RK-PERF-006: Top-level GraphRAG CLI query rejected multi-word input
 
@@ -81,7 +80,8 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
 - Acceptance: `relay-knowledge query relay-teams benchmark --source docs`
   parses as query text `relay-teams benchmark`.
 - Tests: CLI parser unit test for multi-word query text.
-- Status: implemented. Relay-teams optimized sample exits 0 in 43ms.
+- Status: implemented and re-verified. Relay-teams optimized sample exits 0 in
+  80ms.
 
 ## RK-PERF-007: Default scope includes large unknown files
 
@@ -95,4 +95,53 @@ Source benchmark: [relay-teams baseline](relay-teams-baseline-2026-05-14.md)
   unsupported, large/heavy, or degraded counts unless explicitly selected.
 - Tests: scope selection and preview tests cover `.jsonl`, `uv.lock`, and
   explicit opt-in.
-- Status: implemented.
+- Status: implemented and re-verified. Relay-teams selected bytes dropped from
+  32,888,900 to 22,063,153, and the large JSONL dataset dumps plus `uv.lock`
+  were absent from the largest selected files list.
+
+## RK-PERF-008: Re-registering an existing repository root replaces the alias
+
+- Baseline: during Web benchmarking, registering `/opt/workspace/relay-teams`
+  as `relay-teams-web` preserved the existing repository id and indexed totals
+  but made the previous `relay-teams` alias unavailable.
+- Impact: users can accidentally invalidate existing CLI/Web commands that use
+  the old alias while trying to add a second alias for the same root.
+- Fix: add a `code_repository_aliases` table, backfill legacy aliases, resolve
+  repository status through either repository id or any stored alias, and reject
+  alias collisions across different repository ids.
+- Acceptance: duplicate-root registration behavior is explicit in CLI/Web
+  output and user docs, with tests covering old-alias behavior.
+- Status: implemented. Application regression coverage verifies that registering
+  the same Git root as `fixture-web` preserves the original `fixture` alias and
+  resolves both aliases to the same repository id.
+
+## RK-PERF-009: Incremental update precondition is easy to hit from Web/CLI defaults
+
+- Baseline: `repo update relay-teams --base main --head HEAD` returned exit 1
+  after the repository was indexed at HEAD; the equivalent Web operation
+  returned HTTP 400 in 3ms. A separate runtime that first indexed the base commit
+  completed `main -> HEAD` update in 7.36s.
+- Fix: incremental snapshots now carry their resolved base commit, storage
+  clones the matching persisted base scope instead of the active repository
+  status, and the service reads previous file fingerprints from that base scope.
+- Acceptance: Web composer, CLI help, and docs state the required sequence, or
+  update can compute from persisted base snapshots when available.
+- Status: implemented. Application regression coverage indexes a base commit,
+  indexes a different active HEAD, then successfully updates from the persisted
+  base scope.
+
+## RK-PERF-010: Health graph-code counters could appear empty while repository totals were populated
+
+- Baseline: `/api/health` reported `graph.code_file_count=0` while
+  `repository_code_totals.indexed_file_count=1653`.
+- Impact: API consumers that only read the graph counters could incorrectly
+  conclude that code indexing had not run.
+- Fix: service-level `health` and `graph inspect` responses now include
+  repository code totals in the graph code counters while preserving
+  `repository_code_totals` as the repository-specific breakdown. Repository
+  totals also include parse-status counts so the combined graph counters stay
+  internally consistent.
+- Acceptance: after repository indexing, `health.graph.code_file_count` is at
+  least `repository_code_totals.indexed_file_count`, and parse-status counts
+  include repository files.
+- Status: implemented with application regression coverage.

@@ -17,6 +17,10 @@ path = "src/relay_knowledge/lib.rs"
 name = "relay-knowledge"
 path = "src/relay_knowledge/main.rs"
 
+[[test]]
+name = "benchmarks"
+path = "tests/benchmarks/main.rs"
+
 [dependencies]
 axum = "0.8.9"
 futures-util = "0.3"

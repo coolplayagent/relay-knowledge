@@ -63,17 +63,13 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        validate_index_mode_against_status(&status, &request.mode).await?;
         if let Some(response) = self
             .fresh_full_index_response(&store, &status, &request, &context)
             .await?
         {
             return Ok(response);
         }
-        let previous = store
-            .code_file_fingerprints(status.repository_id.clone())
-            .await
-            .map_err(storage_api_error)?;
+        let previous = previous_fingerprints_for_index(&store, &status, &request).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
         let mode = request.mode;
@@ -416,28 +412,59 @@ fn registration_from_status(
     }
 }
 
-async fn validate_index_mode_against_status(
+async fn previous_fingerprints_for_index(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     status: &CodeRepositoryStatus,
-    mode: &CodeIndexMode,
-) -> Result<(), ApiError> {
-    let CodeIndexMode::Incremental { base_ref, .. } = mode else {
-        return Ok(());
+    request: &CodeIndexRequest,
+) -> Result<Vec<crate::domain::CodeFileFingerprint>, ApiError> {
+    let CodeIndexMode::Incremental { base_ref, .. } = &request.mode else {
+        return store
+            .code_file_fingerprints(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error);
     };
-    let indexed_commit = status.last_indexed_commit.as_deref().ok_or_else(|| {
-        ApiError::invalid_argument(format!(
-            "code repository '{}' must be fully indexed before incremental indexing",
-            status.alias
-        ))
-    })?;
     let base_commit = resolve_code_ref(status, base_ref.clone()).await?;
-    if base_commit != indexed_commit {
+    let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
+    let language_filters = merged_filters(
+        &status.language_filters,
+        &request.repository.language_filters,
+    );
+    let base_scope = store
+        .code_repository_scope_status(
+            request.repository.repository.clone(),
+            base_commit.clone(),
+            path_filters,
+            language_filters,
+        )
+        .await
+        .map_err(storage_api_error)?
+        .ok_or_else(|| {
+            ApiError::invalid_argument(format!(
+                "incremental base ref '{}' resolves to {}, but code repository '{}' has no matching indexed base scope; run repo index --ref {} before repo update",
+                base_ref, base_commit, status.alias, base_ref
+            ))
+        })?;
+    if base_scope.stale {
         return Err(ApiError::invalid_argument(format!(
-            "incremental base ref '{}' resolves to {}, but code repository '{}' is indexed at {}",
-            base_ref, base_commit, status.alias, indexed_commit
+            "incremental base ref '{}' resolves to a stale indexed scope {}; refresh or reindex the base before repo update",
+            base_ref,
+            base_scope
+                .last_indexed_scope_id
+                .as_deref()
+                .unwrap_or("unscoped")
         )));
     }
+    let source_scope = base_scope.last_indexed_scope_id.ok_or_else(|| {
+        ApiError::invalid_argument(format!(
+            "incremental base ref '{}' has no persisted source scope",
+            base_ref
+        ))
+    })?;
 
-    Ok(())
+    store
+        .code_file_fingerprints_for_scope(source_scope)
+        .await
+        .map_err(storage_api_error)
 }
 
 async fn retrieval_request_at_indexed_ref(

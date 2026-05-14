@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::{CodeParseStatus, DomainError, FreshnessPolicy, error::required_text};
+use super::{
+    CodeParseStatus, CodeParseStatusCounts, DomainError, FreshnessPolicy, error::required_text,
+};
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
@@ -404,6 +406,8 @@ pub struct CodePathTombstone {
 pub struct CodeIndexSnapshot {
     pub repository_id: String,
     pub source_scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_resolved_commit_sha: Option<String>,
     pub resolved_commit_sha: String,
     pub tree_hash: String,
     pub path_filters: Vec<String>,
@@ -500,6 +504,7 @@ pub struct CodeRepositoryTotals {
     pub reference_count: usize,
     pub chunk_count: usize,
     pub degraded_file_count: usize,
+    pub parse_status_counts: CodeParseStatusCounts,
 }
 
 /// Representative query latency captured for an operations report.

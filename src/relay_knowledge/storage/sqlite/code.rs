@@ -23,9 +23,9 @@ mod code_metadata_tests;
 use crate::{
     domain::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexProgressSummary, CodeIndexSnapshot,
-        CodeIndexSummary, CodeRepositoryLatencySample, CodeRepositoryRegistration,
-        CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-        CodeRetrievalRequest,
+        CodeIndexSummary, CodeParseStatus, CodeParseStatusCounts, CodeRepositoryLatencySample,
+        CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -75,6 +75,13 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository_id: String,
     ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
         self.run(move |connection| file_fingerprints(connection, &repository_id))
+    }
+
+    fn code_file_fingerprints_for_scope(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
+        self.run(move |connection| file_fingerprints_for_scope(connection, &source_scope))
     }
 
     fn apply_code_index_snapshot(
@@ -127,6 +134,29 @@ fn file_fingerprints(
         ",
     )?;
     let rows = statement.query_map(params![repository_id], |row| {
+        Ok(CodeFileFingerprint {
+            path: row.get(0)?,
+            blob_hash: row.get(1)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn file_fingerprints_for_scope(
+    connection: &mut Connection,
+    source_scope: &str,
+) -> Result<Vec<CodeFileFingerprint>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT path, blob_hash
+        FROM code_repository_files
+        WHERE source_scope = ?1
+        ORDER BY path ASC
+        ",
+    )?;
+    let rows = statement.query_map(params![source_scope], |row| {
         Ok(CodeFileFingerprint {
             path: row.get(0)?,
             blob_hash: row.get(1)?,
@@ -329,21 +359,27 @@ fn clone_active_scope_for_incremental(
         SELECT source_scope, path_filters_json, language_filters_json
         FROM code_repository_scopes
         WHERE repository_id = ?1
-          AND resolved_commit_sha = (
-              SELECT last_indexed_commit
-              FROM code_repositories
-              WHERE repository_id = ?1
-          )
+          AND resolved_commit_sha = ?4
         ORDER BY
           CASE WHEN path_filters_json = ?2 AND language_filters_json = ?3 THEN 0 ELSE 1 END,
           rowid DESC
         ",
     )?;
+    let base_commit = snapshot
+        .base_resolved_commit_sha
+        .as_deref()
+        .ok_or_else(|| {
+            StorageError::InvalidInput(format!(
+                "code repository '{}' incremental snapshot is missing its resolved base commit",
+                snapshot.repository_id
+            ))
+        })?;
     let rows = statement.query_map(
         params![
             snapshot.repository_id,
             path_filters_json,
-            language_filters_json
+            language_filters_json,
+            base_commit
         ],
         |row| {
             Ok((
@@ -493,7 +529,40 @@ fn repository_totals(connection: &mut Connection) -> Result<CodeRepositoryTotals
         reference_count: count_all_rows(connection, "code_repository_references")?,
         chunk_count: count_all_rows(connection, "code_repository_chunks")?,
         degraded_file_count: count_all_rows(connection, "code_repository_file_diagnostics")?,
+        parse_status_counts: repository_parse_status_counts(connection)?,
     })
+}
+
+fn repository_parse_status_counts(
+    connection: &Connection,
+) -> Result<CodeParseStatusCounts, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT parse_status, COUNT(*)
+        FROM code_repository_files
+        GROUP BY parse_status
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+    })?;
+    let mut counts = CodeParseStatusCounts::default();
+    for row in rows {
+        let (status, count) = row?;
+        match status.as_str() {
+            value if value == CodeParseStatus::Parsed.as_str() => counts.parsed = count,
+            value if value == CodeParseStatus::Partial.as_str() => counts.partial = count,
+            value if value == CodeParseStatus::TextOnly.as_str() => counts.text_only = count,
+            value if value == CodeParseStatus::Failed.as_str() => counts.failed = count,
+            other => {
+                return Err(StorageError::InvalidInput(format!(
+                    "unknown code repository parse status '{other}'"
+                )));
+            }
+        }
+    }
+
+    Ok(counts)
 }
 
 fn repository_report(
