@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -158,7 +158,12 @@ fn chunks_for_paths(
     paths: &BTreeSet<String>,
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let path_values = paths.iter().cloned().collect::<Vec<_>>();
+    let path_clause = placeholders(path_values.len());
+    let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
@@ -170,10 +175,14 @@ fn chunks_for_paths(
             ON symbol.source_scope = c.source_scope
            AND symbol.symbol_snapshot_id = c.symbol_snapshot_id
         WHERE c.source_scope = ?1
+          AND c.path IN ({path_clause})
         ORDER BY c.path ASC, c.line_start ASC
         ",
-    )?;
-    let rows = statement.query_map(params![required_scope(status)?], |row| {
+    );
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(path_values.into_iter().map(Value::Text));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
         Ok(ImpactChunkRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -199,7 +208,6 @@ fn chunks_for_paths(
 
     Ok(rows
         .into_iter()
-        .filter(|row| paths.contains(&row.path))
         .filter(|row| selected_impact_row(&row.path, &row.language_id, status, request))
         .map(|row| {
             hit_from_parts(
@@ -234,7 +242,26 @@ fn callers_for_symbols(
     deleted_symbol_names: &[String],
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    if symbol_ids.is_empty() && deleted_symbol_names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    let mut filters = Vec::new();
+    if !symbol_ids.is_empty() {
+        filters.push(format!(
+            "c.callee_symbol_snapshot_id IN ({})",
+            placeholders(symbol_ids.len())
+        ));
+        values.extend(symbol_ids.iter().cloned().map(Value::Text));
+    }
+    if !deleted_symbol_names.is_empty() {
+        filters.push(format!(
+            "(c.callee_symbol_snapshot_id IS NULL AND c.callee_name IN ({}))",
+            placeholders(deleted_symbol_names.len())
+        ));
+        values.extend(deleted_symbol_names.iter().cloned().map(Value::Text));
+    }
+    let sql = format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
@@ -247,10 +274,13 @@ fn callers_for_symbols(
             ON caller.source_scope = c.source_scope
            AND caller.symbol_snapshot_id = c.caller_symbol_snapshot_id
         WHERE c.source_scope = ?1
+          AND ({})
         ORDER BY c.path ASC, c.line_start ASC
         ",
-    )?;
-    let rows = statement.query_map(params![required_scope(status)?], |row| {
+        filters.join(" OR ")
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
         Ok(ImpactCallRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -319,7 +349,19 @@ fn importers_for_modules(
     modules: &[String],
     request: &CodeImpactRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let mut statement = connection.prepare(
+    if modules.is_empty() {
+        return Ok(Vec::new());
+    }
+    let module_patterns = modules
+        .iter()
+        .map(|module| format!("%{module}%"))
+        .collect::<Vec<_>>();
+    let module_clause = module_patterns
+        .iter()
+        .map(|_| "i.module LIKE ?")
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
@@ -327,10 +369,14 @@ fn importers_for_modules(
         INNER JOIN code_repository_files f
             ON f.source_scope = i.source_scope AND f.path = i.path
         WHERE i.source_scope = ?1
+          AND ({module_clause})
         ORDER BY i.path ASC, i.line_start ASC
         ",
-    )?;
-    let rows = statement.query_map(params![required_scope(status)?], |row| {
+    );
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(module_patterns.into_iter().map(Value::Text));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
         Ok(ImpactImportRow {
             file_id: row.get(0)?,
             path: row.get(1)?,
@@ -534,6 +580,12 @@ fn insert_non_empty(values: &mut BTreeSet<String>, value: String) {
     if !value.is_empty() {
         values.insert(value.to_owned());
     }
+}
+
+fn placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 struct ImpactSymbolSeeds {

@@ -207,6 +207,22 @@ fn apply_snapshot(
                 symbol.line_range.end,
             ],
         )?;
+        insert_search_document(
+            &transaction,
+            &symbol.source_scope,
+            "symbol",
+            &symbol.symbol_snapshot_id,
+            &symbol.path,
+            &symbol.language_id,
+            [
+                symbol.name.as_str(),
+                symbol.qualified_name.as_str(),
+                symbol.kind.as_str(),
+                symbol.signature.as_str(),
+                symbol.doc_comment.as_deref().unwrap_or_default(),
+                symbol.path.as_str(),
+            ],
+        )?;
     }
     for reference in &snapshot.references {
         transaction.execute(
@@ -236,6 +252,20 @@ fn apply_snapshot(
                 reference.byte_range.end,
                 reference.line_range.start,
                 reference.line_range.end,
+            ],
+        )?;
+        insert_search_document(
+            &transaction,
+            &reference.source_scope,
+            "reference",
+            &reference.reference_id,
+            &reference.path,
+            "",
+            [
+                reference.name.as_str(),
+                reference.kind.as_str(),
+                reference.target_hint.as_deref().unwrap_or_default(),
+                reference.path.as_str(),
             ],
         )?;
     }
@@ -391,6 +421,47 @@ fn clone_active_scope_for_incremental(
         "repository_id, source_scope, path, parse_status, message",
         &previous_scope,
         &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_search",
+        "source_scope, document_kind, record_id, path, language_id, content",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+
+    Ok(())
+}
+
+fn insert_search_document<'a>(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    document_kind: &str,
+    record_id: &str,
+    path: &str,
+    language_id: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), StorageError> {
+    let content = fields
+        .into_iter()
+        .filter(|field| !field.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    transaction.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ",
+        params![
+            source_scope,
+            document_kind,
+            record_id,
+            path,
+            language_id,
+            content
+        ],
     )?;
 
     Ok(())
@@ -605,6 +676,19 @@ fn insert_imports_calls_chunks_diagnostics(
                 import.line_range.end,
             ],
         )?;
+        insert_search_document(
+            transaction,
+            &import.source_scope,
+            "import",
+            &import.import_id,
+            &import.path,
+            "",
+            [
+                import.module.as_str(),
+                import.target_hint.as_deref().unwrap_or_default(),
+                import.path.as_str(),
+            ],
+        )?;
     }
     for call in &snapshot.calls {
         transaction.execute(
@@ -634,6 +718,20 @@ fn insert_imports_calls_chunks_diagnostics(
                 call.line_range.end,
             ],
         )?;
+        insert_search_document(
+            transaction,
+            &call.source_scope,
+            "call",
+            &call.call_id,
+            &call.path,
+            "",
+            [
+                call.caller_name.as_deref().unwrap_or_default(),
+                call.callee_name.as_str(),
+                call.target_hint.as_deref().unwrap_or_default(),
+                call.path.as_str(),
+            ],
+        )?;
     }
     for chunk in &snapshot.chunks {
         transaction.execute(
@@ -657,6 +755,19 @@ fn insert_imports_calls_chunks_diagnostics(
                 chunk.line_range.start,
                 chunk.line_range.end,
                 chunk.symbol_snapshot_id,
+            ],
+        )?;
+        insert_search_document(
+            transaction,
+            &chunk.source_scope,
+            "chunk",
+            &chunk.chunk_id,
+            &chunk.path,
+            &chunk.language_id,
+            [
+                chunk.content.as_str(),
+                chunk.symbol_snapshot_id.as_deref().unwrap_or_default(),
+                chunk.path.as_str(),
             ],
         )?;
     }
@@ -807,6 +918,7 @@ fn delete_scope_index(
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
+        "code_repository_search",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE source_scope = ?1"),
@@ -830,6 +942,7 @@ fn delete_path_index(
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
+        "code_repository_search",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE source_scope = ?1 AND path = ?2"),

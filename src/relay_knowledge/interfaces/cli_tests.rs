@@ -63,6 +63,30 @@ fn parses_query_action_with_options() {
 }
 
 #[test]
+fn parses_multi_word_query_action_with_options() {
+    let command = CliCommand::parse([
+        "query",
+        "relay-teams",
+        "benchmark",
+        "--source",
+        "docs",
+        "--limit",
+        "3",
+    ])
+    .expect("multi-word query command should parse");
+
+    assert_eq!(
+        command.action,
+        CliAction::Query {
+            query: "relay-teams benchmark".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            limit: 3,
+            freshness: FreshnessPolicy::AllowStale,
+        }
+    );
+}
+
+#[test]
 fn parses_dash_prefixed_query_after_delimiter() {
     let command = CliCommand::parse(["query", "--source", "docs", "--", "--help"])
         .expect("dash-prefixed query should parse after delimiter");

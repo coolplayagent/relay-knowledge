@@ -174,6 +174,15 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE VIRTUAL TABLE IF NOT EXISTS code_repository_search USING fts5(
+            source_scope UNINDEXED,
+            document_kind UNINDEXED,
+            record_id UNINDEXED,
+            path UNINDEXED,
+            language_id UNINDEXED,
+            content
+        );
+
         CREATE TABLE IF NOT EXISTS code_repository_schema_migrations (
             name TEXT PRIMARY KEY
         );
@@ -193,6 +202,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
         ",
     )?;
     ensure_code_repository_compat_columns(connection)?;
+    backfill_code_repository_search(connection)?;
 
     Ok(())
 }
@@ -447,6 +457,167 @@ fn symbol_container_kind(kind: &str) -> bool {
     )
 }
 
+fn backfill_code_repository_search(connection: &Connection) -> Result<(), StorageError> {
+    if !code_repository_search_is_empty(connection)? {
+        return Ok(());
+    }
+    backfill_search_symbols(connection)?;
+    backfill_search_references(connection)?;
+    backfill_search_imports(connection)?;
+    backfill_search_calls(connection)?;
+    backfill_search_chunks(connection)?;
+
+    Ok(())
+}
+
+fn code_repository_search_is_empty(connection: &Connection) -> Result<bool, StorageError> {
+    connection
+        .query_row("SELECT COUNT(*) FROM code_repository_search", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|count| count == 0)
+        .map_err(StorageError::from)
+}
+
+fn backfill_search_symbols(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_symbols",
+        &[
+            "source_scope",
+            "symbol_snapshot_id",
+            "path",
+            "language_id",
+            "name",
+            "qualified_name",
+            "kind",
+            "signature",
+            "doc_comment",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'symbol', symbol_snapshot_id, path, language_id,
+               name || ' ' || qualified_name || ' ' || kind || ' ' || signature || ' ' ||
+               coalesce(doc_comment, '')
+        FROM code_repository_symbols
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_references(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_references",
+        &[
+            "source_scope",
+            "reference_id",
+            "path",
+            "name",
+            "kind",
+            "target_hint",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'reference', reference_id, path, '',
+               name || ' ' || kind || ' ' || coalesce(target_hint, '')
+        FROM code_repository_references
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_imports(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_imports",
+        &["source_scope", "import_id", "path", "module", "target_hint"],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'import', import_id, path, '',
+               module || ' ' || coalesce(target_hint, '')
+        FROM code_repository_imports
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_calls",
+        &[
+            "source_scope",
+            "call_id",
+            "path",
+            "caller_name",
+            "callee_name",
+            "target_hint",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'call', call_id, path, '',
+               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '')
+        FROM code_repository_calls
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_chunks(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_chunks",
+        &["source_scope", "chunk_id", "path", "language_id", "content"],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'chunk', chunk_id, path, language_id, content
+        FROM code_repository_chunks
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
 fn migrate_legacy_code_scope_schema(connection: &Connection) -> Result<(), StorageError> {
     if !table_exists(connection, "code_repositories")? {
         return Ok(());
@@ -528,6 +699,18 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, St
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn table_has_columns(
+    connection: &Connection,
+    table: &str,
+    required_columns: &[&str],
+) -> Result<bool, StorageError> {
+    let columns = table_columns(connection, table)?;
+
+    Ok(required_columns
+        .iter()
+        .all(|required| columns.iter().any(|column| column == required)))
 }
 
 fn add_column_if_missing(

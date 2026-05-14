@@ -8,9 +8,9 @@ use std::{
     error::Error,
     fmt, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 
+mod git;
 mod identity;
 mod languages;
 mod parser;
@@ -25,6 +25,10 @@ use crate::domain::{
     RepositoryCodeSymbolRecord, code_snapshot_scope_id,
 };
 
+use git::{
+    git_bytes, git_object_exists, git_optional, resolve_git_root, resolve_ref, resolve_tree,
+    validate_git_ref_arg,
+};
 use parser::parse_indexed_file;
 use scope::{
     load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
@@ -205,6 +209,18 @@ pub fn resolve_repository_ref(
     let root = resolve_git_root(root_path.as_ref())?;
 
     resolve_ref(&root, ref_selector)
+}
+
+/// Resolves a repository ref selector to the exact commit and tree hash.
+pub fn resolve_repository_snapshot(
+    root_path: impl AsRef<Path>,
+    ref_selector: &str,
+) -> Result<(String, String), CodeIndexError> {
+    let root = resolve_git_root(root_path.as_ref())?;
+    let commit = resolve_ref(&root, ref_selector)?;
+    let tree_hash = resolve_tree(&root, &commit)?;
+
+    Ok((commit, tree_hash))
 }
 
 fn build_full_snapshot(
@@ -754,35 +770,6 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     merged
 }
 
-fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()?;
-    if !output.status.success() {
-        return Err(CodeIndexError::Git {
-            args: vec!["rev-parse".to_owned(), "--show-toplevel".to_owned()],
-            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    let root = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-
-    Ok(PathBuf::from(root))
-}
-
-fn resolve_ref(root: &Path, ref_selector: &str) -> Result<String, CodeIndexError> {
-    validate_git_ref_arg("ref_selector", ref_selector)?;
-    git_text(
-        root,
-        ["rev-parse", "--verify", "--end-of-options", ref_selector],
-    )
-}
-
-fn resolve_tree(root: &Path, commit: &str) -> Result<String, CodeIndexError> {
-    git_text(root, ["rev-parse", &format!("{commit}^{{tree}}")])
-}
-
 fn tracked_paths(root: &Path, commit: &str) -> Result<Vec<String>, CodeIndexError> {
     let bytes = git_bytes(root, ["ls-tree", "-r", "-z", "--name-only", commit])?;
 
@@ -811,66 +798,6 @@ fn diff_changes(
     )?;
 
     parse_name_status_z(&bytes)
-}
-
-fn validate_git_ref_arg(field: &'static str, value: &str) -> Result<(), CodeIndexError> {
-    if value.starts_with('-') {
-        return Err(CodeIndexError::InvalidInput(format!(
-            "{field} must not start with '-'"
-        )));
-    }
-
-    Ok(())
-}
-
-fn git_text<const N: usize>(root: &Path, args: [&str; N]) -> Result<String, CodeIndexError> {
-    let bytes = git_bytes(root, args)?;
-
-    Ok(String::from_utf8_lossy(&bytes).trim().to_owned())
-}
-
-fn git_optional<const N: usize>(
-    root: &Path,
-    args: [&str; N],
-) -> Result<Option<String>, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    Ok(Some(
-        String::from_utf8_lossy(&output.stdout).trim().to_owned(),
-    ))
-}
-
-fn git_bytes<const N: usize>(root: &Path, args: [&str; N]) -> Result<Vec<u8>, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()?;
-    if output.status.success() {
-        return Ok(output.stdout);
-    }
-
-    Err(CodeIndexError::Git {
-        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
-        message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-    })
-}
-
-fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["cat-file", "-e", object])
-        .output()?;
-
-    Ok(output.status.success())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
