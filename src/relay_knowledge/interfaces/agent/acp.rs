@@ -376,6 +376,11 @@ impl LocalAcpSessionAdapter {
             error_kind: input.error_kind.map(str::to_owned),
         };
         self.audit.record(event.clone());
+        if input.qos_decision == AgentAuditQosDecision::Rejected {
+            self.metrics
+                .record_rejection("acp", input.error_kind.unwrap_or("qos_rejected"));
+            return;
+        }
         let status_label = match event.status {
             AgentAuditStatus::Completed => "completed",
             AgentAuditStatus::Failed => "failed",
@@ -388,10 +393,6 @@ impl LocalAcpSessionAdapter {
             input.elapsed_ms,
             input.truncated,
         );
-        if input.qos_decision == AgentAuditQosDecision::Rejected {
-            self.metrics
-                .record_rejection("acp", input.error_kind.unwrap_or("qos_rejected"));
-        }
         if event.status == AgentAuditStatus::Cancelled {
             self.metrics.record_cancelled("acp");
         }

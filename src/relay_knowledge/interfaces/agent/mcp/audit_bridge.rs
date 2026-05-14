@@ -9,7 +9,7 @@ use crate::{
 
 use super::{AgentAuditEvent, McpServer, request_id_key};
 
-pub(super) async fn record_mcp_qos_rejection(
+pub(super) fn record_mcp_qos_rejection(
     server: &McpServer,
     operation: &str,
     id: &Value,
@@ -34,7 +34,10 @@ pub(super) async fn record_mcp_qos_rejection(
         error_kind: Some(error_kind.to_owned()),
     };
     server.audit.record(event.clone());
-    persist_agent_audit(server, &event, 0).await;
+    let service = server.service.clone();
+    tokio::spawn(async move {
+        persist_agent_audit_with_service(service, &event, 0).await;
+    });
 }
 
 pub(super) async fn record_mcp_tool_audit(
@@ -88,14 +91,21 @@ pub(super) async fn record_mcp_tool_audit(
 }
 
 async fn persist_agent_audit(server: &McpServer, event: &AgentAuditEvent, graph_version: u64) {
+    persist_agent_audit_with_service(server.service.clone(), event, graph_version).await;
+}
+
+async fn persist_agent_audit_with_service(
+    service: crate::application::RelayKnowledgeService,
+    event: &AgentAuditEvent,
+    graph_version: u64,
+) {
     let detail_json = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_owned());
     let status = match event.status {
         AgentAuditStatus::Completed => AuditStatus::Completed,
         AgentAuditStatus::Failed => AuditStatus::Failed,
         AgentAuditStatus::Cancelled => AuditStatus::Cancelled,
     };
-    let _ = server
-        .service
+    let _ = service
         .record_agent_audit(AgentDurableAuditInput {
             operation: event.operation.clone(),
             interface: "mcp".to_owned(),
@@ -148,6 +158,18 @@ pub(super) async fn record_mcp_method_audit(server: &McpServer, input: McpMethod
         error_kind: input.error_kind.map(str::to_owned),
     };
     server.audit.record(event.clone());
+    let status_label = match event.status {
+        AgentAuditStatus::Completed => "completed",
+        AgentAuditStatus::Failed => "failed",
+        AgentAuditStatus::Cancelled => "cancelled",
+    };
+    server.metrics.record_request(
+        "mcp",
+        input.operation,
+        status_label,
+        input.elapsed_ms,
+        false,
+    );
     persist_agent_audit(server, &event, 0).await;
 }
 

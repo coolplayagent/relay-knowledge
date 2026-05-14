@@ -437,7 +437,7 @@ async fn handle_mcp_post(
         Err(reason) => {
             let error =
                 AgentAdapterError::new(AgentAdapterErrorKind::QosRejected, qos_message(reason));
-            record_mcp_qos_rejection(&server, method, &id, error.kind.as_str()).await;
+            record_mcp_qos_rejection(&server, method, &id, error.kind.as_str());
             server.metrics.record_rejection("mcp", error.kind.as_str());
             return if method == "tools/call" {
                 json_rpc_success(id, tool_error_result(error))
@@ -447,6 +447,7 @@ async fn handle_mcp_post(
         }
     };
 
+    let started = Instant::now();
     let mut pending_tool_audit = None;
     let result = match method {
         "ping" => json!({}),
@@ -493,6 +494,10 @@ async fn handle_mcp_post(
     drop(permit);
     if let Some((operation, request_id, result, duration_ms)) = pending_tool_audit {
         record_mcp_tool_audit(&server, &operation, &request_id, &result, duration_ms).await;
+    } else if !matches!(method, "resources/read" | "prompts/get") {
+        server
+            .metrics
+            .record_request("mcp", method, "completed", elapsed_millis(started), false);
     }
     json_rpc_success(id, result)
 }

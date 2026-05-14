@@ -199,7 +199,7 @@ async fn local_acp_prompt_reports_policy_qos_timeout_and_service_errors() {
         "invalid_scope"
     );
 
-    let (blocked, _service) = adapter_and_service([
+    let (blocked, blocked_service) = adapter_and_service([
         ("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs"),
         ("RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS", "1"),
     ])
@@ -233,6 +233,9 @@ async fn local_acp_prompt_reports_policy_qos_timeout_and_service_errors() {
         rejected.error.as_ref().expect("error").error_kind,
         "qos_rejected"
     );
+    let blocked_metrics = blocked_service.observability().status().agent_protocol;
+    assert_eq!(blocked_metrics.requests_total, 0);
+    assert_eq!(blocked_metrics.rejections_total, 1);
 
     let (timeout_adapter, _service) = adapter_and_service_with_store(
         [

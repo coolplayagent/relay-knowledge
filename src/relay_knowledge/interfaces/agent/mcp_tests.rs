@@ -716,6 +716,16 @@ async fn method_level_reads_are_recorded_in_durable_audit() {
         server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
 
+    let tools = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "tools-list-metrics",
+            "method": "tools/list",
+            "params": {}
+        }),
+    )
+    .await;
     let resource = call_mcp(
         &mut router,
         json!({
@@ -740,6 +750,7 @@ async fn method_level_reads_are_recorded_in_durable_audit() {
     )
     .await;
 
+    assert!(tools["result"]["tools"].as_array().expect("tools").len() > 1);
     assert!(resource["result"]["contents"][0]["text"].is_string());
     assert_eq!(response["result"]["description"], "Retrieve Graph Context");
 
@@ -787,6 +798,10 @@ async fn method_level_reads_are_recorded_in_durable_audit() {
     assert_eq!(event.operation, "prompts/get");
     assert_eq!(event.status, crate::domain::AuditStatus::Completed);
     assert!(event.request_id.ends_with("|string:prompt-audit"));
+
+    let metrics = service.observability().status().agent_protocol;
+    assert_eq!(metrics.requests_total, 3);
+    assert_eq!(metrics.rejections_total, 0);
 }
 
 #[test]
