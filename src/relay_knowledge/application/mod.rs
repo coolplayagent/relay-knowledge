@@ -9,6 +9,7 @@ mod operations;
 mod runtime;
 mod service;
 mod status;
+mod worker_proposals;
 
 pub use runtime::{
     AgentRuntimeConfig, RetrievalRuntimeConfigError, RuntimeConfiguration,

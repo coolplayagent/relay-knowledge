@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::{
     domain::{
         AuditEventRecord, AuditStatus, GraphVersion, ProposalConflictRecord,
-        ProposalConflictSeverity, ProposalKind, ProposalRecord, ProposalState,
+        ProposalConflictSeverity, ProposalKind, ProposalProvenance, ProposalRecord, ProposalState,
         ServiceOperatorState, ServiceOperatorStatus, WorkerBackendState, WorkerKind, WorkerStatus,
         WorkerTaskRecord, WorkerTaskState,
     },
@@ -50,6 +50,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             summary TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             origin TEXT NOT NULL,
+            provenance_json TEXT NOT NULL DEFAULT '{}',
             confidence_basis_points INTEGER NOT NULL,
             decided_by TEXT,
             decision_reason TEXT,
@@ -107,6 +108,30 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         ) VALUES (1, 'disabled', 0, '[]', 0);
         ",
     )?;
+    ensure_text_column(connection, "proposals", "provenance_json", "'{}'")?;
+
+    Ok(())
+}
+
+fn ensure_text_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    default_sql: &str,
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let exists = columns
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if exists {
+        return Ok(());
+    }
+
+    connection.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT {default_sql}"
+    ))?;
 
     Ok(())
 }
@@ -299,12 +324,17 @@ pub(super) fn insert_proposal(
     connection: &Connection,
     proposal: NewProposal,
 ) -> Result<ProposalRecord, StorageError> {
+    let provenance_json = proposal
+        .provenance
+        .validate()
+        .map_err(|error| StorageError::InvalidInput(error.to_string()))?
+        .to_json();
     connection.execute(
         "
         INSERT OR IGNORE INTO proposals (
             proposal_id, source_scope, kind, state, title, summary, payload_json,
-            origin, confidence_basis_points, created_at_ms, updated_at_ms
-        ) VALUES (?1, ?2, ?3, 'proposed', ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            origin, provenance_json, confidence_basis_points, created_at_ms, updated_at_ms
+        ) VALUES (?1, ?2, ?3, 'proposed', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
         ",
         params![
             proposal.proposal_id,
@@ -314,6 +344,7 @@ pub(super) fn insert_proposal(
             proposal.summary,
             proposal.payload_json,
             proposal.origin,
+            provenance_json,
             proposal.confidence_basis_points,
             proposal.now_ms,
         ],
@@ -333,7 +364,11 @@ pub(super) fn list_proposals(
     if let Some(state) = request.state {
         let mut statement = connection.prepare(
             "
-            SELECT p.*, COUNT(c.conflict_id) AS conflict_count
+            SELECT p.proposal_id, p.source_scope, p.kind, p.state, p.title, p.summary,
+                   p.payload_json, p.origin, p.provenance_json,
+                   p.confidence_basis_points, p.decided_by, p.decision_reason,
+                   p.created_at_ms, p.updated_at_ms,
+                   COUNT(c.conflict_id) AS conflict_count
             FROM proposals p
             LEFT JOIN proposal_conflicts c ON c.proposal_id = p.proposal_id
             WHERE p.state = ?1
@@ -348,7 +383,11 @@ pub(super) fn list_proposals(
 
     let mut statement = connection.prepare(
         "
-        SELECT p.*, COUNT(c.conflict_id) AS conflict_count
+        SELECT p.proposal_id, p.source_scope, p.kind, p.state, p.title, p.summary,
+               p.payload_json, p.origin, p.provenance_json,
+               p.confidence_basis_points, p.decided_by, p.decision_reason,
+               p.created_at_ms, p.updated_at_ms,
+               COUNT(c.conflict_id) AS conflict_count
         FROM proposals p
         LEFT JOIN proposal_conflicts c ON c.proposal_id = p.proposal_id
         GROUP BY p.proposal_id
@@ -367,7 +406,11 @@ pub(super) fn proposal_by_id(
     connection
         .query_row(
             "
-            SELECT p.*, COUNT(c.conflict_id) AS conflict_count
+            SELECT p.proposal_id, p.source_scope, p.kind, p.state, p.title, p.summary,
+                   p.payload_json, p.origin, p.provenance_json,
+                   p.confidence_basis_points, p.decided_by, p.decision_reason,
+                   p.created_at_ms, p.updated_at_ms,
+                   COUNT(c.conflict_id) AS conflict_count
             FROM proposals p
             LEFT JOIN proposal_conflicts c ON c.proposal_id = p.proposal_id
             WHERE p.proposal_id = ?1
@@ -706,12 +749,13 @@ fn proposal_from_row(row: &Row<'_>) -> rusqlite::Result<ProposalRecord> {
         summary: row.get(5)?,
         payload_json: row.get(6)?,
         origin: row.get(7)?,
-        confidence_basis_points: row.get(8)?,
-        decided_by: row.get(9)?,
-        decision_reason: row.get(10)?,
-        created_at_ms: row.get(11)?,
-        updated_at_ms: row.get(12)?,
-        conflict_count: row.get(13)?,
+        provenance: ProposalProvenance::from_json(&row.get::<_, String>(8)?).unwrap_or_default(),
+        confidence_basis_points: row.get(9)?,
+        decided_by: row.get(10)?,
+        decision_reason: row.get(11)?,
+        created_at_ms: row.get(12)?,
+        updated_at_ms: row.get(13)?,
+        conflict_count: row.get(14)?,
     })
 }
 

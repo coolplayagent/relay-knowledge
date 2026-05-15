@@ -256,6 +256,7 @@ pub struct ProposalRecord {
     pub summary: String,
     pub payload_json: String,
     pub origin: String,
+    pub provenance: ProposalProvenance,
     pub confidence_basis_points: u16,
     pub conflict_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -270,6 +271,89 @@ impl ProposalRecord {
     /// Returns proposal payload as JSON for API consumers that need typed preview.
     pub fn payload_value(&self) -> serde_json::Value {
         serde_json::from_str(&self.payload_json).unwrap_or(serde_json::Value::Null)
+    }
+}
+
+/// Auditable model, prompt, and source lineage for a stored proposal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposalProvenance {
+    pub producer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_fact_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_when: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budget_notes: Vec<String>,
+}
+
+impl Default for ProposalProvenance {
+    fn default() -> Self {
+        Self::new("unspecified")
+    }
+}
+
+impl ProposalProvenance {
+    /// Creates a minimal provenance record for deterministic or manual proposal producers.
+    pub fn new(producer: impl Into<String>) -> Self {
+        Self {
+            producer: producer.into(),
+            provider: None,
+            model: None,
+            prompt_id: None,
+            prompt_version: None,
+            schema_version: None,
+            input_source_hash: None,
+            input_fact_ids: Vec::new(),
+            stale_when: Vec::new(),
+            budget_notes: Vec::new(),
+        }
+    }
+
+    /// Parses stored JSON while preserving legacy rows that predate provenance metadata.
+    pub fn from_json(value: &str) -> Result<Self, DomainError> {
+        if value.trim().is_empty() || value.trim() == "{}" {
+            return Ok(Self::default());
+        }
+
+        serde_json::from_str::<Self>(value)
+            .map_err(|_| DomainError::invalid("proposal_provenance", "must be valid JSON"))?
+            .validate()
+    }
+
+    /// Serializes provenance metadata for storage.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
+    }
+
+    /// Normalizes and validates stable provenance fields.
+    pub fn validate(mut self) -> Result<Self, DomainError> {
+        self.producer = required_text("proposal_producer", self.producer)?;
+        self.provider = normalize_optional_text("proposal_provider", self.provider)?;
+        self.model = normalize_optional_text("proposal_model", self.model)?;
+        self.prompt_id = normalize_optional_text("proposal_prompt_id", self.prompt_id)?;
+        self.prompt_version =
+            normalize_optional_text("proposal_prompt_version", self.prompt_version)?;
+        self.schema_version =
+            normalize_optional_text("proposal_schema_version", self.schema_version)?;
+        self.input_source_hash =
+            normalize_optional_text("proposal_input_source_hash", self.input_source_hash)?;
+        self.input_fact_ids = normalize_text_list("proposal_input_fact_id", self.input_fact_ids)?;
+        self.stale_when = normalize_text_list("proposal_stale_condition", self.stale_when)?;
+        self.budget_notes = normalize_text_list("proposal_budget_note", self.budget_notes)?;
+
+        Ok(self)
     }
 }
 
@@ -441,6 +525,28 @@ pub fn normalize_actor(value: impl Into<String>) -> Result<String, DomainError> 
     required_text("actor", value)
 }
 
+fn normalize_optional_text(
+    field: &'static str,
+    value: Option<String>,
+) -> Result<Option<String>, DomainError> {
+    value.map(|inner| required_text(field, inner)).transpose()
+}
+
+fn normalize_text_list(
+    field: &'static str,
+    values: Vec<String>,
+) -> Result<Vec<String>, DomainError> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let value = required_text(field, value)?;
+        if !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+
+    Ok(normalized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,6 +665,7 @@ mod tests {
             summary: "summary".to_owned(),
             payload_json: "{".to_owned(),
             origin: "test".to_owned(),
+            provenance: ProposalProvenance::new("test"),
             confidence_basis_points: 1,
             conflict_count: 0,
             decided_by: None,
@@ -568,5 +675,44 @@ mod tests {
         };
 
         assert!(proposal.payload_value().is_null());
+    }
+
+    #[test]
+    fn proposal_provenance_normalizes_and_validates_lineage() {
+        let provenance = ProposalProvenance {
+            producer: " llm_spo_extraction ".to_owned(),
+            provider: Some(" openai-compatible ".to_owned()),
+            model: Some(" graph-extractor ".to_owned()),
+            prompt_id: Some(" relay.extract.spo ".to_owned()),
+            prompt_version: Some(" 1 ".to_owned()),
+            schema_version: Some(" worker-proposal.v2 ".to_owned()),
+            input_source_hash: Some(" sha256:source ".to_owned()),
+            input_fact_ids: vec![" ev-1 ".to_owned(), "ev-1".to_owned()],
+            stale_when: vec![" graph_version_advances ".to_owned()],
+            budget_notes: vec![" timeout_ms=30000 ".to_owned()],
+        }
+        .validate()
+        .expect("provenance should validate");
+
+        assert_eq!(provenance.producer, "llm_spo_extraction");
+        assert_eq!(provenance.input_fact_ids, ["ev-1"]);
+        assert_eq!(
+            ProposalProvenance::from_json(&provenance.to_json())
+                .expect("stored provenance should parse"),
+            provenance
+        );
+        assert_eq!(
+            ProposalProvenance::from_json("{}")
+                .expect("legacy provenance should default")
+                .producer,
+            "unspecified"
+        );
+        assert_eq!(
+            ProposalProvenance::new(" ")
+                .validate()
+                .expect_err("empty producer should fail")
+                .field,
+            "proposal_producer"
+        );
     }
 }

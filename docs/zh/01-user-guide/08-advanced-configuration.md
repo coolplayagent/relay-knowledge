@@ -162,7 +162,21 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
 RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 ```
 
-未设置 worker endpoint 时，`worker run-once` 使用 deterministic fallback 生成 proposal。开启 audit sink 后，agent audit JSONL 写入 `paths` 管理的 log 目录；队列深度在运行时 capped 到 65536，队列满时持久镜像可以丢弃事件，内存 audit log 仍保留最近事件。
+未设置 worker endpoint 时，`worker run-once` 使用 deterministic fallback 生成
+proposal。设置 `RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT` 后，foreground
+worker 会通过 `net::http` 按全局 request timeout 发送 `contract_version=2`
+的 JSON 请求；请求携带 manual-review policy、timeout/lease/max-attempts/
+max-in-flight 预算，以及 provenance 要求。外部 extractor 返回的
+`ingest_request` 会继续走 proposal 存储，不会直接提交 graph mutation；
+其中 relation、claim 和 event 即使声明为 `accepted`，也会在 proposal
+payload 中被降为 `proposed`，避免模型抽取或关系推断绕过事实审批。
+
+Worker 返回值可以附带 `provenance` 对象，字段包括 `producer`、`provider`、
+`model`、`prompt_id`、`prompt_version`、`schema_version`、`input_source_hash`、
+`input_fact_ids`、`stale_when` 和 `budget_notes`。这些 metadata 会随 proposal
+持久化，供 CLI/Web/API 审核和 audit 查询使用。开启 audit sink 后，agent audit
+JSONL 写入 `paths` 管理的 log 目录；队列深度在运行时 capped 到 65536，队列满时
+持久镜像可以丢弃事件，内存 audit log 仍保留最近事件。
 
 ## 8.8 Setup 接口
 

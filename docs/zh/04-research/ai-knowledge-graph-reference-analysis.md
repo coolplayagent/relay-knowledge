@@ -151,6 +151,28 @@
 5. 为 extraction/standardization/inference 三类 worker 统一 provider timeout、QoS、rate limit、retry、dead-letter、cursor 和 prompt version metadata。
 6. 在 GraphRAG evaluation fixture 中增加 entity merge、false merge、transitive-rule whitelist、inferred-edge rejection 和 degraded JSON response 场景。
 
+### 2026-05-15 选择性吸收进展
+
+本轮只吸收与现有 worker/proposal 主路径兼容的部分，不改变普通 `ingest`
+直接提交 accepted facts 的能力，也不引入新的脚本式抽取入口:
+
+- 已为 proposal 增加持久化 provenance，记录 producer、provider、model、
+  prompt id/version、schema version、input source hash、input fact ids、stale
+  条件和预算说明。
+- `worker run-once` 调用外部 endpoint 时使用 `contract_version=2` 请求，
+  明确 manual-review policy、HTTP timeout、lease、max attempts 和
+  max-in-flight 预算。
+- 外部 extractor 返回的结构化 relation/claim/event 会保留在 proposal
+  payload 中，但默认降为 `proposed`，防止 LLM SPO 抽取或关系推断直接写入
+  accepted facts。
+- deterministic fallback proposal、OCR/vision/embedding 已有能力保持可用；
+  本轮没有移除多模态派生 evidence、worker 队列、人工 accept/reject/supersede、
+  audit sink、索引刷新和现有 GraphRAG 检索能力。
+
+尚未吸收的内容继续保留为后续工作: entity merge 的可逆审计、transitive rule
+白名单、community/centrality read model、完整 provider rate-limit/cursor 以及更大规模
+GraphRAG evaluation fixture。
+
 ## 8. 不应直接照搬的内容
 
 - 不直接复制 Python 代码、prompt 文本、HTML 模板或 PyVis 输出。
@@ -169,4 +191,4 @@
 - Background service/self-healing: 增加 extraction/standardization/inference worker 的 lease、retry 和 dead-letter 要求。
 - Advanced observability: 增加 prompt version、model、provider latency、schema validation failure 和 degraded proposal 指标。
 
-截至本文档提交，仓库只固化分析结论，不包含任何实现变更。
+截至 2026-05-15，本分析已开始被选择性吸收到 worker/proposal 主路径；未完成项仍需按对应架构规格拆分实现。
