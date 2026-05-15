@@ -9,6 +9,7 @@ import { graphCanvasSection } from "./graph_canvas.js";
 import { operationsSection } from "./operations_panel.js";
 import { providersSection } from "./providers.js";
 import { homeQueryEntry, type HomeQueryCallbacks } from "./home_query.js";
+import { settingsSection } from "./settings.js";
 import { maxIndexLag } from "./operations.js";
 import { currentTheme, initializeTheme, toggleTheme } from "./theme.js";
 import { element, icon, sectionShell, statusPill, textElement, type Tone } from "./ui.js";
@@ -19,7 +20,15 @@ type Diagnostics = {
   service: ServiceStatusResponse | null;
 };
 
-type PageId = "status" | "readiness" | "graph" | "providers" | "operations" | "indexes" | "runtime";
+type PageId =
+  | "status"
+  | "readiness"
+  | "graph"
+  | "providers"
+  | "operations"
+  | "indexes"
+  | "runtime"
+  | "settings";
 
 type PageLink = {
   id: PageId;
@@ -52,7 +61,8 @@ const PAGES: PageLink[] = [
   { id: "providers", label: "Providers" },
   { id: "operations", label: "Operations" },
   { id: "indexes", label: "Indexes" },
-  { id: "runtime", label: "Runtime" }
+  { id: "runtime", label: "Runtime" },
+  { id: "settings", label: "Settings" }
 ];
 
 let currentDiagnostics: Diagnostics | null = null;
@@ -189,6 +199,14 @@ function pageContent(
       return indexesSection(health.indexes, health.metadata.graph_version);
     case "runtime":
       return runtimeSection(status, service);
+    case "settings":
+      return settingsSection(status, health, service, {
+        rerender: rerenderFromState,
+        setDiagnostics: (diagnostics) => {
+          currentDiagnostics = diagnostics;
+        },
+        errorMessage
+      });
   }
 }
 

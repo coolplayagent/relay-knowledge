@@ -70,8 +70,9 @@ relay-knowledge service doctor
   resources/prompts, durable audit metadata, and OTLP-ready agent metrics.
 - Real OTLP HTTP/protobuf traces and metrics export for resident service mode,
   with local diagnostics when Collector export fails.
-- Static Web diagnostics and operation composers served by the Rust HTTP
-  service on the same local port as `/api/*` and MCP when enabled.
+- Static Web diagnostics, agent/model settings, and operation composers served
+  by the Rust HTTP service on the same local port as `/api/*` and MCP when
+  enabled.
 - Setup diagnostics and named setup profiles for local, read-only agent,
   platform service, and external embedding configurations.
 
@@ -201,6 +202,13 @@ read-model backends are excluded from semantic/vector retrieval execution and
 refresh scheduling; blank embedding model names fail during runtime
 configuration.
 
+The Web Settings page reads the same redacted runtime and service diagnostics to
+prepare MCP exposure, scope policy, audit, and external model environment
+variables, including the configured MCP origin allow-list. It generates shell
+configuration and service commands for the user to apply through the normal
+environment or service manager path; it does not write persistent config files
+or return stored secret values to the browser.
+
 The CLI ingest command writes evidence plus entity labels. The shared API also
 accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source
 `span`, confidence, lifecycle status, typed relations, claims, and events that
@@ -268,9 +276,8 @@ counts, a compact SVG graph overview for evidence/code/index/worker topology,
 the interactive Graph canvas, scoped index freshness, refresh queue diagnostics,
 stale reasons, runtime budgets, and interactive operation composers for
 retrieval, ingestion, graph inspection, code repository workflows, index refresh,
-provider probes,
-worker/proposal/audit operations, and service runtime commands. The same Rust
-HTTP service serves static Web assets plus
+provider probes, worker/proposal/audit operations, service runtime commands, and
+agent/model settings. The same Rust HTTP service serves static Web assets plus
 `/api/project/status`, `/api/health`, `/api/service/status`, and
 `/api/web/operations/execute` on one local port. The execute endpoint accepts
 the current composer snapshot, calls the shared application service, and returns

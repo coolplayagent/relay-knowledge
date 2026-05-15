@@ -79,6 +79,7 @@ pub(super) fn agent_protocol_status(runtime: &RuntimeConfiguration) -> AgentProt
         metrics_endpoint: endpoint_child(&runtime.agent.mcp_endpoint, "metrics"),
         http_bind: network.http.bind_address.to_string(),
         allowed_origin_count: runtime.agent.mcp_allowed_origins.len(),
+        mcp_allowed_origins: runtime.agent.mcp_allowed_origins.clone(),
         policy: runtime.agent.access_policy.summary(),
         audit_sink_enabled: runtime.agent.audit_sink_enabled,
         audit_log_path: path_string(&runtime.paths.agent_audit_log_file()),
