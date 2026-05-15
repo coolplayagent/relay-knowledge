@@ -7,15 +7,22 @@ pub(in crate::code) fn resolve_reference_targets(
     references: &mut [RepositoryCodeReferenceRecord],
 ) {
     let mut by_name = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
+    let mut by_name_and_path = BTreeMap::<(&str, &str), Vec<&RepositoryCodeSymbolRecord>>::new();
     for symbol in symbols {
         by_name.entry(&symbol.name).or_default().push(symbol);
+        by_name_and_path
+            .entry((symbol.name.as_str(), symbol.path.as_str()))
+            .or_default()
+            .push(symbol);
     }
     for reference in references {
         reference.target_hint = Some(reference.name.clone());
         match resolve_reference_target(
-            reference,
             by_name
                 .get(reference.name.as_str())
+                .map(std::vec::Vec::as_slice),
+            by_name_and_path
+                .get(&(reference.name.as_str(), reference.path.as_str()))
                 .map(std::vec::Vec::as_slice),
         ) {
             Resolution::Resolved(symbol) => {
@@ -47,8 +54,8 @@ enum Resolution<'a> {
 }
 
 fn resolve_reference_target<'a>(
-    reference: &RepositoryCodeReferenceRecord,
     candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+    same_path_candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
 ) -> Resolution<'a> {
     let Some(candidates) = candidates else {
         return Resolution::Unresolved;
@@ -57,16 +64,20 @@ fn resolve_reference_target<'a>(
         return Resolution::Resolved(candidates[0]);
     }
 
-    let same_path = candidates
-        .iter()
-        .copied()
-        .filter(|symbol| symbol.path == reference.path)
-        .collect::<Vec<_>>();
-    if same_path.len() == 1 {
-        return Resolution::Resolved(same_path[0]);
+    if let Some(same_path) = same_path_candidates.and_then(unique_candidate) {
+        return Resolution::Resolved(same_path);
     }
 
     Resolution::Ambiguous
+}
+
+fn unique_candidate<'a>(
+    candidates: &[&'a RepositoryCodeSymbolRecord],
+) -> Option<&'a RepositoryCodeSymbolRecord> {
+    match candidates {
+        [candidate] => Some(*candidate),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

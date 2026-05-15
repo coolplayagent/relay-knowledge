@@ -83,6 +83,17 @@ relay-knowledge service doctor
 ./check.sh
 ```
 
+面向代码检索优化实验的独立自迭代循环可以直接启动：
+
+```bash
+./self-iterate.sh
+./self-iterate.sh once
+./self-iterate.sh chart
+```
+
+运行历史、报告、patch 和评分曲线保存在
+`.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。
+
 底层质量门禁：
 
 ```bash
