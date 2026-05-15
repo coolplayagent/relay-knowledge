@@ -2,6 +2,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use relay_knowledge::{
+    PROJECT_NAME,
     env::{
         ALL_PROXY, ALL_PROXY_LOWER, HTTP_PROXY, HTTP_PROXY_LOWER, HTTPS_PROXY, HTTPS_PROXY_LOWER,
         NO_PROXY, NO_PROXY_LOWER, RELAY_KNOWLEDGE_CACHE_DIR, RELAY_KNOWLEDGE_CONFIG_DIR,
@@ -229,6 +230,44 @@ fn binary_outputs_machine_readable_help() {
                     .iter()
                     .any(|value| value == "definition"))
     );
+}
+
+#[test]
+fn binary_help_metadata_uses_canonical_cli_name() {
+    let root = relay_command()
+        .args(["help", "--format", "json"])
+        .output()
+        .expect("binary should run");
+    let repo = relay_command()
+        .args(["help", "repo", "--format", "json"])
+        .output()
+        .expect("binary should run");
+    let repo_query = relay_command()
+        .args(["help", "repo", "query", "--format", "json"])
+        .output()
+        .expect("binary should run");
+
+    assert!(root.status.success());
+    assert!(repo.status.success());
+    assert!(repo_query.status.success());
+
+    let root_json: Value = serde_json::from_slice(&root.stdout).expect("root help JSON");
+    let repo_json: Value = serde_json::from_slice(&repo.stdout).expect("repo help JSON");
+    let repo_query_json: Value =
+        serde_json::from_slice(&repo_query.stdout).expect("repo query help JSON");
+
+    assert_eq!(root_json["binary"], PROJECT_NAME);
+    assert_eq!(repo_json["binary"], PROJECT_NAME);
+    assert_eq!(repo_query_json["binary"], PROJECT_NAME);
+    assert_eq!(repo_json["kind"], "namespace");
+
+    for command in root_json["commands"].as_array().expect("root commands") {
+        assert_command_metadata_uses_project_name(command);
+    }
+    for command in repo_json["commands"].as_array().expect("repo commands") {
+        assert_command_metadata_uses_project_name(command);
+    }
+    assert_command_metadata_uses_project_name(&repo_query_json);
 }
 
 #[test]
@@ -463,6 +502,34 @@ fn binary_rejects_flag_style_actions_and_extra_command_words() {
 }
 
 #[test]
+fn binary_diagnostics_use_canonical_cli_name() {
+    let typo = relay_command()
+        .args(["repo", "qurey", "core", "--query", "rust"])
+        .output()
+        .expect("binary should run");
+    let json = relay_command()
+        .args(["--format", "json", "query", "--query", "SQLite"])
+        .output()
+        .expect("binary should run");
+
+    assert_eq!(typo.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&typo.stderr);
+    assert!(stderr.contains("did you mean 'repo query'"));
+    assert!(stderr.contains(&format!("Try: {PROJECT_NAME} repo query")));
+    assert!(stderr.contains(&format!("Usage: {PROJECT_NAME} repo <subcommand>")));
+
+    assert_eq!(json.status.code(), Some(2));
+    let value: Value = serde_json::from_slice(&json.stderr).expect("diagnostic JSON");
+    assert_eq!(value["suggestion"], format!("{PROJECT_NAME} query SQLite"));
+    assert_eq!(
+        value["usage"],
+        format!(
+            "{PROJECT_NAME} query <text> [--source <scope>] [--limit <n>] [--freshness <policy>]"
+        )
+    );
+}
+
+#[test]
 fn binary_outputs_json_parse_diagnostic_on_json_format_errors() {
     let output = relay_command()
         .args(["--format", "json", "query", "--query", "SQLite"])
@@ -476,7 +543,59 @@ fn binary_outputs_json_parse_diagnostic_on_json_format_errors() {
 
     assert_eq!(value["matched_path"], serde_json::json!(["query"]));
     assert_eq!(value["unexpected_token"], "--query");
-    assert_eq!(value["suggestion"], "relay-knowledge query SQLite");
+    assert_eq!(value["suggestion"], format!("{PROJECT_NAME} query SQLite"));
+}
+
+fn assert_command_metadata_uses_project_name(command: &Value) {
+    let path = command["path"]
+        .as_array()
+        .expect("path should be an array")
+        .iter()
+        .map(|segment| {
+            segment
+                .as_str()
+                .expect("path segment should be a string")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    let usage = command["usage"].as_str().expect("usage should exist");
+
+    assert_usage_invokes_path(usage, &path);
+
+    for example in command["examples"]
+        .as_array()
+        .expect("examples should be an array")
+    {
+        assert_invocation_uses_project_name(example.as_str().expect("example should be a string"));
+    }
+}
+
+fn assert_usage_invokes_path(usage: &str, path: &[String]) {
+    assert_invocation_uses_project_name(usage);
+
+    let tokens = usage.split_whitespace().collect::<Vec<_>>();
+    assert_eq!(tokens.first().copied(), Some(PROJECT_NAME));
+
+    for (index, segment) in path.iter().enumerate() {
+        let usage_segment = tokens
+            .get(index + 1)
+            .unwrap_or_else(|| panic!("usage is missing path segment '{segment}': {usage}"));
+        assert!(
+            usage_segment
+                .split('|')
+                .any(|candidate| candidate == segment.as_str()),
+            "usage segment '{usage_segment}' should include path segment '{segment}' in {usage}"
+        );
+    }
+}
+
+fn assert_invocation_uses_project_name(invocation: &str) {
+    assert!(
+        invocation
+            .split_whitespace()
+            .any(|token| token == PROJECT_NAME),
+        "invocation should include canonical CLI name '{PROJECT_NAME}': {invocation}"
+    );
 }
 
 fn relay_command() -> Command {
