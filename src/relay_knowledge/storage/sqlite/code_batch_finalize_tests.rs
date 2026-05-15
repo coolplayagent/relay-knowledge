@@ -179,6 +179,87 @@ async fn checkpointed_batches_finalize_python_import_edges() {
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
 }
 
+#[tokio::test]
+async fn checkpointed_batches_finalize_relative_python_import_edges() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:python-relative-imports";
+    let session = session_for_scope(source_scope, 2);
+    let model_file = file(
+        source_scope,
+        "model-file",
+        "src/relay_teams/connector/w3_models.py",
+        "python",
+        CodeParseStatus::Parsed,
+    );
+    let service_file = file(
+        source_scope,
+        "service-file",
+        "src/relay_teams/connector/service.py",
+        "python",
+        CodeParseStatus::Parsed,
+    );
+    let request_symbol = symbol(
+        source_scope,
+        "request-symbol",
+        "model-file",
+        "src/relay_teams/connector/w3_models.py",
+        "W3ConnectorSaveRequest",
+        "python",
+    );
+    let service_import = import(
+        source_scope,
+        "service-import",
+        "service-file",
+        "src/relay_teams/connector/service.py",
+        "from .w3_models import W3ConnectorSaveRequest",
+    );
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![model_file],
+            symbols: vec![request_symbol],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("model batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![service_file],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![service_import],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("service batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "W3ConnectorSaveRequest", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/relay_teams/connector/service.py");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+}
+
 async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store

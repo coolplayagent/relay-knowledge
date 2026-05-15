@@ -471,15 +471,16 @@ fn resolve_python_import(
         let Some((module, names)) = body.split_once(" import ") else {
             return ImportResolution::Unresolved;
         };
-        let Some(module_path) = absolute_python_module_path(module.trim()) else {
+        let module_paths = python_module_path_candidates(import_path, module.trim());
+        if module_paths.is_empty() {
             return ImportResolution::Unresolved;
-        };
+        }
         let imported_names = parse_python_imported_names(names);
         return combined_python_import_resolution(
             imported_names.iter().map(|name| {
                 resolve_python_imported_name(
                     name,
-                    &module_path,
+                    module_paths.as_slice(),
                     indexed_module_paths,
                     symbols_by_name,
                 )
@@ -510,11 +511,14 @@ fn resolve_python_import(
 
 fn resolve_python_imported_name(
     name: &str,
-    module_path: &str,
+    module_paths: &[String],
     indexed_module_paths: &BTreeMap<String, Vec<String>>,
     symbols_by_name: &BTreeMap<String, Vec<SymbolKey>>,
 ) -> ImportResolution {
-    let symbol_paths = python_module_files(module_path);
+    let symbol_paths = module_paths
+        .iter()
+        .flat_map(|module_path| python_module_files(module_path))
+        .collect::<Vec<_>>();
     let matching_symbols = symbols_by_name.get(name).map_or(0, |symbols| {
         symbols
             .iter()
@@ -529,7 +533,10 @@ fn resolve_python_imported_name(
     match matching_symbols {
         1 => ImportResolution::Resolved(name.to_owned()),
         2.. => ImportResolution::Ambiguous,
-        0 if python_module_exists(&format!("{module_path}/{name}"), indexed_module_paths) => {
+        0 if module_paths.iter().any(|module_path| {
+            python_module_exists(&format!("{module_path}/{name}"), indexed_module_paths)
+        }) =>
+        {
             ImportResolution::Resolved(name.to_owned())
         }
         _ => ImportResolution::Unresolved,
@@ -584,6 +591,50 @@ fn python_module_files(module_path: &str) -> Vec<String> {
 fn absolute_python_module_path(module: &str) -> Option<String> {
     let module = module.trim();
     (!module.is_empty() && !module.starts_with('.')).then(|| module.replace('.', "/"))
+}
+
+fn python_module_path_candidates(import_path: &str, module: &str) -> Vec<String> {
+    let module = module.trim();
+    if module.is_empty() {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
+    if module.starts_with('.') {
+        if let Some(relative) = relative_python_module_path(import_path, module) {
+            candidates.push(relative);
+        }
+    } else if let Some(absolute) = absolute_python_module_path(module) {
+        candidates.push(absolute);
+    }
+    candidates.sort();
+    candidates.dedup();
+
+    candidates
+}
+
+fn relative_python_module_path(import_path: &str, module: &str) -> Option<String> {
+    let dot_count = module
+        .chars()
+        .take_while(|character| *character == '.')
+        .count();
+    let remainder = module[dot_count..].replace('.', "/");
+    let mut package = parent_dir(strip_source_root(import_path))
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let drop_count = dot_count.saturating_sub(1);
+    if drop_count > package.len() {
+        return None;
+    }
+    for _ in 0..drop_count {
+        package.pop();
+    }
+    let base = package.join("/");
+    if remainder.is_empty() {
+        return (!base.is_empty()).then_some(base);
+    }
+
+    normalize_join(&base, &remainder)
 }
 
 fn parse_python_imported_names(names: &str) -> Vec<String> {
