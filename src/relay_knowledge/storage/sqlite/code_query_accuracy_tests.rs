@@ -191,6 +191,37 @@ async fn exact_identifier_matches_rank_before_substring_matches() {
 }
 
 #[tokio::test]
+async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
+    let store = store_with_repository_snapshot(snapshot_with_resolved_callee_tie()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "cma_debugfs_init",
+                selector,
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("callee query should succeed");
+
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.excerpt.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "cma_debugfs_init calls cma_debugfs_add_one",
+            "cma_debugfs_init calls debugfs_create_dir",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn parsed_hits_do_not_inherit_repository_degraded_reason() {
     let mut snapshot = snapshot_with_degraded_files(1);
     snapshot.files.push(file(
@@ -365,6 +396,57 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics,
+    }
+}
+
+fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
+    let mut ambiguous = call("ambiguous-callee", "cma-source", "mm/cma_debug.c");
+    ambiguous.caller_name = Some("cma_debugfs_init".to_owned());
+    ambiguous.callee_name = "debugfs_create_dir".to_owned();
+    ambiguous.target_hint = Some("debugfs_create_dir".to_owned());
+    ambiguous.line_range = range(205, 205);
+
+    let mut resolved = call("resolved-callee", "cma-source", "mm/cma_debug.c");
+    resolved.caller_name = Some("cma_debugfs_init".to_owned());
+    resolved.callee_symbol_snapshot_id = Some("cma-debugfs-add-one".to_owned());
+    resolved.callee_name = "cma_debugfs_add_one".to_owned();
+    resolved.target_hint = Some("cma_debugfs_add_one".to_owned());
+    resolved.resolution_state = "resolved".to_owned();
+    resolved.confidence_basis_points = 8_000;
+    resolved.confidence_tier = "inferred".to_owned();
+    resolved.line_range = range(208, 208);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "cma-source",
+            "mm/cma_debug.c",
+            "c",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: vec![symbol(
+            "cma-debugfs-add-one",
+            "cma-source",
+            "mm/cma_debug.c",
+            "cma_debugfs_add_one",
+        )],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![ambiguous, resolved],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
     }
 }
 

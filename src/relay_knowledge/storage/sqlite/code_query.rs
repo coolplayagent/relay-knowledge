@@ -372,7 +372,9 @@ fn search_calls(
                         canonical_symbol_id,
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::CallGraph],
-                        score: score + 1.25,
+                        score: score
+                            + 1.25
+                            + call_edge_confidence_bonus(row.confidence_basis_points),
                         excerpt: format!("{caller} calls {}", row.callee_name),
                         degraded_reason: None,
                         edge_kind: Some("call".to_owned()),
@@ -832,6 +834,10 @@ fn symbol_kind_bonus(kind: &str, request: &CodeRetrievalRequest) -> f64 {
         "function_declaration" => 0.0,
         _ => 0.1,
     }
+}
+
+fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
+    f64::from(confidence_basis_points) / 10_000.0
 }
 
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
