@@ -177,6 +177,28 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_index_checkpoints (
+            source_scope TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            resolved_commit_sha TEXT NOT NULL,
+            tree_hash TEXT NOT NULL,
+            path_filters_json TEXT NOT NULL,
+            language_filters_json TEXT NOT NULL,
+            total_path_count INTEGER NOT NULL,
+            parsed_file_count INTEGER NOT NULL,
+            committed_file_count INTEGER NOT NULL,
+            committed_symbol_count INTEGER NOT NULL,
+            committed_reference_count INTEGER NOT NULL,
+            committed_chunk_count INTEGER NOT NULL,
+            batch_count INTEGER NOT NULL,
+            last_path TEXT,
+            resource_budget_json TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            error_message TEXT,
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS code_repository_search USING fts5(
             source_scope UNINDEXED,
             document_kind UNINDEXED,

@@ -15,6 +15,9 @@ mod code_schema;
 #[path = "code_status.rs"]
 mod code_status;
 
+#[path = "code_batch.rs"]
+mod code_batch;
+
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
@@ -29,8 +32,9 @@ mod code_metadata_tests;
 
 use crate::{
     domain::{
-        CodeFileFingerprint, CodeImpactRequest, CodeIndexProgressSummary, CodeIndexSnapshot,
-        CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
+        CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint,
+        CodeIndexProgressSummary, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+        CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
         CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
@@ -95,6 +99,27 @@ impl CodeRepositoryStore for SqliteGraphStore {
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary> {
         self.run(move |connection| apply_snapshot(connection, snapshot))
+    }
+
+    fn begin_code_index_session(
+        &self,
+        session: CodeIndexSession,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        self.run(move |connection| code_batch::begin_session(connection, session))
+    }
+
+    fn apply_code_index_batch(
+        &self,
+        batch: CodeIndexBatch,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        self.run(move |connection| code_batch::apply_batch(connection, batch))
+    }
+
+    fn finalize_code_index_session(
+        &self,
+        session: CodeIndexSession,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        self.run(move |connection| code_batch::finalize_session(connection, session))
     }
 
     fn search_code(
@@ -346,6 +371,9 @@ fn apply_snapshot(
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
             degraded_file_count: snapshot.diagnostics.len(),
+            batch_count: 1,
+            checkpoint_file_count: snapshot.files.len(),
+            resource_budget: crate::domain::CodeIndexResourceBudget::default(),
         },
     })
 }

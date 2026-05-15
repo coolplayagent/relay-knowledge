@@ -10,12 +10,13 @@ use crate::{
     code::{
         CodeIndexError, build_index_snapshot, changed_paths_for_diff,
         deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
-        preview_repository_scope, register_repository, resolve_repository_ref,
-        resolve_repository_snapshot,
+        prepare_full_index_plan, preview_repository_scope, register_repository,
+        resolve_repository_ref, resolve_repository_snapshot,
     },
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
+        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
+        CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::{CodeImpactChanges, StorageError},
 };
@@ -69,18 +70,46 @@ impl RelayKnowledgeService {
         {
             return Ok(response);
         }
-        let previous = previous_fingerprints_for_index(&store, &status, &request).await?;
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
-        let mode = request.mode;
-        let snapshot = run_blocking_code(move || {
-            build_index_snapshot(&registration, &selector, mode, previous)
-        })
-        .await?;
-        let summary = store
-            .apply_code_index_snapshot(snapshot)
-            .await
-            .map_err(storage_api_error)?;
+        let summary = if request.mode == CodeIndexMode::Full {
+            let resource_budget = CodeIndexResourceBudget::default();
+            let mut plan = run_blocking_code(move || {
+                prepare_full_index_plan(registration, selector, resource_budget)
+            })
+            .await?;
+            let session = plan.session();
+            store
+                .begin_code_index_session(session.clone())
+                .await
+                .map_err(storage_api_error)?;
+            loop {
+                let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
+                plan = next_plan;
+                let Some(batch) = batch else {
+                    break;
+                };
+                store
+                    .apply_code_index_batch(batch)
+                    .await
+                    .map_err(storage_api_error)?;
+            }
+            store
+                .finalize_code_index_session(session)
+                .await
+                .map_err(storage_api_error)?
+        } else {
+            let previous = previous_fingerprints_for_index(&store, &status, &request).await?;
+            let mode = request.mode;
+            let snapshot = run_blocking_code(move || {
+                build_index_snapshot(&registration, &selector, mode, previous)
+            })
+            .await?;
+            store
+                .apply_code_index_snapshot(snapshot)
+                .await
+                .map_err(storage_api_error)?
+        };
         let status = store
             .code_repository_status(summary.repository_id.clone())
             .await
@@ -170,6 +199,9 @@ impl RelayKnowledgeService {
                 sqlite_write_count: 0,
                 skipped_file_count: scoped_status.indexed_file_count,
                 degraded_file_count: report.degraded_file_count,
+                batch_count: 0,
+                checkpoint_file_count: scoped_status.indexed_file_count,
+                resource_budget: crate::domain::CodeIndexResourceBudget::default(),
             },
         };
 

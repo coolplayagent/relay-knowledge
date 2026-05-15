@@ -182,9 +182,66 @@ degraded。
 - 命令设置 220 秒上限。
 - 结果：220 秒超时，未完成索引，但没有再次出现栈溢出。
 
-结论：C 语义准确性问题已修复；深层语法树栈溢出已消除。Linux 子系统级全量索引仍需
-后续引入分批落盘、可恢复 checkpoint 和索引进度输出，不能仅靠单次内存 snapshot
-彻底解决。
+结论：C 语义准确性问题已修复；深层语法树栈溢出已消除。后续修复已把 full index
+从单次内存 snapshot 改为 checkpointed batch pipeline：解析阶段按资源预算分批落
+SQLite，`code_repository_index_checkpoints` 持久化 scope 级进度，`repo status`
+在运行中显示 `indexing` 和已提交计数，finalize 阶段再基于已落库事实解析引用、
+include 和调用边，并在完成后原子切换 active scope。
+
+## Checkpointed Pipeline 回归
+
+本轮针对残余架构问题增加了两个回归门禁：
+
+```bash
+cargo test checkpointed_batches_finalize_cross_batch_call_edges --all-targets --all-features
+cargo test --test relay_knowledge indexes_tree_sitter_repository_and_queries_code_graph --all-features
+```
+
+覆盖结果：
+
+- 两个 batch 分别提交目标符号和调用引用，finalize 能跨 batch 解析
+  `target_symbol_snapshot_id`，并物化 `call` edge。
+- 第一批提交后，`code_repositories.state = indexing`，`indexed_file_count = 1`，
+  证明进度不再只存在于进程内存。
+- 完成后 summary 返回 `progress.batch_count = 2`、
+  `progress.checkpoint_file_count = 2` 和实际 `resource_budget`。
+- 应用层真实 Git fixture 的 `repo index` 已走 checkpointed full-index path，
+  definition/reference/import 查询和后续 incremental update 仍通过。
+
+本地 Linux smoke 复核：
+
+```bash
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
+  target/debug/relay-knowledge repo register /opt/workspace/linux \
+  --alias linux-checkpoint-smoke \
+  --path init/main.c \
+  --path include/linux/module.h \
+  --language c \
+  --format json
+
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
+  target/debug/relay-knowledge repo index linux-checkpoint-smoke --ref HEAD --format json
+
+RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
+  target/debug/relay-knowledge repo query linux-checkpoint-smoke \
+  --query module_init --kind definition --ref HEAD --limit 3 --format json
+```
+
+结果：
+
+- Linux HEAD：`70eda68668d1476b459b64e69b8f36659fa9dfa8`，tree：
+  `26fe996ae3fd74753bac73ea6f08e724b4f604a9`。
+- 受控 scope：`init/main.c`、`include/linux/module.h`，语言 `c`。
+- index summary：2 files、255 symbols、401 references、255 chunks、2 degraded files。
+- progress：`batch_count = 1`、`checkpoint_file_count = 2`、
+  `resource_budget = {max_files_per_batch:128, max_bytes_per_batch:16777216,
+  max_rows_per_batch:50000}`。
+- `definition module_init` rank 1/2 命中 `include/linux/module.h:89-90` 和
+  `include/linux/module.h:131-137`。
+
+当前结论：RK-LINUX-ACC-002 的架构阻断已解除。Linux 子系统级 scope 仍需要独立的
+吞吐 benchmark 来给出完成时间和推荐 budget，但不再依赖单次巨大内存 snapshot，也不再
+在中断前零落盘、零 checkpoint、零进度。
 
 ## 修复前查询用例汇总
 
@@ -224,7 +281,7 @@ degraded。
 
 严重度：Critical
 
-状态：已修复栈安全；Linux 全量完成时间仍需后续性能/分批落盘优化。
+状态：已修复栈安全；full-index 已改为 checkpointed batch pipeline。
 
 全量 `/opt/workspace/linux` scope 在 release 二进制下 170.43 秒后崩溃：
 
@@ -240,23 +297,26 @@ fatal runtime error: stack overflow, aborting
 
 剩余影响：
 
-- 无法对 Linux 全仓库建立代码图数据库。
-- 任何依赖全量符号、宏、include 和调用关系的准确性验证都被阻断。
-- 当前单次 snapshot 模型仍难以在交互式时间内完成 Linux 全量仓库索引。
+- Linux 全仓库完成时间仍需单独 benchmark 量化。
+- 子系统级和全仓库 scope 可观测性不再被单次 snapshot 架构阻断。
 
 ### RK-LINUX-ACC-002：中等规模 Linux C scope 索引耗时不可控且无增量落盘
 
 严重度：High
 
-状态：未修复。
+状态：已修复架构阻断；吞吐预算待 benchmark 调优。
 
 `mm`、`fs`、`kernel`、`init`、`include/linux` 共 5,801 个 C/头文件、约 89MB。
 索引运行 502.70 秒后仍无 JSON 输出，SQLite 文件未增长，手动中断。
 
-影响：
+修复后：
 
-- 真实 Linux 子系统级测试无法在合理时间内完成。
-- 索引器缺少可观察进度和可恢复写入点；中断后不能复用已完成解析工作。
+- Full index 使用 `CodeIndexResourceBudget` 控制每批文件数、字节数和 SQLite 行数。
+- 每批提交后更新 `code_repository_index_checkpoints`，并把 repository status 标为
+  `indexing`，暴露已落库文件、符号、引用和 chunk 计数。
+- 查询继续读取上一版 fresh scope；新 scope 只有 finalize 成功后才变成 active。
+- 引用解析、C/C++ include 解析和 call edge 物化移动到 finalize 阶段，避免跨 batch
+  依赖被错误限制在单批内。
 
 ### RK-LINUX-ACC-003：preview 降级预估与实际索引降级严重不一致
 

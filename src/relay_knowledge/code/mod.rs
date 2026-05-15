@@ -16,6 +16,7 @@ mod identity;
 mod ids;
 mod languages;
 mod parser;
+mod pipeline;
 mod scope;
 mod snapshot;
 
@@ -33,6 +34,7 @@ use git::{
 };
 use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
+pub use pipeline::{CodeIndexPlan, prepare_full_index_plan};
 use scope::{
     load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
     path_scope_overlaps, selection_exclusion_reason,

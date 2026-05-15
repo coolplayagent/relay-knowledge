@@ -426,6 +426,128 @@ pub struct CodeIndexSnapshot {
     pub diagnostics: Vec<CodeFileDiagnostic>,
 }
 
+/// Resource budget used to partition repository indexing into bounded batches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexResourceBudget {
+    pub max_files_per_batch: usize,
+    pub max_bytes_per_batch: usize,
+    pub max_rows_per_batch: usize,
+}
+
+impl CodeIndexResourceBudget {
+    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 128;
+    pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024;
+    pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000;
+
+    /// Creates a non-zero resource budget for batch parsing and SQLite writes.
+    pub fn new(
+        max_files_per_batch: usize,
+        max_bytes_per_batch: usize,
+        max_rows_per_batch: usize,
+    ) -> Result<Self, DomainError> {
+        if max_files_per_batch == 0 {
+            return Err(DomainError::invalid(
+                "max_files_per_batch",
+                "must be greater than zero",
+            ));
+        }
+        if max_bytes_per_batch == 0 {
+            return Err(DomainError::invalid(
+                "max_bytes_per_batch",
+                "must be greater than zero",
+            ));
+        }
+        if max_rows_per_batch == 0 {
+            return Err(DomainError::invalid(
+                "max_rows_per_batch",
+                "must be greater than zero",
+            ));
+        }
+
+        Ok(Self {
+            max_files_per_batch,
+            max_bytes_per_batch,
+            max_rows_per_batch,
+        })
+    }
+}
+
+impl Default for CodeIndexResourceBudget {
+    fn default() -> Self {
+        Self {
+            max_files_per_batch: Self::DEFAULT_MAX_FILES_PER_BATCH,
+            max_bytes_per_batch: Self::DEFAULT_MAX_BYTES_PER_BATCH,
+            max_rows_per_batch: Self::DEFAULT_MAX_ROWS_PER_BATCH,
+        }
+    }
+}
+
+/// Stable metadata for one resumable repository indexing session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexSession {
+    pub repository_id: String,
+    pub source_scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_resolved_commit_sha: Option<String>,
+    pub resolved_commit_sha: String,
+    pub tree_hash: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
+    pub full_replace: bool,
+    pub total_path_count: usize,
+    pub changed_path_count: usize,
+    pub skipped_unchanged_count: usize,
+    pub deleted_paths: Vec<String>,
+    pub tombstones: Vec<CodePathTombstone>,
+    pub resource_budget: CodeIndexResourceBudget,
+}
+
+/// One bounded parse result committed under a checkpointed index session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexBatch {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub batch_index: usize,
+    pub parsed_byte_count: usize,
+    pub files: Vec<RepositoryCodeFileRecord>,
+    pub symbols: Vec<RepositoryCodeSymbolRecord>,
+    pub references: Vec<RepositoryCodeReferenceRecord>,
+    pub imports: Vec<CodeImportRecord>,
+    pub chunks: Vec<RepositoryCodeChunkRecord>,
+    pub diagnostics: Vec<CodeFileDiagnostic>,
+}
+
+impl CodeIndexBatch {
+    /// Counts mutable SQLite rows written by this batch.
+    pub fn row_count(&self) -> usize {
+        self.files
+            .len()
+            .saturating_add(self.symbols.len())
+            .saturating_add(self.references.len())
+            .saturating_add(self.imports.len())
+            .saturating_add(self.chunks.len())
+            .saturating_add(self.diagnostics.len())
+    }
+}
+
+/// Durable progress checkpoint for a repository indexing session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexCheckpoint {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub state: String,
+    pub total_path_count: usize,
+    pub parsed_file_count: usize,
+    pub committed_file_count: usize,
+    pub committed_symbol_count: usize,
+    pub committed_reference_count: usize,
+    pub committed_chunk_count: usize,
+    pub batch_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_path: Option<String>,
+    pub resource_budget: CodeIndexResourceBudget,
+}
+
 /// Coarse phase timing and counts reported by repository indexing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexProgressSummary {
@@ -435,6 +557,9 @@ pub struct CodeIndexProgressSummary {
     pub sqlite_write_count: usize,
     pub skipped_file_count: usize,
     pub degraded_file_count: usize,
+    pub batch_count: usize,
+    pub checkpoint_file_count: usize,
+    pub resource_budget: CodeIndexResourceBudget,
 }
 
 /// Result of applying a code index snapshot.
