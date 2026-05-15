@@ -516,13 +516,14 @@ fn insert_search_document<'a>(
     language_id: &str,
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), StorageError> {
-    let mut content = fields
+    let fields = fields
         .into_iter()
         .filter(|field| !field.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .collect::<Vec<_>>();
+    let mut content = fields.join(" ");
     if document_kind == "symbol" {
-        let terms = identifier_search_terms(&content);
+        let terms =
+            identifier_search_terms(&fields.iter().take(2).copied().collect::<Vec<_>>().join(" "));
         if !terms.is_empty() {
             content.push(' ');
             content.push_str(&terms.join(" "));

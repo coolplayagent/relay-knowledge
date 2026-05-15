@@ -215,6 +215,30 @@ async fn definition_queries_rank_own_camel_case_symbol_name_before_signature_men
 }
 
 #[tokio::test]
+async fn exact_camel_case_definition_queries_rank_own_symbol_before_signature_mentions() {
+    let store = store_with_repository_snapshot(snapshot_with_type_name_signature_mentions()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "W3ConnectorSaveRequest",
+                selector,
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("definition query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams/connector/w3_models.py");
+    assert_eq!(hits[0].excerpt, "class W3ConnectorSaveRequest(BaseModel):");
+}
+
+#[tokio::test]
 async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
     let store = store_with_repository_snapshot(snapshot_with_resolved_callee_tie()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
