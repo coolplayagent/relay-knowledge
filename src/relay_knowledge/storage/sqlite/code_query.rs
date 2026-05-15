@@ -139,7 +139,7 @@ fn search_symbols(
                     row.doc_comment.as_deref().unwrap_or_default(),
                     row.path.as_str(),
                 ],
-            );
+            ) + symbol_name_query_bonus(&query, &row.name, request);
             (score > 0.0).then(|| {
                 let mut excerpt = row.signature.clone();
                 if let Some(doc) = &row.doc_comment {
@@ -840,6 +840,28 @@ fn symbol_kind_bonus(kind: &str, request: &CodeRetrievalRequest) -> f64 {
     }
 }
 
+fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalRequest) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
+    ) {
+        return 0.0;
+    }
+    let query_terms = query_terms(query);
+    if query_terms.is_empty() {
+        return 0.0;
+    }
+    let name_tokens = identifier_search_tokens(name);
+    if query_terms
+        .iter()
+        .all(|term| name_tokens.iter().any(|token| token == term))
+    {
+        2.0
+    } else {
+        0.0
+    }
+}
+
 fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
 }
@@ -856,6 +878,58 @@ fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .filter(|token| !token.is_empty())
+}
+
+fn query_terms(query: &str) -> Vec<String> {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn identifier_search_tokens(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for token in identifier_tokens(value) {
+        tokens.push(token.to_ascii_lowercase());
+        tokens.extend(
+            token
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(str::to_ascii_lowercase),
+        );
+        tokens.extend(camel_case_terms(token));
+    }
+    tokens.sort();
+    tokens.dedup();
+
+    tokens
+}
+
+fn camel_case_terms(token: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut start = 0;
+    let mut previous: Option<char> = None;
+    let chars = token.char_indices().collect::<Vec<_>>();
+    for (index, (byte_index, character)) in chars.iter().enumerate() {
+        let next = chars.get(index + 1).map(|(_, next)| *next);
+        let starts_upper_word = character.is_ascii_uppercase()
+            && previous.is_some_and(|previous| {
+                previous.is_ascii_lowercase()
+                    || previous.is_ascii_digit()
+                    || next.is_some_and(|next| next.is_ascii_lowercase())
+            });
+        if *byte_index > start && starts_upper_word {
+            terms.push(token[start..*byte_index].to_ascii_lowercase());
+            start = *byte_index;
+        }
+        previous = Some(*character);
+    }
+    if start < token.len() {
+        terms.push(token[start..].to_ascii_lowercase());
+    }
+
+    terms
 }
 
 #[cfg(test)]

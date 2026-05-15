@@ -516,11 +516,18 @@ fn insert_search_document<'a>(
     language_id: &str,
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), StorageError> {
-    let content = fields
+    let mut content = fields
         .into_iter()
         .filter(|field| !field.trim().is_empty())
         .collect::<Vec<_>>()
         .join(" ");
+    if document_kind == "symbol" {
+        let terms = identifier_search_terms(&content);
+        if !terms.is_empty() {
+            content.push(' ');
+            content.push_str(&terms.join(" "));
+        }
+    }
     transaction.execute(
         "
         INSERT INTO code_repository_search (
@@ -539,6 +546,54 @@ fn insert_search_document<'a>(
     )?;
 
     Ok(())
+}
+
+fn identifier_search_terms(content: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for token in
+        content.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+    {
+        if token.is_empty() {
+            continue;
+        }
+        terms.extend(
+            token
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(str::to_ascii_lowercase),
+        );
+        terms.extend(camel_case_terms(token));
+    }
+    terms.sort();
+    terms.dedup();
+
+    terms
+}
+
+fn camel_case_terms(token: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut start = 0;
+    let mut previous: Option<char> = None;
+    let chars = token.char_indices().collect::<Vec<_>>();
+    for (index, (byte_index, character)) in chars.iter().enumerate() {
+        let next = chars.get(index + 1).map(|(_, next)| *next);
+        let starts_upper_word = character.is_ascii_uppercase()
+            && previous.is_some_and(|previous| {
+                previous.is_ascii_lowercase()
+                    || previous.is_ascii_digit()
+                    || next.is_some_and(|next| next.is_ascii_lowercase())
+            });
+        if *byte_index > start && starts_upper_word {
+            terms.push(token[start..*byte_index].to_ascii_lowercase());
+            start = *byte_index;
+        }
+        previous = Some(*character);
+    }
+    if start < token.len() {
+        terms.push(token[start..].to_ascii_lowercase());
+    }
+
+    terms
 }
 
 fn clone_code_table(

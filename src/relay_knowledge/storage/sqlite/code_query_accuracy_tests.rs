@@ -191,6 +191,30 @@ async fn exact_identifier_matches_rank_before_substring_matches() {
 }
 
 #[tokio::test]
+async fn definition_queries_rank_own_camel_case_symbol_name_before_signature_mentions() {
+    let store = store_with_repository_snapshot(snapshot_with_type_name_signature_mentions()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "w3 save request",
+                selector,
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("definition query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams/connector/w3_models.py");
+    assert_eq!(hits[0].excerpt, "class W3ConnectorSaveRequest(BaseModel):");
+}
+
+#[tokio::test]
 async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
     let store = store_with_repository_snapshot(snapshot_with_resolved_callee_tie()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -561,6 +585,66 @@ fn snapshot_with_exact_match_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![exact_callee, noisy_callee, exact_caller, noisy_caller],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_type_name_signature_mentions() -> CodeIndexSnapshot {
+    let mut request_type = symbol(
+        "w3-save-request",
+        "w3-models-file",
+        "src/relay_teams/connector/w3_models.py",
+        "W3ConnectorSaveRequest",
+    );
+    request_type.language_id = "python".to_owned();
+    request_type.kind = "class".to_owned();
+    request_type.signature = "class W3ConnectorSaveRequest(BaseModel):".to_owned();
+
+    let mut save_method = symbol(
+        "save-w3-connector",
+        "service-file",
+        "src/relay_teams/connector/service.py",
+        "save_w3_connector",
+    );
+    save_method.language_id = "python".to_owned();
+    save_method.kind = "method".to_owned();
+    save_method.signature =
+        "async def save_w3_connector(self, request: W3ConnectorSaveRequest)".to_owned();
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "w3-models-file",
+                "src/relay_teams/connector/w3_models.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "service-file",
+                "src/relay_teams/connector/service.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![save_method, request_type],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
