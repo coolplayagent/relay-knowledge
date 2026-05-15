@@ -215,7 +215,7 @@ Web routes 合并到同一 `net::http` listener 和 QoS budget。
 
 1. 巩固已接入的 semantic/vector backend runtime contract，补 provider 级认证、限流、模型并存和重建策略。
 2. 为外部 embedding/OCR/vision provider 增加具体 worker 实现、模型并存刷新策略和 provider 级诊断。
-3. 为 proposal/conflict lifecycle、valid time 和事实审批流补齐 domain/API/storage 语义。
+3. 继续为 proposal/conflict lifecycle、valid time 和事实审批流补齐 domain/API/storage 语义。当前已完成选择性吸收: proposal 持久化 provenance；外部 extractor worker 请求携带 manual-review policy、timeout/lease/attempt/budget metadata；extractor 返回的 structured relation/claim/event 会在 proposal payload 中强制保持 `proposed`，不会绕过人工 proposal 流程写入 accepted facts。
 4. 建立 service manager install/upgrade/uninstall 与 silent update operator 的平台实现。
 5. Done: 增加 MCP resources/prompts、持久 audit sink、metrics exporter。
 6. 扩充 GraphRAG evaluation fixture 数据集规模和指标报告，继续覆盖 stale index、ambiguous entity、多跳、时间和 code impact。

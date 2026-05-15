@@ -8,18 +8,17 @@ use serde_json::json;
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, AuditQueryApiRequest, AuditQueryResponse, IngestEvidence,
-        IngestEvidenceExtraction, IngestRequest, InterfaceKind, ProposalDecisionApiRequest,
-        ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse,
-        ProposalShowResponse, RequestContext, ServiceDefinitionWriteResponse,
-        ServiceOperatorResponse, ServicePlanRequest, ServicePlanResponse, WorkerRunRequest,
-        WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
+        ApiError, ApiMetadata, AuditQueryApiRequest, AuditQueryResponse, IngestRequest,
+        InterfaceKind, ProposalDecisionApiRequest, ProposalDecisionResponse,
+        ProposalListApiRequest, ProposalListResponse, ProposalShowResponse, RequestContext,
+        ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServicePlanRequest,
+        ServicePlanResponse, WorkerRunRequest, WorkerRunResponse, WorkerStatusRequest,
+        WorkerStatusResponse,
     },
     domain::{
-        AuditStatus, EvidenceModality, EvidenceRecord, ExtractionDiagnostic, ExtractionStatus,
-        FactStatus, GraphVersion, ProposalKind, ProposalState, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorState, WorkerBackendState, WorkerKind, WorkerStatus,
-        WorkerTaskRecord, normalize_actor,
+        AuditStatus, EvidenceModality, EvidenceRecord, GraphVersion, ProposalState,
+        ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorState, WorkerBackendState,
+        WorkerKind, WorkerStatus, WorkerTaskRecord, normalize_actor,
     },
     project::PROJECT_NAME,
     storage::{
@@ -33,6 +32,7 @@ use super::{
     index_refresh::{metadata_for_indexes, refresh_index_kinds},
     ingest::mutation_batch_from_request,
     service::RelayKnowledgeService,
+    worker_proposals::{fallback_proposal, proposal_from_worker_response, worker_request_payload},
 };
 
 const WORKER_LEASE_MS: u64 = 30_000;
@@ -478,19 +478,29 @@ impl RelayKnowledgeService {
         &self,
         task: &WorkerTaskRecord,
     ) -> Result<(NewProposal, Option<String>), ApiError> {
-        let fallback = fallback_proposal(task).map_err(ApiError::invalid_argument)?;
+        let fallback = fallback_proposal(task, WORKER_LEASE_MS, WORKER_MAX_ATTEMPTS)
+            .map_err(ApiError::invalid_argument)?;
         let Some(endpoint) = self.runtime.workers.endpoint_for(task.kind) else {
             return Ok((fallback, None));
         };
-        let payload = json!({
-            "contract_version": 1,
-            "task": task,
-        });
-        let response =
-            crate::net::http::post_json(&self.runtime.network.current().http, endpoint, &payload)
-                .await;
+        let network = self.runtime.network.current();
+        let timeout_ms =
+            u64::try_from(network.http.request_timeout.as_millis()).unwrap_or(u64::MAX);
+        let payload = worker_request_payload(
+            task,
+            timeout_ms,
+            WORKER_LEASE_MS,
+            WORKER_MAX_ATTEMPTS,
+            self.runtime.workers.max_in_flight,
+        );
+        let response = crate::net::http::post_json(&network.http, endpoint, &payload).await;
         match response {
-            Ok(value) => match proposal_from_worker_response(task, value) {
+            Ok(value) => match proposal_from_worker_response(
+                task,
+                value,
+                WORKER_LEASE_MS,
+                WORKER_MAX_ATTEMPTS,
+            ) {
                 Ok(proposal) => Ok((proposal, None)),
                 Err(_) => Ok((
                     fallback,
@@ -612,134 +622,6 @@ fn worker_task_seeds(
             }
         })
         .collect()
-}
-
-fn fallback_proposal(task: &WorkerTaskRecord) -> Result<NewProposal, String> {
-    let evidence_id = task
-        .evidence_id
-        .clone()
-        .unwrap_or_else(|| task.task_id.clone());
-    let derived_id = format!(
-        "derived:{}:{:016x}",
-        task.kind.as_str(),
-        stable_hash64(task.task_id.as_bytes())
-    );
-    let modality = match task.kind {
-        WorkerKind::Embedding => EvidenceModality::ImageEmbedding,
-        WorkerKind::Ocr => EvidenceModality::OcrText,
-        WorkerKind::Vision => EvidenceModality::Caption,
-        WorkerKind::Extractor => EvidenceModality::LayoutRegion,
-    };
-    let extraction = IngestEvidenceExtraction {
-        modality,
-        source_uri: None,
-        source_hash: None,
-        media_hash: None,
-        extractor: Some(format!("{}-fallback", task.kind.as_str())),
-        extractor_version: Some("1".to_owned()),
-        observed_at: Some(format!("{}", now_millis())),
-        parent_evidence_id: Some(evidence_id.clone()),
-        layout_region: (modality == EvidenceModality::LayoutRegion).then_some(
-            crate::domain::LayoutRegion {
-                page_number: 1,
-                x: 0,
-                y: 0,
-                width: 1,
-                height: 1,
-            },
-        ),
-        embedding_model: (modality == EvidenceModality::ImageEmbedding)
-            .then_some("deterministic-fallback-v1".to_owned()),
-        embedding_dimension: (modality == EvidenceModality::ImageEmbedding).then_some(16),
-        diagnostic: Some(ExtractionDiagnostic {
-            status: ExtractionStatus::Degraded,
-            message: Some(
-                "deterministic fallback proposal; external backend not required".to_owned(),
-            ),
-        }),
-    };
-    let request = IngestRequest {
-        source_scope: task.source_scope.clone(),
-        evidence: vec![IngestEvidence {
-            id: Some(derived_id),
-            source_path: None,
-            span: None,
-            confidence: None,
-            status: Some(FactStatus::Accepted),
-            content: format!(
-                "{} fallback output for parent evidence {}",
-                task.kind.as_str(),
-                evidence_id
-            ),
-            entity_labels: Vec::new(),
-            extraction: Some(extraction),
-        }],
-        relations: Vec::new(),
-        claims: Vec::new(),
-        events: Vec::new(),
-    };
-    let payload_json = serde_json::to_string(&request).map_err(|error| error.to_string())?;
-
-    Ok(NewProposal {
-        proposal_id: format!(
-            "proposal:{}:{:016x}",
-            task.kind.as_str(),
-            stable_hash64(task.task_id.as_bytes())
-        ),
-        source_scope: task.source_scope.clone(),
-        kind: ProposalKind::Evidence,
-        title: format!("{} worker proposal", task.kind.as_str()),
-        summary: format!("Derived evidence proposal for parent evidence {evidence_id}"),
-        payload_json,
-        origin: format!("worker:{}", task.kind.as_str()),
-        confidence_basis_points: 5_000,
-        conflicts: Vec::new(),
-        now_ms: now_millis(),
-    })
-}
-
-fn proposal_from_worker_response(
-    task: &WorkerTaskRecord,
-    value: serde_json::Value,
-) -> Result<NewProposal, String> {
-    let ingest = value
-        .get("ingest_request")
-        .cloned()
-        .ok_or_else(|| "missing ingest_request".to_owned())?;
-    let payload_json = serde_json::to_string(&ingest).map_err(|error| error.to_string())?;
-    serde_json::from_value::<IngestRequest>(ingest).map_err(|error| error.to_string())?;
-    let title = value
-        .get("title")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("External worker proposal")
-        .to_owned();
-    let summary = value
-        .get("summary")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("External worker returned a graph mutation proposal")
-        .to_owned();
-    let confidence = value
-        .get("confidence_basis_points")
-        .and_then(serde_json::Value::as_u64)
-        .and_then(|value| u16::try_from(value).ok())
-        .unwrap_or(7_500);
-
-    Ok(NewProposal {
-        proposal_id: format!(
-            "proposal:{}:{:016x}",
-            task.kind.as_str(),
-            stable_hash64(payload_json.as_bytes())
-        ),
-        source_scope: task.source_scope.clone(),
-        kind: ProposalKind::Evidence,
-        title,
-        summary,
-        payload_json,
-        origin: format!("worker:{}", task.kind.as_str()),
-        confidence_basis_points: confidence.min(10_000),
-        conflicts: Vec::new(),
-        now_ms: now_millis(),
-    })
 }
 
 pub(super) fn overlay_worker_runtime(

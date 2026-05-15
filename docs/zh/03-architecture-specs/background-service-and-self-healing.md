@@ -377,6 +377,12 @@ active lease/attempt 守卫、running task target 保护、superseded refresh at
 health/service stale diagnostics 和 foreground `refresh_indexes` drain。后续 service manager、silent update 配置、
 maintenance checkpoint、资源预算暂停和完整 dead-letter operator 流程仍需按上表补齐。
 
+Worker/proposal 主路径已补充外部 endpoint 请求预算和 proposal provenance:
+`worker run-once` 请求包含 HTTP timeout、lease、max attempts 和 max-in-flight；
+proposal 持久化 producer、provider/model、prompt version、schema version、source
+hash、input fact ids、stale 条件和预算说明。Extractor worker 返回的结构化 facts
+保持 `proposed`，因此 worker 成功只代表“候选已生成”，不是 accepted facts 已经写入。
+
 验收标准:
 
 - 用户可以明确开启、关闭和查看静默后台更新。
@@ -385,6 +391,7 @@ maintenance checkpoint、资源预算暂停和完整 dead-letter operator 流程
 - CPU 密集任务不会阻塞 async runtime，也不会让查询热路径同步等待。
 - WAL、日志、临时文件和旧索引分区都有上限或清理策略。
 - 任何查询都能说明自己使用的新鲜或 stale 索引版本。
+- 任一 worker proposal 都能说明 producer、model/prompt 或 deterministic fallback 来源、输入证据、预算和 stale 条件。
 
 ## 10. 参考实践
 

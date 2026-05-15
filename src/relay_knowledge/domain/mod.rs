@@ -42,7 +42,7 @@ pub use mutation::{
 };
 pub use operational::{
     AuditEventRecord, AuditStatus, ProposalConflictRecord, ProposalConflictSeverity, ProposalKind,
-    ProposalRecord, ProposalState, ServiceDefinitionPlan, ServiceManagerAction,
+    ProposalProvenance, ProposalRecord, ProposalState, ServiceDefinitionPlan, ServiceManagerAction,
     ServiceOperatorState, ServiceOperatorStatus, WorkerBackendState, WorkerKind, WorkerStatus,
     WorkerTaskRecord, WorkerTaskState, normalize_actor,
 };

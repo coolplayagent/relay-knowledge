@@ -182,6 +182,102 @@ async fn service_plan_and_operator_state_are_shared_api_surfaces() {
     assert!(proposals.proposals.is_empty());
 }
 
+#[tokio::test]
+async fn extractor_worker_structured_facts_remain_proposed_with_provenance() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("worker listener should bind");
+    let endpoint = format!("http://{}/extract", listener.local_addr().expect("addr"));
+    let worker = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("worker request");
+        let mut buffer = vec![0; 4096];
+        let count = tokio::io::AsyncReadExt::read(&mut stream, &mut buffer)
+            .await
+            .expect("request should read");
+        let request = String::from_utf8_lossy(&buffer[..count]);
+
+        assert!(request.contains("\"contract_version\":2"));
+        assert!(request.contains("\"structured_facts_default_status\":\"proposed\""));
+        assert!(request.contains("\"request_timeout_ms\""));
+
+        let body = serde_json::json!({
+            "title": "LLM SPO extraction proposal",
+            "summary": "Model extracted one relation candidate",
+            "confidence_basis_points": 8600,
+            "provenance": {
+                "producer": "llm_spo_extraction",
+                "provider": "fixture-provider",
+                "model": "fixture-model",
+                "prompt_id": "relay.extract.spo",
+                "prompt_version": "1",
+                "schema_version": "worker-proposal.v2",
+                "input_source_hash": "sha256:fixture",
+                "input_fact_ids": ["ev-extract"],
+                "stale_when": ["source hash changes"],
+                "budget_notes": ["candidate_limit=1"]
+            },
+            "ingest_request": {
+                "source_scope": "docs",
+                "relations": [{
+                    "id": "rel-extracted",
+                    "source_entity_label": "relay-knowledge",
+                    "relation_type": "uses",
+                    "target_entity_label": "proposal review",
+                    "evidence_ids": ["ev-extract"],
+                    "status": "accepted"
+                }]
+            }
+        })
+        .to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes())
+            .await
+            .expect("response should write");
+    });
+    let service = service_with_worker_endpoint(&endpoint).await;
+    service
+        .ingest(
+            ingest_request(vec![ingest_evidence(
+                "ev-extract",
+                "relay-knowledge uses proposal review",
+                vec!["relay-knowledge".to_owned(), "proposal review".to_owned()],
+            )]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should queue extractor worker");
+
+    let run = service
+        .run_worker_once(
+            WorkerRunRequest {
+                kind: Some(WorkerKind::Extractor),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-worker", "trace-worker"),
+        )
+        .await
+        .expect("extractor worker should create a proposal");
+
+    let proposal = run.proposals.first().expect("proposal should be returned");
+    let payload = serde_json::from_str::<IngestRequest>(&proposal.payload_json)
+        .expect("proposal payload should remain an ingest request");
+
+    assert_eq!(proposal.provenance.producer, "llm_spo_extraction");
+    assert_eq!(
+        proposal.provenance.prompt_id.as_deref(),
+        Some("relay.extract.spo")
+    );
+    assert_eq!(proposal.kind.as_str(), "relation");
+    assert_eq!(
+        payload.relations[0].status,
+        Some(crate::domain::FactStatus::Proposed)
+    );
+    worker.await.expect("worker server should finish");
+}
+
 async fn service_with_memory_store() -> RelayKnowledgeService {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
     let environment = EnvironmentConfig::from_pairs(
@@ -190,6 +286,25 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
             ("HOME", "/home/alice"),
             ("TMPDIR", "/tmp"),
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+        ],
+    )
+    .expect("environment should parse");
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+
+    RelayKnowledgeService::with_store(runtime, store as Arc<dyn KnowledgeStore>)
+}
+
+async fn service_with_worker_endpoint(endpoint: &str) -> RelayKnowledgeService {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT", endpoint),
         ],
     )
     .expect("environment should parse");
