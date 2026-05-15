@@ -73,6 +73,13 @@ def best_accepted_run(paths: HistoryPaths) -> dict[str, Any] | None:
     )
 
 
+def previous_scored_run(paths: HistoryPaths) -> dict[str, Any] | None:
+    scored = [run for run in load_runs(paths) if run.get("score") is not None]
+    if not scored:
+        return None
+    return max(scored, key=lambda run: str(run.get("timestamp", "")))
+
+
 def write_report(paths: HistoryPaths, run_id: str, report: dict[str, Any]) -> Path:
     ensure_history(paths)
     report_path = paths.reports / f"{run_id}.json"

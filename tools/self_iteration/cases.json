@@ -23,6 +23,11 @@
         "mm/vma.c",
         "mm/vma.h",
         "mm/cma_debug.c",
+        "fs/anon_inodes.c",
+        "fs/debugfs/file.c",
+        "fs/eventfd.c",
+        "fs/eventpoll.c",
+        "fs/open.c",
         "fs/read_write.c",
         "fs/exec.c",
         "fs/debugfs/inode.c",
@@ -41,6 +46,54 @@
       "index_budget_ms": 5000,
       "query_p50_budget_ms": 250,
       "query_p95_budget_ms": 500
+    },
+    "linux_full": {
+      "path": "/opt/workspace/linux",
+      "alias": "linux-full-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "path_filters": [],
+      "language_filters": ["c"],
+      "index_budget_ms": 240000,
+      "query_p50_budget_ms": 500,
+      "query_p95_budget_ms": 1000
+    },
+    "leveldb_cpp": {
+      "path": "/opt/workspace/leveldb",
+      "alias": "leveldb-cpp-self-iteration",
+      "ref": "HEAD",
+      "path_filters": [
+        "db/db_impl.cc",
+        "db/db_impl.h",
+        "db/db_iter.cc",
+        "db/dbformat.cc",
+        "db/dbformat.h",
+        "db/write_batch.cc",
+        "include/leveldb/cache.h",
+        "include/leveldb/db.h",
+        "include/leveldb/options.h",
+        "util/cache.cc"
+      ],
+      "language_filters": ["cpp", "c"],
+      "index_budget_ms": 8000,
+      "query_p50_budget_ms": 250,
+      "query_p95_budget_ms": 500
+    },
+    "kubernetes_go_sample": {
+      "path": "/opt/workspace/kubernetes",
+      "alias": "kubernetes-go-self-iteration",
+      "ref": "HEAD",
+      "path_filters": [
+        "cmd/kube-apiserver/app/server.go",
+        "cmd/kubelet/app/server.go",
+        "pkg/apis/core/types.go",
+        "staging/src/k8s.io/client-go/kubernetes/clientset.go",
+        "staging/src/k8s.io/client-go/rest/client.go"
+      ],
+      "language_filters": ["go"],
+      "index_budget_ms": 12000,
+      "query_p50_budget_ms": 300,
+      "query_p95_budget_ms": 700
     }
   },
   "query_cases": [
@@ -145,6 +198,62 @@
       "expected": [{"path": "include/linux/export.h", "line_start": 89}]
     },
     {
+      "id": "linux_definition_container_of_const",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "container_of_const",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "include/linux/container_of.h", "line_start": 35}]
+    },
+    {
+      "id": "linux_definition_module_init_macro",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "module_init",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "include/linux/module.h"}]
+    },
+    {
+      "id": "linux_definition_syscall_read",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "read",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["fs/read_write.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "fs/read_write.c", "line_start": 724}]
+    },
+    {
+      "id": "linux_definition_do_sys_openat2",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "do_sys_openat2",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "fs/open.c", "line_start": 1355}]
+    },
+    {
+      "id": "linux_definition_anon_inode_getfile",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "anon_inode_getfile",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "fs/anon_inodes.c", "line_start": 200}]
+    },
+    {
+      "id": "linux_definition_debugfs_create_file_full",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "debugfs_create_file_full",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "fs/debugfs/inode.c", "line_start": 455}]
+    },
+    {
       "id": "linux_callers_cma_debugfs_add_one",
       "repository": "linux_sample",
       "kind": "callers",
@@ -152,6 +261,24 @@
       "limit": 10,
       "max_rank": 1,
       "expected": [{"path": "mm/cma_debug.c", "excerpt_contains": "cma_debugfs_init"}]
+    },
+    {
+      "id": "linux_callers_anon_inode_getfile",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "anon_inode_getfile",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "fs/eventpoll.c", "excerpt_contains": "eventpoll"}]
+    },
+    {
+      "id": "linux_callees_cma_debugfs_init",
+      "repository": "linux_sample",
+      "kind": "callees",
+      "query": "cma_debugfs_init",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "mm/cma_debug.c", "excerpt_contains": "cma_debugfs_add_one"}]
     },
     {
       "id": "linux_callees_do_mmap",
@@ -170,6 +297,138 @@
       "limit": 10,
       "max_rank": 2,
       "expected": [{"path": "mm/cma_debug.c", "edge_target_hint": "include/linux/debugfs.h"}]
+    },
+    {
+      "id": "leveldb_definition_db_open",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DB::Open",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "db/db_impl.cc", "line_start": 1503}]
+    },
+    {
+      "id": "leveldb_definition_dbimpl_get",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DBImpl::Get",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
+    },
+    {
+      "id": "leveldb_definition_new_lru_cache",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "NewLRUCache",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "util/cache.cc", "line_start": 399}]
+    },
+    {
+      "id": "leveldb_definition_write_batch_put",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "WriteBatch::Put",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "db/write_batch.cc", "line_start": 98}]
+    },
+    {
+      "id": "leveldb_callers_new_lru_cache",
+      "repository": "leveldb_cpp",
+      "kind": "callers",
+      "query": "NewLRUCache",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "db/db_impl.cc", "excerpt_contains": "block_cache"}]
+    },
+    {
+      "id": "leveldb_hybrid_internal_key_comparator",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "InternalKeyComparator",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [{"path": "db/dbformat.h"}]
+    },
+    {
+      "id": "leveldb_filter_dbimpl_get_cpp",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "DBImpl::Get",
+      "limit": 10,
+      "path_filters": ["db/db_impl.cc"],
+      "language_filters": ["cpp"],
+      "max_rank": 1,
+      "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
+    },
+    {
+      "id": "kubernetes_definition_api_server_command",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewAPIServerCommand",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "cmd/kube-apiserver/app/server.go", "line_start": 70}]
+    },
+    {
+      "id": "kubernetes_definition_kubelet_command",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewKubeletCommand",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "cmd/kubelet/app/server.go", "line_start": 142}]
+    },
+    {
+      "id": "kubernetes_definition_run_kubelet",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "RunKubelet",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "cmd/kubelet/app/server.go", "line_start": 1234}]
+    },
+    {
+      "id": "kubernetes_definition_pod_type",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "Pod",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["pkg/apis/core/types.go"],
+      "language_filters": ["go"],
+      "expected": [{"path": "pkg/apis/core/types.go", "line_start": 4695}]
+    },
+    {
+      "id": "kubernetes_definition_clientset_new_for_config",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewForConfig",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["staging/src/k8s.io/client-go/kubernetes/clientset.go"],
+      "language_filters": ["go"],
+      "expected": [{"path": "staging/src/k8s.io/client-go/kubernetes/clientset.go", "line_start": 476}]
+    },
+    {
+      "id": "kubernetes_callers_run_kubelet",
+      "repository": "kubernetes_go_sample",
+      "kind": "callers",
+      "query": "RunKubelet",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [{"path": "cmd/kubelet/app/server.go", "excerpt_contains": "RunKubelet"}]
+    },
+    {
+      "id": "kubernetes_hybrid_rest_client",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "RESTClient",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [{"path": "staging/src/k8s.io/client-go/rest/client.go", "line_start": 86}]
     }
   ]
 }

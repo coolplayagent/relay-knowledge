@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from history import append_run, best_accepted_run, export_history, history_paths
+from history import append_run, best_accepted_run, export_history, history_paths, previous_scored_run
 
 
 class HistoryTests(unittest.TestCase):
@@ -48,8 +48,35 @@ class HistoryTests(unittest.TestCase):
             csv_path, svg_path = export_history(paths)
 
             self.assertEqual(best_accepted_run(paths)["run_id"], "two")
+            self.assertEqual(previous_scored_run(paths)["run_id"], "two")
             self.assertIn("run_id", csv_path.read_text(encoding="utf-8"))
             self.assertIn("<svg", svg_path.read_text(encoding="utf-8"))
+
+    def test_previous_scored_run_uses_latest_timestamp_not_best_score(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "best",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": True,
+                    "score": 0.99,
+                },
+            )
+            append_run(
+                paths,
+                {
+                    "run_id": "latest",
+                    "timestamp": "2026-05-15T00:01:00+00:00",
+                    "accepted": False,
+                    "score": 0.50,
+                },
+            )
+
+            self.assertEqual(previous_scored_run(paths)["run_id"], "latest")
 
 
 if __name__ == "__main__":

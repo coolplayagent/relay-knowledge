@@ -83,6 +83,82 @@ class PatchFlowTests(unittest.TestCase):
             prompt = self_iterate.build_prompt(history_paths(workspace), "next")
 
             self.assertIn("No rejected historical run with reasons yet.", prompt)
+            self.assertIn("No worsened evaluation items recorded yet.", prompt)
+            self.assertIn("No improved evaluation items recorded yet.", prompt)
+
+    def test_prompt_includes_recent_degradations_as_next_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "worse",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": False,
+                    "reject_reasons": ["score 0.4 did not improve previous 0.5"],
+                    "degradations": [
+                        {
+                            "kind": "metric",
+                            "name": "linux_sample_index_ms",
+                            "previous": 4000.0,
+                            "current": 4500.0,
+                            "message": "",
+                        },
+                        {
+                            "kind": "case",
+                            "case_id": "linux_definition_start_kernel",
+                            "previous": {"passed": True, "rank": 1},
+                            "current": {"passed": False, "rank": None},
+                            "message": "results=0 rank=None",
+                        },
+                    ],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Recent worsened evaluation items:", prompt)
+            self.assertIn("kind=metric name=linux_sample_index_ms", prompt)
+            self.assertIn("kind=case name=linux_definition_start_kernel", prompt)
+
+    def test_prompt_includes_recent_improvements_to_preserve(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "better",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": True,
+                    "reject_reasons": [],
+                    "improvements": [
+                        {
+                            "kind": "metric",
+                            "name": "leveldb_cpp_index_ms",
+                            "previous": 8000.0,
+                            "current": 6000.0,
+                            "message": "",
+                        },
+                        {
+                            "kind": "case",
+                            "case_id": "kubernetes_definition_run_kubelet",
+                            "previous": {"passed": False, "rank": None},
+                            "current": {"passed": True, "rank": 1},
+                            "message": "results=1 rank=1",
+                        },
+                    ],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Recent improved evaluation items to preserve:", prompt)
+            self.assertIn("kind=metric name=leveldb_cpp_index_ms", prompt)
+            self.assertIn("kind=case name=kubernetes_definition_run_kubelet", prompt)
 
     def test_rejected_patch_restores_tracked_and_untracked_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

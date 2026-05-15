@@ -1,5 +1,7 @@
 # relay-knowledge self-iteration
 
+[中文](README.zh-CN.md) | English
+
 This directory contains an independent Codex-driven optimization loop for code repository retrieval quality. It is intentionally outside the Rust crate and stores all runtime state under `.git/relay-knowledge-self-iteration/`.
 
 ## Start
@@ -45,13 +47,13 @@ Each iteration:
 4. Runs build, lint, tests, and repository retrieval evaluations.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
-7. Commits the candidate net change as one squash commit only when the strict improvement policy accepts it.
+7. Commits the candidate net change as one squash commit only when the previous-run improvement policy accepts it.
 8. Restores the iteration start commit when the candidate is rejected.
 
 If the worktree is dirty at startup, the loop exits immediately instead of
 retrying the same non-retryable precondition failure.
 
-## Scoring
+## Scoring and acceptance
 
 The score is:
 
@@ -59,7 +61,25 @@ The score is:
 accuracy * 0.55 + performance * 0.30 + stability * 0.15
 ```
 
-Strict acceptance requires all quality gates to pass, a score above the best accepted historical score, no accuracy regression, and no key performance metric regression beyond 5%.
+Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, retrieval quality and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
+
+The candidate is accepted when:
+
+```text
+hard_constraints_pass
+and (
+  weighted_score > previous_weighted_score + score_epsilon
+  or epsilon_pareto_improved(candidate, previous)
+)
+```
+
+`epsilon_pareto_improved(candidate, previous)` means at least one tracked objective improves beyond its epsilon threshold and no tracked objective regresses beyond its epsilon threshold. The default thresholds are:
+
+- `score_epsilon = 0.0005`
+- `ratio_epsilon = 0.005` for score components such as accuracy, performance, and stability
+- `metric_epsilon = max(25ms, previous_metric * 0.03)` for raw timing metrics
+
+This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Accuracy, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve.
 
 The `chart` command writes:
 
@@ -68,9 +88,12 @@ The `chart` command writes:
 
 ## Evaluation data
 
-`cases.json` defines the default benchmark targets:
+`cases.json` defines the benchmark targets:
 
-- `/opt/workspace/relay-teams` full repository indexing and representative code graph queries.
-- `/opt/workspace/linux` full repository indexing and covering functions, macros, includes, callers, and callees.
+- `/opt/workspace/relay-teams` repository indexing and representative code graph queries.
+- `/opt/workspace/linux` sampled C indexing in the default profile, covering functions, syscall-style macros, exported symbols, includes, callers, and callees.
+- `/opt/workspace/linux` full C repository indexing in the `exhaustive` profile through the `linux_full` target.
+- `/opt/workspace/leveldb` sampled C++ indexing and queries for class methods, free functions, headers, callers, hybrid lookup, and filters.
+- `/opt/workspace/kubernetes` sampled Go indexing and queries for command constructors, kubelet flow, API types, clientset constructors, callers, hybrid lookup, and filters.
 
-Use `--profile smoke` for launcher validation without full repository evaluation. Use `--profile exhaustive` for future large-scope Linux experiments.
+Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when Linux full initial indexing time should be measured.

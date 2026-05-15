@@ -22,6 +22,7 @@ from history import (
     export_history,
     history_paths,
     load_runs,
+    previous_scored_run,
     write_report,
 )
 from scoring import EvaluationObservation, GateObservation, score_evaluation
@@ -146,7 +147,7 @@ def run_evaluate(args: argparse.Namespace, workspace: Path, paths: Any) -> int:
         codex=None,
         evaluation=evaluation,
         commit=None,
-        best_previous=best_accepted_run(paths),
+        previous_run=previous_scored_run(paths),
     )
     print_score(run_record)
     return 0 if run_record["score"] > 0 else 1
@@ -208,8 +209,8 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
         evaluator_config(args, workspace, paths, run_id),
         generated_diff=patch.has_diff,
     )
-    best_previous = best_accepted_run(paths)
-    candidate_score = score_evaluation(evaluation.observation, best_previous)
+    previous_run = previous_scored_run(paths)
+    candidate_score = score_evaluation(evaluation.observation, previous_run)
     commit = None
     if candidate_score.accepted:
         commit = commit_candidate(workspace, args.commit_message, candidate_score.score, base_ref)
@@ -221,7 +222,7 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
         codex=codex_result,
         evaluation=evaluation,
         commit=commit,
-        best_previous=best_previous,
+        previous_run=previous_run,
         precomputed_score=candidate_score,
     )
 
@@ -260,10 +261,10 @@ def persist_scored_run(
     codex: CodexResult | None,
     evaluation: Any,
     commit: str | None,
-    best_previous: dict[str, Any] | None,
+    previous_run: dict[str, Any] | None,
     precomputed_score: Any | None = None,
 ) -> dict[str, Any]:
-    score = precomputed_score or score_evaluation(evaluation.observation, best_previous)
+    score = precomputed_score or score_evaluation(evaluation.observation, previous_run)
     report = {
         "run_id": run_id,
         "workspace": str(workspace),
@@ -271,6 +272,9 @@ def persist_scored_run(
         "codex": codex_metadata(codex),
         "evaluation": evaluation.report,
         "score": score.to_dict(),
+        "comparison": comparison_metadata(previous_run),
+        "degradations": score.degradations,
+        "improvements": score.improvements,
     }
     report_path = write_report(paths, run_id, report)
     record = run_record(
@@ -295,7 +299,8 @@ def persist_failure_run(
     codex: CodexResult | None,
     observation: EvaluationObservation,
 ) -> dict[str, Any]:
-    score = score_evaluation(observation, best_accepted_run(paths))
+    previous_run = previous_scored_run(paths)
+    score = score_evaluation(observation, previous_run)
     report = {
         "run_id": run_id,
         "workspace": str(workspace),
@@ -308,6 +313,9 @@ def persist_failure_run(
             "metrics": [],
         },
         "score": score.to_dict(),
+        "comparison": comparison_metadata(previous_run),
+        "degradations": score.degradations,
+        "improvements": score.improvements,
     }
     report_path = write_report(paths, run_id, report)
     record = run_record(
@@ -342,11 +350,15 @@ def run_record(
         "performance": score["performance"],
         "stability": score["stability"],
         "reject_reasons": score["reject_reasons"],
+        "degradations": score.get("degradations", []),
+        "improvements": score.get("improvements", []),
         "patch": str(patch.path),
         "patch_sha256": patch.sha256,
         "report": str(report_path),
         "commit": commit,
         "codex_exit_code": codex.exit_code if codex else None,
+        "gates": [gate.__dict__ for gate in evaluation.gates],
+        "cases": [case.__dict__ for case in evaluation.cases],
         "metrics": [metric.__dict__ for metric in evaluation.metrics],
     }
 
@@ -380,6 +392,12 @@ Historical context:
 Recent rejected attempts to avoid:
 {rejected_summary}
 
+Recent worsened evaluation items:
+{recent_degradation_summary(paths)}
+
+Recent improved evaluation items to preserve:
+{recent_improvement_summary(paths)}
+
 Make one concrete candidate code change now. The self-iteration harness will build, test, score, squash-commit accepted improvements, or roll them back.
 """
 
@@ -406,6 +424,75 @@ def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
             f"report={run.get('report', '')}"
         )
     return "\n".join(lines)
+
+
+def recent_degradation_summary(paths: Any, limit: int = 8) -> str:
+    return recent_change_summary(
+        paths=paths,
+        field="degradations",
+        empty_message="No worsened evaluation items recorded yet.",
+        limit=limit,
+    )
+
+
+def recent_improvement_summary(paths: Any, limit: int = 8) -> str:
+    return recent_change_summary(
+        paths=paths,
+        field="improvements",
+        empty_message="No improved evaluation items recorded yet.",
+        limit=limit,
+    )
+
+
+def recent_change_summary(
+    paths: Any,
+    field: str,
+    empty_message: str,
+    limit: int,
+) -> str:
+    changes: list[dict[str, Any]] = []
+    for run in reversed(load_runs(paths)):
+        for change in run.get(field, []):
+            if isinstance(change, dict):
+                item = dict(change)
+                item["run_id"] = run.get("run_id", "")
+                changes.append(item)
+                if len(changes) >= limit:
+                    break
+        if len(changes) >= limit:
+            break
+    if not changes:
+        return empty_message
+
+    lines: list[str] = []
+    for item in changes:
+        kind = item.get("kind", "")
+        name = item.get("name") or item.get("case_id") or ""
+        previous = item.get("previous", "")
+        current = item.get("current", "")
+        message = item.get("message", "")
+        lines.append(
+            "- "
+            f"run_id={item.get('run_id', '')} "
+            f"kind={kind} name={name} "
+            f"previous={previous} current={current} "
+            f"message={message}"
+        )
+    return "\n".join(lines)
+
+
+def comparison_metadata(previous_run: dict[str, Any] | None) -> dict[str, Any] | None:
+    if previous_run is None:
+        return None
+    return {
+        "run_id": previous_run.get("run_id"),
+        "score": previous_run.get("score"),
+        "accuracy": previous_run.get("accuracy"),
+        "performance": previous_run.get("performance"),
+        "stability": previous_run.get("stability"),
+        "accepted": previous_run.get("accepted"),
+        "commit": previous_run.get("commit"),
+    }
 
 
 def capture_patch(
