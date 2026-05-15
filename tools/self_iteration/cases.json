@@ -1,0 +1,175 @@
+{
+  "repositories": {
+    "relay_teams": {
+      "path": "/opt/workspace/relay-teams",
+      "alias": "relay-teams-self-iteration",
+      "ref": "HEAD",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 90000,
+      "query_p50_budget_ms": 300,
+      "query_p95_budget_ms": 600
+    },
+    "linux_sample": {
+      "path": "/opt/workspace/linux",
+      "alias": "linux-self-iteration",
+      "ref": "HEAD",
+      "path_filters": [
+        "init/main.c",
+        "kernel/fork.c",
+        "kernel/sched/core.c",
+        "mm/mmap.c",
+        "mm/nommu.c",
+        "mm/vma.c",
+        "mm/vma.h",
+        "mm/cma_debug.c",
+        "fs/read_write.c",
+        "fs/exec.c",
+        "fs/debugfs/inode.c",
+        "include/linux/mm.h",
+        "include/linux/debugfs.h",
+        "include/linux/fs.h",
+        "include/linux/container_of.h",
+        "include/linux/module.h",
+        "include/linux/export.h",
+        "include/linux/build_bug.h",
+        "include/linux/compiler.h",
+        "include/linux/slab.h",
+        "include/linux/sched.h"
+      ],
+      "language_filters": ["c"],
+      "index_budget_ms": 5000,
+      "query_p50_budget_ms": 250,
+      "query_p95_budget_ms": 500
+    }
+  },
+  "query_cases": [
+    {
+      "id": "rt_definition_connector_service",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "ConnectorService",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
+    },
+    {
+      "id": "rt_definition_w3_save_request",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "W3ConnectorSaveRequest",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py"}]
+    },
+    {
+      "id": "rt_callers_summary",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "_summary",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 177}]
+    },
+    {
+      "id": "rt_callees_summary",
+      "repository": "relay_teams",
+      "kind": "callees",
+      "query": "_summary",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py", "excerpt_contains": "ConnectorSummary"}]
+    },
+    {
+      "id": "rt_imports_w3_save_request",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "W3ConnectorSaveRequest",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"edge_resolution_state": "resolved"}]
+    },
+    {
+      "id": "rt_hybrid_connector_service",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "ConnectorService",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
+    },
+    {
+      "id": "rt_negative_missing_symbol",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "DefinitelyMissingRelayTeamsSymbol",
+      "limit": 10,
+      "expect_empty": true
+    },
+    {
+      "id": "rt_filter_connector_service_python",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "ConnectorService",
+      "limit": 10,
+      "path_filters": ["src/relay_teams/connector/service.py"],
+      "language_filters": ["python"],
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
+    },
+    {
+      "id": "linux_definition_start_kernel",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "start_kernel",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "init/main.c", "line_start": 1017}]
+    },
+    {
+      "id": "linux_definition_container_of",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "container_of",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "include/linux/container_of.h", "line_start": 19}]
+    },
+    {
+      "id": "linux_definition_export_symbol",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "EXPORT_SYMBOL",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "include/linux/export.h", "line_start": 89}]
+    },
+    {
+      "id": "linux_callers_cma_debugfs_add_one",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "cma_debugfs_add_one",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "mm/cma_debug.c", "excerpt_contains": "cma_debugfs_init"}]
+    },
+    {
+      "id": "linux_callees_do_mmap",
+      "repository": "linux_sample",
+      "kind": "callees",
+      "query": "do_mmap",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "mm/mmap.c", "excerpt_contains": "mmap_region"}]
+    },
+    {
+      "id": "linux_imports_debugfs",
+      "repository": "linux_sample",
+      "kind": "imports",
+      "query": "linux/debugfs.h",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "mm/cma_debug.c", "edge_target_hint": "include/linux/debugfs.h"}]
+    }
+  ]
+}

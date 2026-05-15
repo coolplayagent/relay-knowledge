@@ -125,6 +125,19 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
+For unattended code-retrieval optimization experiments, the independent
+self-iteration loop can be started with:
+
+```bash
+./self-iterate.sh
+./self-iterate.sh once
+./self-iterate.sh chart
+```
+
+It stores run history, reports, patches, and score curves under
+`.git/relay-knowledge-self-iteration/` and only commits candidates that improve
+the configured score.
+
 The underlying quality gates are:
 
 ```bash

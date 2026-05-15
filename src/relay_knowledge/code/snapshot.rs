@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::domain::{
     CodeCallRecord, CodeIndexSnapshot, CodePathTombstone, CodeRepositoryRegistration,
     CodeRepositorySelector, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
@@ -100,45 +102,52 @@ impl SnapshotBuild {
         identity::enrich_symbol_identities(&self.repository_id, &mut self.symbols);
         identity::resolve_reference_targets(&self.symbols, &mut self.references);
         identity::resolve_import_targets(&self.files, &self.symbols, &mut self.imports);
+        let symbols_by_path = build_symbol_path_index(&self.symbols);
         self.calls = self
             .references
             .iter()
             .filter(|reference| reference.kind == "call")
-            .map(|reference| CodeCallRecord {
-                repository_id: reference.repository_id.clone(),
-                source_scope: reference.source_scope.clone(),
-                call_id: stable_id(
-                    "call",
-                    [
-                        self.repository_id.as_str(),
-                        self.source_scope.as_str(),
-                        reference.reference_id.as_str(),
-                        reference.path.as_str(),
-                        reference.name.as_str(),
-                        &reference.line_range.start.to_string(),
-                    ],
-                ),
-                file_id: reference.file_id.clone(),
-                path: reference.path.clone(),
-                caller_symbol_snapshot_id: caller_for_line(
-                    &self.symbols,
+            .map(|reference| {
+                let caller = caller_for_line(
+                    &symbols_by_path,
                     &reference.path,
                     reference.line_range.start,
-                )
-                .map(|symbol| symbol.symbol_snapshot_id.clone()),
-                caller_name: caller_for_line(
-                    &self.symbols,
-                    &reference.path,
-                    reference.line_range.start,
-                )
-                .map(|symbol| symbol.name.clone()),
-                callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
-                callee_name: reference.name.clone(),
-                target_hint: reference.target_hint.clone(),
-                resolution_state: reference.resolution_state.clone(),
-                confidence_basis_points: reference.confidence_basis_points,
-                confidence_tier: reference.confidence_tier.clone(),
-                line_range: reference.line_range.clone(),
+                );
+                let (caller_symbol_snapshot_id, caller_name) = caller
+                    .map(|symbol| {
+                        (
+                            Some(symbol.symbol_snapshot_id.clone()),
+                            Some(symbol.name.clone()),
+                        )
+                    })
+                    .unwrap_or((None, None));
+
+                CodeCallRecord {
+                    repository_id: reference.repository_id.clone(),
+                    source_scope: reference.source_scope.clone(),
+                    call_id: stable_id(
+                        "call",
+                        [
+                            self.repository_id.as_str(),
+                            self.source_scope.as_str(),
+                            reference.reference_id.as_str(),
+                            reference.path.as_str(),
+                            reference.name.as_str(),
+                            &reference.line_range.start.to_string(),
+                        ],
+                    ),
+                    file_id: reference.file_id.clone(),
+                    path: reference.path.clone(),
+                    caller_symbol_snapshot_id,
+                    caller_name,
+                    callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
+                    callee_name: reference.name.clone(),
+                    target_hint: reference.target_hint.clone(),
+                    resolution_state: reference.resolution_state.clone(),
+                    confidence_basis_points: reference.confidence_basis_points,
+                    confidence_tier: reference.confidence_tier.clone(),
+                    line_range: reference.line_range.clone(),
+                }
             })
             .collect();
 
@@ -166,16 +175,27 @@ impl SnapshotBuild {
     }
 }
 
+fn build_symbol_path_index(
+    symbols: &[RepositoryCodeSymbolRecord],
+) -> BTreeMap<&str, Vec<&RepositoryCodeSymbolRecord>> {
+    let mut index = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
+    for symbol in symbols {
+        index.entry(&symbol.path).or_default().push(symbol);
+    }
+
+    index
+}
+
 fn caller_for_line<'a>(
-    symbols: &'a [RepositoryCodeSymbolRecord],
+    symbols_by_path: &'a BTreeMap<&str, Vec<&'a RepositoryCodeSymbolRecord>>,
     path: &str,
     line: u32,
 ) -> Option<&'a RepositoryCodeSymbolRecord> {
-    symbols
+    symbols_by_path
+        .get(path)?
         .iter()
-        .filter(|symbol| {
-            symbol.path == path && symbol.line_range.start <= line && symbol.line_range.end >= line
-        })
+        .copied()
+        .filter(|symbol| symbol.line_range.start <= line && symbol.line_range.end >= line)
         .max_by_key(|symbol| symbol.line_range.start)
 }
 
@@ -188,4 +208,55 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     }
 
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::RepositoryCodeRange;
+
+    use super::*;
+
+    #[test]
+    fn caller_lookup_uses_matching_path_and_innermost_symbol() {
+        let symbols = vec![
+            symbol("outer", "src/hot.rs", "outer", 1, 10),
+            symbol("inner", "src/hot.rs", "inner", 5, 8),
+            symbol("other", "src/other.rs", "other", 6, 6),
+        ];
+        let index = build_symbol_path_index(&symbols);
+
+        let caller = caller_for_line(&index, "src/hot.rs", 6).expect("caller should resolve");
+
+        assert_eq!(caller.name, "inner");
+        assert!(caller_for_line(&index, "src/other.rs", 5).is_none());
+        assert!(caller_for_line(&index, "src/missing.rs", 6).is_none());
+    }
+
+    fn symbol(
+        symbol_snapshot_id: &str,
+        path: &str,
+        name: &str,
+        line_start: u32,
+        line_end: u32,
+    ) -> RepositoryCodeSymbolRecord {
+        RepositoryCodeSymbolRecord {
+            repository_id: "repo".to_owned(),
+            source_scope: "scope".to_owned(),
+            symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+            canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+            file_id: format!("file-{symbol_snapshot_id}"),
+            path: path.to_owned(),
+            language_id: "rust".to_owned(),
+            name: name.to_owned(),
+            qualified_name: format!("{}::{name}", path.replace('/', "::")),
+            kind: "function".to_owned(),
+            signature: format!("fn {name}()"),
+            doc_comment: None,
+            byte_range: RepositoryCodeRange { start: 0, end: 1 },
+            line_range: RepositoryCodeRange {
+                start: line_start,
+                end: line_end,
+            },
+        }
+    }
 }
