@@ -11,8 +11,8 @@ use crate::domain::{
 };
 
 use super::{
-    CodeIndexError, git_bytes, git_object_exists, languages::language_id, resolve_ref,
-    resolve_tree, split_nul,
+    CodeIndexError, changes::split_nul, git_bytes, git_object_exists, languages::language_id,
+    resolve_ref, resolve_tree,
 };
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
