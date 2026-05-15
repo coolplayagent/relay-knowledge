@@ -4,7 +4,6 @@ import { build } from "esbuild";
 
 const distUrl = new URL("../dist/", import.meta.url);
 const assetsUrl = new URL("../dist/assets/", import.meta.url);
-const dist = fileURLToPath(distUrl);
 const assets = fileURLToPath(assetsUrl);
 
 mkdirSync(assets, { recursive: true });
