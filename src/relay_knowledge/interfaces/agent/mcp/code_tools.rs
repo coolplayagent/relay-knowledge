@@ -7,8 +7,7 @@ use crate::domain::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, McpServer, api_error_result, authorize_limit,
-    authorize_scope, domain_argument_error, invalid_arguments, parse_freshness, request_context,
-    tool_error_result,
+    domain_argument_error, invalid_arguments, parse_freshness, request_context, tool_error_result,
     tool_registry::{CODE_IMPACT_TOOL, CODE_QUERY_TOOL},
     tool_success_result,
 };
@@ -65,7 +64,15 @@ async fn code_query_tool(server: &McpServer, arguments: Value, request_id: Strin
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
-    let repository = match authorize_scope(Some(args.repository), &server.agent.access_policy) {
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
         Ok(Some(repository)) => repository,
         Ok(None) => {
             return tool_error_result(AgentAdapterError::new(
@@ -119,7 +126,15 @@ async fn code_impact_tool(server: &McpServer, arguments: Value, request_id: Stri
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
-    let repository = match authorize_scope(Some(args.repository), &server.agent.access_policy) {
+    let repository = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            Some(args.repository),
+        )
+        .await
+    {
         Ok(Some(repository)) => repository,
         Ok(None) => {
             return tool_error_result(AgentAdapterError::new(

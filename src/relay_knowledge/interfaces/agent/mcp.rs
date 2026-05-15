@@ -13,6 +13,7 @@ mod http_contract;
 mod metrics;
 mod prompts;
 mod resources;
+mod scope_authorization;
 mod tool_registry;
 
 use axum::{
@@ -32,6 +33,7 @@ use http_contract::{
     ensure_remote_bind_allowed, validate_http_headers, validate_origin,
     validate_protocol_version_header,
 };
+use scope_authorization::RuntimeScopeAuthorizer;
 use state::{CancellationRegistry, SessionCreateError, SessionLookupError, SessionRegistry};
 
 use crate::{
@@ -52,7 +54,7 @@ use crate::{
 
 use super::{
     AgentAdapterError, AgentAdapterErrorKind, AgentAuditEvent, AgentAuditLog, AgentAuditSink,
-    authorize_limit, authorize_scope,
+    authorize_limit,
 };
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
 use code_tools::run_code_tool;
@@ -76,6 +78,7 @@ pub struct McpServer {
     metrics: AgentProtocolMetrics,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
+    scope_authorizer: RuntimeScopeAuthorizer,
 }
 
 impl McpServer {
@@ -103,6 +106,7 @@ impl McpServer {
             metrics,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
+            scope_authorizer: RuntimeScopeAuthorizer::default(),
         }
     }
 
@@ -678,7 +682,11 @@ async fn retrieve_context_tool(server: &McpServer, arguments: Value, request_id:
         Ok(limit) => limit,
         Err(error) => return tool_error_result(error),
     };
-    let source_scope = match authorize_scope(args.source_scope, policy) {
+    let source_scope = match server
+        .scope_authorizer
+        .authorize_scope(&server.service, policy, args.source_scope)
+        .await
+    {
         Ok(scope) => scope,
         Err(error) => return tool_error_result(error),
     };
@@ -729,7 +737,15 @@ async fn inspect_graph_tool(server: &McpServer, arguments: Value, request_id: St
         Ok(args) => args,
         Err(error) => return tool_error_result(invalid_arguments(error)),
     };
-    let source_scope = match authorize_scope(args.source_scope, &server.agent.access_policy) {
+    let source_scope = match server
+        .scope_authorizer
+        .authorize_scope(
+            &server.service,
+            &server.agent.access_policy,
+            args.source_scope,
+        )
+        .await
+    {
         Ok(scope) => scope,
         Err(error) => return tool_error_result(error),
     };

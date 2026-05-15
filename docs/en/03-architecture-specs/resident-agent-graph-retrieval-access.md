@@ -137,6 +137,13 @@ agent result, including retrieval hits, context-pack items, graph facts, source
 spans, code artifact metadata, and backend status metadata. It is not limited to
 raw evidence text bytes.
 
+The MCP adapter may supplement the static policy with a process-local runtime
+allow-list, but every promotion must be verifiable. The current runtime
+promotion source is an already registered code repository alias. Unknown scopes
+still fail with `permission_denied`, and the error message includes the missing
+scope plus the `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` repair path. Runtime
+promotion does not replace remote bind, Origin, QoS, or audit policy.
+
 准入流程:
 
 ```text

@@ -63,8 +63,29 @@ pub fn authorize_scope(
     scope: Option<String>,
     policy: &AgentAccessPolicy,
 ) -> Result<Option<String>, AgentAdapterError> {
+    let Some(normalized) = normalize_scope_for_policy(scope, policy.allow_unspecified_scope)?
+    else {
+        return Ok(None);
+    };
+
+    if policy
+        .allowed_scopes
+        .iter()
+        .any(|allowed| allowed == &normalized)
+    {
+        return Ok(Some(normalized));
+    }
+
+    Err(scope_not_authorized(&normalized))
+}
+
+/// Normalizes optional source scope input while preserving policy semantics.
+pub fn normalize_scope_for_policy(
+    scope: Option<String>,
+    allow_unspecified_scope: bool,
+) -> Result<Option<String>, AgentAdapterError> {
     let Some(scope) = scope else {
-        return if policy.allow_unspecified_scope {
+        return if allow_unspecified_scope {
             Ok(None)
         } else {
             Err(AgentAdapterError::new(
@@ -76,20 +97,16 @@ pub fn authorize_scope(
     let parsed = SourceScope::parse(scope).map_err(|error| {
         AgentAdapterError::new(AgentAdapterErrorKind::InvalidScope, error.to_string())
     })?;
-    let normalized = parsed.as_str().to_owned();
 
-    if policy
-        .allowed_scopes
-        .iter()
-        .any(|allowed| allowed == &normalized)
-    {
-        return Ok(Some(normalized));
-    }
+    Ok(Some(parsed.as_str().to_owned()))
+}
 
-    Err(AgentAdapterError::new(
+/// Builds the shared scope authorization denial.
+pub fn scope_not_authorized(scope: &str) -> AgentAdapterError {
+    AgentAdapterError::new(
         AgentAdapterErrorKind::PermissionDenied,
-        "source_scope is not authorized for this MCP policy",
-    ))
+        format!("source_scope '{scope}' is not authorized for this agent access policy"),
+    )
 }
 
 /// Validates tool limit without silently expanding caller budgets.
@@ -139,6 +156,8 @@ mod tests {
 
         assert_eq!(allowed.as_deref(), Some("docs"));
         assert_eq!(denied.kind, AgentAdapterErrorKind::PermissionDenied);
+        assert!(denied.message.contains("src"));
+        assert!(denied.message.contains("agent access policy"));
     }
 
     #[test]

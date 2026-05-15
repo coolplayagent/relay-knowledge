@@ -217,7 +217,11 @@ bind, defaulting to `http://127.0.0.1:8791/` and
 `http://127.0.0.1:8791/mcp`. MCP is disabled unless requested by the command or
 `RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED=true`; graph tools require
 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` unless
-`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured.
+`RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is explicitly configured or
+the requested scope matches a code repository alias already registered in this
+runtime. Registered repository aliases are promoted into a process-local MCP
+allow-list on first use; unknown scopes are still rejected with the missing
+scope and the exact `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` repair hint.
 The adapter validates `initialize` params, then issues an unpredictable
 `Mcp-Session-Id`. Clients must send `notifications/initialized`, then include
 that session header and `MCP-Protocol-Version` on later calls so `ping`, tool

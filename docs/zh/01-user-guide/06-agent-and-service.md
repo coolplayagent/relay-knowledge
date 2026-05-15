@@ -52,7 +52,7 @@ RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
 RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
 ```
 
-默认 policy 要求配置允许 scope。未设置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
+默认 policy 要求配置允许 scope。未设置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`，或者请求的 scope 已经是当前运行时注册过的 code repository alias。已注册仓库 alias 会在首次 MCP 访问时补入进程内动态白名单；未知 scope 仍会被拒绝，并返回缺失 scope 与 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` 修复提示。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
 
 MCP 不暴露 index refresh 或 repository indexing。仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`；derived index refresh 需要通过 CLI/Web 的显式运维 workflow 触发。
 

@@ -151,7 +151,7 @@ http://127.0.0.1:8791/mcp
 - 后续请求携带 session header 和 `MCP-Protocol-Version`。
 - 发送 `notifications/initialized` 后再调用工具。
 
-默认 agent policy 要求配置允许 scope。未配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`。
+默认 agent policy 要求配置允许 scope。未配置 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 时，graph tools 会拒绝 unspecified scope，除非显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`，或者请求 scope 是当前运行时已注册的 code repository alias。已注册 alias 会在首次 MCP 访问时进入进程内动态白名单，未知 scope 仍会返回带修复提示的 `permission_denied`。
 MCP 不暴露 index refresh 或 repository indexing；仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。远程 bind 默认被拒绝，非本机监听需要显式设置 `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`。
 
 ## 5. Freshness 和降级语义

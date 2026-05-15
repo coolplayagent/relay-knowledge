@@ -126,6 +126,8 @@ pub struct AgentAccessPolicy {
 
 `max_context_bytes` 适用于 agent 结果中保留的序列化上下文负载，包括检索命中、context-pack 条目、图事实、来源范围、代码工件元数据和后端状态元数据。它不限于原始证据文本字节。
 
+MCP adapter 可以在运行中补充一个进程内动态白名单，但补充来源必须可验证。当前只允许把已经注册到本运行时的 code repository alias 提升为 MCP 可读 scope；未知 scope 仍按 `permission_denied` 拒绝，并在错误消息中返回缺失 scope 和 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` 修复方式。动态补充不替代远程 bind、Origin、QoS 或审计策略。
+
 准入流程:
 
 ```text

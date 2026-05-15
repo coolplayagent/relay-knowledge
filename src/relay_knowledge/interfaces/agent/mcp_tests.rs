@@ -123,6 +123,43 @@ async fn retrieve_context_rejects_scope_and_limit_before_service_call() {
 }
 
 #[tokio::test]
+async fn runtime_scope_verification_failure_denies_by_policy() {
+    let store = Arc::new(SlowSearchStore);
+    let (server, _service) = server_and_service_with_store([], store).await;
+    let mut router = server.router();
+
+    let response = call_mcp(
+        &mut router,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "unverified-runtime-scope",
+            "method": "tools/call",
+            "params": {
+                "name": "relay_retrieve_context",
+                "arguments": {
+                    "query": "anything",
+                    "source_scope": "repo",
+                    "limit": 2
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(response["result"]["isError"], true);
+    assert_eq!(
+        response["result"]["structuredContent"]["error_kind"],
+        "permission_denied"
+    );
+    assert!(
+        response["result"]["structuredContent"]["message"]
+            .as_str()
+            .expect("error message")
+            .contains("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=repo")
+    );
+}
+
+#[tokio::test]
 async fn rejects_disallowed_origin_and_protocol_version() {
     let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
