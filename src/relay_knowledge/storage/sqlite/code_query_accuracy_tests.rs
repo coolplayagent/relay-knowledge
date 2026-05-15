@@ -318,6 +318,32 @@ async fn import_queries_can_match_importing_source_paths() {
     );
 }
 
+#[tokio::test]
+async fn import_queries_rank_earlier_matching_includes_before_later_ties() {
+    let store = store_with_repository_snapshot(snapshot_with_repeated_c_imports()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "linux/debugfs.h",
+                selector,
+                CodeQueryKind::Imports,
+                3,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(
+        hits.iter().map(|hit| hit.path.as_str()).collect::<Vec<_>>(),
+        vec!["mm/cma_debug.c", "fs/debugfs/file.c", "fs/debugfs/inode.c"]
+    );
+}
+
 fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
@@ -594,6 +620,49 @@ fn snapshot_with_c_imports() -> CodeIndexSnapshot {
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
+}
+
+fn snapshot_with_repeated_c_imports() -> CodeIndexSnapshot {
+    let mut snapshot = snapshot_with_c_imports();
+    snapshot.changed_path_count = 4;
+    snapshot.files.extend([
+        file(
+            "debugfs-file-source",
+            "fs/debugfs/file.c",
+            "c",
+            CodeParseStatus::Parsed,
+            None,
+        ),
+        file(
+            "debugfs-inode-source",
+            "fs/debugfs/inode.c",
+            "c",
+            CodeParseStatus::Parsed,
+            None,
+        ),
+    ]);
+    let mut file_import = import(
+        "debugfs-file-include",
+        "debugfs-file-source",
+        "fs/debugfs/file.c",
+        "#include <linux/debugfs.h>",
+        Some("include/linux/debugfs.h"),
+        "resolved",
+    );
+    file_import.line_range = range(16, 16);
+    let mut inode_import = import(
+        "debugfs-inode-include",
+        "debugfs-inode-source",
+        "fs/debugfs/inode.c",
+        "#include <linux/debugfs.h>",
+        Some("include/linux/debugfs.h"),
+        "resolved",
+    );
+    inode_import.line_range = range(23, 23);
+    snapshot.imports[1].line_range = range(9, 9);
+    snapshot.imports.extend([file_import, inode_import]);
+
+    snapshot
 }
 
 fn file(

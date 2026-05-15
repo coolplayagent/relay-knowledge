@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+#[path = "code_query_rows.rs"]
+mod code_query_rows;
 #[path = "code_query_scope.rs"]
 mod code_query_scope;
 
@@ -17,6 +19,7 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
+use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
 use code_query_scope::path_matches_filter;
 use code_query_scope::selector_filters_fit_indexed_scope;
@@ -447,10 +450,11 @@ fn search_imports(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(
+            let base_score = score_text(
                 &query,
                 [&row.module, row.target_hint.as_deref().unwrap_or_default()],
             ) + score_exact_path(&query, &row.path);
+            let score = base_score + import_line_priority(base_score, row.line_range.start);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -840,6 +844,14 @@ fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
 }
 
+fn import_line_priority(base_score: f64, line_start: u32) -> f64 {
+    if base_score <= 0.0 {
+        return 0.0;
+    }
+
+    1.0 / f64::from(line_start.clamp(1, 1_000))
+}
+
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -924,79 +936,6 @@ fn fts_values_for_limited(
         Value::Integer(fts_limit as i64),
         Value::Integer(limit as i64),
     ]
-}
-
-struct SymbolRow {
-    symbol_snapshot_id: String,
-    canonical_symbol_id: String,
-    file_id: String,
-    path: String,
-    language_id: String,
-    signature: String,
-    doc_comment: Option<String>,
-    byte_range: RepositoryCodeRange,
-    line_range: RepositoryCodeRange,
-    name: String,
-    qualified_name: String,
-    kind: String,
-}
-
-struct ReferenceRow {
-    file_id: String,
-    path: String,
-    language_id: String,
-    name: String,
-    kind: String,
-    target_symbol_snapshot_id: Option<String>,
-    byte_range: RepositoryCodeRange,
-    line_range: RepositoryCodeRange,
-    target_hint: Option<String>,
-    resolution_state: String,
-    confidence_basis_points: u16,
-    confidence_tier: String,
-    target_canonical_symbol_id: Option<String>,
-}
-
-struct CallRow {
-    file_id: String,
-    path: String,
-    language_id: String,
-    caller_symbol_snapshot_id: Option<String>,
-    caller_name: Option<String>,
-    callee_symbol_snapshot_id: Option<String>,
-    callee_name: String,
-    line_range: RepositoryCodeRange,
-    target_hint: Option<String>,
-    resolution_state: String,
-    confidence_basis_points: u16,
-    confidence_tier: String,
-    caller_canonical_symbol_id: Option<String>,
-    callee_canonical_symbol_id: Option<String>,
-}
-
-struct ImportRow {
-    file_id: String,
-    path: String,
-    language_id: String,
-    module: String,
-    line_range: RepositoryCodeRange,
-    target_hint: Option<String>,
-    resolution_state: String,
-    confidence_basis_points: u16,
-    confidence_tier: String,
-}
-
-struct ChunkRow {
-    file_id: String,
-    path: String,
-    language_id: String,
-    content: String,
-    byte_range: RepositoryCodeRange,
-    line_range: RepositoryCodeRange,
-    symbol_snapshot_id: Option<String>,
-    canonical_symbol_id: Option<String>,
-    parse_status: String,
-    degraded_reason: Option<String>,
 }
 
 #[cfg(test)]
