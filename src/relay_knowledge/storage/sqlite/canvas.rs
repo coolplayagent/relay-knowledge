@@ -268,6 +268,7 @@ fn add_relations(
         JOIN entities tgt ON tgt.id = rel.target_entity_id
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'relation' AND gfe.fact_id = rel.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
+                             AND ev.created_graph_version <= ?1
         WHERE rel.created_graph_version <= ?1
           AND rel.valid_from_graph_version <= ?1
           AND (rel.valid_until_graph_version IS NULL OR rel.valid_until_graph_version >= ?1)
@@ -370,6 +371,7 @@ fn add_claims(
         JOIN entities ent ON ent.id = claim.subject_entity_id
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'claim' AND gfe.fact_id = claim.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
+                             AND ev.created_graph_version <= ?1
         WHERE claim.created_graph_version <= ?1
           AND claim.valid_from_graph_version <= ?1
           AND (claim.valid_until_graph_version IS NULL OR claim.valid_until_graph_version >= ?1)
@@ -490,6 +492,7 @@ fn add_events(
         FROM graph_events event
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'event' AND gfe.fact_id = event.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
+                             AND ev.created_graph_version <= ?1
         WHERE event.created_graph_version <= ?1
           AND event.valid_from_graph_version <= ?1
           AND (event.valid_until_graph_version IS NULL OR event.valid_until_graph_version >= ?1)

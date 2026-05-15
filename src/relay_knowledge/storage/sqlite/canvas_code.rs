@@ -316,7 +316,8 @@ pub(super) fn add_source_path_links(
 ) -> Result<(), StorageError> {
     let mut statement = connection.prepare(
         "
-        SELECT ev.id, ev.source_scope, ev.source_path, ev.created_graph_version
+        SELECT ev.id, ev.source_scope, ev.source_path,
+               MAX(ev.created_graph_version, file.created_graph_version)
         FROM evidence ev
         JOIN code_files file ON file.source_scope = ev.source_scope
                             AND file.path = ev.source_path
@@ -325,7 +326,7 @@ pub(super) fn add_source_path_links(
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND ev.source_path IS NOT NULL
           AND (?3 IS NULL OR lower(ev.source_path || ' ' || ev.content) LIKE '%' || lower(?3) || '%')
-        ORDER BY ev.created_graph_version DESC, ev.id ASC
+        ORDER BY MAX(ev.created_graph_version, file.created_graph_version) DESC, ev.id ASC
         LIMIT ?4
         ",
     )?;

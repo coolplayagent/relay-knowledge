@@ -402,6 +402,23 @@ async fn mixed_canvas_excludes_future_source_path_links() {
             .iter()
             .any(|kind| kind == "source_path")
     );
+
+    let after_file = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Mixed,
+            source_scope: Some("repo".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(2),
+            limit: 40,
+        })
+        .await
+        .expect("canvas should load");
+    let source_edge = after_file
+        .edges
+        .iter()
+        .find(|edge| edge.id == "evidence-source-file:ev-future-file:repo:src/future.rs")
+        .expect("source path edge should appear when the file exists");
+    assert_eq!(source_edge.graph_version, GraphVersion::new(2));
 }
 
 #[tokio::test]
@@ -619,6 +636,101 @@ async fn canvas_filters_structured_facts_by_validity_window() {
             .nodes
             .iter()
             .all(|node| node.id != "claim:claim-expired" && node.id != "event:event-expired")
+    );
+}
+
+#[tokio::test]
+async fn canvas_fact_scope_filters_ignore_future_evidence_scope_changes() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let docs_scope = SourceScope::parse("docs").expect("scope should parse");
+    let repo_scope = SourceScope::parse("repo").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-scope-drift",
+        docs_scope.clone(),
+        "Scope Drift belongs to docs at the first snapshot",
+        vec!["Scope Drift".to_owned(), "Relay".to_owned()],
+    )
+    .expect("evidence should validate");
+    let relation = GraphRelationRecord::new(
+        "rel-scope-drift",
+        docs_scope.clone(),
+        "Scope Drift",
+        "documents",
+        "Relay",
+        vec!["ev-scope-drift".to_owned()],
+    )
+    .expect("relation should validate");
+    let claim = ClaimRecord::new(
+        "claim-scope-drift",
+        docs_scope.clone(),
+        "Scope Drift",
+        "scope",
+        "docs",
+        vec!["ev-scope-drift".to_owned()],
+    )
+    .expect("claim should validate");
+    let event = EventRecord::new(
+        "event-scope-drift",
+        docs_scope,
+        "scope_recorded",
+        vec!["Scope Drift".to_owned()],
+        None,
+        vec!["ev-scope-drift".to_owned()],
+    )
+    .expect("event should validate");
+    store
+        .commit_mutation_batch(
+            GraphMutationBatch::with_facts(
+                vec![evidence],
+                vec![relation],
+                vec![claim],
+                vec![event],
+            )
+            .expect("batch should validate"),
+        )
+        .await
+        .expect("initial facts should commit");
+
+    let moved_evidence = EvidenceRecord::new(
+        "ev-scope-drift",
+        repo_scope,
+        "Scope Drift is reingested under repo later",
+        vec!["Scope Drift".to_owned(), "Relay".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![moved_evidence]).expect("batch"))
+        .await
+        .expect("moved evidence should commit");
+
+    let old_repo_scope = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Knowledge,
+            source_scope: Some("repo".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(1),
+            limit: 80,
+        })
+        .await
+        .expect("canvas should load");
+
+    assert!(
+        old_repo_scope
+            .edges
+            .iter()
+            .all(|edge| edge.id != "relation:rel-scope-drift")
+    );
+    assert!(
+        old_repo_scope
+            .nodes
+            .iter()
+            .all(|node| node.id != "claim:claim-scope-drift")
+    );
+    assert!(
+        old_repo_scope
+            .nodes
+            .iter()
+            .all(|node| node.id != "event:event-scope-drift")
     );
 }
 
