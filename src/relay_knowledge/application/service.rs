@@ -322,7 +322,6 @@ impl RelayKnowledgeService {
                     .to_owned(),
             );
         }
-        let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
         let mut disabled_retriever_sources = self.runtime.retrieval.disabled_retriever_sources();
         if plan.freshness == FreshnessPolicy::GraphOnly {
             for source in [RetrieverSource::Semantic, RetrieverSource::Vector] {
@@ -331,18 +330,26 @@ impl RelayKnowledgeService {
                 }
             }
         }
-        let mut results = store
+        let candidate_limit = self.runtime.retrieval.rerank.candidate_limit(plan.limit);
+        let results = store
             .search(GraphSearchRequest {
                 query: plan.query.clone(),
                 source_scope: plan.source_scope.clone(),
                 graph_version,
-                limit: plan.limit.saturating_add(1),
+                limit: candidate_limit,
                 disabled_retriever_sources,
             })
             .await
             .map_err(storage_api_error)?;
+        let (mut results, mut rerank) = self.runtime.retrieval.rerank.rerank(&plan.query, results);
         let truncated = results.len() > plan.limit;
         results.truncate(plan.limit);
+        rerank.returned_count = results.len();
+        if rerank.degraded {
+            if let Some(reason) = &rerank.reason {
+                degraded_reasons.push(reason.clone());
+            }
+        }
         let context_pack = RetrievedContextPack {
             graph_version,
             source_scope: plan.source_scope.clone(),
@@ -366,12 +373,13 @@ impl RelayKnowledgeService {
                     code_artifact: hit.code_artifact.clone(),
                     retriever_sources: hit.retriever_sources.clone(),
                     ranking: hit.ranking.clone(),
+                    rerank: hit.rerank.clone(),
                 })
                 .collect(),
         };
         let budget_used = RetrievalBudgetUsed {
             limit: plan.limit,
-            candidate_count: results.len() + usize::from(truncated),
+            candidate_count: rerank.candidate_count,
             returned_count: results.len(),
             context_bytes: retrieval_context_bytes(&results, &context_pack, &backend_statuses),
         };
@@ -380,6 +388,7 @@ impl RelayKnowledgeService {
             k: RECIPROCAL_RANK_FUSION_K,
             candidate_count: budget_used.candidate_count,
         };
+        let degraded_reason = (!degraded_reasons.is_empty()).then(|| degraded_reasons.join("; "));
 
         Ok(HybridRetrievalResponse {
             metadata,
@@ -389,6 +398,7 @@ impl RelayKnowledgeService {
             freshness: plan.freshness,
             results,
             fusion,
+            rerank,
             backend_statuses,
             truncated,
             budget_used,

@@ -10,9 +10,9 @@ use crate::{
         CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
         ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
         IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
-        ProposalState, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
-        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
-        WorkerKind, WorkerStatus, WorkerTaskRecord,
+        ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
+        RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
+        ServiceManagerAction, ServiceOperatorStatus, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -317,6 +317,7 @@ pub struct HybridRetrievalResponse {
     pub freshness: FreshnessPolicy,
     pub results: Vec<RetrievalHit>,
     pub fusion: FusionDiagnostics,
+    pub rerank: RerankDiagnostics,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub truncated: bool,

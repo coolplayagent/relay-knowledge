@@ -58,6 +58,12 @@ pub const RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE: &str = "RELAY_KNOWLEDGE_EMBEDDIN
 pub const RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS";
 pub const RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY: &str =
     "RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY";
+pub const RELAY_KNOWLEDGE_RERANK_BACKEND: &str = "RELAY_KNOWLEDGE_RERANK_BACKEND";
+pub const RELAY_KNOWLEDGE_RERANK_MODEL: &str = "RELAY_KNOWLEDGE_RERANK_MODEL";
+pub const RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER: &str =
+    "RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER";
+pub const RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES: &str = "RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES";
 pub const RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT: &str =
     "RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT";
 pub const RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT";
@@ -191,6 +197,11 @@ pub struct RetrievalEnvOverrides {
     pub embedding_batch_size: Option<usize>,
     pub embedding_timeout_ms: Option<u64>,
     pub embedding_max_concurrency: Option<usize>,
+    pub rerank_backend: Option<String>,
+    pub rerank_model: Option<String>,
+    pub rerank_timeout_ms: Option<u64>,
+    pub rerank_candidate_multiplier: Option<usize>,
+    pub rerank_max_candidates: Option<usize>,
 }
 
 /// Worker and service-operator settings read from relay-specific environment variables.
@@ -363,6 +374,17 @@ impl EnvironmentConfig {
                 embedding_max_concurrency: positive_usize_var(
                     &values,
                     RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY,
+                )?,
+                rerank_backend: string_var(&values, RELAY_KNOWLEDGE_RERANK_BACKEND)?,
+                rerank_model: string_var(&values, RELAY_KNOWLEDGE_RERANK_MODEL)?,
+                rerank_timeout_ms: positive_u64_var(&values, RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS)?,
+                rerank_candidate_multiplier: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER,
+                )?,
+                rerank_max_candidates: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES,
                 )?,
             },
             workers: WorkerEnvOverrides {

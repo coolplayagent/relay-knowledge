@@ -7,18 +7,23 @@ use std::time::Duration;
 use std::{error::Error, fmt};
 
 pub mod provider;
+mod rerank;
 
 use crate::domain::{
-    FreshnessPolicy, GraphVersion, IndexKind, IndexStatus, RetrievalBackendState,
-    RetrievalBackendStatus, RetrieverSource,
+    FreshnessPolicy, GraphVersion, IndexKind, IndexStatus, RerankDiagnostics, RerankMode,
+    RetrievalBackendState, RetrievalBackendStatus, RetrievalHit, RetrieverSource,
 };
 
 pub const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
 pub const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
+pub const LOCAL_RERANK_MODEL: &str = "relay-local-deterministic-rerank-v1";
 pub const LOCAL_VECTOR_DIMENSION: u32 = 16;
 pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 32;
 pub const DEFAULT_EMBEDDING_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_EMBEDDING_MAX_CONCURRENCY: usize = 4;
+pub const DEFAULT_RERANK_TIMEOUT: Duration = Duration::from_millis(100);
+pub const DEFAULT_RERANK_CANDIDATE_MULTIPLIER: usize = 4;
+pub const DEFAULT_RERANK_MAX_CANDIDATES: usize = 64;
 
 /// Validated retrieval request with bounded result count.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +136,51 @@ pub struct ReadModelMetadata {
     pub dimension: u32,
 }
 
+/// Runtime configuration for post-fusion result reranking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RerankConfig {
+    pub mode: RerankMode,
+    pub model: Option<String>,
+    pub timeout: Duration,
+    pub candidate_multiplier: usize,
+    pub max_candidates: usize,
+}
+
+impl RerankConfig {
+    /// Uses the built-in deterministic reranker on an expanded local candidate pool.
+    pub fn local() -> Self {
+        Self {
+            mode: RerankMode::Local,
+            model: Some(LOCAL_RERANK_MODEL.to_owned()),
+            timeout: DEFAULT_RERANK_TIMEOUT,
+            candidate_multiplier: DEFAULT_RERANK_CANDIDATE_MULTIPLIER,
+            max_candidates: DEFAULT_RERANK_MAX_CANDIDATES,
+        }
+    }
+
+    /// Returns the storage candidate budget required before final truncation.
+    pub fn candidate_limit(&self, requested_limit: usize) -> usize {
+        let truncation_probe_limit = requested_limit.saturating_add(1);
+        if self.mode == RerankMode::Disabled {
+            return truncation_probe_limit;
+        }
+
+        let expanded = requested_limit
+            .saturating_mul(self.candidate_multiplier)
+            .max(truncation_probe_limit);
+        expanded.min(self.max_candidates.max(truncation_probe_limit))
+    }
+
+    /// Applies the configured reranking policy to post-fusion candidates.
+    pub fn rerank(
+        &self,
+        query: &str,
+        hits: Vec<RetrievalHit>,
+    ) -> (Vec<RetrievalHit>, RerankDiagnostics) {
+        rerank::rerank_hits(query, hits, self)
+    }
+}
+
 /// Runtime configuration for a remote embedding provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteEmbeddingConfig {
@@ -158,6 +208,7 @@ pub struct ReadModelBackendConfig {
     pub vector_model: ReadModelMetadata,
     pub image_model: ReadModelMetadata,
     pub remote_embedding: Option<RemoteEmbeddingConfig>,
+    pub rerank: RerankConfig,
 }
 
 impl ReadModelBackendConfig {
@@ -179,6 +230,7 @@ impl ReadModelBackendConfig {
                 dimension: LOCAL_VECTOR_DIMENSION,
             },
             remote_embedding: None,
+            rerank: RerankConfig::local(),
         }
     }
 

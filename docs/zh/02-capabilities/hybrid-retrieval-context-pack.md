@@ -10,10 +10,11 @@
 
 - `context_pack`：图版本、来源范围、新鲜度策略、截断状态、后端可用性，以及每个条目的来源和排序元数据。
 - `fusion`：排序算法和候选数量。当前阶段使用 `k = 60` 的互惠排名融合。
+- `rerank`：融合后的 rerank 诊断，包括请求/实际模式、候选数量、返回数量、降级状态和可选原因。
 - `budget_used`：请求限制、候选数量、返回数量和打包后的上下文字节数。
 - `truncated`：是否因为请求限制省略了一个或多个匹配候选。
 
-每个结果都包含 `retriever_sources`、`ranking`、实体投影、可选来源范围、结构化事实、直接图路径证据，以及可选的代码工件元数据。`ranking` 会记录检索器来源、来源内排名、原始来源得分和简短解释，方便 agent 引用条目入选原因。
+每个结果都包含 `retriever_sources`、`ranking`、实体投影、可选来源范围、结构化事实、直接图路径证据、可选的代码工件元数据，以及可选 `rerank` signal。`ranking` 会记录检索器来源、来源内排名、原始来源得分和简短解释；`rerank` 记录最终本地 rerank 分数和解释，方便 agent 引用条目入选原因。
 
 ## 检索来源
 
@@ -30,7 +31,7 @@
 
 `semantic` 和 `vector` 是新鲜度元数据中的显式索引族。`backend_statuses` 记录已配置的 `local`、`external` 或 `disabled` 读模型模式、模型名称、维度、作用域后过滤、已索引图版本，以及过期或不可用原因。派生后端禁用或过期时，BM25 与图证据检索仍可使用，响应也会继续报告索引新鲜度。
 
-BM25、semantic、vector、图路径、时序和社区命中通过 RRF 融合。默认 semantic/vector 实现是本地确定性读模型。外部 OpenAI 兼容 embedding provider 可以通过同一游标和后端状态契约提供读模型元数据与探测诊断，而不改变 context pack 响应形状。
+BM25、semantic、vector、图路径、时序和社区命中先通过 RRF 融合，再在最终请求限制前 rerank。默认 semantic/vector 实现是本地确定性读模型。外部 OpenAI 兼容 embedding provider 可以通过同一游标和后端状态契约提供读模型元数据与探测诊断，而不改变 context pack 响应形状。
 
 健康检查和索引刷新诊断也会暴露这些索引族的作用域游标元数据：来源哈希、后端游标，以及配置的后端 worker 提供的模型名称和维度。同一诊断中还包含 `stale_reasons`，用于解释失败状态、图版本滞后和最近错误。
 
@@ -69,6 +70,8 @@ OCR、字幕、表格、布局和图像嵌入维护流程通过 `commit_multimod
 当 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 设置为 `disabled` 时，对应检索器不会执行候选召回，也不会调度读模型刷新工作。Semantic 和 vector 游标的模型元数据来自已索引文档，而不是运行时覆盖标签。
 
 当任一后端设置为 `external` 时，远端 provider 通过 `env` 边界配置。查询执行仍读取本地读模型表，不在热路径调用 provider。
+
+Rerank 在 RRF 之后、请求 limit 截断之前执行。默认 `RELAY_KNOWLEDGE_RERANK_BACKEND=local` 使用确定性本地评分，覆盖 query 与内容、实体标签、图事实、source path、检索来源多样性和结构化证据的匹配。`disabled` 只保留 RRF 顺序。`external` 在本版本是预留 provider contract，会降级为本地 rerank 并设置 `rerank.degraded=true`；查询热路径不会调用远端模型。
 
 ## CLI 示例
 

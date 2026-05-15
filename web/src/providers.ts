@@ -41,6 +41,12 @@ export function providersSection(
       endpointDetail(status)
     ),
     providerItem(
+      "Rerank",
+      status.runtime.rerank_backend_mode,
+      status.runtime.rerank_backend_mode === "disabled" ? "warn" : "good",
+      rerankDetail(status)
+    ),
+    providerItem(
       "Budgets",
       `${status.runtime.embedding_max_concurrency ?? 0} concurrent`,
       status.runtime.embedding_provider ? "good" : "warn",
@@ -52,6 +58,16 @@ export function providersSection(
   section.append(grid, providerCursorTable(health.index_cursors));
 
   return section;
+}
+
+function rerankDetail(status: ProjectStatusResponse): string {
+  const model = status.runtime.rerank_model ?? "no model";
+  return [
+    model,
+    `${status.runtime.rerank_candidate_multiplier}x candidates`,
+    `cap ${status.runtime.rerank_max_candidates}`,
+    `${status.runtime.rerank_timeout_ms}ms`
+  ].join(" / ");
 }
 
 function primaryCursor(

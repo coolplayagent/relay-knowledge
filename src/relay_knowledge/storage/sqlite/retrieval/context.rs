@@ -142,6 +142,7 @@ pub(super) fn graph_evidence_candidates(
                     code_artifact: None,
                     retriever_sources: Vec::new(),
                     ranking: Vec::new(),
+                    rerank: None,
                     score: 0.0,
                 },
                 source: RetrieverSource::GraphEvidence,
