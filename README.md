@@ -213,6 +213,9 @@ the resolved config directory as `model-profiles.json` and
 `model-fallback.json`; the public catalog cache lives under the resolved cache
 directory as `model-catalog-cache.json`. Secret values are accepted only on save
 and are returned to the browser as configured booleans or redacted headers.
+Profile updates preserve redacted stored header secrets unless a replacement
+value is supplied, and API callers can set `clear_api_key=true` to explicitly
+remove a stored API key during header-only migrations.
 
 The CLI ingest command writes evidence plus entity labels. The shared API also
 accepts richer Phase 1 graph facts for adapters: evidence `source_path`, source

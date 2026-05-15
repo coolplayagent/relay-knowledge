@@ -110,6 +110,7 @@ export type ModelProfileSaveRequest = {
   model: string;
   base_url?: string;
   api_key?: string;
+  clear_api_key?: boolean;
   headers?: ModelRequestHeader[];
   ssl_verify?: boolean;
   context_window?: number;

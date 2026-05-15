@@ -91,13 +91,14 @@ pub(super) fn validate_fallback_config(
 
 pub(super) fn validate_headers(
     headers: Vec<ModelRequestHeader>,
+    existing: Option<&[ModelRequestHeader]>,
 ) -> Result<Vec<ModelRequestHeader>, ModelProviderError> {
     let mut names = BTreeSet::new();
     headers
         .into_iter()
         .map(ModelRequestHeader::normalized)
         .map(|result| {
-            let header = result?;
+            let mut header = result?;
             let folded = header.name.to_ascii_lowercase();
             if !names.insert(folded) {
                 return Err(ModelProviderError::InvalidInput(format!(
@@ -112,25 +113,37 @@ pub(super) fn validate_headers(
                 ))
             })?;
             match header.value.as_ref() {
-                Some(value) => {
-                    HeaderValue::from_str(value).map_err(|_| {
-                        ModelProviderError::InvalidInput(format!(
-                            "invalid model header value for '{}'",
-                            header.name
-                        ))
-                    })?;
-                }
+                Some(_) => {}
                 None if header.configured => {
-                    return Err(ModelProviderError::InvalidInput(format!(
-                        "model header '{}' requires a value",
-                        header.name
-                    )));
+                    if let Some(value) = existing_header_value(existing, &header.name) {
+                        header.value = Some(value);
+                    } else {
+                        return Err(ModelProviderError::InvalidInput(format!(
+                            "model header '{}' requires a value",
+                            header.name
+                        )));
+                    }
                 }
                 None => {}
+            }
+            if let Some(value) = header.value.as_ref() {
+                HeaderValue::from_str(value).map_err(|_| {
+                    ModelProviderError::InvalidInput(format!(
+                        "invalid model header value for '{}'",
+                        header.name
+                    ))
+                })?;
             }
             Ok(header)
         })
         .collect()
+}
+
+fn existing_header_value(existing: Option<&[ModelRequestHeader]>, name: &str) -> Option<String> {
+    existing?
+        .iter()
+        .find(|header| header.name.eq_ignore_ascii_case(name))
+        .and_then(|header| header.value.clone())
 }
 
 pub(super) fn normalized_base_url(
@@ -392,11 +405,31 @@ pub(super) async fn discovery_result_from_http(
                     retryable: is_retryable_status(status.as_u16()),
                 };
             }
-            let payload = response.json::<Value>().await.ok();
-            let entries = payload
-                .as_ref()
-                .map(parse_discovery_entries)
-                .unwrap_or_default();
+            let payload = match response.json::<Value>().await {
+                Ok(payload) => payload,
+                Err(error) => {
+                    return ModelDiscoveryResult {
+                        ok: false,
+                        provider: profile.provider,
+                        base_url: redacted_url(&profile.base_url),
+                        latency_ms: elapsed_millis(started),
+                        checked_at_ms,
+                        diagnostics: ModelConnectivityDiagnostics {
+                            endpoint_reachable: true,
+                            auth_valid: true,
+                            rate_limited: false,
+                        },
+                        models: Vec::new(),
+                        model_entries: Vec::new(),
+                        error_code: Some("invalid_response".to_owned()),
+                        error_message: Some(format!(
+                            "provider returned invalid model discovery JSON: {error}"
+                        )),
+                        retryable: false,
+                    };
+                }
+            };
+            let entries = parse_discovery_entries(&payload);
             let models = entries.iter().map(|entry| entry.model.clone()).collect();
             ModelDiscoveryResult {
                 ok: true,
@@ -766,14 +799,14 @@ pub(super) fn catalog_result_from_cache(
 }
 
 pub(super) fn redacted_url(value: &str) -> String {
-    value
-        .split_once('@')
-        .map(|(_, tail)| {
-            let scheme = value
-                .split_once("://")
-                .map_or("https", |(scheme, _)| scheme);
-            format!("{scheme}://{tail}")
-        })
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return value.to_owned();
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, suffix) = rest.split_at(authority_end);
+    authority
+        .rsplit_once('@')
+        .map(|(_, host)| format!("{scheme}://{host}{suffix}"))
         .unwrap_or_else(|| value.to_owned())
 }
 

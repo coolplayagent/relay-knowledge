@@ -158,7 +158,7 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 
 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 也接受 `local` 与 `disabled`。禁用的 read-model backend 不参与 semantic/vector 检索执行和刷新调度；空 embedding model name 会在运行时配置阶段失败。
 
-Web Settings 页面按 agent 互操作性、检索默认值和模型 provider 分类展示。Agent/检索设置会读取同一套脱敏 runtime 与 service diagnostics，用于生成 MCP 暴露、origin allow-list、作用域策略、审计和外部模型相关环境变量。模型 provider 设置通过 `/api/configs/model/*` 管理命名 chat/completion profile、fallback policy、`models.dev` catalog 刷新、endpoint probe 和模型发现。Profile 与 fallback 文件位于解析后的配置目录，文件名为 `model-profiles.json` 和 `model-fallback.json`；公共 catalog cache 位于解析后的缓存目录，文件名为 `model-catalog-cache.json`。Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header。
+Web Settings 页面按 agent 互操作性、检索默认值和模型 provider 分类展示。Agent/检索设置会读取同一套脱敏 runtime 与 service diagnostics，用于生成 MCP 暴露、origin allow-list、作用域策略、审计和外部模型相关环境变量。模型 provider 设置通过 `/api/configs/model/*` 管理命名 chat/completion profile、fallback policy、`models.dev` catalog 刷新、endpoint probe 和模型发现。Profile 与 fallback 文件位于解析后的配置目录，文件名为 `model-profiles.json` 和 `model-fallback.json`；公共 catalog cache 位于解析后的缓存目录，文件名为 `model-catalog-cache.json`。Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header；更新 profile 时会保留已脱敏的 header secret，API 调用方可设置 `clear_api_key=true` 显式清除已保存的 API key，便于迁移到 header-only 认证。
 
 CLI `ingest` 命令会写入 evidence 和 entity label。共享 API 还接受面向 adapter 的更丰富 Phase 1 graph fact：evidence `source_path`、source `span`、confidence、lifecycle status、类型化 relation、claim，以及引用 evidence id 的 event。结构化事实必须引用 supporting evidence；反序列化后会重新校验 supplied confidence、span 和 version-range 字段；检索只使用 `accepted` 或 `proposed` evidence 作为上下文。Context pack item 现在会暴露从这些结构化事实派生的直接 `graph_paths`，方便 agent caller 在 raw fact provenance 旁边引用一跳 relation、claim 或 event path。
 

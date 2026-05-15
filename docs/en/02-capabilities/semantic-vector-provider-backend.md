@@ -85,4 +85,5 @@ it can save named profiles, the default profile, fallback policies, a
 `models.dev` catalog cache, endpoint probes, and model discovery. Profile
 secrets are stored only in the `paths`-resolved config directory, and read
 responses return configured status plus redacted headers instead of raw secret
-values.
+values. Profile updates preserve stored header secrets when a redacted header is
+round-tripped, and `clear_api_key=true` explicitly removes a saved API key.

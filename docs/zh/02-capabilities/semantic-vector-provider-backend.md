@@ -59,4 +59,4 @@ Web 诊断工作区包含 `Providers` 区域，展示：
 - batch、timeout 和 concurrency 预算。
 - 带有模型、维度、scope 和后端游标的 semantic/vector 游标行。
 
-Providers 面板仍是 semantic/vector 读模型诊断视图，不保存 embedding provider 设置，也不提交 embedding API key。Settings 页新增的模型 provider 区域是独立的 chat/completion profile 管理界面：它可以保存命名 profile、默认 profile、fallback policy、`models.dev` catalog cache，并提供 endpoint probe 与模型发现。Profile secret 保存在 `paths` 解析出的配置目录中，读取响应只返回 configured 状态和脱敏 header，不返回 secret 原文。
+Providers 面板仍是 semantic/vector 读模型诊断视图，不保存 embedding provider 设置，也不提交 embedding API key。Settings 页新增的模型 provider 区域是独立的 chat/completion profile 管理界面：它可以保存命名 profile、默认 profile、fallback policy、`models.dev` catalog cache，并提供 endpoint probe 与模型发现。Profile secret 保存在 `paths` 解析出的配置目录中，读取响应只返回 configured 状态和脱敏 header，不返回 secret 原文。更新 profile 时会保留已脱敏的 header secret，`clear_api_key=true` 会显式清除已保存 API key。

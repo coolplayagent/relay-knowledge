@@ -78,6 +78,9 @@ configuration and must satisfy these contracts:
 - MaaS, CodeAgent, and Echo profiles can be saved without a configured secret;
   providers that require API keys must receive a new key on save or keep an
   existing configured secret.
+- Redacted secret headers sent back during profile updates must preserve the
+  stored values, and `clear_api_key=true` must explicitly clear a stored API
+  key without relying on ambiguous omitted/null fields.
 - `Probe` and `Discover` must use the `net::http` outbound client, timeouts, and
   QoS budgets instead of bypassing the network boundary.
 - Catalog refresh failures must preserve the built-in catalog fallback or the

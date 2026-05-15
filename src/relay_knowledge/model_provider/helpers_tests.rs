@@ -15,6 +15,7 @@ fn redacts_secret_profile_fields() {
             model: "gpt-test".to_owned(),
             base_url: Some("https://example.test/v1".to_owned()),
             api_key: Some("secret".to_owned()),
+            clear_api_key: false,
             headers: vec![ModelRequestHeader {
                 name: "x-api-key".to_owned(),
                 value: Some("hidden".to_owned()),
@@ -157,6 +158,27 @@ async fn sends_provider_probe_and_discovery_requests() {
     assert!(!failed_discovery.ok);
     assert_eq!(failed_discovery.error_code.as_deref(), Some("rate_limited"));
     assert!(failed_discovery.retryable);
+
+    let invalid_json = stored_profile(
+        ModelProviderKind::OpenAiCompatible,
+        "gpt-fixture",
+        &format!("{base_url}/bad"),
+        Some("secret"),
+    );
+    let invalid_discovery_response =
+        send_discovery_request(&client, &invalid_json, Some(Duration::from_secs(1))).await;
+    let invalid_discovery = discovery_result_from_http(
+        invalid_json,
+        Instant::now(),
+        now_millis(),
+        invalid_discovery_response,
+    )
+    .await;
+    assert!(!invalid_discovery.ok);
+    assert_eq!(
+        invalid_discovery.error_code.as_deref(),
+        Some("invalid_response")
+    );
 }
 
 #[tokio::test]
@@ -300,6 +322,14 @@ fn maps_headers_statuses_catalogs_and_discovery_payloads() {
         "https://example.com/v1"
     );
     assert_eq!(
+        redacted_url("https://example.com/tenant@region/v1"),
+        "https://example.com/tenant@region/v1"
+    );
+    assert_eq!(
+        redacted_url("https://example.com/v1?tenant=user@example.com"),
+        "https://example.com/v1?tenant=user@example.com"
+    );
+    assert_eq!(
         request_timeout_from_ms(Some(5)),
         Some(Duration::from_millis(5))
     );
@@ -331,6 +361,7 @@ async fn serve_provider_fixture() -> String {
                 }))
             }),
         )
+        .route("/bad/models", get(|| async { "not-json" }))
         .route(
             "/v1/messages",
             post(|| async { (StatusCode::UNAUTHORIZED, Json(json!({}))) }),

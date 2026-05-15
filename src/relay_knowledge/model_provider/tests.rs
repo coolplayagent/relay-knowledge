@@ -4,6 +4,7 @@ use crate::{
     net::http::{HttpBindAddress, HttpConfig, HttpProxyConfig},
     retrieval::ReadModelBackendConfig,
 };
+use tokio::io::AsyncWriteExt;
 
 use super::*;
 
@@ -37,11 +38,46 @@ async fn profile_crud_preserves_secrets_and_redacts_responses() {
         .await
         .expect("profile file should exist");
     assert!(raw.contains("secret-a"));
+    assert!(raw.contains("header-secret"));
     assert!(
         !serde_json::to_string(&updated)
             .unwrap()
             .contains("secret-a")
     );
+
+    let mut redacted_header_update = openai_request("gpt-c", None);
+    redacted_header_update.headers = vec![ModelRequestHeader {
+        name: "x-extra-secret".to_owned(),
+        value: None,
+        secret: true,
+        configured: true,
+    }];
+    service
+        .save_profile("primary", redacted_header_update, &retrieval)
+        .await
+        .expect("redacted header update should preserve stored header value");
+    let raw = fs::read_to_string(service.paths.model_profiles_file())
+        .await
+        .expect("profile file should exist");
+    assert!(raw.contains("header-secret"));
+
+    let mut clear_key_update = openai_request("gpt-d", None);
+    clear_key_update.clear_api_key = true;
+    clear_key_update.headers = vec![ModelRequestHeader {
+        name: "x-extra-secret".to_owned(),
+        value: Some("header-secret".to_owned()),
+        secret: true,
+        configured: false,
+    }];
+    let cleared = service
+        .save_profile("primary", clear_key_update, &retrieval)
+        .await
+        .expect("header-auth update should clear stored api key");
+    assert!(!cleared.profiles[0].api_key_configured);
+    let raw = fs::read_to_string(service.paths.model_profiles_file())
+        .await
+        .expect("profile file should exist");
+    assert!(!raw.contains("secret-a"));
 }
 
 #[tokio::test]
@@ -137,6 +173,22 @@ async fn catalog_uses_builtin_cache_and_network_fallbacks() {
     assert!(fallback.stale);
     assert_eq!(fallback.providers[0].id, "fixture");
     assert_eq!(fallback.error_code.as_deref(), Some("network_error"));
+
+    let mut service = test_service("catalog-http-failure");
+    service.catalog_source_url = failing_catalog_url().await;
+    let fallback = service
+        .catalog(&http, true)
+        .await
+        .expect("builtin fallback");
+    assert!(!fallback.ok);
+    assert!(fallback.stale);
+    assert!(
+        fallback
+            .providers
+            .iter()
+            .any(|provider| provider.id == "echo")
+    );
+    assert_eq!(fallback.error_code.as_deref(), Some("provider_error"));
 }
 
 #[tokio::test]
@@ -232,6 +284,7 @@ async fn unsupported_enterprise_provider_reports_non_retryable_diagnostics() {
         model: "maas-model".to_owned(),
         base_url: None,
         api_key: None,
+        clear_api_key: false,
         headers: Vec::new(),
         ssl_verify: None,
         context_window: None,
@@ -399,12 +452,30 @@ fn test_http_config() -> HttpConfig {
     .expect("http config")
 }
 
+async fn failing_catalog_url() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("catalog fixture should bind");
+    let address = listener.local_addr().expect("catalog fixture address");
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("catalog request");
+        stream
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+            )
+            .await
+            .expect("catalog response");
+    });
+    format!("http://{address}/api.json")
+}
+
 fn openai_request(model: &str, api_key: Option<&str>) -> ModelProfileSaveRequest {
     ModelProfileSaveRequest {
         provider: ModelProviderKind::OpenAiCompatible,
         model: model.to_owned(),
         base_url: Some("https://user:pass@api.example.com/v1".to_owned()),
         api_key: api_key.map(ToOwned::to_owned),
+        clear_api_key: false,
         headers: vec![ModelRequestHeader {
             name: "x-extra-secret".to_owned(),
             value: Some("header-secret".to_owned()),
@@ -448,6 +519,7 @@ fn echo_request(model: &str, is_default: bool) -> ModelProfileSaveRequest {
         model: model.to_owned(),
         base_url: None,
         api_key: None,
+        clear_api_key: false,
         headers: Vec::new(),
         ssl_verify: None,
         context_window: None,

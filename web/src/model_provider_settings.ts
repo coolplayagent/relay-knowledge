@@ -24,6 +24,7 @@ type ProviderUiState = {
   profiles: ModelProfilesResponse | null;
   fallback: ModelFallbackConfig | null;
   catalog: ModelCatalogResult | null;
+  loadFailed: boolean;
   selectedProfile: string;
   draft: ModelProfileDraft;
   message: string;
@@ -36,12 +37,14 @@ type ModelProfileDraft = {
   model: string;
   baseUrl: string;
   apiKey: string;
+  clearApiKey: boolean;
   temperature: number;
   topP: number;
   maxTokens: number;
   contextWindow: number;
   connectTimeoutSeconds: number;
   fallbackPolicyId: string;
+  fallbackPriority: number;
   isDefault: boolean;
 };
 
@@ -65,6 +68,7 @@ let providerState: ProviderUiState = {
   profiles: null,
   fallback: null,
   catalog: null,
+  loadFailed: false,
   selectedProfile: "",
   draft: emptyDraft(),
   message: "",
@@ -84,7 +88,11 @@ export function modelProviderSettingsPanel(callbacks: ProviderCallbacks): HTMLEl
 }
 
 function ensureProviderData(callbacks: ProviderCallbacks) {
-  if (providerState.loading || (providerState.profiles && providerState.fallback && providerState.catalog)) {
+  if (
+    providerState.loading ||
+    providerState.loadFailed ||
+    (providerState.profiles && providerState.fallback && providerState.catalog)
+  ) {
     return;
   }
   providerState.loading = true;
@@ -96,6 +104,7 @@ function ensureProviderData(callbacks: ProviderCallbacks) {
         profiles,
         fallback,
         catalog,
+        loadFailed: false,
         selectedProfile: profiles.default_profile ?? profiles.profiles[0]?.name ?? "",
         draft: draftFromProfile(profiles.profiles.find((profile) => profile.is_default) ?? profiles.profiles[0])
       };
@@ -105,6 +114,7 @@ function ensureProviderData(callbacks: ProviderCallbacks) {
       providerState = {
         ...providerState,
         loading: false,
+        loadFailed: true,
         message: callbacks.errorMessage(error)
       };
       callbacks.rerender();
@@ -190,6 +200,15 @@ function profileEditor(callbacks: ProviderCallbacks): HTMLElement {
     }),
     passwordControl("API key", draft.apiKey, (value) => {
       draft.apiKey = value;
+      if (value.trim()) {
+        draft.clearApiKey = false;
+      }
+    }),
+    checkboxControl("Clear API key", draft.clearApiKey, (checked) => {
+      draft.clearApiKey = checked;
+      if (checked) {
+        draft.apiKey = "";
+      }
     }),
     numberControl("Temperature", draft.temperature, "0", "2", "0.1", (value) => {
       draft.temperature = numericValue(value, 0.7);
@@ -427,7 +446,8 @@ function draftPayload(draft: ModelProfileDraft): ModelProfileSaveRequest {
     context_window: draft.contextWindow || undefined,
     connect_timeout_seconds: draft.connectTimeoutSeconds,
     fallback_policy_id: draft.fallbackPolicyId || undefined,
-    fallback_priority: 0,
+    fallback_priority: draft.fallbackPriority,
+    clear_api_key: draft.clearApiKey || undefined,
     is_default: draft.isDefault
   };
 }
@@ -443,12 +463,14 @@ function draftFromProfile(profile: ModelProfileView | undefined): ModelProfileDr
     model: profile.model,
     baseUrl: profile.base_url,
     apiKey: "",
+    clearApiKey: false,
     temperature: profile.temperature,
     topP: profile.top_p,
     maxTokens: profile.max_tokens ?? 0,
     contextWindow: profile.context_window ?? 0,
     connectTimeoutSeconds: profile.connect_timeout_seconds,
     fallbackPolicyId: profile.fallback_policy_id ?? "",
+    fallbackPriority: profile.fallback_priority,
     isDefault: profile.is_default
   };
 }
@@ -460,12 +482,14 @@ function emptyDraft(): ModelProfileDraft {
     model: "",
     baseUrl: "",
     apiKey: "",
+    clearApiKey: false,
     temperature: 0.7,
     topP: 1,
     maxTokens: 0,
     contextWindow: 0,
     connectTimeoutSeconds: 30,
     fallbackPolicyId: "",
+    fallbackPriority: 0,
     isDefault: true
   };
 }

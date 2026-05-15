@@ -132,6 +132,8 @@ pub struct ModelProfileSaveRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default)]
+    pub clear_api_key: bool,
+    #[serde(default)]
     pub headers: Vec<ModelRequestHeader>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssl_verify: Option<bool>,
@@ -233,16 +235,23 @@ impl StoredModelProfile {
         let provider = request.provider;
         let model = non_empty_string(request.model, "model")?;
         let base_url = normalized_base_url(provider, request.base_url)?;
-        let api_key = match request.api_key {
-            Some(value) => non_empty_string(value, "api_key").ok(),
-            None => existing.and_then(|profile| profile.api_key.clone()),
+        let api_key = if request.clear_api_key {
+            None
+        } else {
+            match request.api_key {
+                Some(value) => non_empty_string(value, "api_key").ok(),
+                None => existing.and_then(|profile| profile.api_key.clone()),
+            }
         };
         let headers = if request.headers.is_empty() {
             existing
                 .map(|profile| profile.headers.clone())
                 .unwrap_or_default()
         } else {
-            validate_headers(request.headers)?
+            validate_headers(
+                request.headers,
+                existing.map(|profile| profile.headers.as_slice()),
+            )?
         };
         if !provider_allows_missing_auth(provider)
             && api_key.is_none()
@@ -653,16 +662,27 @@ impl ModelProviderConfigService {
             Ok(result) => {
                 let fallback_error_code = result.error_code.clone();
                 let fallback_error_message = result.error_message.clone();
+                let source_url = result.source_url.clone();
+                let fetched_at_ms = result.fetched_at_ms;
                 Ok(cached
                     .map(|cache| {
                         catalog_result_from_cache(
                             cache,
                             false,
-                            fallback_error_code,
-                            fallback_error_message,
+                            fallback_error_code.clone(),
+                            fallback_error_message.clone(),
                         )
                     })
-                    .unwrap_or(result))
+                    .unwrap_or_else(|| ModelCatalogResult {
+                        ok: false,
+                        source_url,
+                        fetched_at_ms,
+                        cache_age_seconds: None,
+                        stale: true,
+                        providers: builtin_catalog_providers(),
+                        error_code: fallback_error_code,
+                        error_message: fallback_error_message,
+                    }))
             }
             Err(error) => Ok(cached
                 .map(|cache| {
@@ -886,7 +906,7 @@ impl ModelProviderConfigService {
                 cache_age_seconds: None,
                 stale: true,
                 providers: Vec::new(),
-                error_code: Some("http_error".to_owned()),
+                error_code: Some(status_error_code(response.status().as_u16()).to_owned()),
                 error_message: Some(format!("catalog returned HTTP {}", response.status())),
             });
         }
