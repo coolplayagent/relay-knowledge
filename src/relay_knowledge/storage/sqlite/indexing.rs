@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 mod cursor_metadata;
+mod schema;
 mod task_queue;
 
 use cursor_metadata::{
@@ -74,6 +75,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         );
         ",
     )?;
+    schema::ensure_index_schema_columns(connection)?;
 
     for kind in IndexKind::ALL {
         connection.execute(

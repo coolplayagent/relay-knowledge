@@ -30,13 +30,26 @@ async fn commits_code_graph_batch_and_marks_indexes_stale() {
     );
 }
 
-#[test]
-fn startup_resets_database_with_obsolete_code_tables() {
+#[tokio::test]
+async fn startup_rebuilds_obsolete_code_tables_without_deleting_graph_data() {
     let path = temp_db_path("obsolete-code-tables");
     let connection = rusqlite::Connection::open(&path).expect("connection should open");
     connection
         .execute_batch(
             "
+            CREATE TABLE graph_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                graph_version INTEGER NOT NULL
+            );
+            INSERT INTO graph_state (id, graph_version) VALUES (1, 1);
+            CREATE TABLE evidence (
+                id TEXT PRIMARY KEY,
+                source_scope TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_graph_version INTEGER NOT NULL
+            );
+            INSERT INTO evidence (id, source_scope, content, created_graph_version)
+            VALUES ('ev-code-legacy', 'docs', 'Code graph rebuild should not delete graph data', 1);
             CREATE TABLE code_files (
                 repository_id TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -56,10 +69,13 @@ fn startup_resets_database_with_obsolete_code_tables() {
     drop(connection);
 
     let store = crate::storage::SqliteGraphStore::open(&path)
-        .expect("store should reset obsolete code tables");
+        .expect("store should rebuild obsolete code tables");
+    let graph = store.inspect_graph().await.expect("graph should inspect");
     let guard = store.connection.lock().expect("connection should lock");
     let columns = table_columns(&guard, "code_files").expect("columns should read");
 
+    assert_eq!(graph.graph_version, GraphVersion::new(1));
+    assert_eq!(graph.evidence_count, 1);
     assert!(columns.iter().any(|column| column == "source_scope"));
     assert!(columns.iter().any(|column| column == "content_hash"));
     assert!(!table_exists(&guard, "code_files_legacy_0").expect("table check should run"));

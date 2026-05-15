@@ -457,7 +457,7 @@ async fn initialization_backfills_fact_evidence_links_for_existing_facts() {
 }
 
 #[tokio::test]
-async fn startup_resets_database_with_obsolete_bm25_schema() {
+async fn startup_rebuilds_obsolete_bm25_schema_without_deleting_graph_data() {
     let path = temp_db_path("bm25-reset");
     {
         let store = SqliteGraphStore::open(&path).expect("store should open");
@@ -490,6 +490,7 @@ async fn startup_resets_database_with_obsolete_bm25_schema() {
     }
 
     let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let graph = store.inspect_graph().await.expect("graph should inspect");
     let hits = store
         .search(GraphSearchRequest {
             query: "main".to_owned(),
@@ -501,7 +502,9 @@ async fn startup_resets_database_with_obsolete_bm25_schema() {
         .await
         .expect("search should succeed");
 
-    assert!(hits.is_empty());
+    assert_eq!(graph.graph_version, GraphVersion::new(1));
+    assert_eq!(graph.code_file_count, 1);
+    assert!(!hits.is_empty());
     let _ = std::fs::remove_file(path);
 }
 

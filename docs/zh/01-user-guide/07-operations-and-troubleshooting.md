@@ -77,9 +77,8 @@ MCP 返回 HTTP 400: 常见原因是缺少 `Mcp-Session-Id`、缺少 `MCP-Protoc
 MCP 返回 HTTP 404: 常见原因是 session id 未知、过期或被淘汰。重新执行 initialize 流程并保存新的 `Mcp-Session-Id`。
 
 `health` 或 `service doctor` 在本地库上提示 `no such column`:
-当前版本不再兼容过期 SQLite schema。启动时如果检测到不符合当前表定义的本地数据库，
-会删除该数据库及 WAL/SHM sidecar 并按最新 schema 重建；之后需要重新摄取或重新索引数据。
-若仍复现，先运行 `relay-knowledge health --format json` 获取完整错误，再用隔离
+当前版本会在启动时迁移已知的过期 SQLite schema，并只重建可派生的索引表或刷新队列。
+如果仍复现，先运行 `relay-knowledge health --format json` 获取完整错误，再用隔离
 `RELAY_KNOWLEDGE_HOME` 判断是否只影响旧数据目录。`setup doctor` 不打开 SQLite，
 适合在 storage 诊断失败时先检查 runtime configuration。
 

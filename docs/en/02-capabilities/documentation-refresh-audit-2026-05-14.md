@@ -22,11 +22,11 @@ against the compiled binary.
 | README | Added setup diagnostics/profile commands to current capabilities and CLI examples. |
 | User guide | Bumped the guide version to 1.2, added `setup doctor`, documented setup profiles, and removed the planned-only setup wording. |
 | Advanced configuration | Replaced the old planned setup section with the implemented `setup doctor` and `setup profile` behavior. |
-| Operations troubleshooting | Added setup doctor to the diagnostic order and documented obsolete local database reset behavior. |
+| Operations troubleshooting | Added setup doctor to the diagnostic order and documented obsolete local database migration behavior. |
 | Semantic/vector backend | Added the external embedding setup profile as the recommended starting point. |
 | Unified API spec | Added setup commands to the current CLI surface and clarified that setup profile is read-only recommendation output. |
 | Installation/release spec | Updated service-install guidance to match the implemented `service plan`, `service definition write`, and `setup profile service` flow. |
-| Storage reset | Local SQLite files that do not match the current schema are recreated from the latest table definitions. |
+| Storage migration | Known obsolete SQLite table definitions are migrated in place; derived retrieval tables and refresh queues may be rebuilt without deleting graph data. |
 
 ## Current Documentation Status
 
@@ -49,8 +49,8 @@ against the compiled binary.
 - `relay-knowledge setup profile local|agent-readonly|service|external-embedding`:
   read-only environment and command recommendations that do not write files,
   mutate shell profiles, or install services.
-- SQLite startup reset: local database files that do not match the current
-  table definitions are deleted with their WAL/SHM sidecars and recreated, so
+- SQLite startup migration: known obsolete table definitions are migrated in
+  place, and only derived retrieval tables or refresh queues are rebuilt, so
   `health` and `service doctor` do not run against obsolete schemas.
 
 ## Remaining Implementation Work
@@ -70,5 +70,5 @@ relay-knowledge help --format json
 relay-knowledge setup doctor --format json
 relay-knowledge setup profile external-embedding --format json
 cargo test --all-targets --all-features cli
-cargo test --all-targets --all-features startup_resets_database_with_obsolete_refresh_queue_schema
+cargo test --all-targets --all-features startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_data
 ```
