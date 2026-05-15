@@ -811,6 +811,9 @@ mod graph_tests;
 mod index_refresh_queue_tests;
 
 #[cfg(test)]
+mod index_schema_migration_tests;
+
+#[cfg(test)]
 mod graphrag_phase4_tests;
 
 #[cfg(test)]

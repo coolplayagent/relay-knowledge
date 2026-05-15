@@ -40,7 +40,7 @@ async fn startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_d
                 target_graph_version INTEGER NOT NULL,
                 state TEXT NOT NULL,
                 attempt_count INTEGER NOT NULL,
-                next_retry_at_ms INTEGER NOT NULL,
+                next_retry_after_ms INTEGER NOT NULL,
                 input_fingerprint TEXT NOT NULL,
                 cursor_before INTEGER NOT NULL,
                 cursor_after INTEGER,
@@ -49,7 +49,7 @@ async fn startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_d
             );
             INSERT INTO index_refresh_tasks (
                 task_id, kind, source_scope, modality, target_graph_version, state,
-                attempt_count, next_retry_at_ms, input_fingerprint, cursor_before,
+                attempt_count, next_retry_after_ms, input_fingerprint, cursor_before,
                 cursor_after, last_error_kind, last_error_message
             )
             VALUES (
@@ -78,6 +78,16 @@ async fn startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_d
         .expect("legacy task should exist");
     assert_eq!(claimed.task_id, "bm25:graph:text");
     assert_eq!(claimed.lease_owner.as_deref(), Some("worker-legacy"));
+    store
+        .queue_index_refreshes(IndexRefreshQueueRequest {
+            kinds: vec![IndexKind::Semantic],
+            target_graph_version: GraphVersion::new(1),
+            max_queue_depth: 4,
+            reset_dead_letter_tasks: false,
+            now_ms: 20,
+        })
+        .await
+        .expect("new refresh task should insert after legacy table rebuild");
 
     let guard = store.connection.lock().expect("connection should lock");
     let task_columns = guard
@@ -90,13 +100,18 @@ async fn startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_d
 
     assert!(task_columns.iter().any(|column| column == "lease_owner"));
     assert!(task_columns.iter().any(|column| column == "created_at_ms"));
+    assert!(
+        !task_columns
+            .iter()
+            .any(|column| column == "next_retry_after_ms")
+    );
     assert_eq!(
         guard
             .query_row("SELECT COUNT(*) FROM index_refresh_tasks", [], |row| {
                 row.get::<_, u64>(0)
             })
             .expect("task count should read"),
-        1
+        2
     );
     let mutation_columns = guard
         .prepare("PRAGMA table_info(graph_mutations)")

@@ -76,7 +76,7 @@ connection.executescript(
         target_graph_version INTEGER NOT NULL,
         state TEXT NOT NULL,
         attempt_count INTEGER NOT NULL,
-        next_retry_at_ms INTEGER NOT NULL,
+        next_retry_after_ms INTEGER NOT NULL,
         input_fingerprint TEXT NOT NULL,
         cursor_before INTEGER NOT NULL,
         cursor_after INTEGER,
@@ -85,7 +85,7 @@ connection.executescript(
     );
     INSERT INTO index_refresh_tasks (
         task_id, kind, source_scope, modality, target_graph_version, state,
-        attempt_count, next_retry_at_ms, input_fingerprint, cursor_before,
+        attempt_count, next_retry_after_ms, input_fingerprint, cursor_before,
         cursor_after, last_error_kind, last_error_message
     )
     VALUES (
@@ -149,4 +149,6 @@ if evidence_count != 1:
     raise SystemExit(f"expected preserved evidence row, got {evidence_count}")
 if "lease_owner" not in task_columns:
     raise SystemExit("expected migrated index_refresh_tasks.lease_owner column")
+if "next_retry_after_ms" in task_columns:
+    raise SystemExit("expected obsolete index_refresh_tasks.next_retry_after_ms column to be rebuilt")
 PY
