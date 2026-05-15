@@ -26,6 +26,19 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("degraded").first).to_be_visible()
         expect(page.get_by_text("Code files")).to_be_visible()
         expect(page.get_by_text("738", exact=True)).to_be_visible()
+        expect(page.get_by_text("Graph overview")).to_be_visible()
+        expect(page.locator(".graph-overview-canvas")).to_have_attribute("aria-label", "Graph overview")
+        expect(page.locator(".graph-edge")).to_have_count(7)
+        expect(page.locator(".graph-node")).to_have_count(8)
+        expect(page.get_by_text("14k symbols")).to_be_visible()
+        expect(page.get_by_text("2 kinds / q1")).to_be_visible()
+        graph_font_sizes = page.evaluate(
+            """() => Array.from(
+                document.querySelectorAll(".graph-node-label, .graph-node-value"),
+                node => Number.parseFloat(getComputedStyle(node).fontSize)
+            )"""
+        )
+        assert max(graph_font_sizes) <= 12
         expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
         expect(page.locator("aside nav a")).to_have_count(7)
@@ -158,6 +171,38 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
 
         page.set_viewport_size({"width": 390, "height": 844})
         expect(page.locator("aside nav a")).to_have_count(7)
+        page.get_by_role("link", name="Status").click()
+        mobile_graph = page.evaluate(
+            """() => {
+                const content = document.querySelector(".content");
+                const graph = document.querySelector(".graph-overview-canvas");
+                const labels = Array.from(
+                    document.querySelectorAll(".graph-node-label"),
+                    node => Number.parseFloat(getComputedStyle(node).fontSize)
+                );
+                const values = Array.from(
+                    document.querySelectorAll(".graph-node-value"),
+                    node => Number.parseFloat(getComputedStyle(node).fontSize)
+                );
+                if (!content || !graph) {
+                    return null;
+                }
+                const contentBox = content.getBoundingClientRect();
+                const graphBox = graph.getBoundingClientRect();
+                return {
+                    graphLeft: graphBox.left,
+                    graphRight: graphBox.right,
+                    contentLeft: contentBox.left,
+                    contentRight: contentBox.right,
+                    maxLabelSize: Math.max(...labels),
+                    maxValueSize: Math.max(...values)
+                };
+            }"""
+        )
+        assert mobile_graph["graphLeft"] >= mobile_graph["contentLeft"]
+        assert mobile_graph["graphRight"] <= mobile_graph["contentRight"]
+        assert mobile_graph["maxLabelSize"] <= 11
+        assert mobile_graph["maxValueSize"] <= 10
         page.get_by_role("link", name="Readiness").click()
         expect(page.get_by_text("Runtime budgets")).to_be_visible()
         mobile_layout = page.evaluate(

@@ -25,6 +25,25 @@ type PageLink = {
   label: string;
 };
 
+type GraphTone = "good" | "warn" | "bad" | "neutral";
+
+type GraphNodeSpec = {
+  id: string;
+  label: string;
+  value: string;
+  tone: GraphTone;
+  x: number;
+  y: number;
+};
+
+type GraphEdgeSpec = {
+  from: string;
+  to: string;
+  tone: GraphTone;
+};
+
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
 const PAGES: PageLink[] = [
   { id: "status", label: "Status" },
   { id: "readiness", label: "Readiness" },
@@ -147,7 +166,7 @@ function pageContent(
 ): HTMLElement {
   switch (page) {
     case "status":
-      return statusSection(status, health);
+      return statusSection(status, health, service);
     case "readiness":
       return readinessSection(status, health, service);
     case "graph":
@@ -248,7 +267,11 @@ function refreshButton(): HTMLButtonElement {
   return button;
 }
 
-function statusSection(status: ProjectStatusResponse, health: HealthResponse): HTMLElement {
+function statusSection(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
   const lag = maxIndexLag(health.indexes, status.metadata.graph_version);
   const codeTotals = codeRepositoryTotals(health);
   const section = sectionShell("status", "Status");
@@ -272,9 +295,213 @@ function statusSection(status: ProjectStatusResponse, health: HealthResponse): H
     metricItem("Symbols", codeTotals.symbol_count),
     metricItem("References", codeTotals.reference_count)
   );
-  section.append(statusLine, metrics);
+  section.append(statusLine, graphOverview(status, health, service), metrics);
 
   return section;
+}
+
+function graphOverview(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): HTMLElement {
+  const panel = element("div", "graph-overview");
+  const header = element("div", "graph-overview-header");
+  header.append(
+    textElement("div", "panel-title", "Graph overview"),
+    textElement("div", "graph-overview-meta", `${health.graph.mutation_count} mutations`)
+  );
+
+  const nodes = graphNodes(status, health, service);
+  const svg = svgElement("svg", "graph-overview-canvas");
+  svg.setAttribute("viewBox", "0 0 720 280");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Graph overview");
+  svg.append(...graphEdgeElements(graphEdges(health), nodes));
+  svg.append(...graphNodeElements(nodes));
+
+  panel.append(header, svg);
+
+  return panel;
+}
+
+function graphNodes(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  service: ServiceStatusResponse | null
+): GraphNodeSpec[] {
+  const codeTotals = codeRepositoryTotals(health);
+  const indexLag = maxIndexLag(health.indexes, status.metadata.graph_version);
+  const workerQueue = service
+    ? service.workers.reduce((sum, worker) => sum + worker.queue_depth, 0)
+    : health.index_refresh.queue_depth;
+
+  return [
+    {
+      id: "evidence",
+      label: "Evidence",
+      value: `${formatCompactCount(health.graph.evidence_count)} items`,
+      tone: health.graph.evidence_count > 0 ? "good" : "warn",
+      x: 92,
+      y: 88
+    },
+    {
+      id: "entities",
+      label: "Entities",
+      value: `${formatCompactCount(health.graph.entity_count)} nodes`,
+      tone: health.graph.entity_count > 0 ? "good" : "warn",
+      x: 92,
+      y: 190
+    },
+    {
+      id: "graph",
+      label: "Graph",
+      value: `v${status.metadata.graph_version}`,
+      tone: health.healthy ? "good" : "warn",
+      x: 360,
+      y: 140
+    },
+    {
+      id: "relations",
+      label: "Relations",
+      value: `${formatCompactCount(health.graph.relation_count)} edges`,
+      tone: health.graph.relation_count > 0 ? "good" : "neutral",
+      x: 360,
+      y: 46
+    },
+    {
+      id: "code",
+      label: "Code",
+      value: `${formatCompactCount(codeTotals.indexed_file_count)} files`,
+      tone: codeTotals.indexed_file_count > 0 ? "good" : "warn",
+      x: 360,
+      y: 236
+    },
+    {
+      id: "indexes",
+      label: "Indexes",
+      value: indexLag === 0 ? "fresh" : `lag ${indexLag}`,
+      tone: indexLag === 0 ? "good" : "warn",
+      x: 628,
+      y: 88
+    },
+    {
+      id: "workers",
+      label: "Workers",
+      value: service ? `${service.workers.length} kinds / q${workerQueue}` : "unavailable",
+      tone: serviceTone(service),
+      x: 628,
+      y: 190
+    },
+    {
+      id: "symbols",
+      label: "Symbols",
+      value: `${formatCompactCount(codeTotals.symbol_count)} symbols`,
+      tone: codeTotals.symbol_count > 0 ? "good" : "neutral",
+      x: 520,
+      y: 236
+    }
+  ];
+}
+
+function graphEdges(health: HealthResponse): GraphEdgeSpec[] {
+  const lagging = health.index_refresh.max_index_lag_versions > 0;
+  const workerBacklog =
+    health.index_refresh.queue_depth > 0 ||
+    health.index_refresh.retrying_count > 0 ||
+    health.index_refresh.dead_letter_count > 0;
+
+  return [
+    { from: "evidence", to: "graph", tone: "good" },
+    { from: "entities", to: "graph", tone: "good" },
+    { from: "relations", to: "graph", tone: "neutral" },
+    { from: "code", to: "graph", tone: "good" },
+    { from: "graph", to: "indexes", tone: lagging ? "warn" : "good" },
+    { from: "graph", to: "workers", tone: workerBacklog ? "warn" : "neutral" },
+    { from: "code", to: "symbols", tone: "neutral" }
+  ];
+}
+
+function graphEdgeElements(edges: GraphEdgeSpec[], nodes: GraphNodeSpec[]): SVGElement[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  return edges.flatMap((edge) => {
+    const from = nodeById.get(edge.from);
+    const to = nodeById.get(edge.to);
+    if (!from || !to) {
+      return [];
+    }
+
+    const line = svgElement("line", `graph-edge ${edge.tone}`);
+    line.setAttribute("x1", String(from.x));
+    line.setAttribute("y1", String(from.y));
+    line.setAttribute("x2", String(to.x));
+    line.setAttribute("y2", String(to.y));
+
+    return [line];
+  });
+}
+
+function graphNodeElements(nodes: GraphNodeSpec[]): SVGElement[] {
+  return nodes.map((node) => {
+    const group = svgElement("g", `graph-node ${node.tone}`);
+    group.setAttribute("transform", `translate(${node.x} ${node.y})`);
+    group.setAttribute("data-node-id", node.id);
+    group.append(
+      svgCircle("graph-node-dot", 0, 0, node.id === "graph" ? 13 : 10),
+      svgText("graph-node-label", node.label, 0, -18),
+      svgText("graph-node-value", node.value, 0, 26)
+    );
+
+    return group;
+  });
+}
+
+function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) {
+    return `${trimCompactDecimal(value / 1_000_000)}m`;
+  }
+  if (value >= 1_000) {
+    return `${trimCompactDecimal(value / 1_000)}k`;
+  }
+
+  return String(value);
+}
+
+function trimCompactDecimal(value: number): string {
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function svgCircle(className: string, cx: number, cy: number, r: number): SVGCircleElement {
+  const circle = svgElement("circle", className);
+  circle.setAttribute("cx", String(cx));
+  circle.setAttribute("cy", String(cy));
+  circle.setAttribute("r", String(r));
+
+  return circle;
+}
+
+function svgText(className: string, text: string, x: number, y: number): SVGTextElement {
+  const node = svgElement("text", className);
+  node.setAttribute("x", String(x));
+  node.setAttribute("y", String(y));
+  node.textContent = text;
+
+  return node;
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  className?: string
+): SVGElementTagNameMap[K] {
+  const node = document.createElementNS(SVG_NAMESPACE, tag);
+  if (className) {
+    node.setAttribute("class", className);
+  }
+
+  return node;
 }
 
 function metricItem(label: string, value: number): HTMLElement {
