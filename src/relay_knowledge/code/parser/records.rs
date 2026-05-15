@@ -9,11 +9,7 @@ use super::super::{
     languages::{doc_comment_text, strip_supported_extension},
     stable_id,
 };
-use super::{
-    FileParseContext, FileParseOutput,
-    nodes::{SyntaxRange, compact_whitespace},
-    syntax::TagCapture,
-};
+use super::{FileParseContext, FileParseOutput, nodes::SyntaxRange, syntax::TagCapture};
 
 pub(super) fn records_from_captures(
     context: &FileParseContext<'_>,
@@ -180,17 +176,17 @@ fn symbol_signature(content: &str, range: &SyntaxRange, fallback: &str) -> Strin
         return fallback.to_owned();
     };
     let mut signature = String::new();
-    for line in source
-        .lines()
-        .map(compact_whitespace)
-        .filter(|line| !line.is_empty())
-        .take(MAX_SIGNATURE_LINES)
-    {
-        if !signature.is_empty() {
-            signature.push(' ');
+    let mut signature_lines = 0;
+    for line in source.lines() {
+        if line.split_whitespace().next().is_none() {
+            continue;
         }
-        signature.push_str(&line);
+        signature_lines += 1;
+        let budget_reached = append_compact_line(&mut signature, line, MAX_SIGNATURE_BYTES);
         if signature_looks_complete(&signature) || signature.len() >= MAX_SIGNATURE_BYTES {
+            break;
+        }
+        if budget_reached || signature_lines >= MAX_SIGNATURE_LINES {
             break;
         }
     }
@@ -205,6 +201,37 @@ fn symbol_signature(content: &str, range: &SyntaxRange, fallback: &str) -> Strin
 fn signature_looks_complete(signature: &str) -> bool {
     let trimmed = signature.trim_end();
     trimmed.ends_with('{') || trimmed.ends_with(';') || trimmed.ends_with(':')
+}
+
+fn append_compact_line(signature: &mut String, line: &str, max_bytes: usize) -> bool {
+    if !signature.is_empty() && !push_char_within_budget(signature, ' ', max_bytes) {
+        return true;
+    }
+
+    let mut first_word = true;
+    for word in line.split_whitespace() {
+        if first_word {
+            first_word = false;
+        } else if !push_char_within_budget(signature, ' ', max_bytes) {
+            return true;
+        }
+        for character in word.chars() {
+            if !push_char_within_budget(signature, character, max_bytes) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn push_char_within_budget(signature: &mut String, character: char, max_bytes: usize) -> bool {
+    if signature.len().saturating_add(character.len_utf8()) > max_bytes {
+        return false;
+    }
+    signature.push(character);
+
+    true
 }
 
 fn truncate_to_char_boundary(value: &mut String, max_bytes: usize) {
