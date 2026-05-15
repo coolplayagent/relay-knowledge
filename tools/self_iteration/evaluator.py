@@ -130,6 +130,7 @@ def evaluate_repository(
     path = Path(repo_config["path"])
     alias = repo_config.get("alias", repo_name)
     ref_selector = repo_config.get("ref", "HEAD")
+    scope = repo_config.get("scope", "all")
     repo_cases = [case for case in all_cases if case.get("repository") == repo_name]
     commands: list[CommandResult] = []
     case_observations: list[CaseObservation] = []
@@ -145,7 +146,18 @@ def evaluate_repository(
             stderr=f"repository path is missing: {path}",
         )
         commands.append(missing)
-        return serializable_repo_report(repo_name, commands, case_observations, metrics, {})
+        return serializable_repo_report(repo_name, commands, case_observations, metrics, {}, scope)
+    if scope != "all":
+        invalid = CommandResult(
+            name=f"{repo_name}_scope_is_all",
+            command=["validate", "scope", str(scope)],
+            exit_code=1,
+            duration_ms=0,
+            stdout="",
+            stderr=f"self-iteration repositories must use full scope=all, got: {scope}",
+        )
+        commands.append(invalid)
+        return serializable_repo_report(repo_name, commands, case_observations, metrics, {}, scope)
 
     register = run_command(
         f"{repo_name}_register",
@@ -156,7 +168,7 @@ def evaluate_repository(
     )
     commands.append(register)
     if not register.passed:
-        return serializable_repo_report(repo_name, commands, case_observations, metrics, {})
+        return serializable_repo_report(repo_name, commands, case_observations, metrics, {}, scope)
 
     index = run_command(
         f"{repo_name}_index",
@@ -176,7 +188,7 @@ def evaluate_repository(
         )
     )
     if not index.passed:
-        return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json)
+        return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json, scope)
 
     query_durations: list[int] = []
     for case in repo_cases:
@@ -209,7 +221,7 @@ def evaluate_repository(
             )
         )
 
-    return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json)
+    return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json, scope)
 
 
 def quality_gate_commands(profile: str) -> list[tuple[str, list[str], int]]:
@@ -244,10 +256,11 @@ def register_command(
     repo_config: dict[str, Any],
 ) -> list[str]:
     command = [str(binary), "repo", "register", str(repo_path), "--alias", alias]
-    for path_filter in repo_config.get("path_filters", []):
-        command.extend(["--path", path_filter])
-    for language_filter in repo_config.get("language_filters", []):
-        command.extend(["--language", language_filter])
+    if repo_config.get("scope", "all") != "all":
+        for path_filter in repo_config.get("path_filters", []):
+            command.extend(["--path", path_filter])
+        for language_filter in repo_config.get("language_filters", []):
+            command.extend(["--language", language_filter])
     command.extend(["--format", "json"])
     return command
 
@@ -459,12 +472,14 @@ def serializable_repo_report(
     cases: list[CaseObservation],
     metrics: list[MetricObservation],
     index_json: dict[str, Any],
+    scope: str,
 ) -> dict[str, Any]:
     return {
         "repository": repo_name,
         "commands": commands,
         "cases": cases,
         "metrics": metrics,
+        "scope": scope,
         "index_summary": index_json.get("summary", {}),
     }
 
@@ -472,6 +487,7 @@ def serializable_repo_report(
 def serializable_repository_report(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "repository": report["repository"],
+        "scope": report.get("scope", "all"),
         "commands": [serializable_command(command) for command in report["commands"]],
         "cases": [case.__dict__ for case in report["cases"]],
         "metrics": [metric.__dict__ for metric in report["metrics"]],

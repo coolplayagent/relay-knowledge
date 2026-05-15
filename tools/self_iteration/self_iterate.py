@@ -213,8 +213,17 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
     )
     previous_run = previous_scored_run(paths)
     candidate_score = score_evaluation(evaluation.observation, previous_run)
+    optimization_plan = summarize_optimization_plan(codex_result, patch, candidate_score.to_dict())
     commit = None
     if candidate_score.accepted:
+        write_adopted_optimization_document(
+            workspace=workspace,
+            run_id=run_id,
+            patch=patch,
+            score=candidate_score.to_dict(),
+            evaluation=evaluation,
+            optimization_plan=optimization_plan,
+        )
         commit = commit_candidate(workspace, args.commit_message, candidate_score.score, base_ref)
     run_record = persist_scored_run(
         workspace=workspace,
@@ -226,6 +235,7 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
         commit=commit,
         previous_run=previous_run,
         precomputed_score=candidate_score,
+        optimization_plan=optimization_plan,
     )
 
     if run_record["accepted"]:
@@ -265,6 +275,7 @@ def persist_scored_run(
     commit: str | None,
     previous_run: dict[str, Any] | None,
     precomputed_score: Any | None = None,
+    optimization_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     score = precomputed_score or score_evaluation(evaluation.observation, previous_run)
     report = {
@@ -277,6 +288,7 @@ def persist_scored_run(
         "comparison": comparison_metadata(previous_run),
         "degradations": score.degradations,
         "improvements": score.improvements,
+        "optimization_plan": optimization_plan or {},
     }
     report_path = write_report(paths, run_id, report)
     record = run_record(
@@ -287,6 +299,7 @@ def persist_scored_run(
         report_path=report_path,
         commit=commit,
         codex=codex,
+        optimization_plan=optimization_plan,
     )
     append_run(paths, record)
     export_history(paths)
@@ -318,6 +331,7 @@ def persist_failure_run(
         "comparison": comparison_metadata(previous_run),
         "degradations": score.degradations,
         "improvements": score.improvements,
+        "optimization_plan": {},
     }
     report_path = write_report(paths, run_id, report)
     record = run_record(
@@ -328,6 +342,7 @@ def persist_failure_run(
         report_path=report_path,
         commit=None,
         codex=codex,
+        optimization_plan=None,
     )
     append_run(paths, record)
     export_history(paths)
@@ -342,6 +357,7 @@ def run_record(
     report_path: Path,
     commit: str | None,
     codex: CodexResult | None,
+    optimization_plan: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -359,6 +375,7 @@ def run_record(
         "report": str(report_path),
         "commit": commit,
         "codex_exit_code": codex.exit_code if codex else None,
+        "optimization_plan": optimization_plan or {},
         "gates": [gate.__dict__ for gate in evaluation.gates],
         "cases": [case.__dict__ for case in evaluation.cases],
         "metrics": [metric.__dict__ for metric in evaluation.metrics],
@@ -377,16 +394,18 @@ def build_prompt(paths: Any, run_id: str) -> str:
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
-- Improve Linux and relay-teams code repository tree parsing, code graph query accuracy, and performance.
-- Focus on the highest-value small change you can safely implement in this repository.
+- Improve code repository tree parsing, code graph query accuracy, and performance across relay-teams, Linux, LevelDB, Kubernetes, and Spring Framework.
+- Focus on multi-repository, large-repository full-scope indexing and retrieval.
+- Prefer algorithmic or architectural improvements over local special-casing: candidate pruning before scoring, SQLite/FTS-backed lookups, symbol identity normalization, import/call edge quality, bounded batch/finalize design, cache-aware query plans, and ranking fusion are all valid directions when test-backed.
 
 Constraints:
 - Follow AGENTS.md and repository architecture constraints.
-- Keep the self-iteration framework independent; do not edit tools/self_iteration unless the framework itself is broken.
+- Keep the self-iteration framework independent; edit tools/self_iteration only when improving the harness, cases, prompt feedback, or evaluation policy itself.
 - Do not add broad rewrites, speculative APIs, dead code, or shallow wrappers.
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
 - If recent quality gate diagnostics are present, reproduce and diagnose those gates before changing scoring or evaluation policy.
+- Update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md with the optimization approach if your candidate is meant to be accepted; the harness also appends adopted-run metadata after acceptance.
 - Do not create commits yourself; the harness squashes accepted net changes into one commit.
 
 Historical context:
@@ -403,6 +422,9 @@ Recent worsened evaluation items:
 
 Recent improved evaluation items to preserve:
 {recent_improvement_summary(paths)}
+
+Recent adopted optimization plans to build on:
+{recent_adopted_optimization_summary(paths)}
 
 Make one concrete candidate code change now. The self-iteration harness will build, test, score, squash-commit accepted improvements, or roll them back.
 """
@@ -537,6 +559,38 @@ def recent_improvement_summary(paths: Any, limit: int = 8) -> str:
     )
 
 
+def recent_adopted_optimization_summary(paths: Any, limit: int = 3) -> str:
+    plans: list[dict[str, Any]] = []
+    for run in reversed(load_runs(paths)):
+        if not run.get("accepted"):
+            continue
+        plan = run.get("optimization_plan")
+        if isinstance(plan, dict) and plan:
+            item = dict(plan)
+            item["run_id"] = run.get("run_id", "")
+            item["commit"] = run.get("commit", "")
+            plans.append(item)
+            if len(plans) >= limit:
+                break
+    if not plans:
+        return "No adopted optimization plans recorded yet."
+
+    lines: list[str] = []
+    for plan in plans:
+        changed_paths = ", ".join(str(path) for path in plan.get("changed_paths", [])[:6])
+        improvements = "; ".join(str(item) for item in plan.get("key_improvements", [])[:4])
+        codex_notes = compact_prompt_text(str(plan.get("codex_notes", "")), 700)
+        lines.append(
+            "- "
+            f"run_id={plan.get('run_id', '')} "
+            f"commit={plan.get('commit', '')} "
+            f"changed_paths={changed_paths} "
+            f"improvements={improvements} "
+            f"notes={codex_notes}"
+        )
+    return "\n".join(lines)
+
+
 def recent_change_summary(
     paths: Any,
     field: str,
@@ -586,6 +640,112 @@ def comparison_metadata(previous_run: dict[str, Any] | None) -> dict[str, Any] |
         "accepted": previous_run.get("accepted"),
         "commit": previous_run.get("commit"),
     }
+
+
+def summarize_optimization_plan(
+    codex: CodexResult | None,
+    patch: PatchSnapshot,
+    score: dict[str, Any],
+) -> dict[str, Any]:
+    output = ""
+    if codex:
+        output = "\n".join(part for part in [codex.stdout, codex.stderr] if part.strip())
+    return {
+        "changed_paths": changed_paths_from_diff(patch.diff),
+        "key_improvements": compact_score_changes(score.get("improvements", [])),
+        "known_degradations": compact_score_changes(score.get("degradations", [])),
+        "codex_notes": compact_prompt_text(output, 1800),
+    }
+
+
+def compact_score_changes(changes: object, limit: int = 8) -> list[str]:
+    if not isinstance(changes, list):
+        return []
+    compact: list[str] = []
+    for change in changes[:limit]:
+        if not isinstance(change, dict):
+            continue
+        name = change.get("name") or change.get("case_id") or change.get("kind", "")
+        previous = change.get("previous", "")
+        current = change.get("current", "")
+        reason = change.get("reason") or change.get("message", "")
+        compact.append(f"{change.get('kind', '')}:{name} {previous}->{current} {reason}".strip())
+    return compact
+
+
+def changed_paths_from_diff(diff: str) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for line in diff.splitlines():
+        if not line.startswith("diff --git "):
+            continue
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        path = parts[3]
+        if path.startswith("b/"):
+            path = path[2:]
+        if path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return paths
+
+
+def write_adopted_optimization_document(
+    workspace: Path,
+    run_id: str,
+    patch: PatchSnapshot,
+    score: dict[str, Any],
+    evaluation: Any,
+    optimization_plan: dict[str, Any],
+) -> None:
+    path = workspace / "docs" / "zh" / "05-benchmarks" / "self-iteration-accepted-optimizations.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(accepted_optimization_doc_header(), encoding="utf-8")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(accepted_optimization_entry(run_id, patch, score, evaluation, optimization_plan))
+
+
+def accepted_optimization_doc_header() -> str:
+    return (
+        "# 自迭代采纳优化记录\n\n"
+        "本文档由自迭代 harness 在候选通过质量门禁并被采纳时追加，"
+        "用于把本轮采用的优化思路传递给后续 Codex 迭代。人工维护的总结可以继续补充在对应条目下。\n\n"
+    )
+
+
+def accepted_optimization_entry(
+    run_id: str,
+    patch: PatchSnapshot,
+    score: dict[str, Any],
+    evaluation: Any,
+    optimization_plan: dict[str, Any],
+) -> str:
+    changed_paths = optimization_plan.get("changed_paths", [])
+    improvements = optimization_plan.get("key_improvements", [])
+    degradations = optimization_plan.get("known_degradations", [])
+    case_count = len(evaluation.observation.cases)
+    passed_cases = sum(1 for case in evaluation.observation.cases if case.passed)
+    metrics = [
+        f"{metric.name}={metric.value:.0f}ms"
+        for metric in evaluation.observation.metrics
+        if metric.name.endswith("_ms")
+    ][:8]
+    return (
+        f"## {run_id}\n\n"
+        f"- patch: `{patch.path}`\n"
+        f"- score: {score.get('score')} "
+        f"(accuracy={score.get('accuracy')}, performance={score.get('performance')}, "
+        f"stability={score.get('stability')})\n"
+        f"- cases: {passed_cases}/{case_count} passed\n"
+        f"- changed paths: {', '.join(f'`{path}`' for path in changed_paths) or 'none recorded'}\n"
+        f"- key improvements: {'; '.join(improvements) or 'none recorded'}\n"
+        f"- known degradations: {'; '.join(degradations) or 'none recorded'}\n"
+        f"- latency metrics: {'; '.join(metrics) or 'none recorded'}\n\n"
+        "Adopted optimization notes:\n\n"
+        f"{compact_prompt_text(str(optimization_plan.get('codex_notes', '')), 1200) or 'No Codex notes captured.'}\n\n"
+    )
 
 
 def capture_patch(

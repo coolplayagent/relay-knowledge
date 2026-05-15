@@ -47,8 +47,9 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 4. 运行 build、lint、tests 和代码仓库检索评估。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs.jsonl`。
-7. 只有当上一轮改进采纳策略接受候选时，才把候选净改动 squash 成一个 commit。
-8. 候选被拒绝时，恢复到本轮开始的 commit。
+7. 采纳候选前，将本轮采用的优化思路、变更文件、指标改善和已知退化追加到 `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`。
+8. 只有当上一轮改进采纳策略接受候选时，才把候选净改动和采纳记录 squash 成一个 commit。
+9. 候选被拒绝时，恢复到本轮开始的 commit。
 
 如果启动时工作树是 dirty 状态，循环会立即退出，而不是重复重试同一个不可重试的前置条件失败。
 
@@ -78,7 +79,7 @@ and (
 - `ratio_epsilon = 0.005`，用于 accuracy、performance、stability 等分数组件
 - `metric_epsilon = max(25ms, previous_metric * 0.03)`，用于原始耗时指标
 
-这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。accuracy、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。
+这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。accuracy、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
 
 `chart` 命令会写入：
 
@@ -89,10 +90,11 @@ and (
 
 `cases.json` 定义 benchmark targets：
 
-- `/opt/workspace/relay-teams`：仓库索引和代表性代码图查询。
-- `/opt/workspace/linux`：默认 profile 下的 C 语言采样索引，覆盖函数、syscall 风格宏、导出符号、include、callers 和 callees。
-- `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标评估完整 C 仓库初始索引时间。
-- `/opt/workspace/leveldb`：C++ 采样索引与查询，覆盖类方法、自由函数、头文件、callers、hybrid lookup 和 filters。
-- `/opt/workspace/kubernetes`：Go 采样索引与查询，覆盖 command constructor、kubelet flow、API types、clientset constructor、callers、hybrid lookup 和 filters。
+- `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
+- `/opt/workspace/linux`：默认 profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
+- `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。
+- `/opt/workspace/leveldb`：`scope=all` 全仓 C/C++ 索引与查询，覆盖类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。
+- `/opt/workspace/kubernetes`：`scope=all` 全仓 Go 索引与查询，覆盖 command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。
+- `/opt/workspace/spring-framework`：`scope=all` 全仓 Java 索引与查询，覆盖 context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。
 
-使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要测量 Linux 全量初始索引时间时使用 `--profile exhaustive`。
+所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要长周期重复测量 Linux 全量初始索引时间时使用 `--profile exhaustive`。

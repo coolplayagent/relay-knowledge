@@ -4,6 +4,7 @@
       "path": "/opt/workspace/relay-teams",
       "alias": "relay-teams-self-iteration",
       "ref": "HEAD",
+      "scope": "all",
       "path_filters": [],
       "language_filters": [],
       "index_budget_ms": 90000,
@@ -14,46 +15,21 @@
       "path": "/opt/workspace/linux",
       "alias": "linux-self-iteration",
       "ref": "HEAD",
-      "path_filters": [
-        "init/main.c",
-        "kernel/fork.c",
-        "kernel/sched/core.c",
-        "mm/mmap.c",
-        "mm/nommu.c",
-        "mm/vma.c",
-        "mm/vma.h",
-        "mm/cma_debug.c",
-        "fs/anon_inodes.c",
-        "fs/debugfs/file.c",
-        "fs/eventfd.c",
-        "fs/eventpoll.c",
-        "fs/open.c",
-        "fs/read_write.c",
-        "fs/exec.c",
-        "fs/debugfs/inode.c",
-        "include/linux/mm.h",
-        "include/linux/debugfs.h",
-        "include/linux/fs.h",
-        "include/linux/container_of.h",
-        "include/linux/module.h",
-        "include/linux/export.h",
-        "include/linux/build_bug.h",
-        "include/linux/compiler.h",
-        "include/linux/slab.h",
-        "include/linux/sched.h"
-      ],
-      "language_filters": ["c"],
-      "index_budget_ms": 5000,
-      "query_p50_budget_ms": 250,
-      "query_p95_budget_ms": 500
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 240000,
+      "query_p50_budget_ms": 500,
+      "query_p95_budget_ms": 1000
     },
     "linux_full": {
       "path": "/opt/workspace/linux",
       "alias": "linux-full-self-iteration",
       "ref": "HEAD",
       "profile": "exhaustive",
+      "scope": "all",
       "path_filters": [],
-      "language_filters": ["c"],
+      "language_filters": [],
       "index_budget_ms": 240000,
       "query_p50_budget_ms": 500,
       "query_p95_budget_ms": 1000
@@ -62,20 +38,10 @@
       "path": "/opt/workspace/leveldb",
       "alias": "leveldb-cpp-self-iteration",
       "ref": "HEAD",
-      "path_filters": [
-        "db/db_impl.cc",
-        "db/db_impl.h",
-        "db/db_iter.cc",
-        "db/dbformat.cc",
-        "db/dbformat.h",
-        "db/write_batch.cc",
-        "include/leveldb/cache.h",
-        "include/leveldb/db.h",
-        "include/leveldb/options.h",
-        "util/cache.cc"
-      ],
-      "language_filters": ["cpp", "c"],
-      "index_budget_ms": 8000,
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 45000,
       "query_p50_budget_ms": 250,
       "query_p95_budget_ms": 500
     },
@@ -83,34 +49,23 @@
       "path": "/opt/workspace/kubernetes",
       "alias": "kubernetes-go-self-iteration",
       "ref": "HEAD",
-      "path_filters": [
-        "cmd/kube-apiserver/app/server.go",
-        "cmd/kubelet/app/server.go",
-        "pkg/apis/core/types.go",
-        "staging/src/k8s.io/client-go/kubernetes/clientset.go",
-        "staging/src/k8s.io/client-go/rest/client.go"
-      ],
-      "language_filters": ["go"],
-      "index_budget_ms": 12000,
-      "query_p50_budget_ms": 300,
-      "query_p95_budget_ms": 700
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 300000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
     },
     "spring_framework_java": {
       "path": "/opt/workspace/spring-framework",
       "alias": "spring-framework-java-self-iteration",
       "ref": "HEAD",
-      "path_filters": [
-        "spring-context/src/main/java/org/springframework/context/ApplicationContext.java",
-        "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java",
-        "spring-context/src/main/java/org/springframework/context/support/GenericApplicationContext.java",
-        "spring-context/src/main/java/org/springframework/context/annotation/AnnotationConfigApplicationContext.java",
-        "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java",
-        "spring-beans/src/main/java/org/springframework/beans/factory/support/DefaultListableBeanFactory.java"
-      ],
-      "language_filters": ["java"],
-      "index_budget_ms": 20000,
-      "query_p50_budget_ms": 350,
-      "query_p95_budget_ms": 800
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 180000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
     }
   },
   "query_cases": [
@@ -186,6 +141,33 @@
       "language_filters": ["python"],
       "max_rank": 1,
       "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
+    },
+    {
+      "id": "rt_definition_w3_connector_service_full_scope",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "W3ConnectorService",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams/connector/w3_service.py", "line_start": 107}]
+    },
+    {
+      "id": "rt_hybrid_eval_checkpoint_store",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "EvalCheckpointStore signature mismatch append result",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "EvalCheckpointStore"}]
+    },
+    {
+      "id": "rt_imports_connector_reexport_full_scope",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "W3ConnectorService",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "src/relay_teams/connector/__init__.py"}]
     },
     {
       "id": "linux_definition_start_kernel",
@@ -316,6 +298,33 @@
       "expected": [{"path": "mm/cma_debug.c", "edge_target_hint": "include/linux/debugfs.h"}]
     },
     {
+      "id": "linux_definition_copy_process_full_scope",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "copy_process",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "kernel/fork.c", "line_start": 1969}]
+    },
+    {
+      "id": "linux_hybrid_mmap_syscall_flow_full_scope",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "SYSCALL_DEFINE6 mmap_pgoff do_mmap mmap_region",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "mm/mmap.c", "excerpt_contains": "mmap_region"}]
+    },
+    {
+      "id": "linux_hybrid_epoll_eventfd_full_scope",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "epoll eventfd anon_inode_getfile wakeup poll",
+      "limit": 10,
+      "max_rank": 8,
+      "expected": [{"path": "fs/eventpoll.c"}]
+    },
+    {
       "id": "leveldb_definition_db_open",
       "repository": "leveldb_cpp",
       "kind": "definition",
@@ -379,6 +388,24 @@
       "language_filters": ["cpp"],
       "max_rank": 1,
       "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
+    },
+    {
+      "id": "leveldb_definition_table_cache_find_table_full_scope",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "TableCache::FindTable",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"path": "db/table_cache.cc", "line_start": 41}]
+    },
+    {
+      "id": "leveldb_hybrid_recovery_manifest_full_scope",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "Recover descriptor save_manifest VersionEdit",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "db/db_impl.h", "excerpt_contains": "Recover"}]
     },
     {
       "id": "spring_definition_application_context",
@@ -473,6 +500,34 @@
       ]
     },
     {
+      "id": "spring_definition_framework_servlet_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "FrameworkServlet",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/FrameworkServlet.java",
+          "line_start": 142
+        }
+      ]
+    },
+    {
+      "id": "spring_hybrid_handler_mapping_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "RequestMappingHandlerMapping HandlerMapping getHandler",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/HandlerMapping.java",
+          "excerpt_contains": "RequestMappingHandlerMapping"
+        }
+      ]
+    },
+    {
       "id": "kubernetes_definition_api_server_command",
       "repository": "kubernetes_go_sample",
       "kind": "definition",
@@ -538,6 +593,33 @@
       "limit": 10,
       "max_rank": 3,
       "expected": [{"path": "staging/src/k8s.io/client-go/rest/client.go", "line_start": 86}]
+    },
+    {
+      "id": "kubernetes_definition_generic_client_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewClientWithListAndApply",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "staging/src/k8s.io/client-go/gentype/type.go", "line_start": 134}]
+    },
+    {
+      "id": "kubernetes_hybrid_authorizer_config_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "AuthorizationConfiguration LoadAndValidateData webhook authorizer",
+      "limit": 10,
+      "max_rank": 5,
+      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "excerpt_contains": "LoadAndValidateData"}]
+    },
+    {
+      "id": "kubernetes_imports_client_go_informer_full_scope",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "SharedInformerFactory",
+      "limit": 10,
+      "max_rank": 8,
+      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go"}]
     }
   ]
 }

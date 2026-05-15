@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import self_iterate
 from codex_driver import CodexResult
-from evaluator import EvaluationRun
+from evaluator import EvaluationRun, register_command
 from history import append_run, history_paths
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 from self_iterate import capture_patch, commit_candidate, reject_candidate, run_loop
@@ -231,6 +231,94 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("Recent improved evaluation items to preserve:", prompt)
             self.assertIn("kind=metric name=leveldb_cpp_index_ms", prompt)
             self.assertIn("kind=case name=kubernetes_definition_run_kubelet", prompt)
+
+    def test_prompt_includes_recent_adopted_optimization_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "accepted-plan",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": True,
+                    "score": 0.93,
+                    "commit": "abc123",
+                    "reject_reasons": [],
+                    "optimization_plan": {
+                        "changed_paths": ["src/relay_knowledge/storage/sqlite/code_query.rs"],
+                        "key_improvements": ["metric:linux_sample_query_p95_ms 900->600"],
+                        "codex_notes": "Use SQLite preselection before in-memory rerank.",
+                    },
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Recent adopted optimization plans to build on:", prompt)
+            self.assertIn("run_id=accepted-plan", prompt)
+            self.assertIn("commit=abc123", prompt)
+            self.assertIn("SQLite preselection", prompt)
+
+    def test_full_scope_register_ignores_repository_filters(self) -> None:
+        command = register_command(
+            Path("/bin/relay-knowledge"),
+            Path("/repo"),
+            "repo-alias",
+            {
+                "scope": "all",
+                "path_filters": ["src/only.rs"],
+                "language_filters": ["rust"],
+            },
+        )
+
+        self.assertNotIn("--path", command)
+        self.assertNotIn("--language", command)
+        self.assertEqual(command[-2:], ["--format", "json"])
+
+    def test_adopted_optimization_document_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            patch = self_iterate.PatchSnapshot(
+                path=workspace / ".git" / "relay-knowledge-self-iteration" / "patches" / "run.patch",
+                diff="diff --git a/src/a.rs b/src/a.rs\n",
+                sha256="abc",
+                base_ref="HEAD",
+            )
+            evaluation = EvaluationRun(
+                observation=EvaluationObservation(
+                    gates=[GateObservation("cargo_build_release", True)],
+                    cases=[CaseObservation("case", "repo", True, rank=1)],
+                    metrics=[MetricObservation("repo_query_p95_ms", 42.0, budget=100.0)],
+                ),
+                report={},
+            )
+
+            self_iterate.write_adopted_optimization_document(
+                workspace=workspace,
+                run_id="run",
+                patch=patch,
+                score={"score": 1.0, "accuracy": 1.0, "performance": 1.0, "stability": 1.0},
+                evaluation=evaluation,
+                optimization_plan={
+                    "changed_paths": ["src/a.rs"],
+                    "key_improvements": ["case:case failed->passed"],
+                    "known_degradations": [],
+                    "codex_notes": "Adopt a bounded candidate index.",
+                },
+            )
+
+            doc = (
+                workspace
+                / "docs"
+                / "zh"
+                / "05-benchmarks"
+                / "self-iteration-accepted-optimizations.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("## run", doc)
+            self.assertIn("bounded candidate index", doc)
+            self.assertIn("`src/a.rs`", doc)
 
     def test_rejected_patch_restores_tracked_and_untracked_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

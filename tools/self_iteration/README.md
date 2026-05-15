@@ -47,8 +47,9 @@ Each iteration:
 4. Runs build, lint, tests, and repository retrieval evaluations.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
-7. Commits the candidate net change as one squash commit only when the previous-run improvement policy accepts it.
-8. Restores the iteration start commit when the candidate is rejected.
+7. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md` before committing.
+8. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
+9. Restores the iteration start commit when the candidate is rejected.
 
 If the worktree is dirty at startup, the loop exits immediately instead of
 retrying the same non-retryable precondition failure.
@@ -79,7 +80,7 @@ and (
 - `ratio_epsilon = 0.005` for score components such as accuracy, performance, and stability
 - `metric_epsilon = max(25ms, previous_metric * 0.03)` for raw timing metrics
 
-This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Accuracy, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve.
+This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Accuracy, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
 
 The `chart` command writes:
 
@@ -90,10 +91,11 @@ The `chart` command writes:
 
 `cases.json` defines the benchmark targets:
 
-- `/opt/workspace/relay-teams` repository indexing and representative code graph queries.
-- `/opt/workspace/linux` sampled C indexing in the default profile, covering functions, syscall-style macros, exported symbols, includes, callers, and callees.
-- `/opt/workspace/linux` full C repository indexing in the `exhaustive` profile through the `linux_full` target.
-- `/opt/workspace/leveldb` sampled C++ indexing and queries for class methods, free functions, headers, callers, hybrid lookup, and filters.
-- `/opt/workspace/kubernetes` sampled Go indexing and queries for command constructors, kubelet flow, API types, clientset constructors, callers, hybrid lookup, and filters.
+- `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
+- `/opt/workspace/linux` full `scope=all` indexing in the default profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
+- `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
+- `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.
+- `/opt/workspace/kubernetes` full `scope=all` Go indexing and queries for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
+- `/opt/workspace/spring-framework` full `scope=all` Java indexing and queries for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
 
-Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when Linux full initial indexing time should be measured.
+All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux full initial indexing time should be repeated.
