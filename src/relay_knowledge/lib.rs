@@ -8,6 +8,7 @@ pub mod env;
 pub mod evaluation;
 pub mod indexing;
 pub mod interfaces;
+pub mod model_provider;
 pub mod net;
 pub mod observability;
 pub mod paths;

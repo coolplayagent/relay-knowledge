@@ -78,6 +78,12 @@ The Web diagnostics workspace includes a `Providers` section showing:
 - batch, timeout, and concurrency budgets;
 - semantic/vector cursor rows with model, dimension, scope, and backend cursor.
 
-The Web UI does not save provider settings or submit API keys. Provider
-configuration remains an installation/runtime concern until a secret store is
-introduced.
+The Providers panel remains a semantic/vector read-model diagnostic view. It
+does not save embedding provider settings or submit embedding API keys. The
+Settings page has a separate model provider area for chat/completion profiles:
+it can save named profiles, the default profile, fallback policies, a
+`models.dev` catalog cache, endpoint probes, and model discovery. Profile
+secrets are stored only in the `paths`-resolved config directory, and read
+responses return configured status plus redacted headers instead of raw secret
+values. Profile updates preserve stored header secrets when a redacted header is
+round-tripped, and `clear_api_key=true` explicitly removes a saved API key.

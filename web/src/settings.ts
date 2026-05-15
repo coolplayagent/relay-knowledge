@@ -10,6 +10,7 @@ import {
   loadProjectStatus,
   loadServiceStatus
 } from "./api/client.js";
+import { modelProviderSettingsPanel } from "./model_provider_settings.js";
 import { element, icon, sectionShell, statusPill, textElement, type Tone } from "./ui.js";
 
 type BackendMode = "local" | "external" | "disabled";
@@ -93,8 +94,16 @@ export function settingsSection(
   const state = settingsState;
   const section = sectionShell("settings", "Settings");
   const layout = element("div", "settings-layout");
-  layout.append(
+  const left = element("div", "settings-stack");
+  left.append(
     settingsForm(state, status, health, service, callbacks),
+    modelProviderSettingsPanel({
+      rerender: callbacks.rerender,
+      errorMessage: callbacks.errorMessage
+    })
+  );
+  layout.append(
+    left,
     settingsOutput(state, status, health, callbacks)
   );
   section.append(layout);
@@ -150,7 +159,7 @@ function settingsForm(
   const form = element("form", "settings-panel");
   form.addEventListener("submit", (event) => event.preventDefault());
   form.append(
-    textElement("div", "panel-title", "Agent exposure"),
+    textElement("div", "panel-title", "Agent interoperability"),
     agentStatusRow(state, service),
     checkboxControl("MCP Streamable HTTP", state.agent.mcpEnabled, (value) => {
       state.agent.mcpEnabled = value;
@@ -185,7 +194,7 @@ function settingsForm(
     numberControl("Audit queue depth", state.agent.auditQueueDepth, (value) => {
       state.agent.auditQueueDepth = positiveInt(value, 1024);
     }),
-    textElement("div", "panel-title", "Model provider"),
+    textElement("div", "panel-title", "Retrieval defaults"),
     modelStatusRow(state),
     selectControl("Semantic backend", state.model.semanticBackend, BACKEND_OPTIONS, (value) => {
       state.model.semanticBackend = value as BackendMode;
@@ -580,6 +589,7 @@ function passwordControl(
   const input = document.createElement("input");
   input.type = "password";
   input.name = fieldName(label);
+  input.autocomplete = "new-password";
   input.placeholder = "leave blank to keep current key";
   input.value = value;
   input.addEventListener("input", () => {

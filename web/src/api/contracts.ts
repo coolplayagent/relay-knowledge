@@ -48,6 +48,176 @@ export type RuntimeStatus = {
   embedding_batch_size?: number;
   embedding_timeout_ms?: number;
   embedding_max_concurrency?: number;
+  model_profiles: ModelProfileRuntimeSummary;
+};
+
+export type ModelProviderKind =
+  | "open_ai_compatible"
+  | "openai_compatible"
+  | "anthropic"
+  | "bigmodel"
+  | "minimax"
+  | "maas"
+  | "codeagent"
+  | "echo";
+
+export type ModelRequestHeader = {
+  name: string;
+  value?: string;
+  secret: boolean;
+  configured: boolean;
+};
+
+export type ModelCapabilities = {
+  input: Record<string, boolean | null | undefined>;
+  output: Record<string, boolean | null | undefined>;
+};
+
+export type ModelProfileRuntimeSummary = {
+  loaded: boolean;
+  profile_count: number;
+  default_profile?: string;
+  error?: string;
+};
+
+export type ModelProfileView = {
+  name: string;
+  provider: ModelProviderKind;
+  model: string;
+  base_url: string;
+  api_key_configured: boolean;
+  headers: ModelRequestHeader[];
+  ssl_verify?: boolean;
+  context_window?: number;
+  max_tokens?: number;
+  temperature: number;
+  top_p: number;
+  connect_timeout_seconds: number;
+  capabilities: ModelCapabilities;
+  fallback_policy_id?: string;
+  fallback_priority: number;
+  catalog_provider_id?: string;
+  catalog_provider_name?: string;
+  catalog_model_name?: string;
+  is_default: boolean;
+  source: string;
+};
+
+export type ModelProfilesResponse = {
+  loaded: boolean;
+  default_profile?: string;
+  profiles: ModelProfileView[];
+  error?: string;
+};
+
+export type ModelProfileSaveRequest = {
+  provider: ModelProviderKind;
+  model: string;
+  base_url?: string;
+  api_key?: string;
+  clear_api_key?: boolean;
+  headers?: ModelRequestHeader[];
+  ssl_verify?: boolean;
+  context_window?: number;
+  max_tokens?: number;
+  temperature: number;
+  top_p: number;
+  connect_timeout_seconds: number;
+  capabilities?: ModelCapabilities;
+  fallback_policy_id?: string;
+  fallback_priority?: number;
+  catalog_provider_id?: string;
+  catalog_provider_name?: string;
+  catalog_model_name?: string;
+  is_default?: boolean;
+};
+
+export type ModelFallbackStrategy = "same_provider_then_other_provider" | "other_provider_only";
+
+export type ModelFallbackPolicy = {
+  policy_id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  strategy: ModelFallbackStrategy;
+  max_hops: number;
+  cooldown_seconds: number;
+};
+
+export type ModelFallbackConfig = {
+  policies: ModelFallbackPolicy[];
+};
+
+export type ModelCatalogModel = {
+  id: string;
+  name: string;
+  family?: string;
+  context_window?: number;
+  output_limit?: number;
+  capabilities: ModelCapabilities;
+};
+
+export type ModelCatalogProvider = {
+  id: string;
+  name: string;
+  runtime_provider: ModelProviderKind;
+  api?: string;
+  doc?: string;
+  env: string[];
+  models: ModelCatalogModel[];
+};
+
+export type ModelCatalogResult = {
+  ok: boolean;
+  source_url: string;
+  fetched_at_ms?: number;
+  cache_age_seconds?: number;
+  stale: boolean;
+  providers: ModelCatalogProvider[];
+  error_code?: string;
+  error_message?: string;
+};
+
+export type ModelConnectivityDiagnostics = {
+  endpoint_reachable: boolean;
+  auth_valid: boolean;
+  rate_limited: boolean;
+};
+
+export type ModelConnectivityProbeResult = {
+  ok: boolean;
+  provider: ModelProviderKind;
+  model: string;
+  latency_ms: number;
+  checked_at_ms: number;
+  diagnostics: ModelConnectivityDiagnostics;
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  error_code?: string;
+  error_message?: string;
+  retryable: boolean;
+};
+
+export type ModelDiscoveryResult = {
+  ok: boolean;
+  provider: ModelProviderKind;
+  base_url: string;
+  latency_ms: number;
+  checked_at_ms: number;
+  diagnostics: ModelConnectivityDiagnostics;
+  models: string[];
+  model_entries: Array<{
+    model: string;
+    context_window?: number;
+    output_limit?: number;
+    capabilities: ModelCapabilities;
+  }>;
+  error_code?: string;
+  error_message?: string;
+  retryable: boolean;
 };
 
 export type ProjectStatusResponse = {

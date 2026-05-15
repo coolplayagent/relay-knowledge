@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::ApiMetadata;
+use crate::model_provider::ModelProfileRuntimeSummary;
 use crate::observability::TelemetryStatus;
 
 /// Resolved runtime paths and network budgets exposed for diagnostics.
@@ -46,6 +47,7 @@ pub struct RuntimeStatus {
     pub embedding_batch_size: Option<usize>,
     pub embedding_timeout_ms: Option<u64>,
     pub embedding_max_concurrency: Option<usize>,
+    pub model_profiles: ModelProfileRuntimeSummary,
     pub telemetry: TelemetryStatus,
 }
 
