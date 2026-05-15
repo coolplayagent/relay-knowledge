@@ -182,6 +182,43 @@ async fn echo_probe_and_discovery_work_for_named_and_override_profiles() {
 }
 
 #[tokio::test]
+async fn override_only_probe_and_discovery_do_not_require_default_profile() {
+    let service = test_service("override-only");
+    let retrieval = ReadModelBackendConfig::local();
+    let http = test_http_config();
+
+    let probe = service
+        .probe(
+            &http,
+            &retrieval,
+            ModelConnectivityProbeRequest {
+                profile_name: None,
+                override_config: Some(echo_request("echo-draft", true)),
+                timeout_ms: Some(5),
+            },
+        )
+        .await
+        .expect("override probe should not need saved profile");
+    assert!(probe.ok);
+    assert_eq!(probe.model, "echo-draft");
+
+    let discovery = service
+        .discover(
+            &http,
+            &retrieval,
+            ModelDiscoveryRequest {
+                profile_name: None,
+                override_config: Some(echo_request("echo-draft", true)),
+                timeout_ms: Some(5),
+            },
+        )
+        .await
+        .expect("override discovery should not need saved profile");
+    assert!(discovery.ok);
+    assert_eq!(discovery.models, vec!["echo-draft"]);
+}
+
+#[tokio::test]
 async fn unsupported_enterprise_provider_reports_non_retryable_diagnostics() {
     let service = test_service("unsupported");
     let retrieval = ReadModelBackendConfig::local();
@@ -298,6 +335,32 @@ async fn profile_validation_rejects_invalid_inputs() {
     assert!(
         service
             .save_profile("dup-headers", duplicate_headers, &retrieval)
+            .await
+            .is_err()
+    );
+    let mut bad_header_name = openai_request("gpt", None);
+    bad_header_name.headers = vec![ModelRequestHeader {
+        name: "bad header".to_owned(),
+        value: Some("secret".to_owned()),
+        secret: true,
+        configured: false,
+    }];
+    assert!(
+        service
+            .save_profile("bad-header-name", bad_header_name, &retrieval)
+            .await
+            .is_err()
+    );
+    let mut bad_header_value = openai_request("gpt", None);
+    bad_header_value.headers = vec![ModelRequestHeader {
+        name: "x-api-key".to_owned(),
+        value: Some("line\nbreak".to_owned()),
+        secret: true,
+        configured: false,
+    }];
+    assert!(
+        service
+            .save_profile("bad-header-value", bad_header_value, &retrieval)
             .await
             .is_err()
     );

@@ -370,7 +370,7 @@ async function runProbe(callbacks: ProviderCallbacks) {
   providerState.message = "Probing provider";
   callbacks.rerender();
   try {
-    providerState.result = await probeModelProfile({ override_config: draftPayload(providerState.draft) });
+    providerState.result = await probeModelProfile(probeRequest());
     providerState.message = "Probe complete";
   } catch (error) {
     providerState.message = callbacks.errorMessage(error);
@@ -382,12 +382,22 @@ async function runDiscover(callbacks: ProviderCallbacks) {
   providerState.message = "Discovering models";
   callbacks.rerender();
   try {
-    providerState.result = await discoverModelProfile({ override_config: draftPayload(providerState.draft) });
+    providerState.result = await discoverModelProfile(probeRequest());
     providerState.message = "Discovery complete";
   } catch (error) {
     providerState.message = callbacks.errorMessage(error);
   }
   callbacks.rerender();
+}
+
+function probeRequest(): {
+  profile_name?: string;
+  override_config: ModelProfileSaveRequest;
+} {
+  return {
+    profile_name: providerState.selectedProfile || undefined,
+    override_config: draftPayload(providerState.draft)
+  };
 }
 
 function providerResultPanel(): HTMLElement {

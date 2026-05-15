@@ -695,7 +695,7 @@ impl ModelProviderConfigService {
         let profile = self
             .resolve_probe_profile(retrieval, request.profile_name, request.override_config)
             .await?;
-        let timeout = timeout_from_ms(request.timeout_ms, profile.connect_timeout_seconds);
+        let request_timeout = request_timeout_from_ms(request.timeout_ms);
         let started = Instant::now();
         let checked_at_ms = now_millis();
         if profile.provider == ModelProviderKind::Echo {
@@ -723,9 +723,8 @@ impl ModelProviderConfigService {
             return Ok(unsupported_probe(profile, started, checked_at_ms));
         }
 
-        let client = crate::net::http::outbound_json_client(http)
-            .map_err(|error| ModelProviderError::Network(error.to_string()))?;
-        let response = send_probe_request(&client, &profile, timeout).await;
+        let client = provider_http_client(http, &profile)?;
+        let response = send_probe_request(&client, &profile, request_timeout).await;
         Ok(probe_result_from_http(profile, started, checked_at_ms, response).await)
     }
 
@@ -738,7 +737,7 @@ impl ModelProviderConfigService {
         let profile = self
             .resolve_probe_profile(retrieval, request.profile_name, request.override_config)
             .await?;
-        let timeout = timeout_from_ms(request.timeout_ms, profile.connect_timeout_seconds);
+        let request_timeout = request_timeout_from_ms(request.timeout_ms);
         let started = Instant::now();
         let checked_at_ms = now_millis();
         if profile.provider == ModelProviderKind::Echo {
@@ -768,9 +767,8 @@ impl ModelProviderConfigService {
             return Ok(unsupported_discovery(profile, started, checked_at_ms));
         }
 
-        let client = crate::net::http::outbound_json_client(http)
-            .map_err(|error| ModelProviderError::Network(error.to_string()))?;
-        let response = send_discovery_request(&client, &profile, timeout).await;
+        let client = provider_http_client(http, &profile)?;
+        let response = send_discovery_request(&client, &profile, request_timeout).await;
         Ok(discovery_result_from_http(profile, started, checked_at_ms, response).await)
     }
 
@@ -780,14 +778,26 @@ impl ModelProviderConfigService {
         profile_name: Option<String>,
         override_config: Option<ModelProfileSaveRequest>,
     ) -> Result<StoredModelProfile, ModelProviderError> {
-        let base = match profile_name {
-            Some(name) => self.resolve_profile_by_name(retrieval, &name).await?,
-            None => self.resolve_default_profile(retrieval).await?,
-        };
-        override_config
-            .map(|request| StoredModelProfile::from_save_request(request, Some(&base)))
-            .transpose()
-            .map(|profile| profile.unwrap_or(base))
+        match (profile_name, override_config) {
+            (Some(name), Some(request)) => {
+                let base = self.resolve_profile_by_name(retrieval, &name).await?;
+                StoredModelProfile::from_save_request(request, Some(&base))
+            }
+            (Some(name), None) => self.resolve_profile_by_name(retrieval, &name).await,
+            (None, Some(request)) => {
+                let base = match self.resolve_default_profile(retrieval).await {
+                    Ok(profile) => Some(profile),
+                    Err(ModelProviderError::InvalidInput(message))
+                        if message == "no model profile is configured" =>
+                    {
+                        None
+                    }
+                    Err(error) => return Err(error),
+                };
+                StoredModelProfile::from_save_request(request, base.as_ref())
+            }
+            (None, None) => self.resolve_default_profile(retrieval).await,
+        }
     }
 
     async fn resolve_default_profile(

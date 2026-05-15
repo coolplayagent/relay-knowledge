@@ -105,6 +105,29 @@ pub(super) fn validate_headers(
                     header.name
                 )));
             }
+            HeaderName::from_bytes(header.name.as_bytes()).map_err(|_| {
+                ModelProviderError::InvalidInput(format!(
+                    "invalid model header name '{}'",
+                    header.name
+                ))
+            })?;
+            match header.value.as_ref() {
+                Some(value) => {
+                    HeaderValue::from_str(value).map_err(|_| {
+                        ModelProviderError::InvalidInput(format!(
+                            "invalid model header value for '{}'",
+                            header.name
+                        ))
+                    })?;
+                }
+                None if header.configured => {
+                    return Err(ModelProviderError::InvalidInput(format!(
+                        "model header '{}' requires a value",
+                        header.name
+                    )));
+                }
+                None => {}
+            }
             Ok(header)
         })
         .collect()
@@ -209,7 +232,7 @@ pub(super) async fn write_json<T: Serialize>(
 pub(super) async fn send_probe_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
-    timeout: Duration,
+    request_timeout: Option<Duration>,
 ) -> Result<reqwest::Response, reqwest::Error> {
     let request = match profile.provider {
         ModelProviderKind::Anthropic => client
@@ -237,13 +260,13 @@ pub(super) async fn send_probe_request(
                 "messages": [{"role": "user", "content": "relay-knowledge provider probe"}]
             })),
     };
-    request.timeout(timeout).send().await
+    apply_request_timeout(request, request_timeout).send().await
 }
 
 pub(super) async fn send_discovery_request(
     client: &reqwest::Client,
     profile: &StoredModelProfile,
-    timeout: Duration,
+    request_timeout: Option<Duration>,
 ) -> Result<reqwest::Response, reqwest::Error> {
     let url = match profile.provider {
         ModelProviderKind::Anthropic => {
@@ -251,12 +274,34 @@ pub(super) async fn send_discovery_request(
         }
         _ => format!("{}/models", profile.base_url.trim_end_matches('/')),
     };
-    client
-        .get(url)
-        .headers(auth_headers(profile))
-        .timeout(timeout)
-        .send()
-        .await
+    apply_request_timeout(
+        client.get(url).headers(auth_headers(profile)),
+        request_timeout,
+    )
+    .send()
+    .await
+}
+
+pub(super) fn provider_http_client(
+    http: &HttpConfig,
+    profile: &StoredModelProfile,
+) -> Result<reqwest::Client, ModelProviderError> {
+    crate::net::http::outbound_json_client_with_policy(
+        http,
+        profile.ssl_verify,
+        Some(Duration::from_secs_f64(profile.connect_timeout_seconds)),
+    )
+    .map_err(|error| ModelProviderError::Network(error.to_string()))
+}
+
+fn apply_request_timeout(
+    request: reqwest::RequestBuilder,
+    timeout: Option<Duration>,
+) -> reqwest::RequestBuilder {
+    match timeout {
+        Some(timeout) => request.timeout(timeout),
+        None => request,
+    }
 }
 
 pub(super) fn auth_headers(profile: &StoredModelProfile) -> HeaderMap {
@@ -732,10 +777,8 @@ pub(super) fn redacted_url(value: &str) -> String {
         .unwrap_or_else(|| value.to_owned())
 }
 
-pub(super) fn timeout_from_ms(timeout_ms: Option<u64>, fallback_seconds: f64) -> Duration {
-    timeout_ms
-        .map(Duration::from_millis)
-        .unwrap_or_else(|| Duration::from_secs_f64(fallback_seconds))
+pub(super) fn request_timeout_from_ms(timeout_ms: Option<u64>) -> Option<Duration> {
+    timeout_ms.map(Duration::from_millis)
 }
 
 pub(super) fn elapsed_millis(started: Instant) -> u64 {

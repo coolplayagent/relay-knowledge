@@ -101,7 +101,7 @@ async fn sends_provider_probe_and_discovery_requests() {
         Some("secret"),
     );
 
-    let probe_response = send_probe_request(&client, &profile, Duration::from_secs(1)).await;
+    let probe_response = send_probe_request(&client, &profile, Some(Duration::from_secs(1))).await;
     let probe = probe_result_from_http(
         profile.clone(),
         Instant::now(),
@@ -113,7 +113,7 @@ async fn sends_provider_probe_and_discovery_requests() {
     assert_eq!(probe.token_usage.unwrap().total_tokens, 9);
 
     let discovery_response =
-        send_discovery_request(&client, &profile, Duration::from_secs(1)).await;
+        send_discovery_request(&client, &profile, Some(Duration::from_secs(1))).await;
     let discovery = discovery_result_from_http(
         profile.clone(),
         Instant::now(),
@@ -133,7 +133,7 @@ async fn sends_provider_probe_and_discovery_requests() {
         Some("anthropic-secret"),
     );
     let failed_probe_response =
-        send_probe_request(&client, &anthropic, Duration::from_secs(1)).await;
+        send_probe_request(&client, &anthropic, Some(Duration::from_secs(1))).await;
     let failed_probe = probe_result_from_http(
         anthropic.clone(),
         Instant::now(),
@@ -146,7 +146,7 @@ async fn sends_provider_probe_and_discovery_requests() {
     assert!(!failed_probe.diagnostics.auth_valid);
 
     let failed_discovery_response =
-        send_discovery_request(&client, &anthropic, Duration::from_secs(1)).await;
+        send_discovery_request(&client, &anthropic, Some(Duration::from_secs(1))).await;
     let failed_discovery = discovery_result_from_http(
         anthropic,
         Instant::now(),
@@ -168,7 +168,7 @@ async fn transport_failures_return_retryable_diagnostics() {
         "http://127.0.0.1:1",
         Some("secret"),
     );
-    let response = send_probe_request(&client, &profile, Duration::from_millis(10)).await;
+    let response = send_probe_request(&client, &profile, Some(Duration::from_millis(10))).await;
 
     let result = probe_result_from_http(profile, Instant::now(), now_millis(), response).await;
 
@@ -299,7 +299,11 @@ fn maps_headers_statuses_catalogs_and_discovery_payloads() {
         redacted_url("https://user:pass@example.com/v1"),
         "https://example.com/v1"
     );
-    assert_eq!(timeout_from_ms(Some(5), 30.0), Duration::from_millis(5));
+    assert_eq!(
+        request_timeout_from_ms(Some(5)),
+        Some(Duration::from_millis(5))
+    );
+    assert_eq!(request_timeout_from_ms(None), None);
 }
 
 async fn serve_provider_fixture() -> String {
