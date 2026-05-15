@@ -964,5 +964,9 @@ async fn service_shutdown_signal() {
 }
 
 #[cfg(test)]
+#[path = "cli_naming_tests.rs"]
+mod cli_naming_tests;
+
+#[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
