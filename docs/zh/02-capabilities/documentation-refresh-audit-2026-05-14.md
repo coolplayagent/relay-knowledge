@@ -32,7 +32,7 @@
 
 - `relay-knowledge setup doctor`：不触碰存储的只读配置就绪检查，覆盖运行时路径、网络/QoS 预算、检索后端元数据、MCP 作用域策略、服务目录和 worker 预算，并返回 `configuration_ready`、`live_health_checked=false`、`live_health_commands` 和修复用的 `recommended_actions`。
 - `relay-knowledge setup profile local|agent-readonly|service|external-embedding`：输出只读环境变量和命令建议，不写文件、不修改 shell profile，也不安装服务。
-- SQLite 启动重置：本地数据库文件不匹配当前表定义时，会连同 WAL/SHM sidecar 一起删除并重建，避免 `health` 和 `service doctor` 运行在过期 schema 上。
+- SQLite 启动迁移：启动时迁移已知过期表定义，只局部重建可派生的检索表和刷新队列，避免 `health` 和 `service doctor` 运行在过期 schema 上。
 
 ## 剩余实现工作
 
@@ -51,5 +51,5 @@ relay-knowledge help --format json
 relay-knowledge setup doctor --format json
 relay-knowledge setup profile external-embedding --format json
 cargo test --all-targets --all-features cli
-cargo test --all-targets --all-features startup_resets_database_with_obsolete_refresh_queue_schema
+cargo test --all-targets --all-features startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_data
 ```

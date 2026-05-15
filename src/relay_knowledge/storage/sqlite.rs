@@ -13,7 +13,8 @@ mod helpers;
 mod indexing;
 mod operations;
 mod retrieval;
-mod schema_reset;
+mod schema_columns;
+mod schema_migration;
 mod store_impls;
 
 use crate::{
@@ -44,12 +45,8 @@ impl SqliteGraphStore {
             std::fs::create_dir_all(parent)?;
         }
 
-        let mut connection = Connection::open(&path)?;
-        if schema_reset::database_requires_reset(&connection)? {
-            drop(connection);
-            schema_reset::remove_database_files(&path)?;
-            connection = Connection::open(&path)?;
-        }
+        let connection = Connection::open(&path)?;
+        schema_migration::prepare_existing_database(&connection)?;
         initialize_schema(&connection)?;
 
         Ok(Self {
@@ -217,6 +214,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
 	            ON graph_fact_evidence(evidence_id, fact_kind);
         ",
     )?;
+    schema_columns::ensure_core_schema_columns(connection)?;
     code::initialize_code_schema(connection)?;
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;

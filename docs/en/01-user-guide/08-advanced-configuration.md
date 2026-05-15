@@ -177,8 +177,8 @@ metadata、MCP policy、service directory 和 worker budget，并在 JSON 响应
 `configuration_ready`、`live_health_checked=false`、`live_health_commands` 和
 `recommended_actions`。它不打开 SQLite，不迁移 schema，也不刷新索引；需要检查
 graph version、storage health、index freshness 或 worker/service live health 时继续运行
-`health` 或 `service doctor`。如果本地 SQLite 文件不符合当前表定义，启动时会删除
-该数据库及 WAL/SHM sidecar 并按最新 schema 重建；之后需要重新摄取或重新索引数据。
+`health` 或 `service doctor`。启动时会对本地 SQLite 执行兼容 schema migration；
+可重建的派生索引表会按最新定义重建，graph facts、evidence 和 mutation log 不会被静默删除。
 
 `setup profile` 输出推荐环境变量、命令和安全提示，不写 `.env`，不修改 shell
 profile，也不执行 service manager 安装。支持的 profile:

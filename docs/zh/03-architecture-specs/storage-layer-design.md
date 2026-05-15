@@ -338,9 +338,9 @@ path/language filters、计数和 degraded state。文件、符号、引用、im
 diagnostic 和 tombstone 表都带 `source_scope`，查询按已解析 scope 过滤。对同一
 `source_scope + path` 的新解析结果在事务内替换；增量索引切到新 tree scope 时会先复制
 匹配 base commit/filter 的 persisted scope 的未变行，再替换 changed/deleted path，因此
-新 scope 完整保留未变文件，旧 scope 仍可显式查询。启动时如发现本地 SQLite 文件不符合
-当前表定义，SQLite adapter 会删除该数据库及 WAL/SHM sidecar，并从当前 schema 重新创建；
-用户需要重新摄取或重新索引数据。
+新 scope 完整保留未变文件，旧 scope 仍可显式查询。启动时 SQLite adapter 会执行兼容
+schema migration；过期的派生检索表和刷新队列可以局部重建，graph facts、evidence 和
+mutation log 不得被静默删除。
 
 ### 4.3 版本和变更日志
 

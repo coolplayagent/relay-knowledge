@@ -5,13 +5,33 @@ use crate::storage::{
     IndexRefreshQueueRequest, IndexRefreshTaskState,
 };
 
-#[test]
-fn startup_resets_database_with_obsolete_refresh_queue_schema() {
+#[tokio::test]
+async fn startup_migrates_obsolete_refresh_queue_schema_without_deleting_graph_data() {
     let path = temp_db_path("obsolete-refresh-queue");
     let connection = rusqlite::Connection::open(&path).expect("connection should open");
     connection
         .execute_batch(
             "
+            CREATE TABLE graph_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                graph_version INTEGER NOT NULL
+            );
+            INSERT INTO graph_state (id, graph_version) VALUES (1, 1);
+            CREATE TABLE evidence (
+                id TEXT PRIMARY KEY,
+                source_scope TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_graph_version INTEGER NOT NULL
+            );
+            INSERT INTO evidence (id, source_scope, content, created_graph_version)
+            VALUES ('ev-legacy', 'docs', 'Legacy queue data should survive startup', 1);
+            CREATE TABLE graph_mutations (
+                graph_version INTEGER PRIMARY KEY,
+                evidence_count INTEGER NOT NULL,
+                entity_count INTEGER NOT NULL
+            );
+            INSERT INTO graph_mutations (graph_version, evidence_count, entity_count)
+            VALUES (1, 1, 0);
             CREATE TABLE index_refresh_tasks (
                 task_id TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -41,9 +61,26 @@ fn startup_resets_database_with_obsolete_refresh_queue_schema() {
         .expect("obsolete schema should be created");
     drop(connection);
 
-    let store = SqliteGraphStore::open(&path).expect("store should reset obsolete database");
+    let store = SqliteGraphStore::open(&path).expect("store should migrate obsolete database");
+    let graph = store.inspect_graph().await.expect("graph should inspect");
+    assert_eq!(graph.graph_version, GraphVersion::new(1));
+    assert_eq!(graph.evidence_count, 1);
+
+    let claimed = store
+        .claim_index_refresh_task(IndexRefreshClaimRequest {
+            lease_owner: "worker-legacy".to_owned(),
+            lease_duration_ms: 100,
+            max_attempts: 3,
+            now_ms: 10,
+        })
+        .await
+        .expect("legacy task should be claimable")
+        .expect("legacy task should exist");
+    assert_eq!(claimed.task_id, "bm25:graph:text");
+    assert_eq!(claimed.lease_owner.as_deref(), Some("worker-legacy"));
+
     let guard = store.connection.lock().expect("connection should lock");
-    let columns = guard
+    let task_columns = guard
         .prepare("PRAGMA table_info(index_refresh_tasks)")
         .expect("table info should prepare")
         .query_map([], |row| row.get::<_, String>(1))
@@ -51,15 +88,27 @@ fn startup_resets_database_with_obsolete_refresh_queue_schema() {
         .collect::<Result<Vec<_>, _>>()
         .expect("columns should collect");
 
-    assert!(columns.iter().any(|column| column == "lease_owner"));
-    assert!(columns.iter().any(|column| column == "created_at_ms"));
+    assert!(task_columns.iter().any(|column| column == "lease_owner"));
+    assert!(task_columns.iter().any(|column| column == "created_at_ms"));
     assert_eq!(
         guard
             .query_row("SELECT COUNT(*) FROM index_refresh_tasks", [], |row| {
                 row.get::<_, u64>(0)
             })
             .expect("task count should read"),
-        0
+        1
+    );
+    let mutation_columns = guard
+        .prepare("PRAGMA table_info(graph_mutations)")
+        .expect("mutation table info should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("mutation columns should read")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("mutation columns should collect");
+    assert!(
+        mutation_columns
+            .iter()
+            .any(|column| column == "affected_scopes_json")
     );
     drop(guard);
     let _ = std::fs::remove_file(path);

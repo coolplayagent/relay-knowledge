@@ -25,8 +25,15 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 if command_exists npm; then
   echo "Building Web assets..."
   npm run build --prefix web
+  if command_exists python3; then
+    echo "Running run.sh runtime smoke gate..."
+    cargo build --release
+    sh tests/runtime/run_sh_smoke.sh
+  else
+    echo "[Warning] python3 not found. Skipping run.sh runtime smoke gate."
+  fi
 else
-  echo "[Warning] npm not found. Skipping Web build."
+  echo "[Warning] npm not found. Skipping Web build and run.sh runtime smoke gate."
 fi
 
 if command_exists uv; then
