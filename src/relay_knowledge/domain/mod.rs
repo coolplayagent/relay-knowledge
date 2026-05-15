@@ -19,7 +19,8 @@ pub use code::{
 };
 pub use code_repository::{
     CodeCallRecord, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
-    CodeImpactRequest, CodeImportRecord, CodeIndexMode, CodeIndexProgressSummary, CodeIndexRequest,
+    CodeImpactRequest, CodeImportRecord, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexMode,
+    CodeIndexProgressSummary, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession,
     CodeIndexSnapshot, CodeIndexSummary, CodePathTombstone, CodeQueryKind,
     CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview, CodeRepositoryLargestFile,
     CodeRepositoryLatencySample, CodeRepositoryRegistration, CodeRepositoryReport,

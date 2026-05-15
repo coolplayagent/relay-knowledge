@@ -235,7 +235,7 @@ O(changed_files + affected_files + changed_chunks + refreshed_index_entries)
 - 用 Git tree/diff 避免全目录扫描。
 - 用 blob/content hash 避免对未变文件进行解析。
 - 用反向依赖只读模型限制影响扩散。
-- 用 batch writes 降低事务开销。
+- 用 checkpointed batch writes 降低事务开销，并让大 scope 中断前已有持久进度。
 - 用 content hash 缓存 embedding。
 - 用作用域索引元数据避免全局陈旧。
 
@@ -249,8 +249,9 @@ diff producer
   -> metadata/hash workers
   -> bounded parse queue
   -> parse/extract workers
-  -> bounded mutation batch queue
-  -> storage writer
+  -> bounded SQLite batch writer
+  -> checkpoint cursor
+  -> cross-batch edge finalizer
   -> index refresh workers
 ```
 
@@ -258,7 +259,10 @@ diff producer
 
 - producer 在队列满时暂停或返回 backpressure。
 - parser worker 数量不超过 CPU 和内存预算。
-- storage writer 批量提交，避免多个 writer 抢锁。
+- storage writer 批量提交，避免多个 writer 抢锁；每批更新 checkpoint 和 `indexing`
+  状态。
+- reference/import/call resolution 在 finalize 阶段读取同一 scope 的完整已落库事实，避免
+  大仓库分批后丢失跨批文件关系。
 - embedding 和 community rebuild 低优先级执行。
 - 查询时读取最新的 fresh index 或按新鲜度策略降级，不等待后台低优先级任务完成。
 
@@ -270,7 +274,10 @@ diff producer
 - 默认排除常见的生成文件夹/第三方目录，可配置覆盖。
 - 单文件大小上限，超限 text-only 或 skipped。
 - language filters 和 path filters 可强制要求。
-- 对超过预算的仓库返回 `requires_partitioning`，引导用户选择路径 scope。
+- 默认先用 `CodeIndexResourceBudget` 分批解析和落盘；每批同时受文件数、字节数和写入行数
+  约束。
+- 对超过运行时总资源预算或服务窗口的仓库返回 `requires_partitioning`，引导用户选择路径
+  scope；这属于运维预算决策，不再是索引器必须单次 snapshot 成功的架构限制。
 - 历史查询和 cross-repo 查询走后台预计算，不阻塞交互查询。
 
 ## 8. 检索质量分析

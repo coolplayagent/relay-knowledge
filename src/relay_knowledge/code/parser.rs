@@ -35,7 +35,7 @@ use text::{count_lines, validate_text_content};
 #[cfg(test)]
 use nodes::push_children_reverse;
 
-pub(super) fn parse_indexed_file(
+pub(in crate::code) fn parse_indexed_file(
     build: &mut SnapshotBuild,
     path: &str,
     bytes: &[u8],

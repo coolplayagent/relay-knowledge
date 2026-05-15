@@ -1,9 +1,9 @@
 //! Storage contracts for code repository indexes.
 
 use crate::domain::{
-    CodeFileFingerprint, CodeImpactRequest, CodeIndexSnapshot, CodeIndexSummary,
-    CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals,
-    CodeRetrievalHit, CodeRetrievalRequest,
+    CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession,
+    CodeIndexSnapshot, CodeIndexSummary, CodeRepositoryRegistration, CodeRepositoryReport,
+    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -55,6 +55,42 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         snapshot: CodeIndexSnapshot,
     ) -> StorageFuture<'_, CodeIndexSummary>;
+
+    fn begin_code_index_session(
+        &self,
+        session: CodeIndexSession,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "checkpointed code index sessions for scope '{}' are unavailable",
+                session.source_scope
+            )))
+        })
+    }
+
+    fn apply_code_index_batch(
+        &self,
+        batch: CodeIndexBatch,
+    ) -> StorageFuture<'_, CodeIndexCheckpoint> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "checkpointed code index batches for scope '{}' are unavailable",
+                batch.source_scope
+            )))
+        })
+    }
+
+    fn finalize_code_index_session(
+        &self,
+        session: CodeIndexSession,
+    ) -> StorageFuture<'_, CodeIndexSummary> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "checkpointed code index finalization for scope '{}' is unavailable",
+                session.source_scope
+            )))
+        })
+    }
 
     fn search_code(
         &self,

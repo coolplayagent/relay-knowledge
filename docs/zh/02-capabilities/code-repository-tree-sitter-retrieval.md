@@ -41,12 +41,17 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
 
 该运行在 Python 生产源码范围内索引了 691 个文件、13,399 个 symbol、82,460 个 reference 和 13,402 个 chunk，没有降级文件。Definition、reference、import、caller 和 hybrid 查询都返回了按 revision 约束的命中，并携带 resolved commit、tree hash、path、line range、retrieval layer、index version、freshness、score 和 excerpt metadata。
 
-较宽的试验范围 `src`、`tests`、`docs` 和 `frontend` 不适合交互式全量索引，因为它会纳入生成的前端资产、PDF、大型文档和大型 UI test fixture。当前 CLI 需要在长时间 full-index 操作开始前提供更多 preflight 和 progress 信息。
+较宽的试验范围 `src`、`tests`、`docs` 和 `frontend` 不适合交互式全量索引，因为它会纳入生成的前端资产、PDF、大型文档和大型 UI test fixture。当前 full-index 已具备
+`repo scope preview` preflight、受资源预算约束的 SQLite batch、持久 checkpoint 和
+`indexing` 状态计数；长时间运行不再只有内存内 snapshot，旧 fresh scope 会在 finalize
+成功前继续服务查询。
 
 后续改进项：
 
-- 增加 `repo index --dry-run` 或 `repo scope preview`，在索引前展示文件数量、字节数、语言分布、最大文件、不支持文件、生成资产和预期降级文件。
-- 全量索引时展示 progress 和 budget，包括 Git 文件枚举、blob 读取、parser 工作、SQLite 写入、耗时、跳过文件、降级文件和当前 scope。
+- 继续增强 `repo scope preview` 的降级预测，尤其是 tree-sitter error node 预估。
+- 继续细化 full-index progress 的用户界面，包括耗时、当前 path 和 batch ETA；底层已返回
+  Git 文件枚举、blob 读取、parser、SQLite 写入、跳过文件、降级文件、batch count、
+  checkpoint file count 和 resource budget。
 - 让默认 source preset 和排除规则匹配实际索引成本。默认 preset 排除 `dist`、build output、cache directory、PDF、vendored asset、`*.jsonl` 数据集 dump 和 `uv.lock`；用户可通过显式 path filter opt in。仓库本地 `.relay-knowledgeignore` 可让额外排除规则可重复。
 - `graph inspect` 和 `health` 的代码计数应包含代码仓库索引总量，或明确标注为 graph evidence 计数。E2E 运行中 `repo status` 已显示代码索引总量，但 `graph inspect` 显示零代码文件和零 symbol，容易误读为索引失败。
 - `repo impact` 的路径报告应通过 `path_groups` 区分 scope 内外变更。当前 impact 命中遵守注册 scope，但路径报告仍包含无关 docs、frontend 和 test 变更。

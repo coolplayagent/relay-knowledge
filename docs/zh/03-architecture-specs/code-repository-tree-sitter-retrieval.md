@@ -288,8 +288,9 @@ resolve snapshot
   -> apply authorization/path/language filters
   -> load blob metadata and content hash
   -> skip generated/binary/oversized files
-  -> parse/extract in bounded worker pool
-  -> batch graph mutation commit
+  -> parse/extract in resource-bounded batches
+  -> checkpoint each SQLite batch
+  -> finalize cross-batch references/imports/calls
   -> scoped BM25/semantic/vector refresh
   -> publish repository index status
 ```
@@ -301,8 +302,17 @@ resolve snapshot
 - generated/vendor/lockfile/large file 规则必须可配置、可观测、可解释。
 - 单文件读取、解析和抽取必须有大小上限、时间上限和取消点。
 - parse/extract worker 必须使用非递归 AST 遍历和有界候选集合；深层源码只能增加显式工作栈预算消耗，不能增加 Rust 调用栈深度。
-- 写入按批次提交；批次失败只回滚该批次，成功批次保留。
-- 全量构建完成前，旧 scope 查询继续可用；新 scope 可按 freshness policy 返回 stale/partial。
+- Full index 必须使用 `CodeIndexResourceBudget` 控制每批文件数、读取字节数和写入行数。
+- 写入按批次提交；批次失败只回滚该批次，成功批次保留在新 scope 下。
+- 每个新 scope 必须维护 `code_repository_index_checkpoints` 等价的持久 checkpoint，
+  至少包含 state、total path count、parsed/committed file count、symbol/reference/chunk
+  count、batch count、last path 和资源预算。
+- 批次提交后 repository status 必须进入 `indexing`，并暴露已提交计数；完成前不得把
+  partial scope 切为 active。
+- 引用解析、include 解析和调用边物化必须在 finalize 阶段基于已落库的全 scope 事实执行，
+  不能只在单批内解析跨文件关系。
+- 全量构建完成前，旧 scope 查询继续可用；新 scope 只有 finalize 成功后才按 freshness
+  policy 变为 fresh。
 
 ## 7. 增量更新
 
