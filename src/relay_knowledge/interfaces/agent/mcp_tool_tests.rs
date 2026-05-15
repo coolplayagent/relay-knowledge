@@ -71,6 +71,98 @@ pub fn retry_policy() -> u32 {
 }
 
 #[tokio::test]
+async fn mcp_tools_auto_authorize_registered_repository_alias_at_runtime() {
+    let repo = FixtureRepo::create("mcp-runtime-scope");
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn runtime_scope_policy() -> bool {
+    true
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let (server, service) = server_and_service([]).await;
+    register_and_index_fixture(&service, &repo, "HEAD", CodeIndexMode::Full).await;
+    service
+        .ingest(
+            IngestRequest {
+                source_scope: "fixture".to_owned(),
+                evidence: vec![IngestEvidence {
+                    id: Some("ev-runtime-scope".to_owned()),
+                    source_path: None,
+                    span: None,
+                    confidence: None,
+                    status: None,
+                    content: "Registered repository aliases can be promoted into MCP runtime scope policy."
+                        .to_owned(),
+                    entity_labels: Vec::new(),
+                    extraction: None,
+                }],
+                relations: Vec::new(),
+                claims: Vec::new(),
+                events: Vec::new(),
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+    let mut router = server.clone().router();
+
+    let code_query = tool_call(
+        &mut router,
+        "runtime-code-query",
+        "relay_code_query",
+        json!({
+            "repository": "fixture",
+            "query": "runtime_scope_policy",
+            "kind": "definition",
+            "limit": 5,
+            "freshness": "wait-until-fresh"
+        }),
+    )
+    .await;
+    let retrieve = tool_call(
+        &mut router,
+        "runtime-retrieve",
+        "relay_retrieve_context",
+        json!({
+            "query": "runtime scope policy",
+            "source_scope": "fixture",
+            "limit": 3,
+            "freshness": "wait-until-fresh"
+        }),
+    )
+    .await;
+
+    assert_eq!(code_query["result"]["isError"], false);
+    assert_eq!(
+        code_query["result"]["structuredContent"]["request"]["repository"]["repository"],
+        "fixture"
+    );
+    assert_eq!(retrieve["result"]["isError"], false);
+    assert_eq!(
+        retrieve["result"]["structuredContent"]["source_scope"],
+        "fixture"
+    );
+
+    let audit = server.audit_snapshot();
+    assert!(
+        audit
+            .iter()
+            .any(|event| event.operation == "relay_code_query"
+                && event.source_scope.as_deref() == Some("fixture"))
+    );
+    assert!(
+        audit
+            .iter()
+            .any(|event| event.operation == "relay_retrieve_context"
+                && event.source_scope.as_deref() == Some("fixture"))
+    );
+}
+
+#[tokio::test]
 async fn code_impact_tool_returns_diff_impact_and_audit() {
     let repo = FixtureRepo::create("mcp-code-impact");
     repo.write(

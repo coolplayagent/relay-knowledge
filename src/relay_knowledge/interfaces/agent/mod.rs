@@ -8,4 +8,7 @@ mod policy;
 pub use audit::{
     AgentAuditEvent, AgentAuditLog, AgentAuditQosDecision, AgentAuditSink, AgentAuditStatus,
 };
-pub use policy::{AgentAdapterError, AgentAdapterErrorKind, authorize_limit, authorize_scope};
+pub use policy::{
+    AgentAdapterError, AgentAdapterErrorKind, authorize_limit, authorize_scope,
+    normalize_scope_for_policy, scope_not_authorized,
+};

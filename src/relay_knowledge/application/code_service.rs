@@ -357,6 +357,21 @@ impl RelayKnowledgeService {
         })
     }
 
+    /// Checks whether a repository selector resolves to a registered code source.
+    pub(crate) async fn code_repository_is_registered(
+        &self,
+        repository: String,
+    ) -> Result<bool, ApiError> {
+        let selector = CodeRepositorySelector::new(repository, "HEAD", Vec::new(), Vec::new())
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let store = self.store().await.map_err(storage_api_error)?;
+        store
+            .code_repository_status(selector.repository)
+            .await
+            .map(|status| status.is_some())
+            .map_err(storage_api_error)
+    }
+
     /// Builds a reusable operations report for a registered code repository.
     pub async fn code_repository_report(
         &self,
