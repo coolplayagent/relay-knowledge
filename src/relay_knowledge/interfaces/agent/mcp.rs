@@ -10,7 +10,6 @@ mod state;
 mod audit_bridge;
 mod code_tools;
 mod http_contract;
-mod legacy_http;
 mod metrics;
 mod prompts;
 mod resources;
@@ -77,7 +76,6 @@ pub struct McpServer {
     metrics: AgentProtocolMetrics,
     cancellations: CancellationRegistry,
     sessions: SessionRegistry,
-    legacy_sse: legacy_http::LegacySseRegistry,
 }
 
 impl McpServer {
@@ -105,7 +103,6 @@ impl McpServer {
             metrics,
             cancellations: CancellationRegistry::default(),
             sessions: SessionRegistry::default(),
-            legacy_sse: legacy_http::LegacySseRegistry::default(),
         }
     }
 
@@ -113,22 +110,12 @@ impl McpServer {
     pub fn router(self) -> Router {
         let config = self.network.current();
         let endpoint = self.agent.mcp_endpoint.clone();
-        let legacy_sse_endpoint = legacy_http::sse_endpoint(&endpoint);
-        let legacy_message_endpoint = legacy_http::message_endpoint(&endpoint);
         let metrics_endpoint = metrics::metrics_endpoint(&endpoint);
         let body_limit = usize::try_from(config.http.max_request_body_bytes).unwrap_or(usize::MAX);
 
         Router::new()
             .route(&endpoint, post(handle_mcp_post))
             .route(&endpoint, axum::routing::delete(handle_mcp_delete))
-            .route(
-                &legacy_sse_endpoint,
-                get(legacy_http::handle_legacy_sse_get),
-            )
-            .route(
-                &legacy_message_endpoint,
-                post(legacy_http::handle_legacy_message_post),
-            )
             .route(&metrics_endpoint, get(metrics::handle_metrics_get))
             .with_state(self)
             .layer(TraceLayer::new_for_http())

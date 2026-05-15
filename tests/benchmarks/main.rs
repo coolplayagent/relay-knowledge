@@ -154,7 +154,8 @@ async fn benchmark_code_repository_fast_paths() {
     .await;
     assert!(
         impact
-            .changed_paths
+            .path_groups
+            .in_scope_changed_paths
             .iter()
             .any(|path| path == "src/module_0.rs")
     );

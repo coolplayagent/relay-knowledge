@@ -332,7 +332,7 @@ fn rejects_flag_style_actions_and_extra_command_words() {
 }
 
 #[test]
-fn rejects_legacy_query_flag_form() {
+fn rejects_removed_query_flag_form() {
     let error = CliCommand::parse(["query", "--query", "SQLite"])
         .expect_err("query text should be positional");
 
@@ -348,7 +348,7 @@ fn rejects_legacy_query_flag_form() {
 #[test]
 fn parse_errors_render_machine_readable_diagnostics_when_json_format_is_requested() {
     let error = CliCommand::parse(["--format", "json", "query", "--query", "SQLite"])
-        .expect_err("legacy query flag should fail");
+        .expect_err("removed query flag should fail");
     let value: serde_json::Value =
         serde_json::from_str(&error.render_stderr()).expect("diagnostic should be JSON");
 

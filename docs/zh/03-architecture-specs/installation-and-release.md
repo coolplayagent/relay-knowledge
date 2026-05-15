@@ -122,8 +122,8 @@ service profile 的推荐命令。
 可在同一端口提供 Web 诊断、`/api/*` 和 MCP Streamable HTTP 工具能力。
 安装后的平台 service template 应复用该入口或不带 `--web` 的 MCP-only 入口，
 而不是用 unmanaged shell loop 包装普通 CLI 命令。
-当前 MCP service surface 还包括 `/mcp/metrics` Prometheus text exporter、`/mcp/sse`
-和 `/mcp/message` 旧 HTTP+SSE 兼容入口，以及可选 `logs/agent-audit.jsonl` 持久审计
+当前 MCP service surface 还包括 `/mcp/metrics` Prometheus text exporter
+以及可选 `logs/agent-audit.jsonl` 持久审计
 sink。安装器和 service template 必须把这些路径当作同一个前台服务进程的一部分，
 不要额外启动未受 service manager 管理的 sidecar loop。
 后续真正执行 privileged install/uninstall、rollback 和 package-manager integration

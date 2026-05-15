@@ -544,7 +544,6 @@ pub struct CodeRepositoryImpactResponse {
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub request: CodeImpactRequest,
-    pub changed_paths: Vec<String>,
     pub path_groups: CodeImpactPathGroups,
     pub results: Vec<CodeRetrievalHit>,
 }

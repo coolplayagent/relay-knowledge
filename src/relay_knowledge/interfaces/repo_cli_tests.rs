@@ -403,7 +403,6 @@ pub fn retry_policy_v2() -> u32 {
     )
     .await
     .expect("impact should run");
-    assert_eq!(json_value(&impact)["changed_paths"][0], "src/lib.rs");
     assert_eq!(
         json_value(&impact)["path_groups"]["in_scope_changed_paths"][0],
         "src/lib.rs"

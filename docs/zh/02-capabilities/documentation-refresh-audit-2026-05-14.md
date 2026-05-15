@@ -11,11 +11,11 @@
 | README | 将设置诊断、设置配置文件命令补充到当前能力和 CLI 示例中。 |
 | 用户指南 | 将指南版本提升到 1.2，补充 `setup doctor`，记录设置配置文件，并移除仅规划阶段的设置表述。 |
 | 高级配置 | 用已实现的 `setup doctor` 和 `setup profile` 行为替换旧的规划中设置章节。 |
-| 运维排障 | 将 setup doctor 加入诊断顺序，并记录旧版刷新任务时间戳迁移症状。 |
+| 运维排障 | 将 setup doctor 加入诊断顺序，并记录过期本地数据库重置行为。 |
 | Semantic/vector 后端 | 将外部 embedding 设置配置文件记录为推荐起点。 |
 | 统一 API 规格 | 将 setup 命令加入当前 CLI 表面，并说明 setup profile 是只读推荐输出。 |
 | 安装发布规格 | 更新服务安装说明，使其匹配已实现的 `service plan`、`service definition write` 和 `setup profile service` 流程。 |
-| 存储迁移 | 为缺少 `created_at_ms` 和 `updated_at_ms` 的旧版 `index_refresh_tasks` 表补充兼容迁移。 |
+| 存储重置 | 本地 SQLite 文件不匹配当前 schema 时，会按最新表定义重建。 |
 
 ## 当前文档状态
 
@@ -32,7 +32,7 @@
 
 - `relay-knowledge setup doctor`：不触碰存储的只读配置就绪检查，覆盖运行时路径、网络/QoS 预算、检索后端元数据、MCP 作用域策略、服务目录和 worker 预算，并返回 `configuration_ready`、`live_health_checked=false`、`live_health_commands` 和修复用的 `recommended_actions`。
 - `relay-knowledge setup profile local|agent-readonly|service|external-embedding`：输出只读环境变量和命令建议，不写文件、不修改 shell profile，也不安装服务。
-- 旧版索引刷新队列迁移：启动 schema 初始化现在会补齐缺失的任务时间戳列，并使用迁移时间作为默认值，使 `health` 和 `service doctor` 可以读取旧本地数据库，而不会给出接近 epoch 的误导性队列年龄。
+- SQLite 启动重置：本地数据库文件不匹配当前表定义时，会连同 WAL/SHM sidecar 一起删除并重建，避免 `health` 和 `service doctor` 运行在过期 schema 上。
 
 ## 剩余实现工作
 
@@ -51,5 +51,5 @@ relay-knowledge help --format json
 relay-knowledge setup doctor --format json
 relay-knowledge setup profile external-embedding --format json
 cargo test --all-targets --all-features cli
-cargo test --all-targets --all-features initialization_adds_task_timestamps_to_legacy_refresh_queue
+cargo test --all-targets --all-features startup_resets_database_with_obsolete_refresh_queue_schema
 ```

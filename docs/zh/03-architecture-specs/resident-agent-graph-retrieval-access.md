@@ -163,10 +163,8 @@ MCP server 必须声明 tools、resources 和 prompts capability，并按 access
 `prompts/list` 和 `prompts/get`。MCP tools 已覆盖通用图检索、诊断、索引状态、
 授权 code graph query 和授权 code impact；resources 暴露 service status、health、
 index status、Prometheus metrics，以及仅在 `allow_unspecified_scope=true` 时暴露的
-graph summary；prompts 暴露 retrieval 和 code-impact planning templates。旧 HTTP+SSE 兼容端点通过 `/mcp/sse` 和
-`/mcp/message?sessionId=<id>` 保留；legacy client 保持 `/mcp/sse` 打开接收
-`endpoint` 和 JSON-RPC `message` events，`/mcp/message` POST 只负责提交 payload。
-新集成优先使用 Streamable HTTP。ACP 已提供本地
+graph summary；prompts 暴露 retrieval 和 code-impact planning templates。MCP 客户端只使用 Streamable HTTP `/mcp`；
+`/mcp/sse` 和 `/mcp/message` 不再作为兼容入口提供。ACP 已提供本地
 会话 adapter，用于 agent client 会话入口；它不是通用网络 server，也不提供文件编辑、终端或代码修改能力。
 `initialize` 必须携带匹配的 `protocolVersion`、object 形态的 `capabilities` 和
 非空 `clientInfo.name/version`，通过后返回加密随机的 server-issued

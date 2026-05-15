@@ -91,8 +91,8 @@ Follow-up improvements from this run:
   During the E2E run, `repo status` reported code index totals while
   `graph inspect` reported zero code files and symbols, which is easy to
   misread as a failed code index.
-- Split `repo impact` path reporting into in-scope and out-of-scope changes, or
-  default the visible `changed_paths` list to the registered scope. The impact
+- Split `repo impact` path reporting into in-scope and out-of-scope changes via
+  `path_groups`. The impact
   hits respected the registered source scope, but the path report still included
   unrelated docs, frontend, and test changes.
 - Optimize query execution for larger code indexes. The measured Python source

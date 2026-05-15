@@ -18,14 +18,14 @@ async fn marks_index_refresh_complete_at_graph_version() {
 }
 
 #[tokio::test]
-async fn legacy_index_completion_preserves_scoped_stale_cursors() {
+async fn default_index_completion_preserves_scoped_stale_cursors() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    commit_evidence(&store, "ev-legacy-stale", "docs", "Rust async storage").await;
+    commit_evidence(&store, "ev-default-stale", "docs", "Rust async storage").await;
 
     let status = store
         .mark_refresh_complete(IndexKind::Bm25, GraphVersion::new(1))
         .await
-        .expect("legacy completion should update default cursor");
+        .expect("completion should update default cursor");
 
     assert_eq!(status.kind, IndexKind::Bm25);
     assert_eq!(status.state, IndexState::Stale);

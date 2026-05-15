@@ -202,7 +202,6 @@ export type ServiceStatusResponse = {
     mcp_resources_enabled: boolean;
     mcp_prompts_enabled: boolean;
     acp_local_adapter_enabled: boolean;
-    legacy_http_enabled: boolean;
     metrics_enabled: boolean;
   };
   operator: ServiceOperatorStatus;

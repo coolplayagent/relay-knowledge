@@ -42,6 +42,10 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             indexed_graph_version INTEGER NOT NULL,
             state TEXT NOT NULL,
             last_error TEXT,
+            source_hash TEXT,
+            backend_cursor TEXT,
+            model_name TEXT,
+            model_dimension INTEGER,
             PRIMARY KEY (kind, source_scope, modality)
         );
 
@@ -69,62 +73,6 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             updated_at_ms INTEGER NOT NULL
         );
         ",
-    )?;
-    super::ensure_column(
-        connection,
-        "graph_mutations",
-        "affected_scopes_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )?;
-    super::ensure_column(
-        connection,
-        "graph_mutations",
-        "affected_entity_ids_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )?;
-    super::ensure_column(
-        connection,
-        "graph_mutations",
-        "evidence_ids_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )?;
-    super::ensure_column(
-        connection,
-        "graph_mutations",
-        "source_hashes_json",
-        "TEXT NOT NULL DEFAULT '[]'",
-    )?;
-    super::ensure_column(connection, "index_cursors", "source_hash", "TEXT")?;
-    super::ensure_column(connection, "index_cursors", "backend_cursor", "TEXT")?;
-    super::ensure_column(connection, "index_cursors", "model_name", "TEXT")?;
-    super::ensure_column(connection, "index_cursors", "model_dimension", "INTEGER")?;
-    super::ensure_column(
-        connection,
-        "index_refresh_tasks",
-        "created_at_ms",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    super::ensure_column(
-        connection,
-        "index_refresh_tasks",
-        "updated_at_ms",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    connection.execute(
-        "
-        UPDATE index_refresh_tasks
-        SET created_at_ms = CAST(strftime('%s', 'now') AS INTEGER) * 1000
-        WHERE created_at_ms = 0
-        ",
-        [],
-    )?;
-    connection.execute(
-        "
-        UPDATE index_refresh_tasks
-        SET updated_at_ms = created_at_ms
-        WHERE updated_at_ms = 0
-        ",
-        [],
     )?;
 
     for kind in IndexKind::ALL {

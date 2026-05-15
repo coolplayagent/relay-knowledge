@@ -7,67 +7,6 @@ use crate::{
     },
     storage::SqliteGraphStore,
 };
-use rusqlite::Connection;
-
-#[test]
-fn legacy_scope_migration_recreates_lookup_indexes_on_active_tables() {
-    let connection = Connection::open_in_memory().expect("connection should open");
-    connection
-        .execute_batch(
-            "
-            CREATE TABLE code_repositories (
-                repository_id TEXT PRIMARY KEY,
-                alias TEXT NOT NULL UNIQUE,
-                root_path TEXT NOT NULL,
-                path_filters_json TEXT NOT NULL,
-                language_filters_json TEXT NOT NULL,
-                last_indexed_commit TEXT,
-                tree_hash TEXT,
-                state TEXT NOT NULL,
-                indexed_file_count INTEGER NOT NULL,
-                symbol_count INTEGER NOT NULL,
-                reference_count INTEGER NOT NULL,
-                chunk_count INTEGER NOT NULL,
-                stale INTEGER NOT NULL,
-                degraded_reason TEXT
-            );
-            CREATE TABLE code_repository_files (repository_id TEXT NOT NULL, path TEXT NOT NULL, blob_hash TEXT NOT NULL);
-            CREATE TABLE code_repository_symbols (repository_id TEXT NOT NULL, name TEXT NOT NULL, qualified_name TEXT NOT NULL, path TEXT NOT NULL);
-            CREATE TABLE code_repository_references (repository_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, path TEXT NOT NULL);
-            CREATE TABLE code_repository_calls (repository_id TEXT NOT NULL, callee_name TEXT NOT NULL, caller_name TEXT, path TEXT NOT NULL);
-            CREATE TABLE code_repository_imports (repository_id TEXT NOT NULL, module TEXT NOT NULL, path TEXT NOT NULL);
-            CREATE TABLE code_repository_chunks (repository_id TEXT NOT NULL, path TEXT NOT NULL);
-            CREATE INDEX code_repository_symbols_lookup ON code_repository_symbols(repository_id, name, qualified_name, path);
-            CREATE INDEX code_repository_references_lookup ON code_repository_references(repository_id, name, kind, path);
-            CREATE INDEX code_repository_calls_lookup ON code_repository_calls(repository_id, callee_name, caller_name, path);
-            CREATE INDEX code_repository_imports_lookup ON code_repository_imports(repository_id, module, path);
-            CREATE INDEX code_repository_chunks_lookup ON code_repository_chunks(repository_id, path);
-            ",
-        )
-        .expect("legacy schema should be created");
-
-    initialize_code_schema(&connection).expect("schema migration should run");
-
-    for (index, table) in [
-        ("code_repository_symbols_lookup", "code_repository_symbols"),
-        (
-            "code_repository_references_lookup",
-            "code_repository_references",
-        ),
-        ("code_repository_calls_lookup", "code_repository_calls"),
-        ("code_repository_imports_lookup", "code_repository_imports"),
-        ("code_repository_chunks_lookup", "code_repository_chunks"),
-    ] {
-        let table_name: String = connection
-            .query_row(
-                "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?1",
-                [index],
-                |row| row.get(0),
-            )
-            .expect("index should exist");
-        assert_eq!(table_name, table);
-    }
-}
 
 #[tokio::test]
 async fn stores_code_repository_and_queries_fallback_chunks() {
