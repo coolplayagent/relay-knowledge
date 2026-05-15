@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::{
+use super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
 

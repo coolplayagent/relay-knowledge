@@ -10,31 +10,35 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod changes;
 mod git;
 mod identity;
+mod ids;
 mod languages;
 mod parser;
 mod scope;
+mod snapshot;
 
 #[cfg(test)]
 mod tests;
 
 use crate::domain::{
-    CodeCallRecord, CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
-    CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
+    CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
+    CodeRepositoryRegistration, CodeRepositorySelector,
 };
 
+use changes::{GitChange, diff_changes, tracked_paths, worktree_changed_paths};
 use git::{
     git_bytes, git_object_exists, git_optional, resolve_git_root, resolve_ref, resolve_tree,
-    validate_git_ref_arg,
 };
+use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
 use scope::{
     load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
     path_scope_overlaps, selection_exclusion_reason,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
+use snapshot::SnapshotBuild;
 
 #[cfg(test)]
 use identity::resolve_reference_targets;
@@ -587,348 +591,4 @@ fn parse_changed_path(
     }
 
     parse_indexed_file(build, path, &bytes)
-}
-
-pub(super) struct SnapshotBuild {
-    pub(super) repository_id: String,
-    pub(super) source_scope: String,
-    base_resolved_commit_sha: Option<String>,
-    commit: String,
-    tree_hash: String,
-    path_filters: Vec<String>,
-    language_filters: Vec<String>,
-    full_replace: bool,
-    changed_path_count: usize,
-    pub(super) skipped_unchanged_count: usize,
-    pub(super) deleted_paths: Vec<String>,
-    tombstones: Vec<CodePathTombstone>,
-    pub(super) files: Vec<crate::domain::RepositoryCodeFileRecord>,
-    pub(super) symbols: Vec<RepositoryCodeSymbolRecord>,
-    pub(super) references: Vec<RepositoryCodeReferenceRecord>,
-    pub(super) imports: Vec<crate::domain::CodeImportRecord>,
-    calls: Vec<CodeCallRecord>,
-    pub(super) chunks: Vec<crate::domain::RepositoryCodeChunkRecord>,
-    pub(super) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
-}
-
-impl SnapshotBuild {
-    #[cfg(test)]
-    fn new(
-        registration: &CodeRepositoryRegistration,
-        commit: String,
-        tree_hash: String,
-        full_replace: bool,
-        changed_path_count: usize,
-        skipped_unchanged_count: usize,
-    ) -> Self {
-        let selector = CodeRepositorySelector {
-            repository: registration.repository_id.clone(),
-            ref_selector: commit.clone(),
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-        };
-        Self::new_with_selector(
-            registration,
-            &selector,
-            commit,
-            tree_hash,
-            full_replace,
-            changed_path_count,
-            skipped_unchanged_count,
-        )
-    }
-
-    fn new_with_selector(
-        registration: &CodeRepositoryRegistration,
-        selector: &CodeRepositorySelector,
-        commit: String,
-        tree_hash: String,
-        full_replace: bool,
-        changed_path_count: usize,
-        skipped_unchanged_count: usize,
-    ) -> Self {
-        let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
-        let language_filters =
-            merged_filters(&registration.language_filters, &selector.language_filters);
-        let source_scope = code_snapshot_scope_id(
-            &registration.repository_id,
-            &tree_hash,
-            &path_filters,
-            &language_filters,
-        );
-        Self {
-            repository_id: registration.repository_id.clone(),
-            source_scope,
-            base_resolved_commit_sha: None,
-            commit,
-            tree_hash,
-            path_filters,
-            language_filters,
-            full_replace,
-            changed_path_count,
-            skipped_unchanged_count,
-            deleted_paths: Vec::new(),
-            tombstones: Vec::new(),
-            files: Vec::new(),
-            symbols: Vec::new(),
-            references: Vec::new(),
-            imports: Vec::new(),
-            calls: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    }
-
-    fn finish(mut self) -> CodeIndexSnapshot {
-        identity::enrich_symbol_identities(&self.repository_id, &mut self.symbols);
-        identity::resolve_reference_targets(&self.symbols, &mut self.references);
-        identity::resolve_import_targets(&self.files, &self.symbols, &mut self.imports);
-        self.calls = self
-            .references
-            .iter()
-            .filter(|reference| reference.kind == "call")
-            .map(|reference| CodeCallRecord {
-                repository_id: reference.repository_id.clone(),
-                source_scope: reference.source_scope.clone(),
-                call_id: stable_id(
-                    "call",
-                    [
-                        self.repository_id.as_str(),
-                        self.source_scope.as_str(),
-                        reference.reference_id.as_str(),
-                        reference.path.as_str(),
-                        reference.name.as_str(),
-                        &reference.line_range.start.to_string(),
-                    ],
-                ),
-                file_id: reference.file_id.clone(),
-                path: reference.path.clone(),
-                caller_symbol_snapshot_id: caller_for_line(
-                    &self.symbols,
-                    &reference.path,
-                    reference.line_range.start,
-                )
-                .map(|symbol| symbol.symbol_snapshot_id.clone()),
-                caller_name: caller_for_line(
-                    &self.symbols,
-                    &reference.path,
-                    reference.line_range.start,
-                )
-                .map(|symbol| symbol.name.clone()),
-                callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
-                callee_name: reference.name.clone(),
-                target_hint: reference.target_hint.clone(),
-                resolution_state: reference.resolution_state.clone(),
-                confidence_basis_points: reference.confidence_basis_points,
-                confidence_tier: reference.confidence_tier.clone(),
-                line_range: reference.line_range.clone(),
-            })
-            .collect();
-
-        CodeIndexSnapshot {
-            repository_id: self.repository_id,
-            source_scope: self.source_scope,
-            base_resolved_commit_sha: self.base_resolved_commit_sha,
-            resolved_commit_sha: self.commit,
-            tree_hash: self.tree_hash,
-            path_filters: self.path_filters,
-            language_filters: self.language_filters,
-            full_replace: self.full_replace,
-            changed_path_count: self.changed_path_count,
-            skipped_unchanged_count: self.skipped_unchanged_count,
-            deleted_paths: self.deleted_paths,
-            tombstones: self.tombstones,
-            files: self.files,
-            symbols: self.symbols,
-            references: self.references,
-            imports: self.imports,
-            calls: self.calls,
-            chunks: self.chunks,
-            diagnostics: self.diagnostics,
-        }
-    }
-}
-
-fn caller_for_line<'a>(
-    symbols: &'a [RepositoryCodeSymbolRecord],
-    path: &str,
-    line: u32,
-) -> Option<&'a RepositoryCodeSymbolRecord> {
-    symbols
-        .iter()
-        .filter(|symbol| {
-            symbol.path == path && symbol.line_range.start <= line && symbol.line_range.end >= line
-        })
-        .max_by_key(|symbol| symbol.line_range.start)
-}
-
-fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
-    let mut merged = Vec::new();
-    for value in left.iter().chain(right.iter()) {
-        if !merged.contains(value) {
-            merged.push(value.clone());
-        }
-    }
-
-    merged
-}
-
-fn tracked_paths(root: &Path, commit: &str) -> Result<Vec<String>, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-tree", "-r", "-z", "--name-only", commit])?;
-
-    Ok(split_nul(&bytes))
-}
-
-fn diff_changes(
-    root: &Path,
-    base_ref: &str,
-    head_ref: &str,
-) -> Result<Vec<GitChange>, CodeIndexError> {
-    validate_git_ref_arg("base_ref", base_ref)?;
-    validate_git_ref_arg("head_ref", head_ref)?;
-    let bytes = git_bytes(
-        root,
-        [
-            "diff",
-            "--name-status",
-            "--find-renames",
-            "-z",
-            "--end-of-options",
-            base_ref,
-            head_ref,
-            "--",
-        ],
-    )?;
-
-    parse_name_status_z(&bytes)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum GitChange {
-    AddedOrModified { path: String },
-    Deleted { path: String },
-    Renamed { old_path: String, new_path: String },
-    Copied { old_path: String, new_path: String },
-    TypeChanged { path: String },
-}
-
-fn parse_name_status_z(bytes: &[u8]) -> Result<Vec<GitChange>, CodeIndexError> {
-    let tokens = split_nul(bytes);
-    let mut changes = Vec::new();
-    let mut index = 0;
-
-    while index < tokens.len() {
-        let status = &tokens[index];
-        index += 1;
-        if status.starts_with('R') || status.starts_with('C') {
-            let old_path = tokens.get(index).cloned().ok_or_else(|| {
-                CodeIndexError::InvalidInput("rename old path is missing".to_owned())
-            })?;
-            let new_path = tokens.get(index + 1).cloned().ok_or_else(|| {
-                CodeIndexError::InvalidInput("rename new path is missing".to_owned())
-            })?;
-            index += 2;
-            if status.starts_with('R') {
-                changes.push(GitChange::Renamed { old_path, new_path });
-            } else {
-                changes.push(GitChange::Copied { old_path, new_path });
-            }
-            continue;
-        }
-
-        let path = tokens
-            .get(index)
-            .cloned()
-            .ok_or_else(|| CodeIndexError::InvalidInput("changed path is missing".to_owned()))?;
-        index += 1;
-        match status.chars().next() {
-            Some('D') => changes.push(GitChange::Deleted { path }),
-            Some('T') => changes.push(GitChange::TypeChanged { path }),
-            Some('A' | 'M') => changes.push(GitChange::AddedOrModified { path }),
-            _ => changes.push(GitChange::AddedOrModified { path }),
-        }
-    }
-
-    Ok(changes)
-}
-
-fn split_nul(bytes: &[u8]) -> Vec<String> {
-    bytes
-        .split(|byte| *byte == 0)
-        .filter(|part| !part.is_empty())
-        .map(|part| String::from_utf8_lossy(part).to_string())
-        .collect()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WorktreePathChange {
-    status: String,
-    path: String,
-    deleted_source: Option<String>,
-}
-
-impl WorktreePathChange {
-    fn is_untracked(&self) -> bool {
-        self.status == "??"
-    }
-}
-
-fn worktree_changed_paths(status: &[u8]) -> Vec<WorktreePathChange> {
-    let tokens = split_nul(status);
-    let mut changes = Vec::new();
-    let mut index = 0;
-    while index < tokens.len() {
-        let token = &tokens[index];
-        if token.len() < 4 {
-            index += 1;
-            continue;
-        }
-        let status = &token[..2];
-        let path = token[3..].to_owned();
-        if (status.contains('R') || status.contains('C')) && tokens.get(index + 1).is_some() {
-            let source = tokens[index + 1].clone();
-            changes.push(WorktreePathChange {
-                status: status.to_owned(),
-                path,
-                deleted_source: status.contains('R').then_some(source),
-            });
-            index += 2;
-            continue;
-        }
-        changes.push(WorktreePathChange {
-            status: status.to_owned(),
-            path,
-            deleted_source: None,
-        });
-        index += 1;
-    }
-
-    changes
-}
-
-pub(super) fn stable_content_hash(bytes: &[u8]) -> String {
-    format!("{:016x}", stable_hash64(bytes))
-}
-
-pub(super) fn stable_id<'a>(prefix: &str, parts: impl IntoIterator<Item = &'a str>) -> String {
-    let mut bytes = Vec::new();
-    for part in parts {
-        bytes.extend_from_slice(&(part.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(part.as_bytes());
-    }
-
-    format!("{prefix}:{:016x}", stable_hash64(&bytes))
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-    const FNV_PRIME: u64 = 0x100000001b3;
-
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-
-    hash
 }
