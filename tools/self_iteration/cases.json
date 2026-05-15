@@ -94,6 +94,23 @@
       "index_budget_ms": 12000,
       "query_p50_budget_ms": 300,
       "query_p95_budget_ms": 700
+    },
+    "spring_framework_java": {
+      "path": "/opt/workspace/spring-framework",
+      "alias": "spring-framework-java-self-iteration",
+      "ref": "HEAD",
+      "path_filters": [
+        "spring-context/src/main/java/org/springframework/context/ApplicationContext.java",
+        "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java",
+        "spring-context/src/main/java/org/springframework/context/support/GenericApplicationContext.java",
+        "spring-context/src/main/java/org/springframework/context/annotation/AnnotationConfigApplicationContext.java",
+        "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java",
+        "spring-beans/src/main/java/org/springframework/beans/factory/support/DefaultListableBeanFactory.java"
+      ],
+      "language_filters": ["java"],
+      "index_budget_ms": 20000,
+      "query_p50_budget_ms": 350,
+      "query_p95_budget_ms": 800
     }
   },
   "query_cases": [
@@ -362,6 +379,98 @@
       "language_filters": ["cpp"],
       "max_rank": 1,
       "expected": [{"path": "db/db_impl.cc", "line_start": 1121}]
+    },
+    {
+      "id": "spring_definition_application_context",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "ApplicationContext",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/ApplicationContext.java",
+          "line_start": 59
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_abstract_application_context_refresh",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "refresh",
+      "limit": 10,
+      "path_filters": [
+        "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java"
+      ],
+      "language_filters": ["java"],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/support/AbstractApplicationContext.java",
+          "line_start": 582
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_default_listable_bean_factory",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "DefaultListableBeanFactory",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/factory/support/DefaultListableBeanFactory.java",
+          "line_start": 132
+        }
+      ]
+    },
+    {
+      "id": "spring_definition_annotation_config_application_context",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "AnnotationConfigApplicationContext",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/annotation/AnnotationConfigApplicationContext.java",
+          "line_start": 57
+        }
+      ]
+    },
+    {
+      "id": "spring_imports_default_listable_bean_factory",
+      "repository": "spring_framework_java",
+      "kind": "imports",
+      "query": "DefaultListableBeanFactory",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-context/src/main/java/org/springframework/context/support/GenericApplicationContext.java",
+          "line_start": 43
+        }
+      ]
+    },
+    {
+      "id": "spring_filter_bean_factory_get_bean",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "getBean",
+      "limit": 10,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java"
+      ],
+      "language_filters": ["java"],
+      "max_rank": 1,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/factory/BeanFactory.java",
+          "line_start": 156
+        }
+      ]
     },
     {
       "id": "kubernetes_definition_api_server_command",
