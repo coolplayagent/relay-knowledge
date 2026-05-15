@@ -34,6 +34,11 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
         silent_updates_enabled: runtime.workers.silent_updates_enabled,
         semantic_backend_mode: runtime.retrieval.semantic_mode.as_str().to_owned(),
         vector_backend_mode: runtime.retrieval.vector_mode.as_str().to_owned(),
+        rerank_backend_mode: runtime.retrieval.rerank.mode.as_str().to_owned(),
+        rerank_model: runtime.retrieval.rerank.model.clone(),
+        rerank_candidate_multiplier: runtime.retrieval.rerank.candidate_multiplier,
+        rerank_max_candidates: runtime.retrieval.rerank.max_candidates,
+        rerank_timeout_ms: duration_millis(runtime.retrieval.rerank.timeout),
         embedding_provider: runtime
             .retrieval
             .remote_embedding

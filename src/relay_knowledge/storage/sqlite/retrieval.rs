@@ -716,6 +716,7 @@ fn scored_bm25_hit(
             code_artifact,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
+            rerank: None,
             score: 0.0,
         },
         source,

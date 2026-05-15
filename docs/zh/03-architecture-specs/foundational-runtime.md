@@ -83,6 +83,11 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE` | remote embedding batch size，默认 `32` |
 | `RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS` | remote embedding request timeout，默认 `30000` |
 | `RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY` | remote embedding endpoint concurrency budget，默认 `4` |
+| `RELAY_KNOWLEDGE_RERANK_BACKEND` | post-fusion rerank mode: `local`、`external` 或 `disabled`，默认 `local` |
+| `RELAY_KNOWLEDGE_RERANK_MODEL` | rerank model label，默认 `relay-local-deterministic-rerank-v1` |
+| `RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER` | rerank candidate expansion multiplier，默认 `4` |
+| `RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES` | rerank candidate budget cap，默认 `64` |
+| `RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS` | reserved rerank timeout budget，默认 `100` |
 | `RELAY_KNOWLEDGE_WORKER_EMBEDDING_ENDPOINT` | 外部 embedding worker HTTP endpoint；未设置时使用 deterministic fallback |
 | `RELAY_KNOWLEDGE_WORKER_OCR_ENDPOINT` | 外部 OCR worker HTTP endpoint；未设置时使用 deterministic fallback |
 | `RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT` | 外部 vision/caption worker HTTP endpoint；未设置时使用 deterministic fallback |
@@ -91,7 +96,7 @@ Relay 覆盖项:
 | `RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED` | silent-update operator 默认是否启用，默认 `false` |
 
 空值会失败。数字变量必须是大于零的正整数。HTTP bind 必须能解析为 `host:port`，可以是 IP literal 或 hostname，并且端口不能是 `0`。Proxy URL 必须使用 `http://` 或 `https://` 且包含 host；worker endpoint 当前必须使用 `http://` 且包含 host。No-proxy 和 MCP 逗号分隔列表会 trim，空条目会失败。MCP endpoint 必须是无 query/fragment 的绝对 HTTP path。Proxy 值可能包含凭据，状态输出只暴露是否配置，不输出原始 proxy 字符串。`SSL_VERIFY`、MCP boolean 和 silent-update boolean 默认值可用 `true/false`、`1/0`、`yes/no`、`on/off`。
-semantic/vector backend mode 只接受 `local`、`external` 或 `disabled`。Embedding model 名称会 trim，trim 后为空会在 runtime 配置阶段失败。`external` backend 需要 provider、base URL、API key、model 和 dimension。Provider 调用只能出现在 probe、后台 refresh 或 maintenance 边界，不能在查询热路径运行。`disabled` 会阻止对应 semantic/vector retriever 执行，并跳过对应 read model refresh。
+semantic/vector backend mode 只接受 `local`、`external` 或 `disabled`。Embedding model 名称会 trim，trim 后为空会在 runtime 配置阶段失败。`external` backend 需要 provider、base URL、API key、model 和 dimension。Provider 调用只能出现在 probe、后台 refresh 或 maintenance 边界，不能在查询热路径运行。`disabled` 会阻止对应 semantic/vector retriever 执行，并跳过对应 read model refresh。Rerank backend mode 同样只接受 `local`、`external` 或 `disabled`；`external` 当前会降级为本地确定性 rerank，并在响应 diagnostics 中报告原因。
 
 ## 3. 路径规则
 

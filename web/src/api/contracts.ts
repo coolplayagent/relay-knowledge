@@ -34,6 +34,11 @@ export type RuntimeStatus = {
   silent_updates_enabled: boolean;
   semantic_backend_mode: "local" | "external" | "disabled";
   vector_backend_mode: "local" | "external" | "disabled";
+  rerank_backend_mode: "local" | "external" | "disabled";
+  rerank_model?: string;
+  rerank_candidate_multiplier: number;
+  rerank_max_candidates: number;
+  rerank_timeout_ms: number;
   embedding_provider?: "openai_compatible" | "echo";
   embedding_base_url?: string;
   embedding_api_key_configured: boolean;

@@ -23,6 +23,8 @@ and Web compatibility, and adds:
   state, backend availability, and per-item source/ranking metadata.
 - `fusion`: the ranking algorithm and candidate count. Phase 1 uses reciprocal
   rank fusion with `k = 60`.
+- `rerank`: post-fusion rerank diagnostics, including requested/effective mode,
+  candidate count, returned count, degradation state, and optional reason.
 - `budget_used`: requested limit, candidate count, returned count, and packed
   context bytes.
 - `truncated`: whether one or more matching candidates were omitted because of
@@ -30,9 +32,10 @@ and Web compatibility, and adds:
 
 Each result includes `retriever_sources`, `ranking`, entity projections,
 optional source span, supporting structured facts, direct graph path evidence,
-and optional code artifact metadata. `ranking` records the retriever source,
-source-local rank, raw source score, and a short explanation so agents can cite
-why an item was selected.
+optional code artifact metadata, and optional `rerank` signal. `ranking`
+records the retriever source, source-local rank, raw source score, and a short
+explanation; `rerank` records the final local rerank score and explanation so
+agents can cite why an item was selected.
 
 ## Retrieval Sources
 
@@ -63,10 +66,11 @@ version, and stale/unavailable reason when applicable. BM25 plus graph evidence
 retrieval remains usable when a derived backend is disabled or stale, and the
 response still reports index freshness.
 BM25, semantic, vector, graph path, temporal, and community hits are fused with
-RRF. The default semantic/vector implementation is the local deterministic read
-model. External OpenAI-compatible embedding providers can supply read-model
-metadata and probe diagnostics through the same cursor and backend-status
-contract without changing the context-pack shape.
+RRF, then reranked before the final request limit is applied. The default
+semantic/vector implementation is the local deterministic read model. External
+OpenAI-compatible embedding providers can supply read-model metadata and probe
+diagnostics through the same cursor and backend-status contract without changing
+the context-pack shape.
 Health and index-refresh diagnostics also expose scoped cursor metadata for
 these index families: source hash, backend cursor, and model name/dimension when
 a configured backend worker supplies them. The same diagnostics include
@@ -138,6 +142,14 @@ not from runtime override labels.
 When either backend is `external`, the remote provider is configured through
 the `env` boundary. Query execution still reads local read-model tables and does
 not call the provider on the hot path.
+
+Rerank runs after RRF and before request-limit truncation. The default
+`RELAY_KNOWLEDGE_RERANK_BACKEND=local` path is deterministic and scores query
+term coverage across content, entity labels, graph facts, source paths, source
+diversity, and structured evidence. `disabled` keeps RRF order only. `external`
+is a reserved provider contract in this release and degrades to local rerank
+with `rerank.degraded=true`; it does not call a remote model from the query hot
+path.
 
 ## CLI Example
 

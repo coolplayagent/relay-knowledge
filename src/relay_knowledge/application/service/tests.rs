@@ -6,9 +6,10 @@ use crate::{
     },
     domain::{
         EvidenceModality, ExtractionDiagnostic, ExtractionStatus, FreshnessPolicy, IndexKind,
-        IndexState, RetrievalBackendState, RetrieverSource,
+        IndexState, RerankMode, RetrievalBackendState, RetrieverSource,
     },
     env::PlatformKind,
+    retrieval::LOCAL_RERANK_MODEL,
     storage::{KnowledgeStore, SqliteGraphStore},
 };
 
@@ -43,6 +44,13 @@ async fn status_includes_foundational_runtime_configuration() {
     assert_eq!(response.runtime.http_no_proxy_rules, 2);
     assert!(!response.runtime.http_ssl_verify);
     assert_eq!(response.runtime.qos_max_queue_depth, 42);
+    assert_eq!(response.runtime.rerank_backend_mode, "local");
+    assert_eq!(
+        response.runtime.rerank_model.as_deref(),
+        Some(LOCAL_RERANK_MODEL)
+    );
+    assert_eq!(response.runtime.rerank_candidate_multiplier, 4);
+    assert_eq!(response.runtime.rerank_max_candidates, 64);
 }
 
 #[tokio::test]
@@ -371,6 +379,10 @@ async fn retrieve_context_reports_results_and_index_freshness() {
     );
     assert!(!response.truncated);
     assert_eq!(response.fusion.algorithm, "reciprocal_rank_fusion");
+    assert_eq!(response.rerank.effective_mode, RerankMode::Local);
+    assert_eq!(response.rerank.returned_count, 1);
+    assert!(response.results[0].rerank.is_some());
+    assert!(response.context_pack.items[0].rerank.is_some());
     assert!(
         response.results[0]
             .ranking
@@ -438,6 +450,55 @@ async fn disabled_read_model_backends_do_not_run_retriever_sources() {
         !hit.retriever_sources.contains(&RetrieverSource::Semantic)
             && !hit.retriever_sources.contains(&RetrieverSource::Vector)
     }));
+}
+
+#[tokio::test]
+async fn external_rerank_mode_degrades_to_local_deterministic_rerank() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [
+            ("HOME", "/home/alice"),
+            ("TMPDIR", "/tmp"),
+            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("RELAY_KNOWLEDGE_RERANK_BACKEND", "external"),
+        ],
+    )
+    .expect("environment should parse");
+    let service = service_with_environment(&environment).await;
+    service
+        .ingest(
+            ingest_request(vec![ingest_evidence(
+                "ev-rerank",
+                "Rerank diagnostics preserve local deterministic fallback",
+                vec!["Rerank".to_owned()],
+            )]),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-ingest", "trace-ingest"),
+        )
+        .await
+        .expect("ingest should succeed");
+
+    let response = service
+        .retrieve_context(
+            HybridRetrievalRequest {
+                query: "rerank diagnostics".to_owned(),
+                source_scope: Some("docs".to_owned()),
+                limit: 5,
+                freshness: FreshnessPolicy::AllowStale,
+            },
+            RequestContext::with_ids(InterfaceKind::Cli, "req-query", "trace-query"),
+        )
+        .await
+        .expect("query should succeed");
+
+    assert_eq!(response.rerank.requested_mode, RerankMode::External);
+    assert_eq!(response.rerank.effective_mode, RerankMode::Local);
+    assert!(response.rerank.degraded);
+    assert!(
+        response
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("external rerank provider contract"))
+    );
 }
 
 #[tokio::test]

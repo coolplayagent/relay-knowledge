@@ -2,21 +2,23 @@ use std::{error::Error, fmt, time::Duration};
 
 use crate::{
     api::{AgentAccessPolicy, AgentPolicyError},
-    domain::WorkerKind,
+    domain::{RerankMode, RerankModeError, WorkerKind},
     env::{
         EnvError, EnvironmentConfig, RELAY_KNOWLEDGE_EMBEDDING_API_KEY,
         RELAY_KNOWLEDGE_EMBEDDING_BASE_URL, RELAY_KNOWLEDGE_EMBEDDING_DIMENSION,
-        RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL,
-        RetrievalEnvOverrides,
+        RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, RELAY_KNOWLEDGE_RERANK_MODEL,
+        RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, RetrievalEnvOverrides,
     },
     net::{NetworkConfig, NetworkConfigError, NetworkRuntime, NetworkRuntimeError},
     observability::{ObservabilityRuntime, TelemetryConfig},
     paths::{PathError, RuntimePaths},
     retrieval::{
         DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_EMBEDDING_MAX_CONCURRENCY, DEFAULT_EMBEDDING_TIMEOUT,
-        EmbeddingProviderKind, EmbeddingProviderKindError, LOCAL_SEMANTIC_MODEL,
-        LOCAL_VECTOR_DIMENSION, LOCAL_VECTOR_MODEL, ReadModelBackendConfig, ReadModelBackendMode,
-        ReadModelBackendModeError, ReadModelMetadata, RemoteEmbeddingConfig,
+        DEFAULT_RERANK_CANDIDATE_MULTIPLIER, DEFAULT_RERANK_MAX_CANDIDATES, DEFAULT_RERANK_TIMEOUT,
+        EmbeddingProviderKind, EmbeddingProviderKindError, LOCAL_RERANK_MODEL,
+        LOCAL_SEMANTIC_MODEL, LOCAL_VECTOR_DIMENSION, LOCAL_VECTOR_MODEL, ReadModelBackendConfig,
+        ReadModelBackendMode, ReadModelBackendModeError, ReadModelMetadata, RemoteEmbeddingConfig,
+        RerankConfig,
     },
 };
 
@@ -255,6 +257,7 @@ impl Error for RuntimeConfigurationError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetrievalRuntimeConfigError {
     InvalidBackend(ReadModelBackendModeError),
+    InvalidRerankBackend(RerankModeError),
     InvalidProvider(EmbeddingProviderKindError),
     EmptyModelName(&'static str),
     MissingRemoteValue(&'static str),
@@ -266,6 +269,7 @@ impl fmt::Display for RetrievalRuntimeConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBackend(error) => write!(formatter, "{error}"),
+            Self::InvalidRerankBackend(error) => write!(formatter, "{error}"),
             Self::InvalidProvider(error) => write!(formatter, "{error}"),
             Self::EmptyModelName(variable) => {
                 write!(formatter, "{variable} must not be blank")
@@ -321,6 +325,7 @@ fn retrieval_config_from_environment(
     )?;
 
     let remote_embedding = remote_embedding_config_from_environment(overrides, remote_required)?;
+    let rerank = rerank_config_from_environment(overrides)?;
 
     Ok(ReadModelBackendConfig {
         semantic_mode,
@@ -338,6 +343,48 @@ fn retrieval_config_from_environment(
             dimension,
         },
         remote_embedding,
+        rerank,
+    })
+}
+
+fn rerank_config_from_environment(
+    overrides: &RetrievalEnvOverrides,
+) -> Result<RerankConfig, RetrievalRuntimeConfigError> {
+    let mode = overrides
+        .rerank_backend
+        .as_deref()
+        .map(RerankMode::parse)
+        .transpose()
+        .map_err(RetrievalRuntimeConfigError::InvalidRerankBackend)?
+        .unwrap_or(RerankMode::Local);
+    let model = match mode {
+        RerankMode::Disabled => None,
+        RerankMode::Local => Some(model_name_override(
+            overrides.rerank_model.as_deref(),
+            RELAY_KNOWLEDGE_RERANK_MODEL,
+            LOCAL_RERANK_MODEL,
+        )?),
+        RerankMode::External => overrides
+            .rerank_model
+            .as_deref()
+            .map(|model| model_name_override(Some(model), RELAY_KNOWLEDGE_RERANK_MODEL, ""))
+            .transpose()?,
+    };
+    let timeout = overrides
+        .rerank_timeout_ms
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_RERANK_TIMEOUT);
+
+    Ok(RerankConfig {
+        mode,
+        model,
+        timeout,
+        candidate_multiplier: overrides
+            .rerank_candidate_multiplier
+            .unwrap_or(DEFAULT_RERANK_CANDIDATE_MULTIPLIER),
+        max_candidates: overrides
+            .rerank_max_candidates
+            .unwrap_or(DEFAULT_RERANK_MAX_CANDIDATES),
     })
 }
 
@@ -580,6 +627,11 @@ mod tests {
                 ("RELAY_KNOWLEDGE_EMBEDDING_BATCH_SIZE", "16"),
                 ("RELAY_KNOWLEDGE_EMBEDDING_TIMEOUT_MS", "9000"),
                 ("RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY", "2"),
+                ("RELAY_KNOWLEDGE_RERANK_BACKEND", "external"),
+                ("RELAY_KNOWLEDGE_RERANK_MODEL", "bge-reranker-v2"),
+                ("RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS", "700"),
+                ("RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER", "5"),
+                ("RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES", "80"),
             ],
         )
         .expect("environment should parse");
@@ -608,6 +660,14 @@ mod tests {
         assert_eq!(remote.batch_size, 16);
         assert_eq!(remote.timeout, Duration::from_millis(9000));
         assert_eq!(remote.max_concurrency, 2);
+        assert_eq!(runtime.retrieval.rerank.mode, RerankMode::External);
+        assert_eq!(
+            runtime.retrieval.rerank.model.as_deref(),
+            Some("bge-reranker-v2")
+        );
+        assert_eq!(runtime.retrieval.rerank.timeout, Duration::from_millis(700));
+        assert_eq!(runtime.retrieval.rerank.candidate_multiplier, 5);
+        assert_eq!(runtime.retrieval.rerank.max_candidates, 80);
     }
 
     #[tokio::test]
@@ -654,6 +714,26 @@ mod tests {
             RuntimeConfigurationError::Retrieval(RetrievalRuntimeConfigError::EmptyModelName(
                 RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL
             ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_rerank_backend_mode() {
+        let environment = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [("RELAY_KNOWLEDGE_RERANK_BACKEND", "remote")],
+        )
+        .expect("environment should parse");
+
+        let error = RuntimeConfiguration::from_environment(&environment)
+            .await
+            .expect_err("unknown rerank backend should fail");
+
+        assert!(matches!(
+            error,
+            RuntimeConfigurationError::Retrieval(
+                RetrievalRuntimeConfigError::InvalidRerankBackend(_)
+            )
         ));
     }
 

@@ -70,6 +70,18 @@ RELAY_KNOWLEDGE_EMBEDDING_MAX_CONCURRENCY
 
 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 接受 `local`、`external` 或 `disabled`。`disabled` 会跳过对应 retriever 和 refresh scheduling。外部 provider 配置只描述 metadata 和 worker contract；查询热路径不会同步调用外部 embedding 服务。
 
+Rerank 默认启用本地确定性精选，不需要远端服务:
+
+```text
+RELAY_KNOWLEDGE_RERANK_BACKEND=local
+RELAY_KNOWLEDGE_RERANK_MODEL=relay-local-deterministic-rerank-v1
+RELAY_KNOWLEDGE_RERANK_CANDIDATE_MULTIPLIER=4
+RELAY_KNOWLEDGE_RERANK_MAX_CANDIDATES=64
+RELAY_KNOWLEDGE_RERANK_TIMEOUT_MS=100
+```
+
+`RELAY_KNOWLEDGE_RERANK_BACKEND` 接受 `local`、`external` 或 `disabled`。`external` 当前只保留 provider contract 并降级为本地 rerank；查询热路径不会同步调用远端 rerank 模型。
+
 ## 8.4 网络与 QoS
 
 常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力:

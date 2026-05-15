@@ -101,6 +101,7 @@ impl GraphStore for GraphOnlySearchStore {
                 code_artifact: None,
                 retriever_sources: vec![crate::domain::RetrieverSource::GraphEvidence],
                 ranking: Vec::new(),
+                rerank: None,
                 score: 1.0,
             }])
         })

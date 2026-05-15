@@ -204,6 +204,7 @@ pub struct AgentRetrievalResult {
     pub context_pack: RetrievedContextPack,
     pub results: Vec<RetrievalHit>,
     pub fusion: FusionDiagnostics,
+    pub rerank: crate::domain::RerankDiagnostics,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backend_statuses: Vec<RetrievalBackendStatus>,
     pub indexes: Vec<IndexStatus>,
@@ -229,6 +230,7 @@ impl AgentRetrievalResult {
             freshness,
             results: response_results,
             fusion,
+            mut rerank,
             mut backend_statuses,
             truncated: response_truncated,
             budget_used,
@@ -266,6 +268,7 @@ impl AgentRetrievalResult {
             results.push(hit);
         }
         let returned_count = results.len();
+        rerank.returned_count = returned_count;
         let retained_result_ids = results
             .iter()
             .map(|hit| hit.evidence_id.as_str())
@@ -284,6 +287,7 @@ impl AgentRetrievalResult {
             context_pack,
             results,
             fusion,
+            rerank,
             backend_statuses,
             indexes,
             degraded_reason,
@@ -329,9 +333,9 @@ mod tests {
     use crate::{
         api::InterfaceKind,
         domain::{
-            ContextPackItem, FusionDiagnostics, GraphVersion, RetrievalBackendState,
-            RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievedContextPack,
-            RetrieverSource,
+            ContextPackItem, FusionDiagnostics, GraphVersion, RerankDiagnostics, RerankMode,
+            RetrievalBackendState, RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit,
+            RetrievedContextPack, RetrieverSource,
         },
     };
 
@@ -375,6 +379,7 @@ mod tests {
                 k: 60.0,
                 candidate_count: 3,
             },
+            rerank: rerank_diagnostics(3, 3),
             backend_statuses: Vec::new(),
             truncated: false,
             budget_used: RetrievalBudgetUsed {
@@ -398,6 +403,7 @@ mod tests {
         assert_eq!(result.results.len(), 2);
         assert_eq!(result.context_pack.items.len(), 2);
         assert_eq!(result.budget_used.returned_count, 2);
+        assert_eq!(result.rerank.returned_count, 2);
         assert_eq!(result.budget_used.context_bytes, max_context_bytes);
         assert_eq!(result.freshness, "allow-stale");
     }
@@ -437,6 +443,7 @@ mod tests {
                 k: 60.0,
                 candidate_count: 0,
             },
+            rerank: rerank_diagnostics(0, 0),
             backend_statuses,
             truncated: false,
             budget_used: RetrievalBudgetUsed {
@@ -482,6 +489,7 @@ mod tests {
             code_artifact: None,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
+            rerank: None,
             score: 1.0,
         }
     }
@@ -498,6 +506,19 @@ mod tests {
             code_artifact: None,
             retriever_sources: Vec::new(),
             ranking: Vec::new(),
+            rerank: None,
+        }
+    }
+
+    fn rerank_diagnostics(candidate_count: usize, returned_count: usize) -> RerankDiagnostics {
+        RerankDiagnostics {
+            requested_mode: RerankMode::Local,
+            effective_mode: RerankMode::Local,
+            algorithm: "deterministic_feature_rerank".to_owned(),
+            candidate_count,
+            returned_count,
+            degraded: false,
+            reason: None,
         }
     }
 

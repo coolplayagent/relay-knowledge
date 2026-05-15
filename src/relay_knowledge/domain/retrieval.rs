@@ -1,3 +1,5 @@
+use std::{error::Error, fmt};
+
 use serde::{Deserialize, Serialize};
 
 use super::{ConfidenceScore, EvidenceSpan, FactStatus, GraphVersion, GraphVersionRange};
@@ -36,6 +38,56 @@ pub enum RetrieverSource {
     Temporal,
     CommunitySummary,
 }
+
+/// Rerank backend requested for the hybrid retrieval candidate set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RerankMode {
+    Local,
+    External,
+    Disabled,
+}
+
+impl RerankMode {
+    /// Parses a stable environment/config value.
+    pub fn parse(value: &str) -> Result<Self, RerankModeError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "external" => Ok(Self::External),
+            "disabled" => Ok(Self::Disabled),
+            other => Err(RerankModeError {
+                value: other.to_owned(),
+            }),
+        }
+    }
+
+    /// Stable configuration label.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::External => "external",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+/// Invalid rerank backend mode supplied by runtime configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RerankModeError {
+    pub value: String,
+}
+
+impl fmt::Display for RerankModeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "rerank backend '{}' must be local, external, or disabled",
+            self.value
+        )
+    }
+}
+
+impl Error for RerankModeError {}
 
 /// Availability state for optional retrieval backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +147,25 @@ mod tests {
     }
 
     #[test]
+    fn rerank_mode_labels_match_wire_values() {
+        assert_eq!(
+            RerankMode::parse("local").expect("local"),
+            RerankMode::Local
+        );
+        assert_eq!(
+            RerankMode::parse("external").expect("external"),
+            RerankMode::External
+        );
+        assert_eq!(
+            RerankMode::parse("disabled").expect("disabled"),
+            RerankMode::Disabled
+        );
+        assert_eq!(RerankMode::Local.as_str(), "local");
+        assert_eq!(RerankMode::External.as_str(), "external");
+        assert_eq!(RerankMode::Disabled.as_str(), "disabled");
+    }
+
+    #[test]
     fn graph_path_preserves_fact_provenance() {
         let fact = ContextGraphFact {
             fact_id: "rel-1".to_owned(),
@@ -126,6 +197,14 @@ pub struct RankingSignal {
     pub explanation: String,
 }
 
+/// Final rerank signal applied after hybrid retrieval fusion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RerankSignal {
+    pub mode: RerankMode,
+    pub score: f64,
+    pub explanation: String,
+}
+
 /// Budget actually consumed by retrieval context packing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetrievalBudgetUsed {
@@ -141,6 +220,19 @@ pub struct FusionDiagnostics {
     pub algorithm: String,
     pub k: f64,
     pub candidate_count: usize,
+}
+
+/// Diagnostics for post-fusion reranking.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RerankDiagnostics {
+    pub requested_mode: RerankMode,
+    pub effective_mode: RerankMode,
+    pub algorithm: String,
+    pub candidate_count: usize,
+    pub returned_count: usize,
+    pub degraded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// A compact, auditable context pack for agent and UI adapters.
@@ -273,6 +365,8 @@ pub struct ContextPackItem {
     pub code_artifact: Option<CodeGraphArtifact>,
     pub retriever_sources: Vec<RetrieverSource>,
     pub ranking: Vec<RankingSignal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank: Option<RerankSignal>,
 }
 
 /// A context item returned by retrieval.
@@ -294,5 +388,7 @@ pub struct RetrievalHit {
     pub code_artifact: Option<CodeGraphArtifact>,
     pub retriever_sources: Vec<RetrieverSource>,
     pub ranking: Vec<RankingSignal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank: Option<RerankSignal>,
     pub score: f64,
 }
