@@ -930,3 +930,7 @@ impl From<serde_json::Error> for ModelProviderError {
         Self::Json(error.to_string())
     }
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

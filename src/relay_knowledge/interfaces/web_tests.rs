@@ -88,6 +88,89 @@ async fn serves_project_health_and_service_status_apis() {
 }
 
 #[tokio::test]
+async fn serves_model_provider_config_apis() {
+    let router = test_router("model-config").await;
+    let profiles = get_json(router.clone(), "/api/configs/model/profiles").await;
+    assert_eq!(profiles["loaded"], true);
+    assert_eq!(profiles["profiles"].as_array().unwrap().len(), 0);
+
+    let save_body = json!({
+        "provider": "echo",
+        "model": "echo",
+        "temperature": 0.2,
+        "top_p": 1.0,
+        "connect_timeout_seconds": 5.0,
+        "is_default": true
+    });
+    let saved = request_json(
+        router.clone(),
+        "PUT",
+        "/api/configs/model/profiles/web-echo",
+        Some(save_body),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(saved["default_profile"], "web-echo");
+    assert_eq!(saved["profiles"][0]["provider"], "echo");
+
+    let fallback = get_json(router.clone(), "/api/configs/model-fallback").await;
+    assert_eq!(fallback["policies"].as_array().unwrap().len(), 2);
+    let saved_fallback = request_json(
+        router.clone(),
+        "PUT",
+        "/api/configs/model-fallback",
+        Some(fallback),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(saved_fallback["policies"].as_array().unwrap().len(), 2);
+
+    let catalog = get_json(router.clone(), "/api/configs/model/catalog").await;
+    assert_eq!(catalog["ok"], true);
+    assert!(!catalog["providers"].as_array().unwrap().is_empty());
+    let refreshed = request_json(
+        router.clone(),
+        "POST",
+        "/api/configs/model/catalog:refresh",
+        None,
+        StatusCode::OK,
+    )
+    .await;
+    assert!(!refreshed["providers"].as_array().unwrap().is_empty());
+
+    let probe = request_json(
+        router.clone(),
+        "POST",
+        "/api/configs/model:probe",
+        Some(json!({"profile_name": "web-echo", "timeout_ms": 5})),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(probe["ok"], true);
+    assert_eq!(probe["provider"], "echo");
+
+    let discovery = request_json(
+        router.clone(),
+        "POST",
+        "/api/configs/model:discover",
+        Some(json!({"profile_name": "web-echo", "timeout_ms": 5})),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(discovery["models"][0], "echo");
+
+    let deleted = request_json(
+        router,
+        "DELETE",
+        "/api/configs/model/profiles/web-echo",
+        None,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(deleted["profiles"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
 async fn serves_static_assets_and_spa_fallback() {
     let router = test_router("assets").await;
 
@@ -690,6 +773,30 @@ async fn get_json(router: Router, uri: &str) -> Value {
         .await
         .expect("router should respond");
     assert_eq!(response.status(), StatusCode::OK);
+
+    serde_json::from_str(&response_text(response).await).expect("response should be json")
+}
+
+async fn request_json(
+    router: Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    expected_status: StatusCode,
+) -> Value {
+    let mut builder = Request::builder().method(method).uri(uri);
+    let body = match body {
+        Some(value) => {
+            builder = builder.header(header::CONTENT_TYPE, "application/json");
+            Body::from(value.to_string())
+        }
+        None => Body::empty(),
+    };
+    let response = router
+        .oneshot(builder.body(body).expect("request should build"))
+        .await
+        .expect("router should respond");
+    assert_eq!(response.status(), expected_status);
 
     serde_json::from_str(&response_text(response).await).expect("response should be json")
 }
