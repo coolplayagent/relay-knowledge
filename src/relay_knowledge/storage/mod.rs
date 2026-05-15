@@ -16,9 +16,9 @@ use crate::domain::{
     AuditEventRecord, AuditStatus, CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt,
     CodeParseStatusCounts, CodeReferenceRecord, CodeSymbolRecord, CommitReceipt,
     GraphMutationBatch, GraphVersion, IndexKind, IndexModality, IndexStatus,
-    ProposalConflictRecord, ProposalConflictSeverity, ProposalKind, ProposalRecord, ProposalState,
-    RetrievalHit, RetrieverSource, ServiceOperatorState, ServiceOperatorStatus, WorkerKind,
-    WorkerStatus, WorkerTaskRecord,
+    ProposalConflictRecord, ProposalConflictSeverity, ProposalKind, ProposalProvenance,
+    ProposalRecord, ProposalState, RetrievalHit, RetrieverSource, ServiceOperatorState,
+    ServiceOperatorStatus, WorkerKind, WorkerStatus, WorkerTaskRecord,
 };
 
 pub use canvas::{
@@ -389,6 +389,7 @@ pub struct NewProposal {
     pub summary: String,
     pub payload_json: String,
     pub origin: String,
+    pub provenance: ProposalProvenance,
     pub confidence_basis_points: u16,
     pub conflicts: Vec<NewProposalConflict>,
     pub now_ms: u64,
@@ -924,6 +925,7 @@ mod tests {
                     summary: "summary".to_owned(),
                     payload_json: "{}".to_owned(),
                     origin: "test".to_owned(),
+                    provenance: ProposalProvenance::new("test"),
                     confidence_basis_points: 1,
                     conflicts: Vec::new(),
                     now_ms: 1,

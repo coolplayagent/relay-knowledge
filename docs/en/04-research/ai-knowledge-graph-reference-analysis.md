@@ -151,6 +151,29 @@ If these lessons are later implemented, they should enter specs and tracked work
 5. Standardize provider timeout, QoS, rate limit, retry, dead-letter, cursor, and prompt-version metadata across extraction, standardization, and inference workers.
 6. Extend GraphRAG evaluation fixtures with entity merge, false merge, transitive-rule whitelist, inferred-edge rejection, and degraded JSON response scenarios.
 
+### 2026-05-15 Selective Adoption Progress
+
+This round only adopts the parts that fit the existing worker/proposal path. It
+does not change normal `ingest` behavior for directly submitted accepted facts
+and does not add a separate script-style extraction entry point:
+
+- Proposals now persist provenance metadata: producer, provider, model, prompt
+  id/version, schema version, input source hash, input fact ids, stale
+  conditions, and budget notes.
+- `worker run-once` sends external endpoints a `contract_version=2` request with
+  manual-review policy, HTTP timeout, lease, max-attempt, and max-in-flight
+  budgets.
+- Structured relation/claim/event facts returned by an external extractor remain
+  in the proposal payload but are normalized to `proposed`, so LLM SPO
+  extraction or relationship inference cannot write accepted facts directly.
+- Existing deterministic fallback proposals, OCR/vision/embedding behavior,
+  worker queues, manual accept/reject/supersede, audit sink, index refresh, and
+  GraphRAG retrieval behavior remain intact.
+
+The remaining items stay future work: reversible entity-merge audit,
+transitive-rule whitelists, community/centrality read models, full provider
+rate-limit/cursor handling, and larger GraphRAG evaluation fixtures.
+
 ## 8. What Not to Copy
 
 - Do not copy Python source, prompt text, HTML templates, or PyVis output.
@@ -169,4 +192,4 @@ This analysis should be cited as research material. Before implementation work s
 - Background service/self-healing: add lease, retry, and dead-letter requirements for extraction, standardization, and inference workers.
 - Advanced observability: add prompt version, model, provider latency, schema validation failure, and degraded proposal metrics.
 
-As of this document, the repository records analysis only and contains no implementation change.
+As of 2026-05-15, this analysis has started to feed the worker/proposal path selectively; unfinished items still need separate architecture-backed implementation work.

@@ -306,6 +306,12 @@ Alert 建议:
 - `relay_retrieval_stale_total` 比例异常升高。
 - telemetry export 错误持续出现，但只作为观测链路告警，不作为业务不可用告警。
 
+Proposal 和 worker 观测要求:
+
+- proposal 记录必须携带 provenance，可按 producer、provider、model、prompt id/version、schema version 和 input source hash 过滤。
+- worker 请求应在 audit detail 或 diagnostics 中体现 request timeout、lease、max attempts、max in-flight 和 fallback/degraded reason。
+- extractor 结构化事实被降级为 `proposed` 时，应作为正常治理行为记录，而不是错误；若 worker 返回 schema 不匹配，则记录 degraded fallback。
+
 ## 8. 实施顺序
 
 建议按以下顺序落地，降低耦合风险:
@@ -316,7 +322,7 @@ Alert 建议:
 4. 接入 metrics recorder，先提供进程内快照，再开放 Prometheus endpoint。
 5. 接入 OpenTelemetry trace export，失败时降级为本地日志。
 6. 提供 OpenTelemetry Collector、Prometheus、Grafana 的示例配置。
-7. 为 ingest、commit、index refresh、retrieval 增加 dashboard 和告警规则。
+7. 为 ingest、commit、index refresh、retrieval、worker proposal 和 proposal decision 增加 dashboard 和告警规则。
 
 ## 9. 验收标准
 

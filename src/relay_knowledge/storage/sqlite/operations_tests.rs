@@ -1,7 +1,7 @@
 use crate::{
     domain::{
-        AuditStatus, GraphVersion, ProposalConflictSeverity, ProposalKind, ProposalState,
-        ServiceOperatorState, WorkerKind, WorkerTaskState,
+        AuditStatus, GraphVersion, ProposalConflictSeverity, ProposalKind, ProposalProvenance,
+        ProposalState, ServiceOperatorState, WorkerKind, WorkerTaskState,
     },
     storage::{
         AuditQueryRequest, IndexStore, NewAuditEvent, NewProposal, NewProposalConflict,
@@ -83,6 +83,18 @@ async fn sqlite_proposals_conflicts_audit_and_operator_round_trip() {
             summary: "OCR output".to_owned(),
             payload_json: "{\"source_scope\":\"docs\",\"evidence\":[]}".to_owned(),
             origin: "worker:ocr".to_owned(),
+            provenance: ProposalProvenance {
+                producer: "ocr_worker".to_owned(),
+                provider: Some("fixture".to_owned()),
+                model: Some("fixture-ocr".to_owned()),
+                prompt_id: None,
+                prompt_version: None,
+                schema_version: Some("worker-proposal.v2".to_owned()),
+                input_source_hash: Some("sha256:image".to_owned()),
+                input_fact_ids: vec!["ev-1".to_owned()],
+                stale_when: vec!["parent evidence changes".to_owned()],
+                budget_notes: vec!["timeout_ms=30000".to_owned()],
+            },
             confidence_basis_points: 7000,
             conflicts: vec![NewProposalConflict {
                 conflict_id: "conflict:1".to_owned(),
@@ -98,6 +110,8 @@ async fn sqlite_proposals_conflicts_audit_and_operator_round_trip() {
 
     assert_eq!(proposal.state, ProposalState::Proposed);
     assert_eq!(proposal.conflict_count, 1);
+    assert_eq!(proposal.provenance.producer, "ocr_worker");
+    assert_eq!(proposal.provenance.input_fact_ids, ["ev-1"]);
 
     let listed = store
         .list_proposals(ProposalListRequest {
