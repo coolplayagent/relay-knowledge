@@ -170,22 +170,26 @@ export function currentOperationSnapshot(
   status: ProjectStatusResponse,
   health: HealthResponse
 ): OperationSnapshot {
-  const createdAt = new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
-  const metadata = {
-    request_id: status.metadata.request_id,
-    graph_version: status.metadata.graph_version,
-    indexed_graph_version: health.metadata.indexed_graph_version ?? null
-  };
+  const createdAt = operationSnapshotTime();
+  const metadata = operationMetadata(status, health);
   const snapshot = operationCommandAndPayload(metadata);
 
   return {
     id: `${Date.now()}-${appState.selectedOperation}`,
     createdAt,
     ...snapshot
+  };
+}
+
+export function retrieveOperationSnapshot(
+  status: ProjectStatusResponse,
+  health: HealthResponse,
+  retrieve: AppState["retrieve"]
+): OperationSnapshot {
+  return {
+    id: `${Date.now()}-retrieve`,
+    createdAt: operationSnapshotTime(),
+    ...retrieveSnapshot(operationMetadata(status, health), retrieve)
   };
 }
 
@@ -234,6 +238,25 @@ export function codeQueryKindOptions(): Array<[CodeQueryKind, string]> {
   ];
 }
 
+function operationSnapshotTime(): string {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function operationMetadata(
+  status: ProjectStatusResponse,
+  health: HealthResponse
+): Record<string, unknown> {
+  return {
+    request_id: status.metadata.request_id,
+    graph_version: status.metadata.graph_version,
+    indexed_graph_version: health.metadata.indexed_graph_version ?? null
+  };
+}
+
 function operationCommandAndPayload(metadata: Record<string, unknown>): {
   name: string;
   command: string;
@@ -263,26 +286,26 @@ function operationCommandAndPayload(metadata: Record<string, unknown>): {
   }
 }
 
-function retrieveSnapshot(metadata: Record<string, unknown>) {
+function retrieveSnapshot(metadata: Record<string, unknown>, retrieve = appState.retrieve) {
   const command = shellCommand([
     "relay-knowledge",
     "query",
-    appState.retrieve.query,
+    retrieve.query,
     "--source",
-    appState.retrieve.sourceScope,
+    retrieve.sourceScope,
     "--freshness",
-    appState.retrieve.freshness,
+    retrieve.freshness,
     "--limit",
-    String(appState.retrieve.limit),
+    String(retrieve.limit),
     "--format",
     "streaming-json"
   ]);
   const payload = {
     operation: "retrieve.context",
-    query: appState.retrieve.query,
-    source_scope: appState.retrieve.sourceScope,
-    freshness: appState.retrieve.freshness,
-    limit: appState.retrieve.limit,
+    query: retrieve.query,
+    source_scope: retrieve.sourceScope,
+    freshness: retrieve.freshness,
+    limit: retrieve.limit,
     metadata
   };
 

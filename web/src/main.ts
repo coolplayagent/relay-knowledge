@@ -8,6 +8,7 @@ import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.j
 import { graphCanvasSection } from "./graph_canvas.js";
 import { operationsSection } from "./operations_panel.js";
 import { providersSection } from "./providers.js";
+import { homeQueryEntry, type HomeQueryCallbacks } from "./home_query.js";
 import { maxIndexLag } from "./operations.js";
 import { currentTheme, initializeTheme, toggleTheme } from "./theme.js";
 import { element, icon, sectionShell, statusPill, textElement, type Tone } from "./ui.js";
@@ -166,7 +167,10 @@ function pageContent(
 ): HTMLElement {
   switch (page) {
     case "status":
-      return statusSection(status, health, service);
+      return statusSection(status, health, service, {
+        rerender: rerenderFromState,
+        errorMessage
+      });
     case "readiness":
       return readinessSection(status, health, service);
     case "graph":
@@ -270,7 +274,8 @@ function refreshButton(): HTMLButtonElement {
 function statusSection(
   status: ProjectStatusResponse,
   health: HealthResponse,
-  service: ServiceStatusResponse | null
+  service: ServiceStatusResponse | null,
+  homeQueryCallbacks: HomeQueryCallbacks
 ): HTMLElement {
   const lag = maxIndexLag(health.indexes, status.metadata.graph_version);
   const codeTotals = codeRepositoryTotals(health);
@@ -295,7 +300,12 @@ function statusSection(
     metricItem("Symbols", codeTotals.symbol_count),
     metricItem("References", codeTotals.reference_count)
   );
-  section.append(statusLine, graphOverview(status, health, service), metrics);
+  section.append(
+    homeQueryEntry(status, health, homeQueryCallbacks),
+    statusLine,
+    graphOverview(status, health, service),
+    metrics
+  );
 
   return section;
 }
