@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use crate::domain::{
     RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
@@ -16,8 +16,8 @@ pub(super) fn records_from_captures(
     captures: Vec<TagCapture>,
     output: &mut FileParseOutput,
 ) -> Result<(), CodeIndexError> {
-    let mut seen_symbols = BTreeSet::new();
-    let mut seen_references = BTreeSet::new();
+    let mut seen_symbols = HashSet::new();
+    let mut seen_references = HashSet::new();
     for capture in captures {
         if capture.capture_kind.starts_with("definition.") {
             if context.language_id == "c" && capture.capture_kind == "definition.function" {
