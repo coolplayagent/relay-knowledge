@@ -279,6 +279,39 @@ void f(int); void f(double);
 }
 
 #[test]
+fn cpp_function_definitions_own_calls_inside_namespaces() {
+    let snapshot = parse_source_snapshot(
+        "db/db_impl.cc",
+        br#"
+namespace leveldb {
+
+Options SanitizeOptions(const Options& src)
+{
+    Options result;
+    result.block_cache = NewLRUCache(8 << 20);
+    return result;
+}
+
+}
+"#,
+    );
+
+    let function = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "SanitizeOptions")
+        .expect("C++ function definition should be indexed");
+    let call = snapshot
+        .calls
+        .iter()
+        .find(|call| call.callee_name == "NewLRUCache")
+        .expect("C++ call should be indexed");
+
+    assert_eq!(function.kind, "function");
+    assert_eq!(call.caller_name.as_deref(), Some("SanitizeOptions"));
+}
+
+#[test]
 fn cpp_enum_tag_and_manual_fallback_deduplicate() {
     let snapshot = parse_source_snapshot(
         "db/db_iter.cc",

@@ -5,6 +5,8 @@ mod manual;
 mod nodes;
 #[path = "parser_c.rs"]
 mod parser_c;
+#[path = "parser_cpp.rs"]
+mod parser_cpp;
 mod records;
 mod syntax;
 mod text;

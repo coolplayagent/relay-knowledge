@@ -38,6 +38,12 @@ pub(super) fn manual_definitions(
             return definitions;
         }
     }
+    if language_id == "cpp" {
+        let definitions = super::parser_cpp::manual_definitions(content, node);
+        if !definitions.is_empty() {
+            return definitions;
+        }
+    }
 
     generic_manual_definition(content, language_id, node)
         .into_iter()
