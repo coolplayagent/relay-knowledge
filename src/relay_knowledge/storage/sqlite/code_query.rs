@@ -283,13 +283,17 @@ fn search_calls(
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
                c.confidence_basis_points, c.confidence_tier,
-               caller.canonical_symbol_id, callee.canonical_symbol_id
+               caller.canonical_symbol_id, callee.canonical_symbol_id,
+               caller_chunk.content
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
         LEFT JOIN code_repository_symbols caller
             ON caller.source_scope = c.source_scope
            AND caller.symbol_snapshot_id = c.caller_symbol_snapshot_id
+        LEFT JOIN code_repository_chunks caller_chunk
+            ON caller_chunk.source_scope = c.source_scope
+           AND caller_chunk.symbol_snapshot_id = c.caller_symbol_snapshot_id
         LEFT JOIN code_repository_symbols callee
             ON callee.source_scope = c.source_scope
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
@@ -332,6 +336,7 @@ fn search_calls(
                 confidence_tier: row.get(12)?,
                 caller_canonical_symbol_id: row.get(13)?,
                 callee_canonical_symbol_id: row.get(14)?,
+                caller_excerpt: row.get(15)?,
             })
         },
     )?;
@@ -378,7 +383,11 @@ fn search_calls(
                         score: score
                             + 1.25
                             + call_edge_confidence_bonus(row.confidence_basis_points),
-                        excerpt: format!("{caller} calls {}", row.callee_name),
+                        excerpt: call_excerpt(
+                            row.caller_excerpt.as_deref(),
+                            &caller,
+                            &row.callee_name,
+                        ),
                         degraded_reason: None,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),
@@ -864,6 +873,36 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
 
 fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
+}
+
+fn call_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &str) -> String {
+    let summary = format!("{caller} calls {callee}");
+    let Some(site) = caller_excerpt
+        .map(str::trim)
+        .filter(|excerpt| !excerpt.is_empty())
+        .map(|excerpt| call_site_excerpt(excerpt, callee))
+    else {
+        return summary;
+    };
+
+    if site.is_empty() || site == summary {
+        summary
+    } else {
+        format!("{summary}: {site}")
+    }
+}
+
+fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String {
+    caller_excerpt
+        .lines()
+        .find(|line| line.contains(callee))
+        .map(compact_excerpt_line)
+        .filter(|line| !line.is_empty())
+        .unwrap_or_else(|| compact_excerpt_line(caller_excerpt))
+}
+
+fn compact_excerpt_line(line: &str) -> String {
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn import_line_priority(base_score: f64, line_start: u32) -> f64 {

@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     domain::{
         CodeCallRecord, CodeFileDiagnostic, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus,
-        CodeQueryKind, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord,
-        RepositoryCodeRange, RepositoryCodeSymbolRecord,
+        CodeQueryKind, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -242,6 +242,33 @@ async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
             "cma_debugfs_init calls cma_debugfs_add_one",
             "cma_debugfs_init calls debugfs_create_dir",
         ]
+    );
+}
+
+#[tokio::test]
+async fn caller_queries_use_caller_chunk_excerpt_when_available() {
+    let store = store_with_repository_snapshot(snapshot_with_call_site_chunk()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "NewLRUCache",
+                selector,
+                CodeQueryKind::Callers,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, "db/db_impl.cc");
+    assert_eq!(
+        hits[0].excerpt,
+        "SanitizeOptions calls NewLRUCache: result.block_cache = NewLRUCache(8 << 20);"
     );
 }
 
@@ -496,6 +523,61 @@ fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
         imports: Vec::new(),
         calls: vec![ambiguous, resolved],
         chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
+    let mut caller = symbol(
+        "sanitize-options",
+        "db-impl-source",
+        "db/db_impl.cc",
+        "SanitizeOptions",
+    );
+    caller.language_id = "cpp".to_owned();
+    caller.line_range = range(110, 124);
+
+    let mut call = call("new-lru-cache-call", "db-impl-source", "db/db_impl.cc");
+    call.caller_symbol_snapshot_id = Some("sanitize-options".to_owned());
+    call.caller_name = Some("SanitizeOptions".to_owned());
+    call.callee_name = "NewLRUCache".to_owned();
+    call.target_hint = Some("NewLRUCache".to_owned());
+    call.resolution_state = "resolved".to_owned();
+    call.confidence_basis_points = 8_000;
+    call.confidence_tier = "inferred".to_owned();
+    call.line_range = range(116, 116);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "db-impl-source",
+            "db/db_impl.cc",
+            "cpp",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: vec![caller],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![call],
+        chunks: vec![chunk(
+            "sanitize-options-chunk",
+            "db-impl-source",
+            "db/db_impl.cc",
+            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
+            Some("sanitize-options"),
+        )],
         diagnostics: Vec::new(),
     }
 }
@@ -791,6 +873,27 @@ fn symbol(
         doc_comment: None,
         byte_range: range(0, 1),
         line_range: range(1, 1),
+    }
+}
+
+fn chunk(
+    chunk_id: &str,
+    file_id: &str,
+    path: &str,
+    content: &str,
+    symbol_snapshot_id: Option<&str>,
+) -> RepositoryCodeChunkRecord {
+    RepositoryCodeChunkRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        chunk_id: chunk_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "cpp".to_owned(),
+        content: content.to_owned(),
+        byte_range: range(0, content.len() as u32),
+        line_range: range(110, 124),
+        symbol_snapshot_id: symbol_snapshot_id.map(str::to_owned),
     }
 }
 
