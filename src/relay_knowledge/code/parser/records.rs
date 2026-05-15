@@ -138,15 +138,7 @@ pub(super) fn symbol_record(
     kind: &str,
     range: &SyntaxRange,
 ) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
-    let signature = context
-        .content
-        .get(range.byte_start..range.byte_end)
-        .unwrap_or(name)
-        .lines()
-        .next()
-        .map(compact_whitespace)
-        .filter(|line| !line.is_empty())
-        .unwrap_or_else(|| name.to_owned());
+    let signature = symbol_signature(context.content, range, name);
     let qualified_name = format!("{}::{name}", module_path(context.path));
     let symbol_snapshot_id = stable_id(
         "symbol",
@@ -178,6 +170,52 @@ pub(super) fn symbol_record(
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
     })
+}
+
+fn symbol_signature(content: &str, range: &SyntaxRange, fallback: &str) -> String {
+    const MAX_SIGNATURE_LINES: usize = 8;
+    const MAX_SIGNATURE_BYTES: usize = 512;
+
+    let Some(source) = content.get(range.byte_start..range.byte_end) else {
+        return fallback.to_owned();
+    };
+    let mut signature = String::new();
+    for line in source
+        .lines()
+        .map(compact_whitespace)
+        .filter(|line| !line.is_empty())
+        .take(MAX_SIGNATURE_LINES)
+    {
+        if !signature.is_empty() {
+            signature.push(' ');
+        }
+        signature.push_str(&line);
+        if signature_looks_complete(&signature) || signature.len() >= MAX_SIGNATURE_BYTES {
+            break;
+        }
+    }
+
+    if signature.is_empty() {
+        return fallback.to_owned();
+    }
+    truncate_to_char_boundary(&mut signature, MAX_SIGNATURE_BYTES);
+    signature
+}
+
+fn signature_looks_complete(signature: &str) -> bool {
+    let trimmed = signature.trim_end();
+    trimmed.ends_with('{') || trimmed.ends_with(';') || trimmed.ends_with(':')
+}
+
+fn truncate_to_char_boundary(value: &mut String, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
 }
 
 pub(super) fn reference_record(

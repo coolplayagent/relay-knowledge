@@ -619,6 +619,49 @@ fn parser_panics_are_recorded_as_failed_file_diagnostics() {
 }
 
 #[test]
+fn multiline_symbol_signatures_keep_parameter_types_searchable() {
+    let snapshot = parse_source_snapshot(
+        "src/relay_teams/connector/service.py",
+        br#"
+class W3ConnectorSaveRequest:
+    pass
+
+class ConnectorService:
+    async def save_w3_connector(
+        self,
+        request: W3ConnectorSaveRequest,
+    ) -> None:
+        pass
+"#,
+    );
+    let symbol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "save_w3_connector")
+        .expect("method symbol should be extracted");
+
+    assert!(symbol.signature.contains("W3ConnectorSaveRequest"));
+    assert!(!symbol.signature.contains("pass"));
+}
+
+#[test]
+fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() {
+    let mut source = "def retry_policy(value=\"".to_owned();
+    source.push_str(&"\u{00e9}".repeat(300));
+    source.push_str("\"):\n    pass\n");
+
+    let snapshot = parse_source_snapshot("src/app.py", source.as_bytes());
+    let symbol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "retry_policy")
+        .expect("function symbol should be extracted");
+
+    assert!(symbol.signature.len() <= 512);
+    assert!(symbol.signature.is_char_boundary(symbol.signature.len()));
+}
+
+#[test]
 fn manual_call_extraction_preserves_same_line_calls() {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
