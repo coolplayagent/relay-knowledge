@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import shlex
 import subprocess
 import sys
 import time
@@ -384,6 +386,7 @@ Constraints:
 - Do not add broad rewrites, speculative APIs, dead code, or shallow wrappers.
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
+- If recent quality gate diagnostics are present, reproduce and diagnose those gates before changing scoring or evaluation policy.
 - Do not create commits yourself; the harness squashes accepted net changes into one commit.
 
 Historical context:
@@ -391,6 +394,9 @@ Historical context:
 
 Recent rejected attempts to avoid:
 {rejected_summary}
+
+Recent failed quality gate diagnostics:
+{recent_failed_gate_diagnostics(paths)}
 
 Recent worsened evaluation items:
 {recent_degradation_summary(paths)}
@@ -424,6 +430,93 @@ def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
             f"report={run.get('report', '')}"
         )
     return "\n".join(lines)
+
+
+def recent_failed_gate_diagnostics(paths: Any, limit: int = 3) -> str:
+    diagnostics: list[str] = []
+    for run in reversed(load_runs(paths)):
+        if run.get("accepted"):
+            continue
+        failed_gate_names = [
+            str(gate.get("name", ""))
+            for gate in run.get("gates", [])
+            if isinstance(gate, dict) and not gate.get("passed", False)
+        ]
+        if not failed_gate_names:
+            continue
+        report = load_run_report(run.get("report"))
+        for gate_name in failed_gate_names:
+            command = failed_command(report, gate_name)
+            diagnostics.append(format_failed_gate_diagnostic(run, gate_name, command))
+            if len(diagnostics) >= limit:
+                return "\n".join(diagnostics)
+    if not diagnostics:
+        return "No failed quality gate diagnostics recorded yet."
+    return "\n".join(diagnostics)
+
+
+def load_run_report(report_path: object) -> dict[str, Any]:
+    if not report_path:
+        return {}
+    try:
+        path = Path(str(report_path))
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def failed_command(report: dict[str, Any], gate_name: str) -> dict[str, Any]:
+    evaluation = report.get("evaluation", {})
+    if not isinstance(evaluation, dict):
+        return {}
+    commands = evaluation.get("commands", [])
+    if not isinstance(commands, list):
+        return {}
+    for command in commands:
+        if isinstance(command, dict) and command.get("name") == gate_name:
+            return command
+    return {}
+
+
+def format_failed_gate_diagnostic(
+    run: dict[str, Any],
+    gate_name: str,
+    command: dict[str, Any],
+) -> str:
+    command_text = shell_command(command.get("command", []))
+    stderr_tail = compact_prompt_text(str(command.get("stderr_tail", "")), 900)
+    stdout_tail = compact_prompt_text(str(command.get("stdout_tail", "")), 900)
+    fields = [
+        f"- run_id={run.get('run_id', '')}",
+        f"gate={gate_name}",
+        f"report={run.get('report', '')}",
+    ]
+    if command:
+        fields.extend(
+            [
+                f"exit_code={command.get('exit_code', '')}",
+                f"duration_ms={command.get('duration_ms', '')}",
+                f"command={command_text}",
+            ]
+        )
+    if stderr_tail:
+        fields.append(f"stderr_tail={stderr_tail}")
+    if stdout_tail:
+        fields.append(f"stdout_tail={stdout_tail}")
+    return " ".join(fields)
+
+
+def shell_command(command: object) -> str:
+    if not isinstance(command, list):
+        return ""
+    return " ".join(shlex.quote(str(part)) for part in command)
+
+
+def compact_prompt_text(value: str, limit: int) -> str:
+    compact = " ".join(line.strip() for line in value.splitlines() if line.strip())
+    if len(compact) <= limit:
+        return compact
+    return compact[-limit:]
 
 
 def recent_degradation_summary(paths: Any, limit: int = 8) -> str:
