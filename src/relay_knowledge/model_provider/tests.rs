@@ -2,7 +2,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{
     net::http::{HttpBindAddress, HttpConfig, HttpProxyConfig},
-    retrieval::ReadModelBackendConfig,
+    retrieval::{
+        DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_EMBEDDING_MAX_CONCURRENCY, DEFAULT_EMBEDDING_TIMEOUT,
+        EmbeddingProviderKind, ReadModelBackendConfig, ReadModelBackendMode, RemoteEmbeddingConfig,
+    },
 };
 use tokio::io::AsyncWriteExt;
 
@@ -27,12 +30,17 @@ async fn profile_crud_preserves_secrets_and_redacts_responses() {
     assert_eq!(saved.profiles[0].headers[0].value, None);
     assert!(saved.profiles[0].headers[0].configured);
 
+    let mut routine_update = openai_request("gpt-b", None);
+    routine_update.ssl_verify = None;
+    routine_update.capabilities = None;
     let updated = service
-        .save_profile("primary", openai_request("gpt-b", None), &retrieval)
+        .save_profile("primary", routine_update, &retrieval)
         .await
         .expect("profile should update");
     assert_eq!(updated.profiles[0].model, "gpt-b");
     assert!(updated.profiles[0].api_key_configured);
+    assert_eq!(updated.profiles[0].ssl_verify, Some(true));
+    assert_eq!(updated.profiles[0].capabilities.input.image, Some(true));
 
     let raw = fs::read_to_string(service.paths.model_profiles_file())
         .await
@@ -78,6 +86,40 @@ async fn profile_crud_preserves_secrets_and_redacts_responses() {
         .await
         .expect("profile file should exist");
     assert!(!raw.contains("secret-a"));
+}
+
+#[tokio::test]
+async fn first_save_of_runtime_profile_preserves_environment_secret() {
+    let service = test_service("runtime-secret");
+    let retrieval = remote_retrieval();
+    let profiles = service
+        .profiles(&retrieval)
+        .await
+        .expect("runtime profile should load");
+    assert_eq!(
+        profiles.default_profile.as_deref(),
+        Some(DEFAULT_PROFILE_NAME)
+    );
+    assert!(profiles.profiles[0].api_key_configured);
+    assert_eq!(profiles.profiles[0].source, "environment");
+
+    let mut request = openai_request("text-embedding-3-small", None);
+    request.base_url = Some("https://api.openai.example/v1".to_owned());
+    request.headers.clear();
+    request.ssl_verify = None;
+    request.capabilities = None;
+    let saved = service
+        .save_profile(DEFAULT_PROFILE_NAME, request, &retrieval)
+        .await
+        .expect("runtime profile edit should preserve secret");
+
+    assert_eq!(saved.profiles[0].source, "config");
+    assert!(saved.profiles[0].api_key_configured);
+    assert_eq!(saved.profiles[0].capabilities.input.text, Some(true));
+    let raw = fs::read_to_string(service.paths.model_profiles_file())
+        .await
+        .expect("profile file should exist");
+    assert!(raw.contains("env-secret"));
 }
 
 #[tokio::test]
@@ -450,6 +492,22 @@ fn test_http_config() -> HttpConfig {
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy config"),
     )
     .expect("http config")
+}
+
+fn remote_retrieval() -> ReadModelBackendConfig {
+    let mut config = ReadModelBackendConfig::local();
+    config.semantic_mode = ReadModelBackendMode::External;
+    config.vector_mode = ReadModelBackendMode::External;
+    config.vector_model.name = "text-embedding-3-small".to_owned();
+    config.remote_embedding = Some(RemoteEmbeddingConfig {
+        provider: EmbeddingProviderKind::OpenAiCompatible,
+        base_url: "https://api.openai.example/v1".to_owned(),
+        api_key: "env-secret".to_owned(),
+        batch_size: DEFAULT_EMBEDDING_BATCH_SIZE,
+        timeout: DEFAULT_EMBEDDING_TIMEOUT,
+        max_concurrency: DEFAULT_EMBEDDING_MAX_CONCURRENCY,
+    });
+    config
 }
 
 async fn failing_catalog_url() -> String {

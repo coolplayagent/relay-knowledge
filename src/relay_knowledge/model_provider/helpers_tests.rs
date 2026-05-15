@@ -113,6 +113,24 @@ async fn sends_provider_probe_and_discovery_requests() {
     assert!(probe.ok);
     assert_eq!(probe.token_usage.unwrap().total_tokens, 9);
 
+    let embedding_profile = stored_profile(
+        ModelProviderKind::OpenAiCompatible,
+        "text-embedding-3-small",
+        &base_url,
+        Some("secret"),
+    );
+    let embedding_response =
+        send_probe_request(&client, &embedding_profile, Some(Duration::from_secs(1))).await;
+    let embedding_probe = probe_result_from_http(
+        embedding_profile,
+        Instant::now(),
+        now_millis(),
+        embedding_response,
+    )
+    .await;
+    assert!(embedding_probe.ok);
+    assert_eq!(embedding_probe.token_usage.unwrap().total_tokens, 4);
+
     let discovery_response =
         send_discovery_request(&client, &profile, Some(Duration::from_secs(1))).await;
     let discovery = discovery_result_from_http(
@@ -358,6 +376,18 @@ async fn serve_provider_fixture() -> String {
                         {"id": "gpt-fixture", "context_window": 128000, "output_limit": 4096},
                         {"name": "named-model"}
                     ]
+                }))
+            }),
+        )
+        .route(
+            "/embeddings",
+            post(|| async {
+                Json(json!({
+                    "data": [{"embedding": [0.1, 0.2]}],
+                    "usage": {
+                        "prompt_tokens": 4,
+                        "total_tokens": 4
+                    }
                 }))
             }),
         )

@@ -43,6 +43,17 @@ pub(super) fn profile_response(
     }
 }
 
+pub(super) fn runtime_profile_merge_base(
+    file: &StoredProfileFile,
+    name: &str,
+    retrieval: &ReadModelBackendConfig,
+) -> Option<StoredModelProfile> {
+    if !file.profiles.is_empty() || file.default_profile.is_some() || name != DEFAULT_PROFILE_NAME {
+        return None;
+    }
+    StoredModelProfile::from_runtime(retrieval)
+}
+
 pub(super) fn default_fallback() -> ModelFallbackConfig {
     ModelFallbackConfig {
         policies: vec![
@@ -259,6 +270,16 @@ pub(super) async fn send_probe_request(
                 "max_tokens": profile.max_tokens.unwrap_or(16),
                 "messages": [{"role": "user", "content": "relay-knowledge provider probe"}]
             })),
+        ModelProviderKind::OpenAiCompatible if uses_embedding_probe(profile) => client
+            .post(format!(
+                "{}/embeddings",
+                profile.base_url.trim_end_matches('/')
+            ))
+            .headers(auth_headers(profile))
+            .json(&json!({
+                "model": profile.model,
+                "input": "relay-knowledge provider probe"
+            })),
         _ => client
             .post(format!(
                 "{}/chat/completions",
@@ -274,6 +295,18 @@ pub(super) async fn send_probe_request(
             })),
     };
     apply_request_timeout(request, request_timeout).send().await
+}
+
+fn uses_embedding_probe(profile: &StoredModelProfile) -> bool {
+    profile.source == "environment" || is_embedding_model_name(&profile.model)
+}
+
+fn is_embedding_model_name(model: &str) -> bool {
+    let normalized = model.to_ascii_lowercase();
+    normalized.contains("embedding")
+        || normalized.contains("embed")
+        || normalized.starts_with("bge-")
+        || normalized.starts_with("e5-")
 }
 
 pub(super) async fn send_discovery_request(

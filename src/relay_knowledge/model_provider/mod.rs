@@ -268,13 +268,19 @@ impl StoredModelProfile {
             base_url,
             api_key,
             headers,
-            ssl_verify: request.ssl_verify,
+            ssl_verify: request
+                .ssl_verify
+                .or_else(|| existing.and_then(|profile| profile.ssl_verify)),
             context_window: request.context_window,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,
             connect_timeout_seconds: request.connect_timeout_seconds,
-            capabilities: request.capabilities.unwrap_or_default(),
+            capabilities: request.capabilities.unwrap_or_else(|| {
+                existing
+                    .map(|profile| profile.capabilities.clone())
+                    .unwrap_or_default()
+            }),
             fallback_policy_id: request.fallback_policy_id.and_then(normalize_optional),
             fallback_priority: request.fallback_priority,
             catalog_provider_id: request.catalog_provider_id.and_then(normalize_optional),
@@ -581,7 +587,8 @@ impl ModelProviderConfigService {
                 default_profile: None,
                 profiles: BTreeMap::new(),
             });
-        let existing = file.profiles.get(&name);
+        let runtime_profile = runtime_profile_merge_base(&file, &name, retrieval);
+        let existing = file.profiles.get(&name).or(runtime_profile.as_ref());
         let is_default = request.is_default || file.default_profile.is_none();
         let stored = StoredModelProfile::from_save_request(request, existing)?;
         file.profiles.insert(name.clone(), stored);
