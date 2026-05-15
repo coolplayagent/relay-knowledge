@@ -241,6 +241,14 @@ tree-sitter query capture 推荐命名:
 - `capture_kind`
 - `content_hash`
 
+语言适配器可以在 grammar tags 之外增加确定性补强，但必须保留同一套
+`CodeSymbol`、`CodeReference`、`CodeDependency` 和 `CodeChunk` 输出契约。例如
+C 适配器不能只依赖 tree-sitter-c 的 `function_declarator` tag，因为它只覆盖声明
+范围；函数定义必须使用完整 `function_definition` 范围，顶层 prototype 标记为
+`function_declaration`，`preproc_def` / `preproc_function_def` 标记为 `macro`，
+`preproc_include` 需要解析到已索引头文件路径。AST 遍历必须使用显式栈或有界
+worker，不能用无界递归遍历大型 C 语法树。
+
 ### 5.3 多语言和嵌入语言
 
 当前 v1 grammar registry 必须覆盖常见服务端、前端、移动端和系统语言:

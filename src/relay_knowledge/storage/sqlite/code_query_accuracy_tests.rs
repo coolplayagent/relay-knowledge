@@ -1,9 +1,9 @@
 use super::*;
 use crate::{
     domain::{
-        CodeCallRecord, CodeFileDiagnostic, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeSymbolRecord,
+        CodeCallRecord, CodeFileDiagnostic, CodeImportRecord, CodeIndexSnapshot, CodeParseStatus,
+        CodeQueryKind, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord,
+        RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -230,6 +230,63 @@ async fn parsed_hits_do_not_inherit_repository_degraded_reason() {
     assert_eq!(hits[0].degraded_reason, None);
 }
 
+#[tokio::test]
+async fn import_queries_match_include_targets_not_source_paths() {
+    let store = store_with_repository_snapshot(snapshot_with_c_imports()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "linux/debugfs.h",
+                selector,
+                CodeQueryKind::Imports,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "mm/cma_debug.c");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("include/linux/debugfs.h")
+    );
+}
+
+#[tokio::test]
+async fn import_queries_can_match_importing_source_paths() {
+    let store = store_with_repository_snapshot(snapshot_with_c_imports()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "mm/cma_debug.c",
+                selector,
+                CodeQueryKind::Imports,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "mm/cma_debug.c");
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("include/linux/debugfs.h")
+    );
+}
+
 fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
@@ -401,6 +458,62 @@ fn snapshot_with_exact_match_noise() -> CodeIndexSnapshot {
     }
 }
 
+fn snapshot_with_c_imports() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "debugfs-header",
+                "include/linux/debugfs.h",
+                "c",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "cma-source",
+                "mm/cma_debug.c",
+                "c",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![
+            import(
+                "debugfs-internal-include",
+                "debugfs-header",
+                "include/linux/debugfs.h",
+                "#include <linux/fs.h>",
+                Some("include/linux/fs.h"),
+                "unresolved",
+            ),
+            import(
+                "cma-debugfs-include",
+                "cma-source",
+                "mm/cma_debug.c",
+                "#include <linux/debugfs.h>",
+                Some("include/linux/debugfs.h"),
+                "resolved",
+            ),
+        ],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
 fn file(
     file_id: &str,
     path: &str,
@@ -461,6 +574,37 @@ fn call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
         resolution_state: "unresolved".to_owned(),
         confidence_basis_points: 2_500,
         confidence_tier: "ambiguous".to_owned(),
+        line_range: range(1, 1),
+    }
+}
+
+fn import(
+    import_id: &str,
+    file_id: &str,
+    path: &str,
+    module: &str,
+    target_hint: Option<&str>,
+    resolution_state: &str,
+) -> CodeImportRecord {
+    CodeImportRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        import_id: import_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        module: module.to_owned(),
+        target_hint: target_hint.map(str::to_owned),
+        resolution_state: resolution_state.to_owned(),
+        confidence_basis_points: if resolution_state == "resolved" {
+            8_000
+        } else {
+            2_500
+        },
+        confidence_tier: if resolution_state == "resolved" {
+            "inferred".to_owned()
+        } else {
+            "ambiguous".to_owned()
+        },
         line_range: range(1, 1),
     }
 }

@@ -1,44 +1,58 @@
 use crate::domain::CodeImportRecord;
 
 use super::imports::{
-    ImportContext, ImportResolution, normalize_join, parent_dir, parse_quoted_specifier,
+    ImportContext, ImportResolution, ModuleFileResolution, normalize_join, parent_dir,
+    parse_quoted_specifier,
 };
 
 pub(super) fn resolve_import(
     import: &CodeImportRecord,
     context: &ImportContext<'_>,
-) -> Option<ImportResolution> {
+) -> Option<(ImportResolution, Option<String>)> {
     let request = CppImportRequest::parse(&import.path, &import.module)?;
 
     Some(match request {
-        CppImportRequest::Include { candidates } => {
-            if context.any_module_file_exists(&candidates) {
-                ImportResolution::Resolved
-            } else {
-                ImportResolution::Unresolved
+        CppImportRequest::Include {
+            candidates,
+            allow_source_root_match,
+        } => match context.resolve_first_module_file(&candidates, allow_source_root_match) {
+            ModuleFileResolution::Resolved(target_hint) => {
+                (ImportResolution::Resolved, Some(target_hint))
             }
-        }
+            ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
+            ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, None),
+        },
         CppImportRequest::UsingSymbol { namespace, name } => {
-            if namespace.is_empty() {
+            let resolution = if namespace.is_empty() {
                 context.resolve_name(&name)
             } else {
                 context.resolve_name_in_namespace(&namespace, &name)
-            }
+            };
+            (resolution, None)
         }
         CppImportRequest::UsingNamespace { namespace } => {
-            if context.namespace_exists(&namespace) {
+            let resolution = if context.namespace_exists(&namespace) {
                 ImportResolution::Resolved
             } else {
                 ImportResolution::Unresolved
-            }
+            };
+            (resolution, None)
         }
     })
 }
 
 enum CppImportRequest {
-    Include { candidates: Vec<String> },
-    UsingSymbol { namespace: String, name: String },
-    UsingNamespace { namespace: String },
+    Include {
+        candidates: Vec<String>,
+        allow_source_root_match: bool,
+    },
+    UsingSymbol {
+        namespace: String,
+        name: String,
+    },
+    UsingNamespace {
+        namespace: String,
+    },
 }
 
 impl CppImportRequest {
@@ -74,16 +88,32 @@ impl CppImportRequest {
 }
 
 fn parse_include(import_path: &str, statement: &str) -> Option<CppImportRequest> {
-    let target = parse_quoted_specifier(statement).or_else(|| parse_angle_specifier(statement))?;
+    let (target, quoted) = if let Some(target) = parse_quoted_specifier(statement) {
+        (target, true)
+    } else {
+        (parse_angle_specifier(statement)?, false)
+    };
     let mut candidates = Vec::new();
-    if let Some(relative) = normalize_join(parent_dir(import_path), target) {
-        candidates.push(relative);
+    if quoted {
+        if let Some(relative) = normalize_join(parent_dir(import_path), target) {
+            candidates.push(relative);
+        }
     }
-    candidates.push(target.to_owned());
-    candidates.sort();
-    candidates.dedup();
+    push_candidate(&mut candidates, target.to_owned());
+    if !target.starts_with("include/") {
+        push_candidate(&mut candidates, format!("include/{target}"));
+    }
 
-    Some(CppImportRequest::Include { candidates })
+    Some(CppImportRequest::Include {
+        candidates,
+        allow_source_root_match: quoted,
+    })
+}
+
+fn push_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if !candidates.contains(&candidate) {
+        candidates.push(candidate);
+    }
 }
 
 fn parse_angle_specifier(statement: &str) -> Option<&str> {

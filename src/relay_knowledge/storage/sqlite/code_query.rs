@@ -73,7 +73,7 @@ fn search_symbols(
     let fts_query = fts_match_query(&request.query);
     let sql = "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
-               byte_start, byte_end, line_start, line_end, name, qualified_name
+               byte_start, byte_end, line_start, line_end, name, qualified_name, kind
         FROM code_repository_symbols
         WHERE source_scope = ?
           AND symbol_snapshot_id IN (
@@ -114,6 +114,7 @@ fn search_symbols(
                 },
                 name: row.get(11)?,
                 qualified_name: row.get(12)?,
+                kind: row.get(13)?,
             })
         },
     )?;
@@ -155,7 +156,7 @@ fn search_symbols(
                             CodeRetrievalLayer::Symbol,
                             CodeRetrievalLayer::Definition,
                         ],
-                        score: score + 2.0,
+                        score: score + 2.0 + symbol_kind_bonus(&row.kind, request),
                         excerpt,
                         degraded_reason: None,
                         edge_kind: None,
@@ -444,7 +445,10 @@ fn search_imports(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(&query, [&row.module, &row.path]);
+            let score = score_text(
+                &query,
+                [&row.module, row.target_hint.as_deref().unwrap_or_default()],
+            ) + score_exact_path(&query, &row.path);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -799,6 +803,37 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     score
 }
 
+fn score_exact_path(query: &str, path: &str) -> f64 {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return 0.0;
+    }
+    let path = path.trim().to_lowercase();
+    if path == query {
+        return 4.0;
+    }
+    if path.rsplit('/').next().is_some_and(|name| name == query) {
+        return 2.0;
+    }
+
+    0.0
+}
+
+fn symbol_kind_bonus(kind: &str, request: &CodeRetrievalRequest) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
+    ) {
+        return 0.0;
+    }
+    match kind {
+        "macro" => 0.35,
+        "function" | "method" => 0.25,
+        "function_declaration" => 0.0,
+        _ => 0.1,
+    }
+}
+
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -897,6 +932,7 @@ struct SymbolRow {
     line_range: RepositoryCodeRange,
     name: String,
     qualified_name: String,
+    kind: String,
 }
 
 struct ReferenceRow {
