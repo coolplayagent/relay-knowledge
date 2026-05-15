@@ -30,7 +30,7 @@ This is the English documentation page for `research/industry-capability-snapsho
 
 Microsoft GraphRAG 的查询引擎明确区分 local search、global search、DRIFT search、basic search 和 question generation。Local search 适合围绕具体实体的问题，global search 通过 community reports 做 map-reduce，DRIFT 把社区信息引入局部查询以扩大起点和事实多样性。Microsoft Research 的 DRIFT 实验还显示，它在 5K+ 新闻数据和 50 个局部问题上，相比 local search 在 comprehensiveness 和 diversity 上更常胜出。
 
-MCP 2025-11-25 规范把 stdio 和 Streamable HTTP 定为标准 transport。Streamable HTTP 要求单一 MCP endpoint 支持 POST/GET，强调 Origin 校验、本地默认 localhost、认证、session id、protocol-version header、cancellation、resumability 和 back-compat。`relay-knowledge` 已经实现 Streamable HTTP、session header 和协议版本校验，但 resources/prompts、GET/SSE resumability、DELETE session termination 和旧 HTTP+SSE 兼容仍是后续增强点。
+MCP 2025-11-25 规范把 stdio 和 Streamable HTTP 定为标准 transport。Streamable HTTP 要求单一 MCP endpoint 支持 POST/GET，强调 Origin 校验、本地默认 localhost、认证、session id、protocol-version header、cancellation、resumability 和 back-compat。`relay-knowledge` 已经实现 Streamable HTTP、session header、协议版本校验、resources/prompts 和 DELETE session termination；GET/SSE resumability 仍是后续增强点。
 
 A2A 官方规范把 Agent2Agent 定位为不同框架、语言和厂商 agent 之间的互操作标准。Linux Foundation 在 2026-04-09 宣布 A2A 已有 150+ 组织支持、主要云平台集成和生产使用案例；A2A v1.0 也已作为首个稳定生产版本发布。对 `relay-knowledge` 来说，A2A 更适合作为后续 specialist knowledge agent gateway，而不是把 core 改成 agent runtime。
 

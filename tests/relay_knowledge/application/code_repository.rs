@@ -148,7 +148,13 @@ pub fn retry_policy_v2() -> u32 {
         .await
         .expect("impact should succeed");
 
-    assert!(impact.changed_paths.iter().any(|path| path == "src/lib.rs"));
+    assert!(
+        impact
+            .path_groups
+            .in_scope_changed_paths
+            .iter()
+            .any(|path| path == "src/lib.rs")
+    );
     assert!(impact.results.iter().any(|hit| hit.path == "src/lib.rs"));
 
     repo.write("src/late.rs", "pub fn late_change() {}\n");

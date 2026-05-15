@@ -11,41 +11,6 @@ use super::{
     insert_code_chunk_document, insert_code_symbol_document, replace_evidence_document,
 };
 
-pub(super) fn drop_incompatible_bm25_table(connection: &Connection) -> Result<bool, StorageError> {
-    let exists = connection.query_row(
-        "SELECT EXISTS (
-            SELECT 1 FROM sqlite_master
-            WHERE type = 'table' AND name = 'graph_bm25'
-        )",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !exists {
-        return Ok(false);
-    }
-
-    let mut statement = connection.prepare("PRAGMA table_info(graph_bm25)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let columns = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    let required = [
-        "created_graph_version",
-        "parent_evidence_id",
-        "modality",
-        "entity_aliases",
-    ];
-    if required
-        .iter()
-        .any(|required_column| !columns.iter().any(|column| column == required_column))
-    {
-        connection.execute("DROP TABLE graph_bm25", [])?;
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
 pub(super) fn rebuild_bm25_documents(connection: &Connection) -> Result<(), StorageError> {
     clear_retrieval_documents(connection)?;
     rebuild_evidence_documents(connection)?;

@@ -1,7 +1,6 @@
 use super::*;
 use crate::domain::{CodeFileFields, CodeReferenceFields};
 use crate::storage::{CodeGraphStore, GraphStore, IndexStore};
-use rusqlite::Connection;
 
 #[tokio::test]
 async fn commits_code_graph_batch_and_marks_indexes_stale() {
@@ -32,8 +31,9 @@ async fn commits_code_graph_batch_and_marks_indexes_stale() {
 }
 
 #[test]
-fn preserves_incompatible_legacy_tables_before_creating_current_schema() {
-    let connection = Connection::open_in_memory().expect("connection should open");
+fn startup_resets_database_with_obsolete_code_tables() {
+    let path = temp_db_path("obsolete-code-tables");
+    let connection = rusqlite::Connection::open(&path).expect("connection should open");
     connection
         .execute_batch(
             "
@@ -48,17 +48,31 @@ fn preserves_incompatible_legacy_tables_before_creating_current_schema() {
                 file_id TEXT NOT NULL,
                 name TEXT NOT NULL
             );
+            INSERT INTO code_files (repository_id, path, blob_hash)
+            VALUES ('repo', 'src/lib.rs', 'hash');
             ",
         )
-        .expect("legacy fixture should build");
+        .expect("obsolete code tables should be created");
+    drop(connection);
 
-    initialize_schema(&connection).expect("schema should initialize");
-    let current_columns = table_columns(&connection, "code_files").expect("columns should load");
+    let store = crate::storage::SqliteGraphStore::open(&path)
+        .expect("store should reset obsolete code tables");
+    let guard = store.connection.lock().expect("connection should lock");
+    let columns = table_columns(&guard, "code_files").expect("columns should read");
 
-    assert!(table_exists(&connection, "code_files_legacy_0").expect("legacy table should exist"));
-    assert!(table_exists(&connection, "code_symbols_legacy_0").expect("legacy table should exist"));
-    assert!(current_columns.contains(&"source_scope".to_owned()));
-    assert!(current_columns.contains(&"content_hash".to_owned()));
+    assert!(columns.iter().any(|column| column == "source_scope"));
+    assert!(columns.iter().any(|column| column == "content_hash"));
+    assert!(!table_exists(&guard, "code_files_legacy_0").expect("table check should run"));
+    assert_eq!(
+        guard
+            .query_row("SELECT COUNT(*) FROM code_files", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .expect("code file count should read"),
+        0
+    );
+    drop(guard);
+    let _ = std::fs::remove_file(path);
 }
 
 #[tokio::test]
@@ -286,4 +300,40 @@ fn extraction() -> CodeExtractionMetadata {
 
 fn range(start: u32, end: u32) -> CodeRange {
     CodeRange::new(start, end, 1, 1).expect("range should validate")
+}
+
+fn table_columns(
+    connection: &rusqlite::Connection,
+    table: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn table_exists(connection: &rusqlite::Connection, table: &str) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+fn temp_db_path(test_name: &str) -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    path.push(format!(
+        "relay-knowledge-{test_name}-{}-{unique}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    path
 }

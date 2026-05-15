@@ -45,7 +45,7 @@ versions, freshness, and degradation.
 - `repo index` summary now includes progress counters for Git enumeration/blob
   reads, parsed files, SQLite writes, skipped unchanged files, and degraded
   files.
-- `repo impact` returns both the legacy `changed_paths` list and
+- `repo impact` returns scoped path groups through
   `path_groups.in_scope_changed_paths` /
   `path_groups.out_of_scope_changed_paths`.
 - `repo report <alias> --format markdown|json` emits registration scope,

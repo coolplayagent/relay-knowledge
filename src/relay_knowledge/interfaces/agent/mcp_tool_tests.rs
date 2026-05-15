@@ -143,7 +143,10 @@ pub fn retry_policy() -> u32 {
 
     let structured = &response["result"]["structuredContent"];
     assert_eq!(response["result"]["isError"], false);
-    assert_eq!(structured["changed_paths"][0], "src/lib.rs");
+    assert_eq!(
+        structured["path_groups"]["in_scope_changed_paths"][0],
+        "src/lib.rs"
+    );
     assert!(
         !structured["results"]
             .as_array()

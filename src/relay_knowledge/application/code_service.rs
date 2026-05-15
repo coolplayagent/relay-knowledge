@@ -333,7 +333,6 @@ impl RelayKnowledgeService {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             scope,
             request,
-            changed_paths,
             path_groups,
             results,
         })

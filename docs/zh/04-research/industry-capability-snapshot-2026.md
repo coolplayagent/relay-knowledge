@@ -22,7 +22,7 @@
 
 Microsoft GraphRAG 的查询引擎明确区分本地搜索、全局搜索、DRIFT 搜索、基础搜索和问题生成。本地搜索适合围绕具体实体的问题，全局搜索通过社区报告做 map-reduce，DRIFT 将社区信息引入局部查询以扩大起点和事实多样性。微软研究院的 DRIFT 实验还显示，在 5K+ 新闻数据和 50 个局部问题上，相较于本地搜索，DRIFT 在全面性和多样性方面更常胜出。
 
-MCP 2025-11-25 规范将 stdio 和可流式 HTTP 定为标准传输方式。可流式 HTTP 要求单一 MCP 端点支持 POST/GET，强调 Origin 校验、本地默认 localhost、认证、会话 ID、协议版本头、取消、可恢复性和向后兼容。`relay-knowledge` 已实现可流式 HTTP、会话头和协议版本校验，但 resources/prompts、GET/SSE 可恢复性、DELETE 会话终止和旧 HTTP+SSE 兼容仍是后续增强点。
+MCP 2025-11-25 规范将 stdio 和可流式 HTTP 定为标准传输方式。可流式 HTTP 要求单一 MCP 端点支持 POST/GET，强调 Origin 校验、本地默认 localhost、认证、会话 ID、协议版本头、取消、可恢复性和向后兼容。`relay-knowledge` 已实现可流式 HTTP、会话头、协议版本校验、resources/prompts 和 DELETE 会话终止；GET/SSE 可恢复性仍是后续增强点。
 
 A2A 官方规范将 Agent2Agent 定位为不同框架、语言和厂商代理间的互操作标准。Linux Foundation 于 2026-04-09 宣布 A2A 已获得 150+ 组织支持、主要云平台集成和生产使用案例；A2A v1.0 也已作为首个稳定生产版本发布。对 `relay-knowledge` 来说，A2A 更适合作为后续专业知识代理网关，而非将核心改为代理运行时。
 

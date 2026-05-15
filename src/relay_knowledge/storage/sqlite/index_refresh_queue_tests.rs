@@ -6,23 +6,12 @@ use crate::storage::{
 };
 
 #[test]
-fn initialization_adds_task_timestamps_to_legacy_refresh_queue() {
-    let connection = rusqlite::Connection::open_in_memory().expect("connection should open");
+fn startup_resets_database_with_obsolete_refresh_queue_schema() {
+    let path = temp_db_path("obsolete-refresh-queue");
+    let connection = rusqlite::Connection::open(&path).expect("connection should open");
     connection
         .execute_batch(
             "
-            CREATE TABLE graph_mutations (
-                graph_version INTEGER PRIMARY KEY,
-                evidence_count INTEGER NOT NULL,
-                entity_count INTEGER NOT NULL,
-                relation_count INTEGER NOT NULL DEFAULT 0,
-                claim_count INTEGER NOT NULL DEFAULT 0,
-                event_count INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE evidence (
-                id TEXT PRIMARY KEY,
-                source_scope TEXT NOT NULL
-            );
             CREATE TABLE index_refresh_tasks (
                 task_id TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -30,8 +19,6 @@ fn initialization_adds_task_timestamps_to_legacy_refresh_queue() {
                 modality TEXT NOT NULL,
                 target_graph_version INTEGER NOT NULL,
                 state TEXT NOT NULL,
-                lease_owner TEXT,
-                lease_expires_at_ms INTEGER,
                 attempt_count INTEGER NOT NULL,
                 next_retry_at_ms INTEGER NOT NULL,
                 input_fingerprint TEXT NOT NULL,
@@ -42,20 +29,21 @@ fn initialization_adds_task_timestamps_to_legacy_refresh_queue() {
             );
             INSERT INTO index_refresh_tasks (
                 task_id, kind, source_scope, modality, target_graph_version, state,
-                lease_owner, lease_expires_at_ms, attempt_count, next_retry_at_ms,
-                input_fingerprint, cursor_before, cursor_after, last_error_kind,
-                last_error_message
+                attempt_count, next_retry_at_ms, input_fingerprint, cursor_before,
+                cursor_after, last_error_kind, last_error_message
             )
             VALUES (
                 'bm25:graph:text', 'bm25', 'graph', 'text', 1, 'queued',
-                NULL, NULL, 0, 0, 'fingerprint', 0, NULL, NULL, NULL
+                0, 0, 'fingerprint', 0, NULL, NULL, NULL
             );
             ",
         )
-        .expect("legacy schema should be created");
+        .expect("obsolete schema should be created");
+    drop(connection);
 
-    indexing::initialize_schema(&connection).expect("schema should migrate");
-    let columns = connection
+    let store = SqliteGraphStore::open(&path).expect("store should reset obsolete database");
+    let guard = store.connection.lock().expect("connection should lock");
+    let columns = guard
         .prepare("PRAGMA table_info(index_refresh_tasks)")
         .expect("table info should prepare")
         .query_map([], |row| row.get::<_, String>(1))
@@ -63,19 +51,18 @@ fn initialization_adds_task_timestamps_to_legacy_refresh_queue() {
         .collect::<Result<Vec<_>, _>>()
         .expect("columns should collect");
 
+    assert!(columns.iter().any(|column| column == "lease_owner"));
     assert!(columns.iter().any(|column| column == "created_at_ms"));
-    assert!(columns.iter().any(|column| column == "updated_at_ms"));
-
-    let (created_at_ms, updated_at_ms) = connection
-        .query_row(
-            "SELECT created_at_ms, updated_at_ms FROM index_refresh_tasks WHERE task_id = 'bm25:graph:text'",
-            [],
-            |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
-        )
-        .expect("migrated timestamps should read");
-
-    assert!(created_at_ms > 0);
-    assert_eq!(updated_at_ms, created_at_ms);
+    assert_eq!(
+        guard
+            .query_row("SELECT COUNT(*) FROM index_refresh_tasks", [], |row| {
+                row.get::<_, u64>(0)
+            })
+            .expect("task count should read"),
+        0
+    );
+    drop(guard);
+    let _ = std::fs::remove_file(path);
 }
 
 #[tokio::test]
@@ -914,4 +901,19 @@ async fn commit_relation(
         .commit_mutation_batch(batch)
         .await
         .expect("relation commit should succeed");
+}
+
+fn temp_db_path(test_name: &str) -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    path.push(format!(
+        "relay-knowledge-{test_name}-{}-{unique}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    path
 }

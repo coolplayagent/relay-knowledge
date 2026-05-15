@@ -74,7 +74,6 @@ pub(super) fn agent_protocol_status(runtime: &RuntimeConfiguration) -> AgentProt
     AgentProtocolStatus {
         mcp_streamable_http_enabled: mcp_enabled,
         mcp_endpoint: runtime.agent.mcp_endpoint.clone(),
-        mcp_legacy_http_sse_endpoint: endpoint_child(&runtime.agent.mcp_endpoint, "sse"),
         mcp_resources_enabled: mcp_enabled,
         mcp_prompts_enabled: mcp_enabled,
         metrics_endpoint: endpoint_child(&runtime.agent.mcp_endpoint, "metrics"),

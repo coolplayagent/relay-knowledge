@@ -437,7 +437,7 @@ async fn initialization_backfills_fact_evidence_links_for_existing_facts() {
         let guard = store.connection.lock().expect("connection should lock");
         guard
             .execute("DELETE FROM graph_fact_evidence", [])
-            .expect("legacy link gap should be simulated");
+            .expect("fact link gap should be simulated");
     }
 
     let store = SqliteGraphStore::open(&path).expect("store should reopen");
@@ -457,8 +457,8 @@ async fn initialization_backfills_fact_evidence_links_for_existing_facts() {
 }
 
 #[tokio::test]
-async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
-    let path = temp_db_path("bm25-rebuild");
+async fn startup_resets_database_with_obsolete_bm25_schema() {
+    let path = temp_db_path("bm25-reset");
     {
         let store = SqliteGraphStore::open(&path).expect("store should open");
         store
@@ -486,7 +486,7 @@ async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
                 );
                 ",
             )
-            .expect("legacy bm25 table should be simulated");
+            .expect("obsolete bm25 table should be simulated");
     }
 
     let store = SqliteGraphStore::open(&path).expect("store should reopen");
@@ -501,7 +501,7 @@ async fn initialization_rebuilds_bm25_documents_after_legacy_schema_drop() {
         .await
         .expect("search should succeed");
 
-    assert!(hits.iter().any(|hit| hit.code_artifact.is_some()));
+    assert!(hits.is_empty());
     let _ = std::fs::remove_file(path);
 }
 

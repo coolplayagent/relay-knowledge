@@ -13,6 +13,7 @@ mod helpers;
 mod indexing;
 mod operations;
 mod retrieval;
+mod schema_reset;
 mod store_impls;
 
 use crate::{
@@ -38,11 +39,17 @@ pub struct SqliteGraphStore {
 impl SqliteGraphStore {
     /// Opens a SQLite database and initializes the v1 schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        if let Some(parent) = path.as_ref().parent() {
+        let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let connection = Connection::open(path)?;
+        let mut connection = Connection::open(&path)?;
+        if schema_reset::database_requires_reset(&connection)? {
+            drop(connection);
+            schema_reset::remove_database_files(&path)?;
+            connection = Connection::open(&path)?;
+        }
         initialize_schema(&connection)?;
 
         Ok(Self {
@@ -142,7 +149,11 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
             entity_count INTEGER NOT NULL,
             relation_count INTEGER NOT NULL DEFAULT 0,
             claim_count INTEGER NOT NULL DEFAULT 0,
-            event_count INTEGER NOT NULL DEFAULT 0
+            event_count INTEGER NOT NULL DEFAULT 0,
+            affected_scopes_json TEXT NOT NULL DEFAULT '[]',
+            affected_entity_ids_json TEXT NOT NULL DEFAULT '[]',
+            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+            source_hashes_json TEXT NOT NULL DEFAULT '[]'
         );
 
         CREATE TABLE IF NOT EXISTS graph_relations (
@@ -206,95 +217,12 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
 	            ON graph_fact_evidence(evidence_id, fact_kind);
         ",
     )?;
-    ensure_column(connection, "evidence", "source_path", "TEXT")?;
-    ensure_column(connection, "evidence", "span_start_byte", "INTEGER")?;
-    ensure_column(connection, "evidence", "span_end_byte", "INTEGER")?;
-    ensure_column(connection, "evidence", "span_start_line", "INTEGER")?;
-    ensure_column(connection, "evidence", "span_end_line", "INTEGER")?;
-    ensure_column(
-        connection,
-        "evidence",
-        "confidence_basis_points",
-        "INTEGER NOT NULL DEFAULT 10000",
-    )?;
-    ensure_column(
-        connection,
-        "evidence",
-        "status",
-        "TEXT NOT NULL DEFAULT 'accepted'",
-    )?;
-    ensure_column(
-        connection,
-        "evidence",
-        "modality",
-        "TEXT NOT NULL DEFAULT 'text_span'",
-    )?;
-    ensure_column(connection, "evidence", "source_uri", "TEXT")?;
-    ensure_column(connection, "evidence", "source_hash", "TEXT")?;
-    ensure_column(connection, "evidence", "media_hash", "TEXT")?;
-    ensure_column(connection, "evidence", "extractor", "TEXT")?;
-    ensure_column(connection, "evidence", "extractor_version", "TEXT")?;
-    ensure_column(connection, "evidence", "observed_at", "TEXT")?;
-    ensure_column(connection, "evidence", "parent_evidence_id", "TEXT")?;
-    ensure_column(connection, "evidence", "layout_page_number", "INTEGER")?;
-    ensure_column(connection, "evidence", "layout_x", "INTEGER")?;
-    ensure_column(connection, "evidence", "layout_y", "INTEGER")?;
-    ensure_column(connection, "evidence", "layout_width", "INTEGER")?;
-    ensure_column(connection, "evidence", "layout_height", "INTEGER")?;
-    ensure_column(connection, "evidence", "embedding_model", "TEXT")?;
-    ensure_column(connection, "evidence", "embedding_dimension", "INTEGER")?;
-    ensure_column(
-        connection,
-        "evidence",
-        "extraction_status",
-        "TEXT NOT NULL DEFAULT 'succeeded'",
-    )?;
-    ensure_column(connection, "evidence", "extraction_message", "TEXT")?;
-    ensure_column(
-        connection,
-        "graph_mutations",
-        "relation_count",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    ensure_column(
-        connection,
-        "graph_mutations",
-        "claim_count",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
-    ensure_column(
-        connection,
-        "graph_mutations",
-        "event_count",
-        "INTEGER NOT NULL DEFAULT 0",
-    )?;
     code::initialize_code_schema(connection)?;
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
     operations::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
-
-    Ok(())
-}
-
-fn ensure_column(
-    connection: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), StorageError> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let columns = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    if !columns.iter().any(|existing| existing == column) {
-        connection.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
-            [],
-        )?;
-    }
 
     Ok(())
 }

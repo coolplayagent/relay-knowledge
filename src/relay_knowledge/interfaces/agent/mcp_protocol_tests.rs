@@ -1,22 +1,15 @@
-use std::{fmt::Debug, sync::Arc, time::Duration};
-
 use axum::{
-    body::{Body, Bytes},
+    body::Body,
     http::{Request, StatusCode, header},
 };
-use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use super::*;
-use super::{
-    mcp_test_support::SlowSearchStore,
-    mcp_tests::{
-        call_mcp, call_mcp_with_session, initialize_params, raw_custom_response, raw_mcp_request,
-        raw_mcp_request_without_protocol, raw_mcp_response, server_and_service_with_store,
-        server_with_env, tool_names,
-    },
+use super::mcp_tests::{
+    call_mcp, call_mcp_with_session, initialize_params, raw_custom_response, raw_mcp_request,
+    raw_mcp_request_without_protocol, raw_mcp_response, server_with_env, tool_names,
 };
+use super::*;
 
 #[tokio::test]
 async fn initialize_and_tools_list_use_snake_case_names_without_refresh() {
@@ -440,89 +433,32 @@ async fn resources_and_prompts_cover_all_readonly_variants_and_errors() {
 }
 
 #[tokio::test]
-async fn legacy_sse_endpoint_and_metrics_exporter_share_mcp_router() {
+async fn metrics_exporter_shares_mcp_router_without_compat_routes() {
     let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
     let mut router = server.router();
 
-    let forbidden_sse = router
+    let removed_sse = router
         .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri("/mcp/sse")
-                .header(header::ORIGIN, "https://attacker.example")
                 .body(Body::empty())
                 .expect("request should build"),
         )
         .await
         .expect("router should respond");
-    let sse_response = router
+    let removed_message = router
         .clone()
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri("/mcp/sse")
-                .header(header::ACCEPT, "text/event-stream")
+                .method("POST")
+                .uri("/mcp/message?sessionId=removed")
                 .body(Body::empty())
                 .expect("request should build"),
         )
         .await
         .expect("router should respond");
-    let sse_status = sse_response.status();
-    let sse_headers = sse_response.headers().clone();
-    let session_id = sse_headers
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .expect("legacy sse should issue session")
-        .to_owned();
-    let mut sse_stream = sse_response.into_body().into_data_stream();
-    let endpoint_event = next_sse_event(&mut sse_stream).await;
-    let stream_closed = tokio::time::timeout(Duration::from_millis(20), sse_stream.next()).await;
-
-    let initialize = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "legacy-init",
-            "method": "initialize",
-            "params": initialize_params()
-        })
-        .to_string(),
-        [("accept", "application/json")],
-    )
-    .await;
-    let initialize_event = next_sse_event(&mut sse_stream).await;
-    let initialized = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        [("accept", "application/json")],
-    )
-    .await;
-    let legacy_ping = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        r#"{"jsonrpc":"2.0","id":"legacy-ping","method":"ping"}"#,
-        [("accept", "application/json")],
-    )
-    .await;
-    let ping_event = next_sse_event(&mut sse_stream).await;
-    let bad_protocol = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        r#"{"jsonrpc":"2.0","id":"bad-protocol","method":"ping"}"#,
-        [
-            ("accept", "application/json"),
-            (MCP_PROTOCOL_VERSION_HEADER, "2024-11-05"),
-        ],
-    )
-    .await;
-    let bad_protocol_event = next_sse_event(&mut sse_stream).await;
     let (metrics_status, metrics_headers, metrics_body) =
         raw_custom_response(&mut router, "GET", "/mcp/metrics", "", []).await;
     let forbidden_metrics = raw_custom_response(
@@ -534,29 +470,9 @@ async fn legacy_sse_endpoint_and_metrics_exporter_share_mcp_router() {
     )
     .await;
 
-    assert_eq!(forbidden_sse.status(), StatusCode::FORBIDDEN);
+    assert_eq!(removed_sse.status(), StatusCode::NOT_FOUND);
+    assert_eq!(removed_message.status(), StatusCode::NOT_FOUND);
     assert_eq!(forbidden_metrics.0, StatusCode::FORBIDDEN);
-    assert_eq!(sse_status, StatusCode::OK);
-    assert!(endpoint_event.contains("event: endpoint"));
-    assert!(endpoint_event.contains(&format!("/mcp/message?sessionId={session_id}")));
-    assert!(stream_closed.is_err());
-    assert_eq!(initialize.0, StatusCode::ACCEPTED);
-    assert_eq!(initialize.2, Value::Null);
-    assert!(initialize_event.contains("event: message"));
-    assert!(initialize_event.contains(r#""id":"legacy-init""#));
-    assert!(initialize_event.contains(MCP_PROTOCOL_VERSION));
-    assert_eq!(initialized.0, StatusCode::ACCEPTED);
-    assert_eq!(legacy_ping.0, StatusCode::ACCEPTED);
-    assert_eq!(legacy_ping.2, Value::Null);
-    assert!(ping_event.contains("event: message"));
-    assert!(ping_event.contains(r#""id":"legacy-ping""#));
-    assert!(ping_event.contains(r#""result":{}"#));
-    assert_eq!(bad_protocol.0, StatusCode::ACCEPTED);
-    assert_eq!(bad_protocol.2, Value::Null);
-    assert!(bad_protocol_event.contains("event: message"));
-    assert!(!bad_protocol_event.contains("event: error"));
-    assert!(bad_protocol_event.contains(r#""error""#));
-    assert!(bad_protocol_event.contains(r#""http_status":400"#));
     assert_eq!(metrics_status, StatusCode::OK);
     assert_eq!(
         metrics_headers
@@ -579,18 +495,6 @@ async fn mcp_get_endpoints_reject_missing_origin_when_allowlist_is_configured() 
     .await;
     let mut router = server.router();
 
-    let missing_origin_sse = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/mcp/sse")
-                .header(header::ACCEPT, "text/event-stream")
-                .body(Body::empty())
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should respond");
     let missing_origin_metrics =
         raw_custom_response(&mut router, "GET", "/mcp/metrics", "", []).await;
     let allowed_origin_metrics = raw_custom_response(
@@ -602,185 +506,6 @@ async fn mcp_get_endpoints_reject_missing_origin_when_allowlist_is_configured() 
     )
     .await;
 
-    assert_eq!(missing_origin_sse.status(), StatusCode::FORBIDDEN);
     assert_eq!(missing_origin_metrics.0, StatusCode::FORBIDDEN);
     assert_eq!(allowed_origin_metrics.0, StatusCode::OK);
-}
-
-#[tokio::test]
-async fn legacy_message_rejects_before_tool_execution_when_sse_stream_is_closed() {
-    let server = server_with_env([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")]).await;
-    let mut router = server.clone().router();
-    let sse_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/mcp/sse")
-                .header(header::ACCEPT, "text/event-stream")
-                .body(Body::empty())
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should respond");
-    let session_id = sse_response
-        .headers()
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .expect("legacy sse should issue session")
-        .to_owned();
-    let mut sse_stream = sse_response.into_body().into_data_stream();
-    let _endpoint_event = next_sse_event(&mut sse_stream).await;
-
-    let initialize = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "legacy-init",
-            "method": "initialize",
-            "params": initialize_params()
-        })
-        .to_string(),
-        [("accept", "application/json")],
-    )
-    .await;
-    let _initialize_event = next_sse_event(&mut sse_stream).await;
-    let initialized = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        [("accept", "application/json")],
-    )
-    .await;
-    drop(sse_stream);
-
-    let tool_after_close = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "closed-tool",
-            "method": "tools/call",
-            "params": {
-                "name": "relay_inspect_graph",
-                "arguments": {"source_scope": "docs"}
-            }
-        })
-        .to_string(),
-        [("accept", "application/json")],
-    )
-    .await;
-
-    assert_eq!(initialize.0, StatusCode::ACCEPTED);
-    assert_eq!(initialized.0, StatusCode::ACCEPTED);
-    assert_eq!(tool_after_close.0, StatusCode::NOT_FOUND);
-    assert!(
-        !server
-            .audit_snapshot()
-            .iter()
-            .any(|event| event.operation == "relay_inspect_graph"),
-        "legacy /message must reject unavailable SSE delivery before tool execution"
-    );
-}
-
-#[tokio::test]
-async fn legacy_message_acknowledges_before_slow_mcp_execution_completes() {
-    let (server, _service) = server_and_service_with_store(
-        [("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "docs")],
-        Arc::new(SlowSearchStore),
-    )
-    .await;
-    let mut router = server.router();
-    let sse_response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/mcp/sse")
-                .header(header::ACCEPT, "text/event-stream")
-                .body(Body::empty())
-                .expect("request should build"),
-        )
-        .await
-        .expect("router should respond");
-    let session_id = sse_response
-        .headers()
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .expect("legacy sse should issue session")
-        .to_owned();
-    let mut sse_stream = sse_response.into_body().into_data_stream();
-    let _endpoint_event = next_sse_event(&mut sse_stream).await;
-    let initialize = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "legacy-init",
-            "method": "initialize",
-            "params": initialize_params()
-        })
-        .to_string(),
-        [("accept", "application/json")],
-    )
-    .await;
-    let _initialize_event = next_sse_event(&mut sse_stream).await;
-    let initialized = raw_custom_response(
-        &mut router,
-        "POST",
-        &format!("/mcp/message?sessionId={session_id}"),
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        [("accept", "application/json")],
-    )
-    .await;
-
-    let inspect_request = Request::builder()
-        .method("POST")
-        .uri(format!("/mcp/message?sessionId={session_id}"))
-        .header(header::CONTENT_TYPE, "application/json")
-        .header(header::ACCEPT, "application/json")
-        .header(MCP_PROTOCOL_VERSION_HEADER, MCP_PROTOCOL_VERSION)
-        .body(Body::from(
-            json!({
-                "jsonrpc": "2.0",
-                "id": "slow-inspect",
-                "method": "tools/call",
-                "params": {
-                    "name": "relay_inspect_graph",
-                    "arguments": {"source_scope": "docs"}
-                }
-            })
-            .to_string(),
-        ))
-        .expect("request should build");
-    let inspect_task = tokio::spawn(router.clone().oneshot(inspect_request));
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    drop(sse_stream);
-    let inspect_response = inspect_task
-        .await
-        .expect("request task should join")
-        .expect("router should respond");
-
-    assert_eq!(initialize.0, StatusCode::ACCEPTED);
-    assert_eq!(initialized.0, StatusCode::ACCEPTED);
-    assert_eq!(inspect_response.status(), StatusCode::ACCEPTED);
-}
-
-async fn next_sse_event<S, E>(stream: &mut S) -> String
-where
-    S: futures_util::Stream<Item = Result<Bytes, E>> + Unpin,
-    E: Debug,
-{
-    let chunk = tokio::time::timeout(Duration::from_secs(1), stream.next())
-        .await
-        .expect("SSE event should arrive")
-        .expect("SSE stream should stay open")
-        .expect("SSE chunk should be readable");
-
-    String::from_utf8(chunk.to_vec()).expect("SSE event should be UTF-8")
 }

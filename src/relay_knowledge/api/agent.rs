@@ -180,7 +180,6 @@ pub struct AgentAccessPolicySummary {
 pub struct AgentProtocolStatus {
     pub mcp_streamable_http_enabled: bool,
     pub mcp_endpoint: String,
-    pub mcp_legacy_http_sse_endpoint: String,
     pub mcp_resources_enabled: bool,
     pub mcp_prompts_enabled: bool,
     pub metrics_endpoint: String,

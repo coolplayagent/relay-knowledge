@@ -17,7 +17,7 @@
 - 默认 source preset 排除常见生成路径、重型路径和资源，例如 `dist`、`build`、`target`、`node_modules`、cache、vendored 目录、PDF、archive、font、image、video、source map、wasm、`*.jsonl` 这类按行数据集 dump，以及 `uv.lock` 这类 lockfile snapshot。
 - Git 仓库根目录下的 `.relay-knowledgeignore` 提供可重复的仓库本地排除规则。支持空行、注释、目录名、锚定路径和 `*.extension` 模式。ignore 规则只能收窄有效 scope。
 - `repo index` 摘要现在包含 Git 枚举/blob 读取、已解析文件、SQLite 写入、跳过未变更文件和降级文件的进度计数。
-- `repo impact` 同时返回旧版 `changed_paths` 列表，以及 `path_groups.in_scope_changed_paths` / `path_groups.out_of_scope_changed_paths`。
+- `repo impact` 通过 `path_groups.in_scope_changed_paths` / `path_groups.out_of_scope_changed_paths` 返回 scope 内外路径分组。
 - `repo report <alias> --format markdown|json` 输出注册 scope、已解析 commit/tree、索引总量、降级摘要、代表性查询、延迟样本和新鲜度状态。
 - `graph inspect` 和 `health` 在图代码计数中包含仓库代码总量，使 API consumer 不会看到误报为空的代码图；同一仓库专用计数仍保留在 `repository_code_totals` 下。
 - 代码仓库查询在对 symbol、reference、call、import 和 chunk 进行内存评分前，先使用 SQLite candidate predicate 和 limit。

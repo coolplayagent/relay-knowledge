@@ -234,10 +234,7 @@ The MCP server also advertises resources and prompts: resources expose service
 status, health, index status, and Prometheus text metrics; the graph-wide
 summary resource is advertised only when
 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`. Prompts provide retrieval
-and code-impact planning templates. Legacy HTTP+SSE
-clients can keep `/mcp/sse` open for `endpoint` and `message` events, then post
-JSON-RPC payloads to `/mcp/message`; the native Streamable HTTP endpoint remains
-preferred. `/mcp/metrics` exports a
+and code-impact planning templates. `/mcp/metrics` exports a
 small Prometheus-compatible snapshot for graph version, index refresh backlog,
 dead letters, QoS request counts, and per-index stale state.
 Agent requests write bounded in-process audit events with runtime identity,

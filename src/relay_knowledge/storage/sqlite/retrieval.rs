@@ -39,7 +39,6 @@ const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
 const LOCAL_VECTOR_DIMENSION: usize = 16;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
-    let rebuild_required = migration::drop_incompatible_bm25_table(connection)?;
     connection.execute_batch(
         "
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_bm25 USING fts5(
@@ -91,7 +90,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         );
         ",
     )?;
-    if rebuild_required || migration::derived_documents_missing(connection)? {
+    if migration::derived_documents_missing(connection)? {
         migration::rebuild_bm25_documents(connection)?;
     }
 
