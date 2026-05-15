@@ -214,6 +214,45 @@ export type ServiceStatusResponse = {
   };
 };
 
+export type GraphCanvasKind = "knowledge" | "code" | "mixed";
+
+export type GraphCanvasNode = {
+  id: string;
+  kind: string;
+  label: string;
+  subtitle?: string;
+  source_scope?: string;
+  graph_version: number;
+  weight: number;
+  status?: string;
+  details: Record<string, string>;
+};
+
+export type GraphCanvasEdge = {
+  id: string;
+  kind: string;
+  source: string;
+  target: string;
+  label: string;
+  graph_version: number;
+  confidence_basis_points?: number;
+  evidence_count?: number;
+  details: Record<string, string>;
+};
+
+export type GraphCanvasResponse = {
+  metadata: ApiMetadata;
+  nodes: GraphCanvasNode[];
+  edges: GraphCanvasEdge[];
+  summary: {
+    kind: GraphCanvasKind;
+    node_count: number;
+    edge_count: number;
+    truncated: boolean;
+    available_kinds: string[];
+  };
+};
+
 export type WebOperationSnapshot = {
   id: string;
   name: string;

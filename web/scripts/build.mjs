@@ -1,10 +1,28 @@
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
-const dist = new URL("../dist/", import.meta.url);
-const assets = new URL("../dist/assets/", import.meta.url);
+const distUrl = new URL("../dist/", import.meta.url);
+const assetsUrl = new URL("../dist/assets/", import.meta.url);
+const assets = fileURLToPath(assetsUrl);
 
 mkdirSync(assets, { recursive: true });
-copyFileSync(new URL("../src/styles.css", import.meta.url), new URL("styles.css", assets));
+
+await build({
+  entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  outfile: fileURLToPath(new URL("main.js", assetsUrl)),
+  sourcemap: false,
+});
+
+const styles = [
+  readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"),
+  readFileSync(new URL("../src/graph_canvas.css", import.meta.url), "utf8"),
+].join("\n");
+writeFileSync(new URL("styles.css", assetsUrl), styles);
 
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8")
   .replace(
@@ -13,4 +31,4 @@ const html = readFileSync(new URL("../index.html", import.meta.url), "utf8")
   )
   .replace("</head>", '    <link rel="stylesheet" href="/assets/styles.css" />\n  </head>');
 
-writeFileSync(new URL("index.html", dist), html);
+writeFileSync(new URL("index.html", distUrl), html);

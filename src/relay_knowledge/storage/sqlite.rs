@@ -8,6 +8,8 @@ mod code;
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+mod canvas;
+mod canvas_code;
 mod code_graph;
 mod helpers;
 mod indexing;

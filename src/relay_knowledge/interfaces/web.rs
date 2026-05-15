@@ -8,7 +8,7 @@ use std::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -20,9 +20,10 @@ use tower_http::limit::RequestBodyLimitLayer;
 use crate::{
     api::{
         ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind,
-        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
-        IngestRequest, InterfaceKind, ProposalDecisionApiRequest, ProposalListApiRequest,
-        RequestContext, WorkerRunRequest, WorkerStatusRequest,
+        GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, GraphInspectionRequest,
+        HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind,
+        ProposalDecisionApiRequest, ProposalListApiRequest, RequestContext, WorkerRunRequest,
+        WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{
@@ -51,6 +52,7 @@ fn router_with_assets(
         .route("/api/project/status", get(project_status))
         .route("/api/health", get(health))
         .route("/api/service/status", get(service_status))
+        .route("/api/web/graph/canvas", get(graph_canvas))
         .route("/api/web/operations/execute", post(execute_operation))
         .route("/", get(index))
         .route("/{*path}", get(asset_or_index))
@@ -84,6 +86,36 @@ async fn service_status(State(state): State<WebState>) -> Response {
     match state
         .service
         .service_status(RequestContext::for_interface(InterfaceKind::Web))
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => api_error_response(error),
+    }
+}
+
+async fn graph_canvas(
+    State(state): State<WebState>,
+    Query(query): Query<GraphCanvasQuery>,
+) -> Response {
+    let kind = match query
+        .kind
+        .as_deref()
+        .map(GraphCanvasKind::parse)
+        .transpose()
+    {
+        Ok(kind) => kind.unwrap_or(GraphCanvasKind::Knowledge),
+        Err(message) => return WebError::bad_request(message).into_response(),
+    };
+    let request = GraphCanvasRequest {
+        kind,
+        source_scope: query.scope.and_then(non_empty_query_value),
+        query: query.query.and_then(non_empty_query_value),
+        limit: query.limit.unwrap_or(GRAPH_CANVAS_DEFAULT_LIMIT),
+    };
+
+    match state
+        .service
+        .graph_canvas(request, RequestContext::for_interface(InterfaceKind::Web))
         .await
     {
         Ok(response) => Json(response).into_response(),
@@ -575,6 +607,20 @@ fn proposal_decision_request(payload: &Value) -> Result<ProposalDecisionApiReque
         actor: string_field(payload, "actor")?.to_owned(),
         reason: optional_string_field(payload, "reason"),
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphCanvasQuery {
+    kind: Option<String>,
+    scope: Option<String>,
+    query: Option<String>,
+    limit: Option<usize>,
+}
+
+fn non_empty_query_value(value: String) -> Option<String> {
+    let trimmed = value.trim();
+
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 #[derive(Debug, Deserialize)]

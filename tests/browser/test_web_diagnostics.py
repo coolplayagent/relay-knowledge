@@ -7,6 +7,7 @@ import json
 import socketserver
 import threading
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, expect
 
@@ -27,7 +28,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("738", exact=True)).to_be_visible()
         expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
-        expect(page.locator("aside nav a")).to_have_count(6)
+        expect(page.locator("aside nav a")).to_have_count(7)
         expect(page.get_by_role("link", name="Status")).to_have_attribute("aria-current", "page")
         assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
             "data:image/svg+xml"
@@ -88,6 +89,38 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         page.get_by_role("link", name="Runtime").click()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
 
+        page.get_by_role("link", name="Graph").click()
+        expect(page.get_by_role("heading", name="Graph")).to_be_visible()
+        expect(page.get_by_role("tab", name="Knowledge")).to_have_attribute("aria-selected", "true")
+        expect(page.locator(".graph-status")).to_contain_text("ready")
+        expect(page.locator(".graph-canvas canvas").first).to_be_visible()
+        page.evaluate(
+            """() => {
+                const host = document.querySelector("[data-testid='graph-canvas']");
+                host.__relaySelectGraphElement("entity:entity-relay");
+            }"""
+        )
+        expect(page.locator(".graph-details")).to_contain_text("Relay")
+        page.get_by_role("tab", name="Code").click()
+        expect(page.get_by_role("tab", name="Code")).to_have_attribute("aria-selected", "true")
+        expect(page.locator(".graph-status")).to_contain_text("ready")
+        page.evaluate(
+            """() => {
+                const host = document.querySelector("[data-testid='graph-canvas']");
+                host.__relaySelectGraphElement("code-symbol:repo:src/main.rs:sym-main");
+            }"""
+        )
+        expect(page.locator(".graph-details")).to_contain_text("main")
+        page.get_by_role("tab", name="Mixed").click()
+        expect(page.get_by_role("tab", name="Mixed")).to_have_attribute("aria-selected", "true")
+        page.get_by_label("Query").fill("Relay")
+        page.get_by_role("button", name="Apply graph filters").click()
+        expect(page.locator(".graph-status")).to_contain_text("truncated")
+        page.get_by_role("button", name="Zoom in").click()
+        page.get_by_role("button", name="Zoom out").click()
+        page.get_by_role("button", name="Fit graph to the viewport").click()
+        page.get_by_role("button", name="Reset graph zoom and selection").click()
+
         page.get_by_role("link", name="Providers").click()
         expect(page.get_by_role("heading", name="Providers")).to_be_visible()
         expect(page.get_by_text("Semantic backend")).to_be_visible()
@@ -124,7 +157,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".result-preview")).to_contain_text("worker.status")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        expect(page.locator("aside nav a")).to_have_count(6)
+        expect(page.locator("aside nav a")).to_have_count(7)
         page.get_by_role("link", name="Readiness").click()
         expect(page.get_by_text("Runtime budgets")).to_be_visible()
         mobile_layout = page.evaluate(
@@ -163,13 +196,17 @@ def serve_directory(directory: Path):
 
 class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
-        path = self.path.split("?", 1)[0]
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/project/status":
             self.write_json(PROJECT_STATUS_RESPONSE)
         elif path == "/api/health":
             self.write_json(HEALTH_RESPONSE)
         elif path == "/api/service/status":
             self.write_json(SERVICE_STATUS_RESPONSE)
+        elif path == "/api/web/graph/canvas":
+            kind = parse_qs(parsed.query).get("kind", ["knowledge"])[0]
+            self.write_json(graph_canvas_response(kind))
         else:
             super().do_GET()
 
@@ -209,6 +246,128 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def graph_canvas_response(kind: str) -> dict:
+    knowledge_nodes = [
+        {
+            "id": "entity:entity-relay",
+            "kind": "entity",
+            "label": "Relay",
+            "source_scope": "docs",
+            "graph_version": 7,
+            "weight": 3,
+            "details": {"label": "Relay"},
+        },
+        {
+            "id": "evidence:ev-relay",
+            "kind": "evidence",
+            "label": "docs/graph.md",
+            "subtitle": "Relay connects evidence to graph facts",
+            "source_scope": "docs",
+            "graph_version": 7,
+            "weight": 2,
+            "status": "accepted",
+            "details": {"content": "Relay connects evidence to graph facts"},
+        },
+    ]
+    knowledge_edges = [
+        {
+            "id": "evidence-entity:ev-relay:entity-relay",
+            "kind": "evidence_link",
+            "source": "evidence:ev-relay",
+            "target": "entity:entity-relay",
+            "label": "mentions",
+            "graph_version": 7,
+            "evidence_count": 1,
+            "details": {},
+        }
+    ]
+    code_nodes = [
+        {
+            "id": "scope:repo",
+            "kind": "source_scope",
+            "label": "repo",
+            "source_scope": "repo",
+            "graph_version": 7,
+            "weight": 3,
+            "details": {"source_scope": "repo"},
+        },
+        {
+            "id": "code-file:repo:src/main.rs",
+            "kind": "code_file",
+            "label": "src/main.rs",
+            "subtitle": "rust",
+            "source_scope": "repo",
+            "graph_version": 7,
+            "weight": 2,
+            "status": "parsed",
+            "details": {"path": "src/main.rs", "language": "rust"},
+        },
+        {
+            "id": "code-symbol:repo:src/main.rs:sym-main",
+            "kind": "code_symbol",
+            "label": "main",
+            "subtitle": "function / src/main.rs:1",
+            "source_scope": "repo",
+            "graph_version": 7,
+            "weight": 2,
+            "details": {"symbol_kind": "function", "line_range": "1-12"},
+        },
+    ]
+    code_edges = [
+        {
+            "id": "scope-file:repo:src/main.rs",
+            "kind": "contains",
+            "source": "scope:repo",
+            "target": "code-file:repo:src/main.rs",
+            "label": "contains",
+            "graph_version": 7,
+            "details": {},
+        },
+        {
+            "id": "defines:repo:src/main.rs:sym-main",
+            "kind": "defines",
+            "source": "code-file:repo:src/main.rs",
+            "target": "code-symbol:repo:src/main.rs:sym-main",
+            "label": "defines",
+            "graph_version": 7,
+            "details": {},
+        },
+    ]
+    mixed_edge = {
+        "id": "evidence-source-file:ev-relay:repo:src/main.rs",
+        "kind": "source_path",
+        "source": "evidence:ev-relay",
+        "target": "code-file:repo:src/main.rs",
+        "label": "source",
+        "graph_version": 7,
+        "evidence_count": 1,
+        "details": {"source_path": "src/main.rs"},
+    }
+    nodes = code_nodes if kind == "code" else knowledge_nodes
+    edges = code_edges if kind == "code" else knowledge_edges
+    if kind == "mixed":
+        nodes = knowledge_nodes + code_nodes
+        edges = knowledge_edges + code_edges + [mixed_edge]
+
+    return {
+        "metadata": {
+            "trace_id": f"trace-graph-{kind}",
+            "request_id": f"req-graph-{kind}",
+            "graph_version": 7,
+            "stale": False,
+        },
+        "nodes": nodes,
+        "edges": edges,
+        "summary": {
+            "kind": kind,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "truncated": kind == "mixed",
+            "available_kinds": sorted({item["kind"] for item in nodes + edges}),
+        },
+    }
 
 
 RUNTIME = {

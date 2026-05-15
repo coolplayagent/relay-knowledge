@@ -1,4 +1,6 @@
 import type {
+  GraphCanvasKind,
+  GraphCanvasResponse,
   HealthResponse,
   ProjectStatusResponse,
   ServiceStatusResponse,
@@ -9,6 +11,7 @@ import type {
 const PROJECT_STATUS_PATH = "/api/project/status";
 const HEALTH_PATH = "/api/health";
 const SERVICE_STATUS_PATH = "/api/service/status";
+const GRAPH_CANVAS_PATH = "/api/web/graph/canvas";
 const OPERATION_EXECUTE_PATH = "/api/web/operations/execute";
 const REQUEST_TIMEOUT_MS = 10000;
 const NO_CLIENT_TIMEOUT = null;
@@ -23,6 +26,25 @@ export async function loadHealth(): Promise<HealthResponse> {
 
 export async function loadServiceStatus(): Promise<ServiceStatusResponse> {
   return fetchJson<ServiceStatusResponse>(SERVICE_STATUS_PATH);
+}
+
+export async function loadGraphCanvas(params: {
+  kind: GraphCanvasKind;
+  sourceScope?: string;
+  query?: string;
+  limit: number;
+}): Promise<GraphCanvasResponse> {
+  const query = new URLSearchParams();
+  query.set("kind", params.kind);
+  query.set("limit", String(params.limit));
+  if (params.sourceScope) {
+    query.set("scope", params.sourceScope);
+  }
+  if (params.query) {
+    query.set("query", params.query);
+  }
+
+  return fetchJson<GraphCanvasResponse>(`${GRAPH_CANVAS_PATH}?${query.toString()}`);
 }
 
 export async function executeWebOperation(

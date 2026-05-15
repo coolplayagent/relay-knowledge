@@ -9,10 +9,12 @@ use serde::Serialize;
 use crate::{
     api::{
         AgentProtocolStatus, ApiError, ApiMetadata, EmbeddingProviderProbeResponse,
-        GraphInspectionRequest, GraphInspectionResponse, HealthResponse, HybridRetrievalRequest,
-        HybridRetrievalResponse, IndexRefreshRequest, IndexRefreshResponse, IngestRequest,
-        IngestResponse, MultimodalExtractionRequest, MultimodalExtractionResponse,
-        ProjectStatusResponse, RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
+        GRAPH_CANVAS_MAX_LIMIT, GraphCanvasEdge, GraphCanvasKind, GraphCanvasNode,
+        GraphCanvasRequest, GraphCanvasResponse, GraphCanvasSummary, GraphInspectionRequest,
+        GraphInspectionResponse, HealthResponse, HybridRetrievalRequest, HybridRetrievalResponse,
+        IndexRefreshRequest, IndexRefreshResponse, IngestRequest, IngestResponse,
+        MultimodalExtractionRequest, MultimodalExtractionResponse, ProjectStatusResponse,
+        RequestContext, ServiceRecoveryReport, ServiceStatusResponse,
     },
     domain::{
         AuditStatus, CodeParseStatusCounts, CodeRepositoryTotals, ContextGraphPath,
@@ -32,8 +34,8 @@ use crate::{
         read_model_backend_statuses,
     },
     storage::{
-        GraphInspection, GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest,
-        SqliteGraphStore, StorageError,
+        GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection, GraphSearchRequest,
+        KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore, StorageError,
     },
 };
 
@@ -415,6 +417,77 @@ impl RelayKnowledgeService {
             metadata: ApiMetadata::graph_only(&context, graph.graph_version),
             graph,
             repository_code_totals,
+        })
+    }
+
+    /// Returns a bounded read-only graph canvas snapshot for the Web workspace.
+    pub async fn graph_canvas(
+        &self,
+        request: GraphCanvasRequest,
+        context: RequestContext,
+    ) -> Result<GraphCanvasResponse, ApiError> {
+        if request.limit == 0 || request.limit > GRAPH_CANVAS_MAX_LIMIT {
+            return Err(ApiError::invalid_argument(format!(
+                "graph canvas limit must be between 1 and {GRAPH_CANVAS_MAX_LIMIT}"
+            )));
+        }
+        let store = self.storage.get().await.map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let snapshot = store
+            .graph_canvas(GraphCanvasStorageRequest {
+                selection: canvas_selection(request.kind),
+                source_scope: request.source_scope,
+                query: request.query,
+                graph_version,
+                limit: request.limit,
+            })
+            .await
+            .map_err(storage_api_error)?;
+        let node_count = snapshot.nodes.len();
+        let edge_count = snapshot.edges.len();
+
+        Ok(GraphCanvasResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            nodes: snapshot
+                .nodes
+                .into_iter()
+                .map(|node| GraphCanvasNode {
+                    id: node.id,
+                    kind: node.kind,
+                    label: node.label,
+                    subtitle: node.subtitle,
+                    source_scope: node.source_scope,
+                    graph_version: node.graph_version.get(),
+                    weight: node.weight,
+                    status: node.status,
+                    details: node.details,
+                })
+                .collect(),
+            edges: snapshot
+                .edges
+                .into_iter()
+                .map(|edge| GraphCanvasEdge {
+                    id: edge.id,
+                    kind: edge.kind,
+                    source: edge.source,
+                    target: edge.target,
+                    label: edge.label,
+                    graph_version: edge.graph_version.get(),
+                    confidence_basis_points: edge.confidence_basis_points,
+                    evidence_count: edge.evidence_count,
+                    details: edge.details,
+                })
+                .collect(),
+            summary: GraphCanvasSummary {
+                kind: request.kind,
+                node_count,
+                edge_count,
+                truncated: snapshot.truncated,
+                available_kinds: snapshot.available_kinds,
+            },
         })
     }
 
@@ -804,6 +877,14 @@ fn graph_with_repository_code_totals(
     );
 
     graph
+}
+
+fn canvas_selection(kind: GraphCanvasKind) -> GraphCanvasSelection {
+    match kind {
+        GraphCanvasKind::Knowledge => GraphCanvasSelection::Knowledge,
+        GraphCanvasKind::Code => GraphCanvasSelection::Code,
+        GraphCanvasKind::Mixed => GraphCanvasSelection::Mixed,
+    }
 }
 
 fn add_parse_status_counts(
