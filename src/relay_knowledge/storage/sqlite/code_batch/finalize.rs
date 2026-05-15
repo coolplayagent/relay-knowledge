@@ -10,7 +10,7 @@ pub(super) fn resolve_scope(
     repository_id: &str,
 ) -> Result<(), StorageError> {
     resolve_references(transaction, source_scope)?;
-    resolve_c_includes(transaction, source_scope)?;
+    resolve_imports(transaction, source_scope)?;
     rebuild_calls(transaction, source_scope, repository_id)
 }
 
@@ -53,12 +53,25 @@ fn resolve_references(
     Ok(())
 }
 
-fn resolve_c_includes(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<(), StorageError> {
+fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<(), StorageError> {
     let files = load_file_languages(transaction, source_scope)?;
     let module_paths = module_path_index(files.keys());
+    let imports = load_import_keys(transaction, source_scope)?;
+    let symbols_by_name = if imports
+        .iter()
+        .any(|import| matches!(files.get(&import.path).map(String::as_str), Some("python")))
+    {
+        let mut symbols_by_name = BTreeMap::<String, Vec<SymbolKey>>::new();
+        for symbol in load_symbol_keys(transaction, source_scope)? {
+            symbols_by_name
+                .entry(symbol.name.clone())
+                .or_default()
+                .push(symbol);
+        }
+        symbols_by_name
+    } else {
+        BTreeMap::new()
+    };
     transaction.execute(
         "
         DELETE FROM code_repository_search
@@ -66,12 +79,19 @@ fn resolve_c_includes(
         ",
         params![source_scope],
     )?;
-    for import in load_import_keys(transaction, source_scope)? {
+    for import in imports {
         let language = files.get(&import.path).map(String::as_str);
-        let resolution = if matches!(language, Some("c" | "cpp")) {
-            resolve_include_import(&import.path, &import.module, &module_paths)
-        } else {
-            ImportResolution::Unresolved
+        let resolution = match language {
+            Some("c" | "cpp") => {
+                resolve_include_import(&import.path, &import.module, &module_paths)
+            }
+            Some("python") => resolve_python_import(
+                &import.path,
+                &import.module,
+                &module_paths,
+                &symbols_by_name,
+            ),
+            _ => ImportResolution::Unresolved,
         };
         let (state, confidence, tier, target_hint) =
             import_resolution_fields(resolution, &import.module);
@@ -435,6 +455,155 @@ fn resolve_include_import(
     }
 
     resolve_first_module_file(&candidates, quoted, module_paths)
+}
+
+fn resolve_python_import(
+    import_path: &str,
+    statement: &str,
+    indexed_module_paths: &BTreeMap<String, Vec<String>>,
+    symbols_by_name: &BTreeMap<String, Vec<SymbolKey>>,
+) -> ImportResolution {
+    if !(import_path.ends_with(".py") || import_path.ends_with(".pyw")) {
+        return ImportResolution::Unresolved;
+    }
+    let statement = statement.trim().trim_end_matches(';').trim();
+    if let Some(body) = statement.strip_prefix("from ") {
+        let Some((module, names)) = body.split_once(" import ") else {
+            return ImportResolution::Unresolved;
+        };
+        let Some(module_path) = absolute_python_module_path(module.trim()) else {
+            return ImportResolution::Unresolved;
+        };
+        let imported_names = parse_python_imported_names(names);
+        return combined_python_import_resolution(
+            imported_names.iter().map(|name| {
+                resolve_python_imported_name(
+                    name,
+                    &module_path,
+                    indexed_module_paths,
+                    symbols_by_name,
+                )
+            }),
+            statement,
+        );
+    }
+    if let Some(body) = statement.strip_prefix("import ") {
+        let resolved = body
+            .split(',')
+            .filter_map(|part| {
+                let module = part
+                    .trim()
+                    .split_once(" as ")
+                    .map_or(part.trim(), |(module, _)| module.trim());
+                absolute_python_module_path(module)
+            })
+            .any(|module_path| python_module_exists(&module_path, indexed_module_paths));
+        return if resolved {
+            ImportResolution::Resolved(statement.to_owned())
+        } else {
+            ImportResolution::Unresolved
+        };
+    }
+
+    ImportResolution::Unresolved
+}
+
+fn resolve_python_imported_name(
+    name: &str,
+    module_path: &str,
+    indexed_module_paths: &BTreeMap<String, Vec<String>>,
+    symbols_by_name: &BTreeMap<String, Vec<SymbolKey>>,
+) -> ImportResolution {
+    let symbol_paths = python_module_files(module_path);
+    let matching_symbols = symbols_by_name.get(name).map_or(0, |symbols| {
+        symbols
+            .iter()
+            .filter(|symbol| {
+                symbol_paths
+                    .iter()
+                    .any(|module_path| path_matches_candidate(&symbol.path, module_path))
+            })
+            .take(2)
+            .count()
+    });
+    match matching_symbols {
+        1 => ImportResolution::Resolved(name.to_owned()),
+        2.. => ImportResolution::Ambiguous,
+        0 if python_module_exists(&format!("{module_path}/{name}"), indexed_module_paths) => {
+            ImportResolution::Resolved(name.to_owned())
+        }
+        _ => ImportResolution::Unresolved,
+    }
+}
+
+fn combined_python_import_resolution(
+    results: impl IntoIterator<Item = ImportResolution>,
+    statement: &str,
+) -> ImportResolution {
+    let mut total = 0usize;
+    let mut resolved = 0usize;
+    let mut ambiguous = false;
+    for result in results {
+        total += 1;
+        match result {
+            ImportResolution::Resolved(_) => resolved += 1,
+            ImportResolution::Ambiguous => ambiguous = true,
+            ImportResolution::Unresolved => {}
+        }
+    }
+    if total == 0 {
+        return ImportResolution::Unresolved;
+    }
+    if ambiguous || (resolved > 0 && resolved < total) {
+        return ImportResolution::Ambiguous;
+    }
+    if resolved == total {
+        return ImportResolution::Resolved(statement.to_owned());
+    }
+
+    ImportResolution::Unresolved
+}
+
+fn python_module_exists(
+    module_path: &str,
+    indexed_module_paths: &BTreeMap<String, Vec<String>>,
+) -> bool {
+    python_module_files(module_path)
+        .iter()
+        .any(|file_path| indexed_module_paths.contains_key(&normalize_module_path(file_path)))
+}
+
+fn python_module_files(module_path: &str) -> Vec<String> {
+    vec![
+        format!("{module_path}.py"),
+        format!("{module_path}.pyw"),
+        format!("{module_path}/__init__.py"),
+    ]
+}
+
+fn absolute_python_module_path(module: &str) -> Option<String> {
+    let module = module.trim();
+    (!module.is_empty() && !module.starts_with('.')).then(|| module.replace('.', "/"))
+}
+
+fn parse_python_imported_names(names: &str) -> Vec<String> {
+    names
+        .replace(['(', ')', '\\'], " ")
+        .split(',')
+        .filter_map(|part| {
+            let name = part
+                .trim()
+                .split_once(" as ")
+                .map_or(part.trim(), |(name, _)| name.trim());
+            let name = name.trim_start_matches('.');
+            (!name.is_empty() && name != "*").then(|| name.to_owned())
+        })
+        .collect()
+}
+
+fn path_matches_candidate(path: &str, candidate: &str) -> bool {
+    let candidate = normalize_module_path(candidate);
+    path == candidate || strip_source_root(path) == candidate
 }
 
 fn resolve_first_module_file(

@@ -23,6 +23,10 @@ mod code_batch;
 mod code_tests;
 
 #[cfg(test)]
+#[path = "code_batch_finalize_tests.rs"]
+mod code_batch_finalize_tests;
+
+#[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]
 mod code_query_accuracy_tests;
 

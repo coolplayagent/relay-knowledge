@@ -1,9 +1,8 @@
 use super::*;
 use crate::{
     domain::{
-        CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeIndexSnapshot,
-        CodeParseStatus, CodeQueryKind, CodeRepositorySelector, CodeRetrievalLayer,
-        FreshnessPolicy,
+        CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositorySelector,
+        CodeRetrievalLayer, FreshnessPolicy,
     },
     storage::SqliteGraphStore,
 };
@@ -814,107 +813,6 @@ async fn repository_report_counts_materialized_call_edges_once() {
     assert_eq!(report.resolved_edge_count, 0);
     assert_eq!(report.ambiguous_edge_count, 0);
     assert_eq!(report.unresolved_edge_count, 4);
-}
-
-#[tokio::test]
-async fn checkpointed_batches_finalize_cross_batch_call_edges() {
-    let store = SqliteGraphStore::open_in_memory().expect("store should open");
-    store
-        .upsert_code_repository(
-            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
-                .expect("registration should validate"),
-        )
-        .await
-        .expect("repository should persist");
-    let mut snapshot = snapshot_with_resolved_reference();
-    snapshot.references[0].target_symbol_snapshot_id = None;
-    snapshot.references[0].resolution_state = "unresolved".to_owned();
-    let session = CodeIndexSession {
-        repository_id: snapshot.repository_id.clone(),
-        source_scope: snapshot.source_scope.clone(),
-        base_resolved_commit_sha: None,
-        resolved_commit_sha: snapshot.resolved_commit_sha.clone(),
-        tree_hash: snapshot.tree_hash.clone(),
-        path_filters: Vec::new(),
-        language_filters: Vec::new(),
-        full_replace: true,
-        total_path_count: 2,
-        changed_path_count: 2,
-        skipped_unchanged_count: 0,
-        deleted_paths: Vec::new(),
-        tombstones: Vec::new(),
-        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
-    };
-
-    store
-        .begin_code_index_session(session.clone())
-        .await
-        .expect("session should begin");
-    let first = CodeIndexBatch {
-        repository_id: snapshot.repository_id.clone(),
-        source_scope: snapshot.source_scope.clone(),
-        batch_index: 1,
-        parsed_byte_count: 20,
-        files: vec![snapshot.files[0].clone()],
-        symbols: snapshot.symbols.clone(),
-        references: Vec::new(),
-        imports: Vec::new(),
-        chunks: Vec::new(),
-        diagnostics: Vec::new(),
-    };
-    let second = CodeIndexBatch {
-        repository_id: snapshot.repository_id.clone(),
-        source_scope: snapshot.source_scope.clone(),
-        batch_index: 2,
-        parsed_byte_count: 20,
-        files: vec![snapshot.files[1].clone()],
-        symbols: Vec::new(),
-        references: snapshot.references.clone(),
-        imports: Vec::new(),
-        chunks: Vec::new(),
-        diagnostics: Vec::new(),
-    };
-    let checkpoint = store
-        .apply_code_index_batch(first)
-        .await
-        .expect("first batch should persist");
-    assert_eq!(checkpoint.batch_count, 1);
-    let indexing_status = store
-        .code_repository_status("fixture".to_owned())
-        .await
-        .expect("status should load")
-        .expect("status should exist");
-    assert_eq!(indexing_status.state, "indexing");
-    assert_eq!(indexing_status.indexed_file_count, 1);
-    store
-        .apply_code_index_batch(second)
-        .await
-        .expect("second batch should persist");
-    let summary = store
-        .finalize_code_index_session(session)
-        .await
-        .expect("session should finalize");
-
-    assert_eq!(summary.progress.batch_count, 2);
-    assert_eq!(summary.progress.checkpoint_file_count, 2);
-    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
-        .expect("selector should validate");
-    let hits = store
-        .search_code(
-            crate::domain::CodeRetrievalRequest::new(
-                "target",
-                selector,
-                CodeQueryKind::Callers,
-                5,
-                FreshnessPolicy::AllowStale,
-            )
-            .expect("request should validate"),
-        )
-        .await
-        .expect("call query should succeed");
-
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
 }
 
 async fn store_with_repository_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
