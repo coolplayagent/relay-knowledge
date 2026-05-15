@@ -318,7 +318,9 @@ pub(super) fn add_source_path_links(
         "
         SELECT ev.id, ev.source_scope, ev.source_path, ev.created_graph_version
         FROM evidence ev
-        JOIN code_files file ON file.source_scope = ev.source_scope AND file.path = ev.source_path
+        JOIN code_files file ON file.source_scope = ev.source_scope
+                            AND file.path = ev.source_path
+                            AND file.created_graph_version <= ?1
         WHERE ev.created_graph_version <= ?1
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND ev.source_path IS NOT NULL

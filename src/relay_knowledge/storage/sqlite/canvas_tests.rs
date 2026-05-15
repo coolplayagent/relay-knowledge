@@ -340,6 +340,71 @@ async fn mixed_canvas_links_evidence_to_code_and_reference_targets() {
 }
 
 #[tokio::test]
+async fn mixed_canvas_excludes_future_source_path_links() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("repo").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-future-file",
+        scope.clone(),
+        "src/future.rs documents a file indexed later",
+        vec!["Future File".to_owned()],
+    )
+    .expect("evidence should validate")
+    .with_metadata(
+        Some("src/future.rs".to_owned()),
+        None,
+        crate::domain::ConfidenceScore::CERTAIN,
+        FactStatus::Accepted,
+    )
+    .expect("evidence metadata should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![evidence]).expect("batch"))
+        .await
+        .expect("evidence commit should succeed");
+
+    let file = CodeFileRecord::new(CodeFileFields {
+        source_scope: scope,
+        path: "src/future.rs".to_owned(),
+        content_hash: "hash-future".to_owned(),
+        language_id: "rust".to_owned(),
+        parse_status: CodeParseStatus::Parsed,
+        diagnostic: None,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        chunks: Vec::new(),
+    })
+    .expect("file should validate");
+    store
+        .commit_code_graph_batch(CodeGraphBatch::new(vec![file]).expect("batch"))
+        .await
+        .expect("code graph should commit");
+
+    let before_file = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Mixed,
+            source_scope: Some("repo".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(1),
+            limit: 40,
+        })
+        .await
+        .expect("canvas should load");
+
+    assert!(
+        before_file
+            .edges
+            .iter()
+            .all(|edge| edge.id != "evidence-source-file:ev-future-file:repo:src/future.rs")
+    );
+    assert!(
+        !before_file
+            .available_kinds
+            .iter()
+            .any(|kind| kind == "source_path")
+    );
+}
+
+#[tokio::test]
 async fn code_canvas_prefers_same_path_reference_target_when_symbol_ids_repeat() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let scope = SourceScope::parse("repo").expect("scope should parse");
