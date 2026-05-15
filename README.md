@@ -260,9 +260,11 @@ uv run --extra dev pytest tests/browser
 ```
 
 The static Web workspace renders project health, GraphRAG readiness, graph
-counts, scoped index freshness, refresh queue diagnostics, stale reasons,
-runtime budgets, and interactive operation composers for retrieval, ingestion,
-graph inspection, code repository workflows, index refresh, provider probes,
+counts, a compact SVG graph overview for evidence/code/index/worker topology,
+the interactive Graph canvas, scoped index freshness, refresh queue diagnostics,
+stale reasons, runtime budgets, and interactive operation composers for
+retrieval, ingestion, graph inspection, code repository workflows, index refresh,
+provider probes,
 worker/proposal/audit operations, and service runtime commands. The same Rust
 HTTP service serves static Web assets plus
 `/api/project/status`, `/api/health`, `/api/service/status`, and

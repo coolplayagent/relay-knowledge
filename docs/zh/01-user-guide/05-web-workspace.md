@@ -24,7 +24,7 @@ Web 工作区位于 `web/`，用于诊断面板和操作预览:
 /api/web/operations/execute
 ```
 
-页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、graph canvas、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
+页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、Status 页的紧凑 SVG graph overview、独立 Graph 页面中的 graph canvas、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets 和操作 composer。Status graph overview 使用 `/api/health` 的 evidence、entity、relation、code repository totals、index lag 和 worker queue 数据绘制确定性点线拓扑，不新增后端节点/边接口。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
 Providers 面板只展示脱敏后的 semantic/vector backend mode、模型、维度、endpoint host、key configured 状态和 cursor metadata；Web UI 不保存或提交 provider API key。
 
 `relay-knowledge service run --web` 会在配置的 `RELAY_KNOWLEDGE_HTTP_BIND` 上挂载静态 Web workspace 和这些 Web endpoints；同时启用 `--mcp streamable-http` 时，MCP endpoint 与 Web endpoints 共用同一事件驱动 HTTP listener 和 QoS budget。非 loopback bind 必须显式启用 remote-client access policy；`/api/web/operations/execute` 的请求体受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制。该 endpoint 接收当前 composer snapshot，返回执行后的 metadata、operation、command 和 result JSON。Rust Web adapter 只负责 HTTP JSON 解析和错误映射，实际 retrieve、ingest、graph inspect、index refresh、provider probe、code repository workflow、worker/proposal/audit operations 和 service status 都复用 application service。
@@ -90,7 +90,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-测试覆盖 diagnostics、单详情页导航、主题切换、GraphRAG readiness、graph canvas tabs/selection/zoom controls、operation composer、index table、runtime panel 和移动端布局。
+测试覆盖 diagnostics、单详情页导航、主题切换、Status graph overview 点线与字体比例、GraphRAG readiness、graph canvas tabs/selection/zoom controls、operation composer、index table、runtime panel 和移动端布局。
 
 ## 5.7 安全边界
 

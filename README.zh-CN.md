@@ -181,7 +181,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库工作流、索引刷新、提供者探测、worker/提案/审计操作和服务运行时命令的交互式操作编排器。同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
+静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、用于 evidence/code/index/worker 拓扑的紧凑 SVG graph overview、交互式 Graph canvas、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库工作流、索引刷新、提供者探测、worker/提案/审计操作和服务运行时命令的交互式操作编排器。同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
 
 可选本地 hooks：
 
