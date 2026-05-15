@@ -146,6 +146,14 @@ deterministic semantic/vector retrieval baseline is maintained in
   Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only
   chunks where possible. Parser or query failures are isolated to the affected
   file as `failed` diagnostics so one bad file cannot abort a repository batch.
+- C extraction adds language-aware recovery on top of tree-sitter-c tags:
+  function definitions use the full `function_definition` range instead of the
+  one-line `function_declarator` range, so caller/callee queries can attach
+  call sites to real functions; top-level prototypes are marked as
+  `function_declaration`; `preproc_def` and `preproc_function_def` are indexed
+  as `macro`; and `#include` directives resolve to indexed local header files
+  when possible. Syntax traversal uses an explicit stack to avoid Rust call
+  stack overflow on deeply nested C syntax trees.
 - Revision-scoped queries are served only when the requested ref resolves to the
   currently indexed commit or to the explicit `worktree` overlay ref; callers
   must index another ref before querying it. Refs beginning with `-` are

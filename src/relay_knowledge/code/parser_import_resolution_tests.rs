@@ -158,6 +158,94 @@ void run() {
 }
 
 #[test]
+fn c_include_resolution_normalizes_relative_header_paths() {
+    let snapshot = parse_sources(&[
+        (
+            "include/driver.h",
+            r#"
+void register_driver(void);
+"#,
+        ),
+        (
+            "src/platform/driver.c",
+            r#"
+#include "../../include/driver.h"
+
+void load_driver(void) {
+    register_driver();
+}
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "../../include/driver.h");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("include/driver.h"));
+}
+
+#[test]
+fn quoted_include_resolution_preserves_source_directory_precedence() {
+    let snapshot = parse_sources(&[
+        (
+            "foo.h",
+            r#"
+void root_header(void);
+"#,
+        ),
+        (
+            "src/foo.h",
+            r#"
+void source_header(void);
+"#,
+        ),
+        (
+            "src/use.cpp",
+            r#"
+#include "foo.h"
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "\"foo.h\"");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("src/foo.h"));
+}
+
+#[test]
+fn angle_include_resolution_does_not_probe_source_directory_first() {
+    let snapshot = parse_sources(&[
+        (
+            "include/driver.h",
+            r#"
+void include_driver(void);
+"#,
+        ),
+        (
+            "src/driver.h",
+            r#"
+void private_driver(void);
+"#,
+        ),
+        (
+            "src/platform/driver.h",
+            r#"
+void platform_driver(void);
+"#,
+        ),
+        (
+            "src/platform/driver.c",
+            r#"
+#include <driver.h>
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "<driver.h>");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("include/driver.h"));
+}
+
+#[test]
 fn cpp_using_declarations_keep_ambiguous_symbols_visible() {
     let snapshot = parse_sources(&[
         (

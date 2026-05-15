@@ -26,7 +26,15 @@ pub(super) fn resolve_import_targets(
             "python" => python::resolve_import(import, &context),
             "java" => java::resolve_import(import, &context),
             "typescript" | "tsx" => typescript::resolve_import(import, &context),
-            "cpp" => cpp::resolve_import(import, &context),
+            "c" | "cpp" => match cpp::resolve_import(import, &context) {
+                Some((resolution, target_hint)) => {
+                    if let Some(target_hint) = target_hint {
+                        import.target_hint = Some(target_hint);
+                    }
+                    Some(resolution)
+                }
+                None => None,
+            },
             _ => None,
         };
         if let Some(resolution) = resolution {

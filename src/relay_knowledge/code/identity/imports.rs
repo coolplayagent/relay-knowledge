@@ -9,6 +9,12 @@ pub(super) enum ImportResolution {
     Unresolved,
 }
 
+pub(super) enum ModuleFileResolution {
+    Resolved(String),
+    Ambiguous,
+    Unresolved,
+}
+
 pub(super) struct ImportContext<'a> {
     file_languages: BTreeMap<&'a str, &'a str>,
     module_paths: BTreeMap<String, Vec<&'a RepositoryCodeFileRecord>>,
@@ -68,6 +74,24 @@ impl<'a> ImportContext<'a> {
         module_paths
             .iter()
             .any(|module_path| self.module_file_exists(module_path))
+    }
+
+    pub(super) fn resolve_first_module_file(
+        &self,
+        module_paths: &[String],
+        allow_source_root_match: bool,
+    ) -> ModuleFileResolution {
+        for module_path in module_paths {
+            match self.resolve_module_file(module_path, allow_source_root_match) {
+                ModuleFileResolution::Resolved(path) => {
+                    return ModuleFileResolution::Resolved(path);
+                }
+                ModuleFileResolution::Ambiguous => return ModuleFileResolution::Ambiguous,
+                ModuleFileResolution::Unresolved => {}
+            }
+        }
+
+        ModuleFileResolution::Unresolved
     }
 
     pub(super) fn directory_has_language_files(
@@ -156,6 +180,50 @@ impl<'a> ImportContext<'a> {
             normalize_qualified_name(&symbol.qualified_name).contains(marker.as_str())
         })
     }
+}
+
+impl ImportContext<'_> {
+    fn resolve_module_file(
+        &self,
+        module_path: &str,
+        allow_source_root_match: bool,
+    ) -> ModuleFileResolution {
+        let Some(files) = self.module_paths.get(normalize_module_path(module_path)) else {
+            return ModuleFileResolution::Unresolved;
+        };
+        if let Some(path) = unique_file_match(
+            files
+                .iter()
+                .copied()
+                .filter(|file| file.path == module_path),
+        ) {
+            return ModuleFileResolution::Resolved(path);
+        }
+        if !allow_source_root_match {
+            return ModuleFileResolution::Unresolved;
+        }
+        if let Some(path) = unique_file_match(
+            files
+                .iter()
+                .copied()
+                .filter(|file| strip_source_root(&file.path) == module_path),
+        ) {
+            return ModuleFileResolution::Resolved(path);
+        }
+        if files.len() == 1 {
+            return ModuleFileResolution::Resolved(files[0].path.clone());
+        }
+
+        ModuleFileResolution::Ambiguous
+    }
+}
+
+fn unique_file_match<'a>(
+    files: impl IntoIterator<Item = &'a RepositoryCodeFileRecord>,
+) -> Option<String> {
+    let mut matches = files.into_iter();
+    let first = matches.next()?;
+    matches.next().is_none().then(|| first.path.clone())
 }
 
 pub(super) fn apply_resolution(import: &mut CodeImportRecord, resolution: ImportResolution) {

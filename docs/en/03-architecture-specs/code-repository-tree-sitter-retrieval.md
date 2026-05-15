@@ -249,6 +249,17 @@ tree-sitter query capture 推荐命名:
 - `capture_kind`
 - `content_hash`
 
+Language adapters may add deterministic recovery beyond upstream grammar tags
+as long as they still emit the same `CodeSymbol`, `CodeReference`,
+`CodeDependency`, and `CodeChunk` contracts. For example, the C adapter must not
+depend only on tree-sitter-c's `function_declarator` tag because that tag covers
+only the declarator range; function definitions must use the complete
+`function_definition` range, top-level prototypes must be marked as
+`function_declaration`, `preproc_def` and `preproc_function_def` must be marked
+as `macro`, and `preproc_include` must resolve to indexed header paths when
+possible. AST traversal must use an explicit stack or bounded worker boundary,
+not unbounded recursion over large C syntax trees.
+
 ### 5.3 多语言和嵌入语言
 
 当前 v1 grammar registry 必须覆盖常见服务端、前端、移动端和系统语言:

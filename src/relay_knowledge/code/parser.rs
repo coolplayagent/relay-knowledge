@@ -17,6 +17,9 @@ use super::{
     stable_content_hash, stable_id,
 };
 
+#[path = "parser_c.rs"]
+mod parser_c;
+
 const MAX_TEXT_FILE_BYTES: usize = 512 * 1024;
 
 pub(super) fn parse_indexed_file(
@@ -422,6 +425,9 @@ fn records_from_captures(
     let mut seen_references = BTreeSet::new();
     for capture in captures {
         if capture.capture_kind.starts_with("definition.") {
+            if context.language_id == "c" && capture.capture_kind == "definition.function" {
+                continue;
+            }
             let kind = capture.capture_kind.trim_start_matches("definition.");
             let key = (
                 capture.name.clone(),
@@ -430,12 +436,10 @@ fn records_from_captures(
                 kind.to_owned(),
             );
             if seen_symbols.insert(key) {
-                output.symbols.push(symbol_record(
-                    context,
-                    &capture.name,
-                    kind,
-                    &capture.target_node,
-                )?);
+                upsert_symbol(
+                    output,
+                    symbol_record(context, &capture.name, kind, &capture.target_node)?,
+                );
             }
         } else if capture.capture_kind.starts_with("reference.") {
             let kind = capture.capture_kind.trim_start_matches("reference.");
@@ -446,17 +450,82 @@ fn records_from_captures(
                 kind.to_owned(),
             );
             if seen_references.insert(key) {
-                output.references.push(reference_record(
-                    context,
-                    &capture.name,
-                    kind,
-                    &capture.name_node,
-                )?);
+                upsert_reference(
+                    output,
+                    reference_record(context, &capture.name, kind, &capture.name_node)?,
+                );
             }
         }
     }
 
     Ok(())
+}
+
+fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCodeSymbolRecord) {
+    if let Some(existing) = output.symbols.iter_mut().find(|existing| {
+        existing.name == symbol.name
+            && existing.path == symbol.path
+            && existing.line_range.start == symbol.line_range.start
+            && symbol_kinds_overlap(&existing.kind, &symbol.kind)
+            && ranges_overlap(
+                existing.byte_range.start,
+                existing.byte_range.end,
+                symbol.byte_range.start,
+                symbol.byte_range.end,
+            )
+    }) {
+        let existing_width = existing
+            .byte_range
+            .end
+            .saturating_sub(existing.byte_range.start);
+        let symbol_width = symbol
+            .byte_range
+            .end
+            .saturating_sub(symbol.byte_range.start);
+        if symbol_width > existing_width || symbol_preferred_over_existing(&symbol, existing) {
+            *existing = symbol;
+        }
+        return;
+    }
+
+    output.symbols.push(symbol);
+}
+
+fn ranges_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u32) -> bool {
+    left_start < right_end && right_start < left_end
+}
+
+fn symbol_kinds_overlap(left: &str, right: &str) -> bool {
+    left == right
+        || matches!(
+            (left, right),
+            ("function", "function_declaration")
+                | ("function_declaration", "function")
+                | ("macro", "function")
+                | ("function", "macro")
+        )
+}
+
+fn symbol_preferred_over_existing(
+    symbol: &RepositoryCodeSymbolRecord,
+    existing: &RepositoryCodeSymbolRecord,
+) -> bool {
+    matches!(symbol.kind.as_str(), "function" | "macro")
+        && !matches!(existing.kind.as_str(), "function" | "macro")
+}
+
+fn upsert_reference(output: &mut FileParseOutput, reference: RepositoryCodeReferenceRecord) {
+    if output.references.iter().any(|existing| {
+        existing.name == reference.name
+            && existing.path == reference.path
+            && existing.line_range.start == reference.line_range.start
+            && existing.byte_range.start == reference.byte_range.start
+            && existing.byte_range.end == reference.byte_range.end
+    }) {
+        return;
+    }
+
+    output.references.push(reference);
 }
 
 fn collect_manual_nodes(
@@ -467,37 +536,49 @@ fn collect_manual_nodes(
     let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
     stack.push(root);
     while let Some(node) = stack.pop() {
-        if let Some((name, kind, range)) = manual_definition(context.content, node) {
-            if !output.symbols.iter().any(|symbol| {
-                symbol.name == name
-                    && symbol.path == context.path
-                    && symbol.line_range.start == range.line_start as u32
-            }) {
-                output
-                    .symbols
-                    .push(symbol_record(context, &name, kind, &range)?);
-            }
-        }
-        if let Some((name, range)) = manual_call(context.content, node) {
-            if !output.references.iter().any(|reference| {
-                reference.name == name
-                    && reference.path == context.path
-                    && reference.line_range.start == range.line_start as u32
-                    && reference.byte_range.start as usize == range.byte_start
-                    && reference.byte_range.end as usize == range.byte_end
-            }) {
-                output
-                    .references
-                    .push(reference_record(context, &name, "call", &range)?);
-            }
-        }
+        collect_manual_node(context, node, output)?;
         push_children_reverse(node, &mut stack);
     }
 
     Ok(())
 }
 
-fn manual_definition(content: &str, node: Node<'_>) -> Option<(String, &'static str, SyntaxRange)> {
+fn collect_manual_node(
+    context: &FileParseContext<'_>,
+    node: Node<'_>,
+    output: &mut FileParseOutput,
+) -> Result<(), CodeIndexError> {
+    for (name, kind, range) in manual_definitions(context.content, context.language_id, node) {
+        upsert_symbol(output, symbol_record(context, &name, kind, &range)?);
+    }
+    if let Some((name, range)) = manual_call(context.content, node) {
+        upsert_reference(output, reference_record(context, &name, "call", &range)?);
+    }
+
+    Ok(())
+}
+
+fn manual_definitions(
+    content: &str,
+    language_id: &str,
+    node: Node<'_>,
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    if language_id == "c" {
+        let definitions = parser_c::manual_definitions(content, node);
+        if !definitions.is_empty() {
+            return definitions;
+        }
+    }
+
+    generic_manual_definition(content, node)
+        .into_iter()
+        .collect()
+}
+
+fn generic_manual_definition(
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
     let kind = match node.kind() {
         "function_item" | "function_definition" | "function_declaration" => "function",
         "method_declaration" | "method_definition" | "method_signature" => "method",
@@ -526,8 +607,28 @@ fn manual_call(content: &str, node: Node<'_>) -> Option<(String, SyntaxRange)> {
                 .or_else(|| node.child(0))?;
             last_identifier_text(content, function).map(|name| (name, syntax_range(function)))
         }
+        "preproc_call" => {
+            let name = node
+                .child_by_field_name("directive")
+                .or_else(|| node.child_by_field_name("name"))
+                .or_else(|| first_named_child_of_kind(node, "identifier"))?;
+            Some((node_text(content, name), syntax_range(name)))
+        }
         _ => None,
     }
+}
+
+fn first_named_child_of_kind<'tree>(root: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut stack = Vec::new();
+    push_children_reverse(root, &mut stack);
+    while let Some(node) = stack.pop() {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        push_children_reverse(node, &mut stack);
+    }
+
+    None
 }
 
 fn collect_imports(
@@ -623,7 +724,7 @@ fn chunks_for_symbols(
             file_id: file_id.to_owned(),
             path: path.to_owned(),
             language_id: language_id.to_owned(),
-            content: excerpt.to_owned(),
+            content: trim_to_budget(excerpt, 8_000),
             byte_range: symbol.byte_range.clone(),
             line_range: symbol.line_range.clone(),
             symbol_snapshot_id: Some(symbol.symbol_snapshot_id.clone()),
@@ -873,6 +974,10 @@ fn count_lines(bytes: &[u8]) -> usize {
 #[cfg(test)]
 #[path = "parser_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "parser_c_tests.rs"]
+mod c_tests;
 
 #[cfg(test)]
 #[path = "parser_import_resolution_tests.rs"]
