@@ -26,8 +26,43 @@ pub(super) fn manual_definitions(
             .or_else(|| first_named_child_of_kind(node, "identifier"))
             .map(|name| vec![(node_text(content, name), "macro", syntax_range(node))])
             .unwrap_or_default(),
+        "call_expression" if !has_ancestor_kind(node, "compound_statement") => {
+            syscall_macro_definition(content, node)
+                .map(|definition| vec![definition])
+                .unwrap_or_default()
+        }
         _ => Vec::new(),
     }
+}
+
+fn syscall_macro_definition(
+    content: &str,
+    call: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    let function = call.child_by_field_name("function")?;
+    let macro_name = node_text(content, function);
+    if !is_syscall_definition_macro(&macro_name) {
+        return None;
+    }
+    let arguments = call.child_by_field_name("arguments")?;
+    let syscall_name = first_named_child_of_kind(arguments, "identifier")?;
+
+    Some((
+        node_text(content, syscall_name),
+        "function",
+        syntax_range(call),
+    ))
+}
+
+fn is_syscall_definition_macro(name: &str) -> bool {
+    let Some(suffix) = name
+        .strip_prefix("SYSCALL_DEFINE")
+        .or_else(|| name.strip_prefix("COMPAT_SYSCALL_DEFINE"))
+    else {
+        return false;
+    };
+
+    !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit())
 }
 
 fn function_declaration_symbols(

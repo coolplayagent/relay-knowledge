@@ -72,6 +72,28 @@ void use_macro(void)
 }
 
 #[test]
+fn c_linux_syscall_define_macros_are_indexed_as_function_definitions() {
+    let snapshot = parse_source_snapshot(
+        "fs/read_write.c",
+        br#"
+SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+{
+    return ksys_read(fd, buf, count);
+}
+"#,
+    );
+
+    let syscall = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "read")
+        .expect("SYSCALL_DEFINE should expose the syscall name as a function definition");
+
+    assert_eq!(syscall.kind, "function");
+    assert_eq!(syscall.line_range.start, 2);
+}
+
+#[test]
 fn c_includes_resolve_to_indexed_header_files() {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
