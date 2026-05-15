@@ -25,21 +25,10 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.get_by_text("degraded").first).to_be_visible()
         expect(page.get_by_text("Code files")).to_be_visible()
         expect(page.get_by_text("738", exact=True)).to_be_visible()
-        expect(page.get_by_text("738 files / 14286 symbols")).to_be_visible()
-        expect(page.get_by_role("heading", name="GraphRAG readiness")).to_be_visible()
-        expect(page.get_by_text("BM25 read model")).to_be_visible()
-        expect(page.get_by_text("Semantic cursor")).to_be_visible()
-        expect(page.get_by_text("version 3 / lag 1")).to_be_visible()
-        expect(page.get_by_text("Stale reasons")).to_be_visible()
-        expect(page.get_by_text("bm25 / docs: scoped cursor lags graph version")).to_be_visible()
-        expect(page.get_by_role("cell", name="bm25")).to_be_visible()
-        expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
-        expect(page.get_by_role("heading", name="Providers")).to_be_visible()
-        expect(page.get_by_text("Semantic backend")).to_be_visible()
-        expect(page.get_by_text("https://embeddings.example")).to_be_visible()
-        expect(page.get_by_text("text-embed-3-small").first).to_be_visible()
+        expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
         expect(page.locator("aside nav a")).to_have_count(6)
+        expect(page.get_by_role("link", name="Status")).to_have_attribute("aria-current", "page")
         assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
             "data:image/svg+xml"
         )
@@ -50,6 +39,64 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         )
         assert first_nav_color != "rgb(0, 0, 238)"
 
+        initial_theme = page.evaluate("() => document.documentElement.dataset.theme")
+        page.get_by_test_id("theme-toggle").click()
+        toggled_theme = page.evaluate(
+            "() => ({theme: document.documentElement.dataset.theme, stored: localStorage.getItem('relay-knowledge-theme')})"
+        )
+        assert toggled_theme["theme"] != initial_theme
+        assert toggled_theme["stored"] == toggled_theme["theme"]
+
+        desktop_layout = page.evaluate(
+            """() => {
+                const aside = document.querySelector("aside");
+                const content = document.querySelector(".content");
+                if (!aside || !content) {
+                    return null;
+                }
+                const topBefore = aside.getBoundingClientRect().top;
+                content.scrollTop = 240;
+                return {
+                    bodyOverflow: getComputedStyle(document.body).overflow,
+                    contentOverflow: getComputedStyle(content).overflowY,
+                    topBefore,
+                    topAfter: aside.getBoundingClientRect().top
+                };
+            }"""
+        )
+        assert desktop_layout == {
+            "bodyOverflow": "hidden",
+            "contentOverflow": "auto",
+            "topBefore": 0,
+            "topAfter": 0,
+        }
+
+        page.get_by_role("link", name="Readiness").click()
+        expect(page.get_by_role("heading", name="GraphRAG readiness")).to_be_visible()
+        expect(page.get_by_text("Code files")).not_to_be_visible()
+        expect(page.get_by_text("738 files / 14286 symbols")).to_be_visible()
+        expect(page.get_by_role("heading", name="GraphRAG readiness")).to_be_visible()
+        expect(page.get_by_text("BM25 read model")).to_be_visible()
+        expect(page.get_by_text("Semantic cursor")).to_be_visible()
+        expect(page.get_by_text("version 3 / lag 1")).to_be_visible()
+        expect(page.get_by_text("Stale reasons")).to_be_visible()
+        expect(page.get_by_text("bm25 / docs: scoped cursor lags graph version")).to_be_visible()
+
+        page.get_by_role("link", name="Indexes").click()
+        expect(page.get_by_role("cell", name="bm25")).to_be_visible()
+
+        page.get_by_role("link", name="Runtime").click()
+        expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
+
+        page.get_by_role("link", name="Providers").click()
+        expect(page.get_by_role("heading", name="Providers")).to_be_visible()
+        expect(page.get_by_text("Semantic backend")).to_be_visible()
+        expect(page.get_by_text("https://embeddings.example")).to_be_visible()
+        expect(page.get_by_text("text-embed-3-small").first).to_be_visible()
+
+        page.get_by_role("link", name="Operations").click()
+        expect(page.get_by_role("heading", name="Operations")).to_be_visible()
+        expect(page.get_by_role("heading", name="Providers")).not_to_be_visible()
         page.get_by_label("Query").fill("graph backpressure")
         page.get_by_label("Freshness").select_option("wait-until-fresh")
         expect(page.locator(".command-preview")).to_contain_text(
@@ -78,11 +125,26 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
 
         page.set_viewport_size({"width": 390, "height": 844})
         expect(page.locator("aside nav a")).to_have_count(6)
+        page.get_by_role("link", name="Readiness").click()
         expect(page.get_by_text("Runtime budgets")).to_be_visible()
-        mobile_link_display = page.locator("aside nav a").first.evaluate(
-            "node => getComputedStyle(node).display"
+        mobile_layout = page.evaluate(
+            """() => {
+                const shell = document.querySelector(".shell");
+                const aside = document.querySelector("aside");
+                const link = document.querySelector("aside nav a");
+                if (!shell || !aside || !link) {
+                    return null;
+                }
+                return {
+                    columns: getComputedStyle(shell).gridTemplateColumns,
+                    asidePosition: getComputedStyle(aside).position,
+                    linkDisplay: getComputedStyle(link).display
+                };
+            }"""
         )
-        assert mobile_link_display == "block"
+        assert mobile_layout["columns"] == "390px"
+        assert mobile_layout["asidePosition"] == "sticky"
+        assert mobile_layout["linkDisplay"] == "block"
 
 
 @contextlib.contextmanager
@@ -106,6 +168,8 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
             self.write_json(PROJECT_STATUS_RESPONSE)
         elif path == "/api/health":
             self.write_json(HEALTH_RESPONSE)
+        elif path == "/api/service/status":
+            self.write_json(SERVICE_STATUS_RESPONSE)
         else:
             super().do_GET()
 
@@ -313,4 +377,60 @@ HEALTH_RESPONSE = {
         ],
     },
     "runtime": RUNTIME,
+}
+
+SERVICE_STATUS_RESPONSE = {
+    "metadata": {
+        "trace_id": "trace-service-live",
+        "request_id": "req-service-live",
+        "graph_version": 7,
+        "indexed_graph_version": 6,
+        "stale": True,
+    },
+    "service_name": "relay-knowledge",
+    "mode": "systemd",
+    "background_enabled": True,
+    "silent_updates_enabled": True,
+    "service_definition_path": "/srv/relay/service/relay-knowledge.service",
+    "index_refresh": HEALTH_RESPONSE["index_refresh"],
+    "agent_protocols": {
+        "mcp_streamable_http_enabled": True,
+        "mcp_resources_enabled": True,
+        "mcp_prompts_enabled": True,
+        "acp_local_adapter_enabled": False,
+        "legacy_http_enabled": False,
+        "metrics_enabled": True,
+    },
+    "operator": {
+        "state": "degraded",
+        "silent_updates_enabled": True,
+        "allowed_scopes": ["docs"],
+        "last_run_at_ms": 1778790000000,
+        "updated_at_ms": 1778790060000,
+    },
+    "workers": [
+        {
+            "kind": "embedding",
+            "backend_state": "configured",
+            "endpoint_configured": True,
+            "queue_depth": 1,
+            "running_count": 0,
+            "retrying_count": 0,
+            "dead_letter_count": 0,
+        },
+        {
+            "kind": "ocr",
+            "backend_state": "fallback",
+            "endpoint_configured": False,
+            "queue_depth": 0,
+            "running_count": 0,
+            "retrying_count": 0,
+            "dead_letter_count": 0,
+        },
+    ],
+    "proposal_backlog": 2,
+    "audit_sink": {
+        "durable": True,
+        "event_count": 37,
+    },
 }
