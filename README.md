@@ -85,6 +85,9 @@ relay-knowledge service doctor
 - [2026 Industry Capability Snapshot](docs/en/04-research/industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.
+- [ai-knowledge-graph Reference Analysis](docs/en/04-research/ai-knowledge-graph-reference-analysis.md):
+  architecture, algorithm, performance, and reliability lessons from an
+  external LLM-extracted knowledge graph project.
 - [GraphRAG Capability Guide](docs/en/02-capabilities/graphrag-capability-guide.md): current context-pack,
   freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
   behavior.

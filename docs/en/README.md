@@ -55,6 +55,7 @@ research notes, benchmark records, and verification records.
 - [Code Repository Tree-sitter Retrieval Research](04-research/code-repository-tree-sitter-retrieval-research.md)
 - [Agent Protocol Graph Retrieval Research](04-research/agent-protocol-graph-retrieval-research.md)
 - [relay-knowledge Implementation Reference](04-research/relay-knowledge-implementation-reference.md)
+- [ai-knowledge-graph Reference Analysis](04-research/ai-knowledge-graph-reference-analysis.md)
 - [Industry Capability Snapshot 2026](04-research/industry-capability-snapshot-2026.md)
 
 ## Appendix A: Benchmarks
