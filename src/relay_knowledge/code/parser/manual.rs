@@ -15,8 +15,12 @@ pub(super) fn collect_manual_nodes(
     let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
     stack.push(root);
     while let Some(node) = stack.pop() {
-        for (name, kind, range) in manual_definitions(context.content, context.language_id, node) {
-            upsert_symbol(output, symbol_record(context, &name, kind, &range)?);
+        if manual_definition_candidate(context.language_id, node.kind()) {
+            for (name, kind, range) in
+                manual_definitions(context.content, context.language_id, node)
+            {
+                upsert_symbol(output, symbol_record(context, &name, kind, &range)?);
+            }
         }
         if let Some((name, range)) = manual_call(context, node) {
             upsert_reference(output, reference_record(context, &name, "call", &range)?);
@@ -25,6 +29,22 @@ pub(super) fn collect_manual_nodes(
     }
 
     Ok(())
+}
+
+fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
+    match language_id {
+        "c" => {
+            matches!(
+                node_kind,
+                "declaration" | "preproc_def" | "preproc_function_def" | "call_expression"
+            ) || language_nodes::definition_kind(language_id, node_kind).is_some()
+        }
+        "cpp" => {
+            node_kind == "function_definition"
+                || language_nodes::definition_kind(language_id, node_kind).is_some()
+        }
+        _ => language_nodes::definition_kind(language_id, node_kind).is_some(),
+    }
 }
 
 pub(super) fn manual_definitions(
