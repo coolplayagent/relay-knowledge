@@ -54,6 +54,7 @@ relay-knowledge service doctor
 
 - [使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
 - [2026 行业能力快照](docs/zh/04-research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
+- [ai-knowledge-graph 参考项目分析](docs/zh/04-research/ai-knowledge-graph-reference-analysis.md)：对外部 LLM 抽取型知识图谱项目的架构、算法、性能和可靠性借鉴分析。
 - [GraphRAG 功能文档](docs/zh/02-capabilities/graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
 - [混合检索上下文包](docs/zh/02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
 - [Semantic/Vector Provider 后端](docs/zh/02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。

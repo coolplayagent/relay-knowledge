@@ -49,6 +49,7 @@
 - [代码仓库 Tree-sitter 检索研究材料](04-research/code-repository-tree-sitter-retrieval-research.md)
 - [Agent 协议图检索接入研究](04-research/agent-protocol-graph-retrieval-research.md)
 - [relay-knowledge 实现借鉴落地路线](04-research/relay-knowledge-implementation-reference.md)
+- [ai-knowledge-graph 参考项目分析](04-research/ai-knowledge-graph-reference-analysis.md)
 - [2026 行业能力快照与差距分析](04-research/industry-capability-snapshot-2026.md)
 
 ## 附录 A：基准记录
