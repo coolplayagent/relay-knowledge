@@ -4,7 +4,7 @@ use crate::{
         ClaimRecord, CodeExtractionMetadata, CodeFileFields, CodeFileRecord, CodeGraphBatch,
         CodeParseStatus, CodeRange, CodeReferenceFields, CodeReferenceKind, CodeReferenceRecord,
         CodeResolutionState, CodeSymbolKind, CodeSymbolRecord, EventRecord, EvidenceRecord,
-        FactStatus, GraphMutationBatch, GraphRelationRecord, SourceScope,
+        FactStatus, GraphMutationBatch, GraphRelationRecord, GraphVersionRange, SourceScope,
     },
     storage::{CodeGraphStore, GraphStore},
 };
@@ -336,6 +336,130 @@ async fn mixed_canvas_links_evidence_to_code_and_reference_targets() {
             .iter()
             .any(|edge| edge.id == "reference:repo:src/lib.rs:ref-unresolved"
                 && edge.target == "symbol-ref:repo:missing_symbol")
+    );
+}
+
+#[tokio::test]
+async fn canvas_filters_structured_facts_by_validity_window() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-window",
+        scope.clone(),
+        "Canvas validity windows should match retrieval visibility",
+        vec!["Windowed Graph".to_owned()],
+    )
+    .expect("evidence should validate");
+    let future_relation = GraphRelationRecord::new(
+        "rel-future",
+        scope.clone(),
+        "Windowed Graph",
+        "appears_at",
+        "future snapshot",
+        vec!["ev-window".to_owned()],
+    )
+    .expect("relation should validate")
+    .with_metadata(
+        crate::domain::ConfidenceScore::CERTAIN,
+        FactStatus::Accepted,
+        GraphVersionRange::open_from(GraphVersion::new(3)),
+    )
+    .expect("relation metadata should validate");
+    let expired_claim = ClaimRecord::new(
+        "claim-expired",
+        scope.clone(),
+        "Windowed Graph",
+        "visibility",
+        "expired before snapshot",
+        vec!["ev-window".to_owned()],
+    )
+    .expect("claim should validate")
+    .with_metadata(
+        crate::domain::ConfidenceScore::CERTAIN,
+        FactStatus::Accepted,
+        GraphVersionRange::new(GraphVersion::new(1), Some(GraphVersion::new(1)))
+            .expect("range should validate"),
+    )
+    .expect("claim metadata should validate");
+    let expired_event = EventRecord::new(
+        "event-expired",
+        scope,
+        "window_closed",
+        vec!["Windowed Graph".to_owned()],
+        None,
+        vec!["ev-window".to_owned()],
+    )
+    .expect("event should validate")
+    .with_metadata(
+        crate::domain::ConfidenceScore::CERTAIN,
+        FactStatus::Accepted,
+        GraphVersionRange::new(GraphVersion::new(1), Some(GraphVersion::new(1)))
+            .expect("range should validate"),
+    )
+    .expect("event metadata should validate");
+    store
+        .commit_mutation_batch(
+            GraphMutationBatch::with_facts(
+                vec![evidence],
+                vec![future_relation],
+                vec![expired_claim],
+                vec![expired_event],
+            )
+            .expect("batch should validate"),
+        )
+        .await
+        .expect("commit should succeed");
+
+    let before_future = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Knowledge,
+            source_scope: Some("docs".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(2),
+            limit: 50,
+        })
+        .await
+        .expect("canvas should load");
+    assert!(
+        before_future
+            .edges
+            .iter()
+            .all(|edge| edge.id != "relation:rel-future")
+    );
+    assert!(
+        before_future
+            .nodes
+            .iter()
+            .all(|node| node.id != "claim:claim-expired")
+    );
+    assert!(
+        before_future
+            .nodes
+            .iter()
+            .all(|node| node.id != "event:event-expired")
+    );
+
+    let at_future = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Knowledge,
+            source_scope: Some("docs".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(3),
+            limit: 50,
+        })
+        .await
+        .expect("canvas should load");
+    assert!(
+        at_future
+            .edges
+            .iter()
+            .any(|edge| edge.id == "relation:rel-future")
+    );
+    assert!(
+        at_future
+            .nodes
+            .iter()
+            .all(|node| node.id != "claim:claim-expired" && node.id != "event:event-expired")
     );
 }
 

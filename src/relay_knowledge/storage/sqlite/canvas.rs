@@ -268,6 +268,8 @@ fn add_relations(
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'relation' AND gfe.fact_id = rel.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
         WHERE rel.created_graph_version <= ?1
+          AND rel.valid_from_graph_version <= ?1
+          AND (rel.valid_until_graph_version IS NULL OR rel.valid_until_graph_version >= ?1)
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND (
               ?3 IS NULL OR lower(rel.id || ' ' || src.label || ' ' ||
@@ -368,6 +370,8 @@ fn add_claims(
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'claim' AND gfe.fact_id = claim.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
         WHERE claim.created_graph_version <= ?1
+          AND claim.valid_from_graph_version <= ?1
+          AND (claim.valid_until_graph_version IS NULL OR claim.valid_until_graph_version >= ?1)
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND (
               ?3 IS NULL OR lower(claim.id || ' ' || ent.label || ' ' ||
@@ -486,6 +490,8 @@ fn add_events(
         LEFT JOIN graph_fact_evidence gfe ON gfe.fact_kind = 'event' AND gfe.fact_id = event.id
         LEFT JOIN evidence ev ON ev.id = gfe.evidence_id
         WHERE event.created_graph_version <= ?1
+          AND event.valid_from_graph_version <= ?1
+          AND (event.valid_until_graph_version IS NULL OR event.valid_until_graph_version >= ?1)
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND (
               ?3 IS NULL OR lower(event.id || ' ' || event.event_type || ' ' ||
