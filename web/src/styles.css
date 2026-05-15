@@ -222,6 +222,11 @@ a {
   background: var(--button-primary-hover);
 }
 
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .icon {
   position: relative;
   display: inline-block;
@@ -266,6 +271,8 @@ a {
 .plus-icon::before,
 .plus-icon::after,
 .run-icon::before,
+.copy-icon::before,
+.copy-icon::after,
 .clear-icon::before,
 .clear-icon::after {
   position: absolute;
@@ -296,6 +303,26 @@ a {
   border-bottom: 5px solid transparent;
   border-left: 8px solid currentColor;
   background: transparent;
+}
+
+.copy-icon::before {
+  top: 2px;
+  left: 5px;
+  width: 8px;
+  height: 10px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.copy-icon::after {
+  top: 5px;
+  left: 2px;
+  width: 8px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: var(--surface-raised);
 }
 
 .clear-icon::before,
@@ -445,7 +472,9 @@ a {
 .runtime-list div,
 .operation-form,
 .operation-preview,
-.staged-panel {
+.staged-panel,
+.settings-panel,
+.settings-output {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -642,11 +671,28 @@ dd {
   gap: 12px;
 }
 
-.operation-form {
+.operation-form,
+.settings-panel {
   display: grid;
   align-content: start;
   gap: 12px;
   padding: 14px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 1.05fr);
+  gap: 12px;
+}
+
+.settings-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-checkbox {
+  min-height: 34px;
 }
 
 .field-grid {
@@ -717,12 +763,14 @@ textarea:focus {
 }
 
 .operation-preview,
-.staged-panel {
+.staged-panel,
+.settings-output {
   min-width: 0;
   padding: 14px;
 }
 
-.operation-result {
+.operation-result,
+.settings-result {
   display: grid;
   gap: 8px;
   margin-top: 12px;
@@ -735,11 +783,13 @@ textarea:focus {
   font-weight: 680;
 }
 
-.operation-result[data-state="running"] .muted-line {
+.operation-result[data-state="running"] .muted-line,
+.settings-result[data-state="running"] .muted-line {
   color: var(--amber);
 }
 
-.operation-result[data-state="success"] .result-heading {
+.operation-result[data-state="success"] .result-heading,
+.settings-result[data-state="success"] .result-heading {
   color: var(--green);
 }
 
@@ -787,9 +837,11 @@ pre {
   overflow-wrap: anywhere;
 }
 
-.preview-actions {
+.preview-actions,
+.settings-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
@@ -934,7 +986,8 @@ tr:last-child td {
   .readiness-grid,
   .provider-grid,
   .runtime-list,
-  .operation-layout {
+  .operation-layout,
+  .settings-layout {
     grid-template-columns: 1fr;
   }
 

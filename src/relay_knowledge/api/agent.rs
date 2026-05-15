@@ -185,6 +185,7 @@ pub struct AgentProtocolStatus {
     pub metrics_endpoint: String,
     pub http_bind: String,
     pub allowed_origin_count: usize,
+    pub mcp_allowed_origins: Vec<String>,
     pub policy: AgentAccessPolicySummary,
     pub audit_sink_enabled: bool,
     pub audit_log_path: String,

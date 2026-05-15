@@ -47,7 +47,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".home-query-preview")).to_contain_text("graph cache freshness")
         expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
-        expect(page.locator("aside nav a")).to_have_count(7)
+        expect(page.locator("aside nav a")).to_have_count(8)
         expect(page.get_by_role("link", name="Status")).to_have_attribute("aria-current", "page")
         assert page.locator("link[rel='icon']").get_attribute("href", timeout=5000).startswith(
             "data:image/svg+xml"
@@ -107,6 +107,41 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
 
         page.get_by_role("link", name="Runtime").click()
         expect(page.get_by_text("127.0.0.1:9900")).to_be_visible()
+
+        page.get_by_role("link", name="Settings").click()
+        expect(page.get_by_role("heading", name="Settings")).to_be_visible()
+        expect(page.get_by_text("Agent exposure")).to_be_visible()
+        expect(page.get_by_text("Model provider")).to_be_visible()
+        expect(page.get_by_label("Allowed scopes")).to_have_value("docs")
+        expect(page.get_by_label("Allowed origins")).to_have_value("https://web.example")
+        expect(page.locator(".settings-config-preview")).to_contain_text(
+            "RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs"
+        )
+        expect(page.locator(".settings-config-preview")).to_contain_text(
+            "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=https://web.example"
+        )
+        expect(page.locator(".settings-config-preview")).not_to_contain_text(
+            "RELAY_KNOWLEDGE_EMBEDDING_API_KEY"
+        )
+        page.get_by_label("Allowed origins").fill("http://127.0.0.1:9900")
+        page.get_by_label("Remote clients").check()
+        page.get_by_label("API key").fill("secret-key")
+        expect(page.locator(".settings-config-preview")).to_contain_text(
+            "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=http://127.0.0.1:9900"
+        )
+        expect(page.locator(".settings-config-preview")).to_contain_text(
+            "RELAY_KNOWLEDGE_EMBEDDING_API_KEY=secret-key"
+        )
+        page.get_by_test_id("copy-settings-config").click()
+        expect(page.get_by_text("Copied").or_(page.get_by_text("Copy unavailable"))).to_be_visible()
+        page.get_by_test_id("probe-settings-provider").click()
+        expect(page.locator(".settings-result")).to_contain_text("Probe embedding provider")
+        expect(page.locator(".settings-probe-preview")).to_contain_text("provider.embedding.probe")
+        page.get_by_test_id("reset-settings-runtime").click()
+        expect(page.get_by_label("Allowed origins")).to_have_value("https://web.example")
+        expect(page.locator(".settings-config-preview")).not_to_contain_text(
+            "RELAY_KNOWLEDGE_EMBEDDING_API_KEY"
+        )
 
         page.get_by_role("link", name="Graph").click()
         expect(page.get_by_role("heading", name="Graph")).to_be_visible()
@@ -176,7 +211,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         expect(page.locator(".result-preview")).to_contain_text("worker.status")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        expect(page.locator("aside nav a")).to_have_count(7)
+        expect(page.locator("aside nav a")).to_have_count(8)
         page.get_by_role("link", name="Status").click()
         mobile_graph = page.evaluate(
             """() => {
@@ -605,8 +640,24 @@ SERVICE_STATUS_RESPONSE = {
     "index_refresh": HEALTH_RESPONSE["index_refresh"],
     "agent_protocols": {
         "mcp_streamable_http_enabled": True,
+        "mcp_endpoint": "/mcp",
         "mcp_resources_enabled": True,
         "mcp_prompts_enabled": True,
+        "metrics_endpoint": "/mcp/metrics",
+        "http_bind": "127.0.0.1:9900",
+        "allowed_origin_count": 1,
+        "mcp_allowed_origins": ["https://web.example"],
+        "policy": {
+            "allowed_scope_count": 1,
+            "allow_unspecified_scope": False,
+            "max_limit": 10,
+            "max_context_bytes": 65536,
+            "max_runtime_ms": 30000,
+            "allow_remote_clients": False,
+        },
+        "audit_sink_enabled": True,
+        "audit_log_path": "/srv/relay/logs/agent-audit.jsonl",
+        "audit_queue_depth": 1024,
         "acp_local_adapter_enabled": False,
         "legacy_http_enabled": False,
         "metrics_enabled": True,

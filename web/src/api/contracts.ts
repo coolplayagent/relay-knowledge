@@ -51,6 +51,15 @@ export type ProjectStatusResponse = {
   runtime: RuntimeStatus;
 };
 
+export type AgentAccessPolicySummary = {
+  allowed_scope_count: number;
+  allow_unspecified_scope: boolean;
+  max_limit: number;
+  max_context_bytes: number;
+  max_runtime_ms: number;
+  allow_remote_clients: boolean;
+};
+
 export type IndexStatus = {
   kind: "bm25" | "semantic" | "vector";
   index_version: number;
@@ -199,10 +208,19 @@ export type ServiceStatusResponse = {
   index_refresh: IndexRefreshDiagnostics;
   agent_protocols: {
     mcp_streamable_http_enabled: boolean;
+    mcp_endpoint: string;
     mcp_resources_enabled: boolean;
     mcp_prompts_enabled: boolean;
-    acp_local_adapter_enabled: boolean;
-    metrics_enabled: boolean;
+    metrics_endpoint: string;
+    http_bind: string;
+    allowed_origin_count: number;
+    mcp_allowed_origins: string[];
+    policy: AgentAccessPolicySummary;
+    audit_sink_enabled: boolean;
+    audit_log_path: string;
+    audit_queue_depth: number;
+    acp_local_adapter_enabled?: boolean;
+    metrics_enabled?: boolean;
   };
   operator: ServiceOperatorStatus;
   workers: WorkerStatus[];
