@@ -163,6 +163,7 @@ fn add_entities(
         FROM entities ent
         LEFT JOIN evidence_entities ee ON ee.entity_id = ent.id
         LEFT JOIN evidence ev ON ev.id = ee.evidence_id
+                             AND ev.created_graph_version <= ?1
         WHERE ent.created_graph_version <= ?1
           AND (?2 IS NULL OR ev.source_scope = ?2)
           AND (?3 IS NULL OR lower(ent.id || ' ' || ent.label) LIKE '%' || lower(?3) || '%')

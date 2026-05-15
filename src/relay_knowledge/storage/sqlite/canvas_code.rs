@@ -186,6 +186,18 @@ fn add_code_references(
         LEFT JOIN code_symbols target
           ON target.source_scope = ref.source_scope
          AND target.symbol_id = ref.target_symbol_id
+         AND target.created_graph_version <= ?1
+         AND (
+             target.path = ref.path
+             OR NOT EXISTS (
+                 SELECT 1
+                 FROM code_symbols duplicate
+                 WHERE duplicate.source_scope = ref.source_scope
+                   AND duplicate.symbol_id = ref.target_symbol_id
+                   AND duplicate.created_graph_version <= ?1
+                   AND duplicate.path <> target.path
+             )
+         )
         WHERE ref.created_graph_version <= ?1
           AND (?2 IS NULL OR ref.source_scope = ?2)
           AND (

@@ -340,6 +340,100 @@ async fn mixed_canvas_links_evidence_to_code_and_reference_targets() {
 }
 
 #[tokio::test]
+async fn code_canvas_prefers_same_path_reference_target_when_symbol_ids_repeat() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("repo").expect("scope should parse");
+    let extraction = CodeExtractionMetadata::new("rust", "symbols", "1", "function_item", "name")
+        .expect("extraction should validate");
+    let same_path_symbol = CodeSymbolRecord::new(
+        "shared-symbol",
+        scope.clone(),
+        "src/a.rs",
+        "render_a",
+        CodeSymbolKind::Function,
+        CodeRange::new(1, 12, 1, 1).expect("range"),
+        extraction.clone(),
+    )
+    .expect("symbol should validate");
+    let other_path_symbol = CodeSymbolRecord::new(
+        "shared-symbol",
+        scope.clone(),
+        "src/b.rs",
+        "render_b",
+        CodeSymbolKind::Function,
+        CodeRange::new(1, 12, 1, 1).expect("range"),
+        extraction.clone(),
+    )
+    .expect("symbol should validate");
+    let reference = CodeReferenceRecord::new(CodeReferenceFields {
+        reference_id: "ref-shared".to_owned(),
+        source_scope: scope.clone(),
+        path: "src/a.rs".to_owned(),
+        symbol_text: "render_a".to_owned(),
+        kind: CodeReferenceKind::Call,
+        range: CodeRange::new(20, 28, 3, 3).expect("range"),
+        resolution_state: CodeResolutionState::Resolved,
+        target_symbol_id: Some("shared-symbol".to_owned()),
+        extraction: extraction.clone(),
+    })
+    .expect("reference should validate");
+    let first = CodeFileRecord::new(CodeFileFields {
+        source_scope: scope.clone(),
+        path: "src/a.rs".to_owned(),
+        content_hash: "hash-a".to_owned(),
+        language_id: "rust".to_owned(),
+        parse_status: CodeParseStatus::Parsed,
+        diagnostic: None,
+        symbols: vec![same_path_symbol],
+        references: vec![reference],
+        chunks: Vec::new(),
+    })
+    .expect("file should validate");
+    let second = CodeFileRecord::new(CodeFileFields {
+        source_scope: scope,
+        path: "src/b.rs".to_owned(),
+        content_hash: "hash-b".to_owned(),
+        language_id: "rust".to_owned(),
+        parse_status: CodeParseStatus::Parsed,
+        diagnostic: None,
+        symbols: vec![other_path_symbol],
+        references: Vec::new(),
+        chunks: Vec::new(),
+    })
+    .expect("file should validate");
+    store
+        .commit_code_graph_batch(CodeGraphBatch::new(vec![first, second]).expect("batch"))
+        .await
+        .expect("code graph should commit");
+
+    let snapshot = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Code,
+            source_scope: Some("repo".to_owned()),
+            query: None,
+            graph_version: GraphVersion::new(1),
+            limit: 80,
+        })
+        .await
+        .expect("canvas should load");
+    let reference_edges = snapshot
+        .edges
+        .iter()
+        .filter(|edge| edge.id == "reference:repo:src/a.rs:ref-shared")
+        .collect::<Vec<_>>();
+
+    assert_eq!(reference_edges.len(), 1);
+    assert_eq!(
+        reference_edges[0].target,
+        "code-symbol:repo:src/a.rs:shared-symbol"
+    );
+    assert_ne!(
+        reference_edges[0].target,
+        "code-symbol:repo:src/b.rs:shared-symbol"
+    );
+}
+
+#[tokio::test]
 async fn canvas_filters_structured_facts_by_validity_window() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let scope = SourceScope::parse("docs").expect("scope should parse");
@@ -461,6 +555,66 @@ async fn canvas_filters_structured_facts_by_validity_window() {
             .iter()
             .all(|node| node.id != "claim:claim-expired" && node.id != "event:event-expired")
     );
+}
+
+#[tokio::test]
+async fn canvas_entity_scope_filter_respects_snapshot_bounded_evidence() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let notes = EvidenceRecord::new(
+        "ev-notes",
+        SourceScope::parse("notes").expect("scope should parse"),
+        "Shared Entity first appears in notes",
+        vec!["Shared Entity".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![notes]).expect("batch"))
+        .await
+        .expect("first evidence should commit");
+    let docs = EvidenceRecord::new(
+        "ev-docs",
+        SourceScope::parse("docs").expect("scope should parse"),
+        "Shared Entity later appears in docs",
+        vec!["Shared Entity".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![docs]).expect("batch"))
+        .await
+        .expect("second evidence should commit");
+
+    let before_docs = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Knowledge,
+            source_scope: Some("docs".to_owned()),
+            query: Some("Shared Entity".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 20,
+        })
+        .await
+        .expect("canvas should load");
+    assert!(
+        before_docs
+            .nodes
+            .iter()
+            .all(|node| node.label != "Shared Entity")
+    );
+
+    let after_docs = store
+        .graph_canvas(GraphCanvasStorageRequest {
+            selection: GraphCanvasSelection::Knowledge,
+            source_scope: Some("docs".to_owned()),
+            query: Some("Shared Entity".to_owned()),
+            graph_version: GraphVersion::new(2),
+            limit: 20,
+        })
+        .await
+        .expect("canvas should load");
+    assert!(after_docs.nodes.iter().any(|node| {
+        node.kind == "entity"
+            && node.label == "Shared Entity"
+            && node.source_scope.as_deref() == Some("docs")
+    }));
 }
 
 #[tokio::test]
