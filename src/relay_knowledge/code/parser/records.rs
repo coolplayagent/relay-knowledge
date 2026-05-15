@@ -102,6 +102,8 @@ fn symbol_kinds_overlap(left: &str, right: &str) -> bool {
                 | ("function_declaration", "function")
                 | ("macro", "function")
                 | ("function", "macro")
+                | ("type", "class")
+                | ("class", "type")
         )
 }
 
