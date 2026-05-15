@@ -354,7 +354,8 @@ fn search_calls(
                 CodeQueryKind::Callers => [&row.callee_name, ""],
                 _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
             };
-            let score = score_text(&query, search_fields);
+            let score = score_text(&query, search_fields)
+                + callee_related_name_bonus(&query, &row.callee_name, request);
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
                 let (symbol_snapshot_id, canonical_symbol_id) =
@@ -873,6 +874,41 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
 
 fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
+}
+
+fn callee_related_name_bonus(
+    query: &str,
+    callee_name: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Callees {
+        return 0.0;
+    }
+    let query_tokens = identifier_search_tokens(query);
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let callee_tokens = identifier_search_tokens(callee_name);
+    if query_tokens.iter().any(|query_token| {
+        query_token.len() > 2
+            && callee_tokens
+                .iter()
+                .any(|callee_token| callee_token == query_token)
+    }) {
+        0.35 + (1.2 / callee_identifier_part_count(callee_name))
+    } else {
+        0.0
+    }
+}
+
+fn callee_identifier_part_count(callee_name: &str) -> f64 {
+    let part_count = identifier_tokens(callee_name)
+        .flat_map(|token| token.split('_'))
+        .filter(|part| !part.is_empty())
+        .count()
+        .max(1);
+
+    part_count as f64
 }
 
 fn call_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &str) -> String {

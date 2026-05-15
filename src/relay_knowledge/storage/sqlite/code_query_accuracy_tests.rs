@@ -246,6 +246,29 @@ async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
 }
 
 #[tokio::test]
+async fn callee_queries_prioritize_related_callee_identifier_parts() {
+    let store = store_with_repository_snapshot(snapshot_with_related_callee_names()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "do_mmap",
+                selector,
+                CodeQueryKind::Callees,
+                3,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("callee query should succeed");
+
+    assert_eq!(hits[0].excerpt, "do_mmap calls mmap_region");
+}
+
+#[tokio::test]
 async fn caller_queries_use_caller_chunk_excerpt_when_available() {
     let store = store_with_repository_snapshot(snapshot_with_call_site_chunk()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -578,6 +601,54 @@ fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
             "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
             Some("sanitize-options"),
         )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_related_callee_names() -> CodeIndexSnapshot {
+    let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c");
+    unrelated.caller_name = Some("do_mmap".to_owned());
+    unrelated.callee_name = "__get_unmapped_area".to_owned();
+    unrelated.target_hint = Some("__get_unmapped_area".to_owned());
+    unrelated.resolution_state = "resolved".to_owned();
+    unrelated.confidence_basis_points = 8_000;
+    unrelated.confidence_tier = "inferred".to_owned();
+    unrelated.line_range = range(408, 408);
+
+    let mut related = call("mmap-region", "mmap-source", "mm/mmap.c");
+    related.caller_name = Some("do_mmap".to_owned());
+    related.callee_name = "mmap_region".to_owned();
+    related.target_hint = Some("mmap_region".to_owned());
+    related.resolution_state = "resolved".to_owned();
+    related.confidence_basis_points = 8_000;
+    related.confidence_tier = "inferred".to_owned();
+    related.line_range = range(560, 560);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "mmap-source",
+            "mm/mmap.c",
+            "c",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![unrelated, related],
+        chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
 }
