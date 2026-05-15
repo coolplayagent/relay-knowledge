@@ -61,3 +61,4 @@
 ## 附录 B：验证记录
 
 - [relay-teams E2E 验证 2026-05-14](06-verification/relay-teams-e2e-2026-05-14.md)
+- [relay-teams 代码图检索准确性测试 2026-05-15](06-verification/code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)

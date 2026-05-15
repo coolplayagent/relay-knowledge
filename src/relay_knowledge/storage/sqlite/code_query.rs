@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+#[path = "code_query_scope.rs"]
+mod code_query_scope;
+
 use crate::{
     domain::{
         CodeQueryKind, CodeRepositoryStatus, CodeRetrievalHit, CodeRetrievalLayer,
@@ -14,6 +17,10 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
+#[cfg(test)]
+use code_query_scope::path_matches_filter;
+use code_query_scope::selector_filters_fit_indexed_scope;
+pub(super) use code_query_scope::{language_filter_allows, path_filter_allows};
 
 pub(super) fn search_code(
     connection: &mut Connection,
@@ -570,13 +577,32 @@ pub(super) fn required_repository(
     })?;
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
     let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
-    let scoped_status = repository_scope_status(
+    let scoped_status = match repository_scope_status(
         connection,
         &selector.repository,
         &selector.ref_selector,
         &path_filters,
         &language_filters,
-    )?
+    )? {
+        Some(status) => Some(status),
+        None if (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
+            && selector_filters_fit_indexed_scope(
+                &status.path_filters,
+                &status.language_filters,
+                &selector.path_filters,
+                &selector.language_filters,
+            ) =>
+        {
+            repository_scope_status(
+                connection,
+                &selector.repository,
+                &selector.ref_selector,
+                &status.path_filters,
+                &status.language_filters,
+            )?
+        }
+        None => None,
+    }
     .ok_or_else(|| {
         StorageError::InvalidInput(format!(
             "code repository '{}' has no index for ref {} and requested filters",
@@ -608,34 +634,6 @@ fn selected_row(
         && path_filter_allows(path, &request.repository.path_filters)
         && language_filter_allows(language_id, &status.language_filters)
         && language_filter_allows(language_id, &request.repository.language_filters)
-}
-
-pub(super) fn path_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || filters
-            .iter()
-            .any(|filter| path_matches_filter(path, filter))
-}
-
-pub(super) fn language_filter_allows(language_id: &str, filters: &[String]) -> bool {
-    filters.is_empty() || filters.iter().any(|filter| filter == language_id)
-}
-
-fn path_matches_filter(path: &str, filter: &str) -> bool {
-    let filter = normalize_path_filter(filter);
-    if filter == "." {
-        return true;
-    }
-    !filter.is_empty() && (path == filter || path.starts_with(&format!("{filter}/")))
-}
-
-fn normalize_path_filter(filter: &str) -> &str {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    filter
 }
 
 pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
@@ -689,9 +687,7 @@ pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> 
             status.tree_hash.as_deref().unwrap_or("unindexed")
         )],
         stale: status.stale,
-        degraded_reason: parts
-            .degraded_reason
-            .or_else(|| status.degraded_reason.clone()),
+        degraded_reason: parts.degraded_reason,
         edge_kind: parts.edge_kind,
         edge_resolution_state: parts.edge_resolution_state,
         edge_target_hint: parts.edge_target_hint,
@@ -776,19 +772,37 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
 }
 
 fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
-    let haystack = fields
+    let fields = fields
         .into_iter()
         .map(|field| field.as_ref().to_lowercase())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .collect::<Vec<_>>();
     let mut score = 0.0;
     for token in query.split_whitespace() {
-        if haystack.contains(token) {
-            score += 1.0;
+        let token = token.to_lowercase();
+        if token.is_empty() {
+            continue;
         }
+        let mut token_score = 0.0_f64;
+        for field in &fields {
+            let field = field.trim();
+            if field == token {
+                token_score = token_score.max(4.0);
+            } else if identifier_tokens(field).any(|candidate| candidate == token) {
+                token_score = token_score.max(2.0);
+            } else if field.contains(&token) {
+                token_score = token_score.max(0.5);
+            }
+        }
+        score += token_score;
     }
 
     score
+}
+
+fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
 }
 
 #[cfg(test)]
@@ -944,40 +958,5 @@ struct ChunkRow {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_filters_accept_trailing_slashes() {
-        assert!(path_matches_filter("src/lib.rs", "src/"));
-        assert!(path_matches_filter("src/lib.rs", "src"));
-        assert!(path_matches_filter("src/lib.rs", "."));
-        assert!(path_matches_filter("src/lib.rs", "./"));
-        assert!(path_matches_filter("src/lib.rs", "./src"));
-        assert!(!path_matches_filter("src-other/lib.rs", "src/"));
-    }
-
-    #[test]
-    fn candidate_condition_preserves_all_query_terms() {
-        let (condition, values) =
-            candidate_condition(&["lower(name)", "lower(path)"], "retry budget");
-
-        assert!(condition.contains("lower(name) LIKE ?"));
-        assert_eq!(values.len(), 4);
-        assert!(values.contains(&Value::Text("%retry%".to_owned())));
-        assert!(values.contains(&Value::Text("%budget%".to_owned())));
-    }
-
-    #[test]
-    fn candidate_condition_caps_bind_values_for_long_queries() {
-        let query = (0..300)
-            .map(|index| format!("term{index}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let fields = ["a", "b", "c", "d", "e"];
-
-        let (_, values) = candidate_condition(&fields, &query);
-
-        assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES);
-    }
-}
+#[path = "code_query_unit_tests.rs"]
+mod tests;
