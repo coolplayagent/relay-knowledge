@@ -21,6 +21,7 @@ from history import (
     ensure_history,
     export_history,
     history_paths,
+    load_runs,
     write_report,
 )
 from scoring import EvaluationObservation, GateObservation, score_evaluation
@@ -358,6 +359,7 @@ def build_prompt(paths: Any, run_id: str) -> str:
             f"Best accepted score={best.get('score')} "
             f"accuracy={best.get('accuracy')} commit={best.get('commit')}"
         )
+    rejected_summary = recent_rejected_summary(paths)
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
@@ -375,8 +377,35 @@ Constraints:
 Historical context:
 {best_summary}
 
+Recent rejected attempts to avoid:
+{rejected_summary}
+
 Make one concrete candidate code change now. The self-iteration harness will build, test, score, squash-commit accepted improvements, or roll them back.
 """
+
+
+def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
+    rejected = [
+        run
+        for run in reversed(load_runs(paths))
+        if not run.get("accepted") and run.get("reject_reasons")
+    ][:limit]
+    if not rejected:
+        return "No rejected historical run with reasons yet."
+
+    lines: list[str] = []
+    for run in rejected:
+        reasons = "; ".join(str(reason) for reason in run.get("reject_reasons", []))
+        lines.append(
+            "- "
+            f"run_id={run.get('run_id', '')} "
+            f"score={run.get('score', '')} "
+            f"accuracy={run.get('accuracy', '')} "
+            f"stability={run.get('stability', '')} "
+            f"reasons={reasons} "
+            f"report={run.get('report', '')}"
+        )
+    return "\n".join(lines)
 
 
 def capture_patch(

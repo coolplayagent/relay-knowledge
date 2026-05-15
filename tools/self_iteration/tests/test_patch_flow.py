@@ -14,12 +14,76 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import self_iterate
 from codex_driver import CodexResult
 from evaluator import EvaluationRun
-from history import history_paths
+from history import append_run, history_paths
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 from self_iterate import capture_patch, commit_candidate, reject_candidate, run_loop
 
 
 class PatchFlowTests(unittest.TestCase):
+    def test_prompt_includes_recent_rejected_reasons_as_negative_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "accepted",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": True,
+                    "score": 0.91,
+                    "accuracy": 1.0,
+                    "stability": 1.0,
+                    "commit": "abc123",
+                    "reject_reasons": [],
+                    "report": "accepted.json",
+                },
+            )
+            append_run(
+                paths,
+                {
+                    "run_id": "rejected_without_reason",
+                    "timestamp": "2026-05-15T00:01:00+00:00",
+                    "accepted": False,
+                    "reject_reasons": [],
+                    "report": "ignored.json",
+                },
+            )
+            for index in range(4):
+                append_run(
+                    paths,
+                    {
+                        "run_id": f"rejected_{index}",
+                        "timestamp": f"2026-05-15T00:0{index + 2}:00+00:00",
+                        "accepted": False,
+                        "score": index / 10,
+                        "accuracy": index / 20,
+                        "stability": index / 30,
+                        "reject_reasons": [f"reason_{index}"],
+                        "report": f"report_{index}.json",
+                    },
+                )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Recent rejected attempts to avoid:", prompt)
+            self.assertIn("run_id=rejected_3", prompt)
+            self.assertIn("run_id=rejected_2", prompt)
+            self.assertIn("run_id=rejected_1", prompt)
+            self.assertIn("reasons=reason_3", prompt)
+            self.assertIn("report=report_3.json", prompt)
+            self.assertNotIn("run_id=rejected_0", prompt)
+            self.assertNotIn("rejected_without_reason", prompt)
+            self.assertNotIn("run_id=accepted", prompt)
+
+    def test_prompt_describes_missing_rejected_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            prompt = self_iterate.build_prompt(history_paths(workspace), "next")
+
+            self.assertIn("No rejected historical run with reasons yet.", prompt)
+
     def test_rejected_patch_restores_tracked_and_untracked_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
