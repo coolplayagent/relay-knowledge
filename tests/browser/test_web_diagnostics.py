@@ -110,8 +110,15 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
 
         page.get_by_role("link", name="Settings").click()
         expect(page.get_by_role("heading", name="Settings")).to_be_visible()
-        expect(page.get_by_text("Agent exposure")).to_be_visible()
-        expect(page.get_by_text("Model provider")).to_be_visible()
+        expect(page.get_by_text("Agent interoperability")).to_be_visible()
+        expect(page.get_by_text("Retrieval defaults")).to_be_visible()
+        expect(page.get_by_text("Model providers")).to_be_visible()
+        expect(page.get_by_text("default default")).to_be_visible()
+        model_settings = page.locator(".model-provider-settings")
+        expect(model_settings.get_by_label("Profile name")).to_have_value("default")
+        expect(model_settings.get_by_label("Provider", exact=True)).to_have_value(
+            "openai_compatible"
+        )
         expect(page.get_by_label("Allowed scopes")).to_have_value("docs")
         expect(page.get_by_label("Allowed origins")).to_have_value("https://web.example")
         expect(page.locator(".settings-config-preview")).to_contain_text(
@@ -125,7 +132,7 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         )
         page.get_by_label("Allowed origins").fill("http://127.0.0.1:9900")
         page.get_by_label("Remote clients").check()
-        page.get_by_label("API key").fill("secret-key")
+        page.locator("form.settings-panel").get_by_label("API key").fill("secret-key")
         expect(page.locator(".settings-config-preview")).to_contain_text(
             "RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS=http://127.0.0.1:9900"
         )
@@ -137,6 +144,11 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
         page.get_by_test_id("probe-settings-provider").click()
         expect(page.locator(".settings-result")).to_contain_text("Probe embedding provider")
         expect(page.locator(".settings-probe-preview")).to_contain_text("provider.embedding.probe")
+        page.get_by_test_id("probe-model-profile").click()
+        expect(page.locator(".model-provider-result")).to_contain_text("Probe complete")
+        expect(page.locator(".settings-model-provider-preview")).to_contain_text("text-embed-3-small")
+        page.get_by_test_id("discover-model-profile").click()
+        expect(page.locator(".model-provider-result")).to_contain_text("Discovery complete")
         page.get_by_test_id("reset-settings-runtime").click()
         expect(page.get_by_label("Allowed origins")).to_have_value("https://web.example")
         expect(page.locator(".settings-config-preview")).not_to_contain_text(
@@ -293,8 +305,32 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/web/graph/canvas":
             kind = parse_qs(parsed.query).get("kind", ["knowledge"])[0]
             self.write_json(graph_canvas_response(kind))
+        elif path == "/api/configs/model/profiles":
+            self.write_json(MODEL_PROFILES_RESPONSE)
+        elif path == "/api/configs/model-fallback":
+            self.write_json(MODEL_FALLBACK_RESPONSE)
+        elif path == "/api/configs/model/catalog":
+            self.write_json(MODEL_CATALOG_RESPONSE)
         else:
             super().do_GET()
+
+    def do_PUT(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/api/configs/model/profiles/"):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.write_json(MODEL_PROFILES_RESPONSE)
+        elif path == "/api/configs/model-fallback":
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.write_json(MODEL_FALLBACK_RESPONSE)
+        else:
+            self.send_error(404)
+
+    def do_DELETE(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/api/configs/model/profiles/"):
+            self.write_json(MODEL_PROFILES_RESPONSE)
+        else:
+            self.send_error(404)
 
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
@@ -322,6 +358,14 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
                     },
                 }
             )
+        elif path == "/api/configs/model/catalog:refresh":
+            self.write_json(MODEL_CATALOG_RESPONSE)
+        elif path == "/api/configs/model:probe":
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.write_json(MODEL_PROBE_RESPONSE)
+        elif path == "/api/configs/model:discover":
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.write_json(MODEL_DISCOVERY_RESPONSE)
         else:
             self.send_error(404)
 
@@ -486,6 +530,136 @@ RUNTIME = {
     "embedding_batch_size": 16,
     "embedding_timeout_ms": 9000,
     "embedding_max_concurrency": 2,
+    "model_profiles": {
+        "loaded": True,
+        "profile_count": 1,
+        "default_profile": "default",
+    },
+}
+
+MODEL_PROFILES_RESPONSE = {
+    "loaded": True,
+    "default_profile": "default",
+    "profiles": [
+        {
+            "name": "default",
+            "provider": "openai_compatible",
+            "model": "text-embed-3-small",
+            "base_url": "https://embeddings.example",
+            "api_key_configured": True,
+            "headers": [],
+            "temperature": 0.7,
+            "top_p": 1.0,
+            "connect_timeout_seconds": 30.0,
+            "capabilities": {
+                "input": {"text": True},
+                "output": {"text": True},
+            },
+            "fallback_policy_id": "same_provider_then_other_provider",
+            "fallback_priority": 0,
+            "is_default": True,
+            "source": "environment",
+        }
+    ],
+}
+
+MODEL_FALLBACK_RESPONSE = {
+    "policies": [
+        {
+            "policy_id": "same_provider_then_other_provider",
+            "name": "Same Provider Then Other Provider",
+            "description": "Retry same-provider alternatives before switching providers.",
+            "enabled": True,
+            "strategy": "same_provider_then_other_provider",
+            "max_hops": 3,
+            "cooldown_seconds": 60,
+        },
+        {
+            "policy_id": "other_provider_only",
+            "name": "Other Provider Only",
+            "description": "Fail over directly to profiles from other providers.",
+            "enabled": True,
+            "strategy": "other_provider_only",
+            "max_hops": 3,
+            "cooldown_seconds": 60,
+        },
+    ]
+}
+
+MODEL_CATALOG_RESPONSE = {
+    "ok": True,
+    "source_url": "builtin",
+    "fetched_at_ms": 1778790000000,
+    "cache_age_seconds": 0,
+    "stale": False,
+    "providers": [
+        {
+            "id": "openai",
+            "name": "OpenAI-compatible",
+            "runtime_provider": "openai_compatible",
+            "env": [],
+            "models": [
+                {
+                    "id": "text-embed-3-small",
+                    "name": "text-embed-3-small",
+                    "capabilities": {"input": {"text": True}, "output": {"text": True}},
+                }
+            ],
+        },
+        {
+            "id": "anthropic",
+            "name": "Anthropic",
+            "runtime_provider": "anthropic",
+            "env": [],
+            "models": [
+                {
+                    "id": "claude-sonnet-4-5",
+                    "name": "claude-sonnet-4-5",
+                    "capabilities": {"input": {"text": True}, "output": {"text": True}},
+                }
+            ],
+        },
+    ],
+}
+
+MODEL_PROBE_RESPONSE = {
+    "ok": True,
+    "provider": "openai_compatible",
+    "model": "text-embed-3-small",
+    "latency_ms": 12,
+    "checked_at_ms": 1778790000000,
+    "diagnostics": {
+        "endpoint_reachable": True,
+        "auth_valid": True,
+        "rate_limited": False,
+    },
+    "token_usage": {
+        "prompt_tokens": 4,
+        "completion_tokens": 2,
+        "total_tokens": 6,
+    },
+    "retryable": False,
+}
+
+MODEL_DISCOVERY_RESPONSE = {
+    "ok": True,
+    "provider": "openai_compatible",
+    "base_url": "https://embeddings.example",
+    "latency_ms": 14,
+    "checked_at_ms": 1778790000000,
+    "diagnostics": {
+        "endpoint_reachable": True,
+        "auth_valid": True,
+        "rate_limited": False,
+    },
+    "models": ["text-embed-3-small"],
+    "model_entries": [
+        {
+            "model": "text-embed-3-small",
+            "capabilities": {"input": {"text": True}, "output": {"text": True}},
+        }
+    ],
+    "retryable": False,
 }
 
 PROJECT_STATUS_RESPONSE = {

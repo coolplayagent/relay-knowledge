@@ -472,9 +472,7 @@ a {
 .runtime-list div,
 .operation-form,
 .operation-preview,
-.staged-panel,
-.settings-panel,
-.settings-output {
+.staged-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -671,28 +669,11 @@ dd {
   gap: 12px;
 }
 
-.operation-form,
-.settings-panel {
+.operation-form {
   display: grid;
   align-content: start;
   gap: 12px;
   padding: 14px;
-}
-
-.settings-layout {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 1.05fr);
-  gap: 12px;
-}
-
-.settings-status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-checkbox {
-  min-height: 34px;
 }
 
 .field-grid {
@@ -763,14 +744,12 @@ textarea:focus {
 }
 
 .operation-preview,
-.staged-panel,
-.settings-output {
+.staged-panel {
   min-width: 0;
   padding: 14px;
 }
 
-.operation-result,
-.settings-result {
+.operation-result {
   display: grid;
   gap: 8px;
   margin-top: 12px;
@@ -783,13 +762,11 @@ textarea:focus {
   font-weight: 680;
 }
 
-.operation-result[data-state="running"] .muted-line,
-.settings-result[data-state="running"] .muted-line {
+.operation-result[data-state="running"] .muted-line {
   color: var(--amber);
 }
 
-.operation-result[data-state="success"] .result-heading,
-.settings-result[data-state="success"] .result-heading {
+.operation-result[data-state="success"] .result-heading {
   color: var(--green);
 }
 
@@ -837,8 +814,7 @@ pre {
   overflow-wrap: anywhere;
 }
 
-.preview-actions,
-.settings-actions {
+.preview-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -921,25 +897,6 @@ tr:last-child td {
   border-bottom: 0;
 }
 
-.runtime-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  grid-auto-rows: minmax(86px, auto);
-  gap: 10px;
-  margin: 0;
-}
-
-.runtime-list div {
-  display: grid;
-  align-content: start;
-  min-width: 0;
-  padding: 12px;
-}
-
-.runtime-list dd {
-  font-size: 16px;
-}
-
 @media (max-width: 920px) {
   .shell {
     grid-template-columns: 1fr;
@@ -986,8 +943,7 @@ tr:last-child td {
   .readiness-grid,
   .provider-grid,
   .runtime-list,
-  .operation-layout,
-  .settings-layout {
+  .operation-layout {
     grid-template-columns: 1fr;
   }
 

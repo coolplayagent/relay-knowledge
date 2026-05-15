@@ -124,6 +124,12 @@ mod tests {
                 embedding_batch_size: None,
                 embedding_timeout_ms: None,
                 embedding_max_concurrency: None,
+                model_profiles: crate::model_provider::ModelProfileRuntimeSummary {
+                    loaded: true,
+                    profile_count: 0,
+                    default_profile: None,
+                    error: None,
+                },
                 telemetry: crate::observability::ObservabilityRuntime::new(
                     crate::observability::TelemetryConfig::from_environment(
                         &crate::env::TelemetryEnvOverrides::default(),

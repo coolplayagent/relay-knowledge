@@ -11,7 +11,10 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use crate::env::{PathEnvOverrides, PlatformEnvironment, PlatformKind};
+use crate::{
+    env::{PathEnvOverrides, PlatformEnvironment, PlatformKind},
+    project::{MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME, MODEL_PROFILES_FILE_NAME},
+};
 
 pub use crate::project::APP_DIR_NAME;
 
@@ -90,6 +93,21 @@ impl RuntimePaths {
     /// Returns the JSONL audit log owned by resident agent protocol adapters.
     pub fn agent_audit_log_file(&self) -> PathBuf {
         self.log_dir.join("agent-audit.jsonl")
+    }
+
+    /// Returns the model provider profile configuration file.
+    pub fn model_profiles_file(&self) -> PathBuf {
+        self.config_dir.join(MODEL_PROFILES_FILE_NAME)
+    }
+
+    /// Returns the model provider fallback-policy configuration file.
+    pub fn model_fallback_file(&self) -> PathBuf {
+        self.config_dir.join(MODEL_FALLBACK_FILE_NAME)
+    }
+
+    /// Returns the cached public model catalog file.
+    pub fn model_catalog_cache_file(&self) -> PathBuf {
+        self.cache_dir.join(MODEL_CATALOG_CACHE_FILE_NAME)
     }
 }
 

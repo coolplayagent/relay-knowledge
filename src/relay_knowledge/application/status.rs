@@ -1,10 +1,32 @@
 use std::{path::Path, time::Duration};
 
-use crate::api::{AgentProtocolStatus, RuntimeStatus};
+use crate::{
+    api::{AgentProtocolStatus, RuntimeStatus},
+    model_provider::ModelProfileRuntimeSummary,
+};
 
 use super::RuntimeConfiguration;
 
 pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
+    runtime_status_with_model_profiles(
+        runtime,
+        ModelProfileRuntimeSummary {
+            loaded: true,
+            profile_count: usize::from(runtime.retrieval.remote_embedding.is_some()),
+            default_profile: runtime
+                .retrieval
+                .remote_embedding
+                .as_ref()
+                .map(|_| "default".to_owned()),
+            error: None,
+        },
+    )
+}
+
+pub(super) fn runtime_status_with_model_profiles(
+    runtime: &RuntimeConfiguration,
+    model_profiles: ModelProfileRuntimeSummary,
+) -> RuntimeStatus {
     let network = runtime.network.current();
 
     RuntimeStatus {
@@ -63,6 +85,7 @@ pub(super) fn runtime_status(runtime: &RuntimeConfiguration) -> RuntimeStatus {
             .remote_embedding
             .as_ref()
             .map(|config| config.max_concurrency),
+        model_profiles,
         telemetry: runtime.observability.status(),
     }
 }

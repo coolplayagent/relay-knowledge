@@ -47,7 +47,7 @@ relay-knowledge service doctor
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
 - Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标。
 - 可观测性：常驻服务模式支持真实 OTLP HTTP/protobuf 跟踪和指标导出；Collector 导出失败时提供本地诊断。
-- Web 工作区：Rust HTTP 服务可在同一端口提供静态 Web 诊断、agent/model 设置、操作组合器、`/api/*` 和可选 MCP 端点。
+- Web 工作区：Rust HTTP 服务可在同一端口提供静态 Web 诊断、分类后的 agent/model 设置、持久化模型 provider profile、操作组合器、`/api/*` 和可选 MCP 端点。
 - 设置诊断：提供 local、只读 agent、平台服务、外部嵌入等命名设置配置文件。
 
 ## 文档
@@ -158,7 +158,7 @@ RELAY_KNOWLEDGE_EMBEDDING_DIMENSION=1536
 
 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND` 和 `RELAY_KNOWLEDGE_VECTOR_BACKEND` 也接受 `local` 与 `disabled`。禁用的 read-model backend 不参与 semantic/vector 检索执行和刷新调度；空 embedding model name 会在运行时配置阶段失败。
 
-Web Settings 页面会读取同一套脱敏 runtime 与 service diagnostics，用于生成 MCP 暴露、origin allow-list、作用域策略、审计和外部模型相关环境变量。页面只生成 shell 配置和 service 启动命令，供用户通过环境变量或平台 service manager 应用；它不会写入持久配置文件，也不会把已保存的 secret 值返回给浏览器。
+Web Settings 页面按 agent 互操作性、检索默认值和模型 provider 分类展示。Agent/检索设置会读取同一套脱敏 runtime 与 service diagnostics，用于生成 MCP 暴露、origin allow-list、作用域策略、审计和外部模型相关环境变量。模型 provider 设置通过 `/api/configs/model/*` 管理命名 chat/completion profile、fallback policy、`models.dev` catalog 刷新、endpoint probe 和模型发现。Profile 与 fallback 文件位于解析后的配置目录，文件名为 `model-profiles.json` 和 `model-fallback.json`；公共 catalog cache 位于解析后的缓存目录，文件名为 `model-catalog-cache.json`。Secret 只在保存时接收，回传给浏览器时只显示 configured boolean 或脱敏 header。
 
 CLI `ingest` 命令会写入 evidence 和 entity label。共享 API 还接受面向 adapter 的更丰富 Phase 1 graph fact：evidence `source_path`、source `span`、confidence、lifecycle status、类型化 relation、claim，以及引用 evidence id 的 event。结构化事实必须引用 supporting evidence；反序列化后会重新校验 supplied confidence、span 和 version-range 字段；检索只使用 `accepted` 或 `proposed` evidence 作为上下文。Context pack item 现在会暴露从这些结构化事实派生的直接 `graph_paths`，方便 agent caller 在 raw fact provenance 旁边引用一跳 relation、claim 或 event path。
 
@@ -183,7 +183,7 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、用于 evidence/code/index/worker 拓扑的紧凑 SVG graph overview、交互式 Graph canvas、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库工作流、索引刷新、提供者探测、worker/提案/审计操作、服务运行时命令和 agent/model 设置的交互式工作区。同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
+静态 Web 工作区会渲染项目健康状况、GraphRAG 准备度、图计数、用于 evidence/code/index/worker 拓扑的紧凑 SVG graph overview、交互式 Graph canvas、作用域索引新鲜度、刷新队列诊断、过期原因、运行时预算，以及检索、摄取、图检查、代码仓库工作流、索引刷新、提供者探测、worker/提案/审计操作、服务运行时命令、agent 互操作性设置、检索默认值和模型 provider profile 管理的交互式工作区。同一个 Rust HTTP 服务会在本地端口提供静态 Web 资源，以及 `/api/project/status`、`/api/health`、`/api/service/status` 和 `/api/web/operations/execute`。execute 端点接收当前编排器快照，调用共享应用服务，并返回操作元数据和结果 JSON 供页面展示。Web `service run` 只返回服务运行时快照，不从浏览器启动常驻循环。Web execute 请求受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；非 loopback HTTP 绑定必须显式启用远程客户端访问策略。
 
 可选本地 hooks：
 

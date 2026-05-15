@@ -22,12 +22,17 @@ Web 工作区位于 `web/`，用于诊断面板和操作预览:
 /api/service/status
 /api/web/graph/canvas
 /api/web/operations/execute
+/api/configs/model/profiles
+/api/configs/model-fallback
+/api/configs/model/catalog
+/api/configs/model:probe
+/api/configs/model:discover
 ```
 
 页面展示 project health、GraphRAG readiness、provider backend diagnostics、graph counts、Status 页的紧凑 SVG graph overview、独立 Graph 页面中的 graph canvas、scoped index freshness、refresh queue diagnostics、stale reasons、runtime budgets、agent/model settings 和操作 composer。Status graph overview 使用 `/api/health` 的 evidence、entity、relation、code repository totals、index lag 和 worker queue 数据绘制确定性点线拓扑，不新增后端节点/边接口。GraphRAG readiness 的 Stale reasons 项会显示第一条失败或滞后原因；完整列表仍以 `/api/health` 的 `index_refresh.stale_reasons` JSON 为准。
 Providers 面板只展示脱敏后的 semantic/vector backend mode、模型、维度、endpoint host、key configured 状态和 cursor metadata；Web UI 不保存或提交 provider API key。
 Status 首页提供单输入查询入口，直接提交 `retrieve.context` snapshot 到 `/api/web/operations/execute`，并复用 Operations 面板的 source scope、freshness 和 limit 默认值。
-Settings 面板从 `/api/project/status` 和 `/api/service/status` 读取脱敏 runtime/service 状态，生成 MCP 暴露、origin allow-list、scope policy、audit sink、external semantic/vector backend、provider endpoint 和 model metadata 的环境变量配置。API key 输入只参与当前浏览器会话中的生成结果；后端不会把已保存的 secret 值返回给 Web UI，也不会通过 Settings 页面写入持久配置文件。
+Settings 面板将操作拆成 agent 互操作性、检索默认值和模型 provider 三组。Agent/检索设置从 `/api/project/status` 和 `/api/service/status` 读取脱敏 runtime/service 状态，生成 MCP 暴露、origin allow-list、scope policy、audit sink、external semantic/vector backend、provider endpoint 和 model metadata 的环境变量配置。模型 provider 设置读取和保存命名 profile，支持 OpenAI-compatible、Anthropic、BigModel、MiniMax、MaaS、CodeAgent 和 Echo provider，支持默认 profile、fallback policy、catalog 选择、endpoint probe 和模型发现。Profile secret 只在保存请求中提交；后端返回 profile 时只包含 configured boolean 或脱敏 header。
 
 `relay-knowledge service run --web` 会在配置的 `RELAY_KNOWLEDGE_HTTP_BIND` 上挂载静态 Web workspace 和这些 Web endpoints；同时启用 `--mcp streamable-http` 时，MCP endpoint 与 Web endpoints 共用同一事件驱动 HTTP listener 和 QoS budget。非 loopback bind 必须显式启用 remote-client access policy；`/api/web/operations/execute` 的请求体受 `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制。该 endpoint 接收当前 composer snapshot，返回执行后的 metadata、operation、command 和 result JSON。Rust Web adapter 只负责 HTTP JSON 解析和错误映射，实际 retrieve、ingest、graph inspect、index refresh、provider probe、code repository workflow、worker/proposal/audit operations 和 service status 都复用 application service。
 
@@ -92,8 +97,8 @@ uv run --extra dev python -m playwright install --with-deps chromium
 uv run --extra dev pytest tests/browser
 ```
 
-测试覆盖 diagnostics、Status 首页查询入口、Status graph overview 点线与字体比例、单详情页导航、主题切换、GraphRAG readiness、graph canvas tabs/selection/zoom controls、operation composer、index table、runtime panel、Settings 生成配置与 provider probe，以及移动端布局。
+测试覆盖 diagnostics、Status 首页查询入口、Status graph overview 点线与字体比例、单详情页导航、主题切换、GraphRAG readiness、graph canvas tabs/selection/zoom controls、operation composer、index table、runtime panel、Settings 生成配置、模型 provider profile、provider probe/discovery，以及移动端布局。
 
 ## 5.7 安全边界
 
-Web 工作区面向本地诊断和操作，不承担安装器或后台 daemon 管理职责。浏览器中的 service run 只返回 runtime snapshot；真正常驻服务由 CLI、`run.sh` 或平台 service manager 启动。Provider 面板只展示脱敏配置；Settings 面板可以临时接收新 API key 以生成本地 env block，但不会保存或回传 secret。远程访问默认关闭，只有在 MCP remote-client policy 和 HTTP bind 明确允许后才接受非本机客户端。
+Web 工作区面向本地诊断和操作，不承担安装器或后台 daemon 管理职责。浏览器中的 service run 只返回 runtime snapshot；真正常驻服务由 CLI、`run.sh` 或平台 service manager 启动。Providers 面板只展示 semantic/vector 读模型的脱敏配置；Settings 的模型 provider profile 会保存到由 `paths` 解析出的配置目录，回传时仍不会包含 secret 原文。远程访问默认关闭，只有在 MCP remote-client policy 和 HTTP bind 明确允许后才接受非本机客户端。

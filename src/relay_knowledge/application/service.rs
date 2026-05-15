@@ -23,6 +23,7 @@ use crate::{
         RetrievalMode, RetrievedContextPack, RetrieverSource, SourceScope,
     },
     env::EnvironmentConfig,
+    model_provider::ModelProviderConfigService,
     observability::ObservabilityRuntime,
     project::{
         DATABASE_FILE_NAME, LINUX_SERVICE_DEFINITION_FILE_NAME, MACOS_SERVICE_DEFINITION_FILE_NAME,
@@ -47,7 +48,7 @@ use super::{
     },
     ingest::mutation_batch_from_request,
     multimodal::extraction_ingest_request,
-    status::{agent_protocol_status, runtime_status},
+    status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
 };
 
 #[cfg(test)]
@@ -123,6 +124,11 @@ impl RelayKnowledgeService {
         self.runtime.observability.clone()
     }
 
+    /// Returns the model provider configuration service rooted in runtime paths.
+    pub fn model_provider_config(&self) -> ModelProviderConfigService {
+        ModelProviderConfigService::new(self.runtime.paths.clone())
+    }
+
     /// Persists a redacted agent protocol audit event through the durable sink.
     pub async fn record_agent_audit(&self, event: AgentDurableAuditInput) -> Result<(), ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
@@ -156,10 +162,15 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?;
 
+        let model_profiles = self
+            .model_provider_config()
+            .profile_summary(&self.runtime.retrieval)
+            .await;
+
         Ok(ProjectStatusResponse {
             project_name: PROJECT_NAME.to_owned(),
             metadata: ApiMetadata::graph_only(&context, graph_version),
-            runtime: runtime_status(&self.runtime),
+            runtime: runtime_status_with_model_profiles(&self.runtime, model_profiles),
         })
     }
 
@@ -548,7 +559,12 @@ impl RelayKnowledgeService {
             indexes: outcome.indexes,
             index_cursors: outcome.cursors,
             index_refresh: outcome.diagnostics,
-            runtime: runtime_status(&self.runtime),
+            runtime: runtime_status_with_model_profiles(
+                &self.runtime,
+                self.model_provider_config()
+                    .profile_summary(&self.runtime.retrieval)
+                    .await,
+            ),
         })
     }
 

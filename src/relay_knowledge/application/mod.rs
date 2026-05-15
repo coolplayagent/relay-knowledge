@@ -3,6 +3,7 @@
 mod code_service;
 mod index_refresh;
 mod ingest;
+mod model_provider_config;
 mod multimodal;
 mod operations;
 mod runtime;
