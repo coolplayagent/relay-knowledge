@@ -215,14 +215,28 @@ fn append_compact_line(signature: &mut String, line: &str, max_bytes: usize) -> 
         } else if !push_char_within_budget(signature, ' ', max_bytes) {
             return true;
         }
-        for character in word.chars() {
-            if !push_char_within_budget(signature, character, max_bytes) {
-                return true;
-            }
+        if !push_str_within_budget(signature, word, max_bytes) {
+            return true;
         }
     }
 
     false
+}
+
+fn push_str_within_budget(signature: &mut String, value: &str, max_bytes: usize) -> bool {
+    let remaining = max_bytes.saturating_sub(signature.len());
+    if value.len() <= remaining {
+        signature.push_str(value);
+        return true;
+    }
+
+    for character in value.chars() {
+        if !push_char_within_budget(signature, character, max_bytes) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn push_char_within_budget(signature: &mut String, character: char, max_bytes: usize) -> bool {
