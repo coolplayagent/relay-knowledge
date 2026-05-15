@@ -259,7 +259,10 @@ impl RelayKnowledgeService {
             .search_code(request.clone())
             .await
             .map_err(storage_api_error)?;
-        let degraded_reason = results.iter().find_map(|hit| hit.degraded_reason.clone());
+        let degraded_reason = results
+            .iter()
+            .find_map(|hit| hit.degraded_reason.clone())
+            .or_else(|| scoped_status.degraded_reason.clone());
         let scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,
@@ -498,7 +501,7 @@ async fn resolved_code_scope_status(
 ) -> Result<CodeRepositoryStatus, ApiError> {
     let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
     let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
-    store
+    let exact_scope = store
         .code_repository_scope_status(
             selector.repository.clone(),
             selector.ref_selector.clone(),
@@ -506,13 +509,30 @@ async fn resolved_code_scope_status(
             language_filters,
         )
         .await
-        .map_err(storage_api_error)?
-        .ok_or_else(|| {
-            ApiError::invalid_argument(format!(
-                "code repository '{}' has no index for ref {} and requested filters",
-                selector.repository, selector.ref_selector
-            ))
-        })
+        .map_err(storage_api_error)?;
+    let scoped_status = match exact_scope {
+        Some(status) => Some(status),
+        None if (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
+            && selector_filters_fit_indexed_scope(status, selector) =>
+        {
+            store
+                .code_repository_scope_status(
+                    selector.repository.clone(),
+                    selector.ref_selector.clone(),
+                    status.path_filters.clone(),
+                    status.language_filters.clone(),
+                )
+                .await
+                .map_err(storage_api_error)?
+        }
+        None => None,
+    };
+    scoped_status.ok_or_else(|| {
+        ApiError::invalid_argument(format!(
+            "code repository '{}' has no index for ref {} and requested filters",
+            selector.repository, selector.ref_selector
+        ))
+    })
 }
 
 fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
@@ -524,6 +544,60 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     }
 
     merged
+}
+
+fn selector_filters_fit_indexed_scope(
+    status: &CodeRepositoryStatus,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    requested_paths_fit_indexed_scope(&status.path_filters, &selector.path_filters)
+        && requested_languages_fit_indexed_scope(
+            &status.language_filters,
+            &selector.language_filters,
+        )
+}
+
+fn requested_paths_fit_indexed_scope(
+    indexed_filters: &[String],
+    selector_filters: &[String],
+) -> bool {
+    selector_filters.is_empty()
+        || indexed_filters.is_empty()
+        || selector_filters.iter().all(|selector_filter| {
+            indexed_filters
+                .iter()
+                .any(|indexed_filter| path_filter_covers(indexed_filter, selector_filter))
+        })
+}
+
+fn requested_languages_fit_indexed_scope(
+    indexed_filters: &[String],
+    selector_filters: &[String],
+) -> bool {
+    selector_filters.is_empty()
+        || indexed_filters.is_empty()
+        || selector_filters
+            .iter()
+            .all(|selector_filter| indexed_filters.contains(selector_filter))
+}
+
+fn path_filter_covers(indexed_filter: &str, selector_filter: &str) -> bool {
+    let indexed_filter = normalize_path_filter(indexed_filter);
+    let selector_filter = normalize_path_filter(selector_filter);
+    indexed_filter == "."
+        || (!indexed_filter.is_empty()
+            && !selector_filter.is_empty()
+            && (selector_filter == indexed_filter
+                || selector_filter.starts_with(&format!("{indexed_filter}/"))))
+}
+
+fn normalize_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 async fn indexed_commit_for_ref(

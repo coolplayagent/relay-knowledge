@@ -54,6 +54,140 @@ fn retry_policy() {
 }
 
 #[test]
+fn python_tree_sitter_imports_resolve_local_symbols() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        2,
+        0,
+    );
+    parse_indexed_file(
+        &mut build,
+        "src/relay_teams/connector/w3_models.py",
+        br#"
+class W3ConnectorSaveRequest:
+    pass
+"#,
+    )
+    .expect("model file should parse");
+    parse_indexed_file(
+        &mut build,
+        "src/relay_teams/connector/service.py",
+        br#"
+from relay_teams.connector.w3_models import W3ConnectorSaveRequest
+
+def build_request():
+    return W3ConnectorSaveRequest()
+"#,
+    )
+    .expect("service file should parse");
+
+    let snapshot = build.finish();
+    let import = snapshot
+        .imports
+        .iter()
+        .find(|import| import.module.contains("W3ConnectorSaveRequest"))
+        .expect("tree-sitter should collect the Python import statement");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.confidence_tier, "inferred");
+}
+
+#[test]
+fn python_tree_sitter_external_imports_do_not_match_local_symbol_names() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        2,
+        0,
+    );
+    parse_indexed_file(
+        &mut build,
+        "src/local/session.py",
+        br#"
+class Session:
+    pass
+"#,
+    )
+    .expect("local file should parse");
+    parse_indexed_file(
+        &mut build,
+        "src/client.py",
+        br#"
+from requests import Session
+
+def build_client():
+    return Session()
+"#,
+    )
+    .expect("client file should parse");
+
+    let snapshot = build.finish();
+    let import = snapshot
+        .imports
+        .iter()
+        .find(|import| import.module.contains("requests"))
+        .expect("tree-sitter should collect the external Python import");
+
+    assert_eq!(import.resolution_state, "unresolved");
+    assert_eq!(import.confidence_tier, "ambiguous");
+}
+
+#[test]
+fn python_tree_sitter_package_init_imports_resolve_package_modules() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        2,
+        0,
+    );
+    parse_indexed_file(
+        &mut build,
+        "src/pkg/__init__.py",
+        br#"
+PACKAGE_NAME = "pkg"
+"#,
+    )
+    .expect("package init should parse");
+    parse_indexed_file(
+        &mut build,
+        "src/app.py",
+        br#"
+import pkg
+
+def load():
+    return pkg.PACKAGE_NAME
+"#,
+    )
+    .expect("app file should parse");
+
+    let snapshot = build.finish();
+    let import = snapshot
+        .imports
+        .iter()
+        .find(|import| import.module == "import pkg")
+        .expect("tree-sitter should collect the package import");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.confidence_tier, "inferred");
+}
+
+#[test]
 fn nested_symbols_receive_stable_canonical_qualified_names() {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())

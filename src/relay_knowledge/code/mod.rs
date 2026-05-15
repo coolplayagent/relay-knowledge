@@ -682,9 +682,7 @@ impl SnapshotBuild {
     fn finish(mut self) -> CodeIndexSnapshot {
         identity::enrich_symbol_identities(&self.repository_id, &mut self.symbols);
         identity::resolve_reference_targets(&self.symbols, &mut self.references);
-        for import in &mut self.imports {
-            import.target_hint = Some(import.module.clone());
-        }
+        identity::resolve_import_targets(&self.files, &self.symbols, &mut self.imports);
         self.calls = self
             .references
             .iter()
