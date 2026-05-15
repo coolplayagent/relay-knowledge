@@ -39,6 +39,12 @@ def test_web_diagnostics_render_browser_contract(page: Page) -> None:
             )"""
         )
         assert max(graph_font_sizes) <= 12
+        page.get_by_role("form", name="Query knowledge graph").get_by_label("Query").fill(
+            "graph cache freshness"
+        )
+        page.get_by_test_id("home-query-run").click()
+        expect(page.locator(".home-query-result")).to_contain_text("Retrieve context")
+        expect(page.locator(".home-query-preview")).to_contain_text("graph cache freshness")
         expect(page.get_by_role("heading", name="GraphRAG readiness")).not_to_be_visible()
         expect(page.get_by_role("navigation", name="Primary")).to_be_visible()
         expect(page.locator("aside nav a")).to_have_count(7)
