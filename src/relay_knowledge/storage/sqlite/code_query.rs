@@ -85,6 +85,7 @@ fn search_symbols(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY path ASC, line_start ASC
