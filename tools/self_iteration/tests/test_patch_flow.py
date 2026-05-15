@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import subprocess
 import sys
 import tempfile
@@ -76,6 +77,76 @@ class PatchFlowTests(unittest.TestCase):
             self.assertNotIn("rejected_without_reason", prompt)
             self.assertNotIn("run_id=accepted", prompt)
 
+    def test_prompt_includes_failed_gate_command_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            paths.reports.mkdir(parents=True)
+            report_path = paths.reports / "failed.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "evaluation": {
+                            "commands": [
+                                {
+                                    "name": "leveldb_cpp_index",
+                                    "command": [
+                                        "target/release/relay-knowledge",
+                                        "repo",
+                                        "index",
+                                        "leveldb-cpp-self-iteration",
+                                        "--ref",
+                                        "HEAD",
+                                    ],
+                                    "exit_code": 1,
+                                    "duration_ms": 1697,
+                                    "stdout_tail": "",
+                                    "stderr_tail": (
+                                        "sqlite operation failed: UNIQUE constraint failed: "
+                                        "code_repository_symbols.source_scope, "
+                                        "code_repository_symbols.symbol_snapshot_id\n"
+                                    ),
+                                }
+                            ]
+                        }
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            append_run(
+                paths,
+                {
+                    "run_id": "failed-gate",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": False,
+                    "score": 0.89,
+                    "accuracy": 0.82,
+                    "stability": 0.97,
+                    "reject_reasons": ["quality gates failed: leveldb_cpp_index"],
+                    "report": str(report_path),
+                    "gates": [
+                        {
+                            "name": "leveldb_cpp_index",
+                            "passed": False,
+                            "duration_ms": 1697,
+                            "message": "sqlite operation failed",
+                        }
+                    ],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Recent failed quality gate diagnostics:", prompt)
+            self.assertIn("run_id=failed-gate", prompt)
+            self.assertIn("gate=leveldb_cpp_index", prompt)
+            self.assertIn("target/release/relay-knowledge repo index", prompt)
+            self.assertIn("exit_code=1", prompt)
+            self.assertIn("UNIQUE constraint failed", prompt)
+            self.assertIn("code_repository_symbols.symbol_snapshot_id", prompt)
+
     def test_prompt_describes_missing_rejected_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -83,6 +154,7 @@ class PatchFlowTests(unittest.TestCase):
             prompt = self_iterate.build_prompt(history_paths(workspace), "next")
 
             self.assertIn("No rejected historical run with reasons yet.", prompt)
+            self.assertIn("No failed quality gate diagnostics recorded yet.", prompt)
             self.assertIn("No worsened evaluation items recorded yet.", prompt)
             self.assertIn("No improved evaluation items recorded yet.", prompt)
 

@@ -257,6 +257,27 @@ void f(int); void f(double);
 }
 
 #[test]
+fn cpp_enum_tag_and_manual_fallback_deduplicate() {
+    let snapshot = parse_source_snapshot(
+        "db/db_iter.cc",
+        br#"
+class DBIter {
+ public:
+  enum Direction { kForward, kReverse };
+};
+"#,
+    );
+    let directions = snapshot
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.name == "Direction")
+        .collect::<Vec<_>>();
+
+    assert_eq!(directions.len(), 1);
+    assert_eq!(directions[0].kind, "type");
+}
+
+#[test]
 fn non_c_function_definitions_keep_generic_manual_fallback() {
     let content = r#"
 def retry_policy():
