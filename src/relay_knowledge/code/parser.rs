@@ -464,47 +464,34 @@ fn collect_manual_nodes(
     root: Node<'_>,
     output: &mut FileParseOutput,
 ) -> Result<(), CodeIndexError> {
-    let mut cursor = root.walk();
-    for node in root.children(&mut cursor) {
-        collect_manual_node(context, node, output)?;
-    }
-
-    Ok(())
-}
-
-fn collect_manual_node(
-    context: &FileParseContext<'_>,
-    node: Node<'_>,
-    output: &mut FileParseOutput,
-) -> Result<(), CodeIndexError> {
-    if let Some((name, kind, range)) = manual_definition(context.content, node) {
-        if !output.symbols.iter().any(|symbol| {
-            symbol.name == name
-                && symbol.path == context.path
-                && symbol.line_range.start == range.line_start as u32
-        }) {
-            output
-                .symbols
-                .push(symbol_record(context, &name, kind, &range)?);
+    let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
+    stack.push(root);
+    while let Some(node) = stack.pop() {
+        if let Some((name, kind, range)) = manual_definition(context.content, node) {
+            if !output.symbols.iter().any(|symbol| {
+                symbol.name == name
+                    && symbol.path == context.path
+                    && symbol.line_range.start == range.line_start as u32
+            }) {
+                output
+                    .symbols
+                    .push(symbol_record(context, &name, kind, &range)?);
+            }
         }
-    }
-    if let Some((name, range)) = manual_call(context.content, node) {
-        if !output.references.iter().any(|reference| {
-            reference.name == name
-                && reference.path == context.path
-                && reference.line_range.start == range.line_start as u32
-                && reference.byte_range.start as usize == range.byte_start
-                && reference.byte_range.end as usize == range.byte_end
-        }) {
-            output
-                .references
-                .push(reference_record(context, &name, "call", &range)?);
+        if let Some((name, range)) = manual_call(context.content, node) {
+            if !output.references.iter().any(|reference| {
+                reference.name == name
+                    && reference.path == context.path
+                    && reference.line_range.start == range.line_start as u32
+                    && reference.byte_range.start as usize == range.byte_start
+                    && reference.byte_range.end as usize == range.byte_end
+            }) {
+                output
+                    .references
+                    .push(reference_record(context, &name, "call", &range)?);
+            }
         }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_manual_node(context, child, output)?;
+        push_children_reverse(node, &mut stack);
     }
 
     Ok(())
@@ -551,54 +538,45 @@ fn collect_imports(
     root: Node<'_>,
 ) -> Result<Vec<CodeImportRecord>, CodeIndexError> {
     let mut imports = Vec::new();
-    collect_import_node(build, path, file_id, content, root, &mut imports)?;
+    let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
+    stack.push(root);
+    while let Some(node) = stack.pop() {
+        if is_import_node(node) {
+            let module = compact_whitespace(&node_text(content, node));
+            let range = syntax_range(node);
+            imports.push(CodeImportRecord {
+                repository_id: build.repository_id.clone(),
+                source_scope: build.source_scope.clone(),
+                import_id: stable_id(
+                    "import",
+                    [
+                        &build.repository_id,
+                        &build.source_scope,
+                        path,
+                        &module,
+                        &range.line_start.to_string(),
+                        &range.line_end.to_string(),
+                    ],
+                ),
+                file_id: file_id.to_owned(),
+                path: path.to_owned(),
+                module,
+                target_hint: None,
+                resolution_state: "unresolved".to_owned(),
+                confidence_basis_points: 10_000,
+                confidence_tier: "extracted".to_owned(),
+                line_range: RepositoryCodeRange::new(
+                    "line_range",
+                    range.line_start,
+                    range.line_end,
+                )
+                .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
+            });
+        }
+        push_children_reverse(node, &mut stack);
+    }
 
     Ok(imports)
-}
-
-fn collect_import_node(
-    build: &SnapshotBuild,
-    path: &str,
-    file_id: &str,
-    content: &str,
-    node: Node<'_>,
-    imports: &mut Vec<CodeImportRecord>,
-) -> Result<(), CodeIndexError> {
-    if is_import_node(node) {
-        let module = compact_whitespace(&node_text(content, node));
-        let range = syntax_range(node);
-        imports.push(CodeImportRecord {
-            repository_id: build.repository_id.clone(),
-            source_scope: build.source_scope.clone(),
-            import_id: stable_id(
-                "import",
-                [
-                    &build.repository_id,
-                    &build.source_scope,
-                    path,
-                    &module,
-                    &range.line_start.to_string(),
-                    &range.line_end.to_string(),
-                ],
-            ),
-            file_id: file_id.to_owned(),
-            path: path.to_owned(),
-            module,
-            target_hint: None,
-            resolution_state: "unresolved".to_owned(),
-            confidence_basis_points: 10_000,
-            confidence_tier: "extracted".to_owned(),
-            line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
-                .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
-        });
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_import_node(build, path, file_id, content, child, imports)?;
-    }
-
-    Ok(())
 }
 
 fn is_import_node(node: Node<'_>) -> bool {
@@ -610,6 +588,7 @@ fn is_import_node(node: Node<'_>) -> bool {
         | "namespace_use_declaration"
         | "preproc_include"
         | "use_declaration"
+        | "using_declaration"
         | "using_directive" => true,
         _ => false,
     }
@@ -810,21 +789,37 @@ fn node_text(content: &str, node: Node<'_>) -> String {
 }
 
 fn last_identifier_text(content: &str, node: Node<'_>) -> Option<String> {
-    if matches!(
-        node.kind(),
-        "command_name"
-            | "identifier"
-            | "field_identifier"
-            | "property_identifier"
-            | "type_identifier"
-            | "word"
-    ) {
-        return Some(node_text(content, node));
+    let mut stack = Vec::with_capacity(node.child_count().saturating_add(1));
+    stack.push(node);
+    let mut last = None;
+    while let Some(current) = stack.pop() {
+        if matches!(
+            current.kind(),
+            "command_name"
+                | "identifier"
+                | "field_identifier"
+                | "property_identifier"
+                | "type_identifier"
+                | "word"
+        ) {
+            last = Some(node_text(content, current));
+            continue;
+        }
+        push_children_reverse(current, &mut stack);
     }
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .filter_map(|child| last_identifier_text(content, child))
-        .last()
+
+    last
+}
+
+fn push_children_reverse<'tree>(node: Node<'tree>, stack: &mut Vec<Node<'tree>>) {
+    for index in (0..node.child_count()).rev() {
+        let Ok(index) = u32::try_from(index) else {
+            continue;
+        };
+        if let Some(child) = node.child(index) {
+            stack.push(child);
+        }
+    }
 }
 
 fn compact_whitespace(value: &str) -> String {
@@ -878,3 +873,7 @@ fn count_lines(bytes: &[u8]) -> usize {
 #[cfg(test)]
 #[path = "parser_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "parser_import_resolution_tests.rs"]
+mod import_resolution_tests;

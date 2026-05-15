@@ -207,6 +207,17 @@ LanguageDefinition {
 
 grammar 版本必须写入 extractor metadata。grammar 升级后，同一文件的抽取结果可能变化，必须触发 scoped re-index 或标记 extractor drift。
 
+### 5.1A Parse execution model
+
+解析执行模型必须优先利用 tree-sitter 的语法树、节点范围和 query capture 能力，但手写补充抽取不能采用无界递归。AST 遍历、manual symbol/call/import extraction、嵌入语言 region 遍历和 import resolution 候选扩展必须使用显式工作栈、游标或 bounded queue，并受单文件大小、节点预算、时间预算和取消点约束。
+
+性能要求:
+
+- 单文件解析只构建必要的 captures、symbols、references、imports 和 chunks；不要为整棵 AST 复制完整中间树。
+- 仓库级 import/reference resolution 必须先构建轻量索引，例如 `path -> language_id`、module path、symbol name 候选表，再执行小集合查找。
+- Python、Java、TypeScript/TSX、C/C++ 等语言的 module/include/package 候选必须是固定上限的小集合，不能根据目录或依赖深度生成无界笛卡尔积。
+- 深层嵌套源码、超多 import 和 parser 异常必须降级为 `partial`、`text_only`、`failed`、`ambiguous` 或 `unresolved`，不能让 worker 栈溢出或无界占用内存。
+
 ### 5.2 Query capture contract
 
 tree-sitter query capture 推荐命名:
@@ -289,6 +300,7 @@ resolve snapshot
 - `.gitignore` 只影响 worktree overlay；clean snapshot 使用 Git tree。
 - generated/vendor/lockfile/large file 规则必须可配置、可观测、可解释。
 - 单文件读取、解析和抽取必须有大小上限、时间上限和取消点。
+- parse/extract worker 必须使用非递归 AST 遍历和有界候选集合；深层源码只能增加显式工作栈预算消耗，不能增加 Rust 调用栈深度。
 - 写入按批次提交；批次失败只回滚该批次，成功批次保留。
 - 全量构建完成前，旧 scope 查询继续可用；新 scope 可按 freshness policy 返回 stale/partial。
 
@@ -553,6 +565,8 @@ relay-knowledge repo status <alias> --format json
 - `repo status`: 返回当前 indexed commit/tree、fresh/stale/degraded state 和计数。
 
 当前 v1 语言包覆盖 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。含 error node 的语法树会标记为 `partial` 并保留可靠的符号、引用、import、call 和 chunk；grammar 缺失、非法 UTF-8、二进制或超预算文件会降级为 `text_only`；parser/query 失败会写入文件级 `failed` diagnostic。上述降级均不阻塞其他文件入库。
+
+当前 import resolution 是仓库内静态推断: Python 支持本地 module/package 和 `from ... import ...`；Java 支持普通 import、wildcard import 和 static import；TypeScript/TSX 支持相对 named/default/namespace/side-effect import、扩展名候选和 `index.*`；C++ 支持本地 quote include、仓库内 angle include、`using namespace` 和 `using ns::symbol`。无法唯一确认的外部包、标准库、重载、多候选或缺少配置的别名必须保持 `unresolved` 或 `ambiguous`，不能写成确定依赖。
 
 ## 12. 可观测性
 

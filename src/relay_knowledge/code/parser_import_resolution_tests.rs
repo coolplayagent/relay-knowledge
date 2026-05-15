@@ -1,0 +1,244 @@
+use crate::domain::{
+    CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
+};
+
+use super::*;
+
+#[test]
+fn java_import_resolution_distinguishes_local_and_external_modules() {
+    let snapshot = parse_sources(&[
+        (
+            "src/app/RetryPolicy.java",
+            r#"
+package app;
+
+class RetryPolicy {
+    static void run() {}
+}
+"#,
+        ),
+        (
+            "src/app/Worker.java",
+            r#"
+package app;
+
+import app.RetryPolicy;
+import java.time.Duration;
+
+class Worker {
+    void run() {
+        RetryPolicy.run();
+        Duration.ofSeconds(1);
+    }
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "app.RetryPolicy", "resolved");
+    assert_import_state(&snapshot, "java.time.Duration", "unresolved");
+}
+
+#[test]
+fn java_static_import_reports_overloaded_members_as_ambiguous() {
+    let snapshot = parse_sources(&[
+        (
+            "src/app/RetryPolicy.java",
+            r#"
+package app;
+
+class RetryPolicy {
+    static void run() {}
+    static void run(int attempts) {}
+}
+"#,
+        ),
+        (
+            "src/app/Worker.java",
+            r#"
+package app;
+
+import static app.RetryPolicy.run;
+
+class Worker {}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "static app.RetryPolicy.run", "ambiguous");
+}
+
+#[test]
+fn typescript_import_resolution_handles_relative_modules_and_index_files() {
+    let snapshot = parse_sources(&[
+        (
+            "src/sleep.ts",
+            r#"
+export function sleep(): void {}
+"#,
+        ),
+        (
+            "src/utils/index.ts",
+            r#"
+export function buildRequest(): string {
+    return "ok";
+}
+"#,
+        ),
+        (
+            "src/app.ts",
+            r#"
+import { sleep } from "./sleep";
+import { buildRequest } from "./utils";
+
+export function retryPolicy(): void {
+    sleep();
+    buildRequest();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "./sleep", "resolved");
+    assert_import_state(&snapshot, "./utils", "resolved");
+}
+
+#[test]
+fn typescript_external_package_imports_do_not_match_local_symbol_names() {
+    let snapshot = parse_sources(&[
+        (
+            "src/local/session.ts",
+            r#"
+export class Session {}
+"#,
+        ),
+        (
+            "src/client.ts",
+            r#"
+import { Session } from "requests";
+
+export function buildClient(): Session {
+    return new Session();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "requests", "unresolved");
+}
+
+#[test]
+fn cpp_import_resolution_handles_local_includes_and_using_declarations() {
+    let snapshot = parse_sources(&[
+        (
+            "src/retry.hpp",
+            r#"
+namespace app {
+void RetryPolicy() {}
+}
+"#,
+        ),
+        (
+            "src/retry.cpp",
+            r#"
+#include "retry.hpp"
+#include <string>
+using app::RetryPolicy;
+
+void run() {
+    RetryPolicy();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "retry.hpp", "resolved");
+    assert_import_state(&snapshot, "<string>", "unresolved");
+    assert_import_state(&snapshot, "using app::RetryPolicy", "resolved");
+}
+
+#[test]
+fn cpp_using_declarations_keep_ambiguous_symbols_visible() {
+    let snapshot = parse_sources(&[
+        (
+            "src/a.cpp",
+            r#"
+namespace app {
+void RetryPolicy() {}
+}
+"#,
+        ),
+        (
+            "src/b.cpp",
+            r#"
+namespace app {
+void RetryPolicy() {}
+}
+"#,
+        ),
+        (
+            "src/use.cpp",
+            r#"
+using app::RetryPolicy;
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "using app::RetryPolicy", "ambiguous");
+}
+
+#[test]
+fn deep_syntax_trees_are_walked_without_recursive_parser_helpers() {
+    let mut source = String::from("function root() {\n");
+    for _ in 0..2_048 {
+        source.push_str("if (true) {\n");
+    }
+    source.push_str("sleep();\n");
+    for _ in 0..2_048 {
+        source.push_str("}\n");
+    }
+    source.push_str("}\n");
+
+    let snapshot = parse_sources(&[("src/deep.js", &source)]);
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .any(|reference| reference.name == "sleep")
+    );
+}
+
+fn parse_sources(sources: &[(&str, &str)]) -> CodeIndexSnapshot {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        sources.len(),
+        0,
+    );
+    for (path, source) in sources {
+        parse_indexed_file(&mut build, path, source.as_bytes()).expect("file should parse");
+    }
+
+    build.finish()
+}
+
+fn assert_import_state(snapshot: &CodeIndexSnapshot, fragment: &str, state: &str) {
+    let import = import_containing(snapshot, fragment);
+
+    assert_eq!(import.resolution_state, state, "{fragment}");
+}
+
+fn import_containing<'a>(snapshot: &'a CodeIndexSnapshot, fragment: &str) -> &'a CodeImportRecord {
+    snapshot
+        .imports
+        .iter()
+        .find(|import| import.module.contains(fragment))
+        .unwrap_or_else(|| panic!("import containing {fragment} should exist"))
+}

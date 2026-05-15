@@ -1,0 +1,36 @@
+mod cpp;
+mod imports;
+mod java;
+mod python;
+mod references;
+mod symbols;
+mod typescript;
+
+use crate::domain::{CodeImportRecord, RepositoryCodeFileRecord, RepositoryCodeSymbolRecord};
+
+pub(super) use references::resolve_reference_targets;
+pub(super) use symbols::enrich_symbol_identities;
+
+pub(super) fn resolve_import_targets(
+    files: &[RepositoryCodeFileRecord],
+    symbols: &[RepositoryCodeSymbolRecord],
+    imports: &mut [CodeImportRecord],
+) {
+    let context = imports::ImportContext::new(files, symbols);
+    for import in imports {
+        import.target_hint = Some(import.module.clone());
+        let Some(language_id) = context.language_for_path(&import.path) else {
+            continue;
+        };
+        let resolution = match language_id {
+            "python" => python::resolve_import(import, &context),
+            "java" => java::resolve_import(import, &context),
+            "typescript" | "tsx" => typescript::resolve_import(import, &context),
+            "cpp" => cpp::resolve_import(import, &context),
+            _ => None,
+        };
+        if let Some(resolution) = resolution {
+            imports::apply_resolution(import, resolution);
+        }
+    }
+}
