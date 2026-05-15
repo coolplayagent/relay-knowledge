@@ -6,17 +6,18 @@ use crate::{
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
-        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
-        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
-        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
-        ProposalListRequest, ServiceOperatorUpdate, StorageFuture, WorkerTaskClaimRequest,
-        WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
+        CodeSymbolSearchRequest, GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
+        GraphInspection, GraphSearchRequest, GraphStore, IndexCursor, IndexRefreshClaimRequest,
+        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
+        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
+        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
+        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
+        WorkerTaskSeed,
     },
 };
 
 use super::{
-    SqliteGraphStore, code_graph, commit_batch, current_graph_version,
+    SqliteGraphStore, canvas, code_graph, commit_batch, current_graph_version,
     helpers::read_mutations_after, indexing, inspect_graph, operations, retrieval,
 };
 
@@ -27,6 +28,13 @@ impl GraphStore for SqliteGraphStore {
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection> {
         self.run(inspect_graph)
+    }
+
+    fn graph_canvas(
+        &self,
+        request: GraphCanvasStorageRequest,
+    ) -> StorageFuture<'_, GraphCanvasStorageSnapshot> {
+        self.run(move |connection| canvas::graph_canvas(connection, request))
     }
 
     fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>> {

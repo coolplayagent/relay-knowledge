@@ -5,6 +5,7 @@ import type {
   ServiceStatusResponse
 } from "./api/contracts";
 import { loadHealth, loadProjectStatus, loadServiceStatus } from "./api/client.js";
+import { graphCanvasSection } from "./graph_canvas.js";
 import { operationsSection } from "./operations_panel.js";
 import { providersSection } from "./providers.js";
 import { maxIndexLag } from "./operations.js";
@@ -17,7 +18,7 @@ type Diagnostics = {
   service: ServiceStatusResponse | null;
 };
 
-type PageId = "status" | "readiness" | "providers" | "operations" | "indexes" | "runtime";
+type PageId = "status" | "readiness" | "graph" | "providers" | "operations" | "indexes" | "runtime";
 
 type PageLink = {
   id: PageId;
@@ -27,6 +28,7 @@ type PageLink = {
 const PAGES: PageLink[] = [
   { id: "status", label: "Status" },
   { id: "readiness", label: "Readiness" },
+  { id: "graph", label: "Graph" },
   { id: "providers", label: "Providers" },
   { id: "operations", label: "Operations" },
   { id: "indexes", label: "Indexes" },
@@ -148,6 +150,8 @@ function pageContent(
       return statusSection(status, health);
     case "readiness":
       return readinessSection(status, health, service);
+    case "graph":
+      return graphCanvasSection();
     case "providers":
       return providersSection(status, health);
     case "operations":
@@ -521,4 +525,5 @@ function runtimeItem(label: string, value: string): HTMLElement {
 initializeTheme();
 window.addEventListener("popstate", syncActivePageFromLocation);
 window.addEventListener("hashchange", syncActivePageFromLocation);
+window.addEventListener("relay-knowledge:graph-rerender", rerenderFromState);
 void renderApp();

@@ -4,6 +4,7 @@
 //! metadata, and health snapshots. Domain and interface modules must not depend
 //! on SQL or concrete database types.
 
+mod canvas;
 mod code;
 mod sqlite;
 
@@ -20,6 +21,10 @@ use crate::domain::{
     WorkerStatus, WorkerTaskRecord,
 };
 
+pub use canvas::{
+    GraphCanvasSelection, GraphCanvasStorageEdge, GraphCanvasStorageNode,
+    GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
+};
 pub use code::{CodeImpactChanges, CodeRepositoryStore};
 pub use sqlite::SqliteGraphStore;
 
@@ -33,6 +38,17 @@ pub trait GraphStore: Send + Sync {
     fn commit_mutation_batch(&self, batch: GraphMutationBatch) -> StorageFuture<'_, CommitReceipt>;
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection>;
+
+    fn graph_canvas(
+        &self,
+        _request: GraphCanvasStorageRequest,
+    ) -> StorageFuture<'_, GraphCanvasStorageSnapshot> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "graph canvas storage is unavailable".to_owned(),
+            ))
+        })
+    }
 
     fn search(&self, request: GraphSearchRequest) -> StorageFuture<'_, Vec<RetrievalHit>>;
 

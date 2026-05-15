@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc --noEmit false --outDir dist/assets && node scripts/build.mjs",
+    "build": "node scripts/clean.mjs && tsc --noEmit && node scripts/build.mjs",
     "dev": "npm run build && python3 -m http.server 4173 -d dist"
   },
   "devDependencies": {
+    "esbuild": "^0.27.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "cytoscape": "^3.33.3"
   }
 }
