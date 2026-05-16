@@ -2,7 +2,7 @@ use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
 use axum::{Router, routing::get};
 use serde_json::json;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 #[test]
 fn parses_overridden_http_bind_address() {
@@ -164,8 +164,12 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let listener =
-        InMemoryRequestListener::new(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n".to_vec());
+    let (server_stream, mut client_stream) = tokio::io::duplex(1024);
+    client_stream
+        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("request should write completely");
+    let listener = InMemoryRequestListener::new(server_stream);
     let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel();
     let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started)));
     let router = Router::new().route(
@@ -201,14 +205,14 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
 }
 
 struct InMemoryRequestListener {
-    request: Option<InMemoryRequestStream>,
+    stream: Option<DuplexStream>,
     address: std::net::SocketAddr,
 }
 
 impl InMemoryRequestListener {
-    fn new(request: Vec<u8>) -> Self {
+    fn new(stream: DuplexStream) -> Self {
         Self {
-            request: Some(InMemoryRequestStream { request, offset: 0 }),
+            stream: Some(stream),
             address: "127.0.0.1:8791"
                 .parse()
                 .expect("loopback test address should parse"),
@@ -217,12 +221,12 @@ impl InMemoryRequestListener {
 }
 
 impl axum::serve::Listener for InMemoryRequestListener {
-    type Io = InMemoryRequestStream;
+    type Io = DuplexStream;
     type Addr = std::net::SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        if let Some(request) = self.request.take() {
-            return (request, self.address);
+        if let Some(stream) = self.stream.take() {
+            return (stream, self.address);
         }
 
         std::future::pending().await
@@ -230,53 +234,6 @@ impl axum::serve::Listener for InMemoryRequestListener {
 
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
         Ok(self.address)
-    }
-}
-
-struct InMemoryRequestStream {
-    request: Vec<u8>,
-    offset: usize,
-}
-
-impl AsyncRead for InMemoryRequestStream {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        _context: &mut std::task::Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        let remaining = &self.request[self.offset..];
-        if remaining.is_empty() {
-            return std::task::Poll::Pending;
-        }
-
-        let readable = remaining.len().min(buffer.remaining());
-        buffer.put_slice(&remaining[..readable]);
-        self.offset += readable;
-        std::task::Poll::Ready(Ok(()))
-    }
-}
-
-impl AsyncWrite for InMemoryRequestStream {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        _context: &mut std::task::Context<'_>,
-        buffer: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        std::task::Poll::Ready(Ok(buffer.len()))
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        _context: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        _context: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
     }
 }
 
