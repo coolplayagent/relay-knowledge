@@ -292,10 +292,12 @@ struct ImportKey {
 }
 
 fn caller_for_line(symbols: Option<&Vec<SymbolKey>>, line: u32) -> Option<&SymbolKey> {
-    symbols?
+    let symbols = symbols?;
+    let candidate_end = symbols.partition_point(|symbol| symbol.line_range.start <= line);
+    symbols[..candidate_end]
         .iter()
-        .filter(|symbol| symbol.line_range.start <= line && symbol.line_range.end >= line)
-        .max_by_key(|symbol| symbol.line_range.start)
+        .rev()
+        .find(|symbol| symbol.line_range.end >= line)
 }
 
 fn load_symbol_keys(
@@ -796,4 +798,40 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
     }
 
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SymbolKey, caller_for_line};
+    use crate::domain::RepositoryCodeRange;
+
+    #[test]
+    fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() {
+        let symbols = vec![
+            symbol("outer", 10, 100),
+            symbol("same_start_outer", 20, 80),
+            symbol("same_start_inner", 20, 40),
+            symbol("after_call", 60, 70),
+        ];
+
+        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match");
+
+        assert_eq!(caller.name, "same_start_inner");
+    }
+
+    #[test]
+    fn caller_lookup_ignores_symbols_that_start_after_call_line() {
+        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)];
+
+        assert!(caller_for_line(Some(&symbols), 10).is_none());
+    }
+
+    fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
+        SymbolKey {
+            symbol_snapshot_id: format!("symbol:{name}"),
+            path: "src/lib.rs".to_owned(),
+            name: name.to_owned(),
+            line_range: RepositoryCodeRange { start, end },
+        }
+    }
 }

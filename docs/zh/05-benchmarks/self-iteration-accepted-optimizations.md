@@ -34,6 +34,14 @@
 - 预期影响：把 finalize 中 reference 解析的 Rust 大量对象分配和每条 reference 一次 SQL round trip 降为少量索引化集合更新，主要改善大仓索引稳定性和 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 门禁耗时。
 - 已知风险：集合更新依赖 SQLite 查询规划使用新增索引；极小仓库可能因多执行几条固定 SQL 带来微小常数开销，但应小于逐行更新成本。
 
+## 候选优化说明：20260516T124101Z
+
+- 目标：降低大仓 full-scope finalize 重建 call graph 时的调用者归属查找成本，继续修复 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 超时门禁。
+- 方法：复用 `load_symbol_keys` 已按 `path,line_start,line_end` 排序的符号序列；每条 call reference 先用 `partition_point` 找到 `line_start <= call_line` 的候选前缀，再从前缀末尾反向查找第一个覆盖 call line 的符号，避免在同文件所有符号上做全量 `filter + max_by_key`。
+- 不变量：caller 归属语义保持为“包含 call line 且起始行最大的符号”；同起始行时因 SQL 仍按 `line_end DESC` 排序，反向查找会优先选择更窄的内部符号；call edge、search document、reference resolution 和查询 API 不变。
+- 预期影响：在 Linux C 源文件、Kubernetes Go 文件、Spring Java 文件这类“单文件多符号、多调用引用”场景中，把每条 call reference 的调用者查找从按文件符号数线性扫描降为前缀定位加短距离回退，主要改善 finalize 阶段 CPU 时间。
+- 已知风险：收益依赖符号列表继续保持当前排序；若未来修改 `load_symbol_keys` 的 `ORDER BY`，必须同步调整该查找或测试会失败。
+
 ## 候选优化说明：自迭代文档与 patch 长期记忆
 
 - 目标：让自迭代候选在修改代码、测试、benchmark 或 harness 策略时，同时留下可供后续迭代理解的算法与架构说明，避免只有 patch 和评分而缺少设计意图。
@@ -66,4 +74,17 @@ dd", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = CodeIndex
 Adopted optimization notes:
 
             row.get::<_, u16>(3)?, +                        row.get::<_, String>(4)?, +                    ), +                )) +            })?; + +            rows.collect::<Result<BTreeMap<_, _>, _>>() +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("reference rows should load") +} + fn file( source_scope: &str, file_id: &str, diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index f3aec34be9ed352e5e1013106078e718c3bc9168..d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -210,6 +210,8 @@ CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup ON code_repository_symbols(source_scope, name, qualified_name, path); +        CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup +            ON code_repository_symbols(source_scope, name, path); CREATE INDEX IF NOT EXISTS code_repository_references_lookup ON code_repository_references(source_scope, name, kind, path); CREATE INDEX IF NOT EXISTS code_repository_calls_lookup tokens used 143,069
+## 20260516T124101Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T124101Z.patch`
+- score: 0.916549 (accuracy=0.9, performance=0.905163, stability=1.0)
+- cases: 18/20 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`
+- key improvements: metric:cargo_fmt_check_ms 724.0->684; metric:cargo_test_ms 8230.0->7430; metric:relay_teams_index_ms 86865.0->81070; metric:relay_teams_query_p95_ms 12179.0->11621.0; metric:leveldb_cpp_index_ms 21294.0->19352
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=51187ms; cargo_fmt_check_ms=684ms; cargo_clippy_ms=187ms; cargo_test_ms=7430ms; relay_teams_index_ms=81070ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=11621ms; leveldb_cpp_index_ms=19352ms
+
+Adopted optimization notes:
+
+e) } fn load_symbol_keys( @@ -797,3 +799,39 @@ hash } + +#[cfg(test)] +mod tests { +    use super::{SymbolKey, caller_for_line}; +    use crate::domain::RepositoryCodeRange; + +    #[test] +    fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() { +        let symbols = vec![ +            symbol("outer", 10, 100), +            symbol("same_start_outer", 20, 80), +            symbol("same_start_inner", 20, 40), +            symbol("after_call", 60, 70), +        ]; + +        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match"); + +        assert_eq!(caller.name, "same_start_inner"); +    } + +    #[test] +    fn caller_lookup_ignores_symbols_that_start_after_call_line() { +        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)]; + +        assert!(caller_for_line(Some(&symbols), 10).is_none()); +    } + +    fn symbol(name: &str, start: u32, end: u32) -> SymbolKey { +        SymbolKey { +            symbol_snapshot_id: format!("symbol:{name}"), +            path: "src/lib.rs".to_owned(), +            name: name.to_owned(), +            line_range: RepositoryCodeRange { start, end }, +        } +    } +} tokens used 88,978
 
