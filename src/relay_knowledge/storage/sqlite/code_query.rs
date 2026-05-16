@@ -504,7 +504,7 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = fts_match_query(&request.query);
+    let fts_query = hybrid_chunk_fts_match_query(&request.query);
     let sql = "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
@@ -522,6 +522,7 @@ fn search_chunks(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'chunk'
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
@@ -1128,6 +1129,23 @@ fn fts_match_query(query: &str) -> String {
         "relayknowledgeunlikelyemptyquerytoken".to_owned()
     } else {
         terms.join(" ")
+    }
+}
+
+fn hybrid_chunk_fts_match_query(query: &str) -> String {
+    let terms = query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+
+    if terms.is_empty() {
+        "relayknowledgeunlikelyemptyquerytoken".to_owned()
+    } else if terms.len() == 1 {
+        terms[0].clone()
+    } else {
+        terms.join(" OR ")
     }
 }
 

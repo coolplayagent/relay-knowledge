@@ -383,6 +383,30 @@ async fn caller_queries_use_caller_chunk_excerpt_when_available() {
 }
 
 #[tokio::test]
+async fn hybrid_chunk_queries_do_not_require_every_query_term_in_one_candidate() {
+    let store = store_with_repository_snapshot(snapshot_with_eval_checkpoint_chunk()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "EvalCheckpointStore signature mismatch append result",
+                selector,
+                CodeQueryKind::Hybrid,
+                3,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams_evals/checkpoint.py");
+    assert!(hits[0].excerpt.contains("EvalCheckpointStore"));
+}
+
+#[tokio::test]
 async fn parsed_hits_do_not_inherit_repository_degraded_reason() {
     let mut snapshot = snapshot_with_degraded_files(1);
     snapshot.files.push(file(
@@ -687,6 +711,42 @@ fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
             "db/db_impl.cc",
             "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
             Some("sanitize-options"),
+        )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_eval_checkpoint_chunk() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(
+            "checkpoint-source",
+            "src/relay_teams_evals/checkpoint.py",
+            "python",
+            CodeParseStatus::Parsed,
+            None,
+        )],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![chunk(
+            "checkpoint-chunk",
+            "checkpoint-source",
+            "src/relay_teams_evals/checkpoint.py",
+            "class EvalCheckpointStore:\n    def ensure_initialized(self, signature):\n        raise ValueError(\"Checkpoint signature does not match\")\n\n    def append_result(self, result):\n        self._results_path.write_text(result.model_dump_json())",
+            None,
         )],
         diagnostics: Vec::new(),
     }

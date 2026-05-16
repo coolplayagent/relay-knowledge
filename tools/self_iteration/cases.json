@@ -88,7 +88,7 @@
       "query": "W3ConnectorSaveRequest",
       "limit": 10,
       "max_rank": 1,
-      "expected": [{"path": "src/relay_teams/connector/service.py"}]
+      "expected": [{"path": "src/relay_teams/connector/w3_models.py", "line_start": 53}]
     },
     {
       "id": "rt_callers_summary",

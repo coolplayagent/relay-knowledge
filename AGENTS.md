@@ -51,6 +51,7 @@ Document required services, such as graph databases or local containers, in `REA
 - HTTP must live under `net::http` and be implemented through non-blocking operating-system event mechanisms such as epoll, kqueue, or IOCP through a mature async runtime or HTTP library. Do not implement HTTP with blocking sockets, one-thread-per-connection designs, busy polling, or unmanaged background loops.
 - Network and HTTP entry points must support high-concurrency operation with bounded memory, connection budgets, request budgets, timeouts, cancellation, backpressure, graceful shutdown, and observability for connection counts, queue depth, drops, rate limits, and timeouts.
 - Provide a `net::qos` module for admission control, per-source or per-tenant limits, priorities, resource budgets, overload behavior, and QoS metrics. All inbound and outbound network work must pass through QoS policy before consuming unbounded resources.
+- Treat high performance and retrieval accuracy as algorithm and architecture problems, not as isolated fixture fixes. Improvements must generalize through better data structures, ranking signals, indexing strategy, query planning, batching, concurrency boundaries, or storage layout. Do not solve benchmark or eval failures by enumerating known queries, paths, repositories, symbols, or other narrow special cases unless the enumeration is a documented product contract with tests and maintenance guidance.
 
 ## Release & Installation Constraints
 
@@ -78,7 +79,7 @@ Do not add shallow functions. A function must enforce an invariant, perform mean
 
 Do not add or keep dead code. Remove unused modules, functions, types, fields, feature flags, fixtures, commented-out implementations, TODO stubs, and speculative extension points. New public APIs need a production caller or a documented spec-backed extension point with tests. Do not hide dead code with `#[allow(dead_code)]` or similar attributes except for generated/platform/protocol cases with an explicit removal condition.
 
-Documentation completeness is mandatory. Any change that adds or changes public modules, configuration, environment variables, paths, network behavior, HTTP behavior, QoS policy, failure modes, install/runtime directories, diagnostics, or service operation must update the matching docs and README guidance.
+Documentation completeness is mandatory. Every code, configuration, behavior, test harness, workflow, benchmark, packaging, release, installation, or operations change must include the matching documentation refresh in the same change set. Update README guidance, architecture specs, installation/release notes, benchmark notes, examples, CLI help/spec docs, or contributor docs as appropriate; if no user-facing or maintainer-facing document is affected, state that explicitly in the PR/change summary. Do not leave documentation refresh as a follow-up task.
 
 ## Testing Guidelines
 
