@@ -28,6 +28,13 @@ from history import (
     write_report,
 )
 from scoring import EvaluationObservation, GateObservation, score_evaluation
+from workspace_git import (
+    NonRetryableIterationError,
+    current_head,
+    ensure_clean_worktree,
+    git,
+    git_lines,
+)
 
 
 @dataclass(frozen=True)
@@ -40,11 +47,6 @@ class PatchSnapshot:
     @property
     def has_diff(self) -> bool:
         return bool(self.diff.strip())
-
-
-class NonRetryableIterationError(RuntimeError):
-    """Failure that cannot be fixed by starting another iteration."""
-
 
 def main() -> int:
     args = parse_args()
@@ -249,7 +251,6 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
     print_score(run_record)
     return False
 
-
 def evaluator_config(
     args: argparse.Namespace,
     workspace: Path,
@@ -436,7 +437,8 @@ def build_prompt(paths: Any, run_id: str) -> str:
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
-- Improve code repository tree parsing, code graph query accuracy, and performance across relay-teams, Linux, LevelDB, Kubernetes, and Spring Framework.
+- Prioritize accuracy and stability before performance because they protect the basic usability of code repository retrieval; only optimize speed after preserving or improving those protected objectives.
+- Improve code repository tree parsing, code graph query accuracy, stability, and performance across relay-teams, Linux, LevelDB, Kubernetes, and Spring Framework.
 - Focus on multi-repository, large-repository full-scope indexing and retrieval.
 - Prefer algorithmic or architectural improvements over local special-casing: candidate pruning before scoring, SQLite/FTS-backed lookups, symbol identity normalization, import/call edge quality, bounded batch/finalize design, cache-aware query plans, and ranking fusion are all valid directions when test-backed.
 
@@ -447,6 +449,7 @@ Constraints:
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
 - If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
+- Treat recent accuracy, case, and stability degradations as protected-objective regressions. Fix or explain them before pursuing pure latency/indexing gains, and do not trade away passing cases or quality gates for better timing.
 - Any candidate that changes code, tests, benchmark cases, or self-iteration policy must also update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md before evaluation. Write the optimization's algorithm, architecture, invariants, expected metric/case impact, and known risks in that document; the harness rejects undocumented implementation candidates before acceptance.
 - The self-iteration patch directory is long-term memory. Use the patch memory index below to choose relevant historical patches, then read only the specific patch files you need in small ranges with commands like `sed -n '1,220p' .git/relay-knowledge-self-iteration/patches/<run>.patch`.
 - Do not create commits yourself; the harness squashes accepted net changes into one commit.
@@ -488,7 +491,6 @@ def quality_gate_repair_priority(paths: Any) -> str:
         "- Quality gate repair mode is active. Prioritize fixing these failed gates before "
         f"any other optimization: {', '.join(failed)}."
     )
-
 
 def recent_failed_gate_names(paths: Any, limit: int = 8) -> list[str]:
     names: list[str] = []
@@ -945,36 +947,6 @@ def commit_candidate(
     return git(workspace, ["rev-parse", "--short", "HEAD"], check=True).stdout.strip()
 
 
-def current_head(workspace: Path) -> str:
-    return git(workspace, ["rev-parse", "HEAD"], check=True).stdout.strip()
-
-
-def ensure_clean_worktree(workspace: Path) -> None:
-    status = git(workspace, ["status", "--short"], check=True).stdout.strip()
-    if status:
-        raise NonRetryableIterationError(
-            "working tree is not clean; commit/stash changes or pass --use-current-candidate"
-        )
-
-
-def git(workspace: Path, args: list[str], check: bool) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=workspace,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if check and completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
-    return completed
-
-
-def git_lines(workspace: Path, args: list[str]) -> list[str]:
-    output = git(workspace, args, check=True).stdout
-    return [line for line in output.splitlines() if line]
-
-
 def print_score(record: dict[str, Any]) -> None:
     status = "accepted" if record["accepted"] else "rejected"
     print(
@@ -1023,7 +995,6 @@ def last_line(*outputs: str) -> str:
 
 def default_workspace() -> Path:
     return Path(__file__).resolve().parents[2]
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -63,15 +63,16 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 加权分数为：
 
 ```text
-accuracy * 0.55 + performance * 0.30 + stability * 0.15
+accuracy * 0.60 + performance * 0.15 + stability * 0.25
 ```
 
-采纳策略使用 `带硬约束和加权分数决胜的 epsilon-Pareto 采纳策略`。从多目标优化角度看，build/test gate 和候选 diff 存在性是硬约束，检索质量与延迟观测是目标，epsilon 阈值用于抑制测量噪声，加权分数是决胜项而不是唯一决策规则。
+采纳策略使用 `带硬约束和加权分数决胜的 epsilon-Pareto 采纳策略`。从多目标优化角度看，build/test gate 和候选 diff 存在性是硬约束，accuracy 和 stability 是保证基础功能可用的受保护目标，检索质量与延迟观测是目标，epsilon 阈值用于抑制测量噪声，加权分数是决胜项而不是唯一决策规则。
 
 候选在以下条件满足时被采纳：
 
 ```text
 hard_constraints_pass
+and no_protected_accuracy_or_stability_regression
 and (
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)

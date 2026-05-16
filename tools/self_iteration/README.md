@@ -69,15 +69,16 @@ files in small ranges when reasoning about the next candidate.
 The score is:
 
 ```text
-accuracy * 0.55 + performance * 0.30 + stability * 0.15
+accuracy * 0.60 + performance * 0.15 + stability * 0.25
 ```
 
-Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, retrieval quality and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
+Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, accuracy and stability are protected objectives for basic usability, retrieval quality and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
 
 The candidate is accepted when:
 
 ```text
 hard_constraints_pass
+and no_protected_accuracy_or_stability_regression
 and (
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)

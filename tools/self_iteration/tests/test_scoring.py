@@ -103,7 +103,7 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(score.accepted)
         self.assertTrue(any("quality gates failed" in reason for reason in score.reject_reasons))
 
-    def test_case_regression_is_reported_without_standalone_rejection(self) -> None:
+    def test_accuracy_regression_is_reported_and_rejected(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
@@ -127,7 +127,10 @@ class ScoringTests(unittest.TestCase):
             },
         )
 
-        self.assertTrue(score.accepted)
+        self.assertFalse(score.accepted)
+        self.assertTrue(
+            any("protected accuracy objective regressed" in reason for reason in score.reject_reasons)
+        )
         self.assertTrue(
             any(
                 degradation["kind"] == "case"
@@ -135,6 +138,35 @@ class ScoringTests(unittest.TestCase):
                 and degradation["reason"] == "passed_to_failed"
                 for degradation in score.degradations
             )
+        )
+
+    def test_stability_regression_is_rejected_even_when_latency_improves(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[
+                    GateObservation("build", True),
+                    GateObservation("clippy", False),
+                ],
+                cases=[CaseObservation("case", "repo", True, rank=1)],
+                metrics=[MetricObservation("index_ms", 1.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.1,
+                "accuracy": 1.0,
+                "performance": 0.5,
+                "stability": 1.0,
+                "metrics": [{"name": "index_ms", "value": 100.0}],
+                "gates": [
+                    {"name": "build", "passed": True},
+                    {"name": "clippy", "passed": True},
+                ],
+            },
+        )
+
+        self.assertFalse(score.accepted)
+        self.assertTrue(any("quality gates failed" in reason for reason in score.reject_reasons))
+        self.assertTrue(
+            any("protected stability objective regressed" in reason for reason in score.reject_reasons)
         )
 
     def test_metric_and_case_improvements_are_reported(self) -> None:

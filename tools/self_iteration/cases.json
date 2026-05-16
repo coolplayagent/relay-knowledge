@@ -173,6 +173,35 @@
       "expected": [{"path": "src/relay_teams/connector/__init__.py"}]
     },
     {
+      "id": "rt_definition_eval_checkpoint_append_result",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "append_result",
+      "limit": 20,
+      "path_filters": ["src/relay_teams_evals/checkpoint.py"],
+      "language_filters": ["python"],
+      "max_rank": 1,
+      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "line_start": 176}]
+    },
+    {
+      "id": "rt_fuzzy_constant_checkpoint_version",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "checkpoint metadata version constant",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "_CHECKPOINT_VERSION"}]
+    },
+    {
+      "id": "rt_fuzzy_function_archive_output_dir",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "archive old eval output directory timestamp suffix",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "src/relay_teams_evals/checkpoint.py", "excerpt_contains": "archive_output_dir"}]
+    },
+    {
       "id": "linux_definition_start_kernel",
       "repository": "linux_sample",
       "kind": "definition",
@@ -328,6 +357,15 @@
       "expected": [{"path": "fs/eventpoll.c"}]
     },
     {
+      "id": "linux_definition_eventfd_ctx_fileget_full_scope",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "eventfd_ctx_fileget",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [{"path": "fs/eventfd.c", "line_start": 366}]
+    },
+    {
       "id": "leveldb_definition_db_open",
       "repository": "leveldb_cpp",
       "kind": "definition",
@@ -409,6 +447,33 @@
       "limit": 10,
       "max_rank": 5,
       "expected": [{"path": "db/db_impl.h", "excerpt_contains": "Recover"}]
+    },
+    {
+      "id": "leveldb_definition_new_bloom_filter_policy",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "NewBloomFilterPolicy",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [{"path": "util/bloom.cc", "line_start": 88}]
+    },
+    {
+      "id": "leveldb_fuzzy_class_cache_lru_interface",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "cache interface lookup insert total charge lru",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "include/leveldb/cache.h", "excerpt_contains": "class LEVELDB_EXPORT Cache"}]
+    },
+    {
+      "id": "leveldb_fuzzy_constant_crc_mask_delta",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "crc masked representation rotate add constant",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "util/crc32c.h", "excerpt_contains": "kMaskDelta"}]
     },
     {
       "id": "spring_definition_application_context",
@@ -531,6 +596,34 @@
       ]
     },
     {
+      "id": "spring_definition_dispatcher_servlet_full_scope",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "DispatcherServlet",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
+          "line_start": 157
+        }
+      ]
+    },
+    {
+      "id": "spring_fuzzy_class_dispatcher_servlet",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "front controller servlet dispatch web mvc framework servlet",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "spring-webmvc/src/main/java/org/springframework/web/servlet/DispatcherServlet.java",
+          "excerpt_contains": "class DispatcherServlet"
+        }
+      ]
+    },
+    {
       "id": "kubernetes_definition_api_server_command",
       "repository": "kubernetes_go_sample",
       "kind": "definition",
@@ -623,6 +716,42 @@
       "limit": 10,
       "max_rank": 8,
       "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go"}]
+    },
+    {
+      "id": "kubernetes_definition_authorizer_load_and_validate_data",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "LoadAndValidateData",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "line_start": 185}]
+    },
+    {
+      "id": "kubernetes_fuzzy_variable_repeatable_authorizers",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "repeatable authorization modes webhook list variable",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "pkg/kubeapiserver/authorizer/config.go", "excerpt_contains": "repeatableAuthorizerTypes"}]
+    },
+    {
+      "id": "kubernetes_fuzzy_function_service_ip_ranges",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "service cluster ip ranges primary secondary helper",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "cmd/kube-apiserver/app/options/completion.go", "excerpt_contains": "getServiceIPAndRanges"}]
+    },
+    {
+      "id": "kubernetes_fuzzy_variable_no_backoff",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "rest request default no backoff manager variable",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [{"path": "staging/src/k8s.io/client-go/rest/request.go", "excerpt_contains": "noBackoff"}]
     }
   ]
 }

@@ -7,9 +7,9 @@ from typing import Any
 
 
 DEFAULT_WEIGHTS = {
-    "accuracy": 0.55,
-    "performance": 0.30,
-    "stability": 0.15,
+    "accuracy": 0.60,
+    "performance": 0.15,
+    "stability": 0.25,
 }
 
 SCORE_EPSILON = 0.0005
@@ -167,6 +167,15 @@ def acceptance_reject_reasons(
     if previous_run is None:
         return reasons
 
+    protected_rejections = protected_objective_reject_reasons(
+        accuracy=accuracy,
+        stability=stability,
+        previous_run=previous_run,
+    )
+    if protected_rejections:
+        reasons.extend(protected_rejections)
+        return reasons
+
     previous_score = float(previous_run.get("score", 0.0))
     score_improved = meaningful_increase(score, previous_score, SCORE_EPSILON, 0.0)
     pareto_improved = epsilon_pareto_improved(
@@ -180,6 +189,28 @@ def acceptance_reject_reasons(
     if not score_improved and not pareto_improved:
         reasons.append(epsilon_pareto_reject_reason(score, previous_score))
 
+    return reasons
+
+
+def protected_objective_reject_reasons(
+    accuracy: float,
+    stability: float,
+    previous_run: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    for name, current in (("accuracy", accuracy), ("stability", stability)):
+        previous = previous_run.get(name)
+        if previous is not None and meaningful_decrease(
+            current,
+            float(previous),
+            RATIO_EPSILON,
+            0.0,
+        ):
+            reasons.append(
+                f"protected {name} objective regressed "
+                f"({current:.6f}, previous {float(previous):.6f}, "
+                f"ratio_epsilon {RATIO_EPSILON:.6f})"
+            )
     return reasons
 
 
