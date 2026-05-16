@@ -265,6 +265,31 @@ fn full_index_plan_stops_batch_before_next_blob_exceeds_byte_budget() {
 }
 
 #[test]
+fn full_index_plan_preserves_order_across_bounded_parallel_parse_chunks() {
+    let repo = TempGitRepo::create("parallel-fetch-order");
+    for index in 0..40 {
+        repo.write(
+            &format!("src/file_{index:02}.rs"),
+            &format!("fn f_{index}() {{}}\n"),
+        );
+    }
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let budget =
+        CodeIndexResourceBudget::new(40, 1024 * 1024, 50_000).expect("budget should validate");
+    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget)
+        .expect("plan should prepare");
+
+    let (_, batch) = plan.parse_next_batch().expect("batch should parse");
+    let batch = batch.expect("batch should exist");
+
+    assert_eq!(batch.files.len(), 40);
+    for (index, file) in batch.files.iter().enumerate() {
+        assert_eq!(file.path, format!("src/file_{index:02}.rs"));
+    }
+}
+
+#[test]
 fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() {
     let registration = CodeRepositoryRegistration::new(
         "repo",

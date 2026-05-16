@@ -48,6 +48,14 @@
 - 方法：候选 diff 只要包含非文档文件，就追加 `self_iteration_algorithm_documentation` gate，要求同步更新本文档；prompt 明确要求写出算法、架构、不变量、预期 case/metric 影响和风险。该 gate 在候选评估完成后、评分前加入，作为硬质量门禁参与 `quality gates failed` 拒绝原因。
 - 长期记忆：prompt 新增 `.git/relay-knowledge-self-iteration/patches/` 索引，按最近 patch 列出路径、大小、采纳状态、分数、变更文件、拒绝原因和主要改善。Codex 先读索引，再用 `sed -n` 对相关 patch 小范围渐进读取，避免一次性塞入所有历史 patch 造成上下文膨胀。
 - 预期影响：后续自迭代能同时利用结构化 run history、人工可读设计说明和原始 patch 细节，减少重复尝试，提高对历史成功/失败算法的复用质量。
+
+## 候选优化说明：20260516T130000Z
+
+- 目标：继续修复 Linux、Kubernetes、Spring Framework full-scope index 在大文件数仓库中因 Git blob 读取批次过小而接近或超过 900 秒门禁的问题，同时避免把并行解析改成不受控的线程膨胀。
+- 方法：全量索引的 `git cat-file --batch` 读取组从固定 32 个路径提升到默认文件批次上限 128 个路径，并继续受 `max_files_per_batch` 与 `max_bytes_per_batch` 约束；解析阶段改为按 `available_parallelism()` 分块启动 scoped worker，每块完成后再推进下一块，保持输出顺序稳定。
+- 架构与不变量：Git blob 读取、解析、SQLite checkpoint/finalize 仍由既有 bounded batch plan 管理；source scope、路径筛选、语言筛选、行记录、符号 identity、CLI/API 响应语义不变；单个 batch 的内存上限仍由 16 MiB 默认字节预算和资源预算控制。
+- 预期影响：把大仓冷索引中的 Git 子进程数量最多再降低约 4 倍，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 的 index wall time；小仓 ranking 与 query accuracy 不应变化。
+- 已知风险：单次 `cat-file --batch` stdout 峰值可接近 batch 字节预算；低并发机器上解析仍按 CPU 并行度串行分块，因此收益主要来自减少 Git 进程启动与 IPC 开销。
 ## 20260516T121321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T121321Z.patch`
@@ -87,4 +95,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 e) } fn load_symbol_keys( @@ -797,3 +799,39 @@ hash } + +#[cfg(test)] +mod tests { +    use super::{SymbolKey, caller_for_line}; +    use crate::domain::RepositoryCodeRange; + +    #[test] +    fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() { +        let symbols = vec![ +            symbol("outer", 10, 100), +            symbol("same_start_outer", 20, 80), +            symbol("same_start_inner", 20, 40), +            symbol("after_call", 60, 70), +        ]; + +        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match"); + +        assert_eq!(caller.name, "same_start_inner"); +    } + +    #[test] +    fn caller_lookup_ignores_symbols_that_start_after_call_line() { +        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)]; + +        assert!(caller_for_line(Some(&symbols), 10).is_none()); +    } + +    fn symbol(name: &str, start: u32, end: u32) -> SymbolKey { +        SymbolKey { +            symbol_snapshot_id: format!("symbol:{name}"), +            path: "src/lib.rs".to_owned(), +            name: name.to_owned(), +            line_range: RepositoryCodeRange { start, end }, +        } +    } +} tokens used 88,978
+## 20260516T130000Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T130000Z.patch`
+- score: 0.916501 (accuracy=0.9, performance=0.905002, stability=1.0)
+- cases: 18/20 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/pipeline.rs`, `src/relay_knowledge/code/tests.rs`
+- key improvements: metric:cargo_test_ms 8118.0->7706; metric:relay_teams_index_ms 89353.0->83470; metric:leveldb_cpp_index_ms 21112.0->20417
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=54020ms; cargo_fmt_check_ms=717ms; cargo_clippy_ms=198ms; cargo_test_ms=7706ms; relay_teams_index_ms=83470ms; relay_teams_query_p50_ms=129ms; relay_teams_query_p95_ms=11995ms; leveldb_cpp_index_ms=20417ms
+
+Adopted optimization notes:
+
+3b88 --- a/src/relay_knowledge/code/tests.rs +++ b/src/relay_knowledge/code/tests.rs @@ -265,6 +265,31 @@ } #[test] +fn full_index_plan_preserves_order_across_bounded_parallel_parse_chunks() { +    let repo = TempGitRepo::create("parallel-fetch-order"); +    for index in 0..40 { +        repo.write( +            &format!("src/file_{index:02}.rs"), +            &format!("fn f_{index}() {{}}\n"), +        ); +    } +    repo.git(["add", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = +        CodeIndexResourceBudget::new(40, 1024 * 1024, 50_000).expect("budget should validate"); +    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget) +        .expect("plan should prepare"); + +    let (_, batch) = plan.parse_next_batch().expect("batch should parse"); +    let batch = batch.expect("batch should exist"); + +    assert_eq!(batch.files.len(), 40); +    for (index, file) in batch.files.iter().enumerate() { +        assert_eq!(file.path, format!("src/file_{index:02}.rs")); +    } +} + +#[test] fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() { let registration = CodeRepositoryRegistration::new( "repo", tokens used 84,035
 

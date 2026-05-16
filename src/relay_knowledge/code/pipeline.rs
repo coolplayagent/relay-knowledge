@@ -14,7 +14,7 @@ use super::{
     snapshot::SnapshotBuild,
 };
 
-const GIT_BLOB_FETCH_GROUP: usize = 32;
+const GIT_BLOB_FETCH_GROUP: usize = CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
 
 /// Blocking plan for a checkpointed full repository index.
 #[derive(Debug, Clone)]
@@ -127,7 +127,8 @@ fn parse_fetched_files(
     paths: &[String],
     blobs: &[Vec<u8>],
 ) -> Result<Vec<SnapshotBuild>, CodeIndexError> {
-    if paths.len() <= 1 || worker_count(paths.len()) <= 1 {
+    let worker_count = worker_count(paths.len());
+    if paths.len() <= 1 || worker_count <= 1 {
         return paths
             .iter()
             .zip(blobs.iter())
@@ -135,21 +136,27 @@ fn parse_fetched_files(
             .collect();
     }
 
-    thread::scope(|scope| {
-        let handles = paths
-            .iter()
-            .zip(blobs.iter())
-            .map(|(path, bytes)| scope.spawn(move || parse_one_file(plan, path, bytes)))
-            .collect::<Vec<_>>();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle.join().map_err(|_| {
-                    CodeIndexError::InvalidInput("code parser worker panicked".to_owned())
-                })?
-            })
-            .collect()
-    })
+    let mut parsed = Vec::with_capacity(paths.len());
+    for (path_chunk, blob_chunk) in paths.chunks(worker_count).zip(blobs.chunks(worker_count)) {
+        let chunk = thread::scope(|scope| {
+            let handles = path_chunk
+                .iter()
+                .zip(blob_chunk.iter())
+                .map(|(path, bytes)| scope.spawn(move || parse_one_file(plan, path, bytes)))
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle.join().map_err(|_| {
+                        CodeIndexError::InvalidInput("code parser worker panicked".to_owned())
+                    })?
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+        parsed.extend(chunk);
+    }
+
+    Ok(parsed)
 }
 
 fn parse_one_file(
