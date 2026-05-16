@@ -211,6 +211,7 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
         evaluator_config(args, workspace, paths, run_id),
         generated_diff=patch.has_diff,
     )
+    apply_candidate_documentation_gate(evaluation, patch)
     previous_run = previous_scored_run(paths)
     candidate_score = score_evaluation(evaluation.observation, previous_run)
     optimization_plan = summarize_optimization_plan(codex_result, patch, candidate_score.to_dict())
@@ -263,6 +264,46 @@ def evaluator_config(
         command_timeout_seconds=args.command_timeout_seconds,
         keep_workdirs=args.keep_workdirs,
     )
+
+
+def apply_candidate_documentation_gate(evaluation: Any, patch: PatchSnapshot) -> None:
+    gate = candidate_documentation_gate(patch)
+    evaluation.observation.gates.append(gate)
+    report = evaluation.report
+    if isinstance(report, dict):
+        gates = report.setdefault("gates", [])
+        if isinstance(gates, list):
+            gates.append(gate.__dict__)
+
+
+def candidate_documentation_gate(patch: PatchSnapshot) -> GateObservation:
+    changed_paths = changed_paths_from_diff(patch.diff)
+    if not implementation_paths_require_documentation(changed_paths):
+        return GateObservation(
+            name="self_iteration_algorithm_documentation",
+            passed=True,
+            message="documentation not required for documentation-only candidate",
+        )
+    doc_path = "docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md"
+    documented = doc_path in changed_paths
+    message = (
+        f"{doc_path} updated with candidate algorithm and architecture notes"
+        if documented
+        else f"missing candidate algorithm and architecture notes in {doc_path}"
+    )
+    return GateObservation(
+        name="self_iteration_algorithm_documentation",
+        passed=documented,
+        message=message,
+    )
+
+
+def implementation_paths_require_documentation(changed_paths: list[str]) -> bool:
+    for path in changed_paths:
+        if path.startswith("docs/") or path.endswith(".md"):
+            continue
+        return True
+    return False
 
 
 def persist_scored_run(
@@ -406,7 +447,8 @@ Constraints:
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
 - If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
-- Update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md with the optimization approach if your candidate is meant to be accepted; the harness also appends adopted-run metadata after acceptance.
+- Any candidate that changes code, tests, benchmark cases, or self-iteration policy must also update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md before evaluation. Write the optimization's algorithm, architecture, invariants, expected metric/case impact, and known risks in that document; the harness rejects undocumented implementation candidates before acceptance.
+- The self-iteration patch directory is long-term memory. Use the patch memory index below to choose relevant historical patches, then read only the specific patch files you need in small ranges with commands like `sed -n '1,220p' .git/relay-knowledge-self-iteration/patches/<run>.patch`.
 - Do not create commits yourself; the harness squashes accepted net changes into one commit.
 
 Current priority:
@@ -429,6 +471,9 @@ Recent improved evaluation items to preserve:
 
 Recent adopted optimization plans to build on:
 {recent_adopted_optimization_summary(paths)}
+
+Long-term patch memory index:
+{historical_patch_memory_index(paths)}
 
 Make one concrete candidate code change now. The self-iteration harness will build, test, score, squash-commit accepted improvements, or roll them back.
 """
@@ -623,6 +668,63 @@ def recent_adopted_optimization_summary(paths: Any, limit: int = 3) -> str:
             f"notes={codex_notes}"
         )
     return "\n".join(lines)
+
+
+def historical_patch_memory_index(paths: Any, limit: int = 12) -> str:
+    if not paths.patches.exists():
+        return "No historical patch files recorded yet."
+
+    run_by_patch = {
+        Path(str(run.get("patch", ""))).name: run
+        for run in load_runs(paths)
+        if run.get("patch")
+    }
+    patch_files = sorted(paths.patches.glob("*.patch"), key=lambda path: path.name, reverse=True)
+    if not patch_files:
+        return "No historical patch files recorded yet."
+
+    lines = [
+        "Use this as an index, not as full context. Read only patches that look relevant.",
+    ]
+    for patch_path in patch_files[:limit]:
+        run = run_by_patch.get(patch_path.name, {})
+        changed_paths = historical_patch_changed_paths(patch_path, run)
+        reasons = compact_prompt_text("; ".join(str(reason) for reason in run.get("reject_reasons", [])), 260)
+        improvements = compact_prompt_text("; ".join(compact_score_changes(run.get("improvements", []), 3)), 320)
+        status = "accepted" if run.get("accepted") else "rejected"
+        if not run:
+            status = "unscored"
+        line = (
+            "- "
+            f"patch={patch_path} "
+            f"size_bytes={patch_path.stat().st_size} "
+            f"status={status} "
+            f"score={run.get('score', '')} "
+            f"changed_paths={', '.join(changed_paths[:6]) or 'unknown'}"
+        )
+        if reasons:
+            line += f" reject_reasons={reasons}"
+        if improvements:
+            line += f" improvements={improvements}"
+        lines.append(line)
+    if len(patch_files) > limit:
+        lines.append(
+            f"- {len(patch_files) - limit} older patch file(s) omitted; list them with "
+            f"`find {paths.patches} -maxdepth 1 -type f -name '*.patch' -printf '%f %s\\n' | sort`."
+        )
+    return "\n".join(lines)
+
+
+def historical_patch_changed_paths(patch_path: Path, run: dict[str, Any]) -> list[str]:
+    plan = run.get("optimization_plan")
+    if isinstance(plan, dict):
+        changed_paths = plan.get("changed_paths")
+        if isinstance(changed_paths, list) and changed_paths:
+            return [str(path) for path in changed_paths]
+    try:
+        return changed_paths_from_diff(patch_path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return []
 
 
 def recent_change_summary(

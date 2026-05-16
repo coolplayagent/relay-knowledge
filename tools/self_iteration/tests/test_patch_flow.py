@@ -77,6 +77,47 @@ class PatchFlowTests(unittest.TestCase):
             self.assertNotIn("rejected_without_reason", prompt)
             self.assertNotIn("run_id=accepted", prompt)
 
+    def test_prompt_requires_algorithm_documentation_and_indexes_patch_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            paths.patches.mkdir(parents=True)
+            patch_path = paths.patches / "20260516T000000Z.patch"
+            patch_path.write_text(
+                "\n".join(
+                    [
+                        "diff --git a/src/relay_knowledge/storage/sqlite/code_query.rs b/src/relay_knowledge/storage/sqlite/code_query.rs",
+                        "--- a/src/relay_knowledge/storage/sqlite/code_query.rs",
+                        "+++ b/src/relay_knowledge/storage/sqlite/code_query.rs",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            append_run(
+                paths,
+                {
+                    "run_id": "patch-memory",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": False,
+                    "score": 0.82,
+                    "reject_reasons": ["quality gates failed: linux_sample_index"],
+                    "patch": str(patch_path),
+                    "optimization_plan": {
+                        "changed_paths": ["src/relay_knowledge/storage/sqlite/code_query.rs"]
+                    },
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("must also update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md", prompt)
+            self.assertIn("algorithm, architecture, invariants", prompt)
+            self.assertIn("Long-term patch memory index:", prompt)
+            self.assertIn(str(patch_path), prompt)
+            self.assertIn("status=rejected", prompt)
+            self.assertIn("changed_paths=src/relay_knowledge/storage/sqlite/code_query.rs", prompt)
+
     def test_prompt_includes_failed_gate_command_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -185,6 +226,43 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("kubernetes_go_sample_index", prompt)
             self.assertIn("Prioritize fixing these failed gates", prompt)
 
+    def test_candidate_documentation_gate_rejects_undocumented_implementation(self) -> None:
+        patch = self_iterate.PatchSnapshot(
+            path=Path("candidate.patch"),
+            diff=(
+                "diff --git a/src/relay_knowledge/code.rs b/src/relay_knowledge/code.rs\n"
+                "--- a/src/relay_knowledge/code.rs\n"
+                "+++ b/src/relay_knowledge/code.rs\n"
+            ),
+            sha256="abc",
+            base_ref="HEAD",
+        )
+
+        gate = self_iterate.candidate_documentation_gate(patch)
+
+        self.assertEqual(gate.name, "self_iteration_algorithm_documentation")
+        self.assertFalse(gate.passed)
+        self.assertIn("missing candidate algorithm and architecture notes", gate.message)
+
+    def test_candidate_documentation_gate_accepts_documented_implementation(self) -> None:
+        patch = self_iterate.PatchSnapshot(
+            path=Path("candidate.patch"),
+            diff=(
+                "diff --git a/src/relay_knowledge/code.rs b/src/relay_knowledge/code.rs\n"
+                "--- a/src/relay_knowledge/code.rs\n"
+                "+++ b/src/relay_knowledge/code.rs\n"
+                "diff --git a/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md b/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
+                "--- a/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
+                "+++ b/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
+            ),
+            sha256="abc",
+            base_ref="HEAD",
+        )
+
+        gate = self_iterate.candidate_documentation_gate(patch)
+
+        self.assertTrue(gate.passed)
+
     def test_prompt_describes_missing_rejected_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -196,6 +274,7 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("No recent quality gate failures recorded", prompt)
             self.assertIn("No worsened evaluation items recorded yet.", prompt)
             self.assertIn("No improved evaluation items recorded yet.", prompt)
+            self.assertIn("No historical patch files recorded yet.", prompt)
 
     def test_prompt_includes_recent_degradations_as_next_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -490,6 +569,8 @@ class PatchFlowTests(unittest.TestCase):
             self.assertEqual(run(workspace, ["git", "rev-list", "--count", f"{base_ref}..HEAD"]).stdout.strip(), "1")
             self.assertEqual((workspace / "tracked.txt").read_text(encoding="utf-8"), "candidate\n")
             self.assertEqual((workspace / "generated.txt").read_text(encoding="utf-8"), "generated\n")
+            notes = workspace / "docs" / "zh" / "05-benchmarks" / "self-iteration-accepted-optimizations.md"
+            self.assertIn("candidate algorithm", notes.read_text(encoding="utf-8"))
             status = run(workspace, ["git", "status", "--short"]).stdout.strip()
             self.assertEqual(status, "")
 
@@ -532,7 +613,10 @@ def fake_committing_codex(config: object, _prompt: str) -> CodexResult:
     run(workspace, ["git", "add", "tracked.txt"])
     run(workspace, ["git", "commit", "-m", "candidate one"])
     (workspace / "generated.txt").write_text("generated\n", encoding="utf-8")
-    run(workspace, ["git", "add", "generated.txt"])
+    notes = workspace / "docs" / "zh" / "05-benchmarks" / "self-iteration-accepted-optimizations.md"
+    notes.parent.mkdir(parents=True)
+    notes.write_text("candidate algorithm and architecture notes\n", encoding="utf-8")
+    run(workspace, ["git", "add", "generated.txt", str(notes)])
     run(workspace, ["git", "commit", "-m", "candidate two"])
     return CodexResult(
         command=["codex"],

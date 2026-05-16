@@ -44,7 +44,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches/`。
-4. 运行 build、lint、tests 和代码仓库检索评估。
+4. 运行 build、lint、tests、代码仓库检索评估和自迭代文档 gate。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs.jsonl`。
 7. 采纳候选前，将本轮采用的优化思路、变更文件、指标改善和已知退化追加到 `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`。
@@ -52,6 +52,11 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 9. 候选被拒绝时，恢复到本轮开始的 commit。
 
 如果启动时工作树是 dirty 状态，循环会立即退出，而不是重复重试同一个不可重试的前置条件失败。
+
+实现类候选必须在评估前更新
+`docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`，写清算法、架构、不变量、预期 case/metric 影响和已知风险。harness 会追加
+`self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 也会把
+`.git/relay-knowledge-self-iteration/patches/` 当作长期记忆：先列出有界 patch 索引，再要求 Codex 只对相关历史 patch 做小范围渐进读取。
 
 ## 评分和采纳
 

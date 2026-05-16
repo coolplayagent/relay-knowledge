@@ -44,7 +44,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches/`.
-4. Runs build, lint, tests, and repository retrieval evaluations.
+4. Runs build, lint, tests, repository retrieval evaluations, and the self-iteration documentation gate.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
 7. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md` before committing.
@@ -53,6 +53,16 @@ Each iteration:
 
 If the worktree is dirty at startup, the loop exits immediately instead of
 retrying the same non-retryable precondition failure.
+
+Implementation candidates must update
+`docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md` with the
+algorithm, architecture, invariants, expected case/metric impact, and known
+risks before evaluation. The harness adds a
+`self_iteration_algorithm_documentation` gate to reject code, test, benchmark,
+or harness-policy changes that do not carry those notes. The prompt also treats
+`.git/relay-knowledge-self-iteration/patches/` as long-term memory: it lists a
+bounded patch index and instructs Codex to read only relevant historical patch
+files in small ranges when reasoning about the next candidate.
 
 ## Scoring and acceptance
 
