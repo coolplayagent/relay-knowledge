@@ -230,6 +230,14 @@ Adopted optimization notes:
 - 架构与不变量：SQLite schema、FTS document 内容、candidate limit、source scope、path/language filter、API 字段、graph edge 查询、去重和最终截断规则不变；召回扩展只发生在 bounded symbol candidate set 内，最终排序仍由统一 scorer、symbol kind bonus 和既有融合规则决定。
 - 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 中含常量、函数、类名的自然语言 fuzzy definition/hybrid 查询更容易召回真实多段 identifier，并用 kind/name part 排在单词噪声前；`archive_output_dir` 和 checkpoint version 常量应提升 rank，已通过单元与集成回归测试覆盖。
 - 已知风险：symbol FTS 的 `OR` 召回会让宽查询进入更多候选，可能增加少量 SQLite FTS 和 Rust scoring CPU；候选窗口仍受 500-2000 上限约束，且非 symbol graph 查询保持原有精确召回以控制 fan-out。
+
+## 候选优化说明：20260516T144537Z
+
+- 目标：修复宽 hybrid 查询在 LevelDB 大仓中把 API 声明块排在使用样例或实现块之后的问题，优先保护 `leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface`，同时保留上一轮 fuzzy symbol 召回收益。
+- 方法：在 chunk 层 scoring 后增加受限声明块 bonus；只有当查询至少 3 个长度不小于 3 的词能命中 chunk identifier/text，且 chunk 形态像 API 声明时才加分。抽象接口查询要求 query 含 `interface` 且 chunk 含 `virtual ... = 0;`，普通声明上下文要求至少两行函数声明式原型。该规则补充 ranking fusion，不改变 FTS 召回、symbol/edge 查询或最终 API schema。
+- 架构与不变量：SQLite schema、索引内容、source scope、path/language filter、bounded candidate limit、去重截断、symbol FTS `OR` 召回和 graph edge 查询语义不变；bonus 只在已召回的 hybrid chunk 候选内生效，并要求多词覆盖以避免单词噪声被提升。
+- 预期影响：LevelDB、Linux、Kubernetes、Spring Framework 中面向接口、头文件声明、恢复/manifest 这类 API 上下文的自然语言 hybrid 查询，应更稳定地返回声明入口，而不是测试 fixture、构造函数使用点或实现细节；`leveldb_fuzzy_class_cache_lru_interface` 预期回到 rank 1，`leveldb_hybrid_recovery_manifest_full_scope` 预期进入通过阈值。
+- 已知风险：部分实现文件也可能包含多个声明式行或纯虚接口文本，存在小幅 rank 变化风险；规则要求多词覆盖和声明形态，且仅对 chunk hit 加 bounded bonus，以避免牺牲精确 symbol/query cases。
 ## 20260516T143645Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
@@ -243,4 +251,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 595e4c271c813e5466eb068d26842c18e72d6e06..db6719d0fe07cf265d1d8dff6c31a380334f1108 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -32,3 +32,25 @@ assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES); } + +#[test] +fn symbol_fts_query_uses_any_term_for_fuzzy_recall() { +    assert_eq!( +        symbol_fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +    ); +    assert_eq!( +        fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" \"metadata\" \"version\" \"constant\"" +    ); +} + +#[test] +fn score_text_matches_identifier_parts_inside_snake_case_names() { +    let score = score_text( +        "archive output directory", +        ["def archive_output_dir(output_dir: Path) -> Path:"], +    ); + +    assert!(score >= 4.0); +} tokens used 144,045
+## 20260516T144537Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T144537Z.patch`
+- score: 0.985951 (accuracy=1.0, performance=0.906342, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: score_component:score 0.963002->0.985951; score_component:accuracy 0.961538->1.0; metric:cargo_build_release_ms 34450.0->30307; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': False, 'rank': 9, 'false_positive_count': 0}->{'passed': True, 'rank': 5, 'false_positive_count': 0} failed_to_passed; case:leveldb_fuzzy_class_cache_lru_interface {'passed': True, 'rank': 5, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} rank_improved
+- known degradations: metric:cargo_fmt_check_ms 678.0->708; metric:relay_teams_query_p95_ms 8344.0->9460.0; metric:leveldb_cpp_query_p95_ms 183.0->225.0
+- latency metrics: cargo_build_release_ms=30307ms; cargo_fmt_check_ms=708ms; cargo_clippy_ms=182ms; cargo_test_ms=7290ms; relay_teams_index_ms=69032ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=9460ms; leveldb_cpp_index_ms=18856ms
+
+Adopted optimization notes:
+
+        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 2, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "db-impl-header", +                "db/db_impl.h", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "db-impl-source", +                "db/db_impl.cc", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: vec![target, noise], +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_related_callee_names() -> CodeIndexSnapshot { let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c"); unrelated.caller_name = Some("do_mmap".to_owned()); tokens used 107,884
 

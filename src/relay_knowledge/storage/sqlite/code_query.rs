@@ -579,7 +579,8 @@ fn search_chunks(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(&query, [&row.content, &row.path]);
+            let score = score_text(&query, [&row.content, &row.path])
+                + declaration_chunk_bonus(&query, &row.content);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -842,6 +843,47 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     }
 
     score
+}
+
+fn declaration_chunk_bonus(query: &str, content: &str) -> f64 {
+    let terms = query_terms(query);
+    let lower_content = content.to_lowercase();
+    let matched_terms = terms
+        .iter()
+        .filter(|term| {
+            term.len() >= 3
+                && (identifier_field_matches_token(content, term)
+                    || lower_content.contains(term.as_str()))
+        })
+        .count();
+    if matched_terms < 3 {
+        return 0.0;
+    }
+
+    let declaration_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| declaration_line_is_prototype(line))
+        .count();
+    let abstract_interface = terms.iter().any(|term| term == "interface")
+        && content.contains("virtual ")
+        && (content.contains("= 0;") || content.contains("=0;"));
+
+    if abstract_interface {
+        3.0
+    } else if declaration_lines >= 2 {
+        2.0
+    } else {
+        0.0
+    }
+}
+
+fn declaration_line_is_prototype(line: &str) -> bool {
+    line.ends_with(';')
+        && line.contains('(')
+        && !line.contains("->")
+        && !line.contains('.')
+        && !line.starts_with("return ")
 }
 
 fn identifier_field_matches_token(field: &str, token: &str) -> bool {

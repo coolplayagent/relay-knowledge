@@ -504,6 +504,54 @@ async fn hybrid_chunk_queries_do_not_require_every_query_term_in_one_candidate()
 }
 
 #[tokio::test]
+async fn hybrid_chunk_queries_prioritize_abstract_interfaces_over_usage_fixtures() {
+    let store = store_with_repository_snapshot(snapshot_with_cache_interface_chunk_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "cache interface lookup insert total charge lru",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "include/leveldb/cache.h");
+    assert!(hits[0].excerpt.contains("class LEVELDB_EXPORT Cache"));
+}
+
+#[tokio::test]
+async fn hybrid_chunk_queries_prioritize_header_declarations_for_api_context() {
+    let store = store_with_repository_snapshot(snapshot_with_recovery_manifest_chunk_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "Recover descriptor save_manifest VersionEdit",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "db/db_impl.h");
+    assert!(hits[0].excerpt.contains("RecoverLogFile"));
+}
+
+#[tokio::test]
 async fn parsed_hits_do_not_inherit_repository_degraded_reason() {
     let mut snapshot = snapshot_with_degraded_files(1);
     snapshot.files.push(file(
@@ -1137,6 +1185,114 @@ fn snapshot_with_eval_checkpoint_chunk() -> CodeIndexSnapshot {
             "class EvalCheckpointStore:\n    def ensure_initialized(self, signature):\n        raise ValueError(\"Checkpoint signature does not match\")\n\n    def append_result(self, result):\n        self._results_path.write_text(result.model_dump_json())",
             None,
         )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_cache_interface_chunk_noise() -> CodeIndexSnapshot {
+    let target = chunk(
+        "cache-interface-chunk",
+        "cache-header",
+        "include/leveldb/cache.h",
+        "class LEVELDB_EXPORT Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge,\n                         void (*deleter)(const Slice& key, void* value)) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};",
+        None,
+    );
+    let noise = chunk(
+        "cache-fixture-chunk",
+        "cache-fixture",
+        "benchmarks/cache_lru_fixture.cc",
+        "class CacheFixture {\n public:\n  CacheFixture() : cache_(NewLRUCache(kCacheSize)) {}\n  int Lookup(int key) { return cache_->Lookup(EncodeKey(key)) == nullptr ? -1 : 0; }\n  void Insert(int key, int value, int charge = 1) { cache_->Insert(EncodeKey(key), EncodeValue(value), charge, nullptr); }\n  size_t TotalCharge() const { return cache_->TotalCharge(); }\n};",
+        None,
+    );
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "cache-header",
+                "include/leveldb/cache.h",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "cache-fixture",
+                "benchmarks/cache_lru_fixture.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![target, noise],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_recovery_manifest_chunk_noise() -> CodeIndexSnapshot {
+    let target = chunk(
+        "recover-header-chunk",
+        "db-impl-header",
+        "db/db_impl.h",
+        "class DBImpl {\n  // Switches to a new log-file/memtable and writes a new descriptor iff successful.\n  Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,\n                        VersionEdit* edit, SequenceNumber* max_sequence)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};",
+        None,
+    );
+    let noise = chunk(
+        "recover-implementation-chunk",
+        "db-impl-source",
+        "db/db_impl.cc",
+        "Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,\n                              VersionEdit* edit, SequenceNumber* max_sequence) {\n  if (*save_manifest) {\n    descriptor_log_->AddRecord(edit->Encode());\n  }\n  return Status::OK();\n}",
+        None,
+    );
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "db-impl-header",
+                "db/db_impl.h",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "db-impl-source",
+                "db/db_impl.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![target, noise],
         diagnostics: Vec::new(),
     }
 }
