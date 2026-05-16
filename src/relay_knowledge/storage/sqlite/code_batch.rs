@@ -403,30 +403,37 @@ fn update_checkpoint_after_batch(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let batch_is_new = checkpoint_batch_is_new(transaction, batch)?;
+    let delta_files = if batch_is_new { batch.files.len() } else { 0 };
+    let delta_symbols = if batch_is_new { batch.symbols.len() } else { 0 };
+    let delta_references = if batch_is_new {
+        batch.references.len()
+    } else {
+        0
+    };
+    let delta_chunks = if batch_is_new { batch.chunks.len() } else { 0 };
+    let delta_batches = usize::from(batch_is_new);
     transaction.execute(
         "
         UPDATE code_repository_index_checkpoints
         SET parsed_file_count = parsed_file_count + ?2,
-            committed_file_count = (
-                SELECT COUNT(*) FROM code_repository_files WHERE source_scope = ?1
-            ),
-            committed_symbol_count = (
-                SELECT COUNT(*) FROM code_repository_symbols WHERE source_scope = ?1
-            ),
-            committed_reference_count = (
-                SELECT COUNT(*) FROM code_repository_references WHERE source_scope = ?1
-            ),
-            committed_chunk_count = (
-                SELECT COUNT(*) FROM code_repository_chunks WHERE source_scope = ?1
-            ),
-            batch_count = batch_count + 1,
-            last_path = ?3,
-            updated_at_ms = ?4
+            committed_file_count = committed_file_count + ?3,
+            committed_symbol_count = committed_symbol_count + ?4,
+            committed_reference_count = committed_reference_count + ?5,
+            committed_chunk_count = committed_chunk_count + ?6,
+            batch_count = batch_count + ?7,
+            last_path = COALESCE(?8, last_path),
+            updated_at_ms = ?9
         WHERE source_scope = ?1
         ",
         params![
             batch.source_scope,
-            batch.files.len(),
+            delta_files,
+            delta_files,
+            delta_symbols,
+            delta_references,
+            delta_chunks,
+            delta_batches,
             batch.files.last().map(|file| file.path.as_str()),
             now_millis(),
         ],
@@ -436,16 +443,24 @@ fn update_checkpoint_after_batch(
         UPDATE code_repositories
         SET state = 'indexing',
             indexed_file_count = (
-                SELECT COUNT(*) FROM code_repository_files WHERE source_scope = ?2
+                SELECT committed_file_count
+                FROM code_repository_index_checkpoints
+                WHERE source_scope = ?2
             ),
             symbol_count = (
-                SELECT COUNT(*) FROM code_repository_symbols WHERE source_scope = ?2
+                SELECT committed_symbol_count
+                FROM code_repository_index_checkpoints
+                WHERE source_scope = ?2
             ),
             reference_count = (
-                SELECT COUNT(*) FROM code_repository_references WHERE source_scope = ?2
+                SELECT committed_reference_count
+                FROM code_repository_index_checkpoints
+                WHERE source_scope = ?2
             ),
             chunk_count = (
-                SELECT COUNT(*) FROM code_repository_chunks WHERE source_scope = ?2
+                SELECT committed_chunk_count
+                FROM code_repository_index_checkpoints
+                WHERE source_scope = ?2
             ),
             stale = 1
         WHERE repository_id = ?1
@@ -454,6 +469,24 @@ fn update_checkpoint_after_batch(
     )?;
 
     Ok(())
+}
+
+fn checkpoint_batch_is_new(
+    transaction: &Transaction<'_>,
+    batch: &CodeIndexBatch,
+) -> Result<bool, StorageError> {
+    transaction
+        .query_row(
+            "
+            SELECT batch_count
+            FROM code_repository_index_checkpoints
+            WHERE source_scope = ?1
+            ",
+            params![batch.source_scope],
+            |row| row.get::<_, usize>(0),
+        )
+        .map(|batch_count| batch.batch_index > batch_count)
+        .map_err(StorageError::from)
 }
 
 fn update_repository_after_session(

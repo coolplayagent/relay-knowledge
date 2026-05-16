@@ -173,6 +173,18 @@ impl SnapshotBuild {
             diagnostics: self.diagnostics,
         }
     }
+
+    pub(super) fn append_file_records(&mut self, mut other: Self) {
+        debug_assert_eq!(self.repository_id, other.repository_id);
+        debug_assert_eq!(self.source_scope, other.source_scope);
+        self.files.append(&mut other.files);
+        self.symbols.append(&mut other.symbols);
+        self.references.append(&mut other.references);
+        self.imports.append(&mut other.imports);
+        self.calls.append(&mut other.calls);
+        self.chunks.append(&mut other.chunks);
+        self.diagnostics.append(&mut other.diagnostics);
+    }
 }
 
 fn build_symbol_path_index(

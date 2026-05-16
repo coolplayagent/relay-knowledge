@@ -1,6 +1,7 @@
 use std::{
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use super::CodeIndexError;
@@ -87,6 +88,48 @@ pub(super) fn git_bytes<const N: usize>(
     })
 }
 
+pub(super) fn git_batch_blobs(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Vec<u8>>, CodeIndexError> {
+    if paths
+        .iter()
+        .any(|path| path.contains('\n') || path.contains('\r'))
+    {
+        return paths
+            .iter()
+            .map(|path| git_bytes(root, ["show", &format!("{commit}:{path}")]))
+            .collect();
+    }
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    {
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            CodeIndexError::InvalidInput("git cat-file stdin is unavailable".to_owned())
+        })?;
+        for path in paths {
+            writeln!(stdin, "{commit}:{path}")?;
+        }
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(CodeIndexError::Git {
+            args: vec!["cat-file".to_owned(), "--batch".to_owned()],
+            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+
+    parse_cat_file_batch(paths, &output.stdout)
+}
+
 pub(super) fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
     let output = Command::new("git")
         .arg("-C")
@@ -95,4 +138,55 @@ pub(super) fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeI
         .output()?;
 
     Ok(output.status.success())
+}
+
+fn parse_cat_file_batch(paths: &[String], bytes: &[u8]) -> Result<Vec<Vec<u8>>, CodeIndexError> {
+    let mut offset = 0usize;
+    let mut blobs = Vec::with_capacity(paths.len());
+    for path in paths {
+        let header_end = bytes[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|position| offset + position)
+            .ok_or_else(|| {
+                CodeIndexError::InvalidInput(format!(
+                    "git cat-file batch header is missing for {path}"
+                ))
+            })?;
+        let header = String::from_utf8_lossy(&bytes[offset..header_end]);
+        let mut parts = header.split_whitespace();
+        let _object = parts.next();
+        let object_kind = parts.next();
+        let size = parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| {
+                CodeIndexError::InvalidInput(format!(
+                    "git cat-file batch size is invalid for {path}"
+                ))
+            })?;
+        if object_kind != Some("blob") {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "git cat-file batch expected blob for {path}"
+            )));
+        }
+        let content_start = header_end + 1;
+        let content_end = content_start.checked_add(size).ok_or_else(|| {
+            CodeIndexError::InvalidInput(format!("git cat-file blob size overflow for {path}"))
+        })?;
+        if bytes.len() < content_end + 1 {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "git cat-file batch content is truncated for {path}"
+            )));
+        }
+        blobs.push(bytes[content_start..content_end].to_vec());
+        if bytes[content_end] != b'\n' {
+            return Err(CodeIndexError::InvalidInput(format!(
+                "git cat-file batch record terminator is missing for {path}"
+            )));
+        }
+        offset = content_end + 1;
+    }
+
+    Ok(blobs)
 }

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, thread};
 
 use crate::domain::{
     CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeRepositoryRegistration,
@@ -8,11 +8,13 @@ use crate::domain::{
 use super::{
     CodeIndexError,
     changes::tracked_paths,
-    git::{git_bytes, resolve_ref, resolve_tree},
+    git::{git_batch_blobs, resolve_ref, resolve_tree},
     identity, parse_indexed_file,
     scope::{load_ignore_rules_from_commit, selection_exclusion_reason},
     snapshot::SnapshotBuild,
 };
+
+const GIT_BLOB_FETCH_GROUP: usize = 32;
 
 /// Blocking plan for a checkpointed full repository index.
 #[derive(Debug, Clone)]
@@ -69,13 +71,28 @@ impl CodeIndexPlan {
         );
         let mut parsed_bytes = 0usize;
         while self.cursor < self.paths.len() {
-            let path = &self.paths[self.cursor];
-            let object = format!("{}:{path}", self.commit);
-            let bytes = git_bytes(&self.root, ["show", &object])?;
-            parsed_bytes = parsed_bytes.saturating_add(bytes.len());
-            parse_indexed_file(&mut build, path, &bytes)?;
-            self.cursor += 1;
+            let fetch_end = self.paths.len().min(
+                self.cursor.saturating_add(GIT_BLOB_FETCH_GROUP).min(
+                    self.cursor
+                        .saturating_add(self.resource_budget.max_files_per_batch),
+                ),
+            );
+            let fetched_paths = self.paths[self.cursor..fetch_end].to_vec();
+            let blobs = git_batch_blobs(&self.root, &self.commit, &fetched_paths)?;
+            let parsed_files = parse_fetched_files(&self, &fetched_paths, &blobs)?;
+            for (bytes, parsed_file) in blobs.iter().zip(parsed_files) {
+                parsed_bytes = parsed_bytes.saturating_add(bytes.len());
+                build.append_file_records(parsed_file);
+                self.cursor += 1;
 
+                if !build.files.is_empty()
+                    && (build.files.len() >= self.resource_budget.max_files_per_batch
+                        || parsed_bytes >= self.resource_budget.max_bytes_per_batch
+                        || batch_row_count(&build) >= self.resource_budget.max_rows_per_batch)
+                {
+                    break;
+                }
+            }
             if !build.files.is_empty()
                 && (build.files.len() >= self.resource_budget.max_files_per_batch
                     || parsed_bytes >= self.resource_budget.max_bytes_per_batch
@@ -102,6 +119,62 @@ impl CodeIndexPlan {
 
         Ok((self, Some(batch)))
     }
+}
+
+fn parse_fetched_files(
+    plan: &CodeIndexPlan,
+    paths: &[String],
+    blobs: &[Vec<u8>],
+) -> Result<Vec<SnapshotBuild>, CodeIndexError> {
+    if paths.len() <= 1 || worker_count(paths.len()) <= 1 {
+        return paths
+            .iter()
+            .zip(blobs.iter())
+            .map(|(path, bytes)| parse_one_file(plan, path, bytes))
+            .collect();
+    }
+
+    thread::scope(|scope| {
+        let handles = paths
+            .iter()
+            .zip(blobs.iter())
+            .map(|(path, bytes)| scope.spawn(move || parse_one_file(plan, path, bytes)))
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle.join().map_err(|_| {
+                    CodeIndexError::InvalidInput("code parser worker panicked".to_owned())
+                })?
+            })
+            .collect()
+    })
+}
+
+fn parse_one_file(
+    plan: &CodeIndexPlan,
+    path: &str,
+    bytes: &[u8],
+) -> Result<SnapshotBuild, CodeIndexError> {
+    let mut build = SnapshotBuild::new_with_selector(
+        &plan.registration,
+        &plan.selector,
+        plan.commit.clone(),
+        plan.tree_hash.clone(),
+        true,
+        plan.paths.len(),
+        0,
+    );
+    parse_indexed_file(&mut build, path, bytes)?;
+
+    Ok(build)
+}
+
+fn worker_count(item_count: usize) -> usize {
+    thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(item_count)
 }
 
 /// Prepares a full repository index as a bounded, checkpointable batch plan.

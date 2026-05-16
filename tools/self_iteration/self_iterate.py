@@ -391,6 +391,7 @@ def build_prompt(paths: Any, run_id: str) -> str:
             f"accuracy={best.get('accuracy')} commit={best.get('commit')}"
         )
     rejected_summary = recent_rejected_summary(paths)
+    gate_priority = quality_gate_repair_priority(paths)
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
@@ -404,9 +405,12 @@ Constraints:
 - Do not add broad rewrites, speculative APIs, dead code, or shallow wrappers.
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
-- If recent quality gate diagnostics are present, reproduce and diagnose those gates before changing scoring or evaluation policy.
+- If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
 - Update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md with the optimization approach if your candidate is meant to be accepted; the harness also appends adopted-run metadata after acceptance.
 - Do not create commits yourself; the harness squashes accepted net changes into one commit.
+
+Current priority:
+{gate_priority}
 
 Historical context:
 {best_summary}
@@ -428,6 +432,36 @@ Recent adopted optimization plans to build on:
 
 Make one concrete candidate code change now. The self-iteration harness will build, test, score, squash-commit accepted improvements, or roll them back.
 """
+
+
+def quality_gate_repair_priority(paths: Any) -> str:
+    failed = recent_failed_gate_names(paths)
+    if not failed:
+        return "- No recent quality gate failures recorded; optimize the highest-value retrieval or indexing objective."
+
+    return (
+        "- Quality gate repair mode is active. Prioritize fixing these failed gates before "
+        f"any other optimization: {', '.join(failed)}."
+    )
+
+
+def recent_failed_gate_names(paths: Any, limit: int = 8) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for run in reversed(load_runs(paths)):
+        if run.get("accepted"):
+            continue
+        for gate in run.get("gates", []):
+            if not isinstance(gate, dict) or gate.get("passed", False):
+                continue
+            name = str(gate.get("name", ""))
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+            if len(names) >= limit:
+                return names
+    return names
 
 
 def recent_rejected_summary(paths: Any, limit: int = 3) -> str:

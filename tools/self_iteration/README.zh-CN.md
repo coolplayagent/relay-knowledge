@@ -91,10 +91,10 @@ and (
 `cases.json` 定义 benchmark targets：
 
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
-- `/opt/workspace/linux`：默认 profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
+- `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。
 - `/opt/workspace/leveldb`：`scope=all` 全仓 C/C++ 索引与查询，覆盖类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。
-- `/opt/workspace/kubernetes`：`scope=all` 全仓 Go 索引与查询，覆盖 command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。
-- `/opt/workspace/spring-framework`：`scope=all` 全仓 Java 索引与查询，覆盖 context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。
+- `/opt/workspace/kubernetes`：`exhaustive` profile 下 `scope=all` 全仓 Go 索引与查询，覆盖 command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。
+- `/opt/workspace/spring-framework`：`exhaustive` profile 下 `scope=all` 全仓 Java 索引与查询，覆盖 context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。
 
-所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要长周期重复测量 Linux 全量初始索引时间时使用 `--profile exhaustive`。
+所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要运行 Linux、Kubernetes 或 Spring Framework 长周期全量初始索引 gate 时使用 `--profile exhaustive`；这些 gate 有意不放在默认 profile，避免单 CPU 自迭代 worker 在收集可操作检索反馈前就拒绝每个候选。

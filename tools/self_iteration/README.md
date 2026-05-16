@@ -92,10 +92,10 @@ The `chart` command writes:
 `cases.json` defines the benchmark targets:
 
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
-- `/opt/workspace/linux` full `scope=all` indexing in the default profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
+- `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
 - `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.
-- `/opt/workspace/kubernetes` full `scope=all` Go indexing and queries for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
-- `/opt/workspace/spring-framework` full `scope=all` Java indexing and queries for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
+- `/opt/workspace/kubernetes` full `scope=all` Go indexing in the `exhaustive` profile for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
+- `/opt/workspace/spring-framework` full `scope=all` Java indexing in the `exhaustive` profile for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
 
-All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux full initial indexing time should be repeated.
+All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux, Kubernetes, or Spring Framework full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

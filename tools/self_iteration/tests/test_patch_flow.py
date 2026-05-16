@@ -147,6 +147,44 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("UNIQUE constraint failed", prompt)
             self.assertIn("code_repository_symbols.symbol_snapshot_id", prompt)
 
+    def test_prompt_prioritizes_recent_quality_gate_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "failed-large-repos",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": False,
+                    "reject_reasons": [
+                        "quality gates failed: linux_sample_index, kubernetes_go_sample_index"
+                    ],
+                    "gates": [
+                        {
+                            "name": "linux_sample_index",
+                            "passed": False,
+                            "duration_ms": 900_000,
+                            "message": "timeout after 900s",
+                        },
+                        {
+                            "name": "kubernetes_go_sample_index",
+                            "passed": False,
+                            "duration_ms": 900_000,
+                            "message": "timeout after 900s",
+                        },
+                    ],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Quality gate repair mode is active", prompt)
+            self.assertIn("linux_sample_index", prompt)
+            self.assertIn("kubernetes_go_sample_index", prompt)
+            self.assertIn("Prioritize fixing these failed gates", prompt)
+
     def test_prompt_describes_missing_rejected_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -155,6 +193,7 @@ class PatchFlowTests(unittest.TestCase):
 
             self.assertIn("No rejected historical run with reasons yet.", prompt)
             self.assertIn("No failed quality gate diagnostics recorded yet.", prompt)
+            self.assertIn("No recent quality gate failures recorded", prompt)
             self.assertIn("No worsened evaluation items recorded yet.", prompt)
             self.assertIn("No improved evaluation items recorded yet.", prompt)
 

@@ -4,6 +4,7 @@ use std::fs;
 mod fixtures;
 
 use super::changes::{GitChange, parse_name_status_z};
+use super::git::git_batch_blobs;
 use fixtures::{TempGitRepo, reference, symbol};
 
 #[test]
@@ -194,6 +195,26 @@ fn default_source_preset_excludes_dataset_dumps_and_uv_lock() {
         &selector
     ));
     assert!(!path_is_selected("uv.lock", &registration, &selector));
+}
+
+#[test]
+fn git_batch_blobs_reads_multiple_commit_files() {
+    let repo = TempGitRepo::create("batch-blobs");
+    repo.write("src/alpha.rs", "pub fn alpha() {}\n");
+    repo.write("src/beta.rs", "pub fn beta() {\n    alpha();\n}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let commit = repo.git_text(["rev-parse", "HEAD"]);
+
+    let blobs = git_batch_blobs(
+        &repo.path,
+        &commit,
+        &["src/alpha.rs".to_owned(), "src/beta.rs".to_owned()],
+    )
+    .expect("batch blobs should load");
+
+    assert_eq!(blobs[0], b"pub fn alpha() {}\n");
+    assert_eq!(blobs[1], b"pub fn beta() {\n    alpha();\n}\n");
 }
 
 #[test]

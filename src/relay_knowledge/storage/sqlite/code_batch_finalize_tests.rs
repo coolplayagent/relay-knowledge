@@ -260,6 +260,66 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
 }
 
+#[tokio::test]
+async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:batch-replay";
+    let session = session_for_scope(source_scope, 1);
+    let indexed_file = file(
+        source_scope,
+        "replayed-file",
+        "src/lib.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    );
+    let indexed_symbol = symbol(
+        source_scope,
+        "replayed-symbol",
+        "replayed-file",
+        "src/lib.rs",
+        "run",
+        "rust",
+    );
+    let batch = CodeIndexBatch {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        batch_index: 1,
+        parsed_byte_count: 20,
+        files: vec![indexed_file],
+        symbols: vec![indexed_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+
+    store
+        .begin_code_index_session(session)
+        .await
+        .expect("session should begin");
+    let first = store
+        .apply_code_index_batch(batch.clone())
+        .await
+        .expect("first batch should persist");
+    let replayed = store
+        .apply_code_index_batch(batch)
+        .await
+        .expect("batch replay should remain idempotent for progress");
+    let status = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("status should load")
+        .expect("status should exist");
+
+    assert_eq!(first.committed_file_count, 1);
+    assert_eq!(first.committed_symbol_count, 1);
+    assert_eq!(replayed.committed_file_count, 1);
+    assert_eq!(replayed.committed_symbol_count, 1);
+    assert_eq!(replayed.batch_count, 1);
+    assert_eq!(status.indexed_file_count, 1);
+    assert_eq!(status.symbol_count, 1);
+}
+
 async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store
