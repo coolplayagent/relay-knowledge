@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T195734Z
+
+- 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先恢复 protected stability gate。
+- 方法：保留生产 `serve_listener`、Axum router、pending `/hold` handler 和 graceful shutdown timeout 路径；将该单测改为测试专用 in-memory `Listener`/stream 直接提供完整 HTTP 请求字节，并把 readiness 信号下沉到 `/hold` handler 进入 pending future 前发送。测试只在 handler 已经成为 active request 后触发 shutdown，避免 loopback TCP accept/read、Tower layer dispatch 和全量测试 CPU 拥塞成为 graceful shutdown timeout 断言的前置条件。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS admission、HTTP request timeout、shutdown timeout、CLI/API、索引、检索、ranking、repository parsing 和 self-iteration harness 行为均不变；被测不变量仍是一个已进入 handler 且不会完成的 active request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：修复当前 `cargo_test` gate 的不稳定同步点，减少 HTTP shutdown 单测对 OS socket 调度、端口状态和 request-start layer 调度时机的敏感度；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选只调整测试传输可控性，不提升检索评分；如果未来 Axum/hyper 对自定义 test IO 的 idle-read 语义发生变化，风险会集中暴露在该单测，需要同步更新测试 stream 状态机。
+
 ## 候选优化说明：20260516T194305Z
 
 - 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先保护 stability 与 accuracy 前置门禁。
@@ -580,4 +588,17 @@ Self::Service { +        RequestStartedService { +            inner, +          
 Adopted optimization notes:
 
     stream +        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n") +        .await +        .expect("request should write completely"); tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") @@ -245,39 +250,6 @@ let _ = sender.send(()); } self.inner.call(request) -    } -} - -struct InMemoryRequestListener { -    stream: Option<DuplexStream>, -    address: std::net::SocketAddr, -} - -impl InMemoryRequestListener { -    fn new(stream: DuplexStream) -> Self { -        Self { -            stream: Some(stream), -            address: "127.0.0.1:8791" -                .parse() -                .expect("loopback test address should parse"), -        } -    } -} - -impl axum::serve::Listener for InMemoryRequestListener { -    type Io = DuplexStream; -    type Addr = std::net::SocketAddr; - -    async fn accept(&mut self) -> (Self::Io, Self::Addr) { -        if let Some(stream) = self.stream.take() { -            return (stream, self.address); -        } - -        std::future::pending().await -    } - -    fn local_addr(&self) -> std::io::Result<Self::Addr> { -        Ok(self.address) } } tokens used 73,628
+## 20260516T195734Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T195734Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 59991.0->57595
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=96ms; cargo_fmt_check_ms=465ms; cargo_clippy_ms=4821ms; cargo_test_ms=3711ms; relay_teams_index_ms=57595ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=403ms; leveldb_cpp_index_ms=18905ms
+
+Adopted optimization notes:
+
+m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::task::Poll::Ready(Ok(buffer.len())) +    } -    fn poll_ready( -        &mut self, -        context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    fn poll_flush( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } } tokens used 57,392
 
