@@ -148,28 +148,28 @@ fn insert_checkpoint(
 }
 
 fn insert_files(transaction: &Transaction<'_>, batch: &CodeIndexBatch) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_files (
+            repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
+            line_count, parse_status, degraded_reason
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ",
+    )?;
     for file in &batch.files {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_files (
-                repository_id, source_scope, file_id, path, language_id, blob_hash, byte_len,
-                line_count, parse_status, degraded_reason
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-            ",
-            params![
-                file.repository_id,
-                file.source_scope,
-                file.file_id,
-                file.path,
-                file.language_id,
-                file.blob_hash,
-                file.byte_len,
-                file.line_count,
-                file.parse_status.as_str(),
-                file.degraded_reason,
-            ],
-        )?;
+        statement.execute(params![
+            file.repository_id,
+            file.source_scope,
+            file.file_id,
+            file.path,
+            file.language_id,
+            file.blob_hash,
+            file.byte_len,
+            file.line_count,
+            file.parse_status.as_str(),
+            file.degraded_reason,
+        ])?;
     }
 
     Ok(())
@@ -179,38 +179,38 @@ fn insert_symbols(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_symbols (
+            repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
+            file_id, path, language_id, name,
+            qualified_name, kind, signature, doc_comment, byte_start, byte_end,
+            line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ",
+    )?;
+    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
     for symbol in &batch.symbols {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_symbols (
-                repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
-                file_id, path, language_id, name,
-                qualified_name, kind, signature, doc_comment, byte_start, byte_end,
-                line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ",
-            params![
-                symbol.repository_id,
-                symbol.source_scope,
-                symbol.symbol_snapshot_id,
-                symbol.canonical_symbol_id,
-                symbol.file_id,
-                symbol.path,
-                symbol.language_id,
-                symbol.name,
-                symbol.qualified_name,
-                symbol.kind,
-                symbol.signature,
-                symbol.doc_comment,
-                symbol.byte_range.start,
-                symbol.byte_range.end,
-                symbol.line_range.start,
-                symbol.line_range.end,
-            ],
-        )?;
-        super::insert_search_document(
-            transaction,
+        statement.execute(params![
+            symbol.repository_id,
+            symbol.source_scope,
+            symbol.symbol_snapshot_id,
+            symbol.canonical_symbol_id,
+            symbol.file_id,
+            symbol.path,
+            symbol.language_id,
+            symbol.name,
+            symbol.qualified_name,
+            symbol.kind,
+            symbol.signature,
+            symbol.doc_comment,
+            symbol.byte_range.start,
+            symbol.byte_range.end,
+            symbol.line_range.start,
+            symbol.line_range.end,
+        ])?;
+        search_documents.insert(
             &symbol.source_scope,
             "symbol",
             &symbol.symbol_snapshot_id,
@@ -234,38 +234,38 @@ fn insert_references(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_references (
+            repository_id, source_scope, reference_id, file_id, path, name, kind,
+            target_symbol_snapshot_id, target_hint, resolution_state,
+            confidence_basis_points, confidence_tier,
+            byte_start, byte_end, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ",
+    )?;
+    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
     for reference in &batch.references {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_references (
-                repository_id, source_scope, reference_id, file_id, path, name, kind,
-                target_symbol_snapshot_id, target_hint, resolution_state,
-                confidence_basis_points, confidence_tier,
-                byte_start, byte_end, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ",
-            params![
-                reference.repository_id,
-                reference.source_scope,
-                reference.reference_id,
-                reference.file_id,
-                reference.path,
-                reference.name,
-                reference.kind,
-                reference.target_symbol_snapshot_id,
-                reference.target_hint,
-                reference.resolution_state,
-                reference.confidence_basis_points,
-                reference.confidence_tier,
-                reference.byte_range.start,
-                reference.byte_range.end,
-                reference.line_range.start,
-                reference.line_range.end,
-            ],
-        )?;
-        super::insert_search_document(
-            transaction,
+        statement.execute(params![
+            reference.repository_id,
+            reference.source_scope,
+            reference.reference_id,
+            reference.file_id,
+            reference.path,
+            reference.name,
+            reference.kind,
+            reference.target_symbol_snapshot_id,
+            reference.target_hint,
+            reference.resolution_state,
+            reference.confidence_basis_points,
+            reference.confidence_tier,
+            reference.byte_range.start,
+            reference.byte_range.end,
+            reference.line_range.start,
+            reference.line_range.end,
+        ])?;
+        search_documents.insert(
             &reference.source_scope,
             "reference",
             &reference.reference_id,
@@ -287,32 +287,32 @@ fn insert_imports(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_imports (
+            repository_id, source_scope, import_id, file_id, path, module, target_hint,
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ",
+    )?;
+    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
     for import in &batch.imports {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_imports (
-                repository_id, source_scope, import_id, file_id, path, module, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            ",
-            params![
-                import.repository_id,
-                import.source_scope,
-                import.import_id,
-                import.file_id,
-                import.path,
-                import.module,
-                import.target_hint,
-                import.resolution_state,
-                import.confidence_basis_points,
-                import.confidence_tier,
-                import.line_range.start,
-                import.line_range.end,
-            ],
-        )?;
-        super::insert_search_document(
-            transaction,
+        statement.execute(params![
+            import.repository_id,
+            import.source_scope,
+            import.import_id,
+            import.file_id,
+            import.path,
+            import.module,
+            import.target_hint,
+            import.resolution_state,
+            import.confidence_basis_points,
+            import.confidence_tier,
+            import.line_range.start,
+            import.line_range.end,
+        ])?;
+        search_documents.insert(
             &import.source_scope,
             "import",
             &import.import_id,
@@ -333,32 +333,32 @@ fn insert_chunks(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT INTO code_repository_chunks (
+            repository_id, source_scope, chunk_id, file_id, path, language_id, content,
+            byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ",
+    )?;
+    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
     for chunk in &batch.chunks {
-        transaction.execute(
-            "
-            INSERT INTO code_repository_chunks (
-                repository_id, source_scope, chunk_id, file_id, path, language_id, content,
-                byte_start, byte_end, line_start, line_end, symbol_snapshot_id
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            ",
-            params![
-                chunk.repository_id,
-                chunk.source_scope,
-                chunk.chunk_id,
-                chunk.file_id,
-                chunk.path,
-                chunk.language_id,
-                chunk.content,
-                chunk.byte_range.start,
-                chunk.byte_range.end,
-                chunk.line_range.start,
-                chunk.line_range.end,
-                chunk.symbol_snapshot_id,
-            ],
-        )?;
-        super::insert_search_document(
-            transaction,
+        statement.execute(params![
+            chunk.repository_id,
+            chunk.source_scope,
+            chunk.chunk_id,
+            chunk.file_id,
+            chunk.path,
+            chunk.language_id,
+            chunk.content,
+            chunk.byte_range.start,
+            chunk.byte_range.end,
+            chunk.line_range.start,
+            chunk.line_range.end,
+            chunk.symbol_snapshot_id,
+        ])?;
+        search_documents.insert(
             &chunk.source_scope,
             "chunk",
             &chunk.chunk_id,
@@ -379,21 +379,21 @@ fn insert_diagnostics(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        INSERT OR REPLACE INTO code_repository_file_diagnostics
+            (repository_id, source_scope, path, parse_status, message)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ",
+    )?;
     for diagnostic in &batch.diagnostics {
-        transaction.execute(
-            "
-            INSERT OR REPLACE INTO code_repository_file_diagnostics
-                (repository_id, source_scope, path, parse_status, message)
-            VALUES (?1, ?2, ?3, ?4, ?5)
-            ",
-            params![
-                diagnostic.repository_id,
-                diagnostic.source_scope,
-                diagnostic.path,
-                diagnostic.parse_status.as_str(),
-                diagnostic.message,
-            ],
-        )?;
+        statement.execute(params![
+            diagnostic.repository_id,
+            diagnostic.source_scope,
+            diagnostic.path,
+            diagnostic.parse_status.as_str(),
+            diagnostic.message,
+        ])?;
     }
 
     Ok(())

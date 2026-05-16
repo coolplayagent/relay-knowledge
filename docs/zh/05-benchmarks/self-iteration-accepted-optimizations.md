@@ -56,6 +56,14 @@
 - 架构与不变量：Git blob 读取、解析、SQLite checkpoint/finalize 仍由既有 bounded batch plan 管理；source scope、路径筛选、语言筛选、行记录、符号 identity、CLI/API 响应语义不变；单个 batch 的内存上限仍由 16 MiB 默认字节预算和资源预算控制。
 - 预期影响：把大仓冷索引中的 Git 子进程数量最多再降低约 4 倍，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 的 index wall time；小仓 ranking 与 query accuracy 不应变化。
 - 已知风险：单次 `cat-file --batch` stdout 峰值可接近 batch 字节预算；低并发机器上解析仍按 CPU 并行度串行分块，因此收益主要来自减少 Git 进程启动与 IPC 开销。
+
+## 候选优化说明：20260516T132656Z
+
+- 目标：继续修复 Linux、Kubernetes、Spring Framework full-scope index 的 900 秒超时风险，针对批量持久化与 finalize 阶段中高频重复 SQL prepare 的固定开销。
+- 方法：checkpoint batch 写入在 files、symbols、references、imports、chunks、diagnostics 六类循环中复用各自的 prepared statement；FTS search document 插入通过同一个 prepared inserter 复用 SQL；finalize 的 import resolution 更新、call edge 重建插入和 search document 重建同样复用 prepared statement，避免每条记录重新解析相同 SQL 文本。
+- 架构与不变量：SQLite schema、事务边界、batch/checkpoint 语义、search document 内容、call edge ID、reference/import/call resolution 规则、CLI/API 返回 schema 均不变；仍由既有 bounded batch 与 finalize transaction 控制资源和崩溃恢复边界。
+- 预期影响：大仓索引中每批数百到数万行的写入与 call/import finalize 少做重复 SQL 编译，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index`、`relay_teams_index_ms` 和 `leveldb_cpp_index_ms`，对查询 accuracy/ranking 不应产生影响。
+- 已知风险：prepared statement 生命周期覆盖整个插入循环，若后续在同一循环中加入需要独占 schema 变更的操作，必须先释放 statement；当前循环只执行普通 DML 与 FTS insert，风险较低。
 ## 20260516T121321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T121321Z.patch`
@@ -108,4 +116,17 @@ e) } fn load_symbol_keys( @@ -797,3 +799,39 @@ hash } + +#[cfg(test)] +mod tests
 Adopted optimization notes:
 
 3b88 --- a/src/relay_knowledge/code/tests.rs +++ b/src/relay_knowledge/code/tests.rs @@ -265,6 +265,31 @@ } #[test] +fn full_index_plan_preserves_order_across_bounded_parallel_parse_chunks() { +    let repo = TempGitRepo::create("parallel-fetch-order"); +    for index in 0..40 { +        repo.write( +            &format!("src/file_{index:02}.rs"), +            &format!("fn f_{index}() {{}}\n"), +        ); +    } +    repo.git(["add", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = +        CodeIndexResourceBudget::new(40, 1024 * 1024, 50_000).expect("budget should validate"); +    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget) +        .expect("plan should prepare"); + +    let (_, batch) = plan.parse_next_batch().expect("batch should parse"); +    let batch = batch.expect("batch should exist"); + +    assert_eq!(batch.files.len(), 40); +    for (index, file) in batch.files.iter().enumerate() { +        assert_eq!(file.path, format!("src/file_{index:02}.rs")); +    } +} + +#[test] fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() { let registration = CodeRepositoryRegistration::new( "repo", tokens used 84,035
+## 20260516T132656Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T132656Z.patch`
+- score: 0.971355 (accuracy=1.0, performance=0.904515, stability=1.0)
+- cases: 20/20 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_batch.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`
+- key improvements: score_component:score 0.916501->0.971355; score_component:accuracy 0.9->1.0; case:rt_definition_w3_save_request {'passed': False, 'rank': 2, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} failed_to_passed; case:rt_hybrid_eval_checkpoint_store {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed
+- known degradations: metric:cargo_build_release_ms 54020.0->60487; metric:cargo_fmt_check_ms 717.0->818; metric:cargo_test_ms 7706.0->8794; metric:relay_teams_index_ms 83470.0->86086; metric:relay_teams_query_p95_ms 11995.0->13289.0
+- latency metrics: cargo_build_release_ms=60487ms; cargo_fmt_check_ms=818ms; cargo_clippy_ms=214ms; cargo_test_ms=8794ms; relay_teams_index_ms=86086ms; relay_teams_query_p50_ms=133ms; relay_teams_query_p95_ms=13289ms; leveldb_cpp_index_ms=20307ms
+
+Adopted optimization notes:
+
+  caller.map(|symbol| symbol.name.clone()), -                reference.target_symbol_snapshot_id, -                reference.name, -                reference.target_hint, -                reference.resolution_state, -                reference.confidence_basis_points, -                reference.confidence_tier, -                reference.line_start, -                reference.line_end, -            ], -        )?; -        super::super::insert_search_document( -            transaction, +        insert_call.execute(params![ +            repository_id, +            source_scope, +            call_id, +            reference.file_id, +            reference.path, +            caller.map(|symbol| symbol.symbol_snapshot_id.clone()), +            caller.map(|symbol| symbol.name.clone()), +            reference.target_symbol_snapshot_id, +            reference.name, +            reference.target_hint, +            reference.resolution_state, +            reference.confidence_basis_points, +            reference.confidence_tier, +            reference.line_start, +            reference.line_end, +        ])?; +        search_documents.insert( source_scope, "call", &call_id, tokens used 98,611
 

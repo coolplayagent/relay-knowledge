@@ -507,8 +507,69 @@ fn clone_active_scope_for_incremental(
     Ok(())
 }
 
+pub(super) struct SearchDocumentInserter<'transaction> {
+    statement: rusqlite::Statement<'transaction>,
+}
+
+impl<'transaction> SearchDocumentInserter<'transaction> {
+    pub(super) fn new(
+        transaction: &'transaction rusqlite::Transaction<'_>,
+    ) -> Result<Self, StorageError> {
+        let statement = transaction.prepare(
+            "
+            INSERT INTO code_repository_search (
+                source_scope, document_kind, record_id, path, language_id, content
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            ",
+        )?;
+
+        Ok(Self { statement })
+    }
+
+    pub(super) fn insert<'a>(
+        &mut self,
+        source_scope: &str,
+        document_kind: &str,
+        record_id: &str,
+        path: &str,
+        language_id: &str,
+        fields: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), StorageError> {
+        insert_search_document_with_statement(
+            &mut self.statement,
+            source_scope,
+            document_kind,
+            record_id,
+            path,
+            language_id,
+            fields,
+        )
+    }
+}
+
 fn insert_search_document<'a>(
     transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    document_kind: &str,
+    record_id: &str,
+    path: &str,
+    language_id: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Result<(), StorageError> {
+    let mut inserter = SearchDocumentInserter::new(transaction)?;
+    inserter.insert(
+        source_scope,
+        document_kind,
+        record_id,
+        path,
+        language_id,
+        fields,
+    )
+}
+
+fn insert_search_document_with_statement<'a>(
+    statement: &mut rusqlite::Statement<'_>,
     source_scope: &str,
     document_kind: &str,
     record_id: &str,
@@ -529,22 +590,14 @@ fn insert_search_document<'a>(
             content.push_str(&terms.join(" "));
         }
     }
-    transaction.execute(
-        "
-        INSERT INTO code_repository_search (
-            source_scope, document_kind, record_id, path, language_id, content
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-        ",
-        params![
-            source_scope,
-            document_kind,
-            record_id,
-            path,
-            language_id,
-            content
-        ],
-    )?;
+    statement.execute(params![
+        source_scope,
+        document_kind,
+        record_id,
+        path,
+        language_id,
+        content
+    ])?;
 
     Ok(())
 }

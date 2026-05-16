@@ -126,6 +126,17 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
         ",
         params![source_scope],
     )?;
+    let mut update_import = transaction.prepare(
+        "
+        UPDATE code_repository_imports
+        SET target_hint = ?3,
+            resolution_state = ?4,
+            confidence_basis_points = ?5,
+            confidence_tier = ?6
+        WHERE source_scope = ?1 AND import_id = ?2
+        ",
+    )?;
+    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     for import in imports {
         let language = files.get(&import.path).map(String::as_str);
         let resolution = match language {
@@ -142,26 +153,15 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
         };
         let (state, confidence, tier, target_hint) =
             import_resolution_fields(resolution, &import.module);
-        transaction.execute(
-            "
-            UPDATE code_repository_imports
-            SET target_hint = ?3,
-                resolution_state = ?4,
-                confidence_basis_points = ?5,
-                confidence_tier = ?6
-            WHERE source_scope = ?1 AND import_id = ?2
-            ",
-            params![
-                source_scope,
-                import.import_id,
-                target_hint,
-                state,
-                confidence,
-                tier
-            ],
-        )?;
-        super::super::insert_search_document(
-            transaction,
+        update_import.execute(params![
+            source_scope,
+            import.import_id,
+            target_hint,
+            state,
+            confidence,
+            tier
+        ])?;
+        search_documents.insert(
             source_scope,
             "import",
             &import.import_id,
@@ -202,6 +202,17 @@ fn rebuild_calls(
             .or_default()
             .push(symbol.clone());
     }
+    let mut insert_call = transaction.prepare(
+        "
+        INSERT INTO code_repository_calls (
+            repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
+            caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
+            resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        ",
+    )?;
+    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     for reference in load_call_references(transaction, source_scope)? {
         let caller = caller_for_line(by_path.get(&reference.path), reference.line_start);
         let call_id = stable_id(
@@ -215,35 +226,24 @@ fn rebuild_calls(
                 &reference.line_start.to_string(),
             ],
         );
-        transaction.execute(
-            "
-            INSERT INTO code_repository_calls (
-                repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id,
-                caller_name, callee_symbol_snapshot_id, callee_name, target_hint,
-                resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-            ",
-            params![
-                repository_id,
-                source_scope,
-                call_id,
-                reference.file_id,
-                reference.path,
-                caller.map(|symbol| symbol.symbol_snapshot_id.clone()),
-                caller.map(|symbol| symbol.name.clone()),
-                reference.target_symbol_snapshot_id,
-                reference.name,
-                reference.target_hint,
-                reference.resolution_state,
-                reference.confidence_basis_points,
-                reference.confidence_tier,
-                reference.line_start,
-                reference.line_end,
-            ],
-        )?;
-        super::super::insert_search_document(
-            transaction,
+        insert_call.execute(params![
+            repository_id,
+            source_scope,
+            call_id,
+            reference.file_id,
+            reference.path,
+            caller.map(|symbol| symbol.symbol_snapshot_id.clone()),
+            caller.map(|symbol| symbol.name.clone()),
+            reference.target_symbol_snapshot_id,
+            reference.name,
+            reference.target_hint,
+            reference.resolution_state,
+            reference.confidence_basis_points,
+            reference.confidence_tier,
+            reference.line_start,
+            reference.line_end,
+        ])?;
+        search_documents.insert(
             source_scope,
             "call",
             &call_id,
