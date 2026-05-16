@@ -7,7 +7,7 @@ use crate::domain::{
 
 use super::{
     CodeIndexError,
-    changes::tracked_paths,
+    changes::{GitTreeEntry, tracked_entries},
     git::{git_batch_blobs, resolve_ref, resolve_tree},
     identity, parse_indexed_file,
     scope::{load_ignore_rules_from_commit, selection_exclusion_reason},
@@ -27,7 +27,7 @@ pub struct CodeIndexPlan {
     source_scope: String,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
-    paths: Vec<String>,
+    paths: Vec<GitTreeEntry>,
     cursor: usize,
     next_batch_index: usize,
     resource_budget: CodeIndexResourceBudget,
@@ -71,13 +71,14 @@ impl CodeIndexPlan {
         );
         let mut parsed_bytes = 0usize;
         while self.cursor < self.paths.len() {
-            let fetch_end = self.paths.len().min(
-                self.cursor.saturating_add(GIT_BLOB_FETCH_GROUP).min(
-                    self.cursor
-                        .saturating_add(self.resource_budget.max_files_per_batch),
-                ),
-            );
-            let fetched_paths = self.paths[self.cursor..fetch_end].to_vec();
+            let fetch_end = next_fetch_end(&self, build.files.len(), parsed_bytes);
+            if fetch_end == self.cursor {
+                break;
+            }
+            let fetched_paths = self.paths[self.cursor..fetch_end]
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect::<Vec<_>>();
             let blobs = git_batch_blobs(&self.root, &self.commit, &fetched_paths)?;
             let parsed_files = parse_fetched_files(&self, &fetched_paths, &blobs)?;
             for (bytes, parsed_file) in blobs.iter().zip(parsed_files) {
@@ -187,10 +188,11 @@ pub fn prepare_full_index_plan(
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(&root, &commit)?;
     let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
-    let paths = tracked_paths(&root, &commit)?
+    let paths = tracked_entries(&root, &commit)?
         .into_iter()
-        .filter(|path| {
-            selection_exclusion_reason(path, &registration, &selector, &ignore_rules).is_none()
+        .filter(|entry| {
+            selection_exclusion_reason(&entry.path, &registration, &selector, &ignore_rules)
+                .is_none()
         })
         .collect::<Vec<_>>();
     let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
@@ -217,6 +219,38 @@ pub fn prepare_full_index_plan(
         next_batch_index: 1,
         resource_budget,
     })
+}
+
+fn next_fetch_end(plan: &CodeIndexPlan, batch_file_count: usize, parsed_bytes: usize) -> usize {
+    let remaining_files = plan
+        .resource_budget
+        .max_files_per_batch
+        .saturating_sub(batch_file_count)
+        .max(1);
+    let file_limited_end = plan.paths.len().min(
+        plan.cursor
+            .saturating_add(GIT_BLOB_FETCH_GROUP.min(remaining_files)),
+    );
+    let remaining_bytes = plan
+        .resource_budget
+        .max_bytes_per_batch
+        .saturating_sub(parsed_bytes);
+    let mut byte_count = 0usize;
+    let mut end = plan.cursor;
+    while end < file_limited_end {
+        let entry_bytes = plan.paths[end].byte_count;
+        if end > plan.cursor && byte_count.saturating_add(entry_bytes) > remaining_bytes {
+            break;
+        }
+        byte_count = byte_count.saturating_add(entry_bytes);
+        end += 1;
+    }
+
+    if end == plan.cursor && batch_file_count == 0 {
+        return (plan.cursor + 1).min(plan.paths.len());
+    }
+
+    end
 }
 
 fn batch_row_count(build: &SnapshotBuild) -> usize {

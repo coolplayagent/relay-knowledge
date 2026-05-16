@@ -11,7 +11,7 @@ use crate::domain::{
 };
 
 use super::{
-    CodeIndexError, changes::split_nul, git_bytes, git_object_exists, languages::language_id,
+    CodeIndexError, changes::tracked_entries, git_bytes, git_object_exists, languages::language_id,
     resolve_ref, resolve_tree,
 };
 
@@ -307,33 +307,6 @@ impl IgnoreRule {
         }
         path.split('/').any(|segment| segment == pattern)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GitTreeEntry {
-    path: String,
-    byte_count: usize,
-}
-
-fn tracked_entries(root: &Path, commit: &str) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit])?;
-    let mut entries = Vec::new();
-    for record in split_nul(&bytes) {
-        let Some((metadata, path)) = record.split_once('\t') else {
-            continue;
-        };
-        let fields = metadata.split_whitespace().collect::<Vec<_>>();
-        let byte_count = fields
-            .get(3)
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
-        entries.push(GitTreeEntry {
-            path: path.to_owned(),
-            byte_count,
-        });
-    }
-
-    Ok(entries)
 }
 
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {

@@ -1,9 +1,10 @@
 use super::*;
+use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 
 mod fixtures;
 
-use super::changes::{GitChange, parse_name_status_z};
+use super::changes::{GitChange, parse_name_status_z, tracked_entries};
 use super::git::git_batch_blobs;
 use fixtures::{TempGitRepo, reference, symbol};
 
@@ -215,6 +216,52 @@ fn git_batch_blobs_reads_multiple_commit_files() {
 
     assert_eq!(blobs[0], b"pub fn alpha() {}\n");
     assert_eq!(blobs[1], b"pub fn beta() {\n    alpha();\n}\n");
+}
+
+#[test]
+fn tracked_entries_include_blob_sizes_for_batch_planning() {
+    let repo = TempGitRepo::create("tracked-entry-sizes");
+    repo.write("src/alpha.rs", "fn alpha() {}\n");
+    repo.write("src/beta.rs", "fn beta() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let commit = repo.git_text(["rev-parse", "HEAD"]);
+
+    let entries = tracked_entries(&repo.path, &commit).expect("entries should load");
+
+    assert!(entries.iter().any(|entry| {
+        entry.path == "src/alpha.rs" && entry.byte_count == "fn alpha() {}\n".len()
+    }));
+    assert!(entries.iter().any(|entry| {
+        entry.path == "src/beta.rs" && entry.byte_count == "fn beta() {}\n".len()
+    }));
+}
+
+#[test]
+fn full_index_plan_stops_batch_before_next_blob_exceeds_byte_budget() {
+    let repo = TempGitRepo::create("byte-budget-fetch");
+    repo.write("src/a.rs", "fn a() {}\n");
+    repo.write("src/b.rs", "fn b() {}\n");
+    repo.write("src/c.rs", "fn c() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let budget = CodeIndexResourceBudget::new(128, "fn a() {}\nfn b() {}\n".len(), 50_000)
+        .expect("budget should validate");
+    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget)
+        .expect("plan should prepare");
+
+    let (plan, first_batch) = plan.parse_next_batch().expect("first batch should parse");
+    let (plan, second_batch) = plan.parse_next_batch().expect("second batch should parse");
+    let (_, third_batch) = plan.parse_next_batch().expect("third batch should parse");
+
+    let first_batch = first_batch.expect("first batch should exist");
+    let second_batch = second_batch.expect("second batch should exist");
+    assert!(third_batch.is_none());
+    assert_eq!(first_batch.files.len(), 2);
+    assert_eq!(first_batch.files[0].path, "src/a.rs");
+    assert_eq!(first_batch.files[1].path, "src/b.rs");
+    assert_eq!(second_batch.files.len(), 1);
+    assert_eq!(second_batch.files[0].path, "src/c.rs");
 }
 
 #[test]

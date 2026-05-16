@@ -6,9 +6,40 @@ use super::{
 };
 
 pub(super) fn tracked_paths(root: &Path, commit: &str) -> Result<Vec<String>, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-tree", "-r", "-z", "--name-only", commit])?;
+    Ok(tracked_entries(root, commit)?
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect())
+}
 
-    Ok(split_nul(&bytes))
+pub(super) fn tracked_entries(
+    root: &Path,
+    commit: &str,
+) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
+    let bytes = git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit])?;
+    let mut entries = Vec::new();
+    for record in split_nul(&bytes) {
+        let Some((metadata, path)) = record.split_once('\t') else {
+            continue;
+        };
+        let fields = metadata.split_whitespace().collect::<Vec<_>>();
+        let byte_count = fields
+            .get(3)
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        entries.push(GitTreeEntry {
+            path: path.to_owned(),
+            byte_count,
+        });
+    }
+
+    Ok(entries)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GitTreeEntry {
+    pub(super) path: String,
+    pub(super) byte_count: usize,
 }
 
 pub(super) fn diff_changes(
