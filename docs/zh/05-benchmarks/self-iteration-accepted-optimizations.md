@@ -246,6 +246,14 @@ Adopted optimization notes:
 - 架构与不变量：SQLite schema、FTS 召回、candidate limit、source scope、path/language filter、API 字段、去重截断、声明块 bonus 分值和已接受的 LevelDB accuracy 规则保持不变；bonus 仍要求至少 3 个查询词覆盖且只作用于 bounded chunk candidate set。
 - 预期影响：非声明 chunk 候选在 Rust scoring 阶段避免重复 query 分词、全文 lowercase 和 identifier token 扫描，预期改善 `relay_teams_query_p95_ms` 与 `leveldb_cpp_query_p95_ms`；`leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface` 的排序应保持不变。
 - 已知风险：结构检查顺序改变不应影响结果，但如果未来某语言的声明形态不符合 `declaration_line_is_prototype` 或抽象接口文本模式，仍不会获得该 bonus；测试覆盖实现块不加分、头文件 prototype 和纯虚接口仍加分。
+
+## 候选优化说明：20260516T155614Z
+
+- 目标：修复 relay-teams `_summary` callers/callees 这类高 fan-out call graph 查询的 p95 稳定性问题，同时不改变 accuracy、ranking、FTS 召回或 API 返回语义。
+- 方法：为 `code_repository_chunks(source_scope, symbol_snapshot_id)` 增加 SQLite 索引。call 查询为了生成调用点 excerpt，会把 bounded call candidates 的 `caller_symbol_snapshot_id` 关联到 `code_repository_chunks`；大仓 chunk 数量较高且 caller 命中密集时，没有该索引会让每个候选都可能扫描同 scope chunks。新增索引把 caller chunk lookup 变成按 source scope 和 symbol identity 的索引查找。
+- 架构与不变量：不修改 code graph schema 字段、FTS 文档、candidate limit、查询 scoring、去重截断、call edge resolution、path/language filter 或 CLI/API 行为；索引通过既有 `CREATE INDEX IF NOT EXISTS` 初始化与迁移路径应用到新旧 SQLite 数据库。新增测试固定 schema 必须包含该 lookup index。
+- 预期影响：`relay_teams_query_p95_ms` 中 `_summary` callers/callees 查询应显著降低尾延迟；LevelDB、Kubernetes、Linux、Spring Framework 的 call graph 查询在多调用、多 chunk 场景下也应更稳定。索引阶段可能多维护一个小型 B-tree，但 chunk 写入仍在 bounded batch/finalize 事务内完成。
+- 已知风险：大仓索引写入和数据库文件会因额外索引略增；如果未来 call excerpt 不再从 `code_repository_chunks` 关联 caller symbol，该索引价值会下降，需要按查询计划重新评估。
 ## 20260516T143645Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
@@ -285,4 +293,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 erms = query_terms("recover descriptor save_manifest versionedit"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "Status DBImpl::RecoverLogFile(uint64_t log_number, bool* save_manifest) {\n  descriptor_log_->AddRecord(edit->Encode());\n}" +        ), +        0.0 +    ); +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class DBImpl {\n  Status RecoverLogFile(uint64_t log_number, bool* save_manifest,\n                        VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};" +        ), +        2.0 +    ); +} + +#[test] +fn declaration_chunk_bonus_preserves_interface_boost() { +    let terms = query_terms("cache interface lookup insert total charge lru"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};" +        ), +        3.0 +    ); +} tokens used 113,000
+## 20260516T155614Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T155614Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_schema.rs`, `src/relay_knowledge/storage/sqlite/code_tests.rs`
+- key improvements: score_component:score 0.985774->1.0; score_component:performance 0.90516->1.0; metric:relay_teams_query_p50_ms 127.0->93.5; metric:relay_teams_query_p95_ms 11629.0->298.0; metric:leveldb_cpp_index_ms 19318.0->13790; metric:leveldb_cpp_query_p50_ms 149.0->105.5; metric:leveldb_cpp_query_p95_ms 246.0->170.0
+- known degradations: metric:cargo_build_release_ms 37157.0->52888; metric:cargo_fmt_check_ms 664.0->713; metric:relay_teams_index_ms 70374.0->74641
+- latency metrics: cargo_build_release_ms=52888ms; cargo_fmt_check_ms=713ms; cargo_clippy_ms=176ms; cargo_test_ms=7130ms; relay_teams_index_ms=74641ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=298ms; leveldb_cpp_index_ms=13790ms
+
+Adopted optimization notes:
+
+sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGraphStore, +    storage::{SqliteGraphStore, StorageError}, }; #[path = "code_test_support.rs"] @@ -114,6 +114,33 @@ } #[tokio::test] +async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); + +    let index_exists = store +        .run(|connection| { +            connection +                .query_row( +                    " +                    SELECT EXISTS( +                        SELECT 1 +                        FROM sqlite_master +                        WHERE type = 'index' +                          AND name = 'code_repository_chunks_symbol_lookup' +                    ) +                    ", +                    [], +                    |row| row.get::<_, bool>(0), +                ) +                .map_err(StorageError::from) +        }) +        .await +        .expect("schema index check should succeed"); + +    assert!(index_exists); +} + +#[tokio::test] async fn rejects_code_queries_for_unindexed_refs() { let store = store_with_repository_snapshot(snapshot_with_chunk( "repo", tokens used 113,836
 

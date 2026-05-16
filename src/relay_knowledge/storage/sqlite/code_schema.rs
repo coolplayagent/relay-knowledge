@@ -220,6 +220,8 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
             ON code_repository_chunks(source_scope, path);
+        CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup
+            ON code_repository_chunks(source_scope, symbol_snapshot_id);
         CREATE INDEX IF NOT EXISTS code_repository_scopes_lookup
             ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
         ",
