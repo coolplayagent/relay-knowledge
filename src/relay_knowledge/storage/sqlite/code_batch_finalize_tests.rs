@@ -97,6 +97,7 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(search_document_count(&store, source_scope, "call").await, 1);
 }
 
 #[tokio::test]
@@ -630,4 +631,29 @@ async fn search(
         )
         .await
         .expect("query should succeed")
+}
+
+async fn search_document_count(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    document_kind: &str,
+) -> usize {
+    let source_scope = source_scope.to_owned();
+    let document_kind = document_kind.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT COUNT(*)
+                    FROM code_repository_search
+                    WHERE source_scope = ?1 AND document_kind = ?2
+                    ",
+                    (&source_scope, &document_kind),
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("search document count should load")
 }

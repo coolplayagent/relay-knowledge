@@ -212,7 +212,6 @@ fn rebuild_calls(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
     )?;
-    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     for reference in load_call_references(transaction, source_scope)? {
         let caller = caller_for_line(by_path.get(&reference.path), reference.line_start);
         let call_id = stable_id(
@@ -243,20 +242,29 @@ fn rebuild_calls(
             reference.line_start,
             reference.line_end,
         ])?;
-        search_documents.insert(
-            source_scope,
-            "call",
-            &call_id,
-            &reference.path,
-            "",
-            [
-                caller.map_or("", |symbol| symbol.name.as_str()),
-                reference.name.as_str(),
-                reference.target_hint.as_deref().unwrap_or_default(),
-                reference.path.as_str(),
-            ],
-        )?;
     }
+    rebuild_call_search_documents(transaction, source_scope)?;
+
+    Ok(())
+}
+
+fn rebuild_call_search_documents(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'call', call_id, path, '',
+               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
+               coalesce(target_hint, '') || ' ' || path
+        FROM code_repository_calls
+        WHERE source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
 
     Ok(())
 }

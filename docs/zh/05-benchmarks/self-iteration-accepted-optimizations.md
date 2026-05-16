@@ -64,6 +64,14 @@
 - 架构与不变量：SQLite schema、事务边界、batch/checkpoint 语义、search document 内容、call edge ID、reference/import/call resolution 规则、CLI/API 返回 schema 均不变；仍由既有 bounded batch 与 finalize transaction 控制资源和崩溃恢复边界。
 - 预期影响：大仓索引中每批数百到数万行的写入与 call/import finalize 少做重复 SQL 编译，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index`、`relay_teams_index_ms` 和 `leveldb_cpp_index_ms`，对查询 accuracy/ranking 不应产生影响。
 - 已知风险：prepared statement 生命周期覆盖整个插入循环，若后续在同一循环中加入需要独占 schema 变更的操作，必须先释放 statement；当前循环只执行普通 DML 与 FTS insert，风险较低。
+
+## 候选优化说明：20260516T135345Z
+
+- 目标：继续修复 Linux、Kubernetes、Spring Framework 大仓 full-scope index 在 finalize 阶段重建 call graph 时的 SQLite/FTS 写入放大，同时避免上轮“移除 call FTS 文档”造成的 query p95 与 ranking 退化。
+- 方法：`code_repository_calls` 仍按 reference 逐条重建以保留 caller 归属和稳定 call ID；call edge 表重建完成后，用一次 `INSERT INTO code_repository_search ... SELECT ... FROM code_repository_calls` 集合语句批量重建 call FTS 文档，替代每条 call edge 一次 Rust inserter 调用；schema backfill 使用同一 caller、callee、target hint、path 内容字段，保持旧库补全和新 finalize 输出一致。
+- 架构与不变量：call edge schema、call search document 内容字段、source scope、caller/callee resolution、query API、FTS 查询路径、ranking 融合和 checkpoint/finalize 事务边界保持不变；新增测试断言 cross-batch call finalize 后仍生成 call FTS 文档并可被 callers 查询命中。
+- 预期影响：大仓调用引用数量很高时，finalize 少执行数十万次 Rust 到 SQLite 的 FTS insert 调用和参数绑定，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 超时风险；因为查询路径不变，`rt_hybrid_eval_checkpoint_store`、relay-teams p95 和 LevelDB definition cases 应避免 20260516T133442Z 的退化。
+- 已知风险：集合插入会在 call table 重建后一次性写入 call FTS rows，事务内峰值 SQLite 工作集中在该语句；若未来 call search document 内容新增字段，必须同步更新 backfill 与 finalize 的两处 `SELECT`。
 ## 20260516T121321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T121321Z.patch`
@@ -138,3 +146,17 @@ Adopted optimization notes:
 - 架构与不变量：自迭代仍独立于 Rust crate；repository target 仍保持 `scope=all`；case 级 path/language filter 只用于查询端过滤验证；epsilon-Pareto 仍用于噪声抑制和非受保护目标决策，build/test gate 继续作为硬约束。
 - 预期影响：后续候选会更少用性能提升换取 accuracy 或 gate 稳定性退化；新增 case 提高对 Python 方法重名、Python/C++/Java/Go 常量变量、C 宏/函数、C++ 工厂函数与类、Java servlet 类型、Go authorizer API 的覆盖，并把更多全仓查询纳入 p50/p95 性能观测。
 - 已知风险：新增 case 会改变 accuracy 平均值基线，首次运行可能需要重新建立可比历史；`limit=20` case 会略微增加查询评估耗时，但能更早暴露大仓候选集和排序退化。
+## 20260516T135345Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135345Z.patch`
+- score: 0.939527 (accuracy=0.923077, performance=0.904539, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=59850ms; cargo_fmt_check_ms=842ms; cargo_clippy_ms=209ms; cargo_test_ms=8835ms; relay_teams_index_ms=87582ms; relay_teams_query_p50_ms=136ms; relay_teams_query_p95_ms=13219ms; leveldb_cpp_index_ms=19926ms
+
+Adopted optimization notes:
+
+w( +                    " +                    SELECT COUNT(*) +                    FROM code_repository_search +                    WHERE source_scope = ?1 AND document_kind = ?2 +                    ", +                    (&source_scope, &document_kind), +                    |row| row.get(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("search document count should load") +} diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877..0946af7022d8361c66c6443600975234efc916e8 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -373,7 +373,8 @@ source_scope, document_kind, record_id, path, language_id, content ) SELECT source_scope, 'call', call_id, path, '', -               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '') +               coalesce(caller_name, '') || ' ' || callee_name || ' ' || +               coalesce(target_hint, '') || ' ' || path FROM code_repository_calls ", [], tokens used 135,337
+

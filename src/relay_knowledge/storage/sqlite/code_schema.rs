@@ -373,7 +373,8 @@ fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
             source_scope, document_kind, record_id, path, language_id, content
         )
         SELECT source_scope, 'call', call_id, path, '',
-               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '')
+               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
+               coalesce(target_hint, '') || ' ' || path
         FROM code_repository_calls
         ",
         [],
