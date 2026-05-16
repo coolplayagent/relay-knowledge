@@ -2,7 +2,7 @@ use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
 use axum::{Router, routing::get};
 use serde_json::json;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 #[test]
 fn parses_overridden_http_bind_address() {
@@ -170,14 +170,15 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let (request_started, request_started_waiter) = tokio::sync::oneshot::channel();
-    let request_started = Arc::new(std::sync::Mutex::new(Some(request_started)));
-    let router = Router::new()
-        .route(
-            "/hold",
-            get(|| async { std::future::pending::<&'static str>().await }),
-        )
-        .layer(RequestStartedLayer { request_started });
+    let (request_read, request_read_waiter) = tokio::sync::oneshot::channel();
+    let listener = RequestReadListener {
+        inner: listener,
+        request_read: Arc::new(std::sync::Mutex::new(Some(request_read))),
+    };
+    let router = Router::new().route(
+        "/hold",
+        get(|| async { std::future::pending::<&'static str>().await }),
+    );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve_listener(listener, router, config, async {
         let _ = shutdown_waiter.await;
@@ -189,10 +190,10 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .write_all(request)
         .await
         .expect("request should write completely");
-    tokio::time::timeout(Duration::from_secs(10), request_started_waiter)
+    tokio::time::timeout(Duration::from_secs(10), request_read_waiter)
         .await
-        .expect("request should start before shutdown")
-        .expect("request should signal startup");
+        .expect("server should read request before shutdown")
+        .expect("request read should be signaled");
     let _ = shutdown.send(());
 
     let error = server
@@ -203,54 +204,87 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
     assert!(matches!(error, HttpServeError::ShutdownTimeout));
 }
 
-#[derive(Clone)]
-struct RequestStartedLayer {
-    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+struct RequestReadListener {
+    inner: tokio::net::TcpListener,
+    request_read: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
-impl<S> tower::Layer<S> for RequestStartedLayer {
-    type Service = RequestStartedService<S>;
+impl axum::serve::Listener for RequestReadListener {
+    type Io = RequestReadStream;
+    type Addr = std::net::SocketAddr;
 
-    fn layer(&self, inner: S) -> Self::Service {
-        RequestStartedService {
-            inner,
-            request_started: self.request_started.clone(),
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            match self.inner.accept().await {
+                Ok((inner, address)) => {
+                    return (
+                        RequestReadStream {
+                            inner,
+                            request_read: self.request_read.clone(),
+                        },
+                        address,
+                    );
+                }
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
         }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.inner.local_addr()
     }
 }
 
-#[derive(Clone)]
-struct RequestStartedService<S> {
-    inner: S,
-    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+struct RequestReadStream {
+    inner: tokio::net::TcpStream,
+    request_read: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
-impl<S> Service<Request> for RequestStartedService<S>
-where
-    S: Service<Request> + Send,
-    S::Future: Send + 'static,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(
-        &mut self,
+impl AsyncRead for RequestReadStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
         context: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(context)
+        buffer: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let filled_before = buffer.filled().len();
+        let result = std::pin::Pin::new(&mut self.inner).poll_read(context, buffer);
+        if matches!(result, std::task::Poll::Ready(Ok(()))) && buffer.filled().len() > filled_before
+        {
+            let sender = self
+                .request_read
+                .lock()
+                .expect("request read signal mutex should not be poisoned")
+                .take();
+            if let Some(sender) = sender {
+                let _ = sender.send(());
+            }
+        }
+
+        result
+    }
+}
+
+impl AsyncWrite for RequestReadStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buffer: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer)
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
-        let sender = self
-            .request_started
-            .lock()
-            .expect("request signal mutex should not be poisoned")
-            .take();
-        if let Some(sender) = sender {
-            let _ = sender.send(());
-        }
-        self.inner.call(request)
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(context)
     }
 }
 

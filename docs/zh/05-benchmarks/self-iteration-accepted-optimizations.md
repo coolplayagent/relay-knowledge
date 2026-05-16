@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T190848Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 仍可能在 full-suite 调度压力下等待 router service dispatch 超时的问题，优先恢复 stability 前置质量门禁。
+- 方法：保留预绑定 Tokio listener、真实 TCP client、真实 Axum router 和 pending `/hold` handler；把测试同步点下沉到测试专用 `Listener`/stream 边界，在 server-side stream 读到请求字节后再触发 shutdown，避免把 Axum route dispatch 是否及时 poll 作为 graceful shutdown timeout 的前置条件。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、HTTP request timeout、graceful shutdown timeout、QoS、CLI/API 行为、索引和检索路径均不变；测试仍断言一个已被 HTTP server 接收并读取的未完成请求/连接超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：减少质量门禁对 full-suite 中短时 CPU 拥塞和 Axum handler 调度时机的敏感度，修复当前 `cargo_test` 失败；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 retrieval accuracy、ranking、index 和 query 性能没有直接影响。
+- 已知风险：该候选只调整测试可观测同步边界，不提升检索评分；如果环境在 10 秒内无法让 server-side stream 读取已写入请求，失败仍会暴露为 HTTP runtime 调度或测试资源问题。
+
 ## 候选优化说明：20260516T190626Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在全量测试调度压力下等待请求进入 router service 偶发超时的问题，优先保护 stability 与 accuracy 前置质量门禁。
@@ -475,4 +483,17 @@ rvice { +        RequestStartedService { +            inner, +            reques
 Adopted optimization notes:
 
 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index b3b54e3545dbf196e0c0c4c67df8ab49e6b25664..d74058c99352706b77d9eef80e6e7ea72b4534cb --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -153,7 +153,7 @@ server.await.expect("server task should finish"); } -#[tokio::test] +#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_router_enforces_graceful_shutdown_timeout() { let listener = tokio::net::TcpListener::bind("127.0.0.1:0") .await @@ -164,7 +164,7 @@ .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), -        Duration::from_secs(5), +        Duration::from_secs(30), Duration::from_millis(10), 1024, HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"), @@ -189,7 +189,7 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), request_started_waiter) +    tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") .expect("request should signal startup"); tokens used 47,024
+## 20260516T190848Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190848Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 4966.0->141; metric:relay_teams_index_ms 61194.0->58024
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=119ms; cargo_fmt_check_ms=467ms; cargo_clippy_ms=141ms; cargo_test_ms=3704ms; relay_teams_index_ms=58024ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=410ms; leveldb_cpp_index_ms=18599ms
+
+Adopted optimization notes:
+
+    mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +    } -    fn poll_ready( -        &mut self, +    fn poll_flush( +        mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_flush(context) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) } } tokens used 55,876
 
