@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T174317Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的偶发失败，避免在 full-suite 负载下因测试请求未完整写入或调度延迟而误判 HTTP graceful shutdown 行为。
+- 方法：测试客户端改用 Tokio `write_all` 发送完整 HTTP 请求，替代单次 `try_write`；handler-start readiness 等待从 1 秒提高到 5 秒，但被测 `graceful_shutdown_timeout` 仍保持 10 毫秒，以继续验证 active request 超过 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 架构与不变量：HTTP server、QoS、request timeout、shutdown timeout、CLI/API 行为、网络边界和检索索引路径均不变；只调整测试同步方式，仍要求请求 handler 已经进入 pending 状态后才触发 shutdown。
+- 预期影响：提高 cargo test 稳定性，恢复 protected stability 与 accuracy 评估前置门禁；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索结果和性能指标没有直接影响。
+- 已知风险：若 full-suite 运行环境极端饱和，readiness 等待仍可能超时；该风险代表测试执行资源不足，而不是 shutdown timeout 语义变化。
+
 ## 候选优化说明：20260516T171146Z
 
 - 目标：提升多仓、大仓 full-scope 索引上窄路径查询的准确性与稳定性，避免 FTS bounded candidate window 先被路径外匹配填满，再由 Rust 层过滤时丢失唯一的 in-scope symbol/reference/call/import/chunk 命中。
@@ -349,4 +357,17 @@ ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc",
 Adopted optimization notes:
 
 d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
+## 20260516T174317Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T174317Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: score_component:score 0.35->1.0; score_component:accuracy 0.0->1.0; score_component:stability 0.8->1.0; metric:cargo_build_release_ms 35317.0->33204; gate:cargo_test failed->passed Running tests/relay_knowledge/main.rs (target/debug/deps/relay_knowledge-1a9ddc0d040472be)
+- known degradations: metric:cargo_clippy_ms 180.0->8302; metric:cargo_test_ms 6222.0->7199
+- latency metrics: cargo_build_release_ms=33204ms; cargo_fmt_check_ms=684ms; cargo_clippy_ms=8302ms; cargo_test_ms=7199ms; relay_teams_index_ms=69263ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=311ms; leveldb_cpp_index_ms=15213ms
+
+Adopted optimization notes:
+
+nks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 4d43f645ad38d7d5cae8a7ba9cf06826f9bf2f94..faaf3f2f6db33cc2bfd36072400145272e3b9a36 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -181,14 +181,13 @@ let _ = shutdown_waiter.await; })); -    let stream = connect_with_retry(&bind).await; +    let mut stream = connect_with_retry(&bind).await; let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n"; stream -        .writable() +        .write_all(request) .await -        .expect("stream should become writable"); -    stream.try_write(request).expect("request should write"); -    tokio::time::timeout(Duration::from_secs(1), handler_started.notified()) +        .expect("request should write completely"); +    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676
 

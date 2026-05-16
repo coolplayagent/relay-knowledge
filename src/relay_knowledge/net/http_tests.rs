@@ -181,14 +181,13 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         let _ = shutdown_waiter.await;
     }));
 
-    let stream = connect_with_retry(&bind).await;
+    let mut stream = connect_with_retry(&bind).await;
     let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n";
     stream
-        .writable()
+        .write_all(request)
         .await
-        .expect("stream should become writable");
-    stream.try_write(request).expect("request should write");
-    tokio::time::timeout(Duration::from_secs(1), handler_started.notified())
+        .expect("request should write completely");
+    tokio::time::timeout(Duration::from_secs(5), handler_started.notified())
         .await
         .expect("handler should start before shutdown");
     let _ = shutdown.send(());
