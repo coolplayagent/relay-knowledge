@@ -333,6 +333,30 @@ async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
 }
 
 #[tokio::test]
+async fn caller_queries_keep_best_ranked_fts_candidates_before_bounded_scoring() {
+    let store = store_with_repository_snapshot(snapshot_with_many_caller_candidate_ties()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "TargetCall exactOwner",
+                selector,
+                CodeQueryKind::Callers,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].excerpt, "exactOwner calls TargetCall");
+    assert_eq!(hits[0].path, "src/exact_owner.py");
+}
+
+#[tokio::test]
 async fn callee_queries_prioritize_related_callee_identifier_parts() {
     let store = store_with_repository_snapshot(snapshot_with_related_callee_names()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -656,6 +680,65 @@ fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![ambiguous, resolved],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_many_caller_candidate_ties() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut calls = Vec::new();
+    for index in 0..550 {
+        let file_id = format!("noise-file-{index}");
+        let path = format!("src/exactOwner/noise_{index}.py");
+        files.push(file(
+            &file_id,
+            &path,
+            "python",
+            CodeParseStatus::Parsed,
+            None,
+        ));
+        let mut call = call(&format!("noise-call-{index}"), &file_id, &path);
+        call.caller_name = Some(format!("noiseCaller{index}"));
+        call.callee_name = "TargetCall".to_owned();
+        call.target_hint = Some("TargetCall".to_owned());
+        calls.push(call);
+    }
+
+    files.push(file(
+        "exact-file",
+        "src/exact_owner.py",
+        "python",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    let mut exact = call("exact-call", "exact-file", "src/exact_owner.py");
+    exact.caller_name = Some("exactOwner".to_owned());
+    exact.callee_name = "TargetCall".to_owned();
+    exact.target_hint = Some("TargetCall".to_owned());
+    exact.resolution_state = "resolved".to_owned();
+    exact.confidence_basis_points = 8_000;
+    exact.confidence_tier = "inferred".to_owned();
+    calls.push(exact);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls,
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

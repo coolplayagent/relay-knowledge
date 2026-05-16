@@ -206,6 +206,7 @@ fn search_references(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'reference'
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY r.path ASC, r.line_start ASC
@@ -312,6 +313,7 @@ fn search_calls(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'call'
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
@@ -429,6 +431,7 @@ fn search_imports(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'import'
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY i.path ASC, i.line_start ASC

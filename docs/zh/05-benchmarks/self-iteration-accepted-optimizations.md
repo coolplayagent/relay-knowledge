@@ -72,6 +72,14 @@
 - 架构与不变量：call edge schema、call search document 内容字段、source scope、caller/callee resolution、query API、FTS 查询路径、ranking 融合和 checkpoint/finalize 事务边界保持不变；新增测试断言 cross-batch call finalize 后仍生成 call FTS 文档并可被 callers 查询命中。
 - 预期影响：大仓调用引用数量很高时，finalize 少执行数十万次 Rust 到 SQLite 的 FTS insert 调用和参数绑定，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 超时风险；因为查询路径不变，`rt_hybrid_eval_checkpoint_store`、relay-teams p95 和 LevelDB definition cases 应避免 20260516T133442Z 的退化。
 - 已知风险：集合插入会在 call table 重建后一次性写入 call FTS rows，事务内峰值 SQLite 工作集中在该语句；若未来 call search document 内容新增字段，必须同步更新 backfill 与 finalize 的两处 `SELECT`。
+
+## 候选优化说明：20260516T135933Z
+
+- 目标：保护大仓 graph 查询准确率，避免 references、calls、imports 在 FTS 命中数超过 bounded candidate window 时，因为未排序的 SQLite FTS row 顺序先截断而丢掉最相关候选。
+- 方法：graph 查询的 reference、call、import FTS 子查询在 `LIMIT` 前统一按 `bm25(code_repository_search) ASC, record_id ASC` 排序，与 symbol/chunk 查询的候选剪枝策略一致；Rust 层仍只对 bounded candidate set 做既有语义评分、置信度加权、去重和截断。
+- 架构与不变量：SQLite schema、FTS 文档内容、API 返回字段、query kind 分派、scope/path/language 过滤、最终 Rust scoring 与排序规则不变；新增 caller 回归测试构造超过 500 个匹配 call 文档，断言更短且更相关的 FTS 候选在 bounded scoring 前不会被未排序窗口排除。
+- 预期影响：在 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 这类多仓/大仓中，callers/callees/imports/references 查询的候选召回更稳定，特别是大量同名调用、头文件 include、或引用噪声超过默认 500 候选时；性能可能因三个 graph 子查询多一次 FTS rank 排序有小幅成本，但候选窗口仍有上限。
+- 已知风险：SQLite FTS `bm25` 排序会在高频宽查询上增加查询 CPU；如果 p95 明显退化，应考虑把 rank-aware ordering 限定到命中数可能溢出窗口的 query kind，或引入更细的 path/language 预过滤候选表。
 ## 20260516T121321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T121321Z.patch`
@@ -159,4 +167,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 w( +                    " +                    SELECT COUNT(*) +                    FROM code_repository_search +                    WHERE source_scope = ?1 AND document_kind = ?2 +                    ", +                    (&source_scope, &document_kind), +                    |row| row.get(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("search document count should load") +} diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877..0946af7022d8361c66c6443600975234efc916e8 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -373,7 +373,8 @@ source_scope, document_kind, record_id, path, language_id, content ) SELECT source_scope, 'call', call_id, path, '', -               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '') +               coalesce(caller_name, '') || ' ' || callee_name || ' ' || +               coalesce(target_hint, '') || ' ' || path FROM code_repository_calls ", [], tokens used 135,337
+## 20260516T135933Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135933Z.patch`
+- score: 0.939577 (accuracy=0.923077, performance=0.904871, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 59850.0->56550; metric:cargo_fmt_check_ms 842.0->755; metric:cargo_test_ms 8835.0->7792; metric:relay_teams_index_ms 87582.0->83515; metric:relay_teams_query_p95_ms 13219.0->12317.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=56550ms; cargo_fmt_check_ms=755ms; cargo_clippy_ms=204ms; cargo_test_ms=7792ms; relay_teams_index_ms=83515ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=12317ms; leveldb_cpp_index_ms=19595ms
+
+Adopted optimization notes:
+
+ "exact-file", "src/exact_owner.py"); +    exact.caller_name = Some("exactOwner".to_owned()); +    exact.callee_name = "TargetCall".to_owned(); +    exact.target_hint = Some("TargetCall".to_owned()); +    exact.resolution_state = "resolved".to_owned(); +    exact.confidence_basis_points = 8_000; +    exact.confidence_tier = "inferred".to_owned(); +    calls.push(exact); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls, +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 157,522
 
