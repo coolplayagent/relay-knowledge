@@ -176,16 +176,14 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         "/hold",
         get(move || {
             let handler_started = route_handler_started.clone();
-            async move {
-                let sender = handler_started
-                    .lock()
-                    .expect("handler signal mutex should not be poisoned")
-                    .take();
-                if let Some(sender) = sender {
-                    let _ = sender.send(());
-                }
-                std::future::pending::<&'static str>().await
+            let sender = handler_started
+                .lock()
+                .expect("handler signal mutex should not be poisoned")
+                .take();
+            if let Some(sender) = sender {
+                let _ = sender.send(());
             }
+            async move { std::future::pending::<&'static str>().await }
         }),
     );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
