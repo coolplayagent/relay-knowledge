@@ -73,7 +73,7 @@ fn search_symbols(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = fts_match_query(&request.query);
+    let fts_query = symbol_fts_match_query(&request.query);
     let sql = "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind
@@ -136,6 +136,7 @@ fn search_symbols(
                 [
                     row.name.as_str(),
                     row.qualified_name.as_str(),
+                    row.kind.as_str(),
                     row.signature.as_str(),
                     row.doc_comment.as_deref().unwrap_or_default(),
                     row.path.as_str(),
@@ -815,7 +816,11 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
 fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
     let fields = fields
         .into_iter()
-        .map(|field| field.as_ref().to_lowercase())
+        .map(|field| {
+            let original = field.as_ref().trim().to_owned();
+            let lower = original.to_lowercase();
+            (original, lower)
+        })
         .collect::<Vec<_>>();
     let mut score = 0.0;
     for token in query.split_whitespace() {
@@ -824,13 +829,12 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
             continue;
         }
         let mut token_score = 0.0_f64;
-        for field in &fields {
-            let field = field.trim();
-            if field == token {
+        for (field, lower_field) in &fields {
+            if lower_field == &token {
                 token_score = token_score.max(4.0);
-            } else if identifier_tokens(field).any(|candidate| candidate == token) {
+            } else if identifier_field_matches_token(field, &token) {
                 token_score = token_score.max(2.0);
-            } else if field.contains(&token) {
+            } else if lower_field.contains(&token) {
                 token_score = token_score.max(0.5);
             }
         }
@@ -838,6 +842,19 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     }
 
     score
+}
+
+fn identifier_field_matches_token(field: &str, token: &str) -> bool {
+    identifier_tokens(field).any(|candidate| {
+        candidate.eq_ignore_ascii_case(token)
+            || candidate
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .any(|part| part.eq_ignore_ascii_case(token))
+            || camel_case_terms(candidate)
+                .iter()
+                .any(|part| part.eq_ignore_ascii_case(token))
+    })
 }
 
 fn score_exact_path(query: &str, path: &str) -> f64 {
@@ -1167,6 +1184,14 @@ fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
 }
 
 fn fts_match_query(query: &str) -> String {
+    fts_match_query_with_operator(query, " ")
+}
+
+fn symbol_fts_match_query(query: &str) -> String {
+    fts_match_query_with_operator(query, " OR ")
+}
+
+fn fts_match_query_with_operator(query: &str, operator: &str) -> String {
     let terms = query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .map(str::trim)
@@ -1177,7 +1202,7 @@ fn fts_match_query(query: &str) -> String {
     if terms.is_empty() {
         "relayknowledgeunlikelyemptyquerytoken".to_owned()
     } else {
-        terms.join(" ")
+        terms.join(operator)
     }
 }
 
