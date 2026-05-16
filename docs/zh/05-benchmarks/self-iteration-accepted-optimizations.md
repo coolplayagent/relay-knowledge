@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T193653Z
+
+- 目标：修复当前 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 `/hold` handler 启动超时的问题，优先保护 stability 与 accuracy 前置门禁。
+- 方法：保留 `serve_listener`、Tokio `DuplexStream` in-memory listener、真实 Axum router、真实 pending `/hold` handler 和生产 graceful shutdown timeout 路径不变；把测试 readiness 信号从 route handler closure 前移到测试专用 Tower layer 的 router `Service::call` 边界，确认 HTTP request 已进入 router service 后再触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS、HTTP request timeout、graceful shutdown timeout、CLI/API、索引、检索、ranking 和 repository parsing 行为均不变；测试仍断言一个不会完成的 active request 在 10 毫秒 shutdown budget 内无法 drain 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：减少该单测对具体 route handler poll/closure 调度时机的依赖，修复当前 `cargo_test` gate；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选只稳定 HTTP shutdown 单测的同步边界，不提升检索评分；如果 full-suite 环境在 10 秒内无法让已写入的 request 进入 router service，失败仍会暴露为 HTTP runtime 调度或测试资源问题。
+
 ## 候选优化说明：20260516T192508Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 仍可能等待 handler 启动超时的问题，继续优先保护 stability 与 accuracy 前置质量门禁。
@@ -538,4 +546,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
        _context: &mut std::task::Context<'_>, -        buffer: &mut ReadBuf<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        let remaining = &self.request[self.offset..]; -        if remaining.is_empty() { -            return std::task::Poll::Pending; -        } - -        let readable = remaining.len().min(buffer.remaining()); -        buffer.put_slice(&remaining[..readable]); -        self.offset += readable; -        std::task::Poll::Ready(Ok(())) -    } -} - -impl AsyncWrite for InMemoryRequestStream { -    fn poll_write( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -        buffer: &[u8], -    ) -> std::task::Poll<std::io::Result<usize>> { -        std::task::Poll::Ready(Ok(buffer.len())) -    } - -    fn poll_flush( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) -    } - -    fn poll_shutdown( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) } } tokens used 55,066
+## 20260516T193653Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T193653Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5881.0->4904; metric:relay_teams_index_ms 64393.0->60586
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=100ms; cargo_fmt_check_ms=466ms; cargo_clippy_ms=4904ms; cargo_test_ms=3775ms; relay_teams_index_ms=60586ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=392ms; leveldb_cpp_index_ms=18624ms
+
+Adopted optimization notes:
+
+Self::Service { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready( +        &mut self, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + struct InMemoryRequestListener { stream: Option<DuplexStream>, address: std::net::SocketAddr, tokens used 74,917
 
