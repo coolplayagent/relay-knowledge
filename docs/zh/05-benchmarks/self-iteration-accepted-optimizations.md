@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T181003Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 并发负载下的残余偶发失败，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试在测试协程内预先绑定 Tokio `TcpListener`，用该 listener 的实际地址构造 `HttpConfig`，并直接驱动同一 `serve_listener` server future；客户端仍通过真实 TCP 连接写入完整 HTTP 请求，并等待 `/hold` handler 进入 pending active request 后才触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、Axum serving、request timeout、graceful shutdown timeout、QoS、CLI/API 行为和检索索引路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：消除 `unused_port()` 先探测再释放端口带来的监听竞态，避免测试客户端在端口复用窗口中连接到非目标监听者或等待尚未拥有 socket 的 server，从而提高 `cargo test --all-targets --all-features` 稳定性；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索准确率、排序和索引性能没有直接影响。
+- 已知风险：该用例现在覆盖内部 listener-serving 路径而不是外层 bind 调用；bind 解析和外层入口仍由配置测试及 QoS server 测试覆盖，shutdown timeout 行为仍走相同 Axum server future。
+
 ## 候选优化说明：20260516T174317Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的偶发失败，避免在 full-suite 负载下因测试请求未完整写入或调度延迟而误判 HTTP graceful shutdown 行为。
@@ -370,4 +378,17 @@ d, +            &path, +            "target", +        )); +    } + +    files.p
 Adopted optimization notes:
 
 nks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 4d43f645ad38d7d5cae8a7ba9cf06826f9bf2f94..faaf3f2f6db33cc2bfd36072400145272e3b9a36 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -181,14 +181,13 @@ let _ = shutdown_waiter.await; })); -    let stream = connect_with_retry(&bind).await; +    let mut stream = connect_with_retry(&bind).await; let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n"; stream -        .writable() +        .write_all(request) .await -        .expect("stream should become writable"); -    stream.try_write(request).expect("request should write"); -    tokio::time::timeout(Duration::from_secs(1), handler_started.notified()) +        .expect("request should write completely"); +    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676
+## 20260516T181003Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181003Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5062.0->4796; metric:relay_teams_index_ms 66544.0->59467
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=461ms; cargo_clippy_ms=4796ms; cargo_test_ms=3737ms; relay_teams_index_ms=59467ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=416ms; leveldb_cpp_index_ms=18635ms
+
+Adopted optimization notes:
+
+ed.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index faaf3f2f6db33cc2bfd36072400145272e3b9a36..2eaf575b4b928b3821fd010e11be8a9ab2e5bfb0 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -155,7 +155,13 @@ #[tokio::test] async fn serve_router_enforces_graceful_shutdown_timeout() { -    let bind = format!("127.0.0.1:{}", unused_port()); +    let listener = tokio::net::TcpListener::bind("127.0.0.1:0") +        .await +        .expect("listener should bind"); +    let bind = listener +        .local_addr() +        .expect("listener should expose local address") +        .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), Duration::from_secs(5), @@ -177,7 +183,7 @@ }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); -    let server = tokio::spawn(serve_router(router, config, async { +    let server = tokio::spawn(serve_listener(listener, router, config, async { let _ = shutdown_waiter.await; })); tokens used 40,692
 

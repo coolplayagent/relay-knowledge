@@ -155,7 +155,13 @@ async fn post_json_sends_bounded_worker_request() {
 
 #[tokio::test]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
-    let bind = format!("127.0.0.1:{}", unused_port());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let bind = listener
+        .local_addr()
+        .expect("listener should expose local address")
+        .to_string();
     let config = HttpConfig::new(
         HttpBindAddress::parse(&bind).expect("bind should parse"),
         Duration::from_secs(5),
@@ -177,7 +183,7 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         }),
     );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(serve_router(router, config, async {
+    let server = tokio::spawn(serve_listener(listener, router, config, async {
         let _ = shutdown_waiter.await;
     }));
 
