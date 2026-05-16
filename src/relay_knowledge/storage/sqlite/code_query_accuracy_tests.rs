@@ -263,6 +263,45 @@ async fn exact_definition_queries_rank_name_match_when_many_signatures_mention_i
 }
 
 #[tokio::test]
+async fn scoped_definition_queries_rank_scoped_member_before_token_permutations() {
+    let store = store_with_repository_snapshot(snapshot_with_scoped_cpp_definition_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let db_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "DB::Open",
+                selector.clone(),
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("DB::Open query should succeed");
+    let write_batch_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "WriteBatch::Put",
+                selector,
+                CodeQueryKind::Definition,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("WriteBatch::Put query should succeed");
+
+    assert_eq!(db_hits[0].path, "db/db_impl.cc");
+    assert_eq!(db_hits[0].line_range.start, 1503);
+    assert_eq!(write_batch_hits[0].path, "db/write_batch.cc");
+    assert_eq!(write_batch_hits[0].line_range.start, 98);
+}
+
+#[tokio::test]
 async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
     let store = store_with_repository_snapshot(snapshot_with_resolved_callee_tie()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -910,6 +949,95 @@ fn snapshot_with_many_signature_mentions() -> CodeIndexSnapshot {
             ),
         ],
         symbols,
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_scoped_cpp_definition_noise() -> CodeIndexSnapshot {
+    let mut db_open = symbol("db-open", "db-impl-source", "db/db_impl.cc", "Open");
+    db_open.language_id = "cpp".to_owned();
+    db_open.qualified_name = "leveldb.DB.Open".to_owned();
+    db_open.signature =
+        "Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr)".to_owned();
+    db_open.line_range = range(1503, 1503);
+
+    let mut open_db = symbol(
+        "open-db-helper",
+        "fault-injection-source",
+        "db/fault_injection_test.cc",
+        "OpenDB",
+    );
+    open_db.language_id = "cpp".to_owned();
+    open_db.qualified_name = "leveldb.FaultInjectionTest.OpenDB".to_owned();
+    open_db.signature = "Status OpenDB()".to_owned();
+    open_db.line_range = range(453, 458);
+
+    let mut write_batch_put = symbol(
+        "write-batch-put",
+        "write-batch-source",
+        "db/write_batch.cc",
+        "Put",
+    );
+    write_batch_put.language_id = "cpp".to_owned();
+    write_batch_put.qualified_name = "leveldb.WriteBatch.Put".to_owned();
+    write_batch_put.signature =
+        "void WriteBatch::Put(const Slice& key, const Slice& value)".to_owned();
+    write_batch_put.line_range = range(98, 98);
+
+    let mut c_wrapper = symbol(
+        "c-wrapper-put",
+        "c-source",
+        "db/c.cc",
+        "leveldb_writebatch_put",
+    );
+    c_wrapper.language_id = "cpp".to_owned();
+    c_wrapper.signature =
+        "void leveldb_writebatch_put(leveldb_writebatch_t* b, const char* key, size_t klen)"
+            .to_owned();
+    c_wrapper.line_range = range(332, 335);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "db-impl-source",
+                "db/db_impl.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "fault-injection-source",
+                "db/fault_injection_test.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "write-batch-source",
+                "db/write_batch.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file("c-source", "db/c.cc", "cpp", CodeParseStatus::Parsed, None),
+        ],
+        symbols: vec![open_db, db_open, c_wrapper, write_batch_put],
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),

@@ -140,7 +140,14 @@ fn search_symbols(
                     row.doc_comment.as_deref().unwrap_or_default(),
                     row.path.as_str(),
                 ],
-            ) + symbol_name_query_bonus(&query, &row.name, request);
+            ) + symbol_query_bonus(
+                &query,
+                &row.name,
+                &row.qualified_name,
+                &row.signature,
+                &row.canonical_symbol_id,
+                request,
+            );
             (score > 0.0).then(|| {
                 let mut excerpt = row.signature.clone();
                 if let Some(doc) = &row.doc_comment {
@@ -871,6 +878,57 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
     } else {
         0.0
     }
+}
+
+fn symbol_query_bonus(
+    query: &str,
+    name: &str,
+    qualified_name: &str,
+    signature: &str,
+    canonical_symbol_id: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    let name_bonus = symbol_name_query_bonus(query, name, request);
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
+    ) {
+        return name_bonus;
+    }
+    let Some(scoped_terms) = scoped_query_terms(query) else {
+        return name_bonus;
+    };
+    let has_scoped_match = [qualified_name, signature, canonical_symbol_id]
+        .iter()
+        .any(|field| contains_scoped_terms(field, &scoped_terms));
+    if has_scoped_match {
+        name_bonus + 3.0
+    } else {
+        name_bonus
+    }
+}
+
+fn scoped_query_terms(query: &str) -> Option<Vec<String>> {
+    if !(query.contains("::") || query.contains('.')) {
+        return None;
+    }
+    let terms = scoped_terms(query);
+    (terms.len() >= 2).then_some(terms)
+}
+
+fn contains_scoped_terms(field: &str, query_terms: &[String]) -> bool {
+    let field_terms = scoped_terms(field);
+    field_terms
+        .windows(query_terms.len())
+        .any(|window| window == query_terms)
+}
+
+fn scoped_terms(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
