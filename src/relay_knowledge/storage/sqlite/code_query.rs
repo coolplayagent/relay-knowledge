@@ -571,6 +571,7 @@ fn search_chunks(
         },
     )?;
     let query = request.query.to_lowercase();
+    let declaration_terms = query_terms(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -580,7 +581,7 @@ fn search_chunks(
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(&query, [&row.content, &row.path])
-                + declaration_chunk_bonus(&query, &row.content);
+                + declaration_chunk_bonus(&declaration_terms, &row.content);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -845,8 +846,24 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     score
 }
 
-fn declaration_chunk_bonus(query: &str, content: &str) -> f64 {
-    let terms = query_terms(query);
+fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
+    let abstract_interface = terms.iter().any(|term| term == "interface")
+        && content.contains("virtual ")
+        && (content.contains("= 0;") || content.contains("=0;"));
+    let declaration_lines = if abstract_interface {
+        0
+    } else {
+        content
+            .lines()
+            .map(str::trim)
+            .filter(|line| declaration_line_is_prototype(line))
+            .take(2)
+            .count()
+    };
+    if !abstract_interface && declaration_lines < 2 {
+        return 0.0;
+    }
+
     let lower_content = content.to_lowercase();
     let matched_terms = terms
         .iter()
@@ -859,15 +876,6 @@ fn declaration_chunk_bonus(query: &str, content: &str) -> f64 {
     if matched_terms < 3 {
         return 0.0;
     }
-
-    let declaration_lines = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| declaration_line_is_prototype(line))
-        .count();
-    let abstract_interface = terms.iter().any(|term| term == "interface")
-        && content.contains("virtual ")
-        && (content.contains("= 0;") || content.contains("=0;"));
 
     if abstract_interface {
         3.0

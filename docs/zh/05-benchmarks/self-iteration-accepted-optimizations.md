@@ -238,6 +238,14 @@ Adopted optimization notes:
 - 架构与不变量：SQLite schema、索引内容、source scope、path/language filter、bounded candidate limit、去重截断、symbol FTS `OR` 召回和 graph edge 查询语义不变；bonus 只在已召回的 hybrid chunk 候选内生效，并要求多词覆盖以避免单词噪声被提升。
 - 预期影响：LevelDB、Linux、Kubernetes、Spring Framework 中面向接口、头文件声明、恢复/manifest 这类 API 上下文的自然语言 hybrid 查询，应更稳定地返回声明入口，而不是测试 fixture、构造函数使用点或实现细节；`leveldb_fuzzy_class_cache_lru_interface` 预期回到 rank 1，`leveldb_hybrid_recovery_manifest_full_scope` 预期进入通过阈值。
 - 已知风险：部分实现文件也可能包含多个声明式行或纯虚接口文本，存在小幅 rank 变化风险；规则要求多词覆盖和声明形态，且仅对 chunk hit 加 bounded bonus，以避免牺牲精确 symbol/query cases。
+
+## 候选优化说明：20260516T145236Z
+
+- 目标：保留 20260516T144537Z 对 LevelDB hybrid/API 声明块排序的准确率收益，同时降低该声明块 bonus 在 relay-teams 和 LevelDB 宽 hybrid 查询 p95 上的 per-candidate CPU 成本。
+- 方法：chunk scoring 仍使用同一个声明块 bonus，但先用廉价结构检查判断 chunk 是否包含抽象接口或至少两个声明式 prototype，再对可能拿到 bonus 的少量候选执行 query term 覆盖、identifier token 和 lowercase substring 匹配；query terms 在 `search_chunks` 中每次请求只解析一次，而不是每个 chunk 重复解析。
+- 架构与不变量：SQLite schema、FTS 召回、candidate limit、source scope、path/language filter、API 字段、去重截断、声明块 bonus 分值和已接受的 LevelDB accuracy 规则保持不变；bonus 仍要求至少 3 个查询词覆盖且只作用于 bounded chunk candidate set。
+- 预期影响：非声明 chunk 候选在 Rust scoring 阶段避免重复 query 分词、全文 lowercase 和 identifier token 扫描，预期改善 `relay_teams_query_p95_ms` 与 `leveldb_cpp_query_p95_ms`；`leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface` 的排序应保持不变。
+- 已知风险：结构检查顺序改变不应影响结果，但如果未来某语言的声明形态不符合 `declaration_line_is_prototype` 或抽象接口文本模式，仍不会获得该 bonus；测试覆盖实现块不加分、头文件 prototype 和纯虚接口仍加分。
 ## 20260516T143645Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
@@ -264,4 +272,17 @@ us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_d
 Adopted optimization notes:
 
         base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 2, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "db-impl-header", +                "db/db_impl.h", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "db-impl-source", +                "db/db_impl.cc", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: vec![target, noise], +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_related_callee_names() -> CodeIndexSnapshot { let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c"); unrelated.caller_name = Some("do_mmap".to_owned()); tokens used 107,884
+## 20260516T145236Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T145236Z.patch`
+- score: 0.986063 (accuracy=1.0, performance=0.907089, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: metric:cargo_build_release_ms 30307.0->28188; metric:cargo_fmt_check_ms 708.0->509; metric:cargo_clippy_ms 182.0->149; metric:cargo_test_ms 7290.0->6539; metric:relay_teams_query_p95_ms 9460.0->8464.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28188ms; cargo_fmt_check_ms=509ms; cargo_clippy_ms=149ms; cargo_test_ms=6539ms; relay_teams_index_ms=70263ms; relay_teams_query_p50_ms=119ms; relay_teams_query_p95_ms=8464ms; leveldb_cpp_index_ms=18725ms
+
+Adopted optimization notes:
+
+erms = query_terms("recover descriptor save_manifest versionedit"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "Status DBImpl::RecoverLogFile(uint64_t log_number, bool* save_manifest) {\n  descriptor_log_->AddRecord(edit->Encode());\n}" +        ), +        0.0 +    ); +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class DBImpl {\n  Status RecoverLogFile(uint64_t log_number, bool* save_manifest,\n                        VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};" +        ), +        2.0 +    ); +} + +#[test] +fn declaration_chunk_bonus_preserves_interface_boost() { +    let terms = query_terms("cache interface lookup insert total charge lru"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};" +        ), +        3.0 +    ); +} tokens used 113,000
 
