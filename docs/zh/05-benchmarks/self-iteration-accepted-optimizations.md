@@ -26,6 +26,14 @@
 - 预期影响：减少批次末尾读取后又在下一轮重复读取/解析的 blob，尤其是含大文件或大小分布不均的大仓；小仓查询准确率应保持不变。
 - 已知风险：`ls-tree -l` 比 `--name-only` 返回更多元数据，小仓枚举开销可能略增；收益主要来自避免后续 Git blob 读取、解析和丢弃工作。
 
+## 候选优化说明：20260516T122811Z
+
+- 目标：修复 Linux、Kubernetes、Spring Framework 这类大仓 full-scope 索引在 finalize 阶段按 reference 逐行解析和更新导致的 900 秒质量门禁超时风险。
+- 方法：把 checkpoint finalize 的 reference 解析从 Rust 内存 `BTreeMap` 加逐行 `UPDATE` 改为 SQLite 集合更新：先统一写入 unresolved 基线，再用 `source_scope,name` 唯一符号解析全局唯一引用，用 `source_scope,name,path` 唯一符号解析同文件引用，最后把剩余但存在候选符号的引用标记为 ambiguous；同时新增 `code_repository_symbols(source_scope, name, path)` 索引支撑同文件候选查找。
+- 不变量：reference 解析语义保持不变，仍按“全局唯一符号优先、否则同路径唯一、否则 ambiguous/unresolved”的规则生成 `target_symbol_snapshot_id`、`resolution_state`、confidence 和 tier；call 重建、import 解析、检索 API 和 scope 语义不变。
+- 预期影响：把 finalize 中 reference 解析的 Rust 大量对象分配和每条 reference 一次 SQL round trip 降为少量索引化集合更新，主要改善大仓索引稳定性和 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 门禁耗时。
+- 已知风险：集合更新依赖 SQLite 查询规划使用新增索引；极小仓库可能因多执行几条固定 SQL 带来微小常数开销，但应小于逐行更新成本。
+
 ## 候选优化说明：自迭代文档与 patch 长期记忆
 
 - 目标：让自迭代候选在修改代码、测试、benchmark 或 harness 策略时，同时留下可供后续迭代理解的算法与架构说明，避免只有 patch 和评分而缺少设计意图。
@@ -45,4 +53,17 @@
 Adopted optimization notes:
 
 dd", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = CodeIndexResourceBudget::new(128, "fn a() {}\nfn b() {}\n".len(), 50_000) +        .expect("budget should validate"); +    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget) +        .expect("plan should prepare"); + +    let (plan, first_batch) = plan.parse_next_batch().expect("first batch should parse"); +    let (plan, second_batch) = plan.parse_next_batch().expect("second batch should parse"); +    let (_, third_batch) = plan.parse_next_batch().expect("third batch should parse"); + +    let first_batch = first_batch.expect("first batch should exist"); +    let second_batch = second_batch.expect("second batch should exist"); +    assert!(third_batch.is_none()); +    assert_eq!(first_batch.files.len(), 2); +    assert_eq!(first_batch.files[0].path, "src/a.rs"); +    assert_eq!(first_batch.files[1].path, "src/b.rs"); +    assert_eq!(second_batch.files.len(), 1); +    assert_eq!(second_batch.files[0].path, "src/c.rs"); +} + +#[test] fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() { let registration = CodeRepositoryRegistration::new( "repo", tokens used 165,514
+## 20260516T122811Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T122811Z.patch`
+- score: 0.916543 (accuracy=0.9, performance=0.905145, stability=1.0)
+- cases: 18/20 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: metric:cargo_fmt_check_ms 724.0->688; metric:relay_teams_query_p95_ms 12222.0->11662.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=49471ms; cargo_fmt_check_ms=688ms; cargo_clippy_ms=194ms; cargo_test_ms=7428ms; relay_teams_index_ms=81898ms; relay_teams_query_p50_ms=127ms; relay_teams_query_p95_ms=11662ms; leveldb_cpp_index_ms=19586ms
+
+Adopted optimization notes:
+
+            row.get::<_, u16>(3)?, +                        row.get::<_, String>(4)?, +                    ), +                )) +            })?; + +            rows.collect::<Result<BTreeMap<_, _>, _>>() +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("reference rows should load") +} + fn file( source_scope: &str, file_id: &str, diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index f3aec34be9ed352e5e1013106078e718c3bc9168..d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -210,6 +210,8 @@ CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup ON code_repository_symbols(source_scope, name, qualified_name, path); +        CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup +            ON code_repository_symbols(source_scope, name, path); CREATE INDEX IF NOT EXISTS code_repository_references_lookup ON code_repository_references(source_scope, name, kind, path); CREATE INDEX IF NOT EXISTS code_repository_calls_lookup tokens used 143,069
 

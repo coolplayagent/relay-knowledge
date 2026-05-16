@@ -18,37 +18,84 @@ fn resolve_references(
     transaction: &Transaction<'_>,
     source_scope: &str,
 ) -> Result<(), StorageError> {
-    let symbols = load_symbol_keys(transaction, source_scope)?;
-    let mut by_name = BTreeMap::<String, Vec<SymbolKey>>::new();
-    for symbol in &symbols {
-        by_name
-            .entry(symbol.name.clone())
-            .or_default()
-            .push(symbol.clone());
-    }
-    for reference in load_reference_keys(transaction, source_scope)? {
-        let resolution = resolve_reference(&reference, by_name.get(&reference.name));
-        transaction.execute(
-            "
-            UPDATE code_repository_references
-            SET target_symbol_snapshot_id = ?3,
-                target_hint = ?4,
-                resolution_state = ?5,
-                confidence_basis_points = ?6,
-                confidence_tier = ?7
-            WHERE source_scope = ?1 AND reference_id = ?2
-            ",
-            params![
-                source_scope,
-                reference.reference_id,
-                resolution.target_symbol_snapshot_id,
-                reference.name,
-                resolution.state,
-                resolution.confidence_basis_points,
-                resolution.confidence_tier,
-            ],
-        )?;
-    }
+    transaction.execute(
+        "
+        UPDATE code_repository_references
+        SET target_symbol_snapshot_id = NULL,
+            target_hint = name,
+            resolution_state = 'unresolved',
+            confidence_basis_points = 2500,
+            confidence_tier = 'ambiguous'
+        WHERE source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        UPDATE code_repository_references AS reference
+        SET target_symbol_snapshot_id = (
+                SELECT symbol.symbol_snapshot_id
+                FROM code_repository_symbols AS symbol
+                WHERE symbol.source_scope = reference.source_scope
+                  AND symbol.name = reference.name
+                LIMIT 1
+            ),
+            resolution_state = 'resolved',
+            confidence_basis_points = 8000,
+            confidence_tier = 'inferred'
+        WHERE reference.source_scope = ?1
+          AND (
+                SELECT COUNT(*)
+                FROM code_repository_symbols AS symbol
+                WHERE symbol.source_scope = reference.source_scope
+                  AND symbol.name = reference.name
+            ) = 1
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        UPDATE code_repository_references AS reference
+        SET target_symbol_snapshot_id = (
+                SELECT symbol.symbol_snapshot_id
+                FROM code_repository_symbols AS symbol
+                WHERE symbol.source_scope = reference.source_scope
+                  AND symbol.name = reference.name
+                  AND symbol.path = reference.path
+                LIMIT 1
+            ),
+            resolution_state = 'resolved',
+            confidence_basis_points = 8000,
+            confidence_tier = 'inferred'
+        WHERE reference.source_scope = ?1
+          AND reference.resolution_state != 'resolved'
+          AND (
+                SELECT COUNT(*)
+                FROM code_repository_symbols AS symbol
+                WHERE symbol.source_scope = reference.source_scope
+                  AND symbol.name = reference.name
+                  AND symbol.path = reference.path
+            ) = 1
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        UPDATE code_repository_references AS reference
+        SET resolution_state = 'ambiguous',
+            confidence_basis_points = 5000,
+            confidence_tier = 'ambiguous'
+        WHERE reference.source_scope = ?1
+          AND reference.resolution_state = 'unresolved'
+          AND EXISTS (
+                SELECT 1
+                FROM code_repository_symbols AS symbol
+                WHERE symbol.source_scope = reference.source_scope
+                  AND symbol.name = reference.name
+            )
+        ",
+        params![source_scope],
+    )?;
 
     Ok(())
 }
@@ -244,57 +291,6 @@ struct ImportKey {
     module: String,
 }
 
-struct ReferenceResolution {
-    target_symbol_snapshot_id: Option<String>,
-    state: &'static str,
-    confidence_basis_points: u16,
-    confidence_tier: &'static str,
-}
-
-fn resolve_reference(
-    reference: &ReferenceKey,
-    candidates: Option<&Vec<SymbolKey>>,
-) -> ReferenceResolution {
-    let Some(candidates) = candidates else {
-        return unresolved_reference();
-    };
-    if candidates.len() == 1 {
-        return resolved_reference(candidates[0].symbol_snapshot_id.clone());
-    }
-    let same_path = candidates
-        .iter()
-        .filter(|symbol| symbol.path == reference.path)
-        .collect::<Vec<_>>();
-    if same_path.len() == 1 {
-        return resolved_reference(same_path[0].symbol_snapshot_id.clone());
-    }
-
-    ReferenceResolution {
-        target_symbol_snapshot_id: None,
-        state: "ambiguous",
-        confidence_basis_points: 5_000,
-        confidence_tier: "ambiguous",
-    }
-}
-
-fn resolved_reference(symbol_snapshot_id: String) -> ReferenceResolution {
-    ReferenceResolution {
-        target_symbol_snapshot_id: Some(symbol_snapshot_id),
-        state: "resolved",
-        confidence_basis_points: 8_000,
-        confidence_tier: "inferred",
-    }
-}
-
-fn unresolved_reference() -> ReferenceResolution {
-    ReferenceResolution {
-        target_symbol_snapshot_id: None,
-        state: "unresolved",
-        confidence_basis_points: 2_500,
-        confidence_tier: "ambiguous",
-    }
-}
-
 fn caller_for_line(symbols: Option<&Vec<SymbolKey>>, line: u32) -> Option<&SymbolKey> {
     symbols?
         .iter()
@@ -325,25 +321,6 @@ fn load_symbol_keys(
             },
         })
     })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn load_reference_keys(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<Vec<ReferenceKey>, StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        SELECT reference_id, file_id, path, name, line_start, line_end,
-               target_symbol_snapshot_id, target_hint, resolution_state,
-               confidence_basis_points, confidence_tier
-        FROM code_repository_references
-        WHERE source_scope = ?1
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], reference_from_row)?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)

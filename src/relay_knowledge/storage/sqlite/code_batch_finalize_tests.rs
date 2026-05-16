@@ -7,6 +7,7 @@ use crate::{
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
+use std::collections::BTreeMap;
 
 #[tokio::test]
 async fn checkpointed_batches_finalize_cross_batch_call_edges() {
@@ -96,6 +97,141 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+}
+
+#[tokio::test]
+async fn checkpointed_finalize_preserves_reference_resolution_rules() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:reference-finalize-rules";
+    let session = session_for_scope(source_scope, 3);
+    let file_a = file(
+        source_scope,
+        "file-a",
+        "src/a.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    );
+    let file_b = file(
+        source_scope,
+        "file-b",
+        "src/b.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    );
+    let file_c = file(
+        source_scope,
+        "file-c",
+        "src/c.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+    );
+    let symbols = vec![
+        symbol(
+            source_scope,
+            "global-symbol",
+            "file-a",
+            "src/a.rs",
+            "global",
+            "rust",
+        ),
+        symbol(
+            source_scope,
+            "shared-a",
+            "file-a",
+            "src/a.rs",
+            "shared",
+            "rust",
+        ),
+        symbol(
+            source_scope,
+            "shared-b",
+            "file-b",
+            "src/b.rs",
+            "shared",
+            "rust",
+        ),
+        symbol(
+            source_scope,
+            "ambiguous-a",
+            "file-a",
+            "src/a.rs",
+            "ambiguous",
+            "rust",
+        ),
+        symbol(
+            source_scope,
+            "ambiguous-b",
+            "file-b",
+            "src/b.rs",
+            "ambiguous",
+            "rust",
+        ),
+    ];
+    let references = vec![
+        reference(source_scope, "global-ref", "file-c", "src/c.rs", "global"),
+        reference(source_scope, "shared-ref", "file-a", "src/a.rs", "shared"),
+        reference(
+            source_scope,
+            "ambiguous-ref",
+            "file-c",
+            "src/c.rs",
+            "ambiguous",
+        ),
+        reference(source_scope, "missing-ref", "file-c", "src/c.rs", "missing"),
+    ];
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 60,
+            files: vec![file_a, file_b, file_c],
+            symbols,
+            references,
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let resolved = reference_resolution_rows(&store, source_scope).await;
+
+    assert_eq!(
+        resolved.get("global-ref"),
+        Some(&(
+            "resolved".to_owned(),
+            Some("global-symbol".to_owned()),
+            8_000,
+            "inferred".to_owned()
+        ))
+    );
+    assert_eq!(
+        resolved.get("shared-ref"),
+        Some(&(
+            "resolved".to_owned(),
+            Some("shared-a".to_owned()),
+            8_000,
+            "inferred".to_owned()
+        ))
+    );
+    assert_eq!(
+        resolved.get("ambiguous-ref"),
+        Some(&("ambiguous".to_owned(), None, 5_000, "ambiguous".to_owned()))
+    );
+    assert_eq!(
+        resolved.get("missing-ref"),
+        Some(&("unresolved".to_owned(), None, 2_500, "ambiguous".to_owned()))
+    );
 }
 
 #[tokio::test]
@@ -331,6 +467,40 @@ async fn registered_store() -> SqliteGraphStore {
         .expect("repository should persist");
 
     store
+}
+
+async fn reference_resolution_rows(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+) -> BTreeMap<String, (String, Option<String>, u16, String)> {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            let mut statement = connection.prepare(
+                "
+                SELECT reference_id, resolution_state, target_symbol_snapshot_id,
+                       confidence_basis_points, confidence_tier
+                FROM code_repository_references
+                WHERE source_scope = ?1
+                ",
+            )?;
+            let rows = statement.query_map([source_scope], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, u16>(3)?,
+                        row.get::<_, String>(4)?,
+                    ),
+                ))
+            })?;
+
+            rows.collect::<Result<BTreeMap<_, _>, _>>()
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("reference rows should load")
 }
 
 fn file(
