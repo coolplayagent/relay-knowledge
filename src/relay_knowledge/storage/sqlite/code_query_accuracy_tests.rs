@@ -73,6 +73,33 @@ async fn full_scope_serves_narrower_query_filters() {
 }
 
 #[tokio::test]
+async fn full_scope_path_filters_prune_fts_candidates_before_limit() {
+    let store =
+        store_with_repository_snapshot(snapshot_with_path_filtered_candidate_overflow()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", vec!["src".to_owned()], Vec::new())
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Definition,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("path-filtered full-scope query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/target.rs");
+    assert_eq!(hits[0].excerpt, "fn target()");
+}
+
+#[tokio::test]
 async fn restrictive_scope_rejects_query_filters_outside_indexed_scope() {
     let store = store_with_repository_snapshot_and_filters(
         snapshot_with_target_symbol(),
@@ -702,6 +729,58 @@ fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
             "src/lib.rs",
             "target",
         )],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_path_filtered_candidate_overflow() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..600 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("vendor/noise_{index:03}.rs");
+        files.push(file(&file_id, &path, "rust", CodeParseStatus::Parsed, None));
+        symbols.push(symbol(
+            &format!("noise-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "target",
+        ));
+    }
+
+    files.push(file(
+        "target-file",
+        "src/target.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    symbols.push(symbol(
+        "target-symbol",
+        "target-file",
+        "src/target.rs",
+        "target",
+    ));
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),

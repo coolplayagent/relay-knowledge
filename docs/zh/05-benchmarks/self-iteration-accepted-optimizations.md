@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T171146Z
+
+- 目标：提升多仓、大仓 full-scope 索引上窄路径查询的准确性与稳定性，避免 FTS bounded candidate window 先被路径外匹配填满，再由 Rust 层过滤时丢失唯一的 in-scope symbol/reference/call/import/chunk 命中。
+- 方法：在 `code_repository_search` FTS 子查询进入 `ORDER BY bm25(...) LIMIT` 前，把已索引 scope 的 path filters 与本次 selector path filters 下推为 `path = ? OR path LIKE ? ESCAPE '\\'` 条件；同一 filter 列表内部保持 OR，不同来源 filter 保持 AND，与现有 `selected_row` 语义一致。
+- 架构与不变量：SQLite schema、FTS 文档内容、candidate limit、bm25 排序、Rust scoring、language filter 过滤、去重截断、CLI/API 返回字段和 full-scope/narrow-scope fallback 语义不变；路径过滤仍支持 `./` 与尾随斜杠规范化，并把 `%`、`_`、反斜杠按 SQL LIKE 字面量转义。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 的 full-scope 索引在按子目录检索时减少路径外候选噪声，提高窄 scope 查询召回稳定性，并在有 path filter 的大仓查询中减少后续 join 与 Rust scoring 候选量。
+- 已知风险：收益集中在带 path filter 的查询；无 path filter 的全仓查询不改变 SQL 或评分。FTS5 的 UNINDEXED `path` 条件仍需在 MATCH 结果上过滤，极宽 query 的收益取决于路径过滤选择性。
+
 ## 候选优化说明：20260516T111042Z
 
 - 目标：降低 Linux、Kubernetes、Spring Framework 等大仓全量索引中的 Git blob 读取开销，避免每个文件启动一次 `git show` 子进程。
@@ -328,4 +336,17 @@ sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGrap
 Adopted optimization notes:
 
 ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc", -            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", -            Some("sanitize-options"), -        )], +        chunks: vec![ +            RepositoryCodeChunkRecord { +                line_range: range(110, 115), +                ..chunk( +                    "sanitize-options-prologue", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "Options SanitizeOptions(const Options& src) {\n    Options result;", +                    Some("sanitize-options"), +                ) +            }, +            RepositoryCodeChunkRecord { +                line_range: range(116, 124), +                ..chunk( +                    "sanitize-options-call-site", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", +                    Some("sanitize-options"), +                ) +            }, +        ], diagnostics: Vec::new(), } } tokens used 172,827
+## 20260516T171146Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T171146Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 35920.0->28113; metric:cargo_fmt_check_ms 676.0->516; metric:cargo_clippy_ms 171.0->144; metric:cargo_test_ms 7135.0->6245
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28113ms; cargo_fmt_check_ms=516ms; cargo_clippy_ms=144ms; cargo_test_ms=6245ms; relay_teams_index_ms=67184ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=305ms; leveldb_cpp_index_ms=17958ms
+
+Adopted optimization notes:
+
+d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
 

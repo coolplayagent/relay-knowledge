@@ -74,7 +74,9 @@ fn search_symbols(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind
         FROM code_repository_symbols
@@ -85,16 +87,20 @@ fn search_symbols(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -189,7 +195,9 @@ fn search_references(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
                r.line_start, r.line_end, r.target_hint, r.resolution_state,
@@ -207,16 +215,20 @@ fn search_references(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'reference'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY r.path ASC, r.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -288,7 +300,9 @@ fn search_calls(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
@@ -316,16 +330,20 @@ fn search_calls(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'call'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -430,7 +448,9 @@ fn search_imports(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
@@ -443,16 +463,20 @@ fn search_imports(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'import'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY i.path ASC, i.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -520,7 +544,9 @@ fn search_chunks(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = hybrid_chunk_fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
                symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
@@ -537,16 +563,20 @@ fn search_chunks(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'chunk'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -1276,18 +1306,76 @@ fn hybrid_chunk_fts_match_query(query: &str) -> String {
 }
 
 fn fts_values_for_limited(
-    repository_id: &str,
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
     fts_query: &str,
     fts_limit: usize,
     limit: usize,
 ) -> Vec<Value> {
-    vec![
-        Value::Text(repository_id.to_owned()),
+    let mut values = vec![
+        Value::Text(source_scope.to_owned()),
         Value::Text(fts_query.to_owned()),
-        Value::Text(repository_id.to_owned()),
-        Value::Integer(fts_limit as i64),
-        Value::Integer(limit as i64),
-    ]
+        Value::Text(source_scope.to_owned()),
+    ];
+    push_fts_path_filter_values(&mut values, &status.path_filters);
+    push_fts_path_filter_values(&mut values, &request.repository.path_filters);
+    values.push(Value::Integer(fts_limit as i64));
+    values.push(Value::Integer(limit as i64));
+
+    values
+}
+
+fn fts_path_filter_sql(status: &CodeRepositoryStatus, request: &CodeRetrievalRequest) -> String {
+    let mut clauses = Vec::new();
+    push_fts_path_filter_sql(&mut clauses, &status.path_filters);
+    push_fts_path_filter_sql(&mut clauses, &request.repository.path_filters);
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", clauses.join(" AND "))
+    }
+}
+
+fn push_fts_path_filter_sql(clauses: &mut Vec<String>, filters: &[String]) {
+    let clauses_for_filters = filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+        .map(|_| "(path = ? OR path LIKE ? ESCAPE '\\')".to_owned())
+        .collect::<Vec<_>>();
+    if !clauses_for_filters.is_empty() {
+        clauses.push(format!("({})", clauses_for_filters.join(" OR ")));
+    }
+}
+
+fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    for filter in filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+    {
+        values.push(Value::Text(filter.clone()));
+        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
+    }
+}
+
+fn normalized_sql_path_filter(filter: &str) -> Option<String> {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+    (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
+}
+
+fn escape_sql_like(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    escaped
 }
 
 #[cfg(test)]
