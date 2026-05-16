@@ -472,6 +472,7 @@ async fn caller_queries_use_caller_chunk_excerpt_when_available() {
         .await
         .expect("caller query should succeed");
 
+    assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "db/db_impl.cc");
     assert_eq!(
         hits[0].excerpt,
@@ -1142,13 +1143,28 @@ fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![call],
-        chunks: vec![chunk(
-            "sanitize-options-chunk",
-            "db-impl-source",
-            "db/db_impl.cc",
-            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
-            Some("sanitize-options"),
-        )],
+        chunks: vec![
+            RepositoryCodeChunkRecord {
+                line_range: range(110, 115),
+                ..chunk(
+                    "sanitize-options-prologue",
+                    "db-impl-source",
+                    "db/db_impl.cc",
+                    "Options SanitizeOptions(const Options& src) {\n    Options result;",
+                    Some("sanitize-options"),
+                )
+            },
+            RepositoryCodeChunkRecord {
+                line_range: range(116, 124),
+                ..chunk(
+                    "sanitize-options-call-site",
+                    "db-impl-source",
+                    "db/db_impl.cc",
+                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
+                    Some("sanitize-options"),
+                )
+            },
+        ],
         diagnostics: Vec::new(),
     }
 }

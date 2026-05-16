@@ -304,6 +304,8 @@ fn search_calls(
         LEFT JOIN code_repository_chunks caller_chunk
             ON caller_chunk.source_scope = c.source_scope
            AND caller_chunk.symbol_snapshot_id = c.caller_symbol_snapshot_id
+           AND caller_chunk.line_start <= c.line_start
+           AND caller_chunk.line_end >= c.line_start
         LEFT JOIN code_repository_symbols callee
             ON callee.source_scope = c.source_scope
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id

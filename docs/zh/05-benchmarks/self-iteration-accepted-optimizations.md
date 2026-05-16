@@ -254,6 +254,15 @@ Adopted optimization notes:
 - 架构与不变量：不修改 code graph schema 字段、FTS 文档、candidate limit、查询 scoring、去重截断、call edge resolution、path/language filter 或 CLI/API 行为；索引通过既有 `CREATE INDEX IF NOT EXISTS` 初始化与迁移路径应用到新旧 SQLite 数据库。新增测试固定 schema 必须包含该 lookup index。
 - 预期影响：`relay_teams_query_p95_ms` 中 `_summary` callers/callees 查询应显著降低尾延迟；LevelDB、Kubernetes、Linux、Spring Framework 的 call graph 查询在多调用、多 chunk 场景下也应更稳定。索引阶段可能多维护一个小型 B-tree，但 chunk 写入仍在 bounded batch/finalize 事务内完成。
 - 已知风险：大仓索引写入和数据库文件会因额外索引略增；如果未来 call excerpt 不再从 `code_repository_chunks` 关联 caller symbol，该索引价值会下降，需要按查询计划重新评估。
+
+## 候选优化说明：20260516T160620Z
+
+- 目标：继续保护大仓 call graph 查询稳定性，避免一个 caller symbol 被切成多个非重叠 chunks 时，单条 call edge 因 excerpt join 被放大成多条候选并增加排序、评分和去重成本。
+- 方法：call 查询仍复用 `code_repository_chunks(source_scope, symbol_snapshot_id)` lookup index，但 caller chunk join 增加 call line containment 条件：只连接 `line_start <= call.line_start <= line_end` 的 chunk。这样 excerpt 直接来自包含调用点的 chunk，不再把同一 caller symbol 的 prologue、body、tail chunks 全部带入 bounded candidate rows。
+- 架构与不变量：不改变 SQLite schema、FTS 文档、candidate limit、call edge 召回、方向性 caller/callee 语义、confidence bonus、path/language filter、API 字段或最终排序规则；只收敛已有 excerpt join 的候选行数。新增回归测试构造同一 caller symbol 的两个非重叠 chunks，断言 callers 查询只返回一条 hit 且 excerpt 取实际 call-site chunk。
+- 预期影响：relay-teams、Linux、Kubernetes、Spring Framework 这类长函数、大类方法较多的仓库中，callers/callees 查询的 Rust scoring 输入更小、结果重复更少，p95 抖动应降低；accuracy 预期保持或改善，因为摘要优先来自调用点所在 chunk。
+- 已知风险：如果某个索引器生成的 chunk line ranges 不覆盖 call line，则该 call hit 会退回到 `caller calls callee` 摘要，不再从同 symbol 的其他 chunk 猜测 excerpt；这是更保守的稳定性取舍，后续可通过索引器 line-range 测试保护覆盖率。
+
 ## 20260516T143645Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
@@ -306,4 +315,17 @@ erms = query_terms("recover descriptor save_manifest versionedit"); + +    asser
 Adopted optimization notes:
 
 sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGraphStore, +    storage::{SqliteGraphStore, StorageError}, }; #[path = "code_test_support.rs"] @@ -114,6 +114,33 @@ } #[tokio::test] +async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); + +    let index_exists = store +        .run(|connection| { +            connection +                .query_row( +                    " +                    SELECT EXISTS( +                        SELECT 1 +                        FROM sqlite_master +                        WHERE type = 'index' +                          AND name = 'code_repository_chunks_symbol_lookup' +                    ) +                    ", +                    [], +                    |row| row.get::<_, bool>(0), +                ) +                .map_err(StorageError::from) +        }) +        .await +        .expect("schema index check should succeed"); + +    assert!(index_exists); +} + +#[tokio::test] async fn rejects_code_queries_for_unindexed_refs() { let store = store_with_repository_snapshot(snapshot_with_chunk( "repo", tokens used 113,836
+## 20260516T160620Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T160620Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 27786.0->25737; metric:cargo_fmt_check_ms 694.0->524; metric:cargo_clippy_ms 8303.0->158; metric:cargo_test_ms 7351.0->6118; metric:leveldb_cpp_index_ms 14476.0->13704; metric:leveldb_cpp_query_p50_ms 144.5->103.5; metric:leveldb_cpp_query_p95_ms 226.0->174.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=25737ms; cargo_fmt_check_ms=524ms; cargo_clippy_ms=158ms; cargo_test_ms=6118ms; relay_teams_index_ms=74148ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=308ms; leveldb_cpp_index_ms=13704ms
+
+Adopted optimization notes:
+
+ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc", -            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", -            Some("sanitize-options"), -        )], +        chunks: vec![ +            RepositoryCodeChunkRecord { +                line_range: range(110, 115), +                ..chunk( +                    "sanitize-options-prologue", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "Options SanitizeOptions(const Options& src) {\n    Options result;", +                    Some("sanitize-options"), +                ) +            }, +            RepositoryCodeChunkRecord { +                line_range: range(116, 124), +                ..chunk( +                    "sanitize-options-call-site", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", +                    Some("sanitize-options"), +                ) +            }, +        ], diagnostics: Vec::new(), } } tokens used 172,827
 
