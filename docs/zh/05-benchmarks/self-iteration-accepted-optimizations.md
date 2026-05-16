@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T190626Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在全量测试调度压力下等待请求进入 router service 偶发超时的问题，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：保留预绑定 Tokio listener、真实 TCP request、真实 Axum router、测试专用 Tower request-started layer 和 pending `/hold` handler；将该单测运行在 2 worker Tokio multi-thread runtime 上，并把测试的 request dispatch 等待预算与被测 HTTP request timeout 解耦，避免调度延迟消耗 pending handler 的生产 timeout 预算。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为、索引和检索路径均不变；测试仍只在请求确认为 in-flight 后触发 shutdown，并断言 active request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低 full-suite 中其他 async 测试或短时 CPU 拥塞对 HTTP shutdown readiness 观测的误伤，不改变正常通过路径的网络、router、pending handler 或 shutdown 语义；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索 accuracy、ranking、index 和 query 性能没有直接影响。
+- 已知风险：该候选只修复测试执行调度稳定性，不提升检索评分；如果环境整体 CPU 严重饱和导致 10 秒内仍无法处理已写入请求，失败仍会暴露为 HTTP server 调度或测试资源问题。
+
 ## 候选优化说明：20260516T185001Z
 
 - 目标：继续修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的 readiness 偶发超时，保护 stability 与 accuracy 前置质量门禁。
@@ -454,4 +462,17 @@ or = server tokens used 74,688 - diff --git a/src/relay_knowledge/net/http_tests
 Adopted optimization notes:
 
 rvice { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready(&mut self, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + #[tokio::test] async fn serve_router_with_qos_rejects_excess_connections() { let bind = format!("127.0.0.1:{}", unused_port()); tokens used 54,376
+## 20260516T190530Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190530Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 66815.0->61194
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=102ms; cargo_fmt_check_ms=462ms; cargo_clippy_ms=4966ms; cargo_test_ms=3697ms; relay_teams_index_ms=61194ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=400ms; leveldb_cpp_index_ms=18419ms
+
+Adopted optimization notes:
+
+- diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index b3b54e3545dbf196e0c0c4c67df8ab49e6b25664..d74058c99352706b77d9eef80e6e7ea72b4534cb --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -153,7 +153,7 @@ server.await.expect("server task should finish"); } -#[tokio::test] +#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_router_enforces_graceful_shutdown_timeout() { let listener = tokio::net::TcpListener::bind("127.0.0.1:0") .await @@ -164,7 +164,7 @@ .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), -        Duration::from_secs(5), +        Duration::from_secs(30), Duration::from_millis(10), 1024, HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"), @@ -189,7 +189,7 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), request_started_waiter) +    tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") .expect("request should signal startup"); tokens used 47,024
 

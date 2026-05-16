@@ -153,7 +153,7 @@ async fn post_json_sends_bounded_worker_request() {
     server.await.expect("server task should finish");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -164,7 +164,7 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .to_string();
     let config = HttpConfig::new(
         HttpBindAddress::parse(&bind).expect("bind should parse"),
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         Duration::from_millis(10),
         1024,
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
@@ -189,7 +189,7 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .write_all(request)
         .await
         .expect("request should write completely");
-    tokio::time::timeout(Duration::from_secs(5), request_started_waiter)
+    tokio::time::timeout(Duration::from_secs(10), request_started_waiter)
         .await
         .expect("request should start before shutdown")
         .expect("request should signal startup");
