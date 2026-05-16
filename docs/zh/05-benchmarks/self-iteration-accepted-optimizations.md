@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T194305Z
+
+- 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先保护 stability 与 accuracy 前置门禁。
+- 方法：保留真实 Axum router、测试专用 Tower request-start layer、pending `/hold` handler 和生产 `serve_listener` graceful shutdown timeout 路径；将该单测的传输从 Tokio `DuplexStream` synthetic listener 调整为测试预绑定的 loopback `TcpListener`，再通过已有 bounded retry connector 写入完整 HTTP 请求。预绑定 listener 避免固定端口冲突，真实 TCP accept/read 避免 synthetic duplex listener 在全量测试压力下偶发不推进。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS admission、request timeout、shutdown timeout、CLI/API、索引、检索、ranking 和 repository parsing 行为均不变；测试仍必须先观察请求进入 router service，再触发 shutdown，并断言 active pending request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：修复当前 `cargo_test` gate 的不稳定同步点，减少 HTTP shutdown 单测对 synthetic IO 的依赖；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选增加一个本机 loopback 连接，但使用预绑定 ephemeral listener 和已有 retry helper 降低端口与启动竞态；如果测试主机 TCP loopback 极端不可用，失败会暴露为基础网络测试环境问题。
+
 ## 候选优化说明：20260516T193653Z
 
 - 目标：修复当前 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 `/hold` handler 启动超时的问题，优先保护 stability 与 accuracy 前置门禁。
@@ -559,4 +567,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 Self::Service { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready( +        &mut self, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + struct InMemoryRequestListener { stream: Option<DuplexStream>, address: std::net::SocketAddr, tokens used 74,917
+## 20260516T194305Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T194305Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5938.0->4841
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=95ms; cargo_fmt_check_ms=456ms; cargo_clippy_ms=4841ms; cargo_test_ms=3721ms; relay_teams_index_ms=63352ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=408ms; leveldb_cpp_index_ms=18786ms
+
+Adopted optimization notes:
+
+    stream +        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n") +        .await +        .expect("request should write completely"); tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") @@ -245,39 +250,6 @@ let _ = sender.send(()); } self.inner.call(request) -    } -} - -struct InMemoryRequestListener { -    stream: Option<DuplexStream>, -    address: std::net::SocketAddr, -} - -impl InMemoryRequestListener { -    fn new(stream: DuplexStream) -> Self { -        Self { -            stream: Some(stream), -            address: "127.0.0.1:8791" -                .parse() -                .expect("loopback test address should parse"), -        } -    } -} - -impl axum::serve::Listener for InMemoryRequestListener { -    type Io = DuplexStream; -    type Addr = std::net::SocketAddr; - -    async fn accept(&mut self) -> (Self::Io, Self::Addr) { -        if let Some(stream) = self.stream.take() { -            return (stream, self.address); -        } - -        std::future::pending().await -    } - -    fn local_addr(&self) -> std::io::Result<Self::Addr> { -        Ok(self.address) } } tokens used 73,628
 

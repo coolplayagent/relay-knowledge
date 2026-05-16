@@ -2,7 +2,7 @@ use super::*;
 use crate::net::qos::{QosPolicy, QosRuntime};
 use axum::{Router, routing::get};
 use serde_json::json;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[test]
 fn parses_overridden_http_bind_address() {
@@ -155,21 +155,21 @@ async fn post_json_sends_bounded_worker_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
-    let bind = "127.0.0.1:8791";
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let bind = listener
+        .local_addr()
+        .expect("listener should expose local address")
+        .to_string();
     let config = HttpConfig::new(
-        HttpBindAddress::parse(bind).expect("bind should parse"),
+        HttpBindAddress::parse(&bind).expect("bind should parse"),
         Duration::from_secs(30),
         Duration::from_millis(10),
         1024,
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let (server_stream, mut client_stream) = tokio::io::duplex(1024);
-    client_stream
-        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        .await
-        .expect("request should write completely");
-    let listener = InMemoryRequestListener::new(server_stream);
     let (request_started, request_started_waiter) = tokio::sync::oneshot::channel();
     let request_started = Arc::new(std::sync::Mutex::new(Some(request_started)));
     let router = Router::new()
@@ -183,6 +183,11 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         let _ = shutdown_waiter.await;
     }));
 
+    let mut stream = connect_with_retry(&bind).await;
+    stream
+        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("request should write completely");
     tokio::time::timeout(Duration::from_secs(10), request_started_waiter)
         .await
         .expect("request should start before shutdown")
@@ -245,39 +250,6 @@ where
             let _ = sender.send(());
         }
         self.inner.call(request)
-    }
-}
-
-struct InMemoryRequestListener {
-    stream: Option<DuplexStream>,
-    address: std::net::SocketAddr,
-}
-
-impl InMemoryRequestListener {
-    fn new(stream: DuplexStream) -> Self {
-        Self {
-            stream: Some(stream),
-            address: "127.0.0.1:8791"
-                .parse()
-                .expect("loopback test address should parse"),
-        }
-    }
-}
-
-impl axum::serve::Listener for InMemoryRequestListener {
-    type Io = DuplexStream;
-    type Addr = std::net::SocketAddr;
-
-    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        if let Some(stream) = self.stream.take() {
-            return (stream, self.address);
-        }
-
-        std::future::pending().await
-    }
-
-    fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        Ok(self.address)
     }
 }
 
