@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T191712Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 对 loopback TCP accept/read/write 调度的敏感性，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：保留 `serve_listener`、真实 Axum router、真实 `/hold` pending handler 和生产 graceful shutdown timeout 路径不变；将该单元测试的外部 TCP client/listener 替换为测试专用 in-memory `Listener`/stream，直接向 Axum 提供完整 HTTP request bytes，并在 handler 构造时用 oneshot 证明请求已进入未完成 handler 后再触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS、HTTP request timeout、graceful shutdown timeout、CLI/API、索引和检索行为均不变；测试仍断言一个已被 router 接收且不会完成的活动请求在 10 毫秒 shutdown budget 内无法 drain 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低 full-suite CPU 拥塞、OS socket 调度和短时 loopback backlog 抖动导致的偶发等待超时，修复当前 `cargo_test` gate；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 repository indexing、ranking accuracy、query latency 没有直接行为影响。
+- 已知风险：该候选只稳定 HTTP shutdown 测试前置条件，不提升检索评分；如果 Axum/hyper 对自定义 in-memory test IO 的 poll/read 行为发生不兼容变化，失败会集中暴露在该单元测试中。
+
 ## 候选优化说明：20260516T190848Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 仍可能在 full-suite 调度压力下等待 router service dispatch 超时的问题，优先恢复 stability 前置质量门禁。
@@ -496,4 +504,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
     mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +    } -    fn poll_ready( -        &mut self, +    fn poll_flush( +        mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_flush(context) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) } } tokens used 55,876
+## 20260516T191712Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T191712Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_test_ms 3786.0->3638; metric:relay_teams_index_ms 64279.0->60821
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=121ms; cargo_fmt_check_ms=464ms; cargo_clippy_ms=148ms; cargo_test_ms=3638ms; relay_teams_index_ms=60821ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=397ms; leveldb_cpp_index_ms=18755ms
+
+Adopted optimization notes:
+
+(())) } } -impl AsyncWrite for RequestReadStream { +impl AsyncWrite for InMemoryRequestStream { fn poll_write( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, buffer: &[u8], ) -> std::task::Poll<std::io::Result<usize>> { -        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +        std::task::Poll::Ready(Ok(buffer.len())) } fn poll_flush( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_flush(context) +        std::task::Poll::Ready(Ok(())) } fn poll_shutdown( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) +        std::task::Poll::Ready(Ok(())) } } tokens used 121,229
 

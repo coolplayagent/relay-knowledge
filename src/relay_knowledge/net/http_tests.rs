@@ -155,45 +155,41 @@ async fn post_json_sends_bounded_worker_request() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_router_enforces_graceful_shutdown_timeout() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("listener should bind");
-    let bind = listener
-        .local_addr()
-        .expect("listener should expose local address")
-        .to_string();
+    let bind = "127.0.0.1:8791";
     let config = HttpConfig::new(
-        HttpBindAddress::parse(&bind).expect("bind should parse"),
+        HttpBindAddress::parse(bind).expect("bind should parse"),
         Duration::from_secs(30),
         Duration::from_millis(10),
         1024,
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let (request_read, request_read_waiter) = tokio::sync::oneshot::channel();
-    let listener = RequestReadListener {
-        inner: listener,
-        request_read: Arc::new(std::sync::Mutex::new(Some(request_read))),
-    };
+    let listener =
+        InMemoryRequestListener::new(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n".to_vec());
+    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel();
+    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started)));
     let router = Router::new().route(
         "/hold",
-        get(|| async { std::future::pending::<&'static str>().await }),
+        get(move || {
+            let sender = route_handler_started
+                .lock()
+                .expect("handler signal mutex should not be poisoned")
+                .take();
+            if let Some(sender) = sender {
+                let _ = sender.send(());
+            }
+            async move { std::future::pending::<&'static str>().await }
+        }),
     );
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve_listener(listener, router, config, async {
         let _ = shutdown_waiter.await;
     }));
 
-    let mut stream = connect_with_retry(&bind).await;
-    let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n";
-    stream
-        .write_all(request)
+    tokio::time::timeout(Duration::from_secs(10), handler_started_waiter)
         .await
-        .expect("request should write completely");
-    tokio::time::timeout(Duration::from_secs(10), request_read_waiter)
-        .await
-        .expect("server should read request before shutdown")
-        .expect("request read should be signaled");
+        .expect("handler should start before shutdown")
+        .expect("handler should signal startup");
     let _ = shutdown.send(());
 
     let error = server
@@ -204,87 +200,83 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
     assert!(matches!(error, HttpServeError::ShutdownTimeout));
 }
 
-struct RequestReadListener {
-    inner: tokio::net::TcpListener,
-    request_read: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+struct InMemoryRequestListener {
+    request: Option<InMemoryRequestStream>,
+    address: std::net::SocketAddr,
 }
 
-impl axum::serve::Listener for RequestReadListener {
-    type Io = RequestReadStream;
+impl InMemoryRequestListener {
+    fn new(request: Vec<u8>) -> Self {
+        Self {
+            request: Some(InMemoryRequestStream { request, offset: 0 }),
+            address: "127.0.0.1:8791"
+                .parse()
+                .expect("loopback test address should parse"),
+        }
+    }
+}
+
+impl axum::serve::Listener for InMemoryRequestListener {
+    type Io = InMemoryRequestStream;
     type Addr = std::net::SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        loop {
-            match self.inner.accept().await {
-                Ok((inner, address)) => {
-                    return (
-                        RequestReadStream {
-                            inner,
-                            request_read: self.request_read.clone(),
-                        },
-                        address,
-                    );
-                }
-                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
-            }
+        if let Some(request) = self.request.take() {
+            return (request, self.address);
         }
+
+        std::future::pending().await
     }
 
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.inner.local_addr()
+        Ok(self.address)
     }
 }
 
-struct RequestReadStream {
-    inner: tokio::net::TcpStream,
-    request_read: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+struct InMemoryRequestStream {
+    request: Vec<u8>,
+    offset: usize,
 }
 
-impl AsyncRead for RequestReadStream {
+impl AsyncRead for InMemoryRequestStream {
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
+        _context: &mut std::task::Context<'_>,
         buffer: &mut ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        let filled_before = buffer.filled().len();
-        let result = std::pin::Pin::new(&mut self.inner).poll_read(context, buffer);
-        if matches!(result, std::task::Poll::Ready(Ok(()))) && buffer.filled().len() > filled_before
-        {
-            let sender = self
-                .request_read
-                .lock()
-                .expect("request read signal mutex should not be poisoned")
-                .take();
-            if let Some(sender) = sender {
-                let _ = sender.send(());
-            }
+        let remaining = &self.request[self.offset..];
+        if remaining.is_empty() {
+            return std::task::Poll::Pending;
         }
 
-        result
+        let readable = remaining.len().min(buffer.remaining());
+        buffer.put_slice(&remaining[..readable]);
+        self.offset += readable;
+        std::task::Poll::Ready(Ok(()))
     }
 }
 
-impl AsyncWrite for RequestReadStream {
+impl AsyncWrite for InMemoryRequestStream {
     fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
+        self: std::pin::Pin<&mut Self>,
+        _context: &mut std::task::Context<'_>,
         buffer: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer)
+        std::task::Poll::Ready(Ok(buffer.len()))
     }
 
     fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
+        self: std::pin::Pin<&mut Self>,
+        _context: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.inner).poll_flush(context)
+        std::task::Poll::Ready(Ok(()))
     }
 
     fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
-        context: &mut std::task::Context<'_>,
+        self: std::pin::Pin<&mut Self>,
+        _context: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        std::pin::Pin::new(&mut self.inner).poll_shutdown(context)
+        std::task::Poll::Ready(Ok(()))
     }
 }
 
