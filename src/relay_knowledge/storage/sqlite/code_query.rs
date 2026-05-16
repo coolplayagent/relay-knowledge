@@ -364,7 +364,16 @@ fn search_calls(
                 CodeQueryKind::Callers => [&row.callee_name, ""],
                 _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
             };
-            let score = score_text(&query, search_fields)
+            let base_score = score_text(&query, search_fields);
+            let score = base_score
+                + directional_call_context_bonus(
+                    &query,
+                    base_score,
+                    row.caller_name.as_deref(),
+                    &row.callee_name,
+                    &row.path,
+                    request,
+                )
                 + callee_related_name_bonus(&query, &row.callee_name, request);
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
@@ -961,6 +970,24 @@ fn callee_related_name_bonus(
         0.35 + (1.2 / callee_identifier_part_count(callee_name))
     } else {
         0.0
+    }
+}
+
+fn directional_call_context_bonus(
+    query: &str,
+    base_score: f64,
+    caller_name: Option<&str>,
+    callee_name: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0 {
+        return 0.0;
+    }
+    match request.code_query_kind {
+        CodeQueryKind::Callers => 0.35 * score_text(query, [caller_name.unwrap_or_default(), path]),
+        CodeQueryKind::Callees => 0.35 * score_text(query, [callee_name, path]),
+        _ => 0.0,
     }
 }
 

@@ -181,3 +181,24 @@ Adopted optimization notes:
 
  "exact-file", "src/exact_owner.py"); +    exact.caller_name = Some("exactOwner".to_owned()); +    exact.callee_name = "TargetCall".to_owned(); +    exact.target_hint = Some("TargetCall".to_owned()); +    exact.resolution_state = "resolved".to_owned(); +    exact.confidence_basis_points = 8_000; +    exact.confidence_tier = "inferred".to_owned(); +    calls.push(exact); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls, +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 157,522
 
+## 候选优化说明：20260516T140540Z
+
+- 目标：提升大仓 call graph 查询准确率，避免 `Callers`/`Callees` 方向查询在主边端相同的大量候选中，只按路径或插入顺序处理 tie，导致带有 caller、callee 或路径上下文的自然语言查询排不到目标结果。
+- 方法：在 call FTS bounded candidate set 已经命中后，先保持既有方向语义：`Callers` 必须由 callee 字段产生正分，`Callees` 必须由 caller 字段产生正分；只有主边端 `base_score > 0` 时，再用非主边端和 path 计算一个 0.35 系数的上下文 bonus。这样 `TargetCall exactOwner` 仍只返回调用 `TargetCall` 的 caller，但会把 caller 名或路径含 `exactOwner` 的边排在同 callee 噪声之前。
+- 架构与不变量：SQLite schema、FTS 文档、candidate limit、source scope、path/language filter、API 字段、call edge resolution/confidence bonus、去重和最终截断规则不变；新增单元级集成测试构造同 callee、同 confidence、不同 caller/path 的噪声，断言 caller 上下文能稳定打破 tie。
+- 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 中高 fan-out API、工厂函数、hook、handler 的 callers/callees 查询更容易利用用户给出的 owner、component、file/path 上下文，提升 top-rank 准确率；计算只发生在最多 500-2000 个候选的 Rust scoring 阶段，对索引与 SQLite 查询性能无影响。
+- 已知风险：上下文 bonus 可能把路径或 caller/callee 名里包含额外查询词的结果排到更前；由于 bonus 受主边端正分门控，不能让不调用目标 callee 或不属于目标 caller 的边单独入选。
+## 20260516T140540Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T140540Z.patch`
+- score: 0.939609 (accuracy=0.923077, performance=0.905086, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 56550.0->48946; metric:cargo_fmt_check_ms 755.0->728; metric:relay_teams_query_p95_ms 12317.0->11797.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=48946ms; cargo_fmt_check_ms=728ms; cargo_clippy_ms=200ms; cargo_test_ms=8023ms; relay_teams_index_ms=81709ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=11797ms; leveldb_cpp_index_ms=19861ms
+
+Adopted optimization notes:
+
+rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 3, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "first-noise-file", +                "src/a_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "second-noise-file", +                "src/b_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "exact-file", +                "src/z_exact_owner.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: vec![first_noise, second_noise, exact], +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 132,437
+
