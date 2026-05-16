@@ -170,22 +170,14 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel();
-    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started)));
-    let router = Router::new().route(
-        "/hold",
-        get(move || {
-            let handler_started = route_handler_started.clone();
-            let sender = handler_started
-                .lock()
-                .expect("handler signal mutex should not be poisoned")
-                .take();
-            if let Some(sender) = sender {
-                let _ = sender.send(());
-            }
-            async move { std::future::pending::<&'static str>().await }
-        }),
-    );
+    let (request_started, request_started_waiter) = tokio::sync::oneshot::channel();
+    let request_started = Arc::new(std::sync::Mutex::new(Some(request_started)));
+    let router = Router::new()
+        .route(
+            "/hold",
+            get(|| async { std::future::pending::<&'static str>().await }),
+        )
+        .layer(RequestStartedLayer { request_started });
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(serve_listener(listener, router, config, async {
         let _ = shutdown_waiter.await;
@@ -197,10 +189,10 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .write_all(request)
         .await
         .expect("request should write completely");
-    tokio::time::timeout(Duration::from_secs(5), handler_started_waiter)
+    tokio::time::timeout(Duration::from_secs(5), request_started_waiter)
         .await
-        .expect("handler should start before shutdown")
-        .expect("handler should signal startup");
+        .expect("request should start before shutdown")
+        .expect("request should signal startup");
     let _ = shutdown.send(());
 
     let error = server
@@ -209,6 +201,57 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .expect_err("active request should exceed shutdown timeout");
 
     assert!(matches!(error, HttpServeError::ShutdownTimeout));
+}
+
+#[derive(Clone)]
+struct RequestStartedLayer {
+    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+impl<S> tower::Layer<S> for RequestStartedLayer {
+    type Service = RequestStartedService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RequestStartedService {
+            inner,
+            request_started: self.request_started.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RequestStartedService<S> {
+    inner: S,
+    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+impl<S> Service<Request> for RequestStartedService<S>
+where
+    S: Service<Request> + Send,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(
+        &mut self,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(context)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        let sender = self
+            .request_started
+            .lock()
+            .expect("request signal mutex should not be poisoned")
+            .take();
+        if let Some(sender) = sender {
+            let _ = sender.send(());
+        }
+        self.inner.call(request)
+    }
 }
 
 #[tokio::test]

@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T185001Z
+
+- 目标：继续修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的 readiness 偶发超时，保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试仍使用预绑定 Tokio listener、真实 TCP request、真实 Axum router 和永不完成的 `/hold` handler；新增测试专用 Tower layer，在 router service 接收请求的 `call` 边界发送一次 readiness 信号，测试只在请求确认为 in-flight 后触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为和代码检索路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低测试对 Axum route handler future 何时首次 poll 的敏感度，使质量门禁验证 active request 的 graceful shutdown timeout 行为；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的索引、召回、排序和查询性能没有直接影响。
+- 已知风险：该候选只修复测试同步语义，不提升检索评分；如果 full-suite 环境无法在 5 秒内调度到 router service `call`，失败仍会暴露为 HTTP server 调度或测试资源问题。
+
 ## 候选优化说明：20260516T184629Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 handler readiness 超时的问题，优先保护 stability 与 accuracy 前置质量门禁。
@@ -433,4 +441,17 @@ d = handler_started.clone(); +    let (handler_started, handler_started_waiter) 
 Adopted optimization notes:
 
 or = server tokens used 74,688 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 67fa5d215cacb0745ff6bb5ab4eb14e2849720a2..1d01c78ec52234080d47421338373deeacba72f6 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -176,16 +176,14 @@ "/hold", get(move || { let handler_started = route_handler_started.clone(); -            async move { -                let sender = handler_started -                    .lock() -                    .expect("handler signal mutex should not be poisoned") -                    .take(); -                if let Some(sender) = sender { -                    let _ = sender.send(()); -                } -                std::future::pending::<&'static str>().await +            let sender = handler_started +                .lock() +                .expect("handler signal mutex should not be poisoned") +                .take(); +            if let Some(sender) = sender { +                let _ = sender.send(()); } +            async move { std::future::pending::<&'static str>().await } }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); tokens used 111,325
+## 20260516T185001Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T185001Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 65389.0->59772
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=126ms; cargo_fmt_check_ms=458ms; cargo_clippy_ms=140ms; cargo_test_ms=3723ms; relay_teams_index_ms=59772ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=399ms; leveldb_cpp_index_ms=18655ms
+
+Adopted optimization notes:
+
+rvice { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready(&mut self, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + #[tokio::test] async fn serve_router_with_qos_rejects_excess_connections() { let bind = format!("127.0.0.1:{}", unused_port()); tokens used 54,376
 
