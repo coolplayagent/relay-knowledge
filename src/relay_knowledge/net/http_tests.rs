@@ -170,14 +170,20 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"),
     )
     .expect("config should build");
-    let handler_started = Arc::new(tokio::sync::Notify::new());
-    let route_handler_started = handler_started.clone();
+    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel();
+    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started)));
     let router = Router::new().route(
         "/hold",
         get(move || {
             let handler_started = route_handler_started.clone();
             async move {
-                handler_started.notify_one();
+                let sender = handler_started
+                    .lock()
+                    .expect("handler signal mutex should not be poisoned")
+                    .take();
+                if let Some(sender) = sender {
+                    let _ = sender.send(());
+                }
                 std::future::pending::<&'static str>().await
             }
         }),
@@ -193,9 +199,10 @@ async fn serve_router_enforces_graceful_shutdown_timeout() {
         .write_all(request)
         .await
         .expect("request should write completely");
-    tokio::time::timeout(Duration::from_secs(5), handler_started.notified())
+    tokio::time::timeout(Duration::from_secs(5), handler_started_waiter)
         .await
-        .expect("handler should start before shutdown");
+        .expect("handler should start before shutdown")
+        .expect("handler should signal startup");
     let _ = shutdown.send(());
 
     let error = server

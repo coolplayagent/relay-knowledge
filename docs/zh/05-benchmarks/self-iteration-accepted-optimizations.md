@@ -12,6 +12,14 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T181727Z
+
+- 目标：继续修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的残余偶发失败，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试保留真实 TCP listener、真实 HTTP 请求写入和 Axum handler pending active request，但把 handler readiness 从可复用 `Notify` 改为单次 `oneshot` 信号；handler 首次被轮询时发送启动信号，测试确认 active request 已进入服务逻辑后才触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为和代码检索路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：消除 readiness 观测中的残余调度歧义，让 full-suite 并发负载下的 HTTP shutdown 测试只验证 server 行为而不依赖通知 permit 时序；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的索引、召回、排序和查询性能没有直接影响。
+- 已知风险：该改动只收敛测试同步语义，不提升检索评分；如果运行环境在 5 秒内仍无法轮询已收到完整请求的 handler，失败会继续暴露为测试执行资源或 HTTP server 调度问题。
+
 ## 候选优化说明：20260516T181003Z
 
 - 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 并发负载下的残余偶发失败，优先保护 stability 与 accuracy 前置质量门禁。
@@ -391,4 +399,17 @@ nks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_
 Adopted optimization notes:
 
 ed.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index faaf3f2f6db33cc2bfd36072400145272e3b9a36..2eaf575b4b928b3821fd010e11be8a9ab2e5bfb0 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -155,7 +155,13 @@ #[tokio::test] async fn serve_router_enforces_graceful_shutdown_timeout() { -    let bind = format!("127.0.0.1:{}", unused_port()); +    let listener = tokio::net::TcpListener::bind("127.0.0.1:0") +        .await +        .expect("listener should bind"); +    let bind = listener +        .local_addr() +        .expect("listener should expose local address") +        .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), Duration::from_secs(5), @@ -177,7 +183,7 @@ }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); -    let server = tokio::spawn(serve_router(router, config, async { +    let server = tokio::spawn(serve_listener(listener, router, config, async { let _ = shutdown_waiter.await; })); tokens used 40,692
+## 20260516T181727Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181727Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 68328.0->64783
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=468ms; cargo_clippy_ms=4959ms; cargo_test_ms=3852ms; relay_teams_index_ms=64783ms; relay_teams_query_p50_ms=129ms; relay_teams_query_p95_ms=396ms; leveldb_cpp_index_ms=18642ms
+
+Adopted optimization notes:
+
+d = handler_started.clone(); +    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel(); +    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started))); let router = Router::new().route( "/hold", get(move || { let handler_started = route_handler_started.clone(); async move { -                handler_started.notify_one(); +                let sender = handler_started +                    .lock() +                    .expect("handler signal mutex should not be poisoned") +                    .take(); +                if let Some(sender) = sender { +                    let _ = sender.send(()); +                } std::future::pending::<&'static str>().await } }), @@ -193,9 +199,10 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) +    tokio::time::timeout(Duration::from_secs(5), handler_started_waiter) .await -        .expect("handler should start before shutdown"); +        .expect("handler should start before shutdown") +        .expect("handler should signal startup"); let _ = shutdown.send(()); let error = server tokens used 74,688
 
