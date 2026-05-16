@@ -263,6 +263,30 @@ async fn exact_definition_queries_rank_name_match_when_many_signatures_mention_i
 }
 
 #[tokio::test]
+async fn fuzzy_definition_queries_rank_multi_part_symbol_names_before_single_token_noise() {
+    let store = store_with_repository_snapshot(snapshot_with_archive_output_dir_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "archive old eval output directory timestamp suffix",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams_evals/checkpoint.py");
+    assert!(hits[0].excerpt.contains("fn archive_output_dir()"));
+}
+
+#[tokio::test]
 async fn scoped_definition_queries_rank_scoped_member_before_token_permutations() {
     let store = store_with_repository_snapshot(snapshot_with_scoped_cpp_definition_noise()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -655,6 +679,92 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics,
+    }
+}
+
+fn snapshot_with_archive_output_dir_noise() -> CodeIndexSnapshot {
+    let mut target = symbol(
+        "checkpoint-symbol",
+        "checkpoint-file",
+        "src/relay_teams_evals/checkpoint.py",
+        "archive_output_dir",
+    );
+    let mut output_noise = symbol(
+        "output-symbol",
+        "output-file",
+        "src/relay_teams/sessions/runs/background_tasks/projection.py",
+        "_OUTPUT_TRUNCATED_SUFFIX",
+    );
+    let mut directory_noise = symbol(
+        "directory-symbol",
+        "directory-file",
+        "src/relay_teams/workspace/directory_picker.py",
+        "_pick_directory_macos",
+    );
+    let mut archive_noise = symbol(
+        "archive-symbol",
+        "archive-file",
+        "tests/unit_tests/net/test_github_cli.py",
+        "test_extract_zip_replaces_existing_target",
+    );
+    for symbol in [
+        &mut target,
+        &mut output_noise,
+        &mut directory_noise,
+        &mut archive_noise,
+    ] {
+        symbol.doc_comment = Some("archive old eval output directory timestamp suffix".to_owned());
+    }
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "checkpoint-file",
+                "src/relay_teams_evals/checkpoint.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "output-file",
+                "src/relay_teams/sessions/runs/background_tasks/projection.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "directory-file",
+                "src/relay_teams/workspace/directory_picker.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "archive-file",
+                "tests/unit_tests/net/test_github_cli.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![target, output_noise, directory_noise, archive_noise],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
     }
 }
 

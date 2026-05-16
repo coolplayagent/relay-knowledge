@@ -188,6 +188,14 @@ Adopted optimization notes:
 - 架构与不变量：SQLite schema、FTS 文档、candidate limit、source scope、path/language filter、API 字段、call edge resolution/confidence bonus、去重和最终截断规则不变；新增单元级集成测试构造同 callee、同 confidence、不同 caller/path 的噪声，断言 caller 上下文能稳定打破 tie。
 - 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 中高 fan-out API、工厂函数、hook、handler 的 callers/callees 查询更容易利用用户给出的 owner、component、file/path 上下文，提升 top-rank 准确率；计算只发生在最多 500-2000 个候选的 Rust scoring 阶段，对索引与 SQLite 查询性能无影响。
 - 已知风险：上下文 bonus 可能把路径或 caller/callee 名里包含额外查询词的结果排到更前；由于 bonus 受主边端正分门控，不能让不调用目标 callee 或不属于目标 caller 的边单独入选。
+
+## 候选优化说明：20260516T142335Z
+
+- 目标：提升 fuzzy definition/hybrid 查询对多段函数名的排序准确率，尤其是 `archive old eval output directory timestamp suffix` 这类自然语言查询应优先返回 `archive_output_dir`，而不是只命中单个通用词的 output、directory 或 archive 噪声符号。
+- 方法：仅在 symbol 查询已由 FTS 召回后，在既有 `symbol_name_query_bonus` 中增加受限的部分覆盖 bonus；当至少 3 个长度不小于 3 的查询词能与 symbol name 的规范化 identifier token 精确匹配，或存在清晰前缀关系（例如 `directory` 与 `dir`）时，最多增加 2.0 分。新增回归测试构造 `archive_output_dir` 与 output/directory/archive 单词噪声，断言多段符号名排在首位。
+- 架构与不变量：不改变 SQLite schema、FTS content、candidate limit、source scope、path/language filter、API 字段、call/reference/import 查询语义、去重或最终截断；只调整 bounded symbol candidate set 内的 Rust 排序，且 bonus 需要 3 个匹配词门槛，避免 1-2 个通用词扩大噪声优势。
+- 预期影响：relay-teams、LevelDB、Kubernetes、Spring Framework 中以 snake_case、CamelCase 或缩写命名的函数、类、常量，在自然语言查询同时描述多个 name parts 时更容易排到 top-rank；对性能的影响限于已召回 symbol 候选的少量 identifier token 比较。
+- 已知风险：包含 3 个以上通用短 identifier parts 的符号可能获得额外分数；门槛、长度限制、2.0 上限和不修改 FTS 召回可限制对现有准确率与 p95 的扰动。
 ## 20260516T140540Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T140540Z.patch`
@@ -201,4 +209,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 3, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "first-noise-file", +                "src/a_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "second-noise-file", +                "src/b_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "exact-file", +                "src/z_exact_owner.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: vec![first_noise, second_noise, exact], +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 132,437
+## 20260516T142335Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T142335Z.patch`
+- score: 0.939946 (accuracy=0.923077, performance=0.90733, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: score_component:score 0.893508->0.939946; score_component:accuracy 0.846154->0.923077; metric:cargo_build_release_ms 35177.0->33618; metric:cargo_fmt_check_ms 718.0->682; metric:relay_teams_index_ms 76655.0->70526; metric:relay_teams_query_p95_ms 11039.0->8185.0; case:rt_hybrid_eval_checkpoint_store {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed; case:rt_fuzzy_function_archive_output_dir {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': False, 'rank': 13, 'false_positive_count': 0} rank_improved
+- known degradations: case:rt_fuzzy_constant_checkpoint_version {'passed': True, 'rank': 1, 'false_positive_count': 0}->{'passed': False, 'rank': None, 'false_positive_count': 0} passed_to_failed
+- latency metrics: cargo_build_release_ms=33618ms; cargo_fmt_check_ms=682ms; cargo_clippy_ms=179ms; cargo_test_ms=7211ms; relay_teams_index_ms=70526ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=8185ms; leveldb_cpp_index_ms=18800ms
+
+Adopted optimization notes:
+
+              None, +            ), +            file( +                "output-file", +                "src/relay_teams/sessions/runs/background_tasks/projection.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "directory-file", +                "src/relay_teams/workspace/directory_picker.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "archive-file", +                "tests/unit_tests/net/test_github_cli.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: vec![target, output_noise, directory_noise, archive_noise], +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot { let mut ambiguous = call("ambiguous-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); tokens used 172,862
 

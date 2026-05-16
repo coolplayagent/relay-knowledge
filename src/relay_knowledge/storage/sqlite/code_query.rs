@@ -889,6 +889,25 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
     {
         2.0
     } else {
+        partial_symbol_name_query_bonus(&query_terms, &name_tokens)
+    }
+}
+
+fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String]) -> f64 {
+    let matched_terms = query_terms
+        .iter()
+        .filter(|term| {
+            term.len() >= 3
+                && name_tokens.iter().any(|token| {
+                    token == *term
+                        || (token.len() >= 3
+                            && (term.starts_with(token) || token.starts_with(term.as_str())))
+                })
+        })
+        .count();
+    if matched_terms >= 3 {
+        (matched_terms as f64 * 0.75).min(2.0)
+    } else {
         0.0
     }
 }
