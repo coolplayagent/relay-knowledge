@@ -38,10 +38,21 @@ volume covers and count as chapter 0 when they appear in a reading path.
 
 ## Book 2: Capabilities
 
-- [Chapter 1: GraphRAG Capability Guide](02-capabilities/01-graphrag-capability-guide.md): context packs, freshness, backends, multimodal evidence, code graph, recovery, Web, MCP, and ACP behavior.
-- [Chapter 2: Hybrid Retrieval Context Pack](02-capabilities/02-hybrid-retrieval-context-pack.md): retriever sources, RRF fusion, structured graph facts, graph paths, and backend status.
-- [Chapter 3: Code Repository Tree-sitter Retrieval](02-capabilities/03-code-repository-tree-sitter-retrieval.md): repository indexing, retrieval, reports, and impact analysis.
-- [Chapter 4: Semantic/Vector Provider Backend](02-capabilities/04-semantic-vector-provider-backend.md): external embedding provider setup, redacted diagnostics, Web provider panels, and degradation behavior.
+- [Chapter 1: Capability Overview](02-capabilities/01-capability-overview.md)
+- [Chapter 2: Local-first Runtime and CLI](02-capabilities/02-local-first-runtime-and-cli.md)
+- [Chapter 3: Evidence and Graph Facts](02-capabilities/03-evidence-and-graph-facts.md)
+- [Chapter 4: Query and Context Pack Basics](02-capabilities/04-query-and-context-pack-basics.md)
+- [Chapter 5: Hybrid Retrieval Advantage](02-capabilities/05-hybrid-retrieval-advantage.md)
+- [Chapter 6: Freshness and Index Recovery](02-capabilities/06-freshness-and-index-recovery.md)
+- [Chapter 7: Multimodal Evidence Capability](02-capabilities/07-multimodal-evidence-capability.md)
+- [Chapter 8: Code Repository Basics](02-capabilities/08-code-repository-basics.md)
+- [Chapter 9: Code Graph Competitive Features](02-capabilities/09-code-graph-competitive-features.md)
+- [Chapter 10: Code Impact and Reporting](02-capabilities/10-code-impact-and-reporting.md)
+- [Chapter 11: Semantic/Vector Provider Backend](02-capabilities/11-semantic-vector-provider-backend.md)
+- [Chapter 12: Web Workspace Capabilities](02-capabilities/12-web-workspace-capabilities.md)
+- [Chapter 13: Agent Access Capabilities](02-capabilities/13-agent-access-capabilities.md)
+- [Chapter 14: Operations and Worker Capabilities](02-capabilities/14-operations-and-worker-capabilities.md)
+- [Chapter 15: Evaluation and Quality Gates](02-capabilities/15-evaluation-and-quality-gates.md)
 
 ## Book 3: Architecture Specifications
 

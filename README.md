@@ -91,17 +91,11 @@ relay-knowledge service doctor
 - [Book 4, Chapter 4: ai-knowledge-graph Reference Analysis](docs/en/04-research/04-ai-knowledge-graph-reference-analysis.md):
   architecture, algorithm, performance, and reliability lessons from an
   external LLM-extracted knowledge graph project.
-- [Book 2, Chapter 1: GraphRAG Capability Guide](docs/en/02-capabilities/01-graphrag-capability-guide.md): current context-pack,
-  freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
-  behavior.
-- [Book 2, Chapter 2: Hybrid Retrieval Context Pack](docs/en/02-capabilities/02-hybrid-retrieval-context-pack.md):
-  retriever sources, RRF fusion, structured graph facts, graph paths, and
-  backend status.
-- [Book 2, Chapter 3: Code Repository Tree-sitter Retrieval](docs/en/02-capabilities/03-code-repository-tree-sitter-retrieval.md):
-  repository indexing, retrieval, reports, and impact analysis.
-- [Book 2, Chapter 4: Semantic/Vector Provider Backend](docs/en/02-capabilities/04-semantic-vector-provider-backend.md):
-  external embedding provider setup, redacted diagnostics, Web provider panels,
-  and degradation behavior.
+- [Book 2, Chapter 1: Capability Overview](docs/en/02-capabilities/01-capability-overview.md): foundational behaviors and competitive differentiators.
+- [Book 2, Chapter 4: Query and Context Pack Basics](docs/en/02-capabilities/04-query-and-context-pack-basics.md): query metadata, context items, budgets, truncation, and source spans.
+- [Book 2, Chapter 5: Hybrid Retrieval Advantage](docs/en/02-capabilities/05-hybrid-retrieval-advantage.md): BM25, semantic, vector, graph evidence, code graph, RRF, and ranking explanations.
+- [Book 2, Chapter 9: Code Graph Competitive Features](docs/en/02-capabilities/09-code-graph-competitive-features.md): symbols, references, calls, imports, chunks, identities, and edge diagnostics.
+- [Book 2, Chapter 13: Agent Access Capabilities](docs/en/02-capabilities/13-agent-access-capabilities.md): MCP Streamable HTTP, resources, prompts, ACP session access, scope policy, and audit.
 - [Appendix B.1: Documentation Refresh Audits](docs/en/06-verification/01-documentation-book-refresh-2026-05-17.md):
   dated verification records for documentation freshness and implemented
   capability closures.

@@ -10,7 +10,7 @@ benchmarks, and verification records stay easy to compare.
 ## Directory Policy
 
 - `01-user-guide`: executable user workflows and command guidance.
-- `02-capabilities`: current implemented product behavior only.
+- `02-capabilities`: implemented product capabilities, organized from foundational behavior to competitive differentiators.
 - `03-architecture-specs`: architecture and algorithm whitepaper chapters, hard
   contracts, interface boundaries, and forward product requirements.
 - `04-research`: dated research and gap analysis; it may preserve roadmap
@@ -20,7 +20,7 @@ benchmarks, and verification records stay easy to compare.
   documentation or implementation pass was checked.
 
 All content documents inside numbered volumes use a two-digit chapter prefix in
-the filename, such as `09-hybrid-retrieval-and-context-packing.md`. `README.md`
+the filename, such as `05-hybrid-retrieval-advantage.md`. `README.md`
 files are volume covers and tables of contents; when listed as readable pages
 they are treated as chapter 0.
 
