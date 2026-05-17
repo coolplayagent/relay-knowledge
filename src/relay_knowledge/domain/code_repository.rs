@@ -548,6 +548,99 @@ pub struct CodeIndexCheckpoint {
     pub resource_budget: CodeIndexResourceBudget,
 }
 
+/// Persistent lifecycle for background code repository index tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeIndexTaskState {
+    Queued,
+    Running,
+    Succeeded,
+    Retrying,
+    Failed,
+    DeadLetter,
+    Cancelled,
+}
+
+impl CodeIndexTaskState {
+    /// Stable storage and API representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Retrying => "retrying",
+            Self::Failed => "failed",
+            Self::DeadLetter => "dead_letter",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    /// Parses the stable storage and API representation.
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "running" => Ok(Self::Running),
+            "succeeded" => Ok(Self::Succeeded),
+            "retrying" => Ok(Self::Retrying),
+            "failed" => Ok(Self::Failed),
+            "dead_letter" => Ok(Self::DeadLetter),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(DomainError::invalid(
+                "code_index_task_state",
+                "unknown code index task state",
+            )),
+        }
+    }
+
+    /// Returns whether the task can still consume executor capacity.
+    pub const fn is_unfinished(self) -> bool {
+        matches!(self, Self::Queued | Self::Running | Self::Retrying)
+    }
+}
+
+/// Durable background task for one code repository index request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeIndexTaskRecord {
+    pub task_id: String,
+    pub repository_id: String,
+    pub alias: String,
+    pub ref_selector: String,
+    pub resolved_commit_sha: String,
+    pub tree_hash: String,
+    pub source_scope: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
+    pub mode: CodeIndexMode,
+    pub state: CodeIndexTaskState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_expires_at_ms: Option<u64>,
+    pub attempt_count: u32,
+    pub next_retry_at_ms: u64,
+    pub input_fingerprint: String,
+    pub resource_budget: CodeIndexResourceBudget,
+    pub payload_json: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_message: Option<String>,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
+/// Scope retention result after pruning old repository snapshots.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeScopeRetentionSummary {
+    pub repository_id: String,
+    pub retained_scope_count: usize,
+    pub prunable_scope_count: usize,
+    pub pruned_scope_count: usize,
+    pub retained_scopes: Vec<String>,
+    pub prunable_scopes: Vec<String>,
+    pub pruned_scopes: Vec<String>,
+}
+
 /// Coarse phase timing and counts reported by repository indexing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeIndexProgressSummary {

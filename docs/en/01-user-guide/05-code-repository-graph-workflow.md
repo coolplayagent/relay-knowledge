@@ -52,6 +52,10 @@ relay-knowledge repo index core --ref <commit-sha> --format json
 
 Full indexing reads a clean tree through Git and parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter. Unsupported, invalid UTF-8, binary, oversized, or parser-failed files degrade to text-only or failed diagnostics without failing the whole batch.
 
+When the requested full scope is not already fresh, `repo index` queues a durable background task and returns JSON with `task.state=queued` plus the target scope metadata instead of blocking on the entire cold parse. The CLI starts a bounded single-shot `repo index-worker` for that task; `relay-knowledge service run` also drains the same queue with one repository index worker. Running the same index request while a task is queued or running reuses the active task rather than starting parallel rebuilds for the same repository.
+
+Fresh full indexes still return a completed `summary` immediately. Incremental `repo update` remains synchronous because it applies an explicit base-to-head diff and is already bounded by the changed path set.
+
 ## 5.4 Query Symbols and Relationships
 
 Hybrid query:
@@ -145,6 +149,8 @@ relay-knowledge repo status core --format json
 ```
 
 Reports include repository id, root, indexed commit, tree hash, file/symbol/reference/chunk totals, scope, representative queries, latency samples, and degradation summary. Markdown reports fit PRs or release notes; JSON reports fit CI comparisons of index quality.
+
+`repo status --format json` also includes `active_task` for queued/running/retrying cold indexes, `checkpoint` counters for the active or latest scope, and a `retention` summary. After a background full index succeeds, retention keeps the active scope, the two latest completed scopes, and unfinished task scopes; older scopes are pruned so large repositories do not accumulate unbounded SQLite rows.
 
 `repo report --format markdown` also summarizes edge resolution counts for resolved, ambiguous, and unresolved edges. Use this to tell whether the graph is mostly deterministic AST extraction or still has many ambiguous edges requiring parser improvements.
 

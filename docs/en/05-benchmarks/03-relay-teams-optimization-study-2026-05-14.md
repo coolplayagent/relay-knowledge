@@ -175,19 +175,22 @@ Optimization:
 
 - The no-op fast path should make repeated same-scope Web index requests return
   quickly.
-- Full cold indexing is still long-running and should later move to a queued
-  operation/progress handle rather than a single blocking request.
+- Full cold indexing now returns a queued task handle and runs through the
+  durable code-index worker queue rather than a single blocking request.
 
 Expected optimized behavior:
 
 - Repeated Web index for an already fresh relay-teams scope should return 200
   before the HTTP timeout.
-- Cold full indexing remains a background-operation follow-up.
+- Cold full indexing reports `task`, `active_task`, checkpoint, and retention
+  state while the background worker owns the parse/write work.
 
 Latest optimized result:
 
 - Web `code.repo.index` against the already fresh relay-teams scope returned
   HTTP 200 in 162ms.
+- Cold CLI `repo index` returns after queueing the task; use `repo status` to
+  observe checkpoint progress and final retention pruning.
 
 ## Re-test Checklist
 
@@ -224,7 +227,8 @@ the performance issue as closed.
 | Web no-op `code.repo.index` | 30.015s / HTTP 408 | 0.162s / HTTP 200 |
 | Top-level multi-word `query` | exit 2 | 0.129s / exit 0 |
 
-The latest cold full index sample was 47.45s with 360,504 KiB peak RSS. The
-index still populates the code-repository FTS candidate table as the query
-latency tradeoff; continue measuring the same external repository if cold
-indexing becomes the primary bottleneck.
+The latest synchronous cold full index sample before background queueing was
+47.45s with 360,504 KiB peak RSS. The index still populates the code-repository
+FTS candidate table as the query latency tradeoff; future cold-index
+measurements should track enqueue latency, worker completion time, checkpoint
+lag, and retention pruning on the same external repository.

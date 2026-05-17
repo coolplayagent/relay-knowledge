@@ -141,16 +141,33 @@ where
             value["service_name"].as_str().unwrap_or("relay-knowledge"),
             value["mode"].as_str().unwrap_or("disabled")
         ),
-        "code.repo.index" => format!(
-            "indexed files={} symbols={} references={} chunks={} degraded={}",
-            value["summary"]["indexed_file_count"].as_u64().unwrap_or(0),
-            value["summary"]["symbol_count"].as_u64().unwrap_or(0),
-            value["summary"]["reference_count"].as_u64().unwrap_or(0),
-            value["summary"]["chunk_count"].as_u64().unwrap_or(0),
-            value["summary"]["degraded_file_count"]
-                .as_u64()
-                .unwrap_or(0)
-        ),
+        "code.repo.index" => {
+            if let Some(task) = value["task"].as_object() {
+                format!(
+                    "index task={} state={} scope={}",
+                    task.get("task_id")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown"),
+                    task.get("state")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("queued"),
+                    task.get("source_scope")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("unknown")
+                )
+            } else {
+                format!(
+                    "indexed files={} symbols={} references={} chunks={} degraded={}",
+                    value["summary"]["indexed_file_count"].as_u64().unwrap_or(0),
+                    value["summary"]["symbol_count"].as_u64().unwrap_or(0),
+                    value["summary"]["reference_count"].as_u64().unwrap_or(0),
+                    value["summary"]["chunk_count"].as_u64().unwrap_or(0),
+                    value["summary"]["degraded_file_count"]
+                        .as_u64()
+                        .unwrap_or(0)
+                )
+            }
+        }
         "code.repo.scope_preview" => format!(
             "preview files={} bytes={} unsupported={} expected_degraded={}",
             value["preview"]["selected_file_count"]

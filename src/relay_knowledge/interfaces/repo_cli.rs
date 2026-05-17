@@ -1,3 +1,6 @@
+#[cfg(not(test))]
+use std::process::Stdio;
+
 use crate::{
     api::{CodeRepositoryRegisterRequest, CodeRepositoryReportResponse, RequestContext},
     application::RelayKnowledgeService,
@@ -22,6 +25,9 @@ pub enum RepoCommand {
         alias: String,
         ref_selector: String,
         dry_run: bool,
+    },
+    IndexWorker {
+        task_id: Option<String>,
     },
     ScopePreview {
         alias: String,
@@ -60,6 +66,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
     match tokens.first().map(String::as_str) {
         Some("register") => parse_register(&tokens[1..]),
         Some("index") => parse_index(&tokens[1..]),
+        Some("index-worker") => parse_index_worker(&tokens[1..]),
         Some("scope") => parse_scope(&tokens[1..]),
         Some("update") => parse_update(&tokens[1..]),
         Some("query") => parse_query(&tokens[1..]),
@@ -112,7 +119,7 @@ pub async fn run_repo(
             let request = CodeIndexRequest {
                 repository: selector(alias, ref_selector, Vec::new(), Vec::new())?,
                 mode: CodeIndexMode::Full,
-                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+                freshness_policy: FreshnessPolicy::AllowStale,
             };
             if dry_run {
                 let response = service
@@ -128,9 +135,12 @@ pub async fn run_repo(
                 );
             }
             let response = service
-                .index_code_repository(request, context)
+                .start_code_repository_index(request, context)
                 .await
                 .map_err(|error| CliError::ApiFailed(error.message))?;
+            if let Some(task) = &response.task {
+                spawn_index_worker(&task.task_id)?;
+            }
 
             render_response(
                 "code.repo.index",
@@ -138,6 +148,18 @@ pub async fn run_repo(
                 &response,
                 format,
             )
+        }
+        RepoCommand::IndexWorker { task_id } => {
+            let completed = service
+                .run_code_index_task_once(task_id, context)
+                .await
+                .map_err(|error| CliError::ApiFailed(error.message))?;
+            Ok(match completed {
+                Some(task) => serde_json::to_string(&task)
+                    .map(|json| format!("{json}\n"))
+                    .map_err(|error| CliError::ApiFailed(error.to_string()))?,
+                None => String::new(),
+            })
         }
         RepoCommand::ScopePreview {
             alias,
@@ -334,6 +356,52 @@ fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {
         ref_selector,
         dry_run,
     })
+}
+
+fn parse_index_worker(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let mut task_id = None;
+    let mut index = 0;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--task-id" => {
+                task_id = Some(value_after(tokens, index, "--task-id")?);
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::IndexWorker { task_id })
+}
+
+#[cfg(not(test))]
+fn spawn_index_worker(task_id: &str) -> Result<(), CliError> {
+    let executable = std::env::current_exe()
+        .map_err(|error| CliError::ApiFailed(format!("failed to locate executable: {error}")))?;
+    std::process::Command::new(executable)
+        .args([
+            "repo",
+            "index-worker",
+            "--task-id",
+            task_id,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            CliError::ApiFailed(format!(
+                "failed to start background code index worker for task '{task_id}': {error}"
+            ))
+        })
+}
+
+#[cfg(test)]
+fn spawn_index_worker(_task_id: &str) -> Result<(), CliError> {
+    Ok(())
 }
 
 fn parse_scope(tokens: &[String]) -> Result<RepoCommand, CliError> {

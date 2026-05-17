@@ -52,6 +52,10 @@ relay-knowledge repo index core --ref <commit-sha> --format json
 
 全量索引通过 Git 读取 clean tree，tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
+当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的单个仓库索引 worker 消费任务。同一仓库已有 queued/running task 时，重复索引请求会复用当前任务，不会并行启动多个 full rebuild。
+
+已经 fresh 的 full index 仍会立即返回完成态 `summary`。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束。
+
 ## 5.4 符号与关系查询
 
 混合查询:
@@ -145,6 +149,8 @@ relay-knowledge repo status core --format json
 ```
 
 报告包含 repository id、root、indexed commit、tree hash、文件/符号/reference/chunk 总量、scope、代表性查询、延迟样本和 degradation summary。Markdown 报告适合贴进 PR 或发布说明；JSON 报告适合 CI 比较索引质量。
+
+`repo status --format json` 还会包含 cold index 的 `active_task`、active 或最新 scope 的 `checkpoint` 计数，以及 `retention` 摘要。后台 full index 成功后，retention 会保留 active scope、最近两个完成 scope 和未完成任务 scope；更旧的 scope 会被淘汰，避免大型仓库持续累积无界 SQLite 行。
 
 `repo report --format markdown` 还会汇总 edge resolution: resolved、ambiguous 和 unresolved 数量，用于判断当前代码图谱是否主要来自确定 AST 提取，还是存在大量需要人工或后续解析器改进的模糊边。
 

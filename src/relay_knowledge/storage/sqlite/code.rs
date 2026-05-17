@@ -18,6 +18,15 @@ mod code_status;
 #[path = "code_batch.rs"]
 mod code_batch;
 
+#[path = "code_cleanup.rs"]
+mod code_cleanup;
+
+#[path = "code_tasks.rs"]
+mod code_tasks;
+
+#[path = "code_search.rs"]
+mod code_search;
+
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
@@ -38,6 +47,10 @@ mod code_query_import_target_tests;
 #[path = "code_metadata_tests.rs"]
 mod code_metadata_tests;
 
+#[cfg(test)]
+#[path = "code_tasks_tests.rs"]
+mod code_tasks_tests;
+
 use crate::{
     domain::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint,
@@ -49,6 +62,9 @@ use crate::{
 };
 
 use super::SqliteGraphStore;
+use code_cleanup::{count_code_rows, delete_path_index, delete_scope_index};
+pub(super) use code_search::SearchDocumentInserter;
+use code_search::insert_search_document;
 use code_status::{canonical_filter_values, canonical_path_filters, parse_json_list};
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
@@ -86,6 +102,69 @@ impl CodeRepositoryStore for SqliteGraphStore {
                 &language_filters,
             )
         })
+    }
+
+    fn queue_code_index_task(
+        &self,
+        task: crate::storage::CodeIndexTaskSeed,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
+        self.run(move |connection| code_tasks::queue_task(connection, task))
+    }
+
+    fn claim_code_index_task(
+        &self,
+        request: crate::storage::CodeIndexTaskClaimRequest,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
+        self.run(move |connection| code_tasks::claim_task(connection, request))
+    }
+
+    fn complete_code_index_task(
+        &self,
+        request: crate::storage::CodeIndexTaskCompletion,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
+        self.run(move |connection| code_tasks::complete_task(connection, request))
+    }
+
+    fn fail_code_index_task(
+        &self,
+        request: crate::storage::CodeIndexTaskFailure,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
+        self.run(move |connection| code_tasks::fail_task(connection, request))
+    }
+
+    fn code_index_task(
+        &self,
+        task_id: String,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
+        self.run(move |connection| code_tasks::task_by_id(connection, &task_id))
+    }
+
+    fn active_code_index_task(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
+        self.run(move |connection| code_tasks::active_task(connection, &repository_id))
+    }
+
+    fn code_index_checkpoint(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexCheckpoint>> {
+        self.run(move |connection| code_tasks::checkpoint(connection, &source_scope))
+    }
+
+    fn code_scope_retention(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
+        self.run(move |connection| code_tasks::retention_status(connection, &repository_id))
+    }
+
+    fn prune_code_repository_scopes(
+        &self,
+        request: crate::storage::CodeScopeRetentionRequest,
+    ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
+        self.run(move |connection| code_tasks::prune_scopes(connection, request))
     }
 
     fn code_file_fingerprints(
@@ -511,149 +590,6 @@ fn clone_active_scope_for_incremental(
     Ok(())
 }
 
-pub(super) struct SearchDocumentInserter<'transaction> {
-    statement: rusqlite::Statement<'transaction>,
-}
-
-impl<'transaction> SearchDocumentInserter<'transaction> {
-    pub(super) fn new(
-        transaction: &'transaction rusqlite::Transaction<'_>,
-    ) -> Result<Self, StorageError> {
-        let statement = transaction.prepare(
-            "
-            INSERT INTO code_repository_search (
-                source_scope, document_kind, record_id, path, language_id, content
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ",
-        )?;
-
-        Ok(Self { statement })
-    }
-
-    pub(super) fn insert<'a>(
-        &mut self,
-        source_scope: &str,
-        document_kind: &str,
-        record_id: &str,
-        path: &str,
-        language_id: &str,
-        fields: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), StorageError> {
-        insert_search_document_with_statement(
-            &mut self.statement,
-            source_scope,
-            document_kind,
-            record_id,
-            path,
-            language_id,
-            fields,
-        )
-    }
-}
-
-fn insert_search_document<'a>(
-    transaction: &rusqlite::Transaction<'_>,
-    source_scope: &str,
-    document_kind: &str,
-    record_id: &str,
-    path: &str,
-    language_id: &str,
-    fields: impl IntoIterator<Item = &'a str>,
-) -> Result<(), StorageError> {
-    let mut inserter = SearchDocumentInserter::new(transaction)?;
-    inserter.insert(
-        source_scope,
-        document_kind,
-        record_id,
-        path,
-        language_id,
-        fields,
-    )
-}
-
-fn insert_search_document_with_statement<'a>(
-    statement: &mut rusqlite::Statement<'_>,
-    source_scope: &str,
-    document_kind: &str,
-    record_id: &str,
-    path: &str,
-    language_id: &str,
-    fields: impl IntoIterator<Item = &'a str>,
-) -> Result<(), StorageError> {
-    let fields = fields
-        .into_iter()
-        .filter(|field| !field.trim().is_empty())
-        .collect::<Vec<_>>();
-    let mut content = fields.join(" ");
-    if document_kind == "symbol" {
-        let terms =
-            identifier_search_terms(&fields.iter().take(2).copied().collect::<Vec<_>>().join(" "));
-        if !terms.is_empty() {
-            content.push(' ');
-            content.push_str(&terms.join(" "));
-        }
-    }
-    statement.execute(params![
-        source_scope,
-        document_kind,
-        record_id,
-        path,
-        language_id,
-        content
-    ])?;
-
-    Ok(())
-}
-
-fn identifier_search_terms(content: &str) -> Vec<String> {
-    let mut terms = Vec::new();
-    for token in
-        content.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-    {
-        if token.is_empty() {
-            continue;
-        }
-        terms.extend(
-            token
-                .split('_')
-                .filter(|part| !part.is_empty())
-                .map(str::to_ascii_lowercase),
-        );
-        terms.extend(camel_case_terms(token));
-    }
-    terms.sort();
-    terms.dedup();
-
-    terms
-}
-
-fn camel_case_terms(token: &str) -> Vec<String> {
-    let mut terms = Vec::new();
-    let mut start = 0;
-    let mut previous: Option<char> = None;
-    let chars = token.char_indices().collect::<Vec<_>>();
-    for (index, (byte_index, character)) in chars.iter().enumerate() {
-        let next = chars.get(index + 1).map(|(_, next)| *next);
-        let starts_upper_word = character.is_ascii_uppercase()
-            && previous.is_some_and(|previous| {
-                previous.is_ascii_lowercase()
-                    || previous.is_ascii_digit()
-                    || next.is_some_and(|next| next.is_ascii_lowercase())
-            });
-        if *byte_index > start && starts_upper_word {
-            terms.push(token[start..*byte_index].to_ascii_lowercase());
-            start = *byte_index;
-        }
-        previous = Some(*character);
-    }
-    if start < token.len() {
-        terms.push(token[start..].to_ascii_lowercase());
-    }
-
-    terms
-}
-
 fn clone_code_table(
     transaction: &rusqlite::Transaction<'_>,
     table: &'static str,
@@ -927,66 +863,4 @@ fn update_repository_after_snapshot(
     )?;
 
     Ok(())
-}
-
-fn delete_scope_index(
-    transaction: &rusqlite::Transaction<'_>,
-    source_scope: &str,
-) -> Result<(), StorageError> {
-    for table in [
-        "code_repository_path_tombstones",
-        "code_repository_file_diagnostics",
-        "code_repository_chunks",
-        "code_repository_calls",
-        "code_repository_imports",
-        "code_repository_references",
-        "code_repository_symbols",
-        "code_repository_files",
-        "code_repository_search",
-    ] {
-        transaction.execute(
-            &format!("DELETE FROM {table} WHERE source_scope = ?1"),
-            params![source_scope],
-        )?;
-    }
-
-    Ok(())
-}
-
-fn delete_path_index(
-    transaction: &rusqlite::Transaction<'_>,
-    source_scope: &str,
-    path: &str,
-) -> Result<(), StorageError> {
-    for table in [
-        "code_repository_file_diagnostics",
-        "code_repository_chunks",
-        "code_repository_calls",
-        "code_repository_imports",
-        "code_repository_references",
-        "code_repository_symbols",
-        "code_repository_files",
-        "code_repository_search",
-    ] {
-        transaction.execute(
-            &format!("DELETE FROM {table} WHERE source_scope = ?1 AND path = ?2"),
-            params![source_scope, path],
-        )?;
-    }
-
-    Ok(())
-}
-
-fn count_code_rows(
-    transaction: &rusqlite::Transaction<'_>,
-    table: &'static str,
-    source_scope: &str,
-) -> Result<usize, StorageError> {
-    transaction
-        .query_row(
-            &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = ?1"),
-            params![source_scope],
-            |row| row.get(0),
-        )
-        .map_err(StorageError::from)
 }

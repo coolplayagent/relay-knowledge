@@ -95,6 +95,8 @@ relay-knowledge setup profile local|agent-readonly|service|external-embedding
 relay-knowledge version
 ```
 
+Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running.
+
 ## 3.5 Read and Write Impact
 
 Status, health, help, setup doctor/profile, provider probe, report, and audit query are diagnostic entry points and should not mutate graph facts. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.

@@ -45,6 +45,8 @@ or silently expanding to unapproved disks.
 
 File-system watchers and scan workers degrade by platform capability: Windows may use USN cursors, macOS may use FSEvents cursors, and Linux may use inotify/fanotify or periodic bounded rescans. Event overflow, journal reset, permission changes, missing roots, and cursor invalidation become recoverable diagnostic states instead of unbounded whole-disk scans.
 
+Cold code-repository full indexing uses the same recovery shape. `repo index` persists a code-index task with a source scope, input fingerprint, payload, resource budget, attempt count, retry cursor, and lease fields; foreground CLI starts only a bounded single-shot worker, and resident `service run` drains the durable queue with one repository index worker. The worker writes checkpointed batches, marks retry or dead-letter on failure, and prunes old code scopes after success while retaining the active scope, the two newest completed scopes, and unfinished task scopes.
+
 Overload handling follows SRE and adaptive-concurrency principles: when queue, IO, CPU, or provider budgets saturate, the system rejects new background work first, delays low-priority content indexing, preserves query hot-path budget, and returns retryable, paused, or degraded states.
 
 ## 6. Acceptance Criteria

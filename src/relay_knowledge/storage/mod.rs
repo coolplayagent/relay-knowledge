@@ -26,7 +26,10 @@ pub use canvas::{
     GraphCanvasSelection, GraphCanvasStorageEdge, GraphCanvasStorageNode,
     GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
 };
-pub use code::{CodeImpactChanges, CodeRepositoryStore};
+pub use code::{
+    CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
+    CodeIndexTaskSeed, CodeRepositoryStore, CodeScopeRetentionRequest,
+};
 pub use file_index::{
     FileIndexDiagnostics, FileIndexEntry, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,
     FileIndexScanSummary, FileSearchHit, FileSearchRequest,
