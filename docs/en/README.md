@@ -86,12 +86,14 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 5: Code Repository Tree-sitter Retrieval Research](04-research/05-code-repository-tree-sitter-retrieval-research.md)
 - [Chapter 6: Agent Protocol Graph Retrieval Research](04-research/06-agent-protocol-graph-retrieval-research.md)
 - [Chapter 7: relay-knowledge Implementation Reference](04-research/07-relay-knowledge-implementation-reference.md)
+- [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](04-research/08-competitive-performance-research-2026.md)
 
 ## Appendix A: Benchmarks
 
 - [Appendix A.1: relay-teams Baseline 2026-05-14](05-benchmarks/01-relay-teams-baseline-2026-05-14.md)
 - [Appendix A.2: relay-teams Optimization Issues 2026-05-14](05-benchmarks/02-relay-teams-optimization-issues-2026-05-14.md)
 - [Appendix A.3: relay-teams Optimization Study 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
+- [Appendix A.5: Competitive and High-Performance Benchmark Targets 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
 
 ## Appendix B: Verification
 

@@ -73,6 +73,7 @@
 - [第 5 章 代码仓库 Tree-sitter 检索研究材料](04-research/05-code-repository-tree-sitter-retrieval-research.md)
 - [第 6 章 Agent 协议图检索接入研究](04-research/06-agent-protocol-graph-retrieval-research.md)
 - [第 7 章 relay-knowledge 实现借鉴落地路线](04-research/07-relay-knowledge-implementation-reference.md)
+- [第 8 章 竞争力、高性能与本机文件检索研究 2026](04-research/08-competitive-performance-research-2026.md)
 
 ## 附录 A：基准记录
 
@@ -80,6 +81,7 @@
 - [附录 A.2 relay-teams 优化问题清单 2026-05-14](05-benchmarks/02-relay-teams-optimization-issues-2026-05-14.md)
 - [附录 A.3 relay-teams 优化研究 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
 - [附录 A.4 自迭代已采纳优化记录](05-benchmarks/04-self-iteration-accepted-optimizations.md)
+- [附录 A.5 竞争力与高性能基准目标 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
 
 ## 附录 B：验证记录
 

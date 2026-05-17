@@ -41,15 +41,22 @@ Incremental indexing first narrows the work set:
 3. Expand affected files through reverse dependencies and import/call/reference edges.
 4. Refresh only affected code facts, chunks, and index families.
 
-## 6. Degradation Strategy
+## 6. High-Performance Boundaries
+
+Code indexing follows the shared principles behind Sourcegraph/Zoekt, GitHub Code Search, ripgrep, and Tree-sitter based systems: narrow candidates through path, language, trigram, symbol name, and blob hash before AST capture, edge resolution, or semantic/vector refresh. AST chunks should follow function, type, module, documentation comment, and import-block boundaries; fallback text chunks take over only when structural parsing is unavailable.
+
+Cold full indexing, semantic embedding, cross-batch edge finalization, large-file skip/hash, and parser-heavy work belong behind background worker or maintenance boundaries and do not block query hot paths. Incremental indexing records changed file count, affected file count, parse throughput, write batch count, candidate windows, and stale lag so hidden full scans are visible.
+
+## 7. Degradation Strategy
 
 Parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. Degradation appears in repo status, health, and context pack metadata.
 
-## 7. Acceptance Criteria
+## 8. Acceptance Criteria
 
 - Large repository indexing reports progress and does not replace the previous fresh scope early.
 - Incremental updates process changed and affected files; they do not disguise full scans as incremental work.
 - Files that fail parsing remain retrievable through text search.
+- Indexing traces explain time spent in candidate narrowing, parsing, writing, and refresh phases.
 
 ---
 

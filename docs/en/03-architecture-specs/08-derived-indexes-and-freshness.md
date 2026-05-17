@@ -20,8 +20,20 @@ Derived indexes are valuable not only for recall speed but for explainable fresh
 | `graph_path` | Schema paths, entity neighborhoods, multi-hop candidates |
 | `community` | Community summaries and global context |
 | `code` | Code symbols, references, calls, imports, chunk FTS |
+| `local_file_path` | Normalized local file path, basename, directory tokens, extension, path trigrams/posting lists |
+| `local_file_metadata` | File size, mtime, hash, MIME, language, permission snapshot, symlink/hidden/system metadata |
+| `local_file_content` | File text chunks, BM25/trigram, optional semantic/vector metadata |
+| `local_file_change_cursor` | Windows USN, macOS FSEvents, Linux inotify/fanotify, or bounded rescan cursor |
 
-## 3. Freshness State Machine
+## 3. Local File Index Contract
+
+Local file retrieval does not depend on Everything, Spotlight, Windows Search, locate, or any other external search tool. Platform event mechanisms may become watcher backends later, but relay-knowledge derived indexes must recover independently through bounded scans of authorized roots and persistent cursors.
+
+Filename/path, metadata, and content indexes are separate. Interactive file location must not wait for OCR, archive expansion, large-file hashing, embeddings, or full-content extraction. Every file query applies source scope, authorized root, exclude/ignore rules, permission snapshot, and freshness policy before entering the candidate window.
+
+`local_file_change_cursor` records last event, overflow, missed event, scan watermark, last scan error, and stale reason. If platform events are lost or cursors become invalid, queries return degraded or stale metadata and trigger bounded rescan instead of silently reporting freshness.
+
+## 4. Freshness State Machine
 
 ```text
 missing -> stale -> refreshing -> fresh
@@ -31,7 +43,9 @@ missing -> stale -> refreshing -> fresh
 
 `fresh` means the index cursor covers the target graph version; it does not mean the facts are true. `degraded` may serve requests, but context packs explain missing families, backends, or scopes.
 
-## 4. Refresh Scheduling
+File-index freshness includes both graph version and file cursor watermark. A stale content index does not make the path index unavailable; responses state which layer is stale.
+
+## 5. Refresh Scheduling
 
 Refresh tasks come from mutation logs and explicit refresh requests. Scheduling satisfies:
 
@@ -41,7 +55,9 @@ Refresh tasks come from mutation logs and explicit refresh requests. Scheduling 
 - Completion matches active lease, attempt, and target version.
 - If graph version advances while a task runs, the cursor remains stale and follow-up work is enqueued.
 
-## 5. Query Policy
+Local file refresh tasks also carry root id, platform cursor, scan budget, max files per root, and content extraction budget. Content indexing, OCR, archives, and large-file parsing run only as background worker items, never on query hot paths.
+
+## 6. Query Policy
 
 Freshness policies include at least:
 
@@ -49,11 +65,12 @@ Freshness policies include at least:
 - `wait-until-fresh`: wait for required indexes to reach the target version or return a stable timeout error.
 - `require-fresh`: fail immediately on stale indexes without implicit refresh.
 
-## 6. Acceptance Criteria
+## 7. Acceptance Criteria
 
 - `health` and context packs explain index lag, missing families, dead letters, and last errors.
 - Explicit refresh enqueue failure returns a retryable error and never pretends to be fresh.
 - Startup reconcilers replay missing refresh work from the mutation log.
+- Local filename queries do not depend on content indexes; file query output states path, metadata, content, and change-cursor freshness or degradation.
 
 ---
 

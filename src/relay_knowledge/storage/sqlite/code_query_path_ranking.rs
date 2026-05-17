@@ -71,16 +71,13 @@ pub(super) fn query_mentions_test_or_benchmark(query: &str) -> bool {
     query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .filter(|term| !term.is_empty())
-        .map(str::to_ascii_lowercase)
-        .any(|term| term_mentions_test_or_benchmark(&term))
+        .any(term_mentions_test_or_benchmark)
 }
 
 fn term_mentions_test_or_benchmark(term: &str) -> bool {
-    term_is_test_or_benchmark(term)
-        || term
-            .split('_')
-            .filter(|part| !part.is_empty())
-            .any(term_is_test_or_benchmark)
+    identifier_intent_parts(term)
+        .iter()
+        .any(|part| term_is_test_or_benchmark(part))
 }
 
 fn path_looks_like_test_or_benchmark(path: &str) -> bool {
@@ -107,14 +104,7 @@ fn query_mentions_adapter_surface(query: &str) -> bool {
     query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .filter(|term| !term.is_empty())
-        .map(str::to_ascii_lowercase)
-        .any(|term| {
-            term_mentions_adapter_surface(&term)
-                || term
-                    .split('_')
-                    .filter(|part| !part.is_empty())
-                    .any(term_mentions_adapter_surface)
-        })
+        .any(term_mentions_adapter_surface)
 }
 
 fn file_name_looks_like_test_or_benchmark(file_name: &str) -> bool {
@@ -144,18 +134,70 @@ fn file_name_looks_like_adapter_surface(file_name: &str) -> bool {
     let stem = file_name
         .rsplit_once('.')
         .map_or(file_name, |(stem, _)| stem);
-    segment_mentions_adapter_surface(stem)
+    stem == "c" || segment_mentions_adapter_surface(stem)
 }
 
 fn segment_mentions_adapter_surface(segment: &str) -> bool {
-    segment == "c"
-        || segment
-            .split(['_', '-', '.'])
-            .filter(|part| !part.is_empty())
-            .any(term_mentions_adapter_surface)
+    term_mentions_adapter_surface(segment)
 }
 
 fn term_mentions_adapter_surface(term: &str) -> bool {
+    identifier_intent_parts(term)
+        .iter()
+        .any(|part| term_is_adapter_surface(part))
+}
+
+fn identifier_intent_parts(term: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    for chunk in term.split(['_', '-', '.']).filter(|part| !part.is_empty()) {
+        push_camel_case_intent_parts(chunk, &mut parts);
+    }
+    parts
+}
+
+fn push_camel_case_intent_parts(chunk: &str, parts: &mut Vec<String>) {
+    let characters = chunk.char_indices().collect::<Vec<_>>();
+    if characters.is_empty() {
+        return;
+    }
+
+    let mut start = 0;
+    for index in 1..characters.len() {
+        let previous = characters[index - 1].1;
+        let current = characters[index].1;
+        let next = characters.get(index + 1).map(|(_, character)| *character);
+        let starts_camel_word = previous.is_ascii_lowercase() && current.is_ascii_uppercase();
+        let ends_acronym = previous.is_ascii_uppercase()
+            && current.is_ascii_uppercase()
+            && next.is_some_and(|c| c.is_ascii_lowercase());
+        let changes_alnum_kind = previous.is_ascii_alphabetic() != current.is_ascii_alphabetic();
+        if starts_camel_word || ends_acronym || changes_alnum_kind {
+            push_intent_part(&chunk[start..characters[index].0], parts);
+            start = characters[index].0;
+        }
+    }
+    push_intent_part(&chunk[start..], parts);
+
+    let uppercase_or_digit = chunk
+        .chars()
+        .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
+    if uppercase_or_digit {
+        let lower_chunk = chunk.to_ascii_lowercase();
+        for suffix in ["api", "ffi", "jni"] {
+            if lower_chunk.len() > suffix.len() && lower_chunk.ends_with(suffix) {
+                push_intent_part(suffix, parts);
+            }
+        }
+    }
+}
+
+fn push_intent_part(part: &str, parts: &mut Vec<String>) {
+    if !part.is_empty() {
+        parts.push(part.to_ascii_lowercase());
+    }
+}
+
+fn term_is_adapter_surface(term: &str) -> bool {
     matches!(
         term,
         "adapter"
@@ -254,11 +296,27 @@ mod tests {
             0.0
         );
         assert_eq!(
+            call_site_source_path_bonus(4.0, "src/c/cache.cc", &callers, "NewLRUCache", false),
+            0.2
+        );
+        assert_eq!(
             call_site_source_path_bonus(4.0, "db/c.cc", &callers, "C API NewLRUCache", false),
             0.2
         );
         assert_eq!(
             call_site_source_path_bonus(4.0, "db/c.cc", &callers, "c_api NewLRUCache", false),
+            0.2
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "FFIWrapper", false),
+            0.2
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "CAPI NewLRUCache", false),
+            0.2
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "ApiBridge", false),
             0.2
         );
         assert_eq!(
@@ -272,6 +330,8 @@ mod tests {
         assert!(!query_mentions_test_or_benchmark("NewLRUCache"));
         assert!(query_mentions_test_or_benchmark("NewLRUCache test caller"));
         assert!(query_mentions_test_or_benchmark("db_bench cache"));
+        assert!(query_mentions_test_or_benchmark("UnitTestCoverage"));
+        assert!(query_mentions_test_or_benchmark("BenchmarkSuite"));
     }
 
     #[test]

@@ -41,15 +41,22 @@ resolve snapshot
 3. 用反向依赖和 import/call/reference edge 扩散 affected files。
 4. 只刷新受影响的 code facts、chunks 和 index families。
 
-## 6. 降级策略
+## 6. 高性能边界
+
+代码索引采用 Sourcegraph/Zoekt、GitHub Code Search、ripgrep 和 Tree-sitter 类系统的共同原则：先用路径、语言、trigram、symbol name 和 blob hash 缩小候选，再做 AST capture、edge resolution 和语义/向量刷新。AST chunk 应沿函数、类型、模块、doc comment 和 import block 边界切分；fallback text chunk 只在结构解析不可用时接管。
+
+全量 cold index、语义 embedding、跨 batch edge finalization、large file skip/hash 和 parser-heavy work 都属于后台 worker 或 maintenance 边界，不能阻塞查询热路径。增量索引必须记录 changed file count、affected file count、parse throughput、write batch count、candidate window 和 stale lag，便于区分真正增量和隐藏全仓扫描。
+
+## 7. 降级策略
 
 Parse error、grammar panic、capture mismatch 或 unsupported language 生成 parse status 诊断，并回退到 text chunk。降级结果必须出现在 repo status、health 和 context pack metadata 中。
 
-## 7. 验收标准
+## 8. 验收标准
 
 - 大仓库索引能报告 progress，不替换旧 fresh scope。
 - 增量更新只处理 changed 和 affected files，不能全仓扫描伪装为增量。
 - 解析失败文件仍能通过文本检索召回。
+- 索引 trace 能说明候选缩小、parse、写入和刷新各阶段耗时。
 
 ---
 

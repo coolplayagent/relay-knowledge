@@ -332,29 +332,23 @@ fn status_allows_resource_limit_body(status_code: u16) -> bool {
 
 fn provider_error_reports_resource_limit(body: &str) -> bool {
     if let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) {
-        let provider_error = payload.get("error").unwrap_or(&payload);
-        if let Some(text) = provider_error.as_str() {
-            return text_reports_resource_limit(text);
-        }
-
-        let mut inspected_fields = false;
-        for field in ["code", "type", "message", "status", "detail"] {
-            if let Some(text) = provider_error
-                .get(field)
-                .and_then(serde_json::Value::as_str)
-            {
-                inspected_fields = true;
-                if text_reports_resource_limit(text) {
-                    return true;
-                }
-            }
-        }
-        if inspected_fields {
-            return false;
-        }
+        return json_strings_report_resource_limit(&payload);
     }
 
     text_reports_resource_limit(body)
+}
+
+fn json_strings_report_resource_limit(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => text_reports_resource_limit(text),
+        serde_json::Value::Array(values) => values.iter().any(json_strings_report_resource_limit),
+        serde_json::Value::Object(fields) => {
+            fields.values().any(json_strings_report_resource_limit)
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            false
+        }
+    }
 }
 
 fn text_reports_resource_limit(text: &str) -> bool {
@@ -476,6 +470,20 @@ mod tests {
                     .to_owned(),
             ),
         );
+        let top_level_message_quota = status_error(
+            403,
+            Some(
+                r#"{"error":{"code":"invalid_request"},"message":"Quota exceeded for tenant"}"#
+                    .to_owned(),
+            ),
+        );
+        let nested_detail_resource_exhausted = status_error(
+            500,
+            Some(
+                r#"{"error":{"code":"provider_error"},"details":[{"reason":"Resource exhausted"}]}"#
+                    .to_owned(),
+            ),
+        );
 
         assert_eq!(payment_required.retry, ProviderRetryClass::Retryable);
         assert_eq!(payment_required.code, "rate_limited");
@@ -488,6 +496,13 @@ mod tests {
             ProviderRetryClass::Retryable
         );
         assert_eq!(retry_after_resource_exhausted.code, "rate_limited");
+        assert_eq!(top_level_message_quota.retry, ProviderRetryClass::Retryable);
+        assert_eq!(top_level_message_quota.code, "rate_limited");
+        assert_eq!(
+            nested_detail_resource_exhausted.retry,
+            ProviderRetryClass::Retryable
+        );
+        assert_eq!(nested_detail_resource_exhausted.code, "rate_limited");
     }
 
     #[test]
@@ -503,11 +518,20 @@ mod tests {
                     .to_owned(),
             ),
         );
+        let limit_key_without_limited_value = status_error(
+            400,
+            Some(r#"{"error":{"code":"invalid_request"},"rate_limit":false}"#.to_owned()),
+        );
 
         assert_eq!(auth_forbidden.retry, ProviderRetryClass::Permanent);
         assert_eq!(auth_forbidden.code, "auth_invalid");
         assert_eq!(invalid_request.retry, ProviderRetryClass::Permanent);
         assert_eq!(invalid_request.code, "invalid_request");
+        assert_eq!(
+            limit_key_without_limited_value.retry,
+            ProviderRetryClass::Permanent
+        );
+        assert_eq!(limit_key_without_limited_value.code, "invalid_request");
     }
 
     #[test]

@@ -21,6 +21,7 @@
 | --- | --- | --- | --- |
 | 官方规范与产品文档 | Microsoft GraphRAG、MCP、A2A、OpenAI File Search、Neo4j GraphRAG | 判断生态接口、协议约束和用户体验默认值 | 作为事实来源，避免用二手解读替代 |
 | 论文与综述 | KG construction、KG refinement、RAG、GraphRAG、KGE、HybridRAG | 判断算法边界、质量风险和长期路线 | 只转化为可测试的架构原则 |
+| 搜索、数据库与系统工程 | Lucene/BM25、Vespa/OpenSearch、Everything、plocate、Zoekt、RocksDB、Zanzibar、TAO、SRE | 验证高性能索引、权限过滤、后台恢复、过载保护和可观测性做法 | 采用通用机制，不绑定外部桌面搜索或云服务依赖 |
 | 开源实现与工程案例 | ai-knowledge-graph、Tree-sitter、Codebase-Memory、GitHub code navigation | 验证 pipeline、解析、索引和 Agent 接入可行性 | 采用能力语义，不照搬脚本边界 |
 | 项目内部材料 | 架构规格、能力说明、relay-teams 基准、自迭代记录 | 对照当前实现、关闭差距和安排优先级 | 作为落地约束和验收基线 |
 
@@ -32,6 +33,9 @@
 - A2A 协议规范: <https://a2a-protocol.org/dev/specification/>
 - OpenAI File Search: <https://platform.openai.com/docs/guides/tools-file-search/>
 - Neo4j GraphRAG: <https://neo4j.com/labs/genai-ecosystem/graphrag/>
+- Everything indexes: <https://www.voidtools.com/support/everything/indexes>
+- plocate: <https://plocate.sesse.net/>
+- Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
 
 ## 关键竞争力
 
@@ -39,6 +43,7 @@
 - **图版本与索引新鲜度**: 图事实、BM25、语义索引、向量索引和社区摘要必须能说明对应版本，避免过期上下文进入答案。
 - **三层检索与可解释 Context Pack**: 关键词、语义和向量检索各自发挥优势，再通过图路径、证据和排序解释组织上下文。
 - **代码知识图谱**: 用 Git snapshot、Tree-sitter、符号/引用图和影响分析，把代码仓库从文本搜索升级为结构化知识空间。
+- **本机文件高速检索**: 用独立文件名/路径、metadata、内容和变更游标 read model，把桌面文件定位、文档内容检索和图谱上下文连接起来，同时保持授权和 freshness 可解释。
 - **Agent 互操作**: MCP/ACP 是接入层，核心服务仍保持清晰 API 和授权边界，未来可扩展到 A2A 网关。
 
 ## 章节导读
@@ -50,3 +55,4 @@
 - [第 5 章 代码仓库 Tree-sitter 检索研究材料](05-code-repository-tree-sitter-retrieval-research.md): 明确代码图、增量索引和混合检索的工程路线。
 - [第 6 章 Agent 协议图检索接入研究](06-agent-protocol-graph-retrieval-research.md): 规划 MCP/ACP/A2A 下的图检索互操作。
 - [第 7 章 relay-knowledge 实现借鉴落地路线](07-relay-knowledge-implementation-reference.md): 将研究结论收敛为实现优先级和差距关闭路线。
+- [第 8 章 竞争力、高性能与本机文件检索研究 2026](08-competitive-performance-research-2026.md): 从 GraphRAG、混合搜索、向量索引、代码搜索、本机文件检索、图存储和 SRE 实践中提炼优化建议。
