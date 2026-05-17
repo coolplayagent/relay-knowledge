@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-derived-read-model-cache-preserve-score-20260517
+
+- 目标：在保持 foundational、competitive、semantic/vector、accuracy 与 research judge 保护目标不变的前提下，降低 semantic/vector 本地 read model 和 local rerank 热路径中的重复分配与重复 query vector 哈希成本。
+- 方法：共享标识符 normalizer 增加可扩展现有 `BTreeSet` 的接口，semantic signature、hashed vector 与 rerank fact/label term 收集复用同一集合而不是构造临时集合；vector candidate loop 为每个查询按维度缓存本次 hashed query vector，避免同一维度候选逐行重算。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、candidate filter、candidate limit、RRF fusion、local deterministic scoring公式、external provider URL/API key/model/dimension/env 读取、embedding payload、freshness、QoS、judge 或 self-iteration harness；semantic/vector 最终分数与结果排序应与现有算法一致。
+- 预期影响：local documents、graph retrieval fixture、semantic/vector fixture 和大仓 graph retrieval 查询在 semantic/vector 来源参与时减少临时集合分配和 per-row query vector hashing；protected retrieval source coverage、backend availability、case rank、stability 与 research judge 应保持不变或改善。
+- 已知风险：该候选主要优化 CPU/分配，不扩大召回、不剪枝候选、不改变评分权重，因此质量风险低；可观测性能改善取决于候选窗口大小和向量维度分布，通常在多候选同维度 vector read model 查询中最明显。
+
 ## 候选优化说明：manual-identifier-aware-semantic-vector-rerank-20260517
 
 - 目标：提升 graph semantic/vector 与本地 rerank 对代码符号、实体标签和路径中复合标识符的泛化检索质量，避免 `GraphRAGContextPack`、`SemanticVectorRecall`、`retry_policy`、`RESTClient` 这类标识符只作为一个不透明 token 参与语义签名、向量哈希或 rerank 覆盖度。
@@ -949,4 +957,17 @@ six seven"), +        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"sev
 Adopted optimization notes:
 
 RetrieverSource, }, +    retrieval::terms::normalized_terms, storage::{GraphSearchRequest, StorageError}, }; @@ -773,16 +774,7 @@ } fn collect_terms(value: &str, terms: &mut BTreeSet<String>) { -    for token in value -        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) -        .filter(|token| token.len() >= 2) -    { -        let token = token.to_ascii_lowercase(); -        for part in token.split('_').filter(|part| part.len() >= 2) { -            terms.insert(part.to_owned()); -        } -        terms.insert(token); -    } +    terms.extend(normalized_terms(value, 2)); } fn hashed_vector( @@ -946,4 +938,14 @@ assert_eq!(first, second); assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001); } + +    #[test] +    fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() { +        let labels = vec!["SemanticVectorRecall".to_owned()]; +        let signature = token_signature("GraphRAGContextPack", &labels, None, "abc"); + +        for term in ["semantic", "vector", "recall", "graph", "rag", "context", "pack"] { +            assert!(signature.contains(&term.to_owned()), "missing term {term}"); +        } +    } } tokens used 298,164
+## 20260517T115627Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T115627Z.patch`
+- score: 0.97996 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.955749, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: score_component:research_judge 0.88->0.89; metric:cargo_build_release_ms 33186.0->29988; metric:cargo_fmt_check_ms 719.0->559; metric:cargo_clippy_ms 180.0->154; metric:cargo_test_ms 7819.0->6294; metric:semantic_vector_provider_probe_ms 1390.0->1189
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=29988ms; cargo_fmt_check_ms=559ms; cargo_clippy_ms=154ms; cargo_test_ms=6294ms; relay_teams_index_ms=68979ms; relay_teams_query_p50_ms=96ms; relay_teams_query_p95_ms=346ms; leveldb_cpp_index_ms=16392ms
+
+Adopted optimization notes:
+
+tinue; } @@ -279,6 +277,26 @@ Ok(hits) } +struct QueryVectorCache<'a> { +    query: &'a str, +    vectors: BTreeMap<usize, Vec<f64>>, +} + +impl<'a> QueryVectorCache<'a> { +    fn new(query: &'a str) -> Self { +        Self { +            query, +            vectors: BTreeMap::new(), +        } +    } + +    fn vector(&mut self, dimension: usize) -> &[f64] { +        self.vectors +            .entry(dimension) +            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension)) +    } +} + fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize { request .limit @@ -385,4 +403,16 @@ assert!(ranking.contains("CASE WHEN lower(content) LIKE ?")); assert_eq!(values.len(), MAX_DERIVED_QUERY_TERMS * fields.len() * 2); } + +    #[test] +    fn query_vector_cache_reuses_vectors_by_dimension() { +        let mut cache = QueryVectorCache::new("semantic vector freshness"); +        let first = cache.vector(16).to_vec(); +        let second = cache.vector(16).to_vec(); + +        assert_eq!(first, second); +        assert_eq!(cache.vectors.len(), 1); +        assert_eq!(cache.vector(8).len(), 8); +        assert_eq!(cache.vectors.len(), 2); +    } } tokens used 135,200
 

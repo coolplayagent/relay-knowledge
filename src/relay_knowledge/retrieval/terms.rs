@@ -2,18 +2,22 @@ use std::collections::BTreeSet;
 
 pub(crate) fn normalized_terms(text: &str, min_len: usize) -> BTreeSet<String> {
     let mut terms = BTreeSet::new();
+    extend_normalized_terms(text, min_len, &mut terms);
+
+    terms
+}
+
+pub(crate) fn extend_normalized_terms(text: &str, min_len: usize, terms: &mut BTreeSet<String>) {
     let mut token = String::new();
     for character in text.chars() {
         if character.is_alphanumeric() || character == '_' {
             token.push(character);
         } else {
-            insert_identifier_terms(&token, min_len, &mut terms);
+            insert_identifier_terms(&token, min_len, terms);
             token.clear();
         }
     }
-    insert_identifier_terms(&token, min_len, &mut terms);
-
-    terms
+    insert_identifier_terms(&token, min_len, terms);
 }
 
 fn insert_identifier_terms(token: &str, min_len: usize, terms: &mut BTreeSet<String>) {
@@ -161,5 +165,16 @@ mod tests {
         assert!(terms.contains("api"));
         assert!(terms.contains("w"));
         assert!(terms.contains("3"));
+    }
+
+    #[test]
+    fn extend_normalized_terms_matches_owned_collection() {
+        let mut extended = BTreeSet::from(["existing".to_owned()]);
+        extend_normalized_terms("GraphRAGContextPack retry_policy", 2, &mut extended);
+
+        let mut expected = normalized_terms("GraphRAGContextPack retry_policy", 2);
+        expected.insert("existing".to_owned());
+
+        assert_eq!(extended, expected);
     }
 }

@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::domain::{RerankDiagnostics, RerankMode, RerankSignal, RetrievalHit};
 
-use super::{LOCAL_RERANK_MODEL, RerankConfig, terms::normalized_terms};
+use super::{
+    LOCAL_RERANK_MODEL, RerankConfig,
+    terms::{extend_normalized_terms, normalized_terms},
+};
 
 const CONTENT_MATCH_WEIGHT: f64 = 0.40;
 const ENTITY_MATCH_WEIGHT: f64 = 0.25;
@@ -146,10 +149,10 @@ fn evidence_structure_bonus(hit: &RetrievalHit) -> f64 {
 fn terms_from_facts(hit: &RetrievalHit) -> BTreeSet<String> {
     let mut terms = BTreeSet::new();
     for fact in &hit.graph_facts {
-        terms.extend(terms_from_text(&fact.subject));
-        terms.extend(terms_from_text(&fact.predicate));
+        extend_normalized_terms(&fact.subject, 1, &mut terms);
+        extend_normalized_terms(&fact.predicate, 1, &mut terms);
         if let Some(object) = &fact.object {
-            terms.extend(terms_from_text(object));
+            extend_normalized_terms(object, 1, &mut terms);
         }
     }
 
@@ -157,10 +160,12 @@ fn terms_from_facts(hit: &RetrievalHit) -> BTreeSet<String> {
 }
 
 fn terms_from_labels(labels: &[String]) -> BTreeSet<String> {
-    labels
-        .iter()
-        .flat_map(|label| normalized_terms(label, 1).into_iter())
-        .collect()
+    let mut terms = BTreeSet::new();
+    for label in labels {
+        extend_normalized_terms(label, 1, &mut terms);
+    }
+
+    terms
 }
 
 fn term_coverage(query_terms: &BTreeSet<String>, candidate_terms: &BTreeSet<String>) -> f64 {

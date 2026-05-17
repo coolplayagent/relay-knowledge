@@ -9,7 +9,7 @@ use crate::{
         ContextGraphFact, EvidenceExtractionMetadata, EvidenceModality, FactStatus, GraphVersion,
         RetrievalHit, RetrieverSource,
     },
-    retrieval::terms::normalized_terms,
+    retrieval::terms::extend_normalized_terms,
     storage::{GraphSearchRequest, StorageError},
 };
 
@@ -774,7 +774,7 @@ fn token_signature(
 }
 
 fn collect_terms(value: &str, terms: &mut BTreeSet<String>) {
-    terms.extend(normalized_terms(value, 2));
+    extend_normalized_terms(value, 2, terms);
 }
 
 fn hashed_vector(
