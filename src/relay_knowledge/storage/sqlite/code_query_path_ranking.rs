@@ -4,6 +4,7 @@ pub(super) fn call_site_source_path_bonus(
     base_score: f64,
     path: &str,
     request: &CodeRetrievalRequest,
+    query: &str,
     query_has_test_intent: bool,
 ) -> f64 {
     if base_score <= 0.0
@@ -13,6 +14,13 @@ pub(super) fn call_site_source_path_bonus(
             CodeQueryKind::Callers | CodeQueryKind::Callees
         )
         || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    if request.code_query_kind == CodeQueryKind::Callers
+        && !query_mentions_adapter_surface(query)
+        && path_looks_like_adapter_surface(path)
     {
         return 0.0;
     }
@@ -86,6 +94,29 @@ fn path_looks_like_test_or_benchmark(path: &str) -> bool {
             .is_some_and(file_name_looks_like_test_or_benchmark)
 }
 
+fn path_looks_like_adapter_surface(path: &str) -> bool {
+    let lower_path = path.to_ascii_lowercase();
+    lower_path.split('/').any(segment_mentions_adapter_surface)
+        || lower_path
+            .rsplit('/')
+            .next()
+            .is_some_and(file_name_looks_like_adapter_surface)
+}
+
+fn query_mentions_adapter_surface(query: &str) -> bool {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .map(str::to_ascii_lowercase)
+        .any(|term| {
+            term_mentions_adapter_surface(&term)
+                || term
+                    .split('_')
+                    .filter(|part| !part.is_empty())
+                    .any(term_mentions_adapter_surface)
+        })
+}
+
 fn file_name_looks_like_test_or_benchmark(file_name: &str) -> bool {
     let stem = file_name
         .rsplit_once('.')
@@ -106,6 +137,38 @@ fn term_is_test_or_benchmark(term: &str) -> bool {
     matches!(
         term,
         "test" | "tests" | "testing" | "bench" | "benchmark" | "benchmarks"
+    )
+}
+
+fn file_name_looks_like_adapter_surface(file_name: &str) -> bool {
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    segment_mentions_adapter_surface(stem)
+}
+
+fn segment_mentions_adapter_surface(segment: &str) -> bool {
+    segment == "c"
+        || segment
+            .split(['_', '-', '.'])
+            .filter(|part| !part.is_empty())
+            .any(term_mentions_adapter_surface)
+}
+
+fn term_mentions_adapter_surface(term: &str) -> bool {
+    matches!(
+        term,
+        "adapter"
+            | "adapters"
+            | "api"
+            | "binding"
+            | "bindings"
+            | "bridge"
+            | "ffi"
+            | "interop"
+            | "jni"
+            | "wrapper"
+            | "wrappers"
     )
 }
 
@@ -130,32 +193,77 @@ mod tests {
         let hybrid = retrieval_request(CodeQueryKind::Hybrid);
 
         assert_eq!(
-            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, false),
+            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, "NewLRUCache", false),
             0.2
         );
         assert_eq!(
-            call_site_source_path_bonus(4.0, "db/db_test.cc", &callers, false),
+            call_site_source_path_bonus(4.0, "db/db_test.cc", &callers, "NewLRUCache", false),
             0.0
         );
         assert_eq!(
-            call_site_source_path_bonus(4.0, "benchmarks/db_bench.cc", &callers, false),
+            call_site_source_path_bonus(
+                4.0,
+                "benchmarks/db_bench.cc",
+                &callers,
+                "NewLRUCache",
+                false,
+            ),
             0.0
         );
         assert_eq!(
-            call_site_source_path_bonus(4.0, "src/pkg/__tests__/caller.ts", &callers, false),
+            call_site_source_path_bonus(
+                4.0,
+                "src/pkg/__tests__/caller.ts",
+                &callers,
+                "NewLRUCache",
+                false,
+            ),
             0.0
         );
         assert_eq!(
-            call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, false),
+            call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, "NewLRUCache", false),
             0.0
         );
         assert_eq!(
-            call_site_source_path_bonus(4.0, "db/db_impl.cc", &hybrid, false),
+            call_site_source_path_bonus(4.0, "db/db_impl.cc", &hybrid, "NewLRUCache", false),
             0.0
         );
         assert_eq!(
-            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, true),
+            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, "NewLRUCache", true),
             0.0
+        );
+    }
+
+    #[test]
+    fn call_site_source_path_bonus_demotes_adapter_surfaces_without_adapter_intent() {
+        let callers = retrieval_request(CodeQueryKind::Callers);
+        let callees = retrieval_request(CodeQueryKind::Callees);
+
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "NewLRUCache", false),
+            0.0
+        );
+        assert_eq!(
+            call_site_source_path_bonus(
+                4.0,
+                "bindings/cache_wrapper.cc",
+                &callers,
+                "NewLRUCache",
+                false,
+            ),
+            0.0
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "C API NewLRUCache", false),
+            0.2
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "c_api NewLRUCache", false),
+            0.2
+        );
+        assert_eq!(
+            call_site_source_path_bonus(4.0, "db/c.cc", &callees, "NewLRUCache", false),
+            0.2
         );
     }
 

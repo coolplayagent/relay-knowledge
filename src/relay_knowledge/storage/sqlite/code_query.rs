@@ -415,6 +415,7 @@ fn search_calls(
                     base_score,
                     &row.path,
                     request,
+                    &query,
                     query_has_test_intent,
                 );
             (score > 0.0).then(|| {
