@@ -13,7 +13,7 @@
 - [第 2 章 CLI 基础](01-user-guide/02-cli-basics.md)
 - [第 3 章 CLI 命令参考](01-user-guide/03-cli-command-reference.md)
 - [第 4 章 知识图谱](01-user-guide/04-knowledge-graph.md)
-- [第 5 章 代码仓库图谱](01-user-guide/05-code-repository-graph.md)
+- [第 5 章 代码仓库图谱工作流](01-user-guide/05-code-repository-graph-workflow.md)
 - [第 6 章 Web 工作区](01-user-guide/06-web-workspace.md)
 - [第 7 章 MCP Agent 接入](01-user-guide/07-mcp-agent-access.md)
 - [第 8 章 ACP 本地 Adapter](01-user-guide/08-acp-local-adapter.md)

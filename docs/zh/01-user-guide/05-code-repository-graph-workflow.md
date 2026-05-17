@@ -1,6 +1,6 @@
-# 第 5 章 代码仓库图谱
+# 第 5 章 代码仓库图谱工作流
 
-[中文](../../zh/01-user-guide/05-code-repository-graph.md) | [English](../../en/01-user-guide/05-code-repository-graph.md)
+[中文](../../zh/01-user-guide/05-code-repository-graph-workflow.md) | [English](../../en/01-user-guide/05-code-repository-graph-workflow.md)
 
 代码仓库图谱把 Git tree、文件、符号、引用、调用和 import 关系纳入同一检索面。它不是简单的文件搜索；查询和影响分析都依赖已索引的代码图谱快照。
 

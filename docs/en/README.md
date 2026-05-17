@@ -26,7 +26,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 2: CLI Basics](01-user-guide/02-cli-basics.md)
 - [Chapter 3: CLI Command Reference](01-user-guide/03-cli-command-reference.md)
 - [Chapter 4: Knowledge Graph](01-user-guide/04-knowledge-graph.md)
-- [Chapter 5: Code Repository Graph](01-user-guide/05-code-repository-graph.md)
+- [Chapter 5: Code Repository Graph Workflow](01-user-guide/05-code-repository-graph-workflow.md)
 - [Chapter 6: Web Workspace](01-user-guide/06-web-workspace.md)
 - [Chapter 7: MCP Agent Access](01-user-guide/07-mcp-agent-access.md)
 - [Chapter 8: ACP Local Adapter](01-user-guide/08-acp-local-adapter.md)

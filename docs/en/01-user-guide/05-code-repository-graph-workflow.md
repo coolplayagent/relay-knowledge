@@ -1,6 +1,6 @@
-# Chapter 5: Code Repository Graph
+# Chapter 5: Code Repository Graph Workflow
 
-[English](../../en/01-user-guide/05-code-repository-graph.md) | [中文](../../zh/01-user-guide/05-code-repository-graph.md)
+[English](../../en/01-user-guide/05-code-repository-graph-workflow.md) | [中文](../../zh/01-user-guide/05-code-repository-graph-workflow.md)
 
 The code repository graph brings Git trees, files, symbols, references, calls, and imports into one retrieval surface. It is not simple file search; queries and impact analysis depend on indexed code graph snapshots.
 

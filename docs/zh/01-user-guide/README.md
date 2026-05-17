@@ -27,7 +27,7 @@
 - [第 2 章 CLI 基础](02-cli-basics.md): 命令语法、输出格式、freshness 和解析诊断。
 - [第 3 章 CLI 命令参考](03-cli-command-reference.md): 命令总览、状态诊断、setup profile 和 provider probe。
 - [第 4 章 知识图谱](04-knowledge-graph.md): evidence 写入、context pack 查询、图检查、多模态 evidence 和检索后端入口。
-- [第 5 章 代码仓库图谱](05-code-repository-graph.md): 仓库注册、代码图谱索引、符号与关系查询、增量更新、影响分析和报告。
+- [第 5 章 代码仓库图谱工作流](05-code-repository-graph-workflow.md): 仓库注册、代码图谱索引、符号与关系查询、增量更新、影响分析和报告。
 - [第 6 章 Web 工作区](06-web-workspace.md): 静态资源、同源接口、操作执行、浏览器集成测试和安全边界。
 - [第 7 章 MCP Agent 接入](07-mcp-agent-access.md): MCP policy、会话流程、tools/resources/prompts 和访问边界。
 - [第 8 章 ACP 本地 Adapter](08-acp-local-adapter.md): 本地 ACP 会话、progress、cancellation 和 context artifact。
