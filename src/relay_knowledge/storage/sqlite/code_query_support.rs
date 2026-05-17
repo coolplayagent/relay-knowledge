@@ -516,42 +516,125 @@ pub(super) fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
 }
 
 pub(super) fn fts_match_query(query: &str) -> String {
-    fts_match_query_with_operator(query, " ")
+    fts_match_query_with_operator(query, " ", true)
 }
 
 pub(super) fn symbol_fts_match_query(query: &str) -> String {
-    fts_match_query_with_operator(query, " OR ")
+    fts_match_query_with_operator(query, " OR ", false)
 }
 
-fn fts_match_query_with_operator(query: &str, operator: &str) -> String {
-    let terms = query
+fn fts_match_query_with_operator(
+    query: &str,
+    operator: &str,
+    include_compound_identifiers: bool,
+) -> String {
+    let terms = fts_query_terms(query);
+
+    if terms.is_empty() {
+        return "relayknowledgeunlikelyemptyquerytoken".to_owned();
+    }
+
+    let primary = terms
+        .iter()
+        .map(|term| quote_fts_term(term))
+        .collect::<Vec<_>>()
+        .join(operator);
+    let alternatives = if include_compound_identifiers {
+        compound_identifier_fts_terms(&terms)
+    } else {
+        Vec::new()
+    };
+    if alternatives.is_empty() {
+        primary
+    } else {
+        format!(
+            "({}) OR {}",
+            primary,
+            alternatives
+                .iter()
+                .map(|term| quote_fts_term(term))
+                .collect::<Vec<_>>()
+                .join(" OR ")
+        )
+    }
+}
+
+fn fts_query_terms(query: &str) -> Vec<String> {
+    query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .map(str::trim)
         .filter(|term| !term.is_empty())
-        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
-        .collect::<Vec<_>>();
+        .map(str::to_owned)
+        .collect()
+}
 
-    if terms.is_empty() {
-        "relayknowledgeunlikelyemptyquerytoken".to_owned()
-    } else {
-        terms.join(operator)
+fn quote_fts_term(term: &str) -> String {
+    format!("\"{}\"", term.replace('"', "\"\""))
+}
+
+fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
+    const MAX_COMPOUND_QUERY_TERMS: usize = 6;
+    const MAX_COMPOUND_IDENTIFIER_PARTS: usize = 8;
+    const MIN_COMPOUND_IDENTIFIER_LEN: usize = 6;
+    const MAX_COMPOUND_IDENTIFIER_LEN: usize = 80;
+
+    if terms.len() < 2 || terms.len() > MAX_COMPOUND_QUERY_TERMS {
+        return Vec::new();
+    }
+
+    let mut parts = Vec::new();
+    for term in terms {
+        for part in term.split('_').filter(|part| !part.is_empty()) {
+            if part.len() < 2
+                || !part
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
+            {
+                return Vec::new();
+            }
+            parts.push(part.to_ascii_lowercase());
+        }
+    }
+    if parts.len() < 2 || parts.len() > MAX_COMPOUND_IDENTIFIER_PARTS {
+        return Vec::new();
+    }
+
+    let compact = parts.join("");
+    if !(MIN_COMPOUND_IDENTIFIER_LEN..=MAX_COMPOUND_IDENTIFIER_LEN).contains(&compact.len()) {
+        return Vec::new();
+    }
+
+    let snake = parts.join("_");
+    let mut alternatives = Vec::new();
+    push_compound_identifier_alternative(&mut alternatives, terms, compact);
+    push_compound_identifier_alternative(&mut alternatives, terms, snake);
+
+    alternatives
+}
+
+fn push_compound_identifier_alternative(
+    alternatives: &mut Vec<String>,
+    original_terms: &[String],
+    candidate: String,
+) {
+    if !original_terms
+        .iter()
+        .any(|term| term.eq_ignore_ascii_case(&candidate))
+        && !alternatives.contains(&candidate)
+    {
+        alternatives.push(candidate);
     }
 }
 
 pub(super) fn hybrid_chunk_fts_match_query(query: &str) -> String {
-    let terms = query
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .map(str::trim)
-        .filter(|term| !term.is_empty())
-        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
-        .collect::<Vec<_>>();
+    let terms = fts_query_terms(query);
 
     if terms.is_empty() {
         "relayknowledgeunlikelyemptyquerytoken".to_owned()
     } else if terms.len() == 1 {
-        terms[0].clone()
+        quote_fts_term(&terms[0])
     } else {
-        terms.join(" OR ")
+        fts_match_query_with_operator(query, " OR ", true)
     }
 }
 

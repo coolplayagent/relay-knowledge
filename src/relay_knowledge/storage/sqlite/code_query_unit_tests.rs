@@ -52,7 +52,24 @@ fn symbol_fts_query_uses_any_term_for_fuzzy_recall() {
     );
     assert_eq!(
         fts_match_query("checkpoint metadata version constant"),
-        "\"checkpoint\" \"metadata\" \"version\" \"constant\""
+        "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    );
+    assert_eq!(
+        hybrid_chunk_fts_match_query("checkpoint metadata version constant"),
+        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    );
+}
+
+#[test]
+fn fts_query_compound_identifier_alternatives_are_bounded() {
+    assert_eq!(
+        fts_match_query("new lru cache"),
+        "(\"new\" \"lru\" \"cache\") OR \"newlrucache\" OR \"new_lru_cache\""
+    );
+    assert_eq!(fts_match_query("a b"), "\"a\" \"b\"");
+    assert_eq!(
+        fts_match_query("one two three four five six seven"),
+        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"seven\""
     );
 }
 
@@ -336,6 +353,29 @@ async fn caller_search_preserves_case_for_test_intent() {
         hits[0].score,
         lower_hits[0].score
     );
+}
+
+#[tokio::test]
+async fn caller_search_matches_spaced_compound_identifier_query() {
+    let mut call = code_query_call("new-lru-cache-call", "db-file", "db/db_impl.cc");
+    call.caller_name = Some("DBImpl::Open".to_owned());
+    call.callee_name = "NewLRUCache".to_owned();
+    call.target_hint = Some("NewLRUCache".to_owned());
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file("db-file", "db/db_impl.cc", "cpp")],
+        Vec::new(),
+        vec![call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request("new lru cache", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "db/db_impl.cc");
+    assert!(hits[0].excerpt.contains("NewLRUCache"));
 }
 
 #[test]

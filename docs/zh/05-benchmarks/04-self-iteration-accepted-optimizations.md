@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-compound-identifier-fts-query-recall-20260517
+
+- 目标：提升大仓 full-scope code graph 与 hybrid chunk 查询对自然语言拆分标识符的召回，避免 `new lru cache`、`default listable bean factory` 这类查询在 FTS 候选阶段错过 `NewLRUCache` 或 `new_lru_cache` 形态。
+- 方法：在代码查询 FTS MATCH 构造阶段，为 bounded call/reference/import 与 hybrid chunk 查询追加受限的复合标识符候选，把 2 到 6 个安全 ASCII 查询项扩展为 compact 与 snake_case 两种 OR 分支；symbol 查询保持已有 symbol 文档侧 camel/snake 扩展，不重复扩大候选。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、索引写入格式、candidate limit、排序截断、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；新增扩展只影响查询表达式，且限制词数、part 长度、总标识符长度和单字符噪声，最终仍由 `score_text`、path/language filter 与既有 layer 排序决定返回顺序。
+- 预期影响：LevelDB/C++、Kubernetes/Go、Spring/Java 和 relay-teams/Python 中以拆分标识符询问 caller/callee、reference、import 或 fuzzy chunk 的查询可进入候选窗口，精确 CamelCase/snake_case 查询、target-symbol import fallback、semantic/vector source coverage 和稳定性应保持不变或改善。
+- 已知风险：OR 分支会让少量 compact/snake 标识符命中的候选进入 bounded window；扩展只对短查询项集合生效，并保留后续文本评分过滤，因此主要风险是极少数同名复合标识符在近同分情况下改变排序。
+
 ## 候选优化说明：manual-import-target-filter-pushdown-20260517
 
 - 目标：提升大仓 full-scope import graph 在带 selector path/language filter 时的 target-symbol 查询准确性与稳定性，避免查询导入者范围时把过滤条件误施加到被导入符号定义，或让路径外/语言外导入边先填满 bounded candidate window。
@@ -906,4 +914,18 @@ tests.rs @@ -110,14 +110,32 @@ } #[test] +fn import_target_symbol_bonus_matches_
 Adopted optimization notes:
 
 '\\')".to_owned()) +        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')")) .collect::<Vec<_>>(); if !clauses_for_filters.is_empty() { clauses.push(format!("({})", clauses_for_filters.join(" OR "))); } } -fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) { +fn push_language_filter_sql(clauses: &mut Vec<String>, column: &str, filters: &[String]) { +    let clauses_for_filters = filters +        .iter() +        .map(|_| format!("{column} = ?")) +        .collect::<Vec<_>>(); +    if !clauses_for_filters.is_empty() { +        clauses.push(format!("({})", clauses_for_filters.join(" OR "))); +    } +} + +pub(super) fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) { for filter in filters .iter() .filter_map(|filter| normalized_sql_path_filter(filter)) @@ -611,6 +644,10 @@ } } +pub(super) fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) { +    values.extend(filters.iter().cloned().map(Value::Text)); +} + fn normalized_sql_path_filter(filter: &str) -> Option<String> { let mut filter = filter.trim_end_matches(['/', '\\']); while let Some(stripped) = filter.strip_prefix("./") { tokens used 245,044
+-
+## 20260517T105538Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T105538Z.patch`
+- score: 0.978502 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.956274, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.963464->0.978502; score_component:research_judge 0.77->0.88; metric:cargo_build_release_ms 32343.0->29561; metric:cargo_fmt_check_ms 780.0->578; metric:relay_teams_index_ms 77036.0->74219; metric:relay_teams_query_p50_ms 119.5->89.5; metric:relay_teams_query_p95_ms 456.0->334.0; metric:leveldb_cpp_index_ms 18055.0->13809
+- known degradations: score_component:performance 0.974548->0.956274; metric:leveldb_cpp_query_p95_ms 174.0->231.0; metric:local_documents_file_index_ms 87.0->117; metric:local_documents_file_query_p50_ms 87.5->118.0; metric:local_documents_file_query_p95_ms 90.0->119.0; metric:local_noise_file_index_ms 265.0->360; metric:local_noise_file_query_p50_ms 87.0->114.0; metric:local_noise_file_query_p95_ms 88.0->115.0
+- latency metrics: cargo_build_release_ms=29561ms; cargo_fmt_check_ms=578ms; cargo_clippy_ms=195ms; cargo_test_ms=8056ms; relay_teams_index_ms=74219ms; relay_teams_query_p50_ms=90ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13809ms
+
+Adopted optimization notes:
+
+six seven"), +        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"seven\"" +    ); +} + +#[test] fn score_text_matches_identifier_parts_inside_snake_case_names() { let score = score_text( "archive output directory", @@ -338,6 +355,29 @@ ); } +#[tokio::test] +async fn caller_search_matches_spaced_compound_identifier_query() { +    let mut call = code_query_call("new-lru-cache-call", "db-file", "db/db_impl.cc"); +    call.caller_name = Some("DBImpl::Open".to_owned()); +    call.callee_name = "NewLRUCache".to_owned(); +    call.target_hint = Some("NewLRUCache".to_owned()); +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![code_query_file("db-file", "db/db_impl.cc", "cpp")], +        Vec::new(), +        vec![call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("new lru cache", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "db/db_impl.cc"); +    assert!(hits[0].excerpt.contains("NewLRUCache")); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 205,895
 
