@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-score-text-saturation-20260517
+
+- 目标：在保持 foundational、competitive、semantic/vector、accuracy、stability 与 research judge 保护目标不变的前提下，降低大仓 code graph query scoring 热路径中重复的 identifier 分解和 substring 检查成本。
+- 方法：`score_text` 保留 exact、identifier-part、substring 三层分值不变，但当当前 query token 已达到 exact match 最高分时立即结束该 token 的字段扫描；当已达到 identifier-part 分值时，后续字段只继续检查可能提升到 exact 的分支，不再重复执行无法提高分数的 identifier 或 substring 检查。
+- 架构与不变量：不改变 SQLite schema、FTS candidate expression、candidate limit、path/language filter、排序权重、CLI/API 字段、semantic/vector provider、embedding 设置、judge 配置或环境变量读取；这是对确定性 scoring 的饱和短路，不扩大或收窄候选集合。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等多仓 full-scope code query 在多字段、多 token 候选评分时减少无效字符串扫描；所有已通过的 foundational/competitive case rank、negative query 行为和 semantic/vector source coverage 应保持不变。
+- 已知风险：该候选是语义保持型优化，主要收益取决于候选窗口中重复 identifier 命中的比例；如果查询通常只有一个字段命中或候选很少，可观测延迟改善可能较小。
+
 ## 候选优化说明：manual-derived-read-model-cache-preserve-score-20260517
 
 - 目标：在保持 foundational、competitive、semantic/vector、accuracy 与 research judge 保护目标不变的前提下，降低 semantic/vector 本地 read model 和 local rerank 热路径中的重复分配与重复 query vector 哈希成本。
@@ -970,4 +978,17 @@ RetrieverSource, }, +    retrieval::terms::normalized_terms, storage::{GraphSear
 Adopted optimization notes:
 
 tinue; } @@ -279,6 +277,26 @@ Ok(hits) } +struct QueryVectorCache<'a> { +    query: &'a str, +    vectors: BTreeMap<usize, Vec<f64>>, +} + +impl<'a> QueryVectorCache<'a> { +    fn new(query: &'a str) -> Self { +        Self { +            query, +            vectors: BTreeMap::new(), +        } +    } + +    fn vector(&mut self, dimension: usize) -> &[f64] { +        self.vectors +            .entry(dimension) +            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension)) +    } +} + fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize { request .limit @@ -385,4 +403,16 @@ assert!(ranking.contains("CASE WHEN lower(content) LIKE ?")); assert_eq!(values.len(), MAX_DERIVED_QUERY_TERMS * fields.len() * 2); } + +    #[test] +    fn query_vector_cache_reuses_vectors_by_dimension() { +        let mut cache = QueryVectorCache::new("semantic vector freshness"); +        let first = cache.vector(16).to_vec(); +        let second = cache.vector(16).to_vec(); + +        assert_eq!(first, second); +        assert_eq!(cache.vectors.len(), 1); +        assert_eq!(cache.vector(8).len(), 8); +        assert_eq!(cache.vectors.len(), 2); +    } } tokens used 135,200
+## 20260517T122624Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T122624Z.patch`
+- score: 0.978379 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.973492, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.954626->0.978379; score_component:foundational_capability 0.944444->1.0; score_component:competitive_capability 0.942857->1.0; score_component:accuracy 0.943651->1.0; score_component:performance 0.958323->0.973492; metric:cargo_build_release_ms 31583.0->28662; metric:cargo_fmt_check_ms 828.0->563; metric:cargo_test_ms 7997.0->5044
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28662ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=177ms; cargo_test_ms=5044ms; relay_teams_index_ms=69745ms; relay_teams_query_p50_ms=99ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13980ms
+
+Adopted optimization notes:
+
+            } else if identifier_field_matches_token(field, &token) { +                break; +            } else if token_score < 2.0 && identifier_field_matches_token(field, &token) { token_score = token_score.max(2.0); -            } else if lower_field.contains(&token) { +            } else if token_score < 0.5 && lower_field.contains(&token) { token_score = token_score.max(0.5); } } diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index db7b1c25dbe05a06fe9f0828fb949c421adfdd4e..a660b44d1998162b4135809b055a33be9a25e998 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -84,6 +84,13 @@ } #[test] +fn score_text_preserves_exact_match_ceiling_after_identifier_match() { +    assert_eq!(score_text("cache", ["block_cache", "cache"]), 4.0); +    assert_eq!(score_text("cache", ["block_cache"]), 2.0); +    assert_eq!(score_text("cach", ["block_cache"]), 0.5); +} + +#[test] fn declaration_chunk_bonus_requires_declaration_shape() { let terms = query_terms("recover descriptor save_manifest versionedit"); tokens used 221,588
 

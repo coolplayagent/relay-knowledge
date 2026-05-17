@@ -24,9 +24,10 @@ pub(super) fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRe
         for (field, lower_field) in &fields {
             if lower_field == &token {
                 token_score = token_score.max(4.0);
-            } else if identifier_field_matches_token(field, &token) {
+                break;
+            } else if token_score < 2.0 && identifier_field_matches_token(field, &token) {
                 token_score = token_score.max(2.0);
-            } else if lower_field.contains(&token) {
+            } else if token_score < 0.5 && lower_field.contains(&token) {
                 token_score = token_score.max(0.5);
             }
         }

@@ -84,6 +84,13 @@ fn score_text_matches_identifier_parts_inside_snake_case_names() {
 }
 
 #[test]
+fn score_text_preserves_exact_match_ceiling_after_identifier_match() {
+    assert_eq!(score_text("cache", ["block_cache", "cache"]), 4.0);
+    assert_eq!(score_text("cache", ["block_cache"]), 2.0);
+    assert_eq!(score_text("cach", ["block_cache"]), 0.5);
+}
+
+#[test]
 fn declaration_chunk_bonus_requires_declaration_shape() {
     let terms = query_terms("recover descriptor save_manifest versionedit");
 
