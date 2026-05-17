@@ -515,7 +515,7 @@ dependencies = [
 - **边解析与置信度**: reference、call 和 import 均持久化 `target_hint`、`resolution_state`、`confidence_basis_points` 和 `confidence_tier`。无法唯一解析时保持 `ambiguous` 或 `unresolved`，不会被报告为确定调用。
 - **接口暴露**: CLI `repo query` / `repo impact` / `repo report`、Web operation 和 MCP `relay_code_query` / `relay_code_impact` 共用 application service，查询命中会返回 symbol identity 与 edge metadata。
 
-仍明确属于后续 v2 或更高阶段的能力: 社区检测、wiki/export、真实外部 embedding 索引刷新、多仓库联邦调用解析、外部模型 reranker、watch/daemon 静默更新和完整时间旅行查询。
+已关闭的对齐项还包括 Web operation 入口、local semantic/vector read model、community summary context、MCP code tools 和服务诊断。仍明确属于后续 v2 或更高阶段的能力: wiki/export、具体外部 embedding/OCR/vision provider、多仓库联邦调用解析、外部模型 reranker、安装后的 watchdog/maintenance 工作流、A2A gateway 和完整 valid-time 时间旅行查询。
 
 ### 可超越的关键差距
 
@@ -523,9 +523,9 @@ dependencies = [
 |------|----------|--------------------------|
 | **事件驱动** | 两个仓库均非事件驱动 (git hook 轮询) | 从零构建事件驱动+异步优先架构 (AGENTS.md 已要求) |
 | **嵌入质量** | 仅嵌入函数签名 (10 tokens) | 嵌入函数体/docstring/commit message/Issue 讨论 |
-| **检索精度** | FTS5 MRR 0.35 | 引入 re-ranker + hybrid search + 查询改写 |
+| **检索精度** | 已有 BM25 + local semantic/vector + code graph + RRF + 本地 rerank | 继续推进 query router、外部 reranker 和更大真实数据集报告 |
 | **图数据库** | SQLite 递归 CTE, 无原生图算法 | 预留 Neo4j/SurrealDB 适配层, 支持 PageRank 等原生算法 |
-| **Web API** | 仅有 MCP (stdio/HTTP) | 构建完整的 REST/gRPC Web API |
+| **Web API** | 已有 Rust HTTP `/api/*`、Web operation composer、MCP Streamable HTTP 和本地 ACP | 扩展 release diagnostics 与远端 host integration |
 | **知识类型** | 仅代码结构 | 扩展到文档、Issue、PR 讨论、ADR、运行时拓扑 |
-| **时间维度** | better fork 有基础时间列 | 构建完整的时间旅行查询 + 差分分析 |
+| **时间维度** | 已有 graph version、event `occurred_at` 和 `as_of`/年份 temporal retrieval | 构建 valid-time range invalidation、完整时间旅行查询和差分分析 |
 | **多仓库联邦** | 基础 TOML 注册表 | 跨仓库调用解析、统一图谱查询、Blast Radius 跨仓库分析 |

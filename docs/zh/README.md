@@ -4,6 +4,8 @@
 
 本目录按“书”的方式组织：先读用户手册，再看功能说明，随后进入架构规格、研究资料、基准记录和验证记录。正文只维护在 `docs/zh/` 和 `docs/en/` 两个语言目录中。
 
+目录职责固定如下：`01-user-guide` 只放可执行用户流程；`02-capabilities` 只描述当前已实现能力；`03-architecture-specs` 保留硬约束、接口边界和前瞻产品要求；`04-research` 保留带日期的研究和差距分析；`05-benchmarks` 放基准与优化记录；`06-verification` 放验证、审计和文档新鲜度记录。
+
 ## 第一卷：用户手册
 
 - [使用指南总览](01-user-guide/README.md)：安装、CLI、GraphRAG、代码仓库、Web、Agent 服务、排障和高级配置的主入口。
@@ -22,8 +24,6 @@
 - [混合检索 Context Pack](02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
 - [Semantic/Vector Provider 后端](02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
 - [代码仓库 Tree-sitter 检索](02-capabilities/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
-- [文档刷新审计 2026-05-17](02-capabilities/documentation-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
-- [文档刷新审计 2026-05-14](02-capabilities/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
 
 ## 第三卷：架构规格
 
@@ -58,8 +58,13 @@
 - [relay-teams 基线 2026-05-14](05-benchmarks/relay-teams-baseline-2026-05-14.md)
 - [relay-teams 优化研究 2026-05-14](05-benchmarks/relay-teams-optimization-study-2026-05-14.md)
 - [relay-teams 优化问题清单 2026-05-14](05-benchmarks/relay-teams-optimization-issues-2026-05-14.md)
+- [自迭代已采纳优化记录](05-benchmarks/self-iteration-accepted-optimizations.md)
 
 ## 附录 B：验证记录
 
+- [文档书架刷新审计 2026-05-17](06-verification/documentation-book-refresh-2026-05-17.md)：目录职责、能力关闭状态和书籍式索引刷新记录。
+- [文档刷新审计 2026-05-17](06-verification/documentation-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
+- [文档刷新审计 2026-05-14](06-verification/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和开放产品化工作。
 - [relay-teams E2E 验证 2026-05-14](06-verification/relay-teams-e2e-2026-05-14.md)
 - [relay-teams 代码图检索准确性测试 2026-05-15](06-verification/code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
+- [Linux 代码图检索准确性测试 2026-05-15](06-verification/code-graph-retrieval-accuracy-linux-2026-05-15.md)

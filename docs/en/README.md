@@ -10,6 +10,13 @@ research notes, benchmark records, and verification records.
 > while the full translation is maintained incrementally. Commands, API paths,
 > environment variables, filenames, and configuration contracts are authoritative.
 
+Directory responsibilities are fixed: `01-user-guide` is for executable user
+workflows; `02-capabilities` describes implemented behavior only;
+`03-architecture-specs` keeps hard contracts, interface boundaries, and forward
+product requirements; `04-research` keeps dated research and gap analysis;
+`05-benchmarks` stores benchmark and optimization records; `06-verification`
+stores validation, audit, and documentation freshness records.
+
 ## Book 1: User Guide
 
 - [User Guide Overview](01-user-guide/README.md): install, CLI, GraphRAG, code repositories, Web, agent services, troubleshooting, and advanced configuration.
@@ -28,8 +35,6 @@ research notes, benchmark records, and verification records.
 - [Hybrid Retrieval Context Pack](02-capabilities/hybrid-retrieval-context-pack.md): retriever sources, RRF fusion, structured graph facts, graph paths, and backend status.
 - [Semantic/Vector Provider Backend](02-capabilities/semantic-vector-provider-backend.md): external embedding provider setup, redacted diagnostics, Web provider panels, and degradation behavior.
 - [Code Repository Tree-sitter Retrieval](02-capabilities/code-repository-tree-sitter-retrieval.md): repository indexing, retrieval, reports, and impact analysis.
-- [Documentation Refresh Audit 2026-05-17](02-capabilities/documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
-- [Documentation Refresh Audit 2026-05-14](02-capabilities/documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and remaining implementation work.
 
 ## Book 3: Architecture Specifications
 
@@ -67,4 +72,7 @@ research notes, benchmark records, and verification records.
 
 ## Appendix B: Verification
 
+- [Documentation Book Refresh Audit 2026-05-17](06-verification/documentation-book-refresh-2026-05-17.md): directory responsibilities, closed capability status, and bookshelf index refresh.
+- [Documentation Refresh Audit 2026-05-17](06-verification/documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
+- [Documentation Refresh Audit 2026-05-14](06-verification/documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
 - [relay-teams E2E Verification 2026-05-14](06-verification/relay-teams-e2e-2026-05-14.md)

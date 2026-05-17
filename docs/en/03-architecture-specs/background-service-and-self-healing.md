@@ -346,18 +346,19 @@ Service 或 launchd 管理进程生命周期。
 
 日志和 trace 必须包含 `task_id`、`task_kind`、`scope_id`、`graph_version`、`index_kind`、`indexed_graph_version`、`attempt_count`、`lease_owner`、`error_kind`。
 
-## 8. 实施顺序
+## 8. 关闭状态与后续顺序
 
-建议按以下顺序落地:
+后台配置模型、diagnostics snapshot、foreground service runtime、持久化 task lease、
+retry/dead-letter/reconciler、mutation-log replay、bounded queue、service
+status/doctor、service definition preview、metrics 和 Web 状态展示已关闭，后续不再作为
+未落地能力描述。
 
-1. 定义后台配置模型和 diagnostics snapshot，不先写平台安装器。
-2. 实现 foreground service runtime，让本地开发可直接观察 heartbeat、队列和 shutdown。
-3. 引入持久化 task lease、retry backoff、dead-letter 和 reconciler。
-4. 将 index refresh 改为从 mutation log 和持久化 cursor 恢复。
-5. 增加资源预算和有界队列，把 CPU 密集任务移入 worker pool。
-6. 实现 `service install|status|doctor|logs` 的平台适配，先 Linux systemd，再 Windows Service 和 launchd。
-7. 增加磁盘清理、WAL checkpoint、旧索引 TTL 等维护任务。
-8. 接入 metrics、告警示例和 Web 状态展示。
+开放产品化顺序:
+
+1. 实现特权 `service install|uninstall|start|stop|logs` 的平台适配，先 Linux systemd，再 Windows Service 和 launchd。
+2. 增加安装后 watchdog、磁盘清理、WAL checkpoint、旧索引 TTL 等维护任务编排。
+3. 将 silent-update operator 接入真实安装服务的 pause/resume/retry 运行面。
+4. 增加 release diagnostics、rollback 验证和告警示例。
 
 ## 9. 测试和验收
 

@@ -10,10 +10,10 @@ This is the English documentation page for `specs/graphrag-product-and-implement
 
 ## Source Content
 
-> 文档版本: 1.1
+> 文档版本: 1.2
 > 编制日期: 2026-05-12
-> 进展刷新: 2026-05-13
-> 范围: relay-knowledge 的 GraphRAG 产品边界、当前实现基线、优化措施和分阶段实现规格。
+> 进展刷新: 2026-05-17
+> 范围: relay-knowledge 的 GraphRAG 产品边界、当前实现基线、已关闭阶段和开放产品化工作。
 
 行业能力刷新见 [2026 行业能力快照与差距分析](../04-research/industry-capability-snapshot-2026.md)。本规格以该快照为外部基线，但仍以本地优先、统一 API 和可解释 context pack 为产品边界。
 
@@ -110,59 +110,44 @@ GraphRAG 能力必须保持可解释:
 
 - 默认本地 profile 必须零配置可用: 本地 SQLite、平台目录、本地 deterministic semantic/vector read models、保守网络/QoS 和只读 agent policy。
 - README 和用户指南主路径只展示 `status`、`ingest`、`query`、`health` 等最小闭环；环境变量清单集中到高级配置文档。
-- 后续新增 `setup doctor` 和 `setup profile` 时，应只输出推荐配置、风险提示和下一步命令，不要求用户手写大量变量。
+- `setup doctor` 和 `setup profile` 已作为只读诊断/推荐输出落地，只输出推荐配置、风险提示和下一步命令，不要求用户手写大量变量。
 - 配置分层固定为 Basic、Advanced、Deployment 和 Diagnostic。Basic 面向 CLI 参数，Advanced 面向检索/网络/MCP，Deployment 面向 service manager，Diagnostic 面向 CI 和故障复现。
 
-## 4. 分阶段路线
+## 4. 阶段关闭状态
 
-### Phase 1: 真实检索闭环
+本节是当前规格的关闭台账。已关闭阶段不再作为待办项描述，而应通过回归测试、用户文档和验证记录持续保护；仍未产品化的事项集中到 Phase 5。
 
-- 保持 typed relation、claim/event、source span 和 confidence 的 domain/storage/API 规格可回归测试。
-- 对 ingest 边界重新验证反序列化后的 span、confidence 和 version range；结构化 facts 必须引用 supporting evidence ids。
-- 让 context pack 覆盖 evidence、entity、code symbol、code chunk、source span、structured graph facts 和 direct graph path evidence；当前实现已从 structured relation/claim/event 派生 `graph_paths`。
-- 检索候选只使用 `accepted`/`proposed` evidence，`rejected`/`superseded` evidence 保留为可检查图状态但不作为 grounding context。
-- 增强 BM25/lexical 文档构建字段，覆盖 source path、entity/code symbol lexical aliases、code symbol、code chunk 和 doc comment，并补充 ranking explanation 测试；当前 SQLite FTS5 read model 已为 entity labels 和 code symbols 写入独立 alias 字段。
-- 为 semantic/vector 保留 backend status metadata、scope post-filter metadata 和 `local`/`external`/`disabled` runtime mode。
-- Web readiness 继续从 health/status 显示 BM25、semantic cursor、vector cursor、code graph、runtime budgets 和 index lag。
+### Phase 1: 真实检索闭环（已关闭）
 
-### Phase 2: 可恢复索引刷新
+- Typed relation、claim/event、source span、confidence、status、version-range validation 和 supporting evidence 校验已进入 domain/storage/API 主路径。
+- Context pack 已覆盖 evidence、entity、code symbol、code chunk、source span、structured facts、direct graph path evidence、ranking explanation、freshness、truncation 和 backend availability metadata。
+- BM25/lexical 文档已覆盖 source path、entity/code symbol aliases、code symbol、code chunk 和 doc comment；semantic/vector backend status、scope post-filter metadata 和 Web readiness 已落地。
 
-- 保持已落地的 scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 可回归测试。
-- 为 semantic/vector backend 保持 model、dimension、source hash、backend-specific cursor 和 last error 元数据的持久化/API contract；refresh worker 完成任务时从已索引文档推导 model/dimension 并由 cursor 诊断返回。
-- health/service doctor 继续返回 queue depth、oldest task age、dead-letter count、index lag 和结构化 stale reasons；每条 reason 必须能指向索引族或 scoped cursor，并携带 lag versions 和 last error。
+### Phase 2: 可恢复索引刷新（已关闭）
 
-### Phase 3: Agent 与常驻服务
+- Scoped index cursor、mutation log affected metadata、bounded index refresh queue、active lease/attempt guard、retry backoff、lease-expiry dead-letter 和 startup reconciler 已落地。
+- Semantic/vector cursor 已持久化 model、dimension、source hash、backend cursor 和 last error；refresh completion 可从已索引文档推导 model/dimension。
+- `health`、`service doctor`、显式 refresh 和 Web readiness 已返回 queue depth、oldest task age、dead-letter count、index lag 和结构化 stale reasons。
 
-- 保持 MCP read-only 工具矩阵: retrieve context、inspect graph、index status、service doctor、code graph query 和 code impact。
-- 保持本地 ACP 会话入口，支持 progress、cancellation、context artifact 和 runtime identity。
-- 保持 MCP resources/prompts: service status、health、index status、policy-gated graph summary、Prometheus metrics resource、retrieval prompt 和 code-impact prompt。
-- MCP 只保留 Streamable HTTP `/mcp` 和 metrics endpoint，不再提供 `/mcp/sse` + `/mcp/message` 兼容入口。
-- 保持 bounded in-process audit log，记录 identity、scope、freshness、QoS decision、budget、truncation 和 result count；CLI/Web/service operation 写入持久 audit sink 并通过 `audit query` 暴露；MCP/ACP 可选 JSONL 持久 audit sink 通过有界 async queue 写入 `logs/agent-audit.jsonl`。
-- 保持 `/mcp/metrics` Prometheus text exporter，覆盖 graph version、index refresh backlog、dead letter、QoS request counters 和 per-index stale 状态。
-- service manager v1 生成 systemd/launchd/Windows Service 定义和安装/卸载/启动/停止命令预览，不在 CLI 内执行提权安装；silent-update operator state 可 status/pause/resume。
-- 安装/升级/卸载文档必须覆盖 service manager 模板、运行时目录、rollback 和 diagnostics。
+### Phase 3: Agent 与常驻服务基础（已关闭）
 
-### Phase 4: 高级 GraphRAG
+- MCP Streamable HTTP、本地 ACP session adapter、QoS admission、cancellation、scope policy、code graph query/impact、index refresh 权限控制和错误映射已共享 application service。
+- MCP resources/prompts、`/mcp/metrics` Prometheus exporter、bounded audit log、持久 audit sink 和 `audit query` 已落地。
+- Service manager v1 已生成 systemd/launchd/Windows Service 定义和命令预览；silent-update operator state 已可 status/pause/resume。提权安装、卸载和 rollback 仍属于 Phase 5 产品化。
 
-- 已接入 local semantic retrieval 和 hashed-vector ANN read model，支持 model、dimension、source hash、scope 和 graph version metadata。
-- 已接入 semantic/vector backend runtime contract，支持 `local`、`external` 和 `disabled` 状态、disabled execution gate 以及 refresh cursor model metadata。
-- 已增加 path retrieval、schema-guided traversal、community summary 和 temporal query。
-- 已增加 multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality、parent evidence grouping 和 maintenance worker 输出提交边界。
-- 已建立 evaluation harness 和 CI fixture gate，覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
+### Phase 4: 高级 GraphRAG 与多模态基础（已关闭）
 
-剩余 Phase 4 产品化工作:
+- Local semantic retrieval、hashed-vector ANN read model、RRF fusion、本地确定性 rerank、schema-guided path、temporal query 和 community summary 已落地。
+- Multimodal evidence schema、extractor diagnostics、image/OCR/caption/table/layout modality、parent evidence grouping 和 maintenance worker 提交边界已落地。
+- 外部 worker 已有 HTTP contract、持久队列、deterministic fallback proposal 和人工 review policy；具体生产 provider adapter 仍属于 Phase 5 产品化。
+- Evaluation harness 和 CI fixture gate 已覆盖 exact fact、multi-hop、temporal、negative rejection、stale index、ambiguous entity 和 code impact。
 
-- 扩展外部 worker 响应 contract，覆盖生产 embedding vector payload、OCR/caption/table/layout 结果、metrics exporter 和 release diagnostics。
-- 将 evaluation harness 接到 CI fixture 和后续 release diagnostics。
-- 规划 query router、lite-global 和 DRIFT-like expansion，不改变 `HybridRetrievalResponse` 的 canonical context pack 地位。
+### Phase 5: 易用性与互操作产品化（开放）
 
-### Phase 5: 易用性与互操作产品化
-
-- 实现 `setup doctor`，检查运行时目录、SQLite、索引 freshness、Web 诊断、MCP policy、服务安装状态和常见配置错误。
-- 实现 `setup profile local|agent-readonly|service|external-embedding`，输出推荐配置和安全说明；默认 profile 是 `local`，无需环境变量。
-- 产品化 MCP resources/prompts 和 Streamable HTTP resumability/session termination，保持 tool policy 动态可见。
-- 设计 A2A gateway 的 agent card、task lifecycle、artifact mapping 和 signed identity 边界，仍通过统一 API 调用 core。
-- 将 service manager 安装、silent update、rollback 和 release diagnostics 纳入端到端验收。
+- 已关闭: `setup doctor`、`setup profile local|agent-readonly|service|external-embedding`、MCP resources/prompts、Streamable HTTP session termination、service definition preview、silent-update status/pause/resume、持久 audit sink 和 metrics exporter。
+- 开放: 特权 service install/upgrade/uninstall、rollback、release diagnostics、包管理器 manifest 和安装后 watchdog/maintenance 工作流。
+- 开放: 具体外部 embedding/OCR/vision/table/layout provider adapter、模型共存策略、生产 worker metrics 和 provider 级运维文档。
+- 开放: query router、lite-global/DRIFT-like expansion、A2A gateway、远端 ACP host integration、更大真实数据集和 release-facing 质量阈值。
 
 ## 5. 验收要求
 

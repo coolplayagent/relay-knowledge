@@ -1,6 +1,6 @@
 # 文档刷新审计 2026-05-14
 
-[中文](./documentation-refresh-audit-2026-05-14.md) | [英文](../../en/02-capabilities/documentation-refresh-audit-2026-05-14.md)
+[中文](./documentation-refresh-audit-2026-05-14.md) | [英文](../../en/06-verification/documentation-refresh-audit-2026-05-14.md)
 
 本审计记录 2026-05-14 对当前 `relay-knowledge` 实现所做的文档刷新。命令可用性的权威来源是 `relay-knowledge help --format json`；状态和健康检查行为已根据编译后的二进制进行核对。
 
@@ -23,7 +23,7 @@
 | --- | --- |
 | 根 README 与文档索引 | 已覆盖当前 CLI、Web、MCP、服务和 setup 能力。 |
 | 用户指南 | 已覆盖本地安装、CLI 基础、GraphRAG、代码仓库工作流、Web 工作区、agent/service 运行、排障和高级配置。 |
-| 功能文档 | 已覆盖 GraphRAG context pack、semantic/vector provider 和 tree-sitter 仓库检索。 |
+| 功能文档 | 已覆盖 GraphRAG context pack、semantic/vector provider 和 tree-sitter 仓库检索；审计记录已移入验证卷。 |
 | 规格 | 按设计混合存在：硬约束和接口规格是当前契约；产品、存储、后台服务、架构和安装规格仍包含前瞻要求。 |
 | 研究材料 | 作为历史和参考资料保留，仍刻意保留路线图与差距分析语气，而不是改写成用户操作手册。 |
 | 基准与验证记录 | 是 2026-05-14 的快照记录。除非新的基准运行取代它们，否则应继续作为带日期的证据保留。 |
@@ -34,9 +34,11 @@
 - `relay-knowledge setup profile local|agent-readonly|service|external-embedding`：输出只读环境变量和命令建议，不写文件、不修改 shell profile，也不安装服务。
 - SQLite 启动迁移：启动时迁移已知过期表定义，只局部重建可派生的检索表和刷新队列，避免 `health` 和 `service doctor` 运行在过期 schema 上。
 
-## 剩余实现工作
+## 开放产品化工作
 
-| 能力 | 当前状态 | 剩余工作 |
+以下条目不是未落地的核心闭环，而是仍需端到端产品化或发布运营承接的工作。
+
+| 能力 | 当前状态 | 开放工作 |
 | --- | --- | --- |
 | 特权服务安装/卸载 | 已实现 `service plan` 和 `service definition write`。 | 安装器或运维流程仍需执行平台服务管理器命令，并提供回滚和卸载语义。 |
 | 包管理器分发 | Release workflow 会产出构件；规格描述了 Homebrew、Scoop、winget 和发行版包要求。 | 发布并维护引用 release 构件的包管理器 manifest。 |

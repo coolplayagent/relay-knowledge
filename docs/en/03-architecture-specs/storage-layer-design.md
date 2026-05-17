@@ -675,16 +675,14 @@ SQLite 是 v1 默认，不是永久绑定。
 - BM25 / vector 是否迁移到数据库内置能力由 adapter 决定，但 `IndexStore` 语义不变。
 - 导入导出必须保留 evidence、version 和 mutation log 信息。
 
-## 12. 实施顺序
+## 12. 关闭状态与后续顺序
 
-1. 定义 domain 类型: `Entity`、`Relation`、`Claim`、`Evidence`、`GraphVersion`、`GraphMutation`。
-2. 定义 storage traits 和错误类型，不实现具体数据库逻辑。
-3. 实现内存假存储，支撑 domain 和 service 单测。
-4. 实现 SQLite migration、连接管理、事务批量写入和 mutation log。
-5. 实现基础图查询: get entity、neighbors、version query、path query。
-6. 实现 index status 和 FTS5 BM25 read model。
-7. 增加 contract tests、fixture tests 和索引 stale 场景。
-8. 在 CLI / Web 共用服务层接入 storage facade。
+Domain 类型、storage traits、内存假存储、SQLite migration、事务批量写入、mutation
+log、基础图查询、index status、FTS5 BM25 read model、contract/fixture/stale 测试和
+CLI/Web 共用 service facade 已关闭。
+
+后续存储工作只应围绕明确产品需求展开: valid-time range invalidation、多仓库联邦查询、
+更大规模数据集性能报告、专用图数据库 adapter 评估，以及安装升级时的派生索引重建诊断。
 
 ## 参考资料
 

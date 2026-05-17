@@ -78,6 +78,9 @@ relay-knowledge service doctor
 
 ## Documentation
 
+- [Documentation Bookshelf](docs/en/README.md): book-style entry point for the
+  user guide, implemented capabilities, architecture specs, research,
+  benchmarks, and verification records.
 - [User Guide](docs/en/01-user-guide/README.md): executable local workflows for
   install/runtime directories, CLI output modes, GraphRAG, code repository
   indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
@@ -99,9 +102,9 @@ relay-knowledge service doctor
   and degradation behavior.
 - [Code Repository Tree-sitter Retrieval](docs/en/02-capabilities/code-repository-tree-sitter-retrieval.md):
   repository indexing, retrieval, reports, and impact analysis.
-- [Documentation Refresh Audit 2026-05-14](docs/en/02-capabilities/documentation-refresh-audit-2026-05-14.md):
-  current documentation status, refreshed gaps, and remaining implementation
-  work.
+- [Documentation Refresh Audits](docs/en/06-verification/documentation-book-refresh-2026-05-17.md):
+  dated verification records for documentation freshness and implemented
+  capability closures.
 
 Key specs:
 

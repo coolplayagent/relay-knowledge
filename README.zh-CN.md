@@ -52,6 +52,7 @@ relay-knowledge service doctor
 
 ## 文档
 
+- [文档书架](docs/zh/README.md)：用户手册、已实现能力、架构规格、研究资料、基准记录和验证记录的书籍式入口。
 - [使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
 - [2026 行业能力快照](docs/zh/04-research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
 - [ai-knowledge-graph 参考项目分析](docs/zh/04-research/ai-knowledge-graph-reference-analysis.md)：对外部 LLM 抽取型知识图谱项目的架构、算法、性能和可靠性借鉴分析。
@@ -59,7 +60,7 @@ relay-knowledge service doctor
 - [混合检索上下文包](docs/zh/02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
 - [Semantic/Vector Provider 后端](docs/zh/02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
 - [代码仓库 Tree-sitter 检索](docs/zh/02-capabilities/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
-- [文档刷新审计 2026-05-14](docs/zh/02-capabilities/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
+- [文档刷新审计](docs/zh/06-verification/documentation-book-refresh-2026-05-17.md)：文档新鲜度和已实现能力关闭状态的带日期验证记录。
 
 关键规格：
 

@@ -1,6 +1,6 @@
 # 文档刷新审计 2026-05-17
 
-[中文](./documentation-refresh-audit-2026-05-17.md) | [英文](../../en/02-capabilities/documentation-refresh-audit-2026-05-17.md)
+[中文](./documentation-refresh-audit-2026-05-17.md) | [英文](../../en/06-verification/documentation-refresh-audit-2026-05-17.md)
 
 本审计记录 2026-05-17 针对代码仓库检索自迭代提交的文档刷新。对应代码变更集中在 SQLite 代码检索候选选择、ranking、call excerpt 查询计划、call FTS finalize 写入，以及 HTTP graceful shutdown 单测稳定性。
 

@@ -505,13 +505,14 @@ CI expectations:
 - Existing `cargo fmt --all -- --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test --all-targets --all-features` remain required.
 - Browser gate is unchanged unless Web diagnostics begins displaying protocol status.
 
-## 11. Implementation Order
+## 11. Closed Status
 
-1. Done: add protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` and `AgentRetrievalResult` API types.
-2. Done: extend `InterfaceKind` with `Mcp` and `Acp`.
-3. Done: add `interfaces::agent` module with protocol-neutral validation and policy mapping.
-4. Done: implement MCP Streamable HTTP tool adapter over the shared mapping.
-5. Done: add service status fields showing enabled protocols, bind mode and policy summary without secrets.
-6. Done: implement local ACP session adapter over the same mapping.
-7. Done: add persistent observability events and metrics exporters.
-8. Done: add MCP resources/prompts when product scope requires them.
+The following v1 adapter items are closed and should remain protected by
+regression tests:
+
+- Protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` and `AgentRetrievalResult` API types.
+- `InterfaceKind::Mcp`, `InterfaceKind::Acp`, and `interfaces::agent` protocol-neutral validation/policy mapping.
+- MCP Streamable HTTP tool adapter, local ACP session adapter, service status protocol summary, durable audit events, metrics exporter, and MCP resources/prompts.
+
+Open follow-up work is concentrated in remote ACP host integration, A2A gateway,
+GET/SSE resumability, and fuller installed-service operations.

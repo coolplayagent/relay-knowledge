@@ -489,13 +489,12 @@ CI 预期：
 - 既有 `cargo fmt --all -- --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test --all-targets --all-features` 仍然是必要门禁。
 - 除非 Web 诊断开始展示协议状态，否则浏览器门禁不变。
 
-## 11. 实现顺序
+## 11. 关闭状态
 
-1. 已完成：添加 protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` 和 `AgentRetrievalResult` API 类型。
-2. 已完成：用 `Mcp` 和 `Acp` 扩展 `InterfaceKind`。
-3. 已完成：添加 `interfaces::agent` 模块，包含 protocol-neutral validation 和 policy mapping。
-4. 已完成：在共享 mapping 上实现 MCP Streamable HTTP tool adapter。
-5. 已完成：添加 service status 字段，在不含 secret 的情况下展示已启用协议、bind mode 和 policy summary。
-6. 已完成：在同一 mapping 上实现本地 ACP session adapter。
-7. 已完成：添加持久可观测事件和 metrics exporter。
-8. 已完成：在产品范围需要时添加 MCP resources/prompts。
+以下 v1 接入项已关闭并应通过回归测试保持:
+
+- Protocol-neutral `RuntimeIdentity`、`AgentAccessPolicy` 和 `AgentRetrievalResult` API 类型。
+- `InterfaceKind::Mcp`、`InterfaceKind::Acp` 和 `interfaces::agent` protocol-neutral validation/policy mapping。
+- MCP Streamable HTTP tool adapter、本地 ACP session adapter、service status 协议摘要、持久审计事件、metrics exporter 和 MCP resources/prompts。
+
+后续开放项集中在远端 ACP host integration、A2A gateway、GET/SSE resumability 和更完整的安装后运维体验。
