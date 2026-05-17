@@ -287,7 +287,13 @@ impl AsyncWrite for InMemoryRequestStream {
 
 #[tokio::test]
 async fn serve_router_with_qos_rejects_excess_connections() {
-    let bind = format!("127.0.0.1:{}", unused_port());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let bind = listener
+        .local_addr()
+        .expect("listener should expose address")
+        .to_string();
     let config = HttpConfig::new(
         HttpBindAddress::parse(&bind).expect("bind should parse"),
         Duration::from_secs(5),
@@ -301,15 +307,10 @@ async fn serve_router_with_qos_rejects_excess_connections() {
     let policy = QosPolicy::new(1, 4, 4).expect("policy should build");
     let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel();
     let server_qos = qos.clone();
-    let server = tokio::spawn(serve_router_with_qos(
-        router,
-        config,
-        server_qos,
-        policy,
-        async {
-            let _ = shutdown_waiter.await;
-        },
-    ));
+    let listener = QosTcpListener::new(listener, server_qos, policy);
+    let server = tokio::spawn(serve_listener(listener, router, config, async {
+        let _ = shutdown_waiter.await;
+    }));
 
     let first = connect_with_retry(&bind).await;
     wait_for_connection_count(&qos, 1).await;
@@ -323,14 +324,6 @@ async fn serve_router_with_qos_rejects_excess_connections() {
         .await
         .expect("server task should join")
         .expect("server should stop");
-}
-
-fn unused_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("listener should bind")
-        .local_addr()
-        .expect("listener should expose address")
-        .port()
 }
 
 async fn connect_with_retry(bind: &str) -> tokio::net::TcpStream {

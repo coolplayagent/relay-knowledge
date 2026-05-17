@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-qos-prebound-listener-test-20260518
+- 目标：修复 quality gate repair mode 中 `cargo_test` 的 `serve_router_with_qos_rejects_excess_connections` 偶发端口复用竞态，优先恢复 stability gate，并保持 foundational、competitive、semantic/vector 与 research judge 下限不变。
+- 算法与架构：测试先用 Tokio 绑定 `127.0.0.1:0` 并读取实际地址，再把已绑定 listener 包装为现有 `QosTcpListener` 交给 `serve_listener`；QoS admission、连接 permit 生命周期、Axum serve future、超预算连接关闭和 graceful shutdown 断言仍走生产 listener/server 路径。
+- 不变量：不改变生产 `serve_router_with_qos`、QoS policy/runtime、HTTP 配置解析、CLI/API、SQLite schema、索引、retrieval ranking、semantic/vector provider/env、embedding 设置、research judge 配置或安装发布行为；只消除单测中 “探测空闲端口后释放再重绑” 的非确定性前置条件。
+- 预期影响：`cargo test --all-targets --all-features` 不再因端口被其他并发测试或进程抢占而误判 QoS server 未接受连接；relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 和 graph retrieval fixture 的检索结果与延迟不应直接变化。
+- 已知风险：该候选修复测试同步边界而非提升检索评分；如果未来 `serve_router_with_qos` 外层 bind 逻辑变化，仍需由配置解析或新的外层 bind 测试覆盖。
 ## 候选优化说明：manual-edge-search-language-materialization-20260518
 - 目标：保护 relay-teams、LevelDB、Linux、Kubernetes、Spring Framework、semantic/vector 与 research judge 下限，同时把 reference/call/import 的 language selector 剪枝从 correlated file lookup 推进到 FTS search row 本身，降低多语言大仓 edge query 的候选窗口噪声。
 - 算法与架构：snapshot、checkpointed batch、finalize 的 reference/import/call search document 写入统一带上所属 file 的 `language_id`；schema 初始化对旧 edge search row 做幂等 language 回填；edge 查询复用 symbol/chunk 的 `fts_path_and_language_filter_sql`，在 SQLite FTS bounded candidate subquery 内直接按 `language_id` 剪枝，Rust `selected_row` 继续作为最终一致性保护。
@@ -843,9 +849,6 @@ m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _conte
 - known degradations: score_component:performance 1.0->0.938194
 - latency metrics: cargo_build_release_ms=65969ms; cargo_fmt_check_ms=812ms; cargo_clippy_ms=239ms; cargo_test_ms=8869ms; relay_teams_index_ms=88245ms; relay_teams_query_p50_ms=134ms; relay_teams_query_p95_ms=460ms; leveldb_cpp_index_ms=21528ms
 
-Adopted optimization notes:
-
-   source_scope: source_scope.to_owned(), +            batch_index: 2, +            parsed_byte_count: 20, +            files: vec![loader_file], +            symbols: Vec::new(), +            references: Vec::new(), +            imports: vec![loader_import], +            chunks: Vec::new(), +            diagnostics: Vec::new(), +        }) +        .await +        .expect("loader batch should persist"); +    store +        .finalize_code_index_session(session) +        .await +        .expect("session should finalize"); + +    let hits = search(&store, "ApplicationContext", CodeQueryKind::Imports).await; + +    assert_eq!(hits.len(), 1); +    assert_eq!( +        hits[0].path, +        "src/main/java/org/springframework/context/support/ContextLoader.java" +    ); +    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved")); +    assert_eq!( +        hits[0].edge_target_hint.as_deref(), +        Some("src/main/java/org/springframework/context/ApplicationContext.java") +    ); +} + +#[tokio::test] async fn checkpointed_batch_replay_keeps_progress_counts_stable() { let store = registered_store().await; let source_scope = "git_snapshot:batch-replay"; tokens used 181,583
 ## 20260517T045508Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T045508Z.patch`
@@ -856,9 +859,6 @@ Adopted optimization notes:
 - known degradations: metric:semantic_vector_provider_probe_ms 477.0->601
 - latency metrics: cargo_build_release_ms=99ms; cargo_fmt_check_ms=505ms; cargo_clippy_ms=148ms; cargo_test_ms=4987ms; relay_teams_index_ms=81125ms; relay_teams_query_p50_ms=127ms; relay_teams_query_p95_ms=426ms; leveldb_cpp_index_ms=19553ms
 
-Adopted optimization notes:
-
-G_API_KEY".to_owned(), +                "secret-key".to_owned(), +            ), +            ( +                "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL".to_owned(), +                "runtime-model".to_owned(), +            ), +            ( +                "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION".to_owned(), +                "4".to_owned(), +            ), +        ], +    ) +    .expect("environment should parse"); +    let service = service_with_environment(&environment).await; + +    let response = service +        .probe_embedding_provider(RequestContext::with_ids( +            InterfaceKind::Cli, +            "req-provider-rate-limit", +            "trace-provider-rate-limit", +        )) +        .await +        .expect("probe should run"); + +    assert!(response.ok); +    assert_eq!(response.provider, Some("openai_compatible".to_owned())); +    assert_eq!(response.error_code.as_deref(), Some("rate_limited")); +    assert_eq!(response.retryable, Some(true)); +    server.await.expect("server should finish"); +} + +#[tokio::test] async fn wait_until_fresh_query_does_not_increment_fresh_index_versions() { let service = service_with_memory_store().await; service tokens used 270,438
 ## 20260517T051540Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T051540Z.patch`
@@ -869,9 +869,6 @@ G_API_KEY".to_owned(), +                "secret-key".to_owned(), +            ),
 - known degradations: metric:leveldb_cpp_index_ms 19068.0->19723
 - latency metrics: cargo_build_release_ms=105ms; cargo_fmt_check_ms=502ms; cargo_clippy_ms=156ms; cargo_test_ms=4570ms; relay_teams_index_ms=81658ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=427ms; leveldb_cpp_index_ms=19723ms
 
-Adopted optimization notes:
-
-) { +        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts" +        | "index.tsx" => 0.2, +        _ => 0.0, +    } +} + fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> { value .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_')) diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index d051f6b0dfb45e3835118d83334c62aab27fc2c2..efa07cc9f23cf79de491b1fd7de8bc96cc4ac4dc --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -87,3 +87,13 @@ 3.0 ); } + +#[test] +fn import_surface_bonus_prefers_public_reexport_files() { +    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0); +    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0); +    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0); +    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0); +} tokens used 221,754
 ## 20260517T055803Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T055803Z.patch`
@@ -882,9 +879,6 @@ Adopted optimization notes:
 - known degradations: score_component:performance 1.0->0.95588
 - latency metrics: cargo_build_release_ms=97ms; cargo_fmt_check_ms=465ms; cargo_clippy_ms=157ms; cargo_test_ms=3817ms; relay_teams_index_ms=65523ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=421ms; leveldb_cpp_index_ms=19160ms
 
-Adopted optimization notes:
-
-+            call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, true), +            0.0 +        ); +    } + +    #[test] +    fn query_mentions_test_or_benchmark_detects_explicit_intent() { +        assert!(!query_mentions_test_or_benchmark("NewLRUCache")); +        assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); +        assert!(query_mentions_test_or_benchmark("db_bench cache")); +    } + +    fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +        let selector = +            crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +                .expect("selector should be valid"); + +        CodeRetrievalRequest::new( +            "NewLRUCache", +            selector, +            kind, +            10, +            crate::domain::FreshnessPolicy::AllowStale, +        ) +        .expect("request should be valid") +    } +} tokens used 233,314
 ## 20260517T062729Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T062729Z.patch`
@@ -895,10 +889,6 @@ Adopted optimization notes:
 - known degradations: metric:cargo_fmt_check_ms 729.0->780; metric:cargo_test_ms 8288.0->8625
 - latency metrics: cargo_build_release_ms=34955ms; cargo_fmt_check_ms=780ms; cargo_clippy_ms=213ms; cargo_test_ms=8625ms; relay_teams_index_ms=80016ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=437ms; leveldb_cpp_index_ms=19399ms
 
-Adopted optimization notes:
-
-l_name_query_bonus( +            "EvalCheckpointStore signature mismatch append result", +            "EvalCheckpointStore", +            &hybrid, +        ), +        2.0 +    ); +    assert!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &hybrid, +        ) > symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "FEISHU_METADATA_PLATFORM_KEY", +            &hybrid, +        ) +    ); +    assert_eq!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &callers, +        ), +        0.0 +    ); +} + +fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +    let selector = +        crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +            .expect("selector should be valid"); + +    CodeRetrievalRequest::new( +        "checkpoint metadata version constant", +        selector, +        kind, +        10, +        crate::domain::FreshnessPolicy::AllowStale, +    ) +    .expect("request should be valid") +} tokens used 155,835
--
 ## 20260517T063652Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T063652Z.patch`
@@ -909,9 +899,6 @@ l_name_query_bonus( +            "EvalCheckpointStore signature mismatch append 
 - known degradations: none recorded
 - latency metrics: cargo_build_release_ms=99ms; cargo_fmt_check_ms=489ms; cargo_clippy_ms=144ms; cargo_test_ms=3828ms; relay_teams_index_ms=65576ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=442ms; leveldb_cpp_index_ms=19944ms
 
-Adopted optimization notes:
-
-cache")); } +    #[test] +    fn declaration_surface_path_bonus_prefers_non_test_headers() { +        let hybrid = retrieval_request(CodeQueryKind::Hybrid); +        let definition = retrieval_request(CodeQueryKind::Definition); + +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.h", &hybrid), +            0.35 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "include/leveldb/cache.hpp", &hybrid), +            0.35 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.cc", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl_test.h", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(0.0, "db/db_impl.h", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition), +            0.0 +        ); +    } + fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { let selector = crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) tokens used 337,233
 ## 20260517T065546Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T065546Z.patch`
@@ -922,9 +909,6 @@ cache")); } +    #[test] +    fn declaration_surface_path_bonus_prefers_non_test
 - known degradations: metric:leveldb_cpp_index_ms 19206.0->22453; metric:semantic_vector_provider_probe_ms 1166.0->1243
 - latency metrics: cargo_build_release_ms=127ms; cargo_fmt_check_ms=502ms; cargo_clippy_ms=141ms; cargo_test_ms=3878ms; relay_teams_index_ms=72221ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=474ms; leveldb_cpp_index_ms=22453ms
 
-Adopted optimization notes:
-
-ition); +        let callers = retrieval_request(CodeQueryKind::Callers); + +        assert_eq!( +            symbol_test_path_penalty( +                6.0, +                "tests/unit/test_checkpoint.py", +                &hybrid, +                false +            ), +            -0.75 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "benchmarks/db_bench.cc", &definition, false), +            -0.75 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "src/checkpoint.py", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &hybrid, true), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(0.0, "tests/unit/test_checkpoint.py", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &callers, false), +            0.0 +        ); +    } + fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { let selector = crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) tokens used 204,207
 ## 20260517T070951Z
 - score: 0.985604; cases: 35/35 passed; summary: provider/ranking docs and symbol excerpt improvements raised competitive accuracy; latency degradations remain in memory details.
 ## 20260517T072446Z
@@ -1010,4 +994,17 @@ ile_id = format!("noise-file-{index}"); +        let path = format!("noise/calle
 Adopted optimization notes:
 
 pository_search +                WHERE document_kind IN ('reference', 'import', 'call') +                ORDER BY document_kind ASC, path ASC +                ", +            )?; +            let rows = statement.query_map([], |row| { +                Ok(( +                    row.get::<_, String>(0)?, +                    row.get::<_, String>(1)?, +                    row.get::<_, String>(2)?, +                )) +            })?; + +            rows.collect::<Result<Vec<_>, _>>() +                .map_err(StorageError::from) +        }) +        .await +        .expect("search rows should load"); + +    for document_kind in ["reference", "import", "call"] { +        assert!(rows.iter().any(|(kind, path, language)| { +            kind == document_kind && path == "src/lib.rs" && language == "rust" +        })); +        assert!(rows.iter().any(|(kind, path, language)| { +            kind == document_kind && path == "py/app.py" && language == "python" +        })); +    } +} + +#[tokio::test] async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() { let symbol_store = store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await; tokens used 273,303
+## 20260517T223953Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T223953Z.patch`
+- score: 0.925314 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.75, performance=0.868758, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: score_component:score 0.38->0.925314; score_component:foundational_capability 0.0->1.0; score_component:competitive_capability 0.0->1.0; score_component:accuracy 0.0->1.0; score_component:semantic_vector 0.0->1.0; score_component:stability 0.8->1.0; metric:cargo_build_release_ms 34284.0->33235; gate:cargo_test failed->passed Running tests/relay_knowledge/main.rs (target/debug/deps/relay_knowledge-1e9e4d53e06b577f)
+- known degradations: score_component:performance 1.0->0.868758; metric:cargo_test_ms 7431.0->8696
+- latency metrics: cargo_build_release_ms=33235ms; cargo_fmt_check_ms=821ms; cargo_clippy_ms=199ms; cargo_test_ms=8696ms; relay_teams_index_ms=72480ms; relay_teams_query_p50_ms=208ms; relay_teams_query_p95_ms=387ms; leveldb_cpp_index_ms=15521ms
+
+Adopted optimization notes:
+
+:net::TcpListener::bind("127.0.0.1:0") +        .await +        .expect("listener should bind"); +    let bind = listener +        .local_addr() +        .expect("listener should expose address") +        .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), Duration::from_secs(5), @@ -301,11 +307,11 @@ let policy = QosPolicy::new(1, 4, 4).expect("policy should build"); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); let server_qos = qos.clone(); -    let server = tokio::spawn(serve_router_with_qos( +    let listener = QosTcpListener::new(listener, server_qos, policy); +    let server = tokio::spawn(serve_listener( +        listener, router, config, -        server_qos, -        policy, async { let _ = shutdown_waiter.await; }, @@ -323,14 +329,6 @@ .await .expect("server task should join") .expect("server should stop"); -} - -fn unused_port() -> u16 { -    std::net::TcpListener::bind("127.0.0.1:0") -        .expect("listener should bind") -        .local_addr() -        .expect("listener should expose address") -        .port() } async fn connect_with_retry(bind: &str) -> tokio::net::TcpStream { tokens used 218,268
 
