@@ -23,7 +23,7 @@
 
 ## 3. Ranking Signals
 
-排序信号包括：BM25、identifier part match、CamelCase/snake_case segmentation、symbol kind prior、path proximity、language filter、graph edge confidence、call direction、import surface/re-export file、chunk quality、freshness、semantic/vector rank 和 rerank explanation。
+排序信号包括：BM25、identifier part match、CamelCase/snake_case segmentation、symbol kind prior、path proximity、language filter、graph edge confidence、call direction、caller/callee 查询的非测试源码路径优先级、import surface/re-export file、chunk quality、freshness、semantic/vector rank 和 rerank explanation。当查询本身明确包含 test 或 benchmark 意图时，caller/callee 的源码路径优先级不生效。
 
 ## 4. 候选窗口
 

@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T055803Z
+
+- 目标：在保持 `semantic_vector_provider_probe` 既有 429 reachable-but-degraded 语义和 semantic/vector 保护项不退化的前提下，提升 competitive code graph caller/callee 查询在大仓全量索引中的排序稳定性，尤其是 LevelDB `NewLRUCache` caller 查询这类生产调用点被测试和 benchmark 调用噪声压低的场景。
+- 方法：在 call graph FTS 候选进入 Rust 评分后增加一个小幅源码路径优先级；仅当 explicit `callers`/`callees` 查询已经通过 callee/caller 名称获得正分、查询文本本身没有 test/benchmark 意图、且候选路径不像 test/benchmark 文件或目录时加分。该信号与既有 call direction、edge confidence、line containment、candidate window 和 path/language filter 融合，不枚举 repository、symbol、fixture path 或已知查询。
+- 架构与不变量：不修改 SQLite schema、索引写入、call edge resolution、FTS 召回、候选上限、CLI/API 字段、env/provider 配置、semantic/vector refresh 或 query hot path 的外部边界；测试/benchmark 路径仍可在查询明确要求测试或通过 path filter/语言 filter 约束时返回，未匹配的 call edge 不会因为路径优先级被召回。
+- 预期影响：`leveldb_callers_new_lru_cache` 应把 `db/db_impl.cc`、`db/table_cache.cc` 等生产调用点排到 `*_test.cc` 和 benchmark 噪声前；relay-teams caller/callee 精确 case、full-scope import ranking、foundational definition/filter cases、semantic/vector backend source coverage 和 provider gate 不应退化。
+- 已知风险：部分仓库会把示例、fixture 或 generated code 放在非测试路径下，可能获得该小幅优先级；由于 bonus 只作用于已有正分 directional call edge 且查询显式包含 test/benchmark 时禁用，风险限制在同分或近同分 caller/callee 候选的排序。
+
 ## 候选优化说明：20260517T051540Z
 
 - 目标：在已确认 `semantic_vector_provider_probe` 的 HTTP 429 降级语义通过后，提升 protected competitive repo retrieval 的 import graph ranking，尤其是 full-scope Python/JS/TS/Rust 包装层或 re-export 查询在测试文件和普通使用点噪声前的排序稳定性。
@@ -692,4 +700,17 @@ G_API_KEY".to_owned(), +                "secret-key".to_owned(), +            ),
 Adopted optimization notes:
 
 ) { +        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts" +        | "index.tsx" => 0.2, +        _ => 0.0, +    } +} + fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> { value .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_')) diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index d051f6b0dfb45e3835118d83334c62aab27fc2c2..efa07cc9f23cf79de491b1fd7de8bc96cc4ac4dc --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -87,3 +87,13 @@ 3.0 ); } + +#[test] +fn import_surface_bonus_prefers_public_reexport_files() { +    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0); +    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0); +    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0); +    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0); +} tokens used 221,754
+## 20260517T055803Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T055803Z.patch`
+- score: 0.942612 (foundational=1.0, competitive=0.788095, accuracy=0.894048, semantic_vector=1.0, performance=0.95588, stability=1.0)
+- cases: 35/35 passed
+- changed paths: `docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_path_ranking.rs`
+- key improvements: score_component:score 0.1->0.942612; score_component:foundational_capability 0.0->1.0; score_component:competitive_capability 0.0->0.788095; score_component:accuracy 0.0->0.894048; score_component:semantic_vector 0.0->1.0; score_component:stability 0.0->1.0
+- known degradations: score_component:performance 1.0->0.95588
+- latency metrics: cargo_build_release_ms=97ms; cargo_fmt_check_ms=465ms; cargo_clippy_ms=157ms; cargo_test_ms=3817ms; relay_teams_index_ms=65523ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=421ms; leveldb_cpp_index_ms=19160ms
+
+Adopted optimization notes:
+
++            call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, true), +            0.0 +        ); +    } + +    #[test] +    fn query_mentions_test_or_benchmark_detects_explicit_intent() { +        assert!(!query_mentions_test_or_benchmark("NewLRUCache")); +        assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); +        assert!(query_mentions_test_or_benchmark("db_bench cache")); +    } + +    fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +        let selector = +            crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +                .expect("selector should be valid"); + +        CodeRetrievalRequest::new( +            "NewLRUCache", +            selector, +            kind, +            10, +            crate::domain::FreshnessPolicy::AllowStale, +        ) +        .expect("request should be valid") +    } +} tokens used 233,314
 

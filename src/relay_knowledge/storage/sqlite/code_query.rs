@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+#[path = "code_query_path_ranking.rs"]
+mod code_query_path_ranking;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_scope.rs"]
@@ -19,6 +21,7 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
+use code_query_path_ranking::{call_site_source_path_bonus, query_mentions_test_or_benchmark};
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
 use code_query_scope::path_matches_filter;
@@ -372,6 +375,7 @@ fn search_calls(
         },
     )?;
     let query = request.query.to_lowercase();
+    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -396,6 +400,13 @@ fn search_calls(
                     request,
                 )
                 + callee_related_name_bonus(&query, &row.callee_name, request);
+            let score = score
+                + call_site_source_path_bonus(
+                    base_score,
+                    &row.path,
+                    request,
+                    query_has_test_intent,
+                );
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
                 let (symbol_snapshot_id, canonical_symbol_id) =
