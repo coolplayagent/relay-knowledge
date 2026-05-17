@@ -20,10 +20,21 @@
 
 ## 第二卷：能力说明
 
-- [第 1 章 GraphRAG 功能文档](02-capabilities/01-graphrag-capability-guide.md)：context pack、新鲜度、后端、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
-- [第 2 章 混合检索 Context Pack](02-capabilities/02-hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
-- [第 3 章 代码仓库 Tree-sitter 检索](02-capabilities/03-code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
-- [第 4 章 Semantic/Vector Provider 后端](02-capabilities/04-semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
+- [第 1 章 能力版图总览](02-capabilities/01-capability-overview.md)
+- [第 2 章 本地优先运行时与 CLI](02-capabilities/02-local-first-runtime-and-cli.md)
+- [第 3 章 证据与图事实](02-capabilities/03-evidence-and-graph-facts.md)
+- [第 4 章 查询与 Context Pack 基础](02-capabilities/04-query-and-context-pack-basics.md)
+- [第 5 章 混合检索竞争力](02-capabilities/05-hybrid-retrieval-advantage.md)
+- [第 6 章 新鲜度与索引恢复](02-capabilities/06-freshness-and-index-recovery.md)
+- [第 7 章 多模态证据能力](02-capabilities/07-multimodal-evidence-capability.md)
+- [第 8 章 代码仓库基础能力](02-capabilities/08-code-repository-basics.md)
+- [第 9 章 代码图竞争力特性](02-capabilities/09-code-graph-competitive-features.md)
+- [第 10 章 代码影响分析与报告](02-capabilities/10-code-impact-and-reporting.md)
+- [第 11 章 Semantic/Vector Provider 后端](02-capabilities/11-semantic-vector-provider-backend.md)
+- [第 12 章 Web 工作区能力](02-capabilities/12-web-workspace-capabilities.md)
+- [第 13 章 Agent 接入能力](02-capabilities/13-agent-access-capabilities.md)
+- [第 14 章 运维与 Worker 能力](02-capabilities/14-operations-and-worker-capabilities.md)
+- [第 15 章 评估与质量门禁](02-capabilities/15-evaluation-and-quality-gates.md)
 
 ## 第三卷：架构规格
 
