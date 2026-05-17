@@ -325,9 +325,9 @@ jobs:
           NOTES
 
       - name: Attest release archives
-        uses: actions/attest@v3
+        uses: actions/attest@v4
         with:
-          subject-path: dist/*
+          subject-checksums: dist/checksums.txt
 
       - name: Create GitHub release
         env:
