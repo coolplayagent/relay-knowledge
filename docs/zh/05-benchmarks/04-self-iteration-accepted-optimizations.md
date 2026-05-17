@@ -40,6 +40,14 @@
 - 预期影响：后续 Codex prompt、run history、CSV 和 memory 会区分基础能力退化、竞争力退化和 semantic/vector 退化，回归记忆可直接指出下一轮应优先修复的目标面。
 - 已知风险：新字段会让旧 `accuracy` 历史与新分项历史并存；为保持可比性，历史记录继续输出 `accuracy`，但新维度的 protected regression 只在上一轮已经记录对应字段时生效。
 
+## 候选优化说明：20260517T030641Z
+
+- 目标：提升 Spring Framework 等 Maven/Gradle Java 大仓在 checkpointed full-scope indexing 后的 import graph accuracy，避免跨批次写入的 Java imports 因 finalize 只处理 Python 与 C/C++ 而长期保持 unresolved。
+- 方法：checkpoint finalize 的 import resolution 增加 Java import 解析，覆盖普通 class import、package wildcard、static member 与 static wildcard；模块路径索引增加 `src/main/java`、`src/test/java` 以及 Kotlin/Scala/Groovy 常见源根的规范化，使 `org.springframework.context.ApplicationContext` 可稳定匹配 `src/main/java/org/springframework/context/ApplicationContext.java`。静态成员继续通过符号名和候选 class 文件路径计数，保持唯一 resolved、多重 ambiguous、缺失 unresolved。
+- 架构与不变量：只扩展 storage finalize 和 parser-side import identity 的路径规范化规则；SQLite schema、batch/checkpoint 事务边界、CLI/API 返回形状、Python/C/C++ import 规则、reference/call finalize、FTS 查询与 ranking 规则保持不变。源根规范化只影响模块路径匹配键，不改变实际返回的 repository path 或文件记录主键。
+- 预期影响：Spring Framework Java import cases 的 edge resolution state、target hint 和 import graph retrieval 稳定性提高；跨批次 class/interface imports 不再依赖同一 `SnapshotBuild.finish` 才能解析。对 relay-teams Python、Linux/LevelDB C/C++、Kubernetes Go 查询不应产生行为退化，性能影响限于 finalize 对 Java imports 的轻量字符串解析和符号名索引复用。
+- 已知风险：Java resolution 仍基于源路径与符号名的静态启发式，不解析 build-system source sets、generated sources、annotation processors 或 classpath jars；如果一个 repository 下存在多个同名 source roots 映射到相同 package/class，规则会按既有 ambiguous/unresolved 保护准确性而不是强行选择。
+
 ## 候选优化说明：20260516T195734Z
 
 - 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先恢复 protected stability gate。
@@ -629,3 +637,16 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::task::Poll::Ready(Ok(buffer.len())) +    } -    fn poll_ready( -        &mut self, -        context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    fn poll_flush( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } } tokens used 57,392
+## 20260517T030641Z
+
+- patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches/20260517T030641Z.patch`
+- score: 0.990729 (accuracy=1.0, performance=0.938194, stability=1.0)
+- cases: 32/32 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/imports.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`
+- key improvements: score_component:score 0.3->0.990729; score_component:accuracy 0.0->1.0; score_component:stability 0.0->1.0
+- known degradations: score_component:performance 1.0->0.938194
+- latency metrics: cargo_build_release_ms=65969ms; cargo_fmt_check_ms=812ms; cargo_clippy_ms=239ms; cargo_test_ms=8869ms; relay_teams_index_ms=88245ms; relay_teams_query_p50_ms=134ms; relay_teams_query_p95_ms=460ms; leveldb_cpp_index_ms=21528ms
+
+Adopted optimization notes:
+
+   source_scope: source_scope.to_owned(), +            batch_index: 2, +            parsed_byte_count: 20, +            files: vec![loader_file], +            symbols: Vec::new(), +            references: Vec::new(), +            imports: vec![loader_import], +            chunks: Vec::new(), +            diagnostics: Vec::new(), +        }) +        .await +        .expect("loader batch should persist"); +    store +        .finalize_code_index_session(session) +        .await +        .expect("session should finalize"); + +    let hits = search(&store, "ApplicationContext", CodeQueryKind::Imports).await; + +    assert_eq!(hits.len(), 1); +    assert_eq!( +        hits[0].path, +        "src/main/java/org/springframework/context/support/ContextLoader.java" +    ); +    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved")); +    assert_eq!( +        hits[0].edge_target_hint.as_deref(), +        Some("src/main/java/org/springframework/context/ApplicationContext.java") +    ); +} + +#[tokio::test] async fn checkpointed_batch_replay_keeps_progress_counts_stable() { let store = registered_store().await; let source_scope = "git_snapshot:batch-replay"; tokens used 181,583

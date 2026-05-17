@@ -40,6 +40,40 @@ class Worker {
 }
 
 #[test]
+fn java_import_resolution_handles_maven_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "src/main/java/org/springframework/context/ApplicationContext.java",
+            r#"
+package org.springframework.context;
+
+public interface ApplicationContext {}
+"#,
+        ),
+        (
+            "src/main/java/org/springframework/context/support/ContextLoader.java",
+            r#"
+package org.springframework.context.support;
+
+import org.springframework.context.ApplicationContext;
+
+class ContextLoader {
+    ApplicationContext load() {
+        return null;
+    }
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(
+        &snapshot,
+        "org.springframework.context.ApplicationContext",
+        "resolved",
+    );
+}
+
+#[test]
 fn java_static_import_reports_overloaded_members_as_ambiguous() {
     let snapshot = parse_sources(&[
         (

@@ -398,6 +398,94 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
 }
 
 #[tokio::test]
+async fn checkpointed_batches_finalize_java_import_edges_under_maven_roots() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:java-imports";
+    let session = session_for_scope(source_scope, 2);
+    let context_file = file(
+        source_scope,
+        "context-file",
+        "src/main/java/org/springframework/context/ApplicationContext.java",
+        "java",
+        CodeParseStatus::Parsed,
+    );
+    let loader_file = file(
+        source_scope,
+        "loader-file",
+        "src/main/java/org/springframework/context/support/ContextLoader.java",
+        "java",
+        CodeParseStatus::Parsed,
+    );
+    let context_symbol = symbol(
+        source_scope,
+        "context-symbol",
+        "context-file",
+        "src/main/java/org/springframework/context/ApplicationContext.java",
+        "ApplicationContext",
+        "java",
+    );
+    let loader_import = import(
+        source_scope,
+        "loader-import",
+        "loader-file",
+        "src/main/java/org/springframework/context/support/ContextLoader.java",
+        "import org.springframework.context.ApplicationContext;",
+    );
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![context_file],
+            symbols: vec![context_symbol],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("context batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![loader_file],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![loader_import],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("loader batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "ApplicationContext", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].path,
+        "src/main/java/org/springframework/context/support/ContextLoader.java"
+    );
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("src/main/java/org/springframework/context/ApplicationContext.java")
+    );
+}
+
+#[tokio::test]
 async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:batch-replay";

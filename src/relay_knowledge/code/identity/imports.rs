@@ -310,7 +310,23 @@ pub(super) fn normalize_join(parent: &str, child: &str) -> Option<String> {
 }
 
 pub(super) fn strip_source_root(path: &str) -> &str {
-    path.strip_prefix("src/").unwrap_or(path)
+    for prefix in [
+        "src/main/java/",
+        "src/test/java/",
+        "src/main/kotlin/",
+        "src/test/kotlin/",
+        "src/main/scala/",
+        "src/test/scala/",
+        "src/main/groovy/",
+        "src/test/groovy/",
+        "src/",
+    ] {
+        if let Some(stripped) = path.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+
+    path
 }
 
 fn normalize_module_path(path: &str) -> &str {
