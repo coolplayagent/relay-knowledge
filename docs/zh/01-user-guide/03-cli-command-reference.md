@@ -95,6 +95,8 @@ relay-knowledge setup profile local|agent-readonly|service|external-embedding
 relay-knowledge version
 ```
 
+冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。
+
 ## 3.5 读写影响
 
 状态、健康、帮助、setup doctor/profile、provider probe、report 和 audit query 是诊断入口，不应修改图谱事实。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。

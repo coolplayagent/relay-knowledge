@@ -21,13 +21,14 @@ pub use code_repository::{
     CodeCallRecord, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
     CodeImpactRequest, CodeImportRecord, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexMode,
     CodeIndexProgressSummary, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession,
-    CodeIndexSnapshot, CodeIndexSummary, CodePathTombstone, CodeQueryKind,
-    CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview, CodeRepositoryLargestFile,
-    CodeRepositoryLatencySample, CodeRepositoryRegistration, CodeRepositoryReport,
-    CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus, CodeRepositoryTotals,
-    CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest, RepositoryCodeChunkRecord,
-    RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord, code_snapshot_scope_id,
+    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeIndexTaskState,
+    CodePathTombstone, CodeQueryKind, CodeRepositoryExcludedPath, CodeRepositoryLanguagePreview,
+    CodeRepositoryLargestFile, CodeRepositoryLatencySample, CodeRepositoryRegistration,
+    CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus,
+    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalLayer, CodeRetrievalRequest,
+    CodeScopeRetentionSummary, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+    RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    code_snapshot_scope_id,
 };
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;

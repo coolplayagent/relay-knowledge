@@ -787,6 +787,12 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
     } else {
         None
     };
+    let (code_index_shutdown, code_index_shutdown_receiver) = tokio::sync::watch::channel(false);
+    let code_index_task = tokio::spawn(run_code_index_loop(
+        service.clone(),
+        std::time::Duration::from_secs(5),
+        code_index_shutdown_receiver,
+    ));
     if web_enabled {
         let network_config = runtime.network.current();
         ensure_web_remote_bind_allowed(
@@ -826,9 +832,35 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
         let _ = file_index_shutdown.send(true);
         let _ = task.await;
     }
+    let _ = code_index_shutdown.send(true);
+    let _ = code_index_task.await;
     runtime.observability.shutdown();
 
     Ok(String::new())
+}
+
+async fn run_code_index_loop(
+    service: RelayKnowledgeService,
+    interval: std::time::Duration,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+        let context = RequestContext::for_interface(InterfaceKind::Cli);
+        if let Ok(Some(_)) = service.run_code_index_task_once(None, context).await {
+            continue;
+        }
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+            _ = tokio::time::sleep(interval) => {}
+        }
+    }
 }
 
 fn ensure_web_remote_bind_allowed(

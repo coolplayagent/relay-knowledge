@@ -50,6 +50,17 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "indexed files=2 symbols=3 references=4 chunks=5 degraded=1\n",
         ),
         (
+            "code.repo.index",
+            serde_json::json!({
+                "task": {
+                    "task_id": "task-1",
+                    "state": "queued",
+                    "source_scope": "scope-1",
+                },
+            }),
+            "index task=task-1 state=queued scope=scope-1\n",
+        ),
+        (
             "code.repo.scope_preview",
             serde_json::json!({
                 "preview": {

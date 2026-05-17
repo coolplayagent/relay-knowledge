@@ -312,6 +312,15 @@ fn run_worker() {
     .expect("index should run");
     assert!(indexed.contains("code.repo.index"));
 
+    run_repo(
+        &service,
+        RepoCommand::IndexWorker { task_id: None },
+        context("index-worker"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("index worker should complete queued index");
+
     let definitions = run_repo(
         &service,
         RepoCommand::Query {

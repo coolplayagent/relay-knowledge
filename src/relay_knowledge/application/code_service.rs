@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use crate::{
     api::{
         ApiError, ApiMetadata, CodeRepositoryImpactResponse, CodeRepositoryIndexResponse,
-        CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
+        CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
+        CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
         CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
         CodeRepositoryStatusResponse, RequestContext,
     },
@@ -22,6 +23,11 @@ use crate::{
 };
 
 use super::RelayKnowledgeService;
+
+const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
+const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
+const CODE_INDEX_TASK_RETRY_BACKOFF_MS: u64 = 60_000;
+const RETAIN_RECENT_CODE_SCOPES: usize = 2;
 
 impl RelayKnowledgeService {
     /// Registers a Git repository as a code source.
@@ -130,6 +136,170 @@ impl RelayKnowledgeService {
             summary,
             status,
         })
+    }
+
+    /// Starts a repository index request, queueing cold full indexes for background execution.
+    pub async fn start_code_repository_index(
+        &self,
+        request: CodeIndexRequest,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryIndexStartResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, &request.repository.repository).await?;
+        if let Some(response) = self
+            .fresh_full_index_response(&store, &status, &request, &context)
+            .await?
+        {
+            return Ok(index_start_from_completed(response, None));
+        }
+        if request.mode != CodeIndexMode::Full {
+            let response = self.index_code_repository(request, context).await?;
+            return Ok(index_start_from_completed(response, None));
+        }
+
+        let registration = registration_from_status(&status);
+        let selector = request.repository.clone();
+        let resource_budget = CodeIndexResourceBudget::default();
+        let plan = run_blocking_code(move || {
+            prepare_full_index_plan(registration, selector, resource_budget)
+        })
+        .await?;
+        let session = plan.session();
+        let payload_json = serde_json::to_string(&request)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        let input_fingerprint = format!(
+            "full:{}:{}:{}:{}",
+            session.repository_id,
+            session.resolved_commit_sha,
+            session.tree_hash,
+            session.source_scope
+        );
+        let task = store
+            .queue_code_index_task(crate::storage::CodeIndexTaskSeed {
+                repository_id: session.repository_id.clone(),
+                alias: status.alias.clone(),
+                ref_selector: request.repository.ref_selector.clone(),
+                resolved_commit_sha: session.resolved_commit_sha.clone(),
+                tree_hash: session.tree_hash.clone(),
+                source_scope: session.source_scope.clone(),
+                path_filters: session.path_filters.clone(),
+                language_filters: session.language_filters.clone(),
+                mode: request.mode.clone(),
+                input_fingerprint,
+                resource_budget: session.resource_budget,
+                payload_json,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?;
+        let checkpoint = store
+            .code_index_checkpoint(task.source_scope.clone())
+            .await
+            .map_err(storage_api_error)?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let status = store
+            .code_repository_status(task.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?
+            .unwrap_or(status);
+
+        Ok(CodeRepositoryIndexStartResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_index_task(
+                &task,
+                request.repository.ref_selector,
+            ),
+            summary: None,
+            status,
+            task: Some(task),
+            checkpoint,
+        })
+    }
+
+    /// Runs one queued code index task under a lease.
+    pub async fn run_code_index_task_once(
+        &self,
+        task_id: Option<String>,
+        context: RequestContext,
+    ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let lease_owner = format!("code-index-worker-{}", std::process::id());
+        let Some(task) = store
+            .claim_code_index_task(crate::storage::CodeIndexTaskClaimRequest {
+                task_id,
+                lease_owner: lease_owner.clone(),
+                lease_duration_ms: CODE_INDEX_TASK_LEASE_MS,
+                max_attempts: CODE_INDEX_TASK_MAX_ATTEMPTS,
+                now_ms: now_millis(),
+            })
+            .await
+            .map_err(storage_api_error)?
+        else {
+            return Ok(None);
+        };
+        let mut request = match serde_json::from_str::<CodeIndexRequest>(&task.payload_json) {
+            Ok(request) => request,
+            Err(error) => {
+                let message = format!(
+                    "code index task '{}' payload is invalid: {error}",
+                    task.task_id
+                );
+                let _ = store
+                    .fail_code_index_task(crate::storage::CodeIndexTaskFailure {
+                        task_id: task.task_id,
+                        lease_owner,
+                        attempt_count: task.attempt_count,
+                        error_kind: "task_payload".to_owned(),
+                        error_message: message.clone(),
+                        retry_backoff_ms: CODE_INDEX_TASK_RETRY_BACKOFF_MS,
+                        max_attempts: CODE_INDEX_TASK_MAX_ATTEMPTS,
+                        now_ms: now_millis(),
+                    })
+                    .await;
+                return Err(ApiError::invalid_argument(message));
+            }
+        };
+        request.repository.ref_selector = task.resolved_commit_sha.clone();
+        let result = self.index_code_repository(request, context).await;
+        match result {
+            Ok(response) => {
+                let completed = store
+                    .complete_code_index_task(crate::storage::CodeIndexTaskCompletion {
+                        task_id: task.task_id.clone(),
+                        lease_owner,
+                        attempt_count: task.attempt_count,
+                        now_ms: now_millis(),
+                    })
+                    .await
+                    .map_err(storage_api_error)?;
+                let _ = store
+                    .prune_code_repository_scopes(crate::storage::CodeScopeRetentionRequest {
+                        repository_id: response.summary.repository_id,
+                        active_scope: response.summary.source_scope,
+                        retain_recent_successful_scopes: RETAIN_RECENT_CODE_SCOPES,
+                    })
+                    .await;
+                Ok(Some(completed))
+            }
+            Err(error) => {
+                let _ = store
+                    .fail_code_index_task(crate::storage::CodeIndexTaskFailure {
+                        task_id: task.task_id,
+                        lease_owner,
+                        attempt_count: task.attempt_count,
+                        error_kind: "code_index".to_owned(),
+                        error_message: error.message.clone(),
+                        retry_backoff_ms: CODE_INDEX_TASK_RETRY_BACKOFF_MS,
+                        max_attempts: CODE_INDEX_TASK_MAX_ATTEMPTS,
+                        now_ms: now_millis(),
+                    })
+                    .await;
+                Err(error)
+            }
+        }
     }
 
     async fn fresh_full_index_response(
@@ -381,6 +551,27 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryStatusResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &selector.repository).await?;
+        let active_task = store
+            .active_code_index_task(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?;
+        let checkpoint = match active_task.as_ref() {
+            Some(task) => store
+                .code_index_checkpoint(task.source_scope.clone())
+                .await
+                .map_err(storage_api_error)?,
+            None => match status.last_indexed_scope_id.clone() {
+                Some(scope) => store
+                    .code_index_checkpoint(scope)
+                    .await
+                    .map_err(storage_api_error)?,
+                None => None,
+            },
+        };
+        let retention = store
+            .code_scope_retention(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?;
         let graph_version = store
             .current_graph_version()
             .await
@@ -389,6 +580,9 @@ impl RelayKnowledgeService {
         Ok(CodeRepositoryStatusResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             status,
+            active_task,
+            checkpoint,
+            retention,
         })
     }
 
@@ -458,6 +652,20 @@ fn registration_from_status(
         root_path: status.root_path.clone(),
         path_filters: status.path_filters.clone(),
         language_filters: status.language_filters.clone(),
+    }
+}
+
+fn index_start_from_completed(
+    response: CodeRepositoryIndexResponse,
+    task: Option<crate::domain::CodeIndexTaskRecord>,
+) -> CodeRepositoryIndexStartResponse {
+    CodeRepositoryIndexStartResponse {
+        metadata: response.metadata,
+        scope: response.scope,
+        summary: Some(response.summary),
+        status: response.status,
+        task,
+        checkpoint: None,
     }
 }
 
@@ -630,6 +838,14 @@ fn normalize_path_filter(filter: &str) -> &str {
     }
 
     filter
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 async fn indexed_commit_for_ref(

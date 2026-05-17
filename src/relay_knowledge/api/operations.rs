@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
-        CodeImpactPathGroups, CodeImpactRequest, CodeIndexSummary, CodeRepositoryRegistration,
-        CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector,
-        CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+        CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
+        CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryReport,
+        CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
         CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
         ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
         IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
@@ -621,6 +622,20 @@ pub struct CodeRepositoryIndexResponse {
     pub status: CodeRepositoryStatus,
 }
 
+/// Code repository index start response for queued or no-op index requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryIndexStartResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<CodeIndexSummary>,
+    pub status: CodeRepositoryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<CodeIndexTaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<CodeIndexCheckpoint>,
+}
+
 /// Code repository scope preview response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryScopePreviewResponse {
@@ -671,6 +686,22 @@ impl CodeRepositoryScopeMetadata {
             stale: status.stale,
         }
     }
+
+    /// Builds scope metadata for a queued or running index task.
+    pub fn from_index_task(task: &CodeIndexTaskRecord, requested_ref: impl Into<String>) -> Self {
+        Self {
+            scope_id: task.source_scope.clone(),
+            repository_id: task.repository_id.clone(),
+            alias: task.alias.clone(),
+            requested_ref: requested_ref.into(),
+            resolved_commit_sha: task.resolved_commit_sha.clone(),
+            tree_hash: task.tree_hash.clone(),
+            path_filters: task.path_filters.clone(),
+            language_filters: task.language_filters.clone(),
+            index_versions: vec![format!("code:{}:{}", task.source_scope, task.tree_hash)],
+            stale: true,
+        }
+    }
 }
 
 /// Code repository retrieval response.
@@ -699,6 +730,11 @@ pub struct CodeRepositoryImpactResponse {
 pub struct CodeRepositoryStatusResponse {
     pub metadata: ApiMetadata,
     pub status: CodeRepositoryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_task: Option<CodeIndexTaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<CodeIndexCheckpoint>,
+    pub retention: CodeScopeRetentionSummary,
 }
 
 /// Code repository operations report response.

@@ -57,8 +57,9 @@
 优化：
 
 - no-op fast path 让重复同 scope Web index request 快速返回 HTTP 200。
-- cold full indexing 后续应迁移为 queue/progress handle，而不是单个 blocking request。
+- cold full indexing 已迁移为 queued task handle，并通过持久化 code-index worker queue 执行，而不是单个 blocking request。
 - 已 fresh 的 relay-teams scope 重复 Web index 目标小于 1 秒。
+- cold full indexing 运行中通过 `task`、`active_task`、checkpoint 和 retention 状态观测后台 worker 的 parse/write 工作。
 
 ## 6. 优化后验证
 
@@ -74,6 +75,7 @@
 | Web 无操作索引 | HTTP 408 / 30.015s | HTTP 200 / 0.162s |
 | 顶层多词 `query` | exit 2 | exit 0 / 0.129s |
 
-最新冷 full index 样本为 47.45s，峰值 RSS 为 360,504 KiB。索引仍会填充
-code-repository FTS candidate table，这是为查询延迟做出的有意取舍；如果
-cold indexing budget 成为主要瓶颈，需要继续用同一外部仓库复测。
+后台队列化前的最新同步冷 full index 样本为 47.45s，峰值 RSS 为 360,504 KiB。
+索引仍会填充 code-repository FTS candidate table，这是为查询延迟做出的有意取舍；
+后续 cold-index 复测应在同一外部仓库上同时记录 enqueue latency、worker completion time、
+checkpoint lag 和 retention pruning。

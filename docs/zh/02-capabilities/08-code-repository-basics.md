@@ -22,6 +22,8 @@ relay-knowledge repo status core --format json
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。
 
+冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`repo status` 暴露 active task、checkpoint 进度和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。
+
 ## 竞争力特性
 
 仓库索引绑定 repository id、resolved commit、tree hash、path filter 和 language filter。相同树可以复用 scope，rebase 或 force-moved head 需要新索引，dirty worktree 通过 worktree overlay 显式建模。

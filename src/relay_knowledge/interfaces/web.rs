@@ -292,7 +292,10 @@ async fn dispatch_operation(
         }
         "code.repo.index" => {
             let response = service
-                .index_code_repository(code_index_request(payload, CodeIndexMode::Full)?, context)
+                .start_code_repository_index(
+                    code_index_request(payload, CodeIndexMode::Full)?,
+                    context,
+                )
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }

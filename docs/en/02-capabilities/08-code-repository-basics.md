@@ -22,6 +22,8 @@ relay-knowledge repo status core --format json
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy.
 
+Cold full `repo index` returns a queued task handle and lets the background code-index worker perform parsing and SQLite writes under a lease. `repo status` exposes the active task, checkpoint progress, and retention summary; successful workers keep the active scope, the two latest completed scopes, and unfinished task scopes.
+
 ## Competitive Features
 
 Repository indexing binds repository id, resolved commit, tree hash, path filters, and language filters. Equal trees can reuse scopes, rebased or force-moved heads require new indexes, and dirty worktrees are represented through explicit worktree overlays.

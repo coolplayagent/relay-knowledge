@@ -18,9 +18,9 @@ pub use error::{ApiError, ErrorKind};
 pub use metadata::ApiMetadata;
 pub use operations::{
     AuditQueryApiRequest, AuditQueryResponse, AuditSinkStatus, CodeRepositoryImpactResponse,
-    CodeRepositoryIndexResponse, CodeRepositoryQueryResponse, CodeRepositoryRegisterRequest,
-    CodeRepositoryRegisterResponse, CodeRepositoryReportResponse, CodeRepositoryScopeMetadata,
-    CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
+    CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
+    CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse, CodeRepositoryReportResponse,
+    CodeRepositoryScopeMetadata, CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse,
     EmbeddingProviderProbeResponse, FileIndexRequest, FileIndexResponse, FileQueryRequest,
     FileQueryResponse, GRAPH_CANVAS_DEFAULT_LIMIT, GRAPH_CANVAS_MAX_LIMIT, GraphCanvasEdge,
     GraphCanvasKind, GraphCanvasNode, GraphCanvasRequest, GraphCanvasResponse, GraphCanvasSummary,
