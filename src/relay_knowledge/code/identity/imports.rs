@@ -18,6 +18,7 @@ pub(super) enum ModuleFileResolution {
 pub(super) struct ImportContext<'a> {
     file_languages: BTreeMap<&'a str, &'a str>,
     module_paths: BTreeMap<String, Vec<&'a RepositoryCodeFileRecord>>,
+    go_module_paths: BTreeMap<String, Vec<&'a RepositoryCodeFileRecord>>,
     symbols_by_name: BTreeMap<&'a str, Vec<&'a RepositoryCodeSymbolRecord>>,
 }
 
@@ -28,12 +29,19 @@ impl<'a> ImportContext<'a> {
     ) -> Self {
         let mut file_languages = BTreeMap::new();
         let mut module_paths = BTreeMap::<String, Vec<&RepositoryCodeFileRecord>>::new();
+        let mut go_module_paths = BTreeMap::<String, Vec<&RepositoryCodeFileRecord>>::new();
         for file in files {
             file_languages.insert(file.path.as_str(), file.language_id.as_str());
             module_paths
                 .entry(strip_source_root(&file.path).to_owned())
                 .or_default()
                 .push(file);
+            if file.language_id == "go" {
+                go_module_paths
+                    .entry(strip_go_source_root(&file.path).to_owned())
+                    .or_default()
+                    .push(file);
+            }
         }
 
         let mut symbols_by_name = BTreeMap::<&str, Vec<&RepositoryCodeSymbolRecord>>::new();
@@ -47,6 +55,7 @@ impl<'a> ImportContext<'a> {
         Self {
             file_languages,
             module_paths,
+            go_module_paths,
             symbols_by_name,
         }
     }
@@ -101,42 +110,15 @@ impl<'a> ImportContext<'a> {
             .any(|(_, files)| files.iter().any(|file| file.language_id == language_id))
     }
 
-    pub(super) fn resolve_directory_with_language_files(
+    pub(super) fn resolve_go_directory_with_language_files(
         &self,
         directory_path: &str,
-        language_id: &str,
     ) -> ModuleFileResolution {
-        let directory = normalize_module_path(directory_path);
-        let prefix = if directory.is_empty() {
-            String::new()
-        } else {
-            format!("{directory}/")
-        };
-        let mut matching_directories = Vec::new();
-        for (module_path, files) in self
-            .module_paths
-            .range(prefix.clone()..)
-            .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
-        {
-            if parent_dir(module_path) != directory {
-                continue;
-            }
-            for file in files.iter().filter(|file| file.language_id == language_id) {
-                let directory = parent_dir(&file.path).to_owned();
-                if !matching_directories.contains(&directory) {
-                    matching_directories.push(directory);
-                }
-                if matching_directories.len() > 1 {
-                    return ModuleFileResolution::Ambiguous;
-                }
-            }
-        }
-
-        match matching_directories.as_slice() {
-            [directory] => ModuleFileResolution::Resolved(directory.clone()),
-            [] => ModuleFileResolution::Unresolved,
-            _ => ModuleFileResolution::Ambiguous,
-        }
+        resolve_directory_from_modules(
+            &self.go_module_paths,
+            normalize_go_module_path(directory_path),
+            "go",
+        )
     }
 
     pub(super) fn resolve_name_in_paths(
@@ -347,8 +329,6 @@ pub(super) fn strip_source_root(path: &str) -> &str {
         "src/test/scala/",
         "src/main/groovy/",
         "src/test/groovy/",
-        "staging/src/",
-        "vendor/",
         "src/",
     ] {
         if let Some(stripped) = path.strip_prefix(prefix) {
@@ -363,9 +343,59 @@ fn normalize_module_path(path: &str) -> &str {
     strip_source_root(path.trim_start_matches("./"))
 }
 
+fn strip_go_source_root(path: &str) -> &str {
+    for prefix in ["staging/src/", "vendor/", "src/"] {
+        if let Some(stripped) = path.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+
+    path
+}
+
+fn normalize_go_module_path(path: &str) -> &str {
+    strip_go_source_root(path.trim_start_matches("./"))
+}
+
 fn path_matches_candidate(path: &str, candidate: &str) -> bool {
     let candidate = normalize_module_path(candidate);
     path == candidate || strip_source_root(path) == candidate
+}
+
+fn resolve_directory_from_modules(
+    module_paths: &BTreeMap<String, Vec<&RepositoryCodeFileRecord>>,
+    directory: &str,
+    language_id: &str,
+) -> ModuleFileResolution {
+    let prefix = if directory.is_empty() {
+        String::new()
+    } else {
+        format!("{directory}/")
+    };
+    let mut matching_directories = Vec::new();
+    for (module_path, files) in module_paths
+        .range(prefix.clone()..)
+        .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
+    {
+        if parent_dir(module_path) != directory {
+            continue;
+        }
+        for file in files.iter().filter(|file| file.language_id == language_id) {
+            let directory = parent_dir(&file.path).to_owned();
+            if !matching_directories.contains(&directory) {
+                matching_directories.push(directory);
+            }
+            if matching_directories.len() > 1 {
+                return ModuleFileResolution::Ambiguous;
+            }
+        }
+    }
+
+    match matching_directories.as_slice() {
+        [directory] => ModuleFileResolution::Resolved(directory.clone()),
+        [] => ModuleFileResolution::Unresolved,
+        _ => ModuleFileResolution::Ambiguous,
+    }
 }
 
 fn normalize_qualified_name(value: &str) -> String {

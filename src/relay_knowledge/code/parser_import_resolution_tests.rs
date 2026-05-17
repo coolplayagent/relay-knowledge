@@ -197,6 +197,30 @@ export function buildClient(): Session {
 }
 
 #[test]
+fn python_import_resolution_does_not_strip_vendor_as_source_root() {
+    let snapshot = parse_sources(&[
+        (
+            "vendor/pkg/foo.py",
+            r#"
+class VendorThing:
+    pass
+"#,
+        ),
+        (
+            "src/app.py",
+            r#"
+from pkg.foo import VendorThing
+
+def build():
+    return VendorThing()
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "from pkg.foo import VendorThing", "unresolved");
+}
+
+#[test]
 fn go_import_resolution_splits_blocks_and_handles_staging_source_roots() {
     let snapshot = parse_sources(&[
         (

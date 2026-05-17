@@ -7,7 +7,7 @@ pub(super) fn resolve_import(
     context: &ImportContext<'_>,
 ) -> Option<(ImportResolution, Option<String>)> {
     let import_path = go_import_path(&import.module)?;
-    match context.resolve_directory_with_language_files(&import_path, "go") {
+    match context.resolve_go_directory_with_language_files(&import_path) {
         ModuleFileResolution::Resolved(target_hint) => {
             Some((ImportResolution::Resolved, Some(target_hint)))
         }

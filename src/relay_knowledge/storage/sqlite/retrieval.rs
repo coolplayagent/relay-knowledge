@@ -37,6 +37,7 @@ use ranking::{Candidate, merge_ranked};
 const LABEL_SEPARATOR: char = '\u{1f}';
 const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
 const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
+pub(super) const LOCAL_TOKENIZER_VERSION: &str = "relay-normalized-terms-v2";
 const LOCAL_VECTOR_DIMENSION: usize = 16;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
@@ -70,7 +71,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             token_signature_json TEXT NOT NULL,
             model TEXT NOT NULL,
             dimension INTEGER NOT NULL,
-            source_hash TEXT NOT NULL
+            source_hash TEXT NOT NULL,
+            tokenizer_version TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS graph_vector_documents (
@@ -87,7 +89,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             vector_json TEXT NOT NULL,
             model TEXT NOT NULL,
             dimension INTEGER NOT NULL,
-            source_hash TEXT NOT NULL
+            source_hash TEXT NOT NULL,
+            tokenizer_version TEXT NOT NULL
         );
         ",
     )?;
@@ -429,9 +432,9 @@ fn replace_semantic_document(
         INSERT INTO graph_semantic_documents (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version, source_scope, source_path, entity_labels_json,
-            content, token_signature_json, model, dimension, source_hash
+            content, token_signature_json, model, dimension, source_hash, tokenizer_version
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
         params![
             input.document_id,
@@ -448,6 +451,7 @@ fn replace_semantic_document(
             input.model,
             input.dimension as i64,
             input.source_hash,
+            LOCAL_TOKENIZER_VERSION,
         ],
     )?;
 
@@ -490,9 +494,9 @@ fn replace_vector_document(
         INSERT INTO graph_vector_documents (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version, source_scope, source_path, entity_labels_json,
-            content, vector_json, model, dimension, source_hash
+            content, vector_json, model, dimension, source_hash, tokenizer_version
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
         params![
             input.document_id,
@@ -509,6 +513,7 @@ fn replace_vector_document(
             input.model,
             input.dimension as i64,
             input.source_hash,
+            LOCAL_TOKENIZER_VERSION,
         ],
     )?;
 

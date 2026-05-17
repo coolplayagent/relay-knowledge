@@ -64,6 +64,7 @@ const GRAPH_SEMANTIC_COLUMNS: &[&str] = &[
     "model",
     "dimension",
     "source_hash",
+    "tokenizer_version",
 ];
 
 const GRAPH_VECTOR_COLUMNS: &[&str] = &[
@@ -81,6 +82,7 @@ const GRAPH_VECTOR_COLUMNS: &[&str] = &[
     "model",
     "dimension",
     "source_hash",
+    "tokenizer_version",
 ];
 
 const CODE_GRAPH_SCHEMAS: &[DerivedTableSchema] = &[

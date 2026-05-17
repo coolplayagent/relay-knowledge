@@ -9,12 +9,12 @@ use rusqlite::limits::Limit;
 const TEST_SOURCE_SCOPE: &str = "code:test:import-target:commit:tree";
 
 #[tokio::test]
-async fn target_symbol_import_queries_filter_importing_paths_before_limit() {
-    let store = store_with_snapshot(snapshot_with_path_filtered_target_symbol_imports()).await;
+async fn target_symbol_import_queries_allow_targets_outside_importer_scope() {
+    let store = store_with_snapshot(snapshot_with_import_target_outside_importer_scope()).await;
     let selector = CodeRepositorySelector::new(
         "fixture",
         "commit",
-        vec!["src".to_owned()],
+        vec!["pkg".to_owned()],
         vec!["go".to_owned()],
     )
     .expect("selector should validate");
@@ -22,7 +22,7 @@ async fn target_symbol_import_queries_filter_importing_paths_before_limit() {
     let hits = store
         .search_code(
             crate::domain::CodeRetrievalRequest::new(
-                "TargetSymbol",
+                "SharedInformerFactory",
                 selector,
                 CodeQueryKind::Imports,
                 5,
@@ -31,11 +31,14 @@ async fn target_symbol_import_queries_filter_importing_paths_before_limit() {
             .expect("request should validate"),
         )
         .await
-        .expect("path-filtered target-symbol import query should succeed");
+        .expect("scoped importer target-symbol query should succeed");
 
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "src/target_importer.go");
-    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("lib"));
+    assert_eq!(hits[0].path, "pkg/kubeapiserver/authorizer/config.go");
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("k8s.io/client-go/informers")
+    );
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
 }
 
@@ -72,51 +75,31 @@ async fn target_symbol_import_queries_chunk_large_hint_sets() {
     assert_eq!(hits[0].edge_target_hint.as_deref(), Some("pkg139"));
 }
 
-fn snapshot_with_path_filtered_target_symbol_imports() -> CodeIndexSnapshot {
-    let mut files = Vec::new();
-    let mut symbols = Vec::new();
-    for index in 0..550 {
-        let file_id = format!("noise-symbol-file-{index:03}");
-        let path = format!("vendor/noise_{index:03}/target.go");
-        files.push(file(&file_id, &path, "go"));
-        symbols.push(symbol(
-            &format!("noise-symbol-{index:03}"),
-            &file_id,
-            &path,
-            "TargetSymbol",
-            "go",
-        ));
-    }
-    files.push(file("target-symbol-file", "src/lib/target.go", "go"));
-    symbols.push(symbol(
-        "target-symbol",
-        "target-symbol-file",
-        "src/lib/target.go",
-        "TargetSymbol",
-        "go",
-    ));
-    let mut imports = Vec::new();
-    for index in 0..550 {
-        let file_id = format!("noise-importer-file-{index:03}");
-        let path = format!("src/aaa/noise_importer_{index:03}.py");
-        files.push(file(&file_id, &path, "python"));
-        imports.push(import(
-            &format!("noise-import-{index:03}"),
-            &file_id,
-            &path,
-            "example.com/lib",
-            Some("lib"),
-        ));
-    }
-    files.push(file("target-importer-file", "src/target_importer.go", "go"));
-    imports.push(import(
-        "target-import",
-        "target-importer-file",
-        "src/target_importer.go",
-        "example.com/lib",
-        Some("lib"),
-    ));
+#[tokio::test]
+async fn target_symbol_import_queries_do_not_strip_vendor_for_python_targets() {
+    let store = store_with_snapshot(snapshot_with_python_vendor_target()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["python".to_owned()])
+            .expect("selector should validate");
 
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "VendorThing",
+                selector,
+                CodeQueryKind::Imports,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("python vendor target-symbol query should succeed");
+
+    assert!(hits.is_empty());
+}
+
+fn snapshot_with_import_target_outside_importer_scope() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
@@ -126,14 +109,76 @@ fn snapshot_with_path_filtered_target_symbol_imports() -> CodeIndexSnapshot {
         path_filters: Vec::new(),
         language_filters: Vec::new(),
         full_replace: true,
-        changed_path_count: files.len(),
+        changed_path_count: 2,
         skipped_unchanged_count: 0,
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
-        files,
-        symbols,
+        files: vec![
+            file(
+                "target-symbol-file",
+                "staging/src/k8s.io/client-go/informers/factory.go",
+                "go",
+            ),
+            file(
+                "target-importer-file",
+                "pkg/kubeapiserver/authorizer/config.go",
+                "go",
+            ),
+        ],
+        symbols: vec![symbol(
+            "target-symbol",
+            "target-symbol-file",
+            "staging/src/k8s.io/client-go/informers/factory.go",
+            "SharedInformerFactory",
+            "go",
+        )],
         references: Vec::new(),
-        imports,
+        imports: vec![import(
+            "target-import",
+            "target-importer-file",
+            "pkg/kubeapiserver/authorizer/config.go",
+            "k8s.io/client-go/informers",
+            Some("k8s.io/client-go/informers"),
+        )],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_python_vendor_target() -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("vendor-symbol-file", "vendor/pkg/foo.py", "python"),
+            file("python-importer-file", "src/app.py", "python"),
+        ],
+        symbols: vec![symbol(
+            "vendor-symbol",
+            "vendor-symbol-file",
+            "vendor/pkg/foo.py",
+            "VendorThing",
+            "python",
+        )],
+        references: Vec::new(),
+        imports: vec![import(
+            "python-import",
+            "python-importer-file",
+            "src/app.py",
+            "pkg.foo",
+            Some("pkg"),
+        )],
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

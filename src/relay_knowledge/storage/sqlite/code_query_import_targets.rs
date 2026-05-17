@@ -9,9 +9,8 @@ use crate::{
 
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
-    candidate_limit, fts_path_and_language_filter_sql, fts_values_for_limited_with_language,
-    language_filter_sql_for_column, path_filter_sql_for_column, push_language_filter_values,
-    push_path_filter_values, score_text, symbol_fts_match_query,
+    candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
+    push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
 use super::required_scope;
 
@@ -126,9 +125,7 @@ fn import_target_symbol_matches(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<ImportTargetSymbol>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let fts_filter = fts_path_and_language_filter_sql(status, request);
-    let sql = format!(
-        "
+    let sql = "
         SELECT path, name, language_id
         FROM code_repository_symbols
         WHERE source_scope = ?
@@ -138,20 +135,16 @@ fn import_target_symbol_matches(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
-                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
         )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        "
-    );
-    let mut statement = connection.prepare(&sql)?;
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
+        params_from_iter(symbol_target_fts_values_for_limited(
             required_scope(status)?,
-            status,
-            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -185,19 +178,40 @@ fn import_target_symbol_matches(
     Ok(targets)
 }
 
+fn symbol_target_fts_values_for_limited(
+    source_scope: &str,
+    fts_query: &str,
+    fts_limit: usize,
+    limit: usize,
+) -> Vec<Value> {
+    vec![
+        Value::Text(source_scope.to_owned()),
+        Value::Text(fts_query.to_owned()),
+        Value::Text(source_scope.to_owned()),
+        Value::Integer(fts_limit as i64),
+        Value::Integer(limit as i64),
+    ]
+}
+
 #[derive(PartialEq, Eq)]
 struct ImportTargetSymbol {
     target_hint: String,
     symbol_name: String,
 }
 
-fn import_target_hints_for_symbol(path: &str, _language_id: &str) -> Vec<String> {
+fn import_target_hints_for_symbol(path: &str, language_id: &str) -> Vec<String> {
     let mut target_hints = Vec::new();
     push_target_hint(&mut target_hints, path.to_owned());
     push_target_hint(&mut target_hints, strip_source_root(path).to_owned());
+    if language_id == "go" {
+        push_target_hint(&mut target_hints, strip_go_source_root(path).to_owned());
+    }
     if let Some(parent) = parent_dir(path) {
         push_target_hint(&mut target_hints, parent.to_owned());
         push_target_hint(&mut target_hints, strip_source_root(parent).to_owned());
+        if language_id == "go" {
+            push_target_hint(&mut target_hints, strip_go_source_root(parent).to_owned());
+        }
     }
     target_hints.sort();
     target_hints.dedup();
@@ -302,10 +316,18 @@ fn strip_source_root(path: &str) -> &str {
         "src/test/scala/",
         "src/main/groovy/",
         "src/test/groovy/",
-        "staging/src/",
-        "vendor/",
         "src/",
     ] {
+        if let Some(stripped) = path.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+
+    path
+}
+
+fn strip_go_source_root(path: &str) -> &str {
+    for prefix in ["staging/src/", "vendor/", "src/"] {
         if let Some(stripped) = path.strip_prefix(prefix) {
             return stripped;
         }
