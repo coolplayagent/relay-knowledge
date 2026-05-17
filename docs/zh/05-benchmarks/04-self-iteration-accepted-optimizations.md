@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-go-package-import-symbol-recall-20260517
+
+- 目标：提升 Kubernetes 等 Go 大仓 full-scope import graph 的基础边解析和竞争性检索召回，让查询导出类型或工厂符号时能返回导入对应本地包的源文件，而不是只匹配 import path 文本。
+- 方法：Go tree-sitter import block 解析改为按每个 quoted import spec 生成独立 import record，保留 alias 与 package path；snapshot identity 与 checkpoint finalize 都通过通用 source-root normalization 解析 `staging/src/`、`vendor/` 和 `src/` 下的本地 Go package directory。import 查询增加 target-symbol candidate plan：先用已有 bounded symbol FTS 找到 query 命中的符号，再通过 resolved `target_hint` 文件或 package directory 找到导入者，并用匹配符号名参与排序。
+- 架构与不变量：不改变 CLI/API JSON 字段、SQLite 表结构、provider/env 配置、semantic/vector 后端、embedding 设置或 self-iteration harness；新增索引只覆盖 `code_repository_imports(source_scope, target_hint, path)`，用于有界 target import 查找。SQLite code query 的评分/FTS helper 和 target-symbol import lookup 分拆到独立模块，保持触达文件低于行数上限。外部 Go package、标准库和无法唯一映射到本地 directory 的 import 仍保持 unresolved/ambiguous，不强行选择。
+- 预期影响：`kubernetes_imports_client_go_informer_full_scope` 这类以 `SharedInformerFactory` 等导出符号查询 import graph 的 case 应能通过 resolved package target 找到 `pkg/kubeapiserver/authorizer/config.go`；Java/Python/C/C++ import resolution、relay-teams/LevelDB ranking、semantic/vector source coverage 和稳定性不应退化。
+- 已知风险：Go module path 解析仍是静态 repository path 启发式，不读取 go.mod、replace 或 workspace 配置；如果多个本地目录映射到同一 import path，候选会标为 ambiguous 以保护准确性。target-symbol fallback 会多做一次 bounded symbol lookup 和 indexed target_hint import lookup，可能轻微增加纯 import query latency。
+
 ## 候选优化说明：manual-opencode-default-judge-cli-arg-order-20260517
 
 - 目标：修复当前 quality gate repair mode 中 `research_judge` 失败；安装版 `opencode run` 的 `--file` 是数组选项，默认命令把 judge instruction 放在 `{prompt_file}` 之后时会被误当作第二个附件路径，导致 gate 报 `File not found`。
@@ -843,3 +851,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
  +        let callers = retrieval_request(CodeQueryKind::Callers); +        let callees = retrieval_request(CodeQueryKind::Callees); + +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "NewLRUCache", false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus( +                4.0, +                "bindings/cache_wrapper.cc", +                &callers, +                "NewLRUCache", +                false, +            ), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "C API NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "c_api NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callees, "NewLRUCache", false), +            0.2 +        ); +    } + +    #[test] fn query_mentions_test_or_benchmark_detects_explicit_intent() { assert!(!query_mentions_test_or_benchmark("NewLRUCache")); assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); tokens used 231,004
+## 20260517T094216Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T094216Z.patch`
+- score: 0.972063 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.84, performance=0.950781, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/go.rs`, `src/relay_knowledge/code/identity/imports.rs`, `src/relay_knowledge/code/identity/mod.rs`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/imports.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_go_imports.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=59702ms; cargo_fmt_check_ms=871ms; cargo_clippy_ms=238ms; cargo_test_ms=9129ms; relay_teams_index_ms=87763ms; relay_teams_query_p50_ms=126ms; relay_teams_query_p95_ms=486ms; leveldb_cpp_index_ms=20493ms
+
+Adopted optimization notes:
+
+ssert!(!target_symbol_import_query("org.springframework.context.ApplicationContext")); +    assert!(!target_symbol_import_query("src\\debugfs.h")); +} + +#[test] fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let callers = retrieval_request(CodeQueryKind::Callers); diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index 75c99f2cccc14da916ddc85f34e88870076001e8..564e1e2b35d2e9dfac55e76524f90e6f39d13dd2 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -218,6 +218,8 @@ ON code_repository_calls(source_scope, callee_name, caller_name, path); CREATE INDEX IF NOT EXISTS code_repository_imports_lookup ON code_repository_imports(source_scope, module, path); +        CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup +            ON code_repository_imports(source_scope, target_hint, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup ON code_repository_chunks(source_scope, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup tokens used 573,424
+

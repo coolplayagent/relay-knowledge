@@ -111,6 +111,44 @@ impl<'a> ImportContext<'a> {
             .any(|(_, files)| files.iter().any(|file| file.language_id == language_id))
     }
 
+    pub(super) fn resolve_directory_with_language_files(
+        &self,
+        directory_path: &str,
+        language_id: &str,
+    ) -> ModuleFileResolution {
+        let directory = normalize_module_path(directory_path);
+        let prefix = if directory.is_empty() {
+            String::new()
+        } else {
+            format!("{directory}/")
+        };
+        let mut matching_directories = Vec::new();
+        for (module_path, files) in self
+            .module_paths
+            .range(prefix.clone()..)
+            .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
+        {
+            if parent_dir(module_path) != directory {
+                continue;
+            }
+            for file in files.iter().filter(|file| file.language_id == language_id) {
+                let directory = parent_dir(&file.path).to_owned();
+                if !matching_directories.contains(&directory) {
+                    matching_directories.push(directory);
+                }
+                if matching_directories.len() > 1 {
+                    return ModuleFileResolution::Ambiguous;
+                }
+            }
+        }
+
+        match matching_directories.as_slice() {
+            [directory] => ModuleFileResolution::Resolved(directory.clone()),
+            [] => ModuleFileResolution::Unresolved,
+            _ => ModuleFileResolution::Ambiguous,
+        }
+    }
+
     pub(super) fn resolve_name_in_paths(
         &self,
         name: &str,
@@ -319,6 +357,8 @@ pub(super) fn strip_source_root(path: &str) -> &str {
         "src/test/scala/",
         "src/main/groovy/",
         "src/test/groovy/",
+        "staging/src/",
+        "vendor/",
         "src/",
     ] {
         if let Some(stripped) = path.strip_prefix(prefix) {

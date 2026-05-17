@@ -162,6 +162,50 @@ export function buildClient(): Session {
 }
 
 #[test]
+fn go_import_resolution_splits_blocks_and_handles_staging_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "staging/src/k8s.io/client-go/informers/factory.go",
+            r#"
+package informers
+
+type SharedInformerFactory interface {}
+"#,
+        ),
+        (
+            "pkg/kubeapiserver/authorizer/config.go",
+            r#"
+package authorizer
+
+import (
+    "context"
+    informers "k8s.io/client-go/informers"
+    // "not/local"
+)
+
+var _ informers.SharedInformerFactory
+var _ context.Context
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "k8s.io/client-go/informers", "resolved");
+    assert_import_state(&snapshot, "context", "unresolved");
+    assert!(
+        snapshot
+            .imports
+            .iter()
+            .any(|import| import.module == "informers k8s.io/client-go/informers")
+    );
+    assert!(
+        !snapshot
+            .imports
+            .iter()
+            .any(|import| import.module.contains("not/local"))
+    );
+}
+
+#[test]
 fn cpp_import_resolution_handles_local_includes_and_using_declarations() {
     let snapshot = parse_sources(&[
         (

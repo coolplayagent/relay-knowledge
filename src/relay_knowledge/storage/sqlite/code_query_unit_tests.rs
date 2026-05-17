@@ -110,6 +110,17 @@ fn import_surface_bonus_prefers_public_reexport_files() {
 }
 
 #[test]
+fn target_symbol_import_query_skips_path_like_queries() {
+    assert!(target_symbol_import_query("SharedInformerFactory"));
+    assert!(target_symbol_import_query("DefaultListableBeanFactory"));
+    assert!(!target_symbol_import_query("linux/debugfs.h"));
+    assert!(!target_symbol_import_query(
+        "org.springframework.context.ApplicationContext"
+    ));
+    assert!(!target_symbol_import_query("src\\debugfs.h"));
+}
+
+#[test]
 fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
     let hybrid = retrieval_request(CodeQueryKind::Hybrid);
     let callers = retrieval_request(CodeQueryKind::Callers);

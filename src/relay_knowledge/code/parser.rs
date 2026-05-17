@@ -217,7 +217,14 @@ fn parse_syntax_file(
     };
     records_from_captures(&context, captures, &mut output)?;
     collect_manual_nodes(&context, root, &mut output)?;
-    let imports = collect_imports(build, input.path, input.file_id, input.content, root)?;
+    let imports = collect_imports(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+        root,
+    )?;
     let chunks = chunks_for_symbols(
         build,
         input.path,

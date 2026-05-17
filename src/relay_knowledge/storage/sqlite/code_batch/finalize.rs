@@ -4,6 +4,9 @@ use rusqlite::{Transaction, params};
 
 use crate::{domain::RepositoryCodeRange, storage::StorageError};
 
+#[path = "finalize_go_imports.rs"]
+mod go_imports;
+
 pub(super) fn resolve_scope(
     transaction: &Transaction<'_>,
     source_scope: &str,
@@ -156,6 +159,7 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
                 &module_paths,
                 &symbols_by_name,
             ),
+            Some("go") => go_imports::resolve_import(&import.module, &module_paths),
             Some("java") => resolve_java_import(&import.module, &module_paths, &symbols_by_name),
             _ => ImportResolution::Unresolved,
         };
@@ -900,6 +904,8 @@ fn strip_source_root(path: &str) -> &str {
         "src/test/scala/",
         "src/main/groovy/",
         "src/test/groovy/",
+        "staging/src/",
+        "vendor/",
         "src/",
     ] {
         if let Some(stripped) = path.strip_prefix(prefix) {

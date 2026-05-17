@@ -486,6 +486,91 @@ async fn checkpointed_batches_finalize_java_import_edges_under_maven_roots() {
 }
 
 #[tokio::test]
+async fn checkpointed_batches_finalize_go_package_import_edges_for_symbol_queries() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:go-imports";
+    let session = session_for_scope(source_scope, 2);
+    let informer_file = file(
+        source_scope,
+        "informer-file",
+        "staging/src/k8s.io/client-go/informers/factory.go",
+        "go",
+        CodeParseStatus::Parsed,
+    );
+    let importer_file = file(
+        source_scope,
+        "authorizer-file",
+        "pkg/kubeapiserver/authorizer/config.go",
+        "go",
+        CodeParseStatus::Parsed,
+    );
+    let informer_symbol = symbol(
+        source_scope,
+        "shared-informer-factory",
+        "informer-file",
+        "staging/src/k8s.io/client-go/informers/factory.go",
+        "SharedInformerFactory",
+        "go",
+    );
+    let importer_import = import(
+        source_scope,
+        "informer-import",
+        "authorizer-file",
+        "pkg/kubeapiserver/authorizer/config.go",
+        "informers k8s.io/client-go/informers",
+    );
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![informer_file],
+            symbols: vec![informer_symbol],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("informer batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![importer_file],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![importer_import],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("importer batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "SharedInformerFactory", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "pkg/kubeapiserver/authorizer/config.go");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("staging/src/k8s.io/client-go/informers")
+    );
+}
+
+#[tokio::test]
 async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:batch-replay";

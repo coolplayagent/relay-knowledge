@@ -1,4 +1,5 @@
 mod cpp;
+mod go;
 mod imports;
 mod java;
 mod python;
@@ -24,6 +25,15 @@ pub(super) fn resolve_import_targets(
         };
         let resolution = match language_id {
             "python" => python::resolve_import(import, &context),
+            "go" => match go::resolve_import(import, &context) {
+                Some((resolution, target_hint)) => {
+                    if let Some(target_hint) = target_hint {
+                        import.target_hint = Some(target_hint);
+                    }
+                    Some(resolution)
+                }
+                None => None,
+            },
             "java" => java::resolve_import(import, &context),
             "typescript" | "tsx" => typescript::resolve_import(import, &context),
             "c" | "cpp" => match cpp::resolve_import(import, &context) {
