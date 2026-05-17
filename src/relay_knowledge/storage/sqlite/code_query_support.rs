@@ -245,6 +245,23 @@ pub(super) fn symbol_query_bonus(
     }
 }
 
+pub(super) fn scoped_identity_query_bonus(
+    query: &str,
+    fields: impl IntoIterator<Item = impl AsRef<str>>,
+) -> f64 {
+    let Some(scoped_terms) = scoped_query_terms(query) else {
+        return 0.0;
+    };
+    if fields
+        .into_iter()
+        .any(|field| contains_scoped_terms(field.as_ref(), &scoped_terms))
+    {
+        2.0
+    } else {
+        0.0
+    }
+}
+
 pub(super) fn symbol_excerpt(
     name: &str,
     qualified_name: &str,
@@ -541,8 +558,8 @@ pub(super) fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<
 
 fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
     let mut patterns = Vec::new();
-    for token in query.to_lowercase().split_whitespace() {
-        let token = escape_sql_like(token);
+    for token in fts_query_terms(query) {
+        let token = escape_sql_like(&token.to_lowercase());
         if token.is_empty() {
             continue;
         }

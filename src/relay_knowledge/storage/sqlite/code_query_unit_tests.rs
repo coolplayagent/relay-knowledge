@@ -32,6 +32,20 @@ fn candidate_condition_preserves_all_query_terms() {
 }
 
 #[test]
+fn candidate_condition_splits_scoped_queries_for_edge_prefilters() {
+    let (_, values) = candidate_condition(&["lower(name)"], "pkg.service.TargetThing");
+
+    assert_eq!(
+        values,
+        vec![
+            Value::Text("%pkg%".to_owned()),
+            Value::Text("%service%".to_owned()),
+            Value::Text("%targetthing%".to_owned()),
+        ]
+    );
+}
+
+#[test]
 fn candidate_condition_caps_bind_values_for_long_queries() {
     let query = (0..300)
         .map(|index| format!("term{index}"))
@@ -111,6 +125,21 @@ fn score_query_preserves_multi_token_identifier_scores() {
     ]);
 
     assert_eq!(score, 6.0);
+}
+
+#[test]
+fn scoped_identity_query_bonus_matches_qualified_edge_targets() {
+    assert_eq!(
+        scoped_identity_query_bonus(
+            "pkg.service.TargetThing",
+            ["repo://example/src::pkg::service::TargetThing"],
+        ),
+        2.0
+    );
+    assert_eq!(
+        scoped_identity_query_bonus("TargetThing", ["pkg.service.TargetThing"]),
+        0.0
+    );
 }
 
 #[test]
@@ -452,6 +481,36 @@ async fn caller_search_matches_spaced_compound_identifier_query() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "db/db_impl.cc");
     assert!(hits[0].excerpt.contains("NewLRUCache"));
+}
+
+#[tokio::test]
+async fn caller_search_accepts_scoped_target_hint_prefilter() {
+    let mut call = code_query_call("scoped-target-call", "service-file", "src/pkg/service.py");
+    call.caller_name = Some("Caller".to_owned());
+    call.callee_name = "TargetThing".to_owned();
+    call.target_hint = Some("pkg.service.TargetThing".to_owned());
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file(
+            "service-file",
+            "src/pkg/service.py",
+            "python",
+        )],
+        Vec::new(),
+        vec![call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "pkg.service.TargetThing",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("scoped caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/pkg/service.py");
+    assert!(hits[0].score >= 5.0, "score was {}", hits[0].score);
 }
 
 #[tokio::test]

@@ -303,7 +303,22 @@ fn search_references(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_query.score([&row.name, &row.kind]);
+            let score = score_query.score([
+                row.name.as_str(),
+                row.kind.as_str(),
+                row.target_hint.as_deref().unwrap_or_default(),
+                row.target_canonical_symbol_id
+                    .as_deref()
+                    .unwrap_or_default(),
+            ]) + scoped_identity_query_bonus(
+                &request.query,
+                [
+                    row.target_hint.as_deref().unwrap_or_default(),
+                    row.target_canonical_symbol_id
+                        .as_deref()
+                        .unwrap_or_default(),
+                ],
+            );
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -435,13 +450,41 @@ fn search_calls(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let search_fields = match request.code_query_kind {
-                CodeQueryKind::Callees => [row.caller_name.as_deref().unwrap_or(""), ""],
-                CodeQueryKind::Callers => [&row.callee_name, ""],
-                _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
+            let caller_name = row.caller_name.as_deref().unwrap_or_default();
+            let target_hint = row.target_hint.as_deref().unwrap_or_default();
+            let caller_canonical_id = row
+                .caller_canonical_symbol_id
+                .as_deref()
+                .unwrap_or_default();
+            let callee_canonical_id = row
+                .callee_canonical_symbol_id
+                .as_deref()
+                .unwrap_or_default();
+            let (base_score, scoped_identity_bonus) = match request.code_query_kind {
+                CodeQueryKind::Callees => (
+                    score_query.score([caller_name, caller_canonical_id]),
+                    scoped_identity_query_bonus(query, [caller_canonical_id]),
+                ),
+                CodeQueryKind::Callers => (
+                    score_query.score([row.callee_name.as_str(), target_hint, callee_canonical_id]),
+                    scoped_identity_query_bonus(query, [target_hint, callee_canonical_id]),
+                ),
+                _ => (
+                    score_query.score([
+                        caller_name,
+                        row.callee_name.as_str(),
+                        target_hint,
+                        caller_canonical_id,
+                        callee_canonical_id,
+                    ]),
+                    scoped_identity_query_bonus(
+                        query,
+                        [target_hint, caller_canonical_id, callee_canonical_id],
+                    ),
+                ),
             };
-            let base_score = score_query.score(search_fields);
             let score = base_score
+                + scoped_identity_bonus
                 + directional_call_context_bonus(
                     &score_query,
                     base_score,
@@ -581,6 +624,13 @@ fn search_imports(
                 row.target_hint.as_deref().unwrap_or_default(),
                 row.matched_symbol_name.as_deref().unwrap_or_default(),
             ]) + score_exact_path(&query, &row.path)
+                + scoped_identity_query_bonus(
+                    &request.query,
+                    [
+                        row.target_hint.as_deref().unwrap_or_default(),
+                        row.matched_symbol_name.as_deref().unwrap_or_default(),
+                    ],
+                )
                 + import_target_symbol_bonus(
                     request.query.as_str(),
                     row.matched_symbol_name.as_deref(),
