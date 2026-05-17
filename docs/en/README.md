@@ -78,6 +78,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 
 ## Book 4: Research
 
+- [Chapter 0: Research Overview](04-research/README.md): research sources, goals, competitive positioning, scenario fit, and forward roadmap.
 - [Chapter 1: Industry Capability Snapshot 2026](04-research/01-industry-capability-snapshot-2026.md)
 - [Chapter 2: Knowledge Graph Research Summary](04-research/02-knowledge-graph-research.md)
 - [Chapter 3: arXiv Knowledge Graph Paper Insights](04-research/03-arxiv-knowledge-graph-paper-insights.md)

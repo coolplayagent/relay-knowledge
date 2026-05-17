@@ -8,6 +8,15 @@
 > 结论摘要: MCP 和 ACP 都可以接入图检索，但它们解决的问题不同；v1 应双协议同级支持，同时保持核心检索能力只实现一次
 > 协议刷新: MCP 链接已按 2025-11-25 规范刷新；早期 HTTP+SSE 只作为兼容方向，不作为新实现默认路径。
 
+## 研究定位
+
+| 维度 | 结论 |
+| --- | --- |
+| 研究来源 | 以 MCP 2025-11-25 官方规范、ACP 形态、本仓库 MCP/ACP 实现和 A2A 生态趋势为主。 |
+| 研究目标 | 明确 Agent 协议是图检索能力的接入层，而不是复制第二套业务逻辑或把核心改成 agent runtime。 |
+| 关键竞争力 | 共享统一 API、权限、QoS、新鲜度、审计和错误语义，让不同 Agent 客户端获得一致且可治理的图上下文。 |
+| 场景与未来 | 面向 IDE/Agent host、MCP tool/resource/prompt、ACP 会话、本地服务和未来 A2A 专业知识网关。 |
+
 ## 1. 背景
 
 `relay-knowledge` 已经把 CLI、Web、MCP、本地 ACP 和未来 HTTP API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。当前实现已提供 MCP Streamable HTTP tool/resource/prompt adapter、本地 ACP session adapter、可选 JSONL 持久审计和 Prometheus metrics exporter；后续重点是平台 service manager 集成、silent update operator、跨进程 worker orchestration 和更完整的远程 ACP adapter。

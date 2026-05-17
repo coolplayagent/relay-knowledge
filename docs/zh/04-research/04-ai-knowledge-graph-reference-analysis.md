@@ -7,6 +7,15 @@
 > 参考版本: `40b7019`，2025-12-27，`Merge pull request #19 from Deepak-png981/dj/Introduce-prompt-factory`
 > 范围: 只做架构、算法、性能、可靠性借鉴分析，不引入代码实现，不复制参考项目源码。
 
+## 研究定位
+
+| 维度 | 结论 |
+| --- | --- |
+| 研究来源 | 以 `ai-knowledge-graph` 指定版本的开源实现为主，结合本项目 async-first、service-first 和可恢复索引约束进行对照。 |
+| 研究目标 | 从最小 LLM 构图闭环中提炼可产品化语义，同时识别脚本式实现不适合直接移植的风险。 |
+| 关键竞争力 | relay-knowledge 应吸收阶段化 pipeline、候选事实和预算控制，而把同步请求、无持久任务和弱证据治理转化为反向约束。 |
+| 场景与未来 | 面向用户可检查的图谱生成、proposal 审核、派生事实解释和后台任务恢复，而不是一次性离线可视化。 |
+
 ## 1. 执行结论
 
 `ai-knowledge-graph` 是一个 Python 单机流水线: 读取文本文件，按词数切块，用 OpenAI-compatible Chat Completions API 抽取 Subject-Predicate-Object 三元组，执行实体标准化和关系推断，最后用 NetworkX、Louvain 社区发现和 PyVis 生成交互式 HTML 图谱。它适合作为“LLM 抽取型知识图谱最小闭环”的参考，但不适合按实现方式直接移植到 `relay-knowledge`。

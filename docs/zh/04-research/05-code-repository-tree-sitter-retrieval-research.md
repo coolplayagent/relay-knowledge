@@ -7,6 +7,15 @@
 > 研究范围: tree-sitter 结构化代码解析、Git 增量变更发现、代码知识图谱、高性能索引和检索
 > 输出用途: 支撑 `docs/zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md` 的设计取舍
 
+## 研究定位
+
+| 维度 | 结论 |
+| --- | --- |
+| 研究来源 | 以 Tree-sitter、Git、libgit2、GitHub code navigation、Codebase-Memory 和本仓库代码图经验为主。 |
+| 研究目标 | 把代码仓库检索从全文搜索升级为 Git snapshot、语法结构、符号/引用图和增量索引组合。 |
+| 关键竞争力 | 结构化代码事实、文件级增量、作用域授权、混合召回、影响分析和可恢复索引是面向 agent 的核心壁垒。 |
+| 场景与未来 | 面向大仓库理解、脏工作树查询、代码审查、影响报告、Agent 上下文打包和后续语言服务适配。 |
+
 ## 1. 研究结论
 
 代码仓库检索不能只靠全文索引。成熟方向是把 Git 版本边界、tree-sitter 语法结构、符号/引用图、文本/向量检索和增量索引组合起来:

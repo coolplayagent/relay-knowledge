@@ -65,6 +65,7 @@
 
 ## 第四卷：研究资料
 
+- [第 0 章 研究资料总览](04-research/README.md)：研究来源、目标、竞争力判断、场景化落地和前瞻路线。
 - [第 1 章 2026 行业能力快照与差距分析](04-research/01-industry-capability-snapshot-2026.md)
 - [第 2 章 知识图谱技术研究总结](04-research/02-knowledge-graph-research.md)
 - [第 3 章 arXiv 知识图谱论文深度洞察](04-research/03-arxiv-knowledge-graph-paper-insights.md)

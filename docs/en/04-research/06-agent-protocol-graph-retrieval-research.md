@@ -16,6 +16,15 @@ This is the English documentation page for `04-research/06-agent-protocol-graph-
 > 结论摘要: MCP 和 ACP 都可以接入图检索，但它们解决的问题不同；v1 应双协议同级支持，同时保持核心检索能力只实现一次
 > 协议刷新: MCP 链接已按 2025-11-25 规范刷新；早期 HTTP+SSE 只作为兼容方向，不作为新实现默认路径。
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | MCP 2025-11-25 official specifications, ACP access shape, this repository's MCP/ACP implementation, and the A2A ecosystem direction. |
+| Goal | Keep agent protocols as access layers for graph retrieval rather than duplicating business logic or turning the core into an agent runtime. |
+| Competitive focus | Shared API, permissions, QoS, freshness, audit, and error semantics give different agent clients the same governable graph context. |
+| Scenarios and future | Targets IDE/agent hosts, MCP tools/resources/prompts, ACP sessions, local services, and future A2A specialist-knowledge gateways. |
+
 ## 1. 背景
 
 `relay-knowledge` 已经把 CLI、Web、MCP、本地 ACP 和未来 HTTP API 收口到统一 API 层，并把混合检索、图检查、索引刷新、健康状态和后台服务状态定义为 application service 能力。当前实现已提供 MCP Streamable HTTP tool/resource/prompt adapter、本地 ACP session adapter、可选 JSONL 持久审计和 Prometheus metrics exporter；后续重点是平台 service manager 集成、silent update operator、跨进程 worker orchestration 和更完整的远程 ACP adapter。
