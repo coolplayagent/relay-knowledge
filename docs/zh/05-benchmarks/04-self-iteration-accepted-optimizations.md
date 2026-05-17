@@ -12,6 +12,10 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 渐进式记忆
+
+自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+
 ## 候选优化说明：20260516T195734Z
 
 - 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先恢复 protected stability gate。
@@ -601,4 +605,3 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::task::Poll::Ready(Ok(buffer.len())) +    } -    fn poll_ready( -        &mut self, -        context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    fn poll_flush( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } } tokens used 57,392
-
