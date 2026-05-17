@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T062729Z
+
+- 目标：在保持 `semantic_vector_provider_probe` 既有 reachable-but-degraded 语义、foundational cases 和 stability 不退化的前提下，提高 protected competitive hybrid/fuzzy code retrieval 的排序余量，尤其是带上下文词的符号查询被常见 metadata/output/chunk 噪声压到后位的场景。
+- 方法：将 hybrid/symbol/definition 查询中的 query 侧 identifier normalization 与 symbol name 侧保持一致，对 CamelCase、snake_case 和标点分隔词统一生成可去重 token，再按 query-to-symbol name overlap 给予小幅排序加分；三段及以上重叠保持既有上限，两段重叠获得低幅度 bonus，用于让 `_CHECKPOINT_VERSION`、`EvalCheckpointStore`、`archive_output_dir` 这类真实符号身份信号压过只匹配单个高频上下文词的候选。
+- 架构与不变量：不改变 SQLite schema、FTS candidate window、path/language filter、call/import edge resolution、CLI/API 字段、semantic/vector provider 配置、索引刷新或 self-iteration harness；该信号只作用于已经被 bounded FTS 召回且已有正分的 symbol ranking，不扩大召回集合，也不影响 callers/callees typed edge 查询。
+- 预期影响：`relay-teams` 的 `rt_hybrid_eval_checkpoint_store`、`rt_fuzzy_constant_checkpoint_version` 和 `rt_fuzzy_function_archive_output_dir` 这类 fuzzy/hybrid case 应提升 rank 或保持通过；LevelDB call graph、import surface、semantic/vector source coverage、provider probe gate 和基础 definition/filter/negative cases 不应退化。
+- 已知风险：两个 identifier token 的低幅度 bonus 可能让短名称符号在同分附近上移；由于该 bonus 需要 symbol name 本身匹配多个 query token，且 caller/callee edge 查询不启用，风险限制在 hybrid/symbol/definition 的同分或近同分排序，不改变索引内容或 retriever source coverage。
+
 ## 候选优化说明：20260517T055803Z
 
 - 目标：在保持 `semantic_vector_provider_probe` 既有 429 reachable-but-degraded 语义和 semantic/vector 保护项不退化的前提下，提升 competitive code graph caller/callee 查询在大仓全量索引中的排序稳定性，尤其是 LevelDB `NewLRUCache` caller 查询这类生产调用点被测试和 benchmark 调用噪声压低的场景。
@@ -713,4 +721,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 +            call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, true), +            0.0 +        ); +    } + +    #[test] +    fn query_mentions_test_or_benchmark_detects_explicit_intent() { +        assert!(!query_mentions_test_or_benchmark("NewLRUCache")); +        assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); +        assert!(query_mentions_test_or_benchmark("db_bench cache")); +    } + +    fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +        let selector = +            crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +                .expect("selector should be valid"); + +        CodeRetrievalRequest::new( +            "NewLRUCache", +            selector, +            kind, +            10, +            crate::domain::FreshnessPolicy::AllowStale, +        ) +        .expect("request should be valid") +    } +} tokens used 233,314
+## 20260517T062729Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T062729Z.patch`
+- score: 0.954226 (foundational=1.0, competitive=0.835714, accuracy=0.917857, semantic_vector=1.0, performance=0.95297, stability=1.0)
+- cases: 35/35 passed
+- changed paths: `docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.942406->0.954226; score_component:competitive_capability 0.788095->0.835714; score_component:accuracy 0.894048->0.917857; metric:cargo_build_release_ms 55501.0->34955; case:rt_fuzzy_constant_checkpoint_version {'passed': True, 'rank': 3, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} rank_improved
+- known degradations: metric:cargo_fmt_check_ms 729.0->780; metric:cargo_test_ms 8288.0->8625
+- latency metrics: cargo_build_release_ms=34955ms; cargo_fmt_check_ms=780ms; cargo_clippy_ms=213ms; cargo_test_ms=8625ms; relay_teams_index_ms=80016ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=437ms; leveldb_cpp_index_ms=19399ms
+
+Adopted optimization notes:
+
+l_name_query_bonus( +            "EvalCheckpointStore signature mismatch append result", +            "EvalCheckpointStore", +            &hybrid, +        ), +        2.0 +    ); +    assert!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &hybrid, +        ) > symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "FEISHU_METADATA_PLATFORM_KEY", +            &hybrid, +        ) +    ); +    assert_eq!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &callers, +        ), +        0.0 +    ); +} + +fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +    let selector = +        crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +            .expect("selector should be valid"); + +    CodeRetrievalRequest::new( +        "checkpoint metadata version constant", +        selector, +        kind, +        10, +        crate::domain::FreshnessPolicy::AllowStale, +    ) +    .expect("request should be valid") +} tokens used 155,835
 

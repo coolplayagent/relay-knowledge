@@ -990,7 +990,7 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
     ) {
         return 0.0;
     }
-    let query_terms = query_terms(query);
+    let query_terms = identifier_search_tokens(query);
     if query_terms.is_empty() {
         return 0.0;
     }
@@ -1019,6 +1019,8 @@ fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String
         .count();
     if matched_terms >= 3 {
         (matched_terms as f64 * 0.75).min(2.0)
+    } else if matched_terms == 2 {
+        1.1
     } else {
         0.0
     }
