@@ -1,0 +1,60 @@
+use rusqlite::{Transaction, params};
+
+use crate::storage::StorageError;
+
+pub(super) fn rebuild_reference_search_documents(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search
+        WHERE source_scope = ?1 AND document_kind = 'reference'
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT reference.source_scope, 'reference', reference.reference_id, reference.path,
+               coalesce(file.language_id, ''),
+               reference.name || ' ' || reference.kind || ' ' ||
+               coalesce(reference.target_hint, '') || ' ' || reference.path
+        FROM code_repository_references reference
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = reference.source_scope
+         AND file.path = reference.path
+        WHERE reference.source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn rebuild_call_search_documents(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT call.source_scope, 'call', call.call_id, call.path,
+               coalesce(file.language_id, ''),
+               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
+               coalesce(target_hint, '') || ' ' || call.path
+        FROM code_repository_calls call
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = call.source_scope
+         AND file.path = call.path
+        WHERE call.source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
+
+    Ok(())
+}

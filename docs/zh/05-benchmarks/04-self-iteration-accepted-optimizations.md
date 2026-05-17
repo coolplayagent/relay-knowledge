@@ -1,9 +1,6 @@
 # 自迭代采纳优化记录
-
 本文档由自迭代 harness 在候选通过质量门禁并被采纳时追加，用于把本轮采用的优化思路传递给后续 Codex 迭代。人工维护的总结可以继续补充在对应条目下。
-
 ## 记录格式
-
 - `patch`: 本轮候选补丁在 `.git/relay-knowledge-self-iteration/patches/` 下的路径。
 - `score`: 采纳时的总分和 foundational_capability、competitive_capability、accuracy、semantic_vector、performance、stability 分项。
 - `cases`: 采纳时通过的检索 case 数量。
@@ -11,11 +8,14 @@
 - `key improvements`: 相对上一轮改善的 case、gate 或 metric。
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
-
 ## 渐进式记忆
-
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
-
+## 候选优化说明：manual-edge-search-language-materialization-20260518
+- 目标：保护 relay-teams、LevelDB、Linux、Kubernetes、Spring Framework、semantic/vector 与 research judge 下限，同时把 reference/call/import 的 language selector 剪枝从 correlated file lookup 推进到 FTS search row 本身，降低多语言大仓 edge query 的候选窗口噪声。
+- 算法与架构：snapshot、checkpointed batch、finalize 的 reference/import/call search document 写入统一带上所属 file 的 `language_id`；schema 初始化对旧 edge search row 做幂等 language 回填；edge 查询复用 symbol/chunk 的 `fts_path_and_language_filter_sql`，在 SQLite FTS bounded candidate subquery 内直接按 `language_id` 剪枝，Rust `selected_row` 继续作为最终一致性保护。
+- 不变量：不改变 SQLite 表结构、事实表、FTS MATCH term、candidate limit、BM25 排序、score/ranking/fusion、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP 边界或安装发布行为；无仓库、路径、符号或 fixture 特殊分支，旧数据库通过启动回填保持兼容。
+- 预期影响：language-filtered callers/callees/references/imports 在 Python/Java/Go/Rust 混合仓库中不再需要每个 FTS candidate 再关联文件表验证语言，减少范围外语言在评分前占用候选预算，保护 `ConnectorService`、W3 request、`_summary`、negative missing symbol 与 LevelDB scoped definition floor。
+- 已知风险：新增回填只修复有匹配 file row 的 edge search document；缺失文件事实时仍保留空 language 并由后置过滤防止错误结果。无 language filter 查询路径和 semantic/vector 检索不受影响。
 ## 候选优化说明：manual-directional-call-candidate-filter-20260518
 - 目标：保护 relay-teams `_summary` callers/callees、ConnectorService hybrid、LevelDB/Kubernetes/Spring call graph 与 semantic/vector 下限，同时降低大仓 call graph 查询被反向 caller/callee 文本填满 bounded FTS candidate window 的风险。
 - 算法与架构：call graph FTS 文档继续保留 caller、callee、target hint 与 path 以支持 hybrid；当查询类型是 `callers` 或 `callees` 时，在 FTS 子查询内用 `code_repository_calls` 主键关联加入方向感知 SQL LIKE 过滤：`callers` 只让 callee 名称匹配查询 token 的 call 进入候选，`callees` 只让 caller 名称匹配查询 token 的 call 进入候选。最终 Rust scoring、line-range 扩展、去重融合与排序权重不变。
@@ -997,4 +997,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 ile_id = format!("noise-file-{index}"); +        let path = format!("noise/callee_{index}.py"); +        files.push(code_query_file(&file_id, &path, "python")); +        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path); +        call.caller_name = Some("NoiseCaller".to_owned()); +        call.callee_name = "TargetThing".to_owned(); +        calls.push(call); +    } +    files.push(code_query_file("target-file", "src/service.py", "python")); +    let mut target = code_query_call("zz-target-call", "target-file", "src/service.py"); +    target.caller_name = Some("TargetThing".to_owned()); +    target.callee_name = "TargetCallee".to_owned(); +    calls.push(target); +    let store = +        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await; + +    let hits = store +        .search_code(code_search_request("TargetThing", CodeQueryKind::Callees)) +        .await +        .expect("callee query should succeed"); + +    assert_eq!(hits[0].path, "src/service.py"); +    assert!(hits[0].excerpt.contains("TargetCallee")); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 178,202
+## 20260517T220618Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T220618Z.patch`
+- score: 0.954963 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.875756, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_batch.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`, `src/relay_knowledge/storage/sqlite/code_tests.rs`
+- key improvements: score_component:score 0.924566->0.954963; score_component:foundational_capability 0.777778->1.0; score_component:accuracy 0.888889->1.0; score_component:research_judge 0.86->0.88; metric:cargo_build_release_ms 37221.0->31949; metric:cargo_fmt_check_ms 796.0->661; metric:semantic_vector_provider_probe_ms 1225.0->1150; case:leveldb_definition_db_open {'passed': False, 'rank': 2, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} failed_to_passed
+- known degradations: score_component:performance 0.954292->0.875756; metric:cargo_test_ms 8545.0->8811; metric:relay_teams_query_p50_ms 111.5->219.0; metric:relay_teams_query_p95_ms 293.0->394.0; metric:leveldb_cpp_index_ms 17974.0->19737; metric:leveldb_cpp_query_p50_ms 152.0->300.5; metric:leveldb_cpp_query_p95_ms 219.0->367.0; metric:local_documents_file_index_ms 123.0->293
+- latency metrics: cargo_build_release_ms=31949ms; cargo_fmt_check_ms=661ms; cargo_clippy_ms=199ms; cargo_test_ms=8811ms; relay_teams_index_ms=69614ms; relay_teams_query_p50_ms=219ms; relay_teams_query_p95_ms=394ms; leveldb_cpp_index_ms=19737ms
+
+Adopted optimization notes:
+
+pository_search +                WHERE document_kind IN ('reference', 'import', 'call') +                ORDER BY document_kind ASC, path ASC +                ", +            )?; +            let rows = statement.query_map([], |row| { +                Ok(( +                    row.get::<_, String>(0)?, +                    row.get::<_, String>(1)?, +                    row.get::<_, String>(2)?, +                )) +            })?; + +            rows.collect::<Result<Vec<_>, _>>() +                .map_err(StorageError::from) +        }) +        .await +        .expect("search rows should load"); + +    for document_kind in ["reference", "import", "call"] { +        assert!(rows.iter().any(|(kind, path, language)| { +            kind == document_kind && path == "src/lib.rs" && language == "rust" +        })); +        assert!(rows.iter().any(|(kind, path, language)| { +            kind == document_kind && path == "py/app.py" && language == "python" +        })); +    } +} + +#[tokio::test] async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() { let symbol_store = store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await; tokens used 273,303
 

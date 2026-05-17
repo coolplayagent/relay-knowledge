@@ -264,6 +264,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     )?;
     backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
+    backfill_edge_search_language_ids(connection)?;
 
     Ok(())
 }
@@ -357,9 +358,13 @@ fn backfill_search_references(connection: &Connection) -> Result<(), StorageErro
         INSERT INTO code_repository_search (
             source_scope, document_kind, record_id, path, language_id, content
         )
-        SELECT source_scope, 'reference', reference_id, path, '',
-               name || ' ' || kind || ' ' || coalesce(target_hint, '')
-        FROM code_repository_references
+        SELECT reference.source_scope, 'reference', reference.reference_id, reference.path,
+               coalesce(file.language_id, ''),
+               reference.name || ' ' || reference.kind || ' ' || coalesce(reference.target_hint, '')
+        FROM code_repository_references reference
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = reference.source_scope
+         AND file.path = reference.path
         ",
         [],
     )?;
@@ -380,9 +385,13 @@ fn backfill_search_imports(connection: &Connection) -> Result<(), StorageError> 
         INSERT INTO code_repository_search (
             source_scope, document_kind, record_id, path, language_id, content
         )
-        SELECT source_scope, 'import', import_id, path, '',
-               module || ' ' || coalesce(target_hint, '')
-        FROM code_repository_imports
+        SELECT import.source_scope, 'import', import.import_id, import.path,
+               coalesce(file.language_id, ''),
+               import.module || ' ' || coalesce(import.target_hint, '')
+        FROM code_repository_imports import
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = import.source_scope
+         AND file.path = import.path
         ",
         [],
     )?;
@@ -410,10 +419,14 @@ fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
         INSERT INTO code_repository_search (
             source_scope, document_kind, record_id, path, language_id, content
         )
-        SELECT source_scope, 'call', call_id, path, '',
-               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
-               coalesce(target_hint, '') || ' ' || path
-        FROM code_repository_calls
+        SELECT call.source_scope, 'call', call.call_id, call.path,
+               coalesce(file.language_id, ''),
+               coalesce(call.caller_name, '') || ' ' || call.callee_name || ' ' ||
+               coalesce(call.target_hint, '') || ' ' || call.path
+        FROM code_repository_calls call
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = call.source_scope
+         AND file.path = call.path
         ",
         [],
     )?;
@@ -436,6 +449,32 @@ fn backfill_search_chunks(connection: &Connection) -> Result<(), StorageError> {
         )
         SELECT source_scope, 'chunk', chunk_id, path, language_id, content
         FROM code_repository_chunks
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_edge_search_language_ids(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        UPDATE code_repository_search
+        SET language_id = (
+            SELECT file.language_id
+            FROM code_repository_files file
+            WHERE file.source_scope = code_repository_search.source_scope
+              AND file.path = code_repository_search.path
+            LIMIT 1
+        )
+        WHERE document_kind IN ('reference', 'import', 'call')
+          AND language_id = ''
+          AND EXISTS (
+            SELECT 1
+            FROM code_repository_files file
+            WHERE file.source_scope = code_repository_search.source_scope
+              AND file.path = code_repository_search.path
+          )
         ",
         [],
     )?;

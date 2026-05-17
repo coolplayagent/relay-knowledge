@@ -6,6 +6,8 @@ use crate::{domain::RepositoryCodeRange, storage::StorageError};
 
 #[path = "finalize_go_imports.rs"]
 mod go_imports;
+#[path = "finalize_search.rs"]
+mod search_documents;
 
 pub(super) fn resolve_scope(
     transaction: &Transaction<'_>,
@@ -13,6 +15,7 @@ pub(super) fn resolve_scope(
     repository_id: &str,
 ) -> Result<(), StorageError> {
     resolve_references(transaction, source_scope)?;
+    search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
     resolve_imports(transaction, source_scope)?;
     rebuild_calls(transaction, source_scope, repository_id)
 }
@@ -178,7 +181,7 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
             "import",
             &import.import_id,
             &import.path,
-            "",
+            language.unwrap_or_default(),
             [
                 import.module.as_str(),
                 target_hint.as_str(),
@@ -255,28 +258,7 @@ fn rebuild_calls(
             reference.line_end,
         ])?;
     }
-    rebuild_call_search_documents(transaction, source_scope)?;
-
-    Ok(())
-}
-
-fn rebuild_call_search_documents(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<(), StorageError> {
-    transaction.execute(
-        "
-        INSERT INTO code_repository_search (
-            source_scope, document_kind, record_id, path, language_id, content
-        )
-        SELECT source_scope, 'call', call_id, path, '',
-               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
-               coalesce(target_hint, '') || ' ' || path
-        FROM code_repository_calls
-        WHERE source_scope = ?1
-        ",
-        params![source_scope],
-    )?;
+    search_documents::rebuild_call_search_documents(transaction, source_scope)?;
 
     Ok(())
 }

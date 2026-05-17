@@ -776,43 +776,6 @@ fn call_direction_filter_column(kind: CodeQueryKind) -> Option<&'static str> {
     }
 }
 
-pub(super) fn fts_path_and_file_language_filter_sql(
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-) -> String {
-    let mut clauses = Vec::new();
-    push_path_filter_sql(&mut clauses, "path", &status.path_filters);
-    push_path_filter_sql(&mut clauses, "path", &request.repository.path_filters);
-    let mut language_clauses = Vec::new();
-    push_language_filter_sql(
-        &mut language_clauses,
-        "f.language_id",
-        &status.language_filters,
-    );
-    push_language_filter_sql(
-        &mut language_clauses,
-        "f.language_id",
-        &request.repository.language_filters,
-    );
-    if !language_clauses.is_empty() {
-        clauses.push(format!(
-            "EXISTS (
-                SELECT 1
-                FROM code_repository_files f
-                WHERE f.source_scope = code_repository_search.source_scope
-                  AND f.path = code_repository_search.path
-                  AND {}
-            )",
-            language_clauses.join(" AND ")
-        ));
-    }
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("AND {}", clauses.join(" AND "))
-    }
-}
-
 pub(super) fn fts_path_and_language_filter_sql(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,

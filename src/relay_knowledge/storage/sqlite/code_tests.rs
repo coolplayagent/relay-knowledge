@@ -415,6 +415,43 @@ async fn language_filters_apply_to_references_calls_and_imports() {
 }
 
 #[tokio::test]
+async fn edge_search_documents_store_file_languages_for_snapshot_indexes() {
+    let store = store_with_repository_snapshot(snapshot_with_language_edges()).await;
+    let rows = store
+        .run(|connection| {
+            let mut statement = connection.prepare(
+                "
+                SELECT document_kind, path, language_id
+                FROM code_repository_search
+                WHERE document_kind IN ('reference', 'import', 'call')
+                ORDER BY document_kind ASC, path ASC
+                ",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("search rows should load");
+
+    for document_kind in ["reference", "import", "call"] {
+        assert!(rows.iter().any(|(kind, path, language)| {
+            kind == document_kind && path == "src/lib.rs" && language == "rust"
+        }));
+        assert!(rows.iter().any(|(kind, path, language)| {
+            kind == document_kind && path == "py/app.py" && language == "python"
+        }));
+    }
+}
+
+#[tokio::test]
 async fn code_query_hits_include_symbol_identity_and_edge_diagnostics() {
     let symbol_store =
         store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await;

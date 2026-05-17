@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rusqlite::{Connection, params};
 
 #[path = "code_query.rs"]
@@ -34,6 +36,10 @@ mod code_tests;
 #[cfg(test)]
 #[path = "code_batch_finalize_tests.rs"]
 mod code_batch_finalize_tests;
+
+#[cfg(test)]
+#[path = "code_batch_search_tests.rs"]
+mod code_batch_search_tests;
 
 #[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]
@@ -329,6 +335,11 @@ fn apply_snapshot(
             ],
         )?;
     }
+    let file_languages_by_path = snapshot
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.language_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
     for symbol in &snapshot.symbols {
         transaction.execute(
             "
@@ -412,7 +423,10 @@ fn apply_snapshot(
             "reference",
             &reference.reference_id,
             &reference.path,
-            "",
+            file_languages_by_path
+                .get(reference.path.as_str())
+                .copied()
+                .unwrap_or_default(),
             [
                 reference.name.as_str(),
                 reference.kind.as_str(),
@@ -616,6 +630,11 @@ fn insert_imports_calls_chunks_diagnostics(
     transaction: &rusqlite::Transaction<'_>,
     snapshot: &CodeIndexSnapshot,
 ) -> Result<(), StorageError> {
+    let file_languages_by_path = snapshot
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.language_id.as_str()))
+        .collect::<BTreeMap<_, _>>();
     for import in &snapshot.imports {
         transaction.execute(
             "
@@ -646,7 +665,10 @@ fn insert_imports_calls_chunks_diagnostics(
             "import",
             &import.import_id,
             &import.path,
-            "",
+            file_languages_by_path
+                .get(import.path.as_str())
+                .copied()
+                .unwrap_or_default(),
             [
                 import.module.as_str(),
                 import.target_hint.as_deref().unwrap_or_default(),
@@ -688,7 +710,10 @@ fn insert_imports_calls_chunks_diagnostics(
             "call",
             &call.call_id,
             &call.path,
-            "",
+            file_languages_by_path
+                .get(call.path.as_str())
+                .copied()
+                .unwrap_or_default(),
             [
                 call.caller_name.as_deref().unwrap_or_default(),
                 call.callee_name.as_str(),

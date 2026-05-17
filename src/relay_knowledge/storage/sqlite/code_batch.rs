@@ -1,4 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use rusqlite::{Connection, Transaction, params};
 
@@ -234,6 +237,7 @@ fn insert_references(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_references (
@@ -270,7 +274,10 @@ fn insert_references(
             "reference",
             &reference.reference_id,
             &reference.path,
-            "",
+            file_languages_by_path
+                .get(reference.path.as_str())
+                .map(String::as_str)
+                .unwrap_or_default(),
             [
                 reference.name.as_str(),
                 reference.kind.as_str(),
@@ -287,6 +294,7 @@ fn insert_imports(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
 ) -> Result<(), StorageError> {
+    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_imports (
@@ -317,7 +325,10 @@ fn insert_imports(
             "import",
             &import.import_id,
             &import.path,
-            "",
+            file_languages_by_path
+                .get(import.path.as_str())
+                .map(String::as_str)
+                .unwrap_or_default(),
             [
                 import.module.as_str(),
                 import.target_hint.as_deref().unwrap_or_default(),
@@ -373,6 +384,25 @@ fn insert_chunks(
     }
 
     Ok(())
+}
+
+fn file_languages_by_path(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<BTreeMap<String, String>, StorageError> {
+    let mut statement = transaction.prepare(
+        "
+        SELECT path, language_id
+        FROM code_repository_files
+        WHERE source_scope = ?1
+        ",
+    )?;
+    let rows = statement.query_map(params![source_scope], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(StorageError::from)
 }
 
 fn insert_diagnostics(

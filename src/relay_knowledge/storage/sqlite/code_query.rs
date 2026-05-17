@@ -232,7 +232,7 @@ fn search_references(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
@@ -337,7 +337,7 @@ fn search_calls(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let call_direction_filter = call_direction_fts_filter_sql(request);
     let sql = format!(
         "
@@ -512,7 +512,7 @@ fn search_imports(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
