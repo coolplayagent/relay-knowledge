@@ -12,6 +12,7 @@ use crate::{
     retrieval::LOCAL_RERANK_MODEL,
     storage::{KnowledgeStore, SqliteGraphStore},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
 async fn status_includes_foundational_runtime_configuration() {
@@ -611,6 +612,83 @@ async fn probe_embedding_provider_reports_echo_success_without_secret_leakage() 
             .embedding_base_url,
         Some("https://embeddings.example".to_owned())
     );
+}
+
+#[tokio::test]
+async fn probe_embedding_provider_reports_retryable_rate_limit_as_reachable() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener should bind");
+    let addr = listener.local_addr().expect("local addr should load");
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.expect("request should connect");
+        let mut buffer = vec![0; 2048];
+        let count = stream.read(&mut buffer).await.expect("request should read");
+        let request = String::from_utf8_lossy(&buffer[..count]);
+
+        assert!(request.starts_with("POST /v1/embeddings HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer secret-key"));
+        let body =
+            r#"{"error":{"code":"1113","message":"Insufficient balance or no resource package."}}"#;
+        let response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("response should write");
+    });
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        vec![
+            ("HOME".to_owned(), "/home/alice".to_owned()),
+            ("TMPDIR".to_owned(), "/tmp".to_owned()),
+            ("RELAY_KNOWLEDGE_HOME".to_owned(), "/srv/relay".to_owned()),
+            (
+                "RELAY_KNOWLEDGE_VECTOR_BACKEND".to_owned(),
+                "external".to_owned(),
+            ),
+            (
+                "RELAY_KNOWLEDGE_LLM_PROVIDER".to_owned(),
+                "openai_compatible".to_owned(),
+            ),
+            (
+                "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL".to_owned(),
+                format!("http://{addr}/v1"),
+            ),
+            (
+                "RELAY_KNOWLEDGE_EMBEDDING_API_KEY".to_owned(),
+                "secret-key".to_owned(),
+            ),
+            (
+                "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL".to_owned(),
+                "runtime-model".to_owned(),
+            ),
+            (
+                "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION".to_owned(),
+                "4".to_owned(),
+            ),
+        ],
+    )
+    .expect("environment should parse");
+    let service = service_with_environment(&environment).await;
+
+    let response = service
+        .probe_embedding_provider(RequestContext::with_ids(
+            InterfaceKind::Cli,
+            "req-provider-rate-limit",
+            "trace-provider-rate-limit",
+        ))
+        .await
+        .expect("probe should run");
+
+    assert!(response.ok);
+    assert_eq!(response.provider, Some("openai_compatible".to_owned()));
+    assert_eq!(response.error_code.as_deref(), Some("rate_limited"));
+    assert_eq!(response.retryable, Some(true));
+    server.await.expect("server should finish");
 }
 
 #[tokio::test]
