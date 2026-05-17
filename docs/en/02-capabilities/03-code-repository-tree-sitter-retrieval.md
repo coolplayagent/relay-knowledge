@@ -111,7 +111,7 @@ Follow-up improvements from this run:
 
 The v2 implementation specification for these follow-ups and the local
 deterministic semantic/vector retrieval baseline is maintained in
-[`docs/zh/03-architecture-specs/08-code-repository-retrieval-v2-optimization.md`](../03-architecture-specs/08-code-repository-retrieval-v2-optimization.md).
+[`docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md).
 
 ## Implementation
 

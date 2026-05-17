@@ -64,12 +64,12 @@ relay-knowledge service doctor
 
 关键规格：
 
-- [第三卷第 1 章：工程硬约束](docs/zh/03-architecture-specs/01-engineering-hard-constraints.md)
-- [第三卷第 2 章：GraphRAG 产品与实现路线规格](docs/zh/03-architecture-specs/02-graphrag-product-and-implementation-roadmap.md)
-- [第三卷第 6 章：开放 Agent Runtime 与混合检索架构](docs/zh/03-architecture-specs/06-open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [第三卷第 10 章：Semantic/Vector Provider Backend 规格](docs/zh/03-architecture-specs/10-semantic-vector-provider-backend.md)
-- [第三卷第 12 章：常驻进程 Agent 图检索访问规格](docs/zh/03-architecture-specs/12-resident-agent-graph-retrieval-access.md)
-- [第三卷第 15 章：安装部署与发布规格](docs/zh/03-architecture-specs/15-installation-and-release.md)
+- [第三卷第 1 章：架构愿景与算法版图](docs/zh/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
+- [第三卷第 2 章：工程硬约束](docs/zh/03-architecture-specs/02-engineering-hard-constraints.md)
+- [第三卷第 9 章：混合检索与 Context Packing](docs/zh/03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
+- [第三卷第 13 章：代码检索排序与影响分析](docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
+- [第三卷第 15 章：常驻 Agent 图访问协议](docs/zh/03-architecture-specs/15-resident-agent-graph-access-protocol.md)
+- [第三卷第 19 章：安装、发布与升级](docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
 ## 开发
 

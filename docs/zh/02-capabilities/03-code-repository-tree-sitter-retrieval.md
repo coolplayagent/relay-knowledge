@@ -59,7 +59,7 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-relay-teams-src-e2e \
 - 改善多词查询参数体验。类似 `repo query relay-teams-src --query runtime tools role` 的命令目前会在 `runtime` 后失败；错误应解释引号用法，或在无歧义时接受剩余词作为 query。
 - 增加 `repo report <alias> --format markdown|json`，输出可复用运维报告，包含注册 scope、resolved commit、tree hash、index totals、degradation summary、representative queries、latency samples 和 freshness state。
 
-v2 实现规格和本地 deterministic semantic/vector 检索基线维护在 [代码仓库检索 v2 优化规格](../03-architecture-specs/08-code-repository-retrieval-v2-optimization.md)。
+v2 实现规格和本地 deterministic semantic/vector 检索基线维护在 [代码检索排序与影响分析](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)。
 
 ## 实现
 

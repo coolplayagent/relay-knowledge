@@ -108,12 +108,12 @@ relay-knowledge service doctor
 
 Key specs:
 
-- [Book 3, Chapter 1: Engineering Hard Constraints](docs/en/03-architecture-specs/01-engineering-hard-constraints.md)
-- [Book 3, Chapter 2: GraphRAG Product and Implementation Roadmap](docs/en/03-architecture-specs/02-graphrag-product-and-implementation-roadmap.md)
-- [Book 3, Chapter 6: Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/03-architecture-specs/06-open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Book 3, Chapter 10: Semantic/Vector Provider Backend Specification](docs/en/03-architecture-specs/10-semantic-vector-provider-backend.md)
-- [Book 3, Chapter 12: Resident Agent Graph Retrieval Access Specification](docs/en/03-architecture-specs/12-resident-agent-graph-retrieval-access.md)
-- [Book 3, Chapter 15: Installation and Release Specification](docs/en/03-architecture-specs/15-installation-and-release.md)
+- [Book 3, Chapter 1: Architecture Vision and Algorithm Map](docs/en/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
+- [Book 3, Chapter 2: Engineering Hard Constraints](docs/en/03-architecture-specs/02-engineering-hard-constraints.md)
+- [Book 3, Chapter 9: Hybrid Retrieval and Context Packing](docs/en/03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
+- [Book 3, Chapter 13: Code Retrieval Ranking and Impact Analysis](docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
+- [Book 3, Chapter 15: Resident Agent Graph Access Protocol](docs/en/03-architecture-specs/15-resident-agent-graph-access-protocol.md)
+- [Book 3, Chapter 19: Installation, Release, and Upgrade](docs/en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
 ## Development
 

@@ -11,8 +11,8 @@ benchmarks, and verification records stay easy to compare.
 
 - `01-user-guide`: executable user workflows and command guidance.
 - `02-capabilities`: current implemented product behavior only.
-- `03-architecture-specs`: hard contracts, interface boundaries, and forward
-  product requirements.
+- `03-architecture-specs`: architecture and algorithm whitepaper chapters, hard
+  contracts, interface boundaries, and forward product requirements.
 - `04-research`: dated research and gap analysis; it may preserve roadmap
   language when the page is explicitly historical.
 - `05-benchmarks`: benchmark runs, optimization studies, and performance notes.
@@ -20,9 +20,9 @@ benchmarks, and verification records stay easy to compare.
   documentation or implementation pass was checked.
 
 All content documents inside numbered volumes use a two-digit chapter prefix in
-the filename, such as `03-storage-layer-design.md`. `README.md` files are volume
-covers and tables of contents; when listed as readable pages they are treated as
-chapter 0.
+the filename, such as `09-hybrid-retrieval-and-context-packing.md`. `README.md`
+files are volume covers and tables of contents; when listed as readable pages
+they are treated as chapter 0.
 
 Documentation refresh audits belong in `06-verification`, not in
 `02-capabilities`, because they prove documentation freshness rather than
