@@ -22,6 +22,7 @@
 - [混合检索 Context Pack](02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
 - [Semantic/Vector Provider 后端](02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
 - [代码仓库 Tree-sitter 检索](02-capabilities/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
+- [文档刷新审计 2026-05-17](02-capabilities/documentation-refresh-audit-2026-05-17.md)：代码仓库检索自迭代提交的文档同步记录。
 - [文档刷新审计 2026-05-14](02-capabilities/documentation-refresh-audit-2026-05-14.md)：当前文档状态、已刷新内容和剩余实现工作。
 
 ## 第三卷：架构规格

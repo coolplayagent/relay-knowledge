@@ -166,6 +166,26 @@ deterministic semantic/vector retrieval baseline is maintained in
   request filters must match an indexed snapshot scope exactly; querying or
   impact-analyzing a narrower or broader filter set requires indexing that
   scope first.
+- Lexical code retrieval uses the `code_repository_search` FTS candidate table
+  for symbols, references, calls, imports, and chunks. Indexed-scope and request
+  path filters are pushed into the FTS candidate subquery before
+  `ORDER BY bm25(...) LIMIT`, so narrow-path queries in large repositories are
+  not forced to score a window filled by out-of-path rows.
+- Fuzzy symbol recall uses OR semantics across query terms so natural-language
+  descriptions can still recall multi-part identifiers such as
+  `_CHECKPOINT_VERSION` or `archive_output_dir`. Reference, call, and import
+  queries keep the narrower all-term recall semantics and order bounded
+  candidates by BM25 before Rust scoring.
+- Rust scoring recognizes snake_case and CamelCase identifier parts, limited
+  multi-part symbol-name coverage, directional call context, related callee
+  names, declaration-shaped chunks, and pure-virtual interface chunks. These
+  bonuses only affect already recalled bounded candidates and do not change
+  source scope, path/language filters, edge metadata, or response shape.
+- Caller/callee excerpts use the
+  `code_repository_chunks(source_scope, symbol_snapshot_id)` lookup index and
+  require the chunk line range to contain the call line, preventing long
+  functions or large methods from multiplying one call edge across unrelated
+  chunks.
 - `wait-until-fresh` code queries reject stale repository status. `graph-only`
   returns no repository-index rows and reports that the graph-only policy was
   selected.
