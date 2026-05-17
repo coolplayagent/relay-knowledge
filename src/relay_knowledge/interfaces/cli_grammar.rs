@@ -125,6 +125,7 @@ fn option_value_width(option: &str, next: Option<&str>) -> usize {
             | "--reason"
             | "--operation"
             | "--input"
+            | "--root"
     ) {
         2
     } else {

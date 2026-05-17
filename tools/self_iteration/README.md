@@ -102,6 +102,12 @@ The `chart` command writes:
 
 `cases.json` defines the benchmark targets:
 
+- Local file-index fixtures create deterministic temporary roots for user
+  documents, Linux `/opt`-style paths, Windows `D:`-style paths, deep
+  directories, and high-noise file sets. The evaluator runs
+  `relay-knowledge files index/query`, records `file_index_ms`,
+  `file_query_p50_ms`, and `file_query_p95_ms`, and applies a subprocess
+  timeout to each file query so a candidate cannot hang the evaluator.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.

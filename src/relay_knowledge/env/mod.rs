@@ -72,6 +72,19 @@ pub const RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT: &str =
     "RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT";
 pub const RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT: &str = "RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT";
 pub const RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED: &str = "RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_ENABLED: &str = "RELAY_KNOWLEDGE_FILE_INDEX_ENABLED";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_ROOTS: &str = "RELAY_KNOWLEDGE_FILE_INDEX_ROOTS";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_EXCLUDES: &str = "RELAY_KNOWLEDGE_FILE_INDEX_EXCLUDES";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_MAX_DEPTH: &str = "RELAY_KNOWLEDGE_FILE_INDEX_MAX_DEPTH";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILE_BYTES: &str =
+    "RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILE_BYTES";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_SCAN_INTERVAL_MS: &str =
+    "RELAY_KNOWLEDGE_FILE_INDEX_SCAN_INTERVAL_MS";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS: &str =
+    "RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT: &str =
+    "RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT";
+pub const RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS";
 pub const RELAY_OTEL_ENDPOINT: &str = "RELAY_OTEL_ENDPOINT";
 pub const RELAY_OTEL_TRACES: &str = "RELAY_OTEL_TRACES";
 pub const RELAY_OTEL_METRICS: &str = "RELAY_OTEL_METRICS";
@@ -215,6 +228,20 @@ pub struct WorkerEnvOverrides {
     pub silent_updates_enabled: Option<bool>,
 }
 
+/// Local file index settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileIndexEnvOverrides {
+    pub enabled: Option<bool>,
+    pub roots: Option<String>,
+    pub excludes: Option<String>,
+    pub max_depth: Option<usize>,
+    pub max_file_bytes: Option<u64>,
+    pub scan_interval_ms: Option<u64>,
+    pub scan_timeout_ms: Option<u64>,
+    pub max_files_per_root: Option<usize>,
+    pub query_timeout_ms: Option<u64>,
+}
+
 /// Telemetry exporter settings read from relay-specific environment variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TelemetryEnvOverrides {
@@ -234,6 +261,7 @@ pub struct EnvironmentConfig {
     pub agent: AgentEnvOverrides,
     pub retrieval: RetrievalEnvOverrides,
     pub workers: WorkerEnvOverrides,
+    pub file_index: FileIndexEnvOverrides,
     pub telemetry: TelemetryEnvOverrides,
 }
 
@@ -394,6 +422,29 @@ impl EnvironmentConfig {
                 extractor_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT)?,
                 max_in_flight: positive_usize_var(&values, RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT)?,
                 silent_updates_enabled: bool_var(&values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
+            },
+            file_index: FileIndexEnvOverrides {
+                enabled: bool_var(&values, RELAY_KNOWLEDGE_FILE_INDEX_ENABLED)?,
+                roots: string_var(&values, RELAY_KNOWLEDGE_FILE_INDEX_ROOTS)?,
+                excludes: string_var(&values, RELAY_KNOWLEDGE_FILE_INDEX_EXCLUDES)?,
+                max_depth: positive_usize_var(&values, RELAY_KNOWLEDGE_FILE_INDEX_MAX_DEPTH)?,
+                max_file_bytes: positive_u64_var(
+                    &values,
+                    RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILE_BYTES,
+                )?,
+                scan_interval_ms: positive_u64_var(
+                    &values,
+                    RELAY_KNOWLEDGE_FILE_INDEX_SCAN_INTERVAL_MS,
+                )?,
+                scan_timeout_ms: positive_u64_var(
+                    &values,
+                    RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS,
+                )?,
+                max_files_per_root: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT,
+                )?,
+                query_timeout_ms: positive_u64_var(&values, RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS)?,
             },
             telemetry: TelemetryEnvOverrides {
                 otel_endpoint: string_var(&values, RELAY_OTEL_ENDPOINT)?,
@@ -669,6 +720,8 @@ mod tests {
                 (RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL, "text-embed-3-small"),
                 (RELAY_KNOWLEDGE_IMAGE_EMBEDDING_MODEL, "clip-vit-b32"),
                 (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
+                (RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS, "120000"),
+                (RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS, "600"),
                 (RELAY_OTEL_ENDPOINT, "http://collector.internal:4318"),
                 (RELAY_OTEL_TRACES, "true"),
                 (RELAY_OTEL_METRICS, "false"),
@@ -720,6 +773,8 @@ mod tests {
             Some("clip-vit-b32".to_owned())
         );
         assert_eq!(config.retrieval.embedding_dimension, Some(1536));
+        assert_eq!(config.file_index.scan_timeout_ms, Some(120000));
+        assert_eq!(config.file_index.query_timeout_ms, Some(600));
         assert_eq!(
             config.telemetry.otel_endpoint,
             Some("http://collector.internal:4318".to_owned())

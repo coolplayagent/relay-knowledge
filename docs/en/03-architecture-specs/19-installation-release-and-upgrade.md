@@ -23,6 +23,10 @@ Installers or install scripts support version selection, install directory selec
 ## 4. Runtime State
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations.
+Local file-location indexes store SQLite/FTS5 state in the same runtime data
+area. Installers and service templates must not default to scanning a whole
+disk, Linux `/opt`, mounted volumes, or non-system Windows drives; those roots
+are indexed only when the user configures them or passes them to the CLI.
 
 ## 5. Upgrade and Rollback
 

@@ -54,6 +54,22 @@ where
                 value["results"].as_array().map_or(0, Vec::len)
             )
         }
+        "files.index" => format!(
+            "file_roots={} indexed_files={} missing_files={} scan_errors={} truncated_roots={}",
+            value["summary"]["root_count"].as_u64().unwrap_or(0),
+            value["summary"]["indexed_file_count"].as_u64().unwrap_or(0),
+            value["summary"]["missing_file_count"].as_u64().unwrap_or(0),
+            value["summary"]["scan_error_count"].as_u64().unwrap_or(0),
+            value["summary"]["truncated_root_count"]
+                .as_u64()
+                .unwrap_or(0)
+        ),
+        "files.query" => format!(
+            "results={} truncated={} duration_ms={}",
+            value["results"].as_array().map_or(0, Vec::len),
+            value["truncated"].as_bool().unwrap_or(false),
+            value["duration_ms"].as_u64().unwrap_or(0)
+        ),
         "graph.inspect" => format!(
             "graph_version={} entities={} evidence={} code_files={} code_symbols={} repo_code_files={} repo_code_symbols={}",
             value["graph"]["graph_version"].as_u64().unwrap_or(0),

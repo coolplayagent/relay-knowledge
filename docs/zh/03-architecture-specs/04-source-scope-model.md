@@ -21,6 +21,9 @@ Source scope 是整个系统的授权、版本和索引分区基础。没有 sco
 | `runtime_scope` | service、worker、diagnostic 事件 | runtime instance + component identity |
 
 所有事实、索引 cursor、audit event 和 context item 都必须携带 scope 或可追溯到 scope。
+本地文件定位索引使用显式 document scope，例如 `user-documents` 或
+`local-files:<name>`。Root 可以指向用户文档目录、Linux `/opt`、挂载盘或
+Windows `D:\` 等盘符根，但扫描器不得把一个已授权 root 自动扩大为全盘扫描。
 
 ## 3. 规范化算法
 

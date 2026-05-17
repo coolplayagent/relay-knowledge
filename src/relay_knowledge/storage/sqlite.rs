@@ -11,6 +11,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 mod canvas;
 mod canvas_code;
 mod code_graph;
+mod file_index;
 mod helpers;
 mod indexing;
 mod operations;
@@ -221,6 +222,7 @@ fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     indexing::initialize_schema(connection)?;
     code_graph::initialize_schema(connection)?;
     operations::initialize_schema(connection)?;
+    file_index::initialize_schema(connection)?;
     backfill_fact_evidence_links(connection)?;
     retrieval::initialize_schema(connection)?;
 

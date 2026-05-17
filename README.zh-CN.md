@@ -43,6 +43,7 @@ relay-knowledge service doctor
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
 - 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
 - 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索和影响分析。
+- 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
 - Agent 接入：通过共享应用服务暴露 MCP Streamable HTTP 和本地 ACP 适配器，并带有作用域策略、QoS 准入、取消、资源/提示、持久审计元数据和 OTLP 准备的 agent 指标。
@@ -140,6 +141,8 @@ relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
+RELAY_KNOWLEDGE_FILE_INDEX_ROOTS=/opt/docs relay-knowledge files index --root /opt/docs --source local-files --format json
+relay-knowledge files query "quarterly design pdf" --source local-files --format json
 relay-knowledge worker status --format json
 relay-knowledge worker run-once --kind ocr --format json
 relay-knowledge proposal list --state proposed --format json
@@ -158,6 +161,9 @@ relay-knowledge query -- --help
 ```
 
 CLI 参数含义是公开契约的一部分。Skills 和其它 LLM 工具在发出命令前应先读取 `relay-knowledge help --format json`；该输出会描述每条 command path、operation、读写影响、必填参数、默认值、允许值、可重复性、示例和注意事项。
+本地文件索引 root 必须是绝对路径，并且必须出现在
+`RELAY_KNOWLEDGE_FILE_INDEX_ROOTS` 中；`RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
+用于设置每个 root 的扫描 timeout 预算。
 
 Semantic/vector 读模型 backend 元数据只能通过 `env` 边界配置。默认模式是本地确定性读模型；可以用以下变量选择外部 worker metadata：
 

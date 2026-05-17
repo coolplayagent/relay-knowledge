@@ -358,6 +358,49 @@ pub struct IndexRefreshResponse {
     pub diagnostics: IndexRefreshDiagnostics,
 }
 
+/// Bounded local file indexing request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileIndexRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(default)]
+    pub roots: Vec<String>,
+}
+
+/// Local file indexing response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileIndexResponse {
+    pub metadata: ApiMetadata,
+    pub summary: crate::storage::FileIndexScanSummary,
+}
+
+/// Bounded local file-location query request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileQueryRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    pub limit: usize,
+}
+
+/// Local file-location query response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileQueryResponse {
+    pub metadata: ApiMetadata,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    pub results: Vec<crate::storage::FileSearchHit>,
+    pub truncated: bool,
+    pub duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
 /// Service manager status surfaced without exposing platform-specific handles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceStatusResponse {
@@ -368,6 +411,7 @@ pub struct ServiceStatusResponse {
     pub silent_updates_enabled: bool,
     pub service_definition_path: String,
     pub index_refresh: IndexRefreshDiagnostics,
+    pub file_index: crate::storage::FileIndexDiagnostics,
     pub agent_protocols: AgentProtocolStatus,
     pub operator: ServiceOperatorStatus,
     pub workers: Vec<WorkerStatus>,
@@ -527,6 +571,7 @@ pub struct HealthResponse {
     pub indexes: Vec<IndexStatus>,
     pub index_cursors: Vec<IndexCursor>,
     pub index_refresh: IndexRefreshDiagnostics,
+    pub file_index: crate::storage::FileIndexDiagnostics,
     pub runtime: RuntimeStatus,
 }
 

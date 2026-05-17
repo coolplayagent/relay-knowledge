@@ -71,6 +71,81 @@
       "query_p95_budget_ms": 1200
     }
   },
+  "file_fixtures": {
+    "local_documents": {
+      "scope": "local-files",
+      "index_budget_ms": 5000,
+      "query_p50_budget_ms": 50,
+      "query_p95_budget_ms": 150,
+      "files": [
+        {"path": "Documents/design/quarterly-design.pdf", "content": "pdf placeholder"},
+        {"path": "Documents/design/quarterly-design-notes.md", "content": "notes placeholder"},
+        {"path": "Documents/budget/quarterly-budget.xlsx", "content": "budget placeholder"},
+        {"path": "opt/projects/relay/local-index-plan.md", "content": "linux opt style root"},
+        {"path": "D-drive/Work/contracts/vendor-contract.docx", "content": "windows d drive style root"}
+      ]
+    },
+    "local_noise": {
+      "scope": "local-files",
+      "index_budget_ms": 12000,
+      "query_p50_budget_ms": 80,
+      "query_p95_budget_ms": 200,
+      "generate_noise_files": 1200,
+      "files": [
+        {"path": "outputs/final/customer-renewal-2026.pdf", "content": "target placeholder"},
+        {"path": "deep/a/b/c/d/e/f/operations-runbook.md", "content": "deep placeholder"}
+      ]
+    }
+  },
+  "file_query_cases": [
+    {
+      "id": "files_exact_pdf_name",
+      "fixture": "local_documents",
+      "query": "quarterly design pdf",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"relative_path": "Documents/design/quarterly-design.pdf", "extension": "pdf"}]
+    },
+    {
+      "id": "files_linux_opt_style_path",
+      "fixture": "local_documents",
+      "query": "opt relay local index plan",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"relative_path": "opt/projects/relay/local-index-plan.md"}]
+    },
+    {
+      "id": "files_windows_d_style_path",
+      "fixture": "local_documents",
+      "query": "D drive vendor contract docx",
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"relative_path": "D-drive/Work/contracts/vendor-contract.docx"}]
+    },
+    {
+      "id": "files_high_noise_target_rank",
+      "fixture": "local_noise",
+      "query": "customer renewal 2026 pdf",
+      "limit": 10,
+      "max_rank": 1,
+      "expected": [{"relative_path": "outputs/final/customer-renewal-2026.pdf"}]
+    },
+    {
+      "id": "files_deep_path_budget",
+      "fixture": "local_noise",
+      "query": "operations runbook",
+      "limit": 10,
+      "max_rank": 3,
+      "expected": [{"relative_path": "deep/a/b/c/d/e/f/operations-runbook.md"}]
+    },
+    {
+      "id": "files_negative_missing",
+      "fixture": "local_documents",
+      "query": "definitely missing local file",
+      "limit": 10,
+      "expect_empty": true
+    }
+  ],
   "query_cases": [
     {
       "id": "rt_definition_connector_service",

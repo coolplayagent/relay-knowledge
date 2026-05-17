@@ -111,6 +111,29 @@ impl RuntimePaths {
     }
 }
 
+/// Returns conservative user document roots for local file indexing.
+pub fn default_user_document_roots(
+    environment: &PlatformEnvironment,
+) -> Result<Vec<PathBuf>, PathError> {
+    let home = match environment.platform {
+        PlatformKind::Windows => environment
+            .home_dir
+            .as_deref()
+            .map(|path| validate_path(PathPurpose::Home, path).map(|_| path.to_path_buf()))
+            .transpose()?,
+        _ => validated_optional(PathPurpose::Home, environment.home_dir.as_deref())?
+            .map(Path::to_path_buf),
+    };
+    let Some(home) = home else {
+        return Ok(Vec::new());
+    };
+
+    Ok(["Documents", "Desktop", "Downloads"]
+        .into_iter()
+        .map(|child| home.join(child))
+        .collect())
+}
+
 /// Directory category attached to path validation failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathPurpose {

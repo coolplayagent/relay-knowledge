@@ -60,6 +60,9 @@ relay-knowledge service doctor
 - Code repository registration, tree-sitter indexing, full and incremental
   refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
   impact analysis.
+- Local file-location indexing without Everything or other external search
+  software: explicitly scan authorized roots and use SQLite/FTS5 to quickly
+  find files by name, path, extension, and directory.
 - Bounded index refresh queues, persistent leases, retry/dead-letter handling,
   startup reconciliation, stale diagnostics, and scoped cursor metadata.
 - Worker queues, deterministic fallback proposals, manual proposal acceptance,
@@ -173,6 +176,8 @@ relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
+RELAY_KNOWLEDGE_FILE_INDEX_ROOTS=/opt/docs relay-knowledge files index --root /opt/docs --source local-files --format json
+relay-knowledge files query "quarterly design pdf" --source local-files --format json
 relay-knowledge worker status --format json
 relay-knowledge worker run-once --kind ocr --format json
 relay-knowledge proposal list --state proposed --format json
@@ -194,6 +199,10 @@ CLI parameter meaning is part of the public contract. Skills and other LLM tools
 should inspect `relay-knowledge help --format json` before issuing commands; it
 describes each command path, operation, read/write effect, required parameters,
 defaults, allowed values, repeatability, examples, and notes.
+Local file indexing roots must be absolute and present in
+`RELAY_KNOWLEDGE_FILE_INDEX_ROOTS`; relative entries are rejected before a
+background or explicit scan starts. `RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS`
+sets the per-root scan timeout budget.
 
 Semantic/vector read-model backend metadata is configured only through the
 `env` boundary. The default mode is local deterministic read models; external

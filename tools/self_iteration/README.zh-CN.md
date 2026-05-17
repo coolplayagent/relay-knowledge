@@ -96,6 +96,11 @@ and (
 
 `cases.json` 定义 benchmark targets：
 
+- 本地文件索引 fixture：在临时目录中生成 `user documents`、Linux `/opt`
+  风格路径、Windows `D:` 风格路径、深层目录和高噪声文件集合，运行
+  `relay-knowledge files index/query`，记录 `file_index_ms`、
+  `file_query_p50_ms` 和 `file_query_p95_ms`。每条文件查询都使用
+  subprocess timeout，防止候选实现卡死 evaluator。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。

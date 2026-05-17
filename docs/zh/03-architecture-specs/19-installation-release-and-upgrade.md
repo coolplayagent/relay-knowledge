@@ -23,6 +23,9 @@ Installer 或安装脚本支持：版本选择、安装目录选择、dry run、
 ## 4. 运行时状态
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。
+本地文件定位索引的 SQLite/FTS5 状态也写入同一运行态数据区。安装器和 service
+template 不能默认扫描全盘、Linux `/opt`、挂载盘或 Windows 非系统盘；只有用户显式配置
+或通过 CLI 传入这些 root 时才建立索引。
 
 ## 5. 升级与回滚
 

@@ -1,6 +1,7 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
 mod code_service;
+mod file_index;
 mod index_refresh;
 mod ingest;
 mod model_provider_config;
@@ -11,8 +12,9 @@ mod service;
 mod status;
 mod worker_proposals;
 
+pub use file_index::DEFAULT_FILE_QUERY_LIMIT;
 pub use runtime::{
-    AgentRuntimeConfig, RetrievalRuntimeConfigError, RuntimeConfiguration,
-    RuntimeConfigurationError, WorkerRuntimeConfig,
+    AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, RetrievalRuntimeConfigError,
+    RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,
 };
 pub use service::{AgentDurableAuditInput, RelayKnowledgeService};

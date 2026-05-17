@@ -35,8 +35,9 @@ use crate::{
         read_model_backend_statuses,
     },
     storage::{
-        GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection, GraphSearchRequest,
-        KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore, StorageError,
+        FileIndexDiagnostics, GraphCanvasSelection, GraphCanvasStorageRequest, GraphInspection,
+        GraphSearchRequest, KnowledgeStore, NewAuditEvent, ProposalListRequest, SqliteGraphStore,
+        StorageError,
     },
 };
 
@@ -560,6 +561,7 @@ impl RelayKnowledgeService {
             .indexes
             .iter()
             .all(|status| !status.is_stale_for(graph.graph_version));
+        let file_index = file_index_diagnostics_or_default(&store).await?;
 
         Ok(HealthResponse {
             metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
@@ -569,6 +571,7 @@ impl RelayKnowledgeService {
             indexes: outcome.indexes,
             index_cursors: outcome.cursors,
             index_refresh: outcome.diagnostics,
+            file_index,
             runtime: runtime_status_with_model_profiles(
                 &self.runtime,
                 self.model_provider_config()
@@ -718,6 +721,7 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let index_refresh =
             reconcile_index_refreshes(&store, graph_version, &self.runtime.retrieval).await?;
+        let file_index = file_index_diagnostics_or_default(&store).await?;
         let service_definition_path = self
             .runtime
             .paths
@@ -751,6 +755,7 @@ impl RelayKnowledgeService {
             silent_updates_enabled: operator.silent_updates_enabled,
             service_definition_path,
             index_refresh,
+            file_index,
             agent_protocols: agent_protocol_status(&self.runtime),
             operator,
             workers,
@@ -852,6 +857,20 @@ impl StorageProvider {
 
 fn storage_api_error(error: StorageError) -> ApiError {
     ApiError::storage_unavailable(error.to_string())
+}
+
+async fn file_index_diagnostics_or_default(
+    store: &Arc<dyn KnowledgeStore>,
+) -> Result<FileIndexDiagnostics, ApiError> {
+    match store.file_index_diagnostics().await {
+        Ok(diagnostics) => Ok(diagnostics),
+        Err(StorageError::InvalidInput(message))
+            if message == "file index storage is unavailable" =>
+        {
+            Ok(FileIndexDiagnostics::default())
+        }
+        Err(error) => Err(storage_api_error(error)),
+    }
 }
 
 fn normalize_optional_source_scope(value: Option<String>) -> Result<Option<String>, String> {

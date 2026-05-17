@@ -21,6 +21,10 @@ Source scope is the foundation for authorization, versioning, and index partitio
 | `runtime_scope` | Service, worker, diagnostic events | Runtime instance + component identity |
 
 Every fact, index cursor, audit event, and context item carries scope or can be traced to scope.
+Local file-location indexes use explicit document scopes such as `user-documents`
+or `local-files:<name>`. Roots can point at home document folders, Linux paths
+such as `/opt`, mounted volumes, or Windows drive roots such as `D:\`, but the
+scanner may not widen one authorized root into a whole-disk scan.
 
 ## 3. Normalization Algorithm
 
