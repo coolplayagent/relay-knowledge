@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-opencode-default-judge-cli-arg-order-20260517
+
+- 目标：修复当前 quality gate repair mode 中 `research_judge` 失败；安装版 `opencode run` 的 `--file` 是数组选项，默认命令把 judge instruction 放在 `{prompt_file}` 之后时会被误当作第二个附件路径，导致 gate 报 `File not found`。
+- 方法：调整 self-iteration judge 的默认 CLI command 为先传 message、再传 `--file {prompt_file}`，并增加单元测试锁定 argv 形态，确保默认 opencode 命令没有任何非选项参数跟在 prompt 文件路径之后。自定义 judge command、HTTP judge、disable backend 和 stdin prompt 模式保持原有逻辑。
+- 架构与不变量：不写入 provider URL、API key、模型名、维度或 CLI secret；judge backend、HTTP endpoint、密钥、模型和自定义命令仍只从运行时环境读取。候选 diff、确定性评估摘要、rubric、严格 JSON 解析、置信度阈值、总分阈值、anti-fixture-special-casing 阈值和 retrieval evaluator 不变。
+- 预期影响：默认本地 `opencode` judge 可读取 prompt 文件并返回 `research_judge` objective，不再因命令行参数顺序把有效候选拒绝；foundational、competitive、semantic/vector、stability、repo indexing 和检索排序不受影响。
+- 已知风险：不同 opencode 版本如果改变 positional message 与 `--file` 的解析顺序，默认命令仍可能需要适配；该风险通过保留 `RELAY_KNOWLEDGE_JUDGE_COMMAND` 覆盖、`RELAY_KNOWLEDGE_JUDGE_BACKEND=none` 显式禁用和 focused 单元测试控制。
+
 ## 候选优化说明：manual-opencode-default-judge-cli-20260517
 
 - 目标：让自迭代 research judge 在本地默认走 `opencode` CLI，减少每次启用开放式质量评审时都要手动配置 judge command 的操作成本。
