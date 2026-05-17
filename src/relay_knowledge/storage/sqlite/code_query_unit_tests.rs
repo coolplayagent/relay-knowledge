@@ -1,4 +1,15 @@
 use super::*;
+use crate::{
+    domain::{
+        CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
+        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeSymbolRecord,
+    },
+    storage::SqliteGraphStore,
+    storage::code::CodeRepositoryStore,
+};
+
+const CASE_INTENT_SOURCE_SCOPE: &str = "code:test:case-intent:commit:tree";
 
 #[test]
 fn path_filters_accept_trailing_slashes() {
@@ -132,6 +143,170 @@ fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
     );
 }
 
+#[tokio::test]
+async fn symbol_search_preserves_case_for_name_bonus() {
+    let mut target = code_query_symbol(
+        "eval-checkpoint-store",
+        "checkpoint-file",
+        "src/relay_teams_evals/checkpoint.py",
+        "EvalCheckpointStore",
+    );
+    target.kind = "class".to_owned();
+    target.signature = "class EvalCheckpointStore:".to_owned();
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file(
+            "checkpoint-file",
+            "src/relay_teams_evals/checkpoint.py",
+            "python",
+        )],
+        vec![target],
+        Vec::new(),
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "EvalCheckpointStore signature mismatch append result",
+            CodeQueryKind::Definition,
+        ))
+        .await
+        .expect("symbol query should succeed");
+
+    let hit = hits
+        .iter()
+        .find(|hit| hit.symbol_snapshot_id.as_deref() == Some("eval-checkpoint-store"))
+        .expect("target symbol should be recalled");
+    let lower_hits = store
+        .search_code(code_search_request(
+            "evalcheckpointstore signature mismatch append result",
+            CodeQueryKind::Definition,
+        ))
+        .await
+        .expect("lowercase symbol query should succeed");
+    assert!(
+        hit.score > lower_hits[0].score + 1.5,
+        "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}",
+        hit.score,
+        lower_hits[0].score
+    );
+}
+
+#[tokio::test]
+async fn symbol_search_preserves_case_for_test_intent() {
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file(
+            "coverage-file",
+            "tests/unit/test_coverage.py",
+            "python",
+        )],
+        vec![code_query_symbol(
+            "unit-test-coverage",
+            "coverage-file",
+            "tests/unit/test_coverage.py",
+            "UnitTestCoverage",
+        )],
+        Vec::new(),
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "UnitTestCoverage",
+            CodeQueryKind::Symbol,
+        ))
+        .await
+        .expect("symbol query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    let lower_hits = store
+        .search_code(code_search_request(
+            "unittestcoverage",
+            CodeQueryKind::Symbol,
+        ))
+        .await
+        .expect("lowercase symbol query should succeed");
+    assert!(
+        hits[0].score > lower_hits[0].score + 0.7,
+        "mixed-case test intent should disable test-path penalty, got {} vs lowercase {}",
+        hits[0].score,
+        lower_hits[0].score
+    );
+}
+
+#[tokio::test]
+async fn caller_search_preserves_case_for_adapter_intent() {
+    let mut call = code_query_call("api-bridge-call", "c-api-file", "db/c.cc");
+    call.caller_name = Some("ApiBridge".to_owned());
+    call.callee_name = "NewLRUCache".to_owned();
+    call.target_hint = Some("NewLRUCache".to_owned());
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file("c-api-file", "db/c.cc", "cpp")],
+        Vec::new(),
+        vec![call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "ApiBridge NewLRUCache",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    let lower_hits = store
+        .search_code(code_search_request(
+            "apibridge NewLRUCache",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("lowercase caller query should succeed");
+    assert!(
+        hits[0].score > lower_hits[0].score + 0.1,
+        "mixed-case adapter intent should preserve source-path bonus, got {} vs lowercase {}",
+        hits[0].score,
+        lower_hits[0].score
+    );
+}
+
+#[tokio::test]
+async fn caller_search_preserves_case_for_test_intent() {
+    let mut call = code_query_call("unit-test-call", "cache-file", "src/cache.py");
+    call.caller_name = Some("UnitTestCoverage".to_owned());
+    call.callee_name = "NewLRUCache".to_owned();
+    call.target_hint = Some("NewLRUCache".to_owned());
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file("cache-file", "src/cache.py", "python")],
+        Vec::new(),
+        vec![call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "UnitTestCoverage NewLRUCache",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    let lower_hits = store
+        .search_code(code_search_request(
+            "unittestcoverage NewLRUCache",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("lowercase caller query should succeed");
+    assert!(
+        lower_hits[0].score > hits[0].score + 0.1,
+        "mixed-case test intent should disable production source-path bonus, got {} vs lowercase {}",
+        hits[0].score,
+        lower_hits[0].score
+    );
+}
+
 #[test]
 fn symbol_excerpt_adds_class_owner_for_member_context() {
     assert_eq!(
@@ -176,4 +351,119 @@ fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest {
         crate::domain::FreshnessPolicy::AllowStale,
     )
     .expect("request should be valid")
+}
+
+fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should be valid");
+
+    CodeRetrievalRequest::new(query, selector, kind, 10, FreshnessPolicy::AllowStale)
+        .expect("request should be valid")
+}
+
+fn code_query_snapshot(
+    files: Vec<RepositoryCodeFileRecord>,
+    symbols: Vec<RepositoryCodeSymbolRecord>,
+    calls: Vec<CodeCallRecord>,
+) -> CodeIndexSnapshot {
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls,
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn code_query_file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
+    RepositoryCodeFileRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: language_id.to_owned(),
+        blob_hash: format!("hash-{file_id}"),
+        byte_len: 0,
+        line_count: 1,
+        parse_status: CodeParseStatus::Parsed,
+        degraded_reason: None,
+    }
+}
+
+fn code_query_symbol(
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "python".to_owned(),
+        name: name.to_owned(),
+        qualified_name: name.to_owned(),
+        kind: "function".to_owned(),
+        signature: format!("def {name}():"),
+        doc_comment: None,
+        byte_range: code_query_range(0, 1),
+        line_range: code_query_range(1, 1),
+    }
+}
+
+fn code_query_call(call_id: &str, file_id: &str, path: &str) -> CodeCallRecord {
+    CodeCallRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        call_id: call_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        caller_symbol_snapshot_id: None,
+        caller_name: None,
+        callee_symbol_snapshot_id: None,
+        callee_name: "target".to_owned(),
+        target_hint: None,
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 2_500,
+        confidence_tier: "ambiguous".to_owned(),
+        line_range: code_query_range(1, 1),
+    }
+}
+
+fn code_query_range(start: u32, end: u32) -> RepositoryCodeRange {
+    RepositoryCodeRange { start, end }
+}
+
+async fn store_with_case_intent_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let registration =
+        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    store
+        .upsert_code_repository(registration)
+        .await
+        .expect("repository should persist");
+    store
+        .apply_code_index_snapshot(snapshot)
+        .await
+        .expect("snapshot should apply");
+
+    store
 }

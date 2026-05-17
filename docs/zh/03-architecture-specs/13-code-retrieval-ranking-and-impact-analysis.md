@@ -23,7 +23,7 @@
 
 ## 3. Ranking Signals
 
-排序信号包括：BM25、identifier part match、CamelCase/snake_case segmentation、query-to-symbol name normalized overlap、symbol kind prior、path proximity、language filter、graph edge confidence、call direction、caller/callee 查询的非测试源码路径优先级、查询无 test 意图时对 symbol test/benchmark 路径的小幅降权、qualified method 命中的 class-member excerpt context、import surface/re-export file、已具备 declaration-shape evidence 的 header chunk declaration surface priority、chunk quality、freshness、semantic/vector rank 和 rerank explanation。当查询本身明确包含 test 或 benchmark 意图时，test/benchmark path 调整不生效。
+排序信号包括：BM25、identifier part match、CamelCase/snake_case segmentation、query-to-symbol name normalized overlap、symbol kind prior、path proximity、language filter、graph edge confidence、call direction、caller/callee 查询的非测试源码路径优先级、查询无 test 意图时对 symbol test/benchmark 路径的小幅降权、qualified method 命中的 class-member excerpt context、import surface/re-export file、已具备 declaration-shape evidence 的 header chunk declaration surface priority、chunk quality、freshness、semantic/vector rank 和 rerank explanation。排序在 lowercased lexical scoring 前保留原始 query 大小写，用于 identifier segmentation 和 intent check。当查询本身明确包含 test 或 benchmark 意图时，test/benchmark path 调整不生效。
 
 业界代码搜索实践要求词法、结构和语义分层：Zoekt/Google Code Search 类 trigram candidate 适合 substring/regex 初筛，BM25 适合自然语言和文档 chunk，Tree-sitter capture 适合 symbol/edge，semantic/vector 适合概念性解释查询。排序不能用语义分数覆盖 exact symbol 或 resolved edge，也不能让宽泛 regex 结果绕过 scope、path、language 和 revision filter。
 
