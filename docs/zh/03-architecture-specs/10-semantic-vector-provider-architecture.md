@@ -35,7 +35,7 @@ OpenAI-compatible embedding endpoint 构造接受 host root、最终路径段为
 
 ## 5. 降级策略
 
-外部 provider 不可用时，系统按配置降级到 local 或声明 semantic/vector unavailable。Provider probe 将 HTTP 402、HTTP 429 以及带 quota/backpressure 诊断的 HTTP 400 或 HTTP 403 body 归类为“可达但资源受限”的诊断；认证、endpoint、model、timeout 和 malformed-response 失败仍保持独立分类。Context pack 必须暴露 backend availability、model、dimension、last error 和 stale lag。
+外部 provider 不可用时，系统按配置降级到 local 或声明 semantic/vector unavailable。Provider probe 将 HTTP 402、HTTP 429 以及带 quota/backpressure 诊断的 HTTP 400、HTTP 403、HTTP 409、HTTP 425 或 5xx body 归类为“可达但资源受限”的诊断；认证、endpoint、model、timeout、普通 provider-unavailable 和 malformed-response 失败仍保持独立分类。Context pack 必须暴露 backend availability、model、dimension、last error 和 stale lag。
 
 ## 6. 验收标准
 

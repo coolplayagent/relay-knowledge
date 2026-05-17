@@ -167,10 +167,12 @@ fn search_symbols(
                     + 2.0
                     + symbol_kind_bonus(&row.kind, request)
                     + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
-                let mut excerpt = row.signature.clone();
-                if let Some(doc) = &row.doc_comment {
-                    excerpt = format!("{doc}\n{}", row.signature);
-                }
+                let excerpt = symbol_excerpt(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    row.doc_comment.as_deref(),
+                );
                 hit_from_parts(
                     status,
                     HitParts {
@@ -1061,6 +1063,56 @@ fn symbol_query_bonus(
         name_bonus + 3.0
     } else {
         name_bonus
+    }
+}
+
+fn symbol_excerpt(
+    name: &str,
+    qualified_name: &str,
+    signature: &str,
+    doc_comment: Option<&str>,
+) -> String {
+    let body = if let Some(doc) = doc_comment {
+        format!("{doc}\n{signature}")
+    } else {
+        signature.to_owned()
+    };
+    let Some(display_name) = class_member_display_name(name, qualified_name) else {
+        return body;
+    };
+    if body.contains(&display_name) {
+        body
+    } else {
+        format!("{display_name}: {body}")
+    }
+}
+
+fn class_member_display_name(name: &str, qualified_name: &str) -> Option<String> {
+    let name = name.trim();
+    let qualified_name = qualified_name.trim();
+    if name.is_empty() || qualified_name == name {
+        return None;
+    }
+
+    let raw_prefix = qualified_name.strip_suffix(name)?;
+    if !(raw_prefix.ends_with('.') || raw_prefix.ends_with("::")) {
+        return None;
+    }
+    let prefix = raw_prefix.trim_end_matches(['.', ':']);
+    if prefix.is_empty() {
+        return None;
+    }
+    let owner = prefix
+        .rsplit(['.', ':'])
+        .find(|segment| !segment.is_empty())?;
+    if owner
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+    {
+        Some(format!("{owner}.{name}"))
+    } else {
+        None
     }
 }
 

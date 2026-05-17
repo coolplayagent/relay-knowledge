@@ -266,11 +266,11 @@ fn deterministic_vector(input: &str, dimension: usize) -> EmbeddingVector {
 }
 
 fn status_error(status_code: u16, body: Option<String>) -> EmbeddingProviderError {
+    let body_reports_resource_limit = body
+        .as_deref()
+        .is_some_and(provider_error_reports_resource_limit);
     let resource_limited = matches!(status_code, 402 | 429)
-        || (matches!(status_code, 400 | 403)
-            && body
-                .as_deref()
-                .is_some_and(provider_error_reports_resource_limit));
+        || (status_allows_resource_limit_body(status_code) && body_reports_resource_limit);
     let retry = if resource_limited || matches!(status_code, 408 | 500..=599) {
         ProviderRetryClass::Retryable
     } else {
@@ -324,6 +324,10 @@ fn status_code_error_code(status_code: u16, resource_limited: bool) -> &'static 
         500..=599 => "provider_unavailable",
         _ => "provider_http_error",
     }
+}
+
+fn status_allows_resource_limit_body(status_code: u16) -> bool {
+    matches!(status_code, 400 | 403 | 409 | 425 | 500..=599)
 }
 
 fn provider_error_reports_resource_limit(body: &str) -> bool {
@@ -465,6 +469,13 @@ mod tests {
                 r#"{"error":{"type":"resource_exhausted","message":"quota exceeded"}}"#.to_owned(),
             ),
         );
+        let retry_after_resource_exhausted = status_error(
+            503,
+            Some(
+                r#"{"error":{"status":"RESOURCE_EXHAUSTED","message":"rate limit exceeded"}}"#
+                    .to_owned(),
+            ),
+        );
 
         assert_eq!(payment_required.retry, ProviderRetryClass::Retryable);
         assert_eq!(payment_required.code, "rate_limited");
@@ -472,6 +483,11 @@ mod tests {
         assert_eq!(quota_forbidden.code, "rate_limited");
         assert_eq!(invalid_request_quota.retry, ProviderRetryClass::Retryable);
         assert_eq!(invalid_request_quota.code, "rate_limited");
+        assert_eq!(
+            retry_after_resource_exhausted.retry,
+            ProviderRetryClass::Retryable
+        );
+        assert_eq!(retry_after_resource_exhausted.code, "rate_limited");
     }
 
     #[test]

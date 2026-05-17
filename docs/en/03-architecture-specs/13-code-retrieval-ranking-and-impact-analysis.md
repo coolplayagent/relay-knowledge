@@ -23,7 +23,7 @@ Advanced code retrieval comes from fusing structural signals with lexical and se
 
 ## 3. Ranking Signals
 
-Signals include BM25, identifier-part matches, CamelCase/snake_case segmentation, normalized query-to-symbol name overlap, symbol-kind priors, path proximity, language filters, graph-edge confidence, call direction, non-test source path priority for caller/callee queries, a small symbol test/benchmark path penalty when the query has no test intent, import surface/re-export files, declaration surface priority for header chunks that already match declaration-shape evidence, chunk quality, freshness, semantic/vector rank, and rerank explanations. Test/benchmark path adjustments are disabled when the query itself asks for tests or benchmarks.
+Signals include BM25, identifier-part matches, CamelCase/snake_case segmentation, normalized query-to-symbol name overlap, symbol-kind priors, path proximity, language filters, graph-edge confidence, call direction, non-test source path priority for caller/callee queries, a small symbol test/benchmark path penalty when the query has no test intent, class-member excerpt context for qualified method hits, import surface/re-export files, declaration surface priority for header chunks that already match declaration-shape evidence, chunk quality, freshness, semantic/vector rank, and rerank explanations. Test/benchmark path adjustments are disabled when the query itself asks for tests or benchmarks.
 
 ## 4. Candidate Window
 

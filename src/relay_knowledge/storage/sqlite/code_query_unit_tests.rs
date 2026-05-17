@@ -132,6 +132,37 @@ fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
     );
 }
 
+#[test]
+fn symbol_excerpt_adds_class_owner_for_member_context() {
+    assert_eq!(
+        symbol_excerpt(
+            "append_result",
+            "src::relay_teams_evals::checkpoint::EvalCheckpointStore.append_result",
+            "def append_result(self, result: EvalResult) -> None:",
+            None,
+        ),
+        "EvalCheckpointStore.append_result: def append_result(self, result: EvalResult) -> None:"
+    );
+    assert_eq!(
+        symbol_excerpt(
+            "archive_output_dir",
+            "src::relay_teams_evals::checkpoint::archive_output_dir",
+            "def archive_output_dir(output_dir: Path) -> Path:",
+            None,
+        ),
+        "def archive_output_dir(output_dir: Path) -> Path:"
+    );
+    assert_eq!(
+        symbol_excerpt(
+            "Compare",
+            "leveldb::InternalKeyComparator::Compare",
+            "virtual int Compare(const Slice& a, const Slice& b) const;",
+            Some("Comparator interface"),
+        ),
+        "InternalKeyComparator.Compare: Comparator interface\nvirtual int Compare(const Slice& a, const Slice& b) const;"
+    );
+}
+
 fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest {
     let selector =
         crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new())

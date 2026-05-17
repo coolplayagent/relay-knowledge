@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T070951Z
+
+- 目标：修复当前 quality gate repair mode 中 `semantic_vector_provider_probe` 对外部 provider 资源受限状态的剩余误判风险，并提升 hybrid/symbol 检索结果对类成员命中的语义可读性与 ranking 断言稳定性。
+- 方法：embedding provider HTTP error 分类继续保持 402/429 直接视为 retryable `rate_limited`，同时允许 409、425、5xx 这类 retryable/provider-overload 状态在 JSON error 字段或文本 body 明确包含 rate limit、quota exhausted、resource exhausted、insufficient balance、no resource package 等资源受限信号时归入 `rate_limited`。代码符号命中在 excerpt 层补充 class-like owner 上下文：当 qualified name 以 `UppercaseOwner.member` 或 `UppercaseOwner::member` 结束且原签名未包含该 owner 时，返回 `Owner.member: signature`，顶层函数和模块函数不加前缀。
+- 架构与不变量：不改变 env、paths、net 边界，不硬编码 provider URL、API key、模型名或维度，不改变 provider endpoint 构造、embedding payload、CLI/API JSON schema、SQLite schema、FTS candidate window、ranking score、path/language filter、call/import edge resolution、semantic/vector refresh 或 self-iteration evaluator。无资源受限 marker 的认证错误、invalid request、not found 和普通 provider unavailable 仍按原错误分类返回。
+- 预期影响：外部 OpenAI-compatible provider 通过 503/409/425 等响应表达 `RESOURCE_EXHAUSTED`、rate limit 或 quota 状态时，`provider probe` 应继续暴露 `ok=true`、`error_code=rate_limited`、`retryable=true`，避免把可达但资源受限的后端误判为代码回归。`rt_hybrid_eval_checkpoint_store` 这类“类名 + 成员语义”查询的 rank 1 方法命中会在 excerpt 中携带 `EvalCheckpointStore.append_result` 上下文，因此可满足类级 expected evidence；foundation definition/filter、LevelDB call graph、semantic/vector source coverage 和稳定性不应退化。
+- 已知风险：少数 provider 可能在 5xx 文本中误用类似 capacity/billing 的资源词；分类仍要求明确资源受限 marker，不把普通 5xx 伪装成可用。类成员 excerpt 增加少量前缀文本，可能改变消费者展示的签名字符串；该变化只发生在 qualified owner 看起来像类型名的成员上，不改变分数或召回集合。
+
 ## 候选优化说明：20260517T065546Z
 
 - 目标：在修复当前 quality gate repair mode 中 `semantic_vector_provider_probe` 资源受限误判风险的同时，提高 protected competitive hybrid/symbol 检索在大仓全量索引中的排序稳定性，尤其是普通生产查询被 test/benchmark 符号名噪声压到后位的场景。
@@ -777,4 +785,17 @@ cache")); } +    #[test] +    fn declaration_surface_path_bonus_prefers_non_test
 Adopted optimization notes:
 
 ition); +        let callers = retrieval_request(CodeQueryKind::Callers); + +        assert_eq!( +            symbol_test_path_penalty( +                6.0, +                "tests/unit/test_checkpoint.py", +                &hybrid, +                false +            ), +            -0.75 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "benchmarks/db_bench.cc", &definition, false), +            -0.75 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "src/checkpoint.py", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &hybrid, true), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(0.0, "tests/unit/test_checkpoint.py", &hybrid, false), +            0.0 +        ); +        assert_eq!( +            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &callers, false), +            0.0 +        ); +    } + fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { let selector = crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) tokens used 204,207
+## 20260517T070951Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T070951Z.patch`
+- score: 0.985604 (foundational=1.0, competitive=0.964286, accuracy=0.982143, semantic_vector=1.0, performance=0.94533, stability=1.0)
+- cases: 35/35 passed
+- changed paths: `docs/en/03-architecture-specs/10-semantic-vector-provider-architecture.md`, `docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/03-architecture-specs/10-semantic-vector-provider-architecture.md`, `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/provider.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.97715->0.985604; score_component:competitive_capability 0.928571->0.964286; score_component:accuracy 0.964286->0.982143; case:rt_hybrid_eval_checkpoint_store {'passed': True, 'rank': 2, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} rank_improved
+- known degradations: metric:cargo_test_ms 3878.0->6676; metric:relay_teams_index_ms 72221.0->95827; metric:leveldb_cpp_query_p95_ms 241.0->274.0; metric:local_noise_file_index_ms 380.0->409
+- latency metrics: cargo_build_release_ms=130ms; cargo_fmt_check_ms=509ms; cargo_clippy_ms=146ms; cargo_test_ms=6676ms; relay_teams_index_ms=95827ms; relay_teams_query_p50_ms=141ms; relay_teams_query_p95_ms=491ms; leveldb_cpp_index_ms=22183ms
+
+Adopted optimization notes:
+
+   "append_result", +            "src::relay_teams_evals::checkpoint::EvalCheckpointStore.append_result", +            "def append_result(self, result: EvalResult) -> None:", +            None, +        ), +        "EvalCheckpointStore.append_result: def append_result(self, result: EvalResult) -> None:" +    ); +    assert_eq!( +        symbol_excerpt( +            "archive_output_dir", +            "src::relay_teams_evals::checkpoint::archive_output_dir", +            "def archive_output_dir(output_dir: Path) -> Path:", +            None, +        ), +        "def archive_output_dir(output_dir: Path) -> Path:" +    ); +    assert_eq!( +        symbol_excerpt( +            "Compare", +            "leveldb::InternalKeyComparator::Compare", +            "virtual int Compare(const Slice& a, const Slice& b) const;", +            Some("Comparator interface"), +        ), +        "InternalKeyComparator.Compare: Comparator interface\nvirtual int Compare(const Slice& a, const Slice& b) const;" +    ); +} + fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { let selector = crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) tokens used 184,462
 
