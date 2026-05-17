@@ -511,7 +511,9 @@ fn search_imports(
                 &query,
                 [&row.module, row.target_hint.as_deref().unwrap_or_default()],
             ) + score_exact_path(&query, &row.path);
-            let score = base_score + import_line_priority(base_score, row.line_range.start);
+            let score = base_score
+                + import_line_priority(base_score, row.line_range.start)
+                + import_surface_bonus(base_score, &row.path);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -1155,6 +1157,23 @@ fn import_line_priority(base_score: f64, line_start: u32) -> f64 {
     }
 
     1.0 / f64::from(line_start.clamp(1, 1_000))
+}
+
+fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
+    if base_score <= 0.0 {
+        return 0.0;
+    }
+    if path
+        .split('/')
+        .any(|segment| matches!(segment, "test" | "tests" | "__tests__"))
+    {
+        return 0.0;
+    }
+    match path.rsplit('/').next().unwrap_or(path) {
+        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts"
+        | "index.tsx" => 0.2,
+        _ => 0.0,
+    }
 }
 
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {

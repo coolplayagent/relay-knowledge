@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T051540Z
+
+- 目标：在已确认 `semantic_vector_provider_probe` 的 HTTP 429 降级语义通过后，提升 protected competitive repo retrieval 的 import graph ranking，尤其是 full-scope Python/JS/TS/Rust 包装层或 re-export 查询在测试文件和普通使用点噪声前的排序稳定性。
+- 方法：在 import 查询的 bounded FTS 候选进入 Rust 评分后增加通用 import surface signal；当 import row 已经通过 module/target/path 得到正分时，`__init__.py`、`mod.rs`、`lib.rs`、`index.js`、`index.jsx`、`index.ts`、`index.tsx` 这类包入口、crate 入口或 barrel file 获得小幅加分。该信号与既有 line priority、resolution state、target hint 和 BM25 候选剪枝融合，不枚举 repository、query、symbol 或 fixture path。
+- 架构与不变量：不修改 SQLite schema、FTS document、candidate limit、import resolution、CLI/API 字段、env/provider 配置、semantic/vector refresh 或 query hot path 的外部调用边界；只有已有正匹配 import 候选的排序分数变化，未匹配候选不会因 surface path 被召回或返回。
+- 预期影响：`relay-teams` 的 `W3ConnectorService` import/re-export full-scope case 应把 `src/relay_teams/connector/__init__.py` 排到测试导入前；Rust crate root、Rust module root 和 JS/TS barrel imports 在大仓中也更容易排在测试或普通消费点前。Foundational exact import cases、Linux C include、LevelDB C++ hybrid 和 semantic/vector provider gate 不应退化。
+- 已知风险：少数项目会在 `index.*` 或 `lib.rs` 中放测试-only 或 side-effect imports；由于 bonus 只在 module/target/path 已经正匹配后生效且幅度较小，风险限制在同分或近同分候选的排序，不扩大召回面。
+
 ## 候选优化说明：20260517T045508Z
 
 - 目标：修复当前 quality gate repair mode 指定的 `semantic_vector_provider_probe` 失败，使外部 OpenAI-compatible provider 返回 HTTP 429 quota/backpressure 时不再把候选误判为 semantic/vector 代码回归，同时继续保留 provider 端资源不足诊断。
@@ -671,4 +679,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 G_API_KEY".to_owned(), +                "secret-key".to_owned(), +            ), +            ( +                "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL".to_owned(), +                "runtime-model".to_owned(), +            ), +            ( +                "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION".to_owned(), +                "4".to_owned(), +            ), +        ], +    ) +    .expect("environment should parse"); +    let service = service_with_environment(&environment).await; + +    let response = service +        .probe_embedding_provider(RequestContext::with_ids( +            InterfaceKind::Cli, +            "req-provider-rate-limit", +            "trace-provider-rate-limit", +        )) +        .await +        .expect("probe should run"); + +    assert!(response.ok); +    assert_eq!(response.provider, Some("openai_compatible".to_owned())); +    assert_eq!(response.error_code.as_deref(), Some("rate_limited")); +    assert_eq!(response.retryable, Some(true)); +    server.await.expect("server should finish"); +} + +#[tokio::test] async fn wait_until_fresh_query_does_not_increment_fresh_index_versions() { let service = service_with_memory_store().await; service tokens used 270,438
+## 20260517T051540Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T051540Z.patch`
+- score: 0.937063 (foundational=1.0, competitive=0.766667, accuracy=0.883333, semantic_vector=1.0, performance=0.953965, stability=1.0)
+- cases: 35/35 passed
+- changed paths: `docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.928331->0.937063; score_component:competitive_capability 0.730952->0.766667; score_component:accuracy 0.865476->0.883333; metric:cargo_build_release_ms 55106.0->105; metric:cargo_fmt_check_ms 726.0->502; metric:cargo_clippy_ms 191.0->156; metric:cargo_test_ms 8267.0->4570; metric:relay_teams_query_p95_ms 459.0->427.0
+- known degradations: metric:leveldb_cpp_index_ms 19068.0->19723
+- latency metrics: cargo_build_release_ms=105ms; cargo_fmt_check_ms=502ms; cargo_clippy_ms=156ms; cargo_test_ms=4570ms; relay_teams_index_ms=81658ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=427ms; leveldb_cpp_index_ms=19723ms
+
+Adopted optimization notes:
+
+) { +        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts" +        | "index.tsx" => 0.2, +        _ => 0.0, +    } +} + fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> { value .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_')) diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index d051f6b0dfb45e3835118d83334c62aab27fc2c2..efa07cc9f23cf79de491b1fd7de8bc96cc4ac4dc --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -87,3 +87,13 @@ 3.0 ); } + +#[test] +fn import_surface_bonus_prefers_public_reexport_files() { +    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0); +    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0); +    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0); +    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0); +    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0); +} tokens used 221,754
 

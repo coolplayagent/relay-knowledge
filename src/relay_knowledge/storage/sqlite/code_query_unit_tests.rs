@@ -87,3 +87,13 @@ fn declaration_chunk_bonus_preserves_interface_boost() {
         3.0
     );
 }
+
+#[test]
+fn import_surface_bonus_prefers_public_reexport_files() {
+    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0);
+    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0);
+    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0);
+    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0);
+    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0);
+    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0);
+}
