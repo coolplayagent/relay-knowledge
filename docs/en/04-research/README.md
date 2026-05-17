@@ -21,6 +21,7 @@
 | --- | --- | --- | --- |
 | Official specifications and product docs | Microsoft GraphRAG, MCP, A2A, OpenAI File Search, Neo4j GraphRAG | Confirm ecosystem interfaces, protocol constraints, and UX defaults | Treat as primary facts rather than replacing them with commentary |
 | Papers and surveys | KG construction, KG refinement, RAG, GraphRAG, KGE, HybridRAG | Identify algorithm boundaries, quality risks, and long-term direction | Convert only into testable architecture principles |
+| Search, database, and systems engineering | Lucene/BM25, Vespa/OpenSearch, Everything, plocate, Zoekt, RocksDB, Zanzibar, TAO, SRE | Validate high-performance indexing, permission filtering, background recovery, overload protection, and observability practices | Adopt general mechanisms without taking external desktop-search or cloud-service dependencies |
 | Open-source implementations and engineering cases | ai-knowledge-graph, Tree-sitter, Codebase-Memory, GitHub code navigation | Validate pipeline, parsing, indexing, and agent-access feasibility | Adopt capability semantics, not script boundaries |
 | Project-internal material | architecture specs, capability docs, relay-teams benchmarks, self-iteration records | Compare current implementation with gaps and priorities | Use as implementation constraints and acceptance baselines |
 
@@ -32,6 +33,9 @@ Core primary-source entry points:
 - A2A protocol specification: <https://a2a-protocol.org/dev/specification/>
 - OpenAI File Search: <https://platform.openai.com/docs/guides/tools-file-search/>
 - Neo4j GraphRAG: <https://neo4j.com/labs/genai-ecosystem/graphrag/>
+- Everything indexes: <https://www.voidtools.com/support/everything/indexes>
+- plocate: <https://plocate.sesse.net/>
+- Sourcegraph/Zoekt: <https://github.com/sourcegraph/zoekt>
 
 ## Competitive Focus
 
@@ -39,6 +43,7 @@ Core primary-source entry points:
 - **Graph versions and index freshness**: graph facts, BM25, semantic indexes, vector indexes, and community summaries must report their version alignment before they enter answers.
 - **Three-layer retrieval and explainable context packs**: keyword, semantic, and vector retrieval each cover different failure modes, then graph paths, evidence, and ranking explanations organize the final context.
 - **Code knowledge graph**: Git snapshots, Tree-sitter, symbol/reference graphs, and impact analysis move repository understanding beyond text search.
+- **Fast local file retrieval**: Separate filename/path, metadata, content, and change-cursor read models connect desktop file location, document content retrieval, and graph context while preserving explainable authorization and freshness.
 - **Agent interoperability**: MCP and ACP are access layers, while the core service keeps stable APIs and authorization boundaries; A2A can become a later gateway.
 
 ## Chapter Guide
@@ -50,3 +55,4 @@ Core primary-source entry points:
 - [Chapter 5: Code Repository Tree-sitter Retrieval Research](05-code-repository-tree-sitter-retrieval-research.md): defines the engineering route for code graphs, incremental indexing, and hybrid retrieval.
 - [Chapter 6: Agent Protocol Graph Retrieval Research](06-agent-protocol-graph-retrieval-research.md): plans graph-retrieval interoperability across MCP, ACP, and future A2A gateways.
 - [Chapter 7: relay-knowledge Implementation Reference](07-relay-knowledge-implementation-reference.md): turns research conclusions into implementation priorities and gap closure.
+- [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](08-competitive-performance-research-2026.md): extracts optimization guidance from GraphRAG, hybrid search, vector indexing, code search, local file retrieval, graph storage, and SRE practice.

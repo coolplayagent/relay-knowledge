@@ -43,11 +43,16 @@ persist cursors and diagnostics, enforce scan/query timeout budgets, and report
 truncated roots, scan errors, freshness, and lag instead of blocking query paths
 or silently expanding to unapproved disks.
 
+File-system watchers and scan workers degrade by platform capability: Windows may use USN cursors, macOS may use FSEvents cursors, and Linux may use inotify/fanotify or periodic bounded rescans. Event overflow, journal reset, permission changes, missing roots, and cursor invalidation become recoverable diagnostic states instead of unbounded whole-disk scans.
+
+Overload handling follows SRE and adaptive-concurrency principles: when queue, IO, CPU, or provider budgets saturate, the system rejects new background work first, delays low-priority content indexing, preserves query hot-path budget, and returns retryable, paused, or degraded states.
+
 ## 6. Acceptance Criteria
 
 - Crashes and restarts do not lose required refresh work.
 - Diagnostic paths do not automatically revive dead-letter tasks.
 - CPU/IO-heavy background work does not block query hot paths.
+- Watcher lag, scan backlog, cursor invalidation, and overload decisions are explainable through health and service doctor.
 
 ---
 

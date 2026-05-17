@@ -16,7 +16,7 @@
 normalize query
   -> resolve source scope and freshness policy
   -> plan retriever families
-  -> lexical / semantic / vector / graph / code recall
+  -> lexical / semantic / vector / graph / code / local file recall
   -> candidate normalization and dedup
   -> weighted reciprocal-rank fusion
   -> graph expansion and local rerank
@@ -26,6 +26,8 @@ normalize query
 
 任何 retriever 都不能绕过 scope filter、authorization policy 或 freshness policy。
 
+Query planner 需要先识别查询意图：exact term、conceptual、multi-hop、temporal、code symbol、impact、file path、file content 或 mixed agent context。不同意图选择不同 retriever family 和预算；例如文件名/路径查询优先 `local_file_path` 和 metadata，内容问题才进入 `local_file_content`、BM25 或 semantic/vector 路径。
+
 ## 3. 融合模型
 
 基础融合使用加权 RRF：
@@ -34,7 +36,9 @@ normalize query
 score(candidate) = sum(weight_i / (k + rank_i)) + structural_bonus - penalty
 ```
 
-`structural_bonus` 来自 source authority、direct graph path、accepted lifecycle、exact symbol match、fresh index 和 evidence confidence。`penalty` 来自 stale lag、degraded backend、ambiguous entity、low confidence 或 duplicate parent evidence。
+`structural_bonus` 来自 source authority、direct graph path、accepted lifecycle、exact symbol match、exact file path/basename match、fresh index 和 evidence confidence。`penalty` 来自 stale lag、degraded backend、ambiguous entity、low confidence、unauthorized candidate rejection 或 duplicate parent evidence。
+
+RRF 之后允许多阶段 rerank，但 rerank 必须只处理有界候选窗口，并保留每个 retriever 的 rank contribution。BM25、向量、图路径、代码边和文件路径分数不可在未归一化时直接相加。
 
 ## 4. 图扩展
 
@@ -45,18 +49,20 @@ Graph expansion 从高置信候选出发，只在预算内扩展：
 - schema-guided path。
 - temporal predecessor/successor。
 - code symbol reference/call/import edge。
+- local file path/content evidence relation。
 
 扩展结果必须带 path provenance，不能只返回“相关上下文”。
 
 ## 5. Context Pack
 
-Context pack 是 agent 和 UI 的稳定证据包。它包含：query metadata、retriever sources、rank explanations、context items、source spans、graph paths、structured facts、code artifacts、freshness、degraded state、budget 和 truncation reason。
+Context pack 是 agent 和 UI 的稳定证据包。它包含：query metadata、retriever sources、rank explanations、context items、source spans、graph paths、structured facts、code artifacts、local file artifacts、freshness、degraded state、budget 和 truncation reason。
 
 Context packing 优先保证多样性和可引用性：同一父 evidence、同一 symbol、同一 source span 的重复命中会合并；低置信扩展不能挤掉直接 evidence。
 
 ## 6. 验收标准
 
 - 精确术语、概念相似、多跳关系、时间事实和代码符号查询都有对应 retriever 信号。
+- 文件名/路径和文件内容查询能区分 path、metadata、content 和 change cursor 的 freshness。
 - 返回结果能解释每个 item 的来源、rank 贡献和 freshness。
 - 任一 backend degraded 时仍能以可解释方式降级，而不是静默缺失。
 

@@ -20,6 +20,8 @@ Observability is not extra logging; it is the architecture control plane. Retrie
 | Health | Service state, index state, provider state, QoS state, degraded reason |
 | Audit | Agent/runtime identity, scope, action, decision, result metadata |
 
+Local file and code retrieval also expose candidate counts, post-filter counts, permission-filter rejections, watcher lag, scan throughput, content extraction backlog, index size, RRF contribution, and truncation reason.
+
 ## 3. Trace Context
 
 Every user request and background task carries a trace id. Context packs, audit events, worker tasks, mutation logs, and index cursors can be correlated through trace id or graph version.
@@ -31,6 +33,7 @@ Every user request and background task carries a trace id. Context packs, audit 
 - Worker dead-letter rate stays below threshold.
 - QoS drops and timeouts carry explicit overload reasons.
 - MCP/Web/CLI errors for the same operation use consistent classes.
+- Local file filename/path queries and content queries meet separate p95/p99 budgets, with explicit watcher-lag and stale-scope thresholds.
 
 ## 5. Diagnostic Interfaces
 
@@ -41,6 +44,7 @@ CLI health, service doctor, Web diagnostics, MCP resources, and Prometheus metri
 - Every degraded response states the degraded family, reason, and recovery entry point.
 - Collector export failures do not interrupt local service operation.
 - Diagnostics do not leak secrets, private endpoint tokens, or unauthorized paths.
+- Retrieval traces explain candidate windows, filtering, ranking, RRF, context packing, and worker-stage elapsed time.
 
 ---
 

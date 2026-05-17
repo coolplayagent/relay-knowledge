@@ -60,9 +60,10 @@ relay-knowledge service doctor
 - Code repository registration, tree-sitter indexing, full and incremental
   refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
   impact analysis.
-- Local file-location indexing without Everything or other external search
-  software: explicitly scan authorized roots and use SQLite/FTS5 to quickly
-  find files by name, path, extension, and directory.
+- Local file-location indexing without Everything, Spotlight, Windows Search,
+  locate, or other external search software: explicitly scan authorized roots
+  and use SQLite/FTS5 to quickly find files by name, path, extension, and
+  directory.
 - Bounded index refresh queues, persistent leases, retry/dead-letter handling,
   startup reconciliation, stale diagnostics, and scoped cursor metadata.
 - Worker queues, deterministic fallback proposals, manual proposal acceptance,
@@ -94,11 +95,16 @@ relay-knowledge service doctor
 - [Book 4, Chapter 4: ai-knowledge-graph Reference Analysis](docs/en/04-research/04-ai-knowledge-graph-reference-analysis.md):
   architecture, algorithm, performance, and reliability lessons from an
   external LLM-extracted knowledge graph project.
+- [Book 4, Chapter 8: Competitive, High-Performance, and Local File Retrieval Research](docs/en/04-research/08-competitive-performance-research-2026.md):
+  broader paper and industry-system references for GraphRAG, hybrid search,
+  vector indexes, code search, fast local file retrieval, graph storage, and SRE.
 - [Book 2, Chapter 1: Capability Overview](docs/en/02-capabilities/01-capability-overview.md): foundational behaviors and competitive differentiators.
 - [Book 2, Chapter 4: Query and Context Pack Basics](docs/en/02-capabilities/04-query-and-context-pack-basics.md): query metadata, context items, budgets, truncation, and source spans.
 - [Book 2, Chapter 5: Hybrid Retrieval Advantage](docs/en/02-capabilities/05-hybrid-retrieval-advantage.md): BM25, semantic, vector, graph evidence, code graph, RRF, and ranking explanations.
 - [Book 2, Chapter 9: Code Graph Competitive Features](docs/en/02-capabilities/09-code-graph-competitive-features.md): symbols, references, calls, imports, chunks, identities, and edge diagnostics.
 - [Book 2, Chapter 13: Agent Access Capabilities](docs/en/02-capabilities/13-agent-access-capabilities.md): MCP Streamable HTTP, resources, prompts, ACP session access, scope policy, and audit.
+- [Appendix A.5: Competitive and High-Performance Benchmark Targets](docs/en/05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md):
+  metric targets for graph, code, local file, indexing, and worker performance gates.
 - [Appendix B.1: Documentation Refresh Audits](docs/en/06-verification/01-documentation-book-refresh-2026-05-17.md):
   dated verification records for documentation freshness and implemented
   capability closures.

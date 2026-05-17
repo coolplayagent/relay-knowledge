@@ -35,7 +35,7 @@ External embedding output does not write accepted facts. It writes index-family 
 
 ## 5. Degradation Policy
 
-When an external provider is unavailable, the system falls back to local mode if configured or declares semantic/vector unavailable. Context packs expose backend availability, model, dimension, last error, and stale lag.
+When an external provider is unavailable, the system falls back to local mode if configured or declares semantic/vector unavailable. Provider probes classify HTTP 402, HTTP 429, and quota/backpressure-shaped HTTP 400, HTTP 403, HTTP 409, HTTP 425, or 5xx bodies as reachable but resource-limited diagnostics; authentication, endpoint, model, timeout, generic provider-unavailable, and malformed-response failures remain distinct. Context packs expose backend availability, model, dimension, last error, and stale lag.
 
 ## 6. Acceptance Criteria
 

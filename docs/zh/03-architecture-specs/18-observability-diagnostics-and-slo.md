@@ -20,6 +20,8 @@
 | Health | service state、index state、provider state、QoS state、degraded reason |
 | Audit | agent/runtime identity、scope、action、decision、result metadata |
 
+本机文件和代码检索还必须暴露 candidate count、post-filter count、permission-filter rejection、watcher lag、scan throughput、content extraction backlog、index size、RRF contribution 和 truncation reason。
+
 ## 3. Trace Context
 
 每个用户请求和后台任务都携带 trace id。Context pack、audit event、worker task、mutation log 和 index cursor 应能通过 trace 或 graph version 关联。
@@ -31,6 +33,7 @@
 - worker dead-letter rate 低于阈值。
 - QoS drop 和 timeout 有明确 overload reason。
 - MCP/Web/CLI 相同操作的错误分类一致。
+- 本机文件 filename/path 查询和 content 查询分别满足 p95/p99 预算，watcher lag 和 stale scope 有明确阈值。
 
 ## 5. 诊断界面
 
@@ -41,6 +44,7 @@ CLI health、service doctor、Web diagnostics、MCP resources 和 Prometheus met
 - 任何 degraded response 都能说明 degraded family、原因和恢复入口。
 - Collector 不可用时，OTLP export 失败不会中断本地服务。
 - 诊断输出不泄漏 secret、私有 endpoint token 或未授权路径。
+- 检索 trace 能解释候选窗口、过滤、排序、RRF、context packing 和 worker 阶段耗时。
 
 ---
 

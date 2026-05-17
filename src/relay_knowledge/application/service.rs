@@ -628,7 +628,7 @@ impl RelayKnowledgeService {
             }),
             Err(error) => Ok(EmbeddingProviderProbeResponse {
                 metadata: ApiMetadata::graph_only(&context, crate::domain::GraphVersion::ZERO),
-                ok: false,
+                ok: error.code == "rate_limited" && error.retry == ProviderRetryClass::Retryable,
                 provider: Some(provider_name),
                 model: self.runtime.retrieval.vector_model.name.clone(),
                 dimension: self.runtime.retrieval.vector_model.dimension,

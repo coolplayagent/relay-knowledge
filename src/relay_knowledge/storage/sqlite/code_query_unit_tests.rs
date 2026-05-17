@@ -87,3 +87,93 @@ fn declaration_chunk_bonus_preserves_interface_boost() {
         3.0
     );
 }
+
+#[test]
+fn import_surface_bonus_prefers_public_reexport_files() {
+    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0);
+    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0);
+    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0);
+    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0);
+    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0);
+    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0);
+}
+
+#[test]
+fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
+    let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+    let callers = retrieval_request(CodeQueryKind::Callers);
+
+    assert_eq!(
+        symbol_name_query_bonus(
+            "EvalCheckpointStore signature mismatch append result",
+            "EvalCheckpointStore",
+            &hybrid,
+        ),
+        2.0
+    );
+    assert!(
+        symbol_name_query_bonus(
+            "checkpoint metadata version constant",
+            "_CHECKPOINT_VERSION",
+            &hybrid,
+        ) > symbol_name_query_bonus(
+            "checkpoint metadata version constant",
+            "FEISHU_METADATA_PLATFORM_KEY",
+            &hybrid,
+        )
+    );
+    assert_eq!(
+        symbol_name_query_bonus(
+            "checkpoint metadata version constant",
+            "_CHECKPOINT_VERSION",
+            &callers,
+        ),
+        0.0
+    );
+}
+
+#[test]
+fn symbol_excerpt_adds_class_owner_for_member_context() {
+    assert_eq!(
+        symbol_excerpt(
+            "append_result",
+            "src::relay_teams_evals::checkpoint::EvalCheckpointStore.append_result",
+            "def append_result(self, result: EvalResult) -> None:",
+            None,
+        ),
+        "EvalCheckpointStore.append_result: def append_result(self, result: EvalResult) -> None:"
+    );
+    assert_eq!(
+        symbol_excerpt(
+            "archive_output_dir",
+            "src::relay_teams_evals::checkpoint::archive_output_dir",
+            "def archive_output_dir(output_dir: Path) -> Path:",
+            None,
+        ),
+        "def archive_output_dir(output_dir: Path) -> Path:"
+    );
+    assert_eq!(
+        symbol_excerpt(
+            "Compare",
+            "leveldb::InternalKeyComparator::Compare",
+            "virtual int Compare(const Slice& a, const Slice& b) const;",
+            Some("Comparator interface"),
+        ),
+        "InternalKeyComparator.Compare: Comparator interface\nvirtual int Compare(const Slice& a, const Slice& b) const;"
+    );
+}
+
+fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest {
+    let selector =
+        crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new())
+            .expect("selector should be valid");
+
+    CodeRetrievalRequest::new(
+        "checkpoint metadata version constant",
+        selector,
+        kind,
+        10,
+        crate::domain::FreshnessPolicy::AllowStale,
+    )
+    .expect("request should be valid")
+}

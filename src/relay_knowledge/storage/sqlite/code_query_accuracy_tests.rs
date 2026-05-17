@@ -858,7 +858,7 @@ fn snapshot_with_archive_output_dir_noise() -> CodeIndexSnapshot {
         "archive-symbol",
         "archive-file",
         "tests/unit_tests/net/test_github_cli.py",
-        "test_extract_zip_replaces_existing_target",
+        "test_archive_output_dir_moves_existing_contents_to_timestamped_sibling",
     );
     for symbol in [
         &mut target,

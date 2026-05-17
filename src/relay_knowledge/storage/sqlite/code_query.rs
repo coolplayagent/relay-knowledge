@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+#[path = "code_query_path_ranking.rs"]
+mod code_query_path_ranking;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_scope.rs"]
@@ -19,6 +21,10 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
+use code_query_path_ranking::{
+    call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
+    symbol_test_path_penalty,
+};
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
 use code_query_scope::path_matches_filter;
@@ -129,6 +135,7 @@ fn search_symbols(
         },
     )?;
     let query = request.query.to_lowercase();
+    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -156,10 +163,16 @@ fn search_symbols(
                 request,
             );
             (score > 0.0).then(|| {
-                let mut excerpt = row.signature.clone();
-                if let Some(doc) = &row.doc_comment {
-                    excerpt = format!("{doc}\n{}", row.signature);
-                }
+                let score = score
+                    + 2.0
+                    + symbol_kind_bonus(&row.kind, request)
+                    + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
+                let excerpt = symbol_excerpt(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    row.doc_comment.as_deref(),
+                );
                 hit_from_parts(
                     status,
                     HitParts {
@@ -174,7 +187,7 @@ fn search_symbols(
                             CodeRetrievalLayer::Symbol,
                             CodeRetrievalLayer::Definition,
                         ],
-                        score: score + 2.0 + symbol_kind_bonus(&row.kind, request),
+                        score,
                         excerpt,
                         degraded_reason: None,
                         edge_kind: None,
@@ -372,6 +385,7 @@ fn search_calls(
         },
     )?;
     let query = request.query.to_lowercase();
+    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -396,6 +410,14 @@ fn search_calls(
                     request,
                 )
                 + callee_related_name_bonus(&query, &row.callee_name, request);
+            let score = score
+                + call_site_source_path_bonus(
+                    base_score,
+                    &row.path,
+                    request,
+                    &query,
+                    query_has_test_intent,
+                );
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
                 let (symbol_snapshot_id, canonical_symbol_id) =
@@ -511,7 +533,9 @@ fn search_imports(
                 &query,
                 [&row.module, row.target_hint.as_deref().unwrap_or_default()],
             ) + score_exact_path(&query, &row.path);
-            let score = base_score + import_line_priority(base_score, row.line_range.start);
+            let score = base_score
+                + import_line_priority(base_score, row.line_range.start)
+                + import_surface_bonus(base_score, &row.path);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -612,8 +636,10 @@ fn search_chunks(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
+            let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
             let score = score_text(&query, [&row.content, &row.path])
-                + declaration_chunk_bonus(&declaration_terms, &row.content);
+                + declaration_bonus
+                + declaration_surface_path_bonus(declaration_bonus, &row.path, request);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -977,7 +1003,7 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
     ) {
         return 0.0;
     }
-    let query_terms = query_terms(query);
+    let query_terms = identifier_search_tokens(query);
     if query_terms.is_empty() {
         return 0.0;
     }
@@ -1006,6 +1032,8 @@ fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String
         .count();
     if matched_terms >= 3 {
         (matched_terms as f64 * 0.75).min(2.0)
+    } else if matched_terms == 2 {
+        1.1
     } else {
         0.0
     }
@@ -1036,6 +1064,56 @@ fn symbol_query_bonus(
         name_bonus + 3.0
     } else {
         name_bonus
+    }
+}
+
+fn symbol_excerpt(
+    name: &str,
+    qualified_name: &str,
+    signature: &str,
+    doc_comment: Option<&str>,
+) -> String {
+    let body = if let Some(doc) = doc_comment {
+        format!("{doc}\n{signature}")
+    } else {
+        signature.to_owned()
+    };
+    let Some(display_name) = class_member_display_name(name, qualified_name) else {
+        return body;
+    };
+    if body.contains(&display_name) {
+        body
+    } else {
+        format!("{display_name}: {body}")
+    }
+}
+
+fn class_member_display_name(name: &str, qualified_name: &str) -> Option<String> {
+    let name = name.trim();
+    let qualified_name = qualified_name.trim();
+    if name.is_empty() || qualified_name == name {
+        return None;
+    }
+
+    let raw_prefix = qualified_name.strip_suffix(name)?;
+    if !(raw_prefix.ends_with('.') || raw_prefix.ends_with("::")) {
+        return None;
+    }
+    let prefix = raw_prefix.trim_end_matches(['.', ':']);
+    if prefix.is_empty() {
+        return None;
+    }
+    let owner = prefix
+        .rsplit(['.', ':'])
+        .find(|segment| !segment.is_empty())?;
+    if owner
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+    {
+        Some(format!("{owner}.{name}"))
+    } else {
+        None
     }
 }
 
@@ -1155,6 +1233,23 @@ fn import_line_priority(base_score: f64, line_start: u32) -> f64 {
     }
 
     1.0 / f64::from(line_start.clamp(1, 1_000))
+}
+
+fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
+    if base_score <= 0.0 {
+        return 0.0;
+    }
+    if path
+        .split('/')
+        .any(|segment| matches!(segment, "test" | "tests" | "__tests__"))
+    {
+        return 0.0;
+    }
+    match path.rsplit('/').next().unwrap_or(path) {
+        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts"
+        | "index.tsx" => 0.2,
+        _ => 0.0,
+    }
 }
 
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {

@@ -8,7 +8,7 @@
 
 ## Capability Positioning
 
-Hybrid retrieval is the central competitive capability in Book 2. It combines BM25, local semantic token read models, local hashed-vector ANN, configurable external semantic/vector backends, graph evidence fallback, code graph documents, schema paths, temporal events, community summaries, and RRF.
+Hybrid retrieval is the central competitive capability in Book 2. It combines BM25, local semantic token read models, local hashed-vector ANN, configurable external semantic/vector backends, graph evidence fallback, code graph documents, local file path/content read models, schema paths, temporal events, community summaries, and RRF.
 
 ## User-visible Behavior
 
@@ -16,10 +16,11 @@ Hybrid retrieval is the central competitive capability in Book 2. It combines BM
 - BM25 indexes generated lexical aliases for entities and code symbols, but aliases are not returned as canonical labels.
 - Graph paths preserve node labels, edge fact id, predicate, supporting evidence ids, confidence, status, and version range.
 - Temporal, community, and code graph signals can appear in the same context pack as evidence hits.
+- Local file results distinguish path, metadata, content, and change-cursor freshness; filename/path queries do not depend on content indexes.
 
 ## Competitive Features
 
-Full-text search misses conceptual similarity, vector search can miss exact symbols, and graph queries lack natural-language recall. Hybrid retrieval fuses these signals and then budgets context, serving fact QA, code location, multi-hop relations, and agent context construction together.
+Full-text search misses conceptual similarity, vector search can miss exact symbols, graph queries lack natural-language recall, and ordinary desktop file search usually lacks graph and agent context. Hybrid retrieval fuses these signals and then budgets context, serving fact QA, code location, local file location, multi-hop relations, and agent context construction together.
 
 ## Command/API Entry Points
 
@@ -30,6 +31,7 @@ relay-knowledge query "retry policy graph path"   --freshness wait-until-fresh  
 ## Degradation and Diagnostics
 
 When semantic/vector backends are disabled or cursors are stale, BM25 and graph evidence remain usable. `context_pack.backend_statuses` explains configured backend, model, dimension, scope post-filter, and indexed graph version.
+When local file content cursors are stale, path and metadata remain usable for file location; responses explain content staleness, watcher lag, or bounded-rescan state.
 
 ## Related Architecture Chapters
 
