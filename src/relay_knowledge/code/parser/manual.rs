@@ -43,6 +43,10 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
             node_kind == "function_definition"
                 || language_nodes::definition_kind(language_id, node_kind).is_some()
         }
+        "javascript" | "jsx" | "typescript" | "tsx" => {
+            matches!(node_kind, "variable_declarator" | "public_field_definition")
+                || language_nodes::definition_kind(language_id, node_kind).is_some()
+        }
         _ => language_nodes::definition_kind(language_id, node_kind).is_some(),
     }
 }
@@ -64,10 +68,48 @@ pub(super) fn manual_definitions(
             return definitions;
         }
     }
+    if let Some(definition) = javascript_like_function_value_definition(content, language_id, node)
+    {
+        return vec![definition];
+    }
 
     generic_manual_definition(content, language_id, node)
         .into_iter()
         .collect()
+}
+
+fn javascript_like_function_value_definition(
+    content: &str,
+    language_id: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
+        || !matches!(
+            node.kind(),
+            "variable_declarator" | "public_field_definition"
+        )
+    {
+        return None;
+    }
+    let value = node.child_by_field_name("value")?;
+    if !matches!(value.kind(), "arrow_function" | "function_expression") {
+        return None;
+    }
+    let name = node.child_by_field_name("name")?;
+    let name = node_text(content, name);
+    if !javascript_identifier_name(&name) {
+        return None;
+    }
+
+    Some((name, "function", syntax_range(node)))
+}
+
+fn javascript_identifier_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters.next().is_some_and(|character| {
+        character == '_' || character == '$' || character.is_ascii_alphabetic()
+    }) && characters
+        .all(|character| character == '_' || character == '$' || character.is_ascii_alphanumeric())
 }
 
 fn generic_manual_definition(

@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-typescript-function-value-symbols-20260518
+- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升多仓 TypeScript/TSX 仓库对 `export const name = (...) => ...` 和 class field arrow handler 的 definition、hybrid 与 call graph 检索覆盖。
+- 算法与架构：在既有 tree-sitter tag capture 后的 manual node pass 中，只对 JavaScript/TypeScript family 的 `variable_declarator`/`public_field_definition` 且 value 为 `arrow_function` 或 `function_expression` 的节点补充 function symbol，复用现有 symbol id、签名、chunk、call/reference、identity enrich 与 bounded query pipeline。
+- 不变量：不改变 SQLite schema、FTS/candidate limit、ranking 权重、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、HTTP/QoS、安装发布或仓库/case 特殊分支；非函数常量、destructuring binding、普通字段和外部配置仍不会被当成函数 symbol。
+- 预期影响：relay-teams 以外的前端/服务混合大仓可把现代 TypeScript 函数值纳入 code graph，改善 full-scope repository tree parsing、symbol definition recall、hybrid chunks 和 caller/callee ownership；现有 Python/Go/Java/C++ cases 与 semantic/vector source coverage 应保持不变。
+- 已知风险：新增 symbol 可能让同名 TypeScript function-valued bindings 参与近同分排序；风险受语言、node kind、function-valued `value`、identifier-name 验证、existing upsert 去重和最终 score/dedupe/truncate 限制。
 ## 候选优化说明：manual-checkpointed-typescript-import-resolution-20260518
 - 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时补齐 checkpointed full-scope indexing 对 TypeScript/TSX 相对导入边的解析，降低多仓前端/服务混合代码库中 import graph 的遗漏。
 - 算法与架构：checkpointed batch finalize 在已有 Python/Go/Java/C++ resolver 旁新增 TypeScript/TSX resolver，复用 source-root normalized module-path index、bounded symbol-by-name index 和相对模块候选规则，支持 `./`、`../`、extension 替换与 `index.*` barrel 文件；命名导入必须唯一落到候选模块文件中的符号，默认或 side-effect 导入只要求唯一模块文件。
@@ -990,4 +996,17 @@ erms = query_terms("recover descriptor save_manifest versionedit"); @@ -455,6 +4
 Adopted optimization notes:
 
 ), +        source_scope: source_scope.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        total_path_count, +        changed_path_count: total_path_count, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"), +    } +} + +fn range(start: u32, end: u32) -> RepositoryCodeRange { +    RepositoryCodeRange { start, end } +} + +async fn search( +    store: &SqliteGraphStore, +    query: &str, +    kind: CodeQueryKind, +) -> Vec<CodeRetrievalHit> { +    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new()) +        .expect("selector should validate"); +    store +        .search_code( +            CodeRetrievalRequest::new(query, selector, kind, 5, FreshnessPolicy::AllowStale) +                .expect("request should validate"), +        ) +        .await +        .expect("query should succeed") +} tokens used 162,097
+## 20260517T234741Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T234741Z.patch`
+- score: 0.961262 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.917747, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_tests.rs`
+- key improvements: score_component:score 0.757755->0.961262; score_component:performance 0.875598->0.917747; score_component:stability 0.981132->1.0; score_component:research_judge 0.0->0.88; metric:cargo_build_release_ms 50825.0->40908; metric:leveldb_cpp_index_ms 19874.0->18234; metric:leveldb_cpp_query_p50_ms 300.0->222.5; metric:leveldb_cpp_query_p95_ms 387.0->279.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=40908ms; cargo_fmt_check_ms=816ms; cargo_clippy_ms=217ms; cargo_test_ms=9323ms; relay_teams_index_ms=81573ms; relay_teams_query_p50_ms=294ms; relay_teams_query_p95_ms=537ms; leveldb_cpp_index_ms=18234ms
+
+Adopted optimization notes:
+
+onnectorSaveRequest, +): Promise<void> => { +    await client.save(request); +}; + +const normalizeConnector = function ( +    request: W3ConnectorSaveRequest, +): W3ConnectorSaveRequest { +    return request; +}; + +class ConnectorService { +    saveLater = (request: W3ConnectorSaveRequest): void => { +        saveW3Connector(request); +    }; +} +"#, +    ); + +    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed); +    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] { +        let symbol = snapshot +            .symbols +            .iter() +            .find(|symbol| symbol.name == name) +            .unwrap_or_else(|| panic!("{name} should be extracted as a function symbol")); +        assert_eq!(symbol.kind, "function"); +        assert!(symbol.signature.contains("W3ConnectorSaveRequest")); +    } +    assert!( +        !snapshot +            .symbols +            .iter() +            .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS") +    ); +} + +#[test] fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() { let mut source = "def retry_policy(value=\"".to_owned(); source.push_str(&"\u{00e9}".repeat(300)); tokens used 242,666
 

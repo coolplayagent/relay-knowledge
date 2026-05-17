@@ -645,6 +645,52 @@ class ConnectorService:
 }
 
 #[test]
+fn typescript_function_value_declarations_are_symbols() {
+    let snapshot = parse_source_snapshot(
+        "src/connectors.ts",
+        br#"
+type W3ConnectorSaveRequest = { id: string };
+const CONNECTOR_TIMEOUT_MS = 5000;
+
+export const saveW3Connector = async (
+    request: W3ConnectorSaveRequest,
+): Promise<void> => {
+    await client.save(request);
+};
+
+const normalizeConnector = function (
+    request: W3ConnectorSaveRequest,
+): W3ConnectorSaveRequest {
+    return request;
+};
+
+class ConnectorService {
+    saveLater = (request: W3ConnectorSaveRequest): void => {
+        saveW3Connector(request);
+    };
+}
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] {
+        let symbol = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == name)
+            .unwrap_or_else(|| panic!("{name} should be extracted as a function symbol"));
+        assert_eq!(symbol.kind, "function");
+        assert!(symbol.signature.contains("W3ConnectorSaveRequest"));
+    }
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS")
+    );
+}
+
+#[test]
 fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() {
     let mut source = "def retry_policy(value=\"".to_owned();
     source.push_str(&"\u{00e9}".repeat(300));
