@@ -74,6 +74,41 @@ class ContextLoader {
 }
 
 #[test]
+fn java_wildcard_import_resolution_targets_normalized_package_directory() {
+    let snapshot = parse_sources(&[
+        (
+            "src/main/java/org/springframework/context/ApplicationContext.java",
+            r#"
+package org.springframework.context;
+
+public interface ApplicationContext {}
+"#,
+        ),
+        (
+            "src/main/java/org/springframework/context/support/ContextLoader.java",
+            r#"
+package org.springframework.context.support;
+
+import org.springframework.context.*;
+
+class ContextLoader {
+    ApplicationContext load() {
+        return null;
+    }
+}
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "org.springframework.context.*");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(
+        import.target_hint.as_deref(),
+        Some("org/springframework/context")
+    );
+}
+
+#[test]
 fn java_static_import_reports_overloaded_members_as_ambiguous() {
     let snapshot = parse_sources(&[
         (
@@ -159,6 +194,74 @@ export function buildClient(): Session {
     ]);
 
     assert_import_state(&snapshot, "requests", "unresolved");
+}
+
+#[test]
+fn python_import_resolution_does_not_strip_vendor_as_source_root() {
+    let snapshot = parse_sources(&[
+        (
+            "vendor/pkg/foo.py",
+            r#"
+class VendorThing:
+    pass
+"#,
+        ),
+        (
+            "src/app.py",
+            r#"
+from pkg.foo import VendorThing
+
+def build():
+    return VendorThing()
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "from pkg.foo import VendorThing", "unresolved");
+}
+
+#[test]
+fn go_import_resolution_splits_blocks_and_handles_staging_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "staging/src/k8s.io/client-go/informers/factory.go",
+            r#"
+package informers
+
+type SharedInformerFactory interface {}
+"#,
+        ),
+        (
+            "pkg/kubeapiserver/authorizer/config.go",
+            r#"
+package authorizer
+
+import (
+    "context"
+    informers "k8s.io/client-go/informers"
+    // "not/local"
+)
+
+var _ informers.SharedInformerFactory
+var _ context.Context
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "k8s.io/client-go/informers", "resolved");
+    assert_import_state(&snapshot, "context", "unresolved");
+    assert!(
+        snapshot
+            .imports
+            .iter()
+            .any(|import| import.module == "informers k8s.io/client-go/informers")
+    );
+    assert!(
+        !snapshot
+            .imports
+            .iter()
+            .any(|import| import.module.contains("not/local"))
+    );
 }
 
 #[test]

@@ -16,6 +16,69 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-vector-overlap-identifier-fallback-20260517
+- 目标与算法：保护 foundational、competitive、semantic/vector、stability 与 research judge 目标，同时修复 vector read model 最终 overlap guard 对代码/配置标识符词形过窄的问题；当既有 lowercase whitespace substring 快路径无命中时，使用共享 semantic/vector token signature 对 query、content、entity labels 和 source path 做 snake_case、CamelCase、缩写与路径 term 归一化，再按规范化 term overlap 接受候选。
+- 架构与不变量：不改变 SQLite schema、BM25/FTS 文档、candidate limit、RRF fusion、local vector hash、semantic scoring、CLI/API 字段、provider URL/API key/model/dimension/env 读取、judge 配置或 self-iteration harness；现有 substring 快路径先返回，identifier fallback 只扩大原本会被误拒绝的派生候选。
+- 预期影响：`retry_policy` 查询匹配 `Retry policy` 文本、`GraphRAGContextPack`/`RuntimeBudget` 等标签拆分、source path 标识符和大仓代码证据的 vector source coverage 更稳定；semantic source、code query ranking、backend availability 与质量门禁应保持不变或改善。
+- 已知风险：对快路径无命中的 vector/graph derived 候选会多做一次 bounded token signature 计算；该成本限制在已通过 SQL candidate pruning 的候选上，且保留 substring 快路径以控制常见自然语言查询延迟。
+
+## 候选优化说明：manual-code-query-language-filter-pushdown-20260517
+- 目标与算法：在保持 foundational、competitive、semantic/vector、stability 与 research judge 目标不变的前提下，把 code graph symbol/chunk 查询的 selector language filter 下推到 `code_repository_search` FTS bounded candidate window，避免多语言大仓中范围外语言先填满候选上限后再被 Rust 层丢弃。
+- 架构与不变量：不改变 SQLite schema、FTS 文档内容、candidate limit、BM25 排序、score_text、CLI/API 字段、provider URL/API key/model/dimension/env 读取或 judge 配置；path filter 与 language filter 的 SQL 占位值顺序保持显式对应，最终 `selected_row` 仍作为一致性保护。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等 full-scope 多语言索引在按语言查询 definition/hybrid chunk 时提升召回稳定性并减少无效候选评分；无 language filter 的既有 case 和 semantic/vector source coverage 应保持不变。
+- 已知风险：收益集中在 language-filtered symbol/chunk 查询；reference/call/import FTS 文档当前不携带可靠 language_id，因此仍保留既有后置过滤以避免误裁剪。
+
+## 候选优化说明：manual-score-text-saturation-20260517
+- 目标：在保持 foundational、competitive、semantic/vector、accuracy、stability 与 research judge 保护目标不变的前提下，降低大仓 code graph query scoring 热路径中重复的 identifier 分解和 substring 检查成本。
+- 方法：`score_text` 保留 exact、identifier-part、substring 三层分值不变，但当当前 query token 已达到 exact match 最高分时立即结束该 token 的字段扫描；当已达到 identifier-part 分值时，后续字段只继续检查可能提升到 exact 的分支，不再重复执行无法提高分数的 identifier 或 substring 检查。
+- 架构与不变量：不改变 SQLite schema、FTS candidate expression、candidate limit、path/language filter、排序权重、CLI/API 字段、semantic/vector provider、embedding 设置、judge 配置或环境变量读取；这是对确定性 scoring 的饱和短路，不扩大或收窄候选集合。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等多仓 full-scope code query 在多字段、多 token 候选评分时减少无效字符串扫描；所有已通过的 foundational/competitive case rank、negative query 行为和 semantic/vector source coverage 应保持不变。
+- 已知风险：该候选是语义保持型优化，主要收益取决于候选窗口中重复 identifier 命中的比例；如果查询通常只有一个字段命中或候选很少，可观测延迟改善可能较小。
+
+## 候选优化说明：manual-derived-read-model-cache-preserve-score-20260517
+- 目标：在保持 foundational、competitive、semantic/vector、accuracy 与 research judge 保护目标不变的前提下，降低 semantic/vector 本地 read model 和 local rerank 热路径中的重复分配与重复 query vector 哈希成本。
+- 方法：共享标识符 normalizer 增加可扩展现有 `BTreeSet` 的接口，semantic signature、hashed vector 与 rerank fact/label term 收集复用同一集合而不是构造临时集合；vector candidate loop 为每个查询按维度缓存本次 hashed query vector，避免同一维度候选逐行重算。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、candidate filter、candidate limit、RRF fusion、local deterministic scoring公式、external provider URL/API key/model/dimension/env 读取、embedding payload、freshness、QoS、judge 或 self-iteration harness；semantic/vector 最终分数与结果排序应与现有算法一致。
+- 预期影响：local documents、graph retrieval fixture、semantic/vector fixture 和大仓 graph retrieval 查询在 semantic/vector 来源参与时减少临时集合分配和 per-row query vector hashing；protected retrieval source coverage、backend availability、case rank、stability 与 research judge 应保持不变或改善。
+- 已知风险：该候选主要优化 CPU/分配，不扩大召回、不剪枝候选、不改变评分权重，因此质量风险低；可观测性能改善取决于候选窗口大小和向量维度分布，通常在多候选同维度 vector read model 查询中最明显。
+
+## 候选优化说明：manual-identifier-aware-semantic-vector-rerank-20260517
+- 目标：提升 graph semantic/vector 与本地 rerank 对代码符号、实体标签和路径中复合标识符的泛化检索质量，避免 `GraphRAGContextPack`、`SemanticVectorRecall`、`retry_policy`、`RESTClient` 这类标识符只作为一个不透明 token 参与语义签名、向量哈希或 rerank 覆盖度。
+- 方法：新增检索层共享 term normalizer，在保留完整 token 的同时拆分 snake_case、PascalCase/CamelCase、连续大写缩写与数字边界，并为多段标识符加入 acronym token；SQLite semantic signature、local hashed vector 与本地 deterministic rerank 统一使用该 normalizer。新增单元与存储集成测试锁定 label-only 标识符拆分后同时贡献 semantic/vector 来源。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、code graph query behavior、external provider URL/API key/model/dimension/env 读取、embedding payload、candidate limit、RRF fusion、freshness、QoS 或 self-iteration harness；完整原始 token 仍保留，新增 term 只扩展已有 semantic/vector/rerank 内部表示。
+- 预期影响：semantic/vector fixture、GraphRAG evidence、code symbol/chunk read model 和 agent context pack 查询在自然语言词序与代码标识符词形不一致时更容易获得 semantic/vector source coverage，并在本地 rerank 中把实体标签或代码 artifact 命中的候选排到只含泛化文本的候选前；foundational/competitive repo code query、provider probe 和稳定性不应退化。
+- 已知风险：semantic/vector read-model token 集合会因标识符拆分和 acronym 增加少量项，可能轻微增加刷新与查询 CPU；实现限制在已有 bounded candidate/rerank 流程内，且保留完整 token 以降低精确标识符查询退化风险。
+
+## 候选优化说明：manual-compound-identifier-fts-query-recall-20260517
+- 目标：提升大仓 full-scope code graph 与 hybrid chunk 查询对自然语言拆分标识符的召回，避免 `new lru cache`、`default listable bean factory` 这类查询在 FTS 候选阶段错过 `NewLRUCache` 或 `new_lru_cache` 形态。
+- 方法：在代码查询 FTS MATCH 构造阶段，为 bounded call/reference/import 与 hybrid chunk 查询追加受限的复合标识符候选，把 2 到 6 个安全 ASCII 查询项扩展为 compact 与 snake_case 两种 OR 分支；symbol 查询保持已有 symbol 文档侧 camel/snake 扩展，不重复扩大候选。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、索引写入格式、candidate limit、排序截断、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；新增扩展只影响查询表达式，且限制词数、part 长度、总标识符长度和单字符噪声，最终仍由 `score_text`、path/language filter 与既有 layer 排序决定返回顺序。
+- 预期影响：LevelDB/C++、Kubernetes/Go、Spring/Java 和 relay-teams/Python 中以拆分标识符询问 caller/callee、reference、import 或 fuzzy chunk 的查询可进入候选窗口，精确 CamelCase/snake_case 查询、target-symbol import fallback、semantic/vector source coverage 和稳定性应保持不变或改善。
+- 已知风险：OR 分支会让少量 compact/snake 标识符命中的候选进入 bounded window；扩展只对短查询项集合生效，并保留后续文本评分过滤，因此主要风险是极少数同名复合标识符在近同分情况下改变排序。
+
+## 候选优化说明：manual-import-target-filter-pushdown-20260517
+- 目标：提升大仓 full-scope import graph 在带 selector path/language filter 时的 target-symbol 查询准确性与稳定性，避免查询导入者范围时把过滤条件误施加到被导入符号定义，或让路径外/语言外导入边先填满 bounded candidate window。
+- 方法：import target-symbol fallback 分两阶段处理：第一阶段只在当前 indexed source scope 内用 bounded symbol FTS 找到查询命中的目标符号，并生成 path/package target hints；第二阶段通过 `code_repository_imports(source_scope, target_hint, path)` 查找导入边时，把 indexed scope 和本次 selector path filters 下推到 `i.path`，把 language filters 下推到 `f.language_id`，在 `ORDER BY ... LIMIT` 前裁剪导入者候选。
+- 架构与不变量：不改变 CLI/API 字段、SQLite 表结构、candidate limit、FTS 文档、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；最终 `selected_row` 仍保留为一致性保护，新增 SQL pushdown 只减少范围外 import edge 候选。目标符号发现不再使用本次导入者 path/language filter，因为 selector filter 描述的是返回的 import rows，而不是被导入符号必须所在的路径或语言。
+- 预期影响：Kubernetes/Go package import、Spring wildcard import、relay-teams Python re-export 等以符号名查询 import graph 的 case 在窄路径/语言查询和大仓噪声下更稳定；范围外 import noise 不会消耗 bounded target-hint lookup window，查询延迟也可能因更早裁剪导入边而改善。
+- 已知风险：target-symbol fallback 的符号发现阶段会在 source scope 内查看比 selector path/language filter 更宽的符号集合；最终 import rows 仍受 selector path/language 过滤和 bounded target-hint lookup 约束，因此风险主要是多一次 bounded symbol FTS 可能找到同名符号并生成额外 target hints，但不会返回范围外导入者。
+
+## 候选优化说明：manual-java-wildcard-import-target-recall-20260517
+
+- 目标：提升 Spring Framework 等 Java 大仓 full-scope import graph 的符号查询召回，尤其是代码使用 `import package.*` 时，查询具体类名或 fully-qualified class name 能找到通配 package import 的导入者。
+- 方法：Java import resolution 对 package wildcard 记录 source-root normalized package directory 作为 `target_hint`，直接类/静态通配 import 在可唯一解析时记录具体 Java 源文件；import target-symbol 查询把符号文件路径扩展为实际路径、实际父目录、去 source-root 路径和去 source-root 父目录，并允许不含路径分隔符的 fully-qualified class 查询进入 bounded symbol-target 扩展。
+- 架构与不变量：不改变 CLI/API 字段、SQLite 表结构、candidate limit、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；仍只在已有 bounded symbol FTS 召回后，通过 indexed `code_repository_imports(source_scope, target_hint, path)` 查找 import 候选。路径型查询和常见文件扩展名查询不会进入 symbol-target import fallback，避免把文件检索误扩成 package import 检索。
+- 预期影响：`org.springframework.context.ApplicationContext` 这类 FQN 查询可通过 `import org.springframework.context.*;` 返回导入文件；Spring package wildcard import、Kubernetes Go package import target-symbol fallback、relay-teams Python import、LevelDB C/C++ graph 查询和 semantic/vector source coverage 应保持或改善。
+- 已知风险：Java wildcard target hint 采用 source-root normalized package directory，而不是唯一物理目录；在同一 package 同时存在 main/test/generated 源根时，它会提升跨 source-root package import 召回，但 edge target 不再指向单个文件。该设计只用于 wildcard package 边，直接类 import 仍保留具体文件 target hint。
+
+## 候选优化说明：manual-go-package-import-symbol-recall-20260517
+
+- 目标：提升 Kubernetes 等 Go 大仓 full-scope import graph 的基础边解析和竞争性检索召回，让查询导出类型或工厂符号时能返回导入对应本地包的源文件，而不是只匹配 import path 文本。
+- 方法：Go tree-sitter import block 解析改为按每个 quoted import spec 生成独立 import record，保留 alias 与 package path；snapshot identity 与 checkpoint finalize 都通过通用 source-root normalization 解析 `staging/src/`、`vendor/` 和 `src/` 下的本地 Go package directory。import 查询增加 target-symbol candidate plan：先用已有 bounded symbol FTS 找到 query 命中的符号，再通过 resolved `target_hint` 文件或 package directory 找到导入者，并用匹配符号名参与排序。
+- 架构与不变量：不改变 CLI/API JSON 字段、SQLite 表结构、provider/env 配置、semantic/vector 后端、embedding 设置或 self-iteration harness；新增索引只覆盖 `code_repository_imports(source_scope, target_hint, path)`，用于有界 target import 查找。SQLite code query 的评分/FTS helper 和 target-symbol import lookup 分拆到独立模块，保持触达文件低于行数上限。外部 Go package、标准库和无法唯一映射到本地 directory 的 import 仍保持 unresolved/ambiguous，不强行选择。
+- 预期影响：`kubernetes_imports_client_go_informer_full_scope` 这类以 `SharedInformerFactory` 等导出符号查询 import graph 的 case 应能通过 resolved package target 找到 `pkg/kubeapiserver/authorizer/config.go`；Java/Python/C/C++ import resolution、relay-teams/LevelDB ranking、semantic/vector source coverage 和稳定性不应退化。
+- 已知风险：Go module path 解析仍是静态 repository path 启发式，不读取 go.mod、replace 或 workspace 配置；如果多个本地目录映射到同一 import path，候选会标为 ambiguous 以保护准确性。target-symbol fallback 会多做一次 bounded symbol lookup 和 indexed target_hint import lookup，可能轻微增加纯 import query latency。
+
 ## 候选优化说明：manual-opencode-default-judge-cli-arg-order-20260517
 
 - 目标：修复当前 quality gate repair mode 中 `research_judge` 失败；安装版 `opencode run` 的 `--file` 是数组选项，默认命令把 judge instruction 放在 `{prompt_file}` 之后时会被误当作第二个附件路径，导致 gate 报 `File not found`。
@@ -843,3 +906,93 @@ Adopted optimization notes:
 Adopted optimization notes:
 
  +        let callers = retrieval_request(CodeQueryKind::Callers); +        let callees = retrieval_request(CodeQueryKind::Callees); + +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "NewLRUCache", false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus( +                4.0, +                "bindings/cache_wrapper.cc", +                &callers, +                "NewLRUCache", +                false, +            ), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "C API NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "c_api NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callees, "NewLRUCache", false), +            0.2 +        ); +    } + +    #[test] fn query_mentions_test_or_benchmark_detects_explicit_intent() { assert!(!query_mentions_test_or_benchmark("NewLRUCache")); assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); tokens used 231,004
+## 20260517T094216Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T094216Z.patch`
+- score: 0.972063 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.84, performance=0.950781, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/go.rs`, `src/relay_knowledge/code/identity/imports.rs`, `src/relay_knowledge/code/identity/mod.rs`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/imports.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_go_imports.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=59702ms; cargo_fmt_check_ms=871ms; cargo_clippy_ms=238ms; cargo_test_ms=9129ms; relay_teams_index_ms=87763ms; relay_teams_query_p50_ms=126ms; relay_teams_query_p95_ms=486ms; leveldb_cpp_index_ms=20493ms
+
+Adopted optimization notes:
+
+ssert!(!target_symbol_import_query("org.springframework.context.ApplicationContext")); +    assert!(!target_symbol_import_query("src\\debugfs.h")); +} + +#[test] fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let callers = retrieval_request(CodeQueryKind::Callers); diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index 75c99f2cccc14da916ddc85f34e88870076001e8..564e1e2b35d2e9dfac55e76524f90e6f39d13dd2 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -218,6 +218,8 @@ ON code_repository_calls(source_scope, callee_name, caller_name, path); CREATE INDEX IF NOT EXISTS code_repository_imports_lookup ON code_repository_imports(source_scope, module, path); +        CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup +            ON code_repository_imports(source_scope, target_hint, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup ON code_repository_chunks(source_scope, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup tokens used 573,424
+## 20260517T101427Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T101427Z.patch`
+- score: 0.973723 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.85, performance=0.952787, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/imports.rs`, `src/relay_knowledge/code/identity/java.rs`, `src/relay_knowledge/code/identity/mod.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:research_judge 0.84->0.85; metric:cargo_fmt_check_ms 871.0->819; metric:cargo_clippy_ms 238.0->203
+- known degradations: metric:cargo_build_release_ms 59702.0->62256; metric:cargo_test_ms 9129.0->10113; metric:relay_teams_index_ms 87763.0->91935; metric:relay_teams_query_p95_ms 486.0->556.0; metric:leveldb_cpp_index_ms 20493.0->21453; metric:semantic_vector_provider_probe_ms 1292.0->1566
+- latency metrics: cargo_build_release_ms=62256ms; cargo_fmt_check_ms=819ms; cargo_clippy_ms=203ms; cargo_test_ms=10113ms; relay_teams_index_ms=91935ms; relay_teams_query_p50_ms=142ms; relay_teams_query_p95_ms=556ms; leveldb_cpp_index_ms=21453ms
+## 20260517T102845Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T102845Z.patch`
+- score: 0.9769 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.954995, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_target_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: score_component:research_judge 0.85->0.87; metric:cargo_test_ms 10113.0->8801; metric:relay_teams_index_ms 91935.0->79775; metric:relay_teams_query_p95_ms 556.0->472.0; metric:leveldb_cpp_index_ms 21453.0->19412
+- known degradations: metric:cargo_build_release_ms 62256.0->66551; metric:cargo_clippy_ms 203.0->240; metric:semantic_vector_provider_probe_ms 1566.0->1835
+- latency metrics: cargo_build_release_ms=66551ms; cargo_fmt_check_ms=834ms; cargo_clippy_ms=240ms; cargo_test_ms=8801ms; relay_teams_index_ms=79775ms; relay_teams_query_p50_ms=138ms; relay_teams_query_p95_ms=472ms; leveldb_cpp_index_ms=19412ms
+## 20260517T105538Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T105538Z.patch`
+- score: 0.978502 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.956274, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.963464->0.978502; score_component:research_judge 0.77->0.88; metric:cargo_build_release_ms 32343.0->29561; metric:cargo_fmt_check_ms 780.0->578; metric:relay_teams_index_ms 77036.0->74219; metric:relay_teams_query_p50_ms 119.5->89.5; metric:relay_teams_query_p95_ms 456.0->334.0; metric:leveldb_cpp_index_ms 18055.0->13809
+- known degradations: score_component:performance 0.974548->0.956274; metric:leveldb_cpp_query_p95_ms 174.0->231.0; metric:local_documents_file_index_ms 87.0->117; metric:local_documents_file_query_p50_ms 87.5->118.0; metric:local_documents_file_query_p95_ms 90.0->119.0; metric:local_noise_file_index_ms 265.0->360; metric:local_noise_file_query_p50_ms 87.0->114.0; metric:local_noise_file_query_p95_ms 88.0->115.0
+- latency metrics: cargo_build_release_ms=29561ms; cargo_fmt_check_ms=578ms; cargo_clippy_ms=195ms; cargo_test_ms=8056ms; relay_teams_index_ms=74219ms; relay_teams_query_p50_ms=90ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13809ms
+## 20260517T113610Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T113610Z.patch`
+- score: 0.979868 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.954596, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/mod.rs`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`
+- key improvements: score_component:score 0.966917->0.979868; score_component:foundational_capability 0.972222->1.0; score_component:accuracy 0.986111->1.0; score_component:research_judge 0.83->0.89; metric:cargo_build_release_ms 38844.0->29541; metric:cargo_fmt_check_ms 737.0->671; metric:relay_teams_index_ms 77412.0->73020; metric:relay_teams_query_p50_ms 134.5->92.5
+- known degradations: score_component:performance 0.974652->0.954596; metric:cargo_test_ms 7671.0->7925; metric:leveldb_cpp_index_ms 14765.0->15884; metric:leveldb_cpp_query_p50_ms 106.5->145.0; metric:leveldb_cpp_query_p95_ms 188.0->244.0; metric:local_documents_file_index_ms 94.0->120; metric:local_documents_file_query_p50_ms 88.0->122.5; metric:local_documents_file_query_p95_ms 90.0->128.0
+- latency metrics: cargo_build_release_ms=29541ms; cargo_fmt_check_ms=671ms; cargo_clippy_ms=196ms; cargo_test_ms=7925ms; relay_teams_index_ms=73020ms; relay_teams_query_p50_ms=92ms; relay_teams_query_p95_ms=337ms; leveldb_cpp_index_ms=15884ms
+## 20260517T115627Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T115627Z.patch`
+- score: 0.97996 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.955749, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: score_component:research_judge 0.88->0.89; metric:cargo_build_release_ms 33186.0->29988; metric:cargo_fmt_check_ms 719.0->559; metric:cargo_clippy_ms 180.0->154; metric:cargo_test_ms 7819.0->6294; metric:semantic_vector_provider_probe_ms 1390.0->1189
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=29988ms; cargo_fmt_check_ms=559ms; cargo_clippy_ms=154ms; cargo_test_ms=6294ms; relay_teams_index_ms=68979ms; relay_teams_query_p50_ms=96ms; relay_teams_query_p95_ms=346ms; leveldb_cpp_index_ms=16392ms
+## 20260517T122624Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T122624Z.patch`
+- score: 0.978379 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.973492, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.954626->0.978379; score_component:foundational_capability 0.944444->1.0; score_component:competitive_capability 0.942857->1.0; score_component:accuracy 0.943651->1.0; score_component:performance 0.958323->0.973492; metric:cargo_build_release_ms 31583.0->28662; metric:cargo_fmt_check_ms 828.0->563; metric:cargo_test_ms 7997.0->5044
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28662ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=177ms; cargo_test_ms=5044ms; relay_teams_index_ms=69745ms; relay_teams_query_p50_ms=99ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13980ms
+## 20260517T134401Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T134401Z.patch`
+- score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:research_judge 0.86->0.88; metric:cargo_fmt_check_ms 848.0->784; metric:cargo_test_ms 8803.0->8527
+- known degradations: score_component:performance 0.952029->0.936811; metric:cargo_build_release_ms 39891.0->41918; metric:leveldb_cpp_query_p50_ms 145.0->187.0; metric:leveldb_cpp_query_p95_ms 253.0->296.0; metric:local_documents_file_query_p50_ms 122.5->148.5; metric:local_documents_file_query_p95_ms 124.0->175.0; metric:local_noise_file_index_ms 374.0->473; metric:semantic_vector_refresh_ms 84.0->111
+- latency metrics: cargo_build_release_ms=41918ms; cargo_fmt_check_ms=784ms; cargo_clippy_ms=207ms; cargo_test_ms=8527ms; relay_teams_index_ms=80341ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=459ms; leveldb_cpp_index_ms=19962ms
+## 20260517T140829Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T140829Z.patch`
+- score: 0.97451 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.86, performance=0.943869, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: score_component:score 0.964613->0.97451; score_component:research_judge 0.79->0.86; metric:semantic_vector_provider_probe_ms 1327.0->1240
+- known degradations: score_component:performance 0.951416->0.943869; metric:cargo_build_release_ms 41245.0->49017; metric:cargo_fmt_check_ms 840.0->910; metric:cargo_test_ms 8983.0->9888; metric:relay_teams_index_ms 83146.0->91550; metric:leveldb_cpp_query_p95_ms 259.0->287.0; metric:local_noise_file_index_ms 367.0->411; metric:local_noise_file_query_p50_ms 127.0->153.5
+- latency metrics: cargo_build_release_ms=49017ms; cargo_fmt_check_ms=910ms; cargo_clippy_ms=223ms; cargo_test_ms=9888ms; relay_teams_index_ms=91550ms; relay_teams_query_p50_ms=144ms; relay_teams_query_p95_ms=509ms; leveldb_cpp_index_ms=21322ms
+
+Adopted optimization notes:
+
+identifier_part_match(term, candidate) +            }) +        }) +        .count() as f64 +} -    score +fn fuzzy_identifier_part_match(query_term: &str, candidate: &str) -> bool { +    query_term.len() >= 3 && candidate.len() >= 3 && candidate.contains(query_term) } fn evidence_document_id(evidence_id: &str) -> String { diff --git a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs index 24416550eda523a632273dddf8b7dd55c2fbc11f..2bd9886479fa589a8ce06c8a9160360e3c1dd16d --- a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs +++ b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs @@ -418,4 +418,19 @@ assert_eq!(cache.vector(8).len(), 8); assert_eq!(cache.vectors.len(), 2); } + +    #[test] +    fn overlap_score_matches_identifier_variants_after_fast_path_miss() { +        let labels = vec!["RuntimeBudget".to_owned()]; + +        assert_eq!( +            overlap_score( +                "retry_policy", +                "Retry policy controls the runtime budget", +                &labels, +                Some("src/runtime/budget.rs"), +            ), +            2.0 +        ); +    } } tokens used 311,144
+

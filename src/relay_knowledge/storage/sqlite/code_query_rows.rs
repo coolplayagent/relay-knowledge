@@ -54,6 +54,7 @@ pub(super) struct ImportRow {
     pub(super) path: String,
     pub(super) language_id: String,
     pub(super) module: String,
+    pub(super) matched_symbol_name: Option<String>,
     pub(super) line_range: RepositoryCodeRange,
     pub(super) target_hint: Option<String>,
     pub(super) resolution_state: String,

@@ -119,12 +119,43 @@ async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants()
         .expect("search should succeed");
 
     assert_eq!(hits[0].evidence_id, "ev-retry");
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
+}
+
+#[tokio::test]
+async fn semantic_and_vector_retrieval_match_identifier_parts_from_labels() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-label",
+        scope,
+        "Opaque retrieval backend note",
+        vec!["SemanticVectorRecall".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![evidence]).expect("batch"))
+        .await
+        .expect("commit should succeed");
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "semantic vector recall".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].evidence_id, "ev-label");
     assert!(
         hits[0]
             .retriever_sources
             .contains(&RetrieverSource::Semantic)
-            || hits[0].retriever_sources.contains(&RetrieverSource::Vector)
     );
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
 }
 
 #[tokio::test]
@@ -545,6 +576,87 @@ async fn initialization_backfills_empty_semantic_and_vector_documents() {
         hit.retriever_sources.contains(&RetrieverSource::Semantic)
             || hit.retriever_sources.contains(&RetrieverSource::Vector)
     }));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn initialization_rebuilds_derived_documents_when_tokenizer_version_changes() {
+    let path = temp_db_path("derived-tokenizer-version");
+    {
+        let store = SqliteGraphStore::open(&path).expect("store should open");
+        let evidence = EvidenceRecord::new(
+            "ev-tokenizer-rebuild",
+            SourceScope::parse("docs").expect("scope should parse"),
+            "Opaque retrieval backend note",
+            vec!["GraphRAGContextPack".to_owned()],
+        )
+        .expect("evidence should validate");
+        store
+            .commit_mutation_batch(GraphMutationBatch::new(vec![evidence]).expect("batch"))
+            .await
+            .expect("commit should succeed");
+        let guard = store.connection.lock().expect("connection should lock");
+        guard
+            .execute(
+                "UPDATE graph_semantic_documents
+                 SET token_signature_json = '[\"graphragcontextpack\"]',
+                     tokenizer_version = 'legacy-tokenizer'",
+                [],
+            )
+            .expect("semantic tokenizer version should downgrade");
+        guard
+            .execute(
+                "UPDATE graph_vector_documents
+                 SET vector_json = '[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]',
+                     tokenizer_version = 'legacy-tokenizer'",
+                [],
+            )
+            .expect("vector tokenizer version should downgrade");
+    }
+
+    let store = SqliteGraphStore::open(&path).expect("store should reopen");
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "context pack".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: vec![
+                RetrieverSource::Bm25,
+                RetrieverSource::GraphEvidence,
+                RetrieverSource::CodeGraph,
+                RetrieverSource::GraphPath,
+                RetrieverSource::Temporal,
+                RetrieverSource::CommunitySummary,
+            ],
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].evidence_id, "ev-tokenizer-rebuild");
+    assert!(
+        hits[0]
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+    );
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
+    let guard = store.connection.lock().expect("connection should lock");
+    let current_semantic_rows: usize = guard
+        .query_row(
+            "SELECT COUNT(*) FROM graph_semantic_documents WHERE tokenizer_version = ?1",
+            [super::retrieval::LOCAL_TOKENIZER_VERSION],
+            |row| row.get(0),
+        )
+        .expect("semantic version count should load");
+    let current_vector_rows: usize = guard
+        .query_row(
+            "SELECT COUNT(*) FROM graph_vector_documents WHERE tokenizer_version = ?1",
+            [super::retrieval::LOCAL_TOKENIZER_VERSION],
+            |row| row.get(0),
+        )
+        .expect("vector version count should load");
+    assert_eq!(current_semantic_rows, 1);
+    assert_eq!(current_vector_rows, 1);
     let _ = std::fs::remove_file(path);
 }
 

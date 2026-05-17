@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    EvidenceDocumentInput,
+    EvidenceDocumentInput, LOCAL_TOKENIZER_VERSION,
     context::{entities_for_evidence, parse_fact_status},
     insert_code_chunk_document, insert_code_symbol_document, replace_evidence_document,
 };
@@ -32,7 +32,9 @@ pub(super) fn derived_documents_missing(connection: &Connection) -> Result<bool,
 
     Ok(bm25_count != expected_count
         || semantic_count != expected_count
-        || vector_count != expected_count)
+        || vector_count != expected_count
+        || table_has_mismatched_tokenizer_version(connection, "graph_semantic_documents")?
+        || table_has_mismatched_tokenizer_version(connection, "graph_vector_documents")?)
 }
 
 fn clear_retrieval_documents(connection: &Connection) -> Result<(), StorageError> {
@@ -270,6 +272,18 @@ fn table_row_count(connection: &Connection, table: &'static str) -> Result<usize
     let sql = format!("SELECT COUNT(*) FROM {table}");
     connection
         .query_row(&sql, [], |row| row.get::<_, usize>(0))
+        .map_err(StorageError::from)
+}
+
+fn table_has_mismatched_tokenizer_version(
+    connection: &Connection,
+    table: &'static str,
+) -> Result<bool, StorageError> {
+    let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE tokenizer_version <> ?1)");
+    connection
+        .query_row(&sql, params![LOCAL_TOKENIZER_VERSION], |row| {
+            row.get::<_, bool>(0)
+        })
         .map_err(StorageError::from)
 }
 

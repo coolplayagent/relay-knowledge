@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{Connection, params_from_iter, types::Value};
 
@@ -203,6 +203,7 @@ pub(super) fn vector_candidates(
     )?;
 
     let mut hits = Vec::new();
+    let mut query_vectors = QueryVectorCache::new(&request.query);
     for (
         document_id,
         document_kind,
@@ -232,7 +233,7 @@ pub(super) fn vector_candidates(
             continue;
         }
         let score = cosine_similarity(
-            &hashed_vector(&request.query, &[], None, "", dimension),
+            query_vectors.vector(dimension),
             &parse_f64_array(&vector_json)?,
         );
         if score <= 0.0 {
@@ -277,6 +278,26 @@ pub(super) fn vector_candidates(
     sort_scored_hits(&mut hits);
 
     Ok(hits)
+}
+
+struct QueryVectorCache<'a> {
+    query: &'a str,
+    vectors: BTreeMap<usize, Vec<f64>>,
+}
+
+impl<'a> QueryVectorCache<'a> {
+    fn new(query: &'a str) -> Self {
+        Self {
+            query,
+            vectors: BTreeMap::new(),
+        }
+    }
+
+    fn vector(&mut self, dimension: usize) -> &[f64] {
+        self.vectors
+            .entry(dimension)
+            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension))
+    }
 }
 
 fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize {
@@ -384,5 +405,32 @@ mod tests {
         assert!(condition.contains("lower(content) LIKE ?"));
         assert!(ranking.contains("CASE WHEN lower(content) LIKE ?"));
         assert_eq!(values.len(), MAX_DERIVED_QUERY_TERMS * fields.len() * 2);
+    }
+
+    #[test]
+    fn query_vector_cache_reuses_vectors_by_dimension() {
+        let mut cache = QueryVectorCache::new("semantic vector freshness");
+        let first = cache.vector(16).to_vec();
+        let second = cache.vector(16).to_vec();
+
+        assert_eq!(first, second);
+        assert_eq!(cache.vectors.len(), 1);
+        assert_eq!(cache.vector(8).len(), 8);
+        assert_eq!(cache.vectors.len(), 2);
+    }
+
+    #[test]
+    fn overlap_score_matches_identifier_variants_after_fast_path_miss() {
+        let labels = vec!["RuntimeBudget".to_owned()];
+
+        assert_eq!(
+            overlap_score(
+                "retry_policy",
+                "Retry policy controls the runtime budget",
+                &labels,
+                Some("src/runtime/budget.rs"),
+            ),
+            2.0
+        );
     }
 }

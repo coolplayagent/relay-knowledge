@@ -1,39 +1,45 @@
 use crate::domain::CodeImportRecord;
 
-use super::imports::{ImportContext, ImportResolution};
+use super::imports::{ImportContext, ImportResolution, ModuleFileResolution};
 
 pub(super) fn resolve_import(
     import: &CodeImportRecord,
     context: &ImportContext<'_>,
-) -> Option<ImportResolution> {
+) -> Option<(ImportResolution, Option<String>)> {
     let request = JavaImportRequest::parse(&import.module)?;
 
     Some(match request {
         JavaImportRequest::Class { class_path, name } => {
             let file_path = java_source_path(&class_path);
-            if context.module_file_exists_with_language(&file_path, "java") {
-                ImportResolution::Resolved
-            } else {
-                context.resolve_name_in_paths(&name, &[file_path])
+            match context.resolve_first_module_file(std::slice::from_ref(&file_path), true) {
+                ModuleFileResolution::Resolved(target_hint) => {
+                    (ImportResolution::Resolved, Some(target_hint))
+                }
+                ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
+                ModuleFileResolution::Unresolved => {
+                    (context.resolve_name_in_paths(&name, &[file_path]), None)
+                }
             }
         }
         JavaImportRequest::PackageWildcard { package_path } => {
             if context.directory_has_language_files(&package_path, "java") {
-                ImportResolution::Resolved
+                (ImportResolution::Resolved, Some(package_path))
             } else {
-                ImportResolution::Unresolved
+                (ImportResolution::Unresolved, None)
             }
         }
         JavaImportRequest::StaticMember { class_path, member } => {
             let file_path = java_source_path(&class_path);
-            context.resolve_name_in_paths(&member, &[file_path])
+            (context.resolve_name_in_paths(&member, &[file_path]), None)
         }
         JavaImportRequest::StaticWildcard { class_path } => {
             let file_path = java_source_path(&class_path);
-            if context.module_file_exists_with_language(&file_path, "java") {
-                ImportResolution::Resolved
-            } else {
-                ImportResolution::Unresolved
+            match context.resolve_first_module_file(&[file_path], true) {
+                ModuleFileResolution::Resolved(target_hint) => {
+                    (ImportResolution::Resolved, Some(target_hint))
+                }
+                ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
+                ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, None),
             }
         }
     })

@@ -9,6 +9,7 @@ use crate::{
         ContextGraphFact, EvidenceExtractionMetadata, EvidenceModality, FactStatus, GraphVersion,
         RetrievalHit, RetrieverSource,
     },
+    retrieval::terms::extend_normalized_terms,
     storage::{GraphSearchRequest, StorageError},
 };
 
@@ -36,6 +37,7 @@ use ranking::{Candidate, merge_ranked};
 const LABEL_SEPARATOR: char = '\u{1f}';
 const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
 const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
+pub(super) const LOCAL_TOKENIZER_VERSION: &str = "relay-normalized-terms-v2";
 const LOCAL_VECTOR_DIMENSION: usize = 16;
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
@@ -69,7 +71,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             token_signature_json TEXT NOT NULL,
             model TEXT NOT NULL,
             dimension INTEGER NOT NULL,
-            source_hash TEXT NOT NULL
+            source_hash TEXT NOT NULL,
+            tokenizer_version TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS graph_vector_documents (
@@ -86,7 +89,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             vector_json TEXT NOT NULL,
             model TEXT NOT NULL,
             dimension INTEGER NOT NULL,
-            source_hash TEXT NOT NULL
+            source_hash TEXT NOT NULL,
+            tokenizer_version TEXT NOT NULL
         );
         ",
     )?;
@@ -428,9 +432,9 @@ fn replace_semantic_document(
         INSERT INTO graph_semantic_documents (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version, source_scope, source_path, entity_labels_json,
-            content, token_signature_json, model, dimension, source_hash
+            content, token_signature_json, model, dimension, source_hash, tokenizer_version
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
         params![
             input.document_id,
@@ -447,6 +451,7 @@ fn replace_semantic_document(
             input.model,
             input.dimension as i64,
             input.source_hash,
+            LOCAL_TOKENIZER_VERSION,
         ],
     )?;
 
@@ -489,9 +494,9 @@ fn replace_vector_document(
         INSERT INTO graph_vector_documents (
             document_id, document_kind, evidence_id, parent_evidence_id, modality,
             created_graph_version, source_scope, source_path, entity_labels_json,
-            content, vector_json, model, dimension, source_hash
+            content, vector_json, model, dimension, source_hash, tokenizer_version
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
         params![
             input.document_id,
@@ -508,6 +513,7 @@ fn replace_vector_document(
             input.model,
             input.dimension as i64,
             input.source_hash,
+            LOCAL_TOKENIZER_VERSION,
         ],
     )?;
 
@@ -773,16 +779,7 @@ fn token_signature(
 }
 
 fn collect_terms(value: &str, terms: &mut BTreeSet<String>) {
-    for token in value
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        .filter(|token| token.len() >= 2)
-    {
-        let token = token.to_ascii_lowercase();
-        for part in token.split('_').filter(|part| part.len() >= 2) {
-            terms.insert(part.to_owned());
-        }
-        terms.insert(token);
-    }
+    extend_normalized_terms(value, 2, terms);
 }
 
 fn hashed_vector(
@@ -858,8 +855,34 @@ fn overlap_score(query: &str, content: &str, labels: &[String], source_path: Opt
             score += 1.0;
         }
     }
+    if score > 0.0 {
+        return score;
+    }
 
-    score
+    identifier_overlap_score(query, content, labels, source_path)
+}
+
+fn identifier_overlap_score(
+    query: &str,
+    content: &str,
+    labels: &[String],
+    source_path: Option<&str>,
+) -> f64 {
+    let query_terms = token_signature(query, &[], None, "");
+    let document_terms = token_signature(content, labels, source_path, "");
+    query_terms
+        .iter()
+        .filter(|term| {
+            let term = term.as_str();
+            document_terms
+                .iter()
+                .any(|candidate| candidate == term || fuzzy_identifier_part_match(term, candidate))
+        })
+        .count() as f64
+}
+
+fn fuzzy_identifier_part_match(query_term: &str, candidate: &str) -> bool {
+    query_term.len() >= 3 && candidate.len() >= 3 && candidate.contains(query_term)
 }
 
 fn evidence_document_id(evidence_id: &str) -> String {
@@ -945,5 +968,17 @@ mod tests {
         assert!(signature.contains(&"rust".to_owned()));
         assert_eq!(first, second);
         assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() {
+        let labels = vec!["SemanticVectorRecall".to_owned()];
+        let signature = token_signature("GraphRAGContextPack", &labels, None, "abc");
+
+        for term in [
+            "semantic", "vector", "recall", "graph", "rag", "context", "pack",
+        ] {
+            assert!(signature.contains(&term.to_owned()), "missing term {term}");
+        }
     }
 }

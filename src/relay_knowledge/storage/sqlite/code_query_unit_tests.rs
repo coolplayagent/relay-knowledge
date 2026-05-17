@@ -52,7 +52,24 @@ fn symbol_fts_query_uses_any_term_for_fuzzy_recall() {
     );
     assert_eq!(
         fts_match_query("checkpoint metadata version constant"),
-        "\"checkpoint\" \"metadata\" \"version\" \"constant\""
+        "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    );
+    assert_eq!(
+        hybrid_chunk_fts_match_query("checkpoint metadata version constant"),
+        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    );
+}
+
+#[test]
+fn fts_query_compound_identifier_alternatives_are_bounded() {
+    assert_eq!(
+        fts_match_query("new lru cache"),
+        "(\"new\" \"lru\" \"cache\") OR \"newlrucache\" OR \"new_lru_cache\""
+    );
+    assert_eq!(fts_match_query("a b"), "\"a\" \"b\"");
+    assert_eq!(
+        fts_match_query("one two three four five six seven"),
+        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"seven\""
     );
 }
 
@@ -64,6 +81,13 @@ fn score_text_matches_identifier_parts_inside_snake_case_names() {
     );
 
     assert!(score >= 4.0);
+}
+
+#[test]
+fn score_text_preserves_exact_match_ceiling_after_identifier_match() {
+    assert_eq!(score_text("cache", ["block_cache", "cache"]), 4.0);
+    assert_eq!(score_text("cache", ["block_cache"]), 2.0);
+    assert_eq!(score_text("cach", ["block_cache"]), 0.5);
 }
 
 #[test]
@@ -107,6 +131,37 @@ fn import_surface_bonus_prefers_public_reexport_files() {
     assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0);
     assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0);
     assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0);
+}
+
+#[test]
+fn import_target_symbol_bonus_matches_fully_qualified_class_tail() {
+    assert_eq!(
+        import_target_symbol_bonus(
+            "org.springframework.context.ApplicationContext",
+            Some("ApplicationContext"),
+        ),
+        2.0
+    );
+    assert_eq!(
+        import_target_symbol_bonus("org.springframework.context", Some("ApplicationContext")),
+        0.0
+    );
+    assert_eq!(import_target_symbol_bonus("ApplicationContext", None), 0.0);
+}
+
+#[test]
+fn target_symbol_import_query_skips_path_like_queries() {
+    assert!(target_symbol_import_query("SharedInformerFactory"));
+    assert!(target_symbol_import_query("DefaultListableBeanFactory"));
+    assert!(target_symbol_import_query(
+        "org.springframework.context.ApplicationContext"
+    ));
+    assert!(!target_symbol_import_query("linux/debugfs.h"));
+    assert!(!target_symbol_import_query("linux.debugfs.h"));
+    assert!(!target_symbol_import_query("src\\debugfs.h"));
+    assert!(!target_symbol_import_query(
+        "DefaultListableBeanFactory.java"
+    ));
 }
 
 #[test]
@@ -189,6 +244,52 @@ async fn symbol_search_preserves_case_for_name_bonus() {
         hit.score,
         lower_hits[0].score
     );
+}
+
+#[tokio::test]
+async fn symbol_search_pushes_language_filters_before_candidate_limit() {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..550 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("pkg/noise_{index:03}.py");
+        files.push(code_query_file(&file_id, &path, "python"));
+        symbols.push(code_query_symbol(
+            &format!("noise-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "target",
+        ));
+    }
+
+    files.push(code_query_file("target-file", "src/lib.rs", "rust"));
+    let mut target = code_query_symbol("target-symbol", "target-file", "src/lib.rs", "target");
+    target.language_id = "rust".to_owned();
+    target.signature = "fn target() {}".to_owned();
+    symbols.push(target);
+    let store =
+        store_with_case_intent_snapshot(code_query_snapshot(files, symbols, Vec::new())).await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Definition,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("language-filtered symbol query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/lib.rs");
+    assert_eq!(hits[0].language_id, "rust");
 }
 
 #[tokio::test]
@@ -305,6 +406,29 @@ async fn caller_search_preserves_case_for_test_intent() {
         hits[0].score,
         lower_hits[0].score
     );
+}
+
+#[tokio::test]
+async fn caller_search_matches_spaced_compound_identifier_query() {
+    let mut call = code_query_call("new-lru-cache-call", "db-file", "db/db_impl.cc");
+    call.caller_name = Some("DBImpl::Open".to_owned());
+    call.callee_name = "NewLRUCache".to_owned();
+    call.target_hint = Some("NewLRUCache".to_owned());
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file("db-file", "db/db_impl.cc", "cpp")],
+        Vec::new(),
+        vec![call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request("new lru cache", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "db/db_impl.cc");
+    assert!(hits[0].excerpt.contains("NewLRUCache"));
 }
 
 #[test]
