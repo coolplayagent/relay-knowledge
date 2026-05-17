@@ -379,7 +379,7 @@ fn repo_index() -> CliCommandSpec {
         &["relay-knowledge repo index core --ref HEAD --format json"],
         &[
             "`--dry-run` returns a scope preview instead of writing index state.",
-            "Cold full indexes return a durable task handle and start a bounded background worker; use `repo status` to inspect active task and checkpoint progress.",
+            "Cold full indexes return a durable task handle and the CLI runs one bounded worker attempt before returning; service mode continues unfinished background tasks and `repo status` reports checkpoints.",
         ],
     )
 }

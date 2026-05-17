@@ -1,8 +1,8 @@
-#[cfg(not(test))]
-use std::process::Stdio;
-
 use crate::{
-    api::{CodeRepositoryRegisterRequest, CodeRepositoryReportResponse, RequestContext},
+    api::{
+        CodeRepositoryIndexStartResponse, CodeRepositoryRegisterRequest,
+        CodeRepositoryReportResponse, RequestContext,
+    },
     application::RelayKnowledgeService,
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
@@ -116,8 +116,9 @@ pub async fn run_repo(
             ref_selector,
             dry_run,
         } => {
+            let selector = selector(alias, ref_selector, Vec::new(), Vec::new())?;
             let request = CodeIndexRequest {
-                repository: selector(alias, ref_selector, Vec::new(), Vec::new())?,
+                repository: selector.clone(),
                 mode: CodeIndexMode::Full,
                 freshness_policy: FreshnessPolicy::AllowStale,
             };
@@ -134,13 +135,12 @@ pub async fn run_repo(
                     format,
                 );
             }
-            let response = service
+            let worker_context = context.clone();
+            let mut response = service
                 .start_code_repository_index(request, context)
                 .await
                 .map_err(|error| CliError::ApiFailed(error.message))?;
-            if let Some(task) = &response.task {
-                spawn_index_worker(&task.task_id)?;
-            }
+            finish_started_index_task(service, &mut response, selector, worker_context).await?;
 
             render_response(
                 "code.repo.index",
@@ -296,6 +296,38 @@ pub async fn run_repo(
     }
 }
 
+async fn finish_started_index_task(
+    service: &RelayKnowledgeService,
+    response: &mut CodeRepositoryIndexStartResponse,
+    selector: CodeRepositorySelector,
+    context: RequestContext,
+) -> Result<(), CliError> {
+    let Some(task_id) = response.task.as_ref().map(|task| task.task_id.clone()) else {
+        return Ok(());
+    };
+    let completed = service
+        .run_code_index_task_once(Some(task_id), context.clone())
+        .await
+        .map_err(|error| CliError::ApiFailed(error.message))?;
+    if let Some(task) = completed {
+        response.task = Some(task);
+    }
+    let requested_ref = selector.ref_selector.clone();
+    let status = service
+        .code_repository_status(selector.clone(), context)
+        .await
+        .map_err(|error| CliError::ApiFailed(error.message))?;
+    response.status = status.status;
+    response.scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+        &response.status,
+        &selector,
+        requested_ref,
+    );
+    response.checkpoint = status.checkpoint;
+
+    Ok(())
+}
+
 fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
     let root_path = tokens
         .first()
@@ -372,36 +404,6 @@ fn parse_index_worker(tokens: &[String]) -> Result<RepoCommand, CliError> {
     }
 
     Ok(RepoCommand::IndexWorker { task_id })
-}
-
-#[cfg(not(test))]
-fn spawn_index_worker(task_id: &str) -> Result<(), CliError> {
-    let executable = std::env::current_exe()
-        .map_err(|error| CliError::ApiFailed(format!("failed to locate executable: {error}")))?;
-    std::process::Command::new(executable)
-        .args([
-            "repo",
-            "index-worker",
-            "--task-id",
-            task_id,
-            "--format",
-            "json",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| {
-            CliError::ApiFailed(format!(
-                "failed to start background code index worker for task '{task_id}': {error}"
-            ))
-        })
-}
-
-#[cfg(test)]
-fn spawn_index_worker(_task_id: &str) -> Result<(), CliError> {
-    Ok(())
 }
 
 fn parse_scope(tokens: &[String]) -> Result<RepoCommand, CliError> {

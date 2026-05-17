@@ -312,6 +312,28 @@ fn run_worker() {
     .expect("index should run");
     assert!(indexed.contains("code.repo.index"));
 
+    let fresh_definitions = run_repo(
+        &service,
+        RepoCommand::Query {
+            alias: "fixture".to_owned(),
+            query: "retry_policy".to_owned(),
+            kind: CodeQueryKind::Definition,
+            limit: 5,
+            ref_selector: "HEAD".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            freshness: FreshnessPolicy::WaitUntilFresh,
+        },
+        context("query-after-index"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("query should run immediately after repo index");
+    assert_eq!(
+        json_value(&fresh_definitions)["results"][0]["path"],
+        "src/lib.rs"
+    );
+
     run_repo(
         &service,
         RepoCommand::IndexWorker { task_id: None },
