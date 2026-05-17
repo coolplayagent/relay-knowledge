@@ -8,6 +8,7 @@ use std::{error::Error, fmt};
 
 pub mod provider;
 mod rerank;
+pub(crate) mod terms;
 
 use crate::domain::{
     FreshnessPolicy, GraphVersion, IndexKind, IndexStatus, RerankDiagnostics, RerankMode,

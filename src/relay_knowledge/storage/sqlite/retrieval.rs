@@ -9,6 +9,7 @@ use crate::{
         ContextGraphFact, EvidenceExtractionMetadata, EvidenceModality, FactStatus, GraphVersion,
         RetrievalHit, RetrieverSource,
     },
+    retrieval::terms::normalized_terms,
     storage::{GraphSearchRequest, StorageError},
 };
 
@@ -773,16 +774,7 @@ fn token_signature(
 }
 
 fn collect_terms(value: &str, terms: &mut BTreeSet<String>) {
-    for token in value
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        .filter(|token| token.len() >= 2)
-    {
-        let token = token.to_ascii_lowercase();
-        for part in token.split('_').filter(|part| part.len() >= 2) {
-            terms.insert(part.to_owned());
-        }
-        terms.insert(token);
-    }
+    terms.extend(normalized_terms(value, 2));
 }
 
 fn hashed_vector(
@@ -945,5 +937,17 @@ mod tests {
         assert!(signature.contains(&"rust".to_owned()));
         assert_eq!(first, second);
         assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() {
+        let labels = vec!["SemanticVectorRecall".to_owned()];
+        let signature = token_signature("GraphRAGContextPack", &labels, None, "abc");
+
+        for term in [
+            "semantic", "vector", "recall", "graph", "rag", "context", "pack",
+        ] {
+            assert!(signature.contains(&term.to_owned()), "missing term {term}");
+        }
     }
 }

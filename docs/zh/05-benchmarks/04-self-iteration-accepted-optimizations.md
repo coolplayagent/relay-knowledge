@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-identifier-aware-semantic-vector-rerank-20260517
+
+- 目标：提升 graph semantic/vector 与本地 rerank 对代码符号、实体标签和路径中复合标识符的泛化检索质量，避免 `GraphRAGContextPack`、`SemanticVectorRecall`、`retry_policy`、`RESTClient` 这类标识符只作为一个不透明 token 参与语义签名、向量哈希或 rerank 覆盖度。
+- 方法：新增检索层共享 term normalizer，在保留完整 token 的同时拆分 snake_case、PascalCase/CamelCase、连续大写缩写与数字边界，并为多段标识符加入 acronym token；SQLite semantic signature、local hashed vector 与本地 deterministic rerank 统一使用该 normalizer。新增单元与存储集成测试锁定 label-only 标识符拆分后同时贡献 semantic/vector 来源。
+- 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、code graph query behavior、external provider URL/API key/model/dimension/env 读取、embedding payload、candidate limit、RRF fusion、freshness、QoS 或 self-iteration harness；完整原始 token 仍保留，新增 term 只扩展已有 semantic/vector/rerank 内部表示。
+- 预期影响：semantic/vector fixture、GraphRAG evidence、code symbol/chunk read model 和 agent context pack 查询在自然语言词序与代码标识符词形不一致时更容易获得 semantic/vector source coverage，并在本地 rerank 中把实体标签或代码 artifact 命中的候选排到只含泛化文本的候选前；foundational/competitive repo code query、provider probe 和稳定性不应退化。
+- 已知风险：semantic/vector read-model token 集合会因标识符拆分和 acronym 增加少量项，可能轻微增加刷新与查询 CPU；实现限制在已有 bounded candidate/rerank 流程内，且保留完整 token 以降低精确标识符查询退化风险。
+
 ## 候选优化说明：manual-compound-identifier-fts-query-recall-20260517
 
 - 目标：提升大仓 full-scope code graph 与 hybrid chunk 查询对自然语言拆分标识符的召回，避免 `new lru cache`、`default listable bean factory` 这类查询在 FTS 候选阶段错过 `NewLRUCache` 或 `new_lru_cache` 形态。
@@ -928,4 +936,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 six seven"), +        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"seven\"" +    ); +} + +#[test] fn score_text_matches_identifier_parts_inside_snake_case_names() { let score = score_text( "archive output directory", @@ -338,6 +355,29 @@ ); } +#[tokio::test] +async fn caller_search_matches_spaced_compound_identifier_query() { +    let mut call = code_query_call("new-lru-cache-call", "db-file", "db/db_impl.cc"); +    call.caller_name = Some("DBImpl::Open".to_owned()); +    call.callee_name = "NewLRUCache".to_owned(); +    call.target_hint = Some("NewLRUCache".to_owned()); +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![code_query_file("db-file", "db/db_impl.cc", "cpp")], +        Vec::new(), +        vec![call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("new lru cache", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "db/db_impl.cc"); +    assert!(hits[0].excerpt.contains("NewLRUCache")); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 205,895
+## 20260517T113610Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T113610Z.patch`
+- score: 0.979868 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.954596, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/mod.rs`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`
+- key improvements: score_component:score 0.966917->0.979868; score_component:foundational_capability 0.972222->1.0; score_component:accuracy 0.986111->1.0; score_component:research_judge 0.83->0.89; metric:cargo_build_release_ms 38844.0->29541; metric:cargo_fmt_check_ms 737.0->671; metric:relay_teams_index_ms 77412.0->73020; metric:relay_teams_query_p50_ms 134.5->92.5
+- known degradations: score_component:performance 0.974652->0.954596; metric:cargo_test_ms 7671.0->7925; metric:leveldb_cpp_index_ms 14765.0->15884; metric:leveldb_cpp_query_p50_ms 106.5->145.0; metric:leveldb_cpp_query_p95_ms 188.0->244.0; metric:local_documents_file_index_ms 94.0->120; metric:local_documents_file_query_p50_ms 88.0->122.5; metric:local_documents_file_query_p95_ms 90.0->128.0
+- latency metrics: cargo_build_release_ms=29541ms; cargo_fmt_check_ms=671ms; cargo_clippy_ms=196ms; cargo_test_ms=7925ms; relay_teams_index_ms=73020ms; relay_teams_query_p50_ms=92ms; relay_teams_query_p95_ms=337ms; leveldb_cpp_index_ms=15884ms
+
+Adopted optimization notes:
+
+RetrieverSource, }, +    retrieval::terms::normalized_terms, storage::{GraphSearchRequest, StorageError}, }; @@ -773,16 +774,7 @@ } fn collect_terms(value: &str, terms: &mut BTreeSet<String>) { -    for token in value -        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) -        .filter(|token| token.len() >= 2) -    { -        let token = token.to_ascii_lowercase(); -        for part in token.split('_').filter(|part| part.len() >= 2) { -            terms.insert(part.to_owned()); -        } -        terms.insert(token); -    } +    terms.extend(normalized_terms(value, 2)); } fn hashed_vector( @@ -946,4 +938,14 @@ assert_eq!(first, second); assert!((cosine_similarity(&first, &second) - 1.0).abs() < 0.000_001); } + +    #[test] +    fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() { +        let labels = vec!["SemanticVectorRecall".to_owned()]; +        let signature = token_signature("GraphRAGContextPack", &labels, None, "abc"); + +        for term in ["semantic", "vector", "recall", "graph", "rag", "context", "pack"] { +            assert!(signature.contains(&term.to_owned()), "missing term {term}"); +        } +    } } tokens used 298,164
 

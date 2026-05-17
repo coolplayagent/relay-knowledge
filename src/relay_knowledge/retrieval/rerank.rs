@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::domain::{RerankDiagnostics, RerankMode, RerankSignal, RetrievalHit};
 
-use super::{LOCAL_RERANK_MODEL, RerankConfig};
+use super::{LOCAL_RERANK_MODEL, RerankConfig, terms::normalized_terms};
 
 const CONTENT_MATCH_WEIGHT: f64 = 0.40;
 const ENTITY_MATCH_WEIGHT: f64 = 0.25;
@@ -159,7 +159,7 @@ fn terms_from_facts(hit: &RetrievalHit) -> BTreeSet<String> {
 fn terms_from_labels(labels: &[String]) -> BTreeSet<String> {
     labels
         .iter()
-        .flat_map(|label| terms_from_text(label).into_iter())
+        .flat_map(|label| normalized_terms(label, 1).into_iter())
         .collect()
 }
 
@@ -176,20 +176,7 @@ fn term_coverage(query_terms: &BTreeSet<String>, candidate_terms: &BTreeSet<Stri
 }
 
 fn terms_from_text(text: &str) -> BTreeSet<String> {
-    let mut terms = BTreeSet::new();
-    let mut current = String::new();
-    for character in text.chars() {
-        if character.is_alphanumeric() {
-            current.extend(character.to_lowercase());
-        } else if !current.is_empty() {
-            terms.insert(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        terms.insert(current);
-    }
-
-    terms
+    normalized_terms(text, 1)
 }
 
 #[cfg(test)]
@@ -223,6 +210,30 @@ mod tests {
         assert_eq!(reranked[0].evidence_id, "ev-target");
         assert_eq!(diagnostics.effective_mode, RerankMode::Local);
         assert!(reranked[0].rerank.is_some());
+    }
+
+    #[test]
+    fn local_rerank_matches_identifier_parts_in_entity_labels() {
+        let hits = vec![
+            hit(
+                "ev-generic",
+                "generic context pack note",
+                &["Runtime"],
+                vec![RetrieverSource::Bm25],
+                0.12,
+            ),
+            hit(
+                "ev-label",
+                "opaque retrieval note",
+                &["GraphRAGContextPack"],
+                vec![RetrieverSource::Semantic, RetrieverSource::Vector],
+                0.10,
+            ),
+        ];
+
+        let (reranked, _) = rerank_hits("graph rag context pack", hits, &RerankConfig::local());
+
+        assert_eq!(reranked[0].evidence_id, "ev-label");
     }
 
     #[test]

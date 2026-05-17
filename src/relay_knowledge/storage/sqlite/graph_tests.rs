@@ -128,6 +128,42 @@ async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants()
 }
 
 #[tokio::test]
+async fn semantic_and_vector_retrieval_match_identifier_parts_from_labels() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let scope = SourceScope::parse("docs").expect("scope should parse");
+    let evidence = EvidenceRecord::new(
+        "ev-label",
+        scope,
+        "Opaque retrieval backend note",
+        vec!["SemanticVectorRecall".to_owned()],
+    )
+    .expect("evidence should validate");
+    store
+        .commit_mutation_batch(GraphMutationBatch::new(vec![evidence]).expect("batch"))
+        .await
+        .expect("commit should succeed");
+
+    let hits = store
+        .search(GraphSearchRequest {
+            query: "semantic vector recall".to_owned(),
+            source_scope: Some("docs".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+            disabled_retriever_sources: Vec::new(),
+        })
+        .await
+        .expect("search should succeed");
+
+    assert_eq!(hits[0].evidence_id, "ev-label");
+    assert!(
+        hits[0]
+            .retriever_sources
+            .contains(&RetrieverSource::Semantic)
+    );
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
+}
+
+#[tokio::test]
 async fn derived_retrieval_scores_older_documents_before_truncating() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     commit_evidence(
