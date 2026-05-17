@@ -120,7 +120,7 @@ overrides come from runtime environment variables:
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`, with aliases
   `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` and
   `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`; when unset, the default is
-  `opencode run --file {prompt_file} "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests."`
+  `opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}`
 - Shared timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
 
 Custom CLI commands receive the judge prompt on stdin by default. Command

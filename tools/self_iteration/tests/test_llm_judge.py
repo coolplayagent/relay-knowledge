@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from llm_judge import (  # noqa: E402
     DEFAULT_CLI_JUDGE_COMMAND,
+    cli_command,
     evaluate_research_judge_suite,
     judge_outcome,
     judge_settings_from_env,
@@ -83,6 +84,24 @@ class LlmJudgeTests(unittest.TestCase):
         self.assertTrue(settings.configured)
         self.assertEqual(settings.backend, "cli")
         self.assertEqual(settings.cli_command, DEFAULT_CLI_JUDGE_COMMAND)
+
+    def test_default_opencode_command_keeps_message_before_file_attachment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prompt_file = root / "judge-prompt.txt"
+            command, stdin = cli_command(
+                DEFAULT_CLI_JUDGE_COMMAND,
+                workspace=root,
+                prompt_file=prompt_file,
+                prompt="judge prompt body",
+            )
+
+        file_index = command.index("--file")
+        self.assertIsNone(stdin)
+        self.assertEqual(command[:2], ["opencode", "run"])
+        self.assertIn("strict JSON", " ".join(command[2:file_index]))
+        self.assertEqual(command[file_index + 1], str(prompt_file))
+        self.assertEqual(file_index + 2, len(command))
 
     def test_http_backend_requires_all_runtime_env(self) -> None:
         settings = judge_settings_from_env(

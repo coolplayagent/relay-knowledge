@@ -25,8 +25,9 @@ DEFAULT_DIMENSIONS = [
     "anti_fixture_special_casing",
 ]
 DEFAULT_CLI_JUDGE_COMMAND = (
-    'opencode run --file {prompt_file} '
-    '"Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests."'
+    'opencode run '
+    '"Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." '
+    "--file {prompt_file}"
 )
 DISABLED_BACKENDS = {"none", "off", "disabled", "skip", "false"}
 
