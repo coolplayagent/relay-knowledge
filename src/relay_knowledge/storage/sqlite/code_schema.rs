@@ -220,6 +220,8 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
             ON code_repository_chunks(source_scope, path);
+        CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup
+            ON code_repository_chunks(source_scope, symbol_snapshot_id);
         CREATE INDEX IF NOT EXISTS code_repository_scopes_lookup
             ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
         ",
@@ -373,7 +375,8 @@ fn backfill_search_calls(connection: &Connection) -> Result<(), StorageError> {
             source_scope, document_kind, record_id, path, language_id, content
         )
         SELECT source_scope, 'call', call_id, path, '',
-               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '')
+               coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
+               coalesce(target_hint, '') || ' ' || path
         FROM code_repository_calls
         ",
         [],

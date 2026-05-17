@@ -73,8 +73,10 @@ fn search_symbols(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_query = symbol_fts_match_query(&request.query);
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind
         FROM code_repository_symbols
@@ -85,16 +87,20 @@ fn search_symbols(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -136,6 +142,7 @@ fn search_symbols(
                 [
                     row.name.as_str(),
                     row.qualified_name.as_str(),
+                    row.kind.as_str(),
                     row.signature.as_str(),
                     row.doc_comment.as_deref().unwrap_or_default(),
                     row.path.as_str(),
@@ -188,7 +195,9 @@ fn search_references(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
                r.line_start, r.line_end, r.target_hint, r.resolution_state,
@@ -206,15 +215,20 @@ fn search_references(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'reference'
+                {fts_path_filter}
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY r.path ASC, r.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -286,7 +300,9 @@ fn search_calls(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
                c.line_start, c.line_end, c.target_hint, c.resolution_state,
@@ -302,6 +318,8 @@ fn search_calls(
         LEFT JOIN code_repository_chunks caller_chunk
             ON caller_chunk.source_scope = c.source_scope
            AND caller_chunk.symbol_snapshot_id = c.caller_symbol_snapshot_id
+           AND caller_chunk.line_start <= c.line_start
+           AND caller_chunk.line_end >= c.line_start
         LEFT JOIN code_repository_symbols callee
             ON callee.source_scope = c.source_scope
            AND callee.symbol_snapshot_id = c.callee_symbol_snapshot_id
@@ -312,15 +330,20 @@ fn search_calls(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'call'
+                {fts_path_filter}
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -362,7 +385,16 @@ fn search_calls(
                 CodeQueryKind::Callers => [&row.callee_name, ""],
                 _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
             };
-            let score = score_text(&query, search_fields)
+            let base_score = score_text(&query, search_fields);
+            let score = base_score
+                + directional_call_context_bonus(
+                    &query,
+                    base_score,
+                    row.caller_name.as_deref(),
+                    &row.callee_name,
+                    &row.path,
+                    request,
+                )
                 + callee_related_name_bonus(&query, &row.callee_name, request);
             (score > 0.0).then(|| {
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
@@ -416,7 +448,9 @@ fn search_imports(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
                i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
         FROM code_repository_imports i
@@ -429,15 +463,20 @@ fn search_imports(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'import'
+                {fts_path_filter}
+              ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY i.path ASC, i.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -505,7 +544,9 @@ fn search_chunks(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = hybrid_chunk_fts_match_query(&request.query);
-    let sql = "
+    let fts_path_filter = fts_path_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
                symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
@@ -522,16 +563,20 @@ fn search_chunks(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'chunk'
+                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
         ORDER BY c.path ASC, c.line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -558,6 +603,7 @@ fn search_chunks(
         },
     )?;
     let query = request.query.to_lowercase();
+    let declaration_terms = query_terms(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -566,7 +612,8 @@ fn search_chunks(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(&query, [&row.content, &row.path]);
+            let score = score_text(&query, [&row.content, &row.path])
+                + declaration_chunk_bonus(&declaration_terms, &row.content);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -803,7 +850,11 @@ fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit
 fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
     let fields = fields
         .into_iter()
-        .map(|field| field.as_ref().to_lowercase())
+        .map(|field| {
+            let original = field.as_ref().trim().to_owned();
+            let lower = original.to_lowercase();
+            (original, lower)
+        })
         .collect::<Vec<_>>();
     let mut score = 0.0;
     for token in query.split_whitespace() {
@@ -812,13 +863,12 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
             continue;
         }
         let mut token_score = 0.0_f64;
-        for field in &fields {
-            let field = field.trim();
-            if field == token {
+        for (field, lower_field) in &fields {
+            if lower_field == &token {
                 token_score = token_score.max(4.0);
-            } else if identifier_tokens(field).any(|candidate| candidate == token) {
+            } else if identifier_field_matches_token(field, &token) {
                 token_score = token_score.max(2.0);
-            } else if field.contains(&token) {
+            } else if lower_field.contains(&token) {
                 token_score = token_score.max(0.5);
             }
         }
@@ -826,6 +876,67 @@ fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) ->
     }
 
     score
+}
+
+fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
+    let abstract_interface = terms.iter().any(|term| term == "interface")
+        && content.contains("virtual ")
+        && (content.contains("= 0;") || content.contains("=0;"));
+    let declaration_lines = if abstract_interface {
+        0
+    } else {
+        content
+            .lines()
+            .map(str::trim)
+            .filter(|line| declaration_line_is_prototype(line))
+            .take(2)
+            .count()
+    };
+    if !abstract_interface && declaration_lines < 2 {
+        return 0.0;
+    }
+
+    let lower_content = content.to_lowercase();
+    let matched_terms = terms
+        .iter()
+        .filter(|term| {
+            term.len() >= 3
+                && (identifier_field_matches_token(content, term)
+                    || lower_content.contains(term.as_str()))
+        })
+        .count();
+    if matched_terms < 3 {
+        return 0.0;
+    }
+
+    if abstract_interface {
+        3.0
+    } else if declaration_lines >= 2 {
+        2.0
+    } else {
+        0.0
+    }
+}
+
+fn declaration_line_is_prototype(line: &str) -> bool {
+    line.ends_with(';')
+        && line.contains('(')
+        && !line.contains("->")
+        && !line.contains('.')
+        && !line.starts_with("return ")
+}
+
+fn identifier_field_matches_token(field: &str, token: &str) -> bool {
+    identifier_tokens(field).any(|candidate| {
+        candidate.eq_ignore_ascii_case(token)
+            || candidate
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .any(|part| part.eq_ignore_ascii_case(token))
+            || camel_case_terms(candidate)
+                .iter()
+                .any(|part| part.eq_ignore_ascii_case(token))
+    })
 }
 
 fn score_exact_path(query: &str, path: &str) -> f64 {
@@ -876,6 +987,25 @@ fn symbol_name_query_bonus(query: &str, name: &str, request: &CodeRetrievalReque
         .all(|term| name_tokens.iter().any(|token| token == term))
     {
         2.0
+    } else {
+        partial_symbol_name_query_bonus(&query_terms, &name_tokens)
+    }
+}
+
+fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String]) -> f64 {
+    let matched_terms = query_terms
+        .iter()
+        .filter(|term| {
+            term.len() >= 3
+                && name_tokens.iter().any(|token| {
+                    token == *term
+                        || (token.len() >= 3
+                            && (term.starts_with(token) || token.starts_with(term.as_str())))
+                })
+        })
+        .count();
+    if matched_terms >= 3 {
+        (matched_terms as f64 * 0.75).min(2.0)
     } else {
         0.0
     }
@@ -958,6 +1088,24 @@ fn callee_related_name_bonus(
         0.35 + (1.2 / callee_identifier_part_count(callee_name))
     } else {
         0.0
+    }
+}
+
+fn directional_call_context_bonus(
+    query: &str,
+    base_score: f64,
+    caller_name: Option<&str>,
+    callee_name: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0 {
+        return 0.0;
+    }
+    match request.code_query_kind {
+        CodeQueryKind::Callers => 0.35 * score_text(query, [caller_name.unwrap_or_default(), path]),
+        CodeQueryKind::Callees => 0.35 * score_text(query, [callee_name, path]),
+        _ => 0.0,
     }
 }
 
@@ -1118,6 +1266,14 @@ fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
 }
 
 fn fts_match_query(query: &str) -> String {
+    fts_match_query_with_operator(query, " ")
+}
+
+fn symbol_fts_match_query(query: &str) -> String {
+    fts_match_query_with_operator(query, " OR ")
+}
+
+fn fts_match_query_with_operator(query: &str, operator: &str) -> String {
     let terms = query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .map(str::trim)
@@ -1128,7 +1284,7 @@ fn fts_match_query(query: &str) -> String {
     if terms.is_empty() {
         "relayknowledgeunlikelyemptyquerytoken".to_owned()
     } else {
-        terms.join(" ")
+        terms.join(operator)
     }
 }
 
@@ -1150,18 +1306,76 @@ fn hybrid_chunk_fts_match_query(query: &str) -> String {
 }
 
 fn fts_values_for_limited(
-    repository_id: &str,
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
     fts_query: &str,
     fts_limit: usize,
     limit: usize,
 ) -> Vec<Value> {
-    vec![
-        Value::Text(repository_id.to_owned()),
+    let mut values = vec![
+        Value::Text(source_scope.to_owned()),
         Value::Text(fts_query.to_owned()),
-        Value::Text(repository_id.to_owned()),
-        Value::Integer(fts_limit as i64),
-        Value::Integer(limit as i64),
-    ]
+        Value::Text(source_scope.to_owned()),
+    ];
+    push_fts_path_filter_values(&mut values, &status.path_filters);
+    push_fts_path_filter_values(&mut values, &request.repository.path_filters);
+    values.push(Value::Integer(fts_limit as i64));
+    values.push(Value::Integer(limit as i64));
+
+    values
+}
+
+fn fts_path_filter_sql(status: &CodeRepositoryStatus, request: &CodeRetrievalRequest) -> String {
+    let mut clauses = Vec::new();
+    push_fts_path_filter_sql(&mut clauses, &status.path_filters);
+    push_fts_path_filter_sql(&mut clauses, &request.repository.path_filters);
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", clauses.join(" AND "))
+    }
+}
+
+fn push_fts_path_filter_sql(clauses: &mut Vec<String>, filters: &[String]) {
+    let clauses_for_filters = filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+        .map(|_| "(path = ? OR path LIKE ? ESCAPE '\\')".to_owned())
+        .collect::<Vec<_>>();
+    if !clauses_for_filters.is_empty() {
+        clauses.push(format!("({})", clauses_for_filters.join(" OR ")));
+    }
+}
+
+fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    for filter in filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+    {
+        values.push(Value::Text(filter.clone()));
+        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
+    }
+}
+
+fn normalized_sql_path_filter(filter: &str) -> Option<String> {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+    (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
+}
+
+fn escape_sql_like(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    escaped
 }
 
 #[cfg(test)]

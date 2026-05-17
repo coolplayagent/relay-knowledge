@@ -4,7 +4,7 @@ use crate::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositorySelector,
         CodeRetrievalLayer, FreshnessPolicy,
     },
-    storage::SqliteGraphStore,
+    storage::{SqliteGraphStore, StorageError},
 };
 
 #[path = "code_test_support.rs"]
@@ -111,6 +111,33 @@ async fn chunk_hits_with_symbol_snapshots_include_canonical_identity() {
         hits[0].canonical_symbol_id.as_deref(),
         Some("repo://repo/src::lib.rs::target")
     );
+}
+
+#[tokio::test]
+async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+
+    let index_exists = store
+        .run(|connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM sqlite_master
+                        WHERE type = 'index'
+                          AND name = 'code_repository_chunks_symbol_lookup'
+                    )
+                    ",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(StorageError::from)
+        })
+        .await
+        .expect("schema index check should succeed");
+
+    assert!(index_exists);
 }
 
 #[tokio::test]

@@ -28,6 +28,7 @@ research notes, benchmark records, and verification records.
 - [Hybrid Retrieval Context Pack](02-capabilities/hybrid-retrieval-context-pack.md): retriever sources, RRF fusion, structured graph facts, graph paths, and backend status.
 - [Semantic/Vector Provider Backend](02-capabilities/semantic-vector-provider-backend.md): external embedding provider setup, redacted diagnostics, Web provider panels, and degradation behavior.
 - [Code Repository Tree-sitter Retrieval](02-capabilities/code-repository-tree-sitter-retrieval.md): repository indexing, retrieval, reports, and impact analysis.
+- [Documentation Refresh Audit 2026-05-17](02-capabilities/documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
 - [Documentation Refresh Audit 2026-05-14](02-capabilities/documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and remaining implementation work.
 
 ## Book 3: Architecture Specifications

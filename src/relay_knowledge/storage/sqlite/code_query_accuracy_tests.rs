@@ -73,6 +73,33 @@ async fn full_scope_serves_narrower_query_filters() {
 }
 
 #[tokio::test]
+async fn full_scope_path_filters_prune_fts_candidates_before_limit() {
+    let store =
+        store_with_repository_snapshot(snapshot_with_path_filtered_candidate_overflow()).await;
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", vec!["src".to_owned()], Vec::new())
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Definition,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("path-filtered full-scope query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/target.rs");
+    assert_eq!(hits[0].excerpt, "fn target()");
+}
+
+#[tokio::test]
 async fn restrictive_scope_rejects_query_filters_outside_indexed_scope() {
     let store = store_with_repository_snapshot_and_filters(
         snapshot_with_target_symbol(),
@@ -263,6 +290,55 @@ async fn exact_definition_queries_rank_name_match_when_many_signatures_mention_i
 }
 
 #[tokio::test]
+async fn fuzzy_definition_queries_rank_multi_part_symbol_names_before_single_token_noise() {
+    let store = store_with_repository_snapshot(snapshot_with_archive_output_dir_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "archive old eval output directory timestamp suffix",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams_evals/checkpoint.py");
+    assert!(hits[0].excerpt.contains("fn archive_output_dir()"));
+}
+
+#[tokio::test]
+async fn fuzzy_symbol_queries_recall_identifier_when_extra_terms_are_not_in_symbol_document() {
+    let store =
+        store_with_repository_snapshot(snapshot_with_checkpoint_version_constant_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "checkpoint metadata version constant",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "src/relay_teams_evals/checkpoint.py");
+    assert!(hits[0].excerpt.contains("_CHECKPOINT_VERSION"));
+}
+
+#[tokio::test]
 async fn scoped_definition_queries_rank_scoped_member_before_token_permutations() {
     let store = store_with_repository_snapshot(snapshot_with_scoped_cpp_definition_noise()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -333,6 +409,54 @@ async fn callee_queries_rank_resolved_edges_before_ambiguous_ties() {
 }
 
 #[tokio::test]
+async fn caller_queries_keep_best_ranked_fts_candidates_before_bounded_scoring() {
+    let store = store_with_repository_snapshot(snapshot_with_many_caller_candidate_ties()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "TargetCall exactOwner",
+                selector,
+                CodeQueryKind::Callers,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].excerpt, "exactOwner calls TargetCall");
+    assert_eq!(hits[0].path, "src/exact_owner.py");
+}
+
+#[tokio::test]
+async fn caller_queries_rank_matching_caller_context_before_same_callee_noise() {
+    let store = store_with_repository_snapshot(snapshot_with_same_callee_context_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "TargetCall exactOwner",
+                selector,
+                CodeQueryKind::Callers,
+                3,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].excerpt, "exactOwner calls TargetCall");
+    assert_eq!(hits[0].path, "src/z_exact_owner.py");
+}
+
+#[tokio::test]
 async fn callee_queries_prioritize_related_callee_identifier_parts() {
     let store = store_with_repository_snapshot(snapshot_with_related_callee_names()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
@@ -375,6 +499,7 @@ async fn caller_queries_use_caller_chunk_excerpt_when_available() {
         .await
         .expect("caller query should succeed");
 
+    assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "db/db_impl.cc");
     assert_eq!(
         hits[0].excerpt,
@@ -404,6 +529,54 @@ async fn hybrid_chunk_queries_do_not_require_every_query_term_in_one_candidate()
 
     assert_eq!(hits[0].path, "src/relay_teams_evals/checkpoint.py");
     assert!(hits[0].excerpt.contains("EvalCheckpointStore"));
+}
+
+#[tokio::test]
+async fn hybrid_chunk_queries_prioritize_abstract_interfaces_over_usage_fixtures() {
+    let store = store_with_repository_snapshot(snapshot_with_cache_interface_chunk_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "cache interface lookup insert total charge lru",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "include/leveldb/cache.h");
+    assert!(hits[0].excerpt.contains("class LEVELDB_EXPORT Cache"));
+}
+
+#[tokio::test]
+async fn hybrid_chunk_queries_prioritize_header_declarations_for_api_context() {
+    let store = store_with_repository_snapshot(snapshot_with_recovery_manifest_chunk_noise()).await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "Recover descriptor save_manifest VersionEdit",
+                selector,
+                CodeQueryKind::Hybrid,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].path, "db/db_impl.h");
+    assert!(hits[0].excerpt.contains("RecoverLogFile"));
 }
 
 #[tokio::test]
@@ -564,6 +737,58 @@ fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
     }
 }
 
+fn snapshot_with_path_filtered_candidate_overflow() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..600 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("vendor/noise_{index:03}.rs");
+        files.push(file(&file_id, &path, "rust", CodeParseStatus::Parsed, None));
+        symbols.push(symbol(
+            &format!("noise-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "target",
+        ));
+    }
+
+    files.push(file(
+        "target-file",
+        "src/target.rs",
+        "rust",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    symbols.push(symbol(
+        "target-symbol",
+        "target-file",
+        "src/target.rs",
+        "target",
+    ));
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
 fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
     let mut files = Vec::new();
     let mut diagnostics = Vec::new();
@@ -607,6 +832,178 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics,
+    }
+}
+
+fn snapshot_with_archive_output_dir_noise() -> CodeIndexSnapshot {
+    let mut target = symbol(
+        "checkpoint-symbol",
+        "checkpoint-file",
+        "src/relay_teams_evals/checkpoint.py",
+        "archive_output_dir",
+    );
+    let mut output_noise = symbol(
+        "output-symbol",
+        "output-file",
+        "src/relay_teams/sessions/runs/background_tasks/projection.py",
+        "_OUTPUT_TRUNCATED_SUFFIX",
+    );
+    let mut directory_noise = symbol(
+        "directory-symbol",
+        "directory-file",
+        "src/relay_teams/workspace/directory_picker.py",
+        "_pick_directory_macos",
+    );
+    let mut archive_noise = symbol(
+        "archive-symbol",
+        "archive-file",
+        "tests/unit_tests/net/test_github_cli.py",
+        "test_extract_zip_replaces_existing_target",
+    );
+    for symbol in [
+        &mut target,
+        &mut output_noise,
+        &mut directory_noise,
+        &mut archive_noise,
+    ] {
+        symbol.doc_comment = Some("archive old eval output directory timestamp suffix".to_owned());
+    }
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "checkpoint-file",
+                "src/relay_teams_evals/checkpoint.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "output-file",
+                "src/relay_teams/sessions/runs/background_tasks/projection.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "directory-file",
+                "src/relay_teams/workspace/directory_picker.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "archive-file",
+                "tests/unit_tests/net/test_github_cli.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![target, output_noise, directory_noise, archive_noise],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_checkpoint_version_constant_noise() -> CodeIndexSnapshot {
+    let mut target = symbol(
+        "checkpoint-version-symbol",
+        "checkpoint-file",
+        "src/relay_teams_evals/checkpoint.py",
+        "_CHECKPOINT_VERSION",
+    );
+    target.kind = "constant".to_owned();
+    target.signature = "_CHECKPOINT_VERSION = 1".to_owned();
+
+    let mut checkpoint_noise = symbol(
+        "checkpoint-noise",
+        "checkpoint-noise-file",
+        "src/relay_teams_evals/reporting.py",
+        "checkpoint_metadata_report",
+    );
+    checkpoint_noise.signature = "def checkpoint_metadata_report() -> None:".to_owned();
+
+    let mut version_noise = symbol(
+        "version-noise",
+        "version-noise-file",
+        "src/relay_teams_evals/versioning.py",
+        "metadata_version_report",
+    );
+    version_noise.signature = "def metadata_version_report() -> None:".to_owned();
+
+    let mut constant_noise = symbol(
+        "constant-noise",
+        "constant-noise-file",
+        "src/relay_teams_evals/constants.py",
+        "metadata_constant_report",
+    );
+    constant_noise.signature = "def metadata_constant_report() -> None:".to_owned();
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "checkpoint-file",
+                "src/relay_teams_evals/checkpoint.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "checkpoint-noise-file",
+                "src/relay_teams_evals/reporting.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "version-noise-file",
+                "src/relay_teams_evals/versioning.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "constant-noise-file",
+                "src/relay_teams_evals/constants.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: vec![target, checkpoint_noise, version_noise, constant_noise],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
     }
 }
 
@@ -661,6 +1058,126 @@ fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
     }
 }
 
+fn snapshot_with_many_caller_candidate_ties() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut calls = Vec::new();
+    for index in 0..550 {
+        let file_id = format!("noise-file-{index}");
+        let path = format!("src/exactOwner/noise_{index}.py");
+        files.push(file(
+            &file_id,
+            &path,
+            "python",
+            CodeParseStatus::Parsed,
+            None,
+        ));
+        let mut call = call(&format!("noise-call-{index}"), &file_id, &path);
+        call.caller_name = Some(format!("noiseCaller{index}"));
+        call.callee_name = "TargetCall".to_owned();
+        call.target_hint = Some("TargetCall".to_owned());
+        calls.push(call);
+    }
+
+    files.push(file(
+        "exact-file",
+        "src/exact_owner.py",
+        "python",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    let mut exact = call("exact-call", "exact-file", "src/exact_owner.py");
+    exact.caller_name = Some("exactOwner".to_owned());
+    exact.callee_name = "TargetCall".to_owned();
+    exact.target_hint = Some("TargetCall".to_owned());
+    exact.resolution_state = "resolved".to_owned();
+    exact.confidence_basis_points = 8_000;
+    exact.confidence_tier = "inferred".to_owned();
+    calls.push(exact);
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls,
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_same_callee_context_noise() -> CodeIndexSnapshot {
+    let mut first_noise = call("first-noise-call", "first-noise-file", "src/a_noise.py");
+    first_noise.caller_name = Some("otherOwner".to_owned());
+    first_noise.callee_name = "TargetCall".to_owned();
+    first_noise.target_hint = Some("TargetCall".to_owned());
+
+    let mut second_noise = call("second-noise-call", "second-noise-file", "src/b_noise.py");
+    second_noise.caller_name = Some("anotherOwner".to_owned());
+    second_noise.callee_name = "TargetCall".to_owned();
+    second_noise.target_hint = Some("TargetCall".to_owned());
+
+    let mut exact = call("exact-call", "exact-file", "src/z_exact_owner.py");
+    exact.caller_name = Some("exactOwner".to_owned());
+    exact.callee_name = "TargetCall".to_owned();
+    exact.target_hint = Some("TargetCall".to_owned());
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "first-noise-file",
+                "src/a_noise.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "second-noise-file",
+                "src/b_noise.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "exact-file",
+                "src/z_exact_owner.py",
+                "python",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![first_noise, second_noise, exact],
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
 fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
     let mut caller = symbol(
         "sanitize-options",
@@ -705,13 +1222,28 @@ fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![call],
-        chunks: vec![chunk(
-            "sanitize-options-chunk",
-            "db-impl-source",
-            "db/db_impl.cc",
-            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
-            Some("sanitize-options"),
-        )],
+        chunks: vec![
+            RepositoryCodeChunkRecord {
+                line_range: range(110, 115),
+                ..chunk(
+                    "sanitize-options-prologue",
+                    "db-impl-source",
+                    "db/db_impl.cc",
+                    "Options SanitizeOptions(const Options& src) {\n    Options result;",
+                    Some("sanitize-options"),
+                )
+            },
+            RepositoryCodeChunkRecord {
+                line_range: range(116, 124),
+                ..chunk(
+                    "sanitize-options-call-site",
+                    "db-impl-source",
+                    "db/db_impl.cc",
+                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}",
+                    Some("sanitize-options"),
+                )
+            },
+        ],
         diagnostics: Vec::new(),
     }
 }
@@ -748,6 +1280,114 @@ fn snapshot_with_eval_checkpoint_chunk() -> CodeIndexSnapshot {
             "class EvalCheckpointStore:\n    def ensure_initialized(self, signature):\n        raise ValueError(\"Checkpoint signature does not match\")\n\n    def append_result(self, result):\n        self._results_path.write_text(result.model_dump_json())",
             None,
         )],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_cache_interface_chunk_noise() -> CodeIndexSnapshot {
+    let target = chunk(
+        "cache-interface-chunk",
+        "cache-header",
+        "include/leveldb/cache.h",
+        "class LEVELDB_EXPORT Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge,\n                         void (*deleter)(const Slice& key, void* value)) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};",
+        None,
+    );
+    let noise = chunk(
+        "cache-fixture-chunk",
+        "cache-fixture",
+        "benchmarks/cache_lru_fixture.cc",
+        "class CacheFixture {\n public:\n  CacheFixture() : cache_(NewLRUCache(kCacheSize)) {}\n  int Lookup(int key) { return cache_->Lookup(EncodeKey(key)) == nullptr ? -1 : 0; }\n  void Insert(int key, int value, int charge = 1) { cache_->Insert(EncodeKey(key), EncodeValue(value), charge, nullptr); }\n  size_t TotalCharge() const { return cache_->TotalCharge(); }\n};",
+        None,
+    );
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "cache-header",
+                "include/leveldb/cache.h",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "cache-fixture",
+                "benchmarks/cache_lru_fixture.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![target, noise],
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_recovery_manifest_chunk_noise() -> CodeIndexSnapshot {
+    let target = chunk(
+        "recover-header-chunk",
+        "db-impl-header",
+        "db/db_impl.h",
+        "class DBImpl {\n  // Switches to a new log-file/memtable and writes a new descriptor iff successful.\n  Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,\n                        VersionEdit* edit, SequenceNumber* max_sequence)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit, Version* base)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};",
+        None,
+    );
+    let noise = chunk(
+        "recover-implementation-chunk",
+        "db-impl-source",
+        "db/db_impl.cc",
+        "Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,\n                              VersionEdit* edit, SequenceNumber* max_sequence) {\n  if (*save_manifest) {\n    descriptor_log_->AddRecord(edit->Encode());\n  }\n  return Status::OK();\n}",
+        None,
+    );
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file(
+                "db-impl-header",
+                "db/db_impl.h",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+            file(
+                "db-impl-source",
+                "db/db_impl.cc",
+                "cpp",
+                CodeParseStatus::Parsed,
+                None,
+            ),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![target, noise],
         diagnostics: Vec::new(),
     }
 }

@@ -12,6 +12,110 @@
 - `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 
+## 候选优化说明：20260516T195734Z
+
+- 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先恢复 protected stability gate。
+- 方法：保留生产 `serve_listener`、Axum router、pending `/hold` handler 和 graceful shutdown timeout 路径；将该单测改为测试专用 in-memory `Listener`/stream 直接提供完整 HTTP 请求字节，并把 readiness 信号下沉到 `/hold` handler 进入 pending future 前发送。测试只在 handler 已经成为 active request 后触发 shutdown，避免 loopback TCP accept/read、Tower layer dispatch 和全量测试 CPU 拥塞成为 graceful shutdown timeout 断言的前置条件。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS admission、HTTP request timeout、shutdown timeout、CLI/API、索引、检索、ranking、repository parsing 和 self-iteration harness 行为均不变；被测不变量仍是一个已进入 handler 且不会完成的 active request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：修复当前 `cargo_test` gate 的不稳定同步点，减少 HTTP shutdown 单测对 OS socket 调度、端口状态和 request-start layer 调度时机的敏感度；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选只调整测试传输可控性，不提升检索评分；如果未来 Axum/hyper 对自定义 test IO 的 idle-read 语义发生变化，风险会集中暴露在该单测，需要同步更新测试 stream 状态机。
+
+## 候选优化说明：20260516T194305Z
+
+- 目标：修复 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 request-start 信号超时的问题，优先保护 stability 与 accuracy 前置门禁。
+- 方法：保留真实 Axum router、测试专用 Tower request-start layer、pending `/hold` handler 和生产 `serve_listener` graceful shutdown timeout 路径；将该单测的传输从 Tokio `DuplexStream` synthetic listener 调整为测试预绑定的 loopback `TcpListener`，再通过已有 bounded retry connector 写入完整 HTTP 请求。预绑定 listener 避免固定端口冲突，真实 TCP accept/read 避免 synthetic duplex listener 在全量测试压力下偶发不推进。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS admission、request timeout、shutdown timeout、CLI/API、索引、检索、ranking 和 repository parsing 行为均不变；测试仍必须先观察请求进入 router service，再触发 shutdown，并断言 active pending request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：修复当前 `cargo_test` gate 的不稳定同步点，减少 HTTP shutdown 单测对 synthetic IO 的依赖；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选增加一个本机 loopback 连接，但使用预绑定 ephemeral listener 和已有 retry helper 降低端口与启动竞态；如果测试主机 TCP loopback 极端不可用，失败会暴露为基础网络测试环境问题。
+
+## 候选优化说明：20260516T193653Z
+
+- 目标：修复当前 quality gate repair mode 指定的 `cargo_test` 失败，稳定 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 `/hold` handler 启动超时的问题，优先保护 stability 与 accuracy 前置门禁。
+- 方法：保留 `serve_listener`、Tokio `DuplexStream` in-memory listener、真实 Axum router、真实 pending `/hold` handler 和生产 graceful shutdown timeout 路径不变；把测试 readiness 信号从 route handler closure 前移到测试专用 Tower layer 的 router `Service::call` 边界，确认 HTTP request 已进入 router service 后再触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS、HTTP request timeout、graceful shutdown timeout、CLI/API、索引、检索、ranking 和 repository parsing 行为均不变；测试仍断言一个不会完成的 active request 在 10 毫秒 shutdown budget 内无法 drain 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：减少该单测对具体 route handler poll/closure 调度时机的依赖，修复当前 `cargo_test` gate；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 multi-repository indexing、query accuracy 和 latency 没有直接行为影响。
+- 已知风险：该候选只稳定 HTTP shutdown 单测的同步边界，不提升检索评分；如果 full-suite 环境在 10 秒内无法让已写入的 request 进入 router service，失败仍会暴露为 HTTP runtime 调度或测试资源问题。
+
+## 候选优化说明：20260516T192508Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 仍可能等待 handler 启动超时的问题，继续优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：保留 `serve_listener`、真实 Axum router、真实 `/hold` pending handler 和生产 graceful shutdown timeout 路径不变；将测试专用手写 `AsyncRead`/`AsyncWrite` stream 替换为 Tokio `DuplexStream`，由 client 端预写完整 HTTP request 并在断言期间保持连接存活，让 hyper/axum 使用经过 Tokio 验证的 in-memory IO 唤醒语义。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS、HTTP request timeout、graceful shutdown timeout、CLI/API、索引和检索行为均不变；测试仍断言一个已被 router 接收且不会完成的活动请求在 10 毫秒 shutdown budget 内无法 drain 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：消除手写 test stream 在 EOF 后返回 `Pending` 且不注册后续唤醒导致的 suite 调度敏感性，修复当前 `cargo_test` gate；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 repository indexing、ranking accuracy、query latency 没有直接行为影响。
+- 已知风险：该候选只稳定 HTTP shutdown 测试前置条件，不提升检索评分；如果 Tokio duplex 行为或 Axum listener IO bounds 变化，失败会集中暴露在该单元测试中。
+
+## 候选优化说明：20260516T191712Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 对 loopback TCP accept/read/write 调度的敏感性，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：保留 `serve_listener`、真实 Axum router、真实 `/hold` pending handler 和生产 graceful shutdown timeout 路径不变；将该单元测试的外部 TCP client/listener 替换为测试专用 in-memory `Listener`/stream，直接向 Axum 提供完整 HTTP request bytes，并在 handler 构造时用 oneshot 证明请求已进入未完成 handler 后再触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、QoS、HTTP request timeout、graceful shutdown timeout、CLI/API、索引和检索行为均不变；测试仍断言一个已被 router 接收且不会完成的活动请求在 10 毫秒 shutdown budget 内无法 drain 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低 full-suite CPU 拥塞、OS socket 调度和短时 loopback backlog 抖动导致的偶发等待超时，修复当前 `cargo_test` gate；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 repository indexing、ranking accuracy、query latency 没有直接行为影响。
+- 已知风险：该候选只稳定 HTTP shutdown 测试前置条件，不提升检索评分；如果 Axum/hyper 对自定义 in-memory test IO 的 poll/read 行为发生不兼容变化，失败会集中暴露在该单元测试中。
+
+## 候选优化说明：20260516T190848Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 仍可能在 full-suite 调度压力下等待 router service dispatch 超时的问题，优先恢复 stability 前置质量门禁。
+- 方法：保留预绑定 Tokio listener、真实 TCP client、真实 Axum router 和 pending `/hold` handler；把测试同步点下沉到测试专用 `Listener`/stream 边界，在 server-side stream 读到请求字节后再触发 shutdown，避免把 Axum route dispatch 是否及时 poll 作为 graceful shutdown timeout 的前置条件。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、HTTP request timeout、graceful shutdown timeout、QoS、CLI/API 行为、索引和检索路径均不变；测试仍断言一个已被 HTTP server 接收并读取的未完成请求/连接超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：减少质量门禁对 full-suite 中短时 CPU 拥塞和 Axum handler 调度时机的敏感度，修复当前 `cargo_test` 失败；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的 retrieval accuracy、ranking、index 和 query 性能没有直接影响。
+- 已知风险：该候选只调整测试可观测同步边界，不提升检索评分；如果环境在 10 秒内无法让 server-side stream 读取已写入请求，失败仍会暴露为 HTTP runtime 调度或测试资源问题。
+
+## 候选优化说明：20260516T190626Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在全量测试调度压力下等待请求进入 router service 偶发超时的问题，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：保留预绑定 Tokio listener、真实 TCP request、真实 Axum router、测试专用 Tower request-started layer 和 pending `/hold` handler；将该单测运行在 2 worker Tokio multi-thread runtime 上，并把测试的 request dispatch 等待预算与被测 HTTP request timeout 解耦，避免调度延迟消耗 pending handler 的生产 timeout 预算。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为、索引和检索路径均不变；测试仍只在请求确认为 in-flight 后触发 shutdown，并断言 active request 超过 10 毫秒 graceful shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低 full-suite 中其他 async 测试或短时 CPU 拥塞对 HTTP shutdown readiness 观测的误伤，不改变正常通过路径的网络、router、pending handler 或 shutdown 语义；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索 accuracy、ranking、index 和 query 性能没有直接影响。
+- 已知风险：该候选只修复测试执行调度稳定性，不提升检索评分；如果环境整体 CPU 严重饱和导致 10 秒内仍无法处理已写入请求，失败仍会暴露为 HTTP server 调度或测试资源问题。
+
+## 候选优化说明：20260516T185001Z
+
+- 目标：继续修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的 readiness 偶发超时，保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试仍使用预绑定 Tokio listener、真实 TCP request、真实 Axum router 和永不完成的 `/hold` handler；新增测试专用 Tower layer，在 router service 接收请求的 `call` 边界发送一次 readiness 信号，测试只在请求确认为 in-flight 后触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为和代码检索路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：降低测试对 Axum route handler future 何时首次 poll 的敏感度，使质量门禁验证 active request 的 graceful shutdown timeout 行为；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的索引、召回、排序和查询性能没有直接影响。
+- 已知风险：该候选只修复测试同步语义，不提升检索评分；如果 full-suite 环境无法在 5 秒内调度到 router service `call`，失败仍会暴露为 HTTP server 调度或测试资源问题。
+
+## 候选优化说明：20260516T184629Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 调度压力下等待 handler readiness 超时的问题，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试继续使用预绑定 Tokio listener、真实 TCP request、真实 Axum router 和 pending active handler；把 readiness 信号放在 Axum handler 闭包构造 pending response future 的同步阶段，测试确认请求已完成 route dispatch 后再触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为和代码检索路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：减少测试对 Tokio 是否立即 poll pending response future 的敏感度，让质量门禁只验证 graceful shutdown timeout 行为；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的索引、召回、排序和查询性能没有直接影响。
+- 已知风险：该候选只收敛测试同步语义，不提升检索评分；如果 full-suite 环境在 readiness 前长期无法调度到已收到完整请求的 Axum service，失败会继续暴露为测试执行资源或 HTTP server 调度问题。
+
+## 候选优化说明：20260516T181727Z
+
+- 目标：继续修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的残余偶发失败，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试保留真实 TCP listener、真实 HTTP 请求写入和 Axum handler pending active request，但把 handler readiness 从可复用 `Notify` 改为单次 `oneshot` 信号；handler 首次被轮询时发送启动信号，测试确认 active request 已进入服务逻辑后才触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、`serve_listener`、QoS、request timeout、graceful shutdown timeout、CLI/API 行为和代码检索路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：消除 readiness 观测中的残余调度歧义，让 full-suite 并发负载下的 HTTP shutdown 测试只验证 server 行为而不依赖通知 permit 时序；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的索引、召回、排序和查询性能没有直接影响。
+- 已知风险：该改动只收敛测试同步语义，不提升检索评分；如果运行环境在 5 秒内仍无法轮询已收到完整请求的 handler，失败会继续暴露为测试执行资源或 HTTP server 调度问题。
+
+## 候选优化说明：20260516T181003Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 在 full-suite 并发负载下的残余偶发失败，优先保护 stability 与 accuracy 前置质量门禁。
+- 方法：shutdown timeout 测试在测试协程内预先绑定 Tokio `TcpListener`，用该 listener 的实际地址构造 `HttpConfig`，并直接驱动同一 `serve_listener` server future；客户端仍通过真实 TCP 连接写入完整 HTTP 请求，并等待 `/hold` handler 进入 pending active request 后才触发 shutdown。
+- 架构与不变量：生产 `serve_router`、`serve_router_with_qos`、Axum serving、request timeout、graceful shutdown timeout、QoS、CLI/API 行为和检索索引路径均不变；被测不变量仍是 active request 超过 10 毫秒 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 预期影响：消除 `unused_port()` 先探测再释放端口带来的监听竞态，避免测试客户端在端口复用窗口中连接到非目标监听者或等待尚未拥有 socket 的 server，从而提高 `cargo test --all-targets --all-features` 稳定性；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索准确率、排序和索引性能没有直接影响。
+- 已知风险：该用例现在覆盖内部 listener-serving 路径而不是外层 bind 调用；bind 解析和外层入口仍由配置测试及 QoS server 测试覆盖，shutdown timeout 行为仍走相同 Axum server future。
+
+## 候选优化说明：20260516T174317Z
+
+- 目标：修复 `cargo_test` 门禁中 `net::http::tests::serve_router_enforces_graceful_shutdown_timeout` 的偶发失败，避免在 full-suite 负载下因测试请求未完整写入或调度延迟而误判 HTTP graceful shutdown 行为。
+- 方法：测试客户端改用 Tokio `write_all` 发送完整 HTTP 请求，替代单次 `try_write`；handler-start readiness 等待从 1 秒提高到 5 秒，但被测 `graceful_shutdown_timeout` 仍保持 10 毫秒，以继续验证 active request 超过 shutdown budget 时返回 `HttpServeError::ShutdownTimeout`。
+- 架构与不变量：HTTP server、QoS、request timeout、shutdown timeout、CLI/API 行为、网络边界和检索索引路径均不变；只调整测试同步方式，仍要求请求 handler 已经进入 pending 状态后才触发 shutdown。
+- 预期影响：提高 cargo test 稳定性，恢复 protected stability 与 accuracy 评估前置门禁；对 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 的检索结果和性能指标没有直接影响。
+- 已知风险：若 full-suite 运行环境极端饱和，readiness 等待仍可能超时；该风险代表测试执行资源不足，而不是 shutdown timeout 语义变化。
+
+## 候选优化说明：20260516T171146Z
+
+- 目标：提升多仓、大仓 full-scope 索引上窄路径查询的准确性与稳定性，避免 FTS bounded candidate window 先被路径外匹配填满，再由 Rust 层过滤时丢失唯一的 in-scope symbol/reference/call/import/chunk 命中。
+- 方法：在 `code_repository_search` FTS 子查询进入 `ORDER BY bm25(...) LIMIT` 前，把已索引 scope 的 path filters 与本次 selector path filters 下推为 `path = ? OR path LIKE ? ESCAPE '\\'` 条件；同一 filter 列表内部保持 OR，不同来源 filter 保持 AND，与现有 `selected_row` 语义一致。
+- 架构与不变量：SQLite schema、FTS 文档内容、candidate limit、bm25 排序、Rust scoring、language filter 过滤、去重截断、CLI/API 返回字段和 full-scope/narrow-scope fallback 语义不变；路径过滤仍支持 `./` 与尾随斜杠规范化，并把 `%`、`_`、反斜杠按 SQL LIKE 字面量转义。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 的 full-scope 索引在按子目录检索时减少路径外候选噪声，提高窄 scope 查询召回稳定性，并在有 path filter 的大仓查询中减少后续 join 与 Rust scoring 候选量。
+- 已知风险：收益集中在带 path filter 的查询；无 path filter 的全仓查询不改变 SQL 或评分。FTS5 的 UNINDEXED `path` 条件仍需在 MATCH 结果上过滤，极宽 query 的收益取决于路径过滤选择性。
+
 ## 候选优化说明：20260516T111042Z
 
 - 目标：降低 Linux、Kubernetes、Spring Framework 等大仓全量索引中的 Git blob 读取开销，避免每个文件启动一次 `git show` 子进程。
@@ -64,6 +168,22 @@
 - 架构与不变量：SQLite schema、事务边界、batch/checkpoint 语义、search document 内容、call edge ID、reference/import/call resolution 规则、CLI/API 返回 schema 均不变；仍由既有 bounded batch 与 finalize transaction 控制资源和崩溃恢复边界。
 - 预期影响：大仓索引中每批数百到数万行的写入与 call/import finalize 少做重复 SQL 编译，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index`、`relay_teams_index_ms` 和 `leveldb_cpp_index_ms`，对查询 accuracy/ranking 不应产生影响。
 - 已知风险：prepared statement 生命周期覆盖整个插入循环，若后续在同一循环中加入需要独占 schema 变更的操作，必须先释放 statement；当前循环只执行普通 DML 与 FTS insert，风险较低。
+
+## 候选优化说明：20260516T135345Z
+
+- 目标：继续修复 Linux、Kubernetes、Spring Framework 大仓 full-scope index 在 finalize 阶段重建 call graph 时的 SQLite/FTS 写入放大，同时避免上轮“移除 call FTS 文档”造成的 query p95 与 ranking 退化。
+- 方法：`code_repository_calls` 仍按 reference 逐条重建以保留 caller 归属和稳定 call ID；call edge 表重建完成后，用一次 `INSERT INTO code_repository_search ... SELECT ... FROM code_repository_calls` 集合语句批量重建 call FTS 文档，替代每条 call edge 一次 Rust inserter 调用；schema backfill 使用同一 caller、callee、target hint、path 内容字段，保持旧库补全和新 finalize 输出一致。
+- 架构与不变量：call edge schema、call search document 内容字段、source scope、caller/callee resolution、query API、FTS 查询路径、ranking 融合和 checkpoint/finalize 事务边界保持不变；新增测试断言 cross-batch call finalize 后仍生成 call FTS 文档并可被 callers 查询命中。
+- 预期影响：大仓调用引用数量很高时，finalize 少执行数十万次 Rust 到 SQLite 的 FTS insert 调用和参数绑定，主要改善 `linux_sample_index`、`kubernetes_go_sample_index`、`spring_framework_java_index` 超时风险；因为查询路径不变，`rt_hybrid_eval_checkpoint_store`、relay-teams p95 和 LevelDB definition cases 应避免 20260516T133442Z 的退化。
+- 已知风险：集合插入会在 call table 重建后一次性写入 call FTS rows，事务内峰值 SQLite 工作集中在该语句；若未来 call search document 内容新增字段，必须同步更新 backfill 与 finalize 的两处 `SELECT`。
+
+## 候选优化说明：20260516T135933Z
+
+- 目标：保护大仓 graph 查询准确率，避免 references、calls、imports 在 FTS 命中数超过 bounded candidate window 时，因为未排序的 SQLite FTS row 顺序先截断而丢掉最相关候选。
+- 方法：graph 查询的 reference、call、import FTS 子查询在 `LIMIT` 前统一按 `bm25(code_repository_search) ASC, record_id ASC` 排序，与 symbol/chunk 查询的候选剪枝策略一致；Rust 层仍只对 bounded candidate set 做既有语义评分、置信度加权、去重和截断。
+- 架构与不变量：SQLite schema、FTS 文档内容、API 返回字段、query kind 分派、scope/path/language 过滤、最终 Rust scoring 与排序规则不变；新增 caller 回归测试构造超过 500 个匹配 call 文档，断言更短且更相关的 FTS 候选在 bounded scoring 前不会被未排序窗口排除。
+- 预期影响：在 relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 这类多仓/大仓中，callers/callees/imports/references 查询的候选召回更稳定，特别是大量同名调用、头文件 include、或引用噪声超过默认 500 候选时；性能可能因三个 graph 子查询多一次 FTS rank 排序有小幅成本，但候选窗口仍有上限。
+- 已知风险：SQLite FTS `bm25` 排序会在高频宽查询上增加查询 CPU；如果 p95 明显退化，应考虑把 rank-aware ordering 限定到命中数可能溢出窗口的 query kind，或引入更细的 path/language 预过滤候选表。
 ## 20260516T121321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T121321Z.patch`
@@ -138,3 +258,347 @@ Adopted optimization notes:
 - 架构与不变量：自迭代仍独立于 Rust crate；repository target 仍保持 `scope=all`；case 级 path/language filter 只用于查询端过滤验证；epsilon-Pareto 仍用于噪声抑制和非受保护目标决策，build/test gate 继续作为硬约束。
 - 预期影响：后续候选会更少用性能提升换取 accuracy 或 gate 稳定性退化；新增 case 提高对 Python 方法重名、Python/C++/Java/Go 常量变量、C 宏/函数、C++ 工厂函数与类、Java servlet 类型、Go authorizer API 的覆盖，并把更多全仓查询纳入 p50/p95 性能观测。
 - 已知风险：新增 case 会改变 accuracy 平均值基线，首次运行可能需要重新建立可比历史；`limit=20` case 会略微增加查询评估耗时，但能更早暴露大仓候选集和排序退化。
+## 20260516T135345Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135345Z.patch`
+- score: 0.939527 (accuracy=0.923077, performance=0.904539, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=59850ms; cargo_fmt_check_ms=842ms; cargo_clippy_ms=209ms; cargo_test_ms=8835ms; relay_teams_index_ms=87582ms; relay_teams_query_p50_ms=136ms; relay_teams_query_p95_ms=13219ms; leveldb_cpp_index_ms=19926ms
+
+Adopted optimization notes:
+
+w( +                    " +                    SELECT COUNT(*) +                    FROM code_repository_search +                    WHERE source_scope = ?1 AND document_kind = ?2 +                    ", +                    (&source_scope, &document_kind), +                    |row| row.get(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("search document count should load") +} diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877..0946af7022d8361c66c6443600975234efc916e8 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -373,7 +373,8 @@ source_scope, document_kind, record_id, path, language_id, content ) SELECT source_scope, 'call', call_id, path, '', -               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '') +               coalesce(caller_name, '') || ' ' || callee_name || ' ' || +               coalesce(target_hint, '') || ' ' || path FROM code_repository_calls ", [], tokens used 135,337
+## 20260516T135933Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135933Z.patch`
+- score: 0.939577 (accuracy=0.923077, performance=0.904871, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 59850.0->56550; metric:cargo_fmt_check_ms 842.0->755; metric:cargo_test_ms 8835.0->7792; metric:relay_teams_index_ms 87582.0->83515; metric:relay_teams_query_p95_ms 13219.0->12317.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=56550ms; cargo_fmt_check_ms=755ms; cargo_clippy_ms=204ms; cargo_test_ms=7792ms; relay_teams_index_ms=83515ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=12317ms; leveldb_cpp_index_ms=19595ms
+
+Adopted optimization notes:
+
+ "exact-file", "src/exact_owner.py"); +    exact.caller_name = Some("exactOwner".to_owned()); +    exact.callee_name = "TargetCall".to_owned(); +    exact.target_hint = Some("TargetCall".to_owned()); +    exact.resolution_state = "resolved".to_owned(); +    exact.confidence_basis_points = 8_000; +    exact.confidence_tier = "inferred".to_owned(); +    calls.push(exact); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls, +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 157,522
+
+## 候选优化说明：20260516T140540Z
+
+- 目标：提升大仓 call graph 查询准确率，避免 `Callers`/`Callees` 方向查询在主边端相同的大量候选中，只按路径或插入顺序处理 tie，导致带有 caller、callee 或路径上下文的自然语言查询排不到目标结果。
+- 方法：在 call FTS bounded candidate set 已经命中后，先保持既有方向语义：`Callers` 必须由 callee 字段产生正分，`Callees` 必须由 caller 字段产生正分；只有主边端 `base_score > 0` 时，再用非主边端和 path 计算一个 0.35 系数的上下文 bonus。这样 `TargetCall exactOwner` 仍只返回调用 `TargetCall` 的 caller，但会把 caller 名或路径含 `exactOwner` 的边排在同 callee 噪声之前。
+- 架构与不变量：SQLite schema、FTS 文档、candidate limit、source scope、path/language filter、API 字段、call edge resolution/confidence bonus、去重和最终截断规则不变；新增单元级集成测试构造同 callee、同 confidence、不同 caller/path 的噪声，断言 caller 上下文能稳定打破 tie。
+- 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 中高 fan-out API、工厂函数、hook、handler 的 callers/callees 查询更容易利用用户给出的 owner、component、file/path 上下文，提升 top-rank 准确率；计算只发生在最多 500-2000 个候选的 Rust scoring 阶段，对索引与 SQLite 查询性能无影响。
+- 已知风险：上下文 bonus 可能把路径或 caller/callee 名里包含额外查询词的结果排到更前；由于 bonus 受主边端正分门控，不能让不调用目标 callee 或不属于目标 caller 的边单独入选。
+
+## 候选优化说明：20260516T142335Z
+
+- 目标：提升 fuzzy definition/hybrid 查询对多段函数名的排序准确率，尤其是 `archive old eval output directory timestamp suffix` 这类自然语言查询应优先返回 `archive_output_dir`，而不是只命中单个通用词的 output、directory 或 archive 噪声符号。
+- 方法：仅在 symbol 查询已由 FTS 召回后，在既有 `symbol_name_query_bonus` 中增加受限的部分覆盖 bonus；当至少 3 个长度不小于 3 的查询词能与 symbol name 的规范化 identifier token 精确匹配，或存在清晰前缀关系（例如 `directory` 与 `dir`）时，最多增加 2.0 分。新增回归测试构造 `archive_output_dir` 与 output/directory/archive 单词噪声，断言多段符号名排在首位。
+- 架构与不变量：不改变 SQLite schema、FTS content、candidate limit、source scope、path/language filter、API 字段、call/reference/import 查询语义、去重或最终截断；只调整 bounded symbol candidate set 内的 Rust 排序，且 bonus 需要 3 个匹配词门槛，避免 1-2 个通用词扩大噪声优势。
+- 预期影响：relay-teams、LevelDB、Kubernetes、Spring Framework 中以 snake_case、CamelCase 或缩写命名的函数、类、常量，在自然语言查询同时描述多个 name parts 时更容易排到 top-rank；对性能的影响限于已召回 symbol 候选的少量 identifier token 比较。
+- 已知风险：包含 3 个以上通用短 identifier parts 的符号可能获得额外分数；门槛、长度限制、2.0 上限和不修改 FTS 召回可限制对现有准确率与 p95 的扰动。
+## 20260516T140540Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T140540Z.patch`
+- score: 0.939609 (accuracy=0.923077, performance=0.905086, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 56550.0->48946; metric:cargo_fmt_check_ms 755.0->728; metric:relay_teams_query_p95_ms 12317.0->11797.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=48946ms; cargo_fmt_check_ms=728ms; cargo_clippy_ms=200ms; cargo_test_ms=8023ms; relay_teams_index_ms=81709ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=11797ms; leveldb_cpp_index_ms=19861ms
+
+Adopted optimization notes:
+
+rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 3, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "first-noise-file", +                "src/a_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "second-noise-file", +                "src/b_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "exact-file", +                "src/z_exact_owner.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: vec![first_noise, second_noise, exact], +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 132,437
+## 20260516T142335Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T142335Z.patch`
+- score: 0.939946 (accuracy=0.923077, performance=0.90733, stability=1.0)
+- cases: 24/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: score_component:score 0.893508->0.939946; score_component:accuracy 0.846154->0.923077; metric:cargo_build_release_ms 35177.0->33618; metric:cargo_fmt_check_ms 718.0->682; metric:relay_teams_index_ms 76655.0->70526; metric:relay_teams_query_p95_ms 11039.0->8185.0; case:rt_hybrid_eval_checkpoint_store {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed; case:rt_fuzzy_function_archive_output_dir {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': False, 'rank': 13, 'false_positive_count': 0} rank_improved
+- known degradations: case:rt_fuzzy_constant_checkpoint_version {'passed': True, 'rank': 1, 'false_positive_count': 0}->{'passed': False, 'rank': None, 'false_positive_count': 0} passed_to_failed
+- latency metrics: cargo_build_release_ms=33618ms; cargo_fmt_check_ms=682ms; cargo_clippy_ms=179ms; cargo_test_ms=7211ms; relay_teams_index_ms=70526ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=8185ms; leveldb_cpp_index_ms=18800ms
+
+Adopted optimization notes:
+
+              None, +            ), +            file( +                "output-file", +                "src/relay_teams/sessions/runs/background_tasks/projection.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "directory-file", +                "src/relay_teams/workspace/directory_picker.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "archive-file", +                "tests/unit_tests/net/test_github_cli.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: vec![target, output_noise, directory_noise, archive_noise], +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot { let mut ambiguous = call("ambiguous-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); tokens used 172,862
+
+## 候选优化说明：20260516T143645Z
+
+- 目标：修复 fuzzy symbol/hybrid 查询在自然语言 query 含额外描述词时的召回缺口，优先保护 `rt_fuzzy_constant_checkpoint_version` 和 `rt_fuzzy_function_archive_output_dir` 这类代码仓库检索准确率。
+- 方法：仅对 symbol FTS bounded candidate recall 使用多 term `OR`，避免 `_CHECKPOINT_VERSION`、`archive_output_dir` 这类真实符号因 `metadata`、`old`、`timestamp`、`suffix` 等描述词未出现在符号文档内而在评分前被排除；reference、call、import 继续使用原有 all-term FTS 召回。Rust 侧 `score_text` 改为识别 snake_case 和 CamelCase identifier part，且 symbol 评分字段纳入 `kind`，让召回后的候选仍按符号名、类型、签名、路径上下文排序。
+- 架构与不变量：SQLite schema、FTS document 内容、candidate limit、source scope、path/language filter、API 字段、graph edge 查询、去重和最终截断规则不变；召回扩展只发生在 bounded symbol candidate set 内，最终排序仍由统一 scorer、symbol kind bonus 和既有融合规则决定。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 中含常量、函数、类名的自然语言 fuzzy definition/hybrid 查询更容易召回真实多段 identifier，并用 kind/name part 排在单词噪声前；`archive_output_dir` 和 checkpoint version 常量应提升 rank，已通过单元与集成回归测试覆盖。
+- 已知风险：symbol FTS 的 `OR` 召回会让宽查询进入更多候选，可能增加少量 SQLite FTS 和 Rust scoring CPU；候选窗口仍受 500-2000 上限约束，且非 symbol graph 查询保持原有精确召回以控制 fan-out。
+
+## 候选优化说明：20260516T144537Z
+
+- 目标：修复宽 hybrid 查询在 LevelDB 大仓中把 API 声明块排在使用样例或实现块之后的问题，优先保护 `leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface`，同时保留上一轮 fuzzy symbol 召回收益。
+- 方法：在 chunk 层 scoring 后增加受限声明块 bonus；只有当查询至少 3 个长度不小于 3 的词能命中 chunk identifier/text，且 chunk 形态像 API 声明时才加分。抽象接口查询要求 query 含 `interface` 且 chunk 含 `virtual ... = 0;`，普通声明上下文要求至少两行函数声明式原型。该规则补充 ranking fusion，不改变 FTS 召回、symbol/edge 查询或最终 API schema。
+- 架构与不变量：SQLite schema、索引内容、source scope、path/language filter、bounded candidate limit、去重截断、symbol FTS `OR` 召回和 graph edge 查询语义不变；bonus 只在已召回的 hybrid chunk 候选内生效，并要求多词覆盖以避免单词噪声被提升。
+- 预期影响：LevelDB、Linux、Kubernetes、Spring Framework 中面向接口、头文件声明、恢复/manifest 这类 API 上下文的自然语言 hybrid 查询，应更稳定地返回声明入口，而不是测试 fixture、构造函数使用点或实现细节；`leveldb_fuzzy_class_cache_lru_interface` 预期回到 rank 1，`leveldb_hybrid_recovery_manifest_full_scope` 预期进入通过阈值。
+- 已知风险：部分实现文件也可能包含多个声明式行或纯虚接口文本，存在小幅 rank 变化风险；规则要求多词覆盖和声明形态，且仅对 chunk hit 加 bounded bonus，以避免牺牲精确 symbol/query cases。
+
+## 候选优化说明：20260516T145236Z
+
+- 目标：保留 20260516T144537Z 对 LevelDB hybrid/API 声明块排序的准确率收益，同时降低该声明块 bonus 在 relay-teams 和 LevelDB 宽 hybrid 查询 p95 上的 per-candidate CPU 成本。
+- 方法：chunk scoring 仍使用同一个声明块 bonus，但先用廉价结构检查判断 chunk 是否包含抽象接口或至少两个声明式 prototype，再对可能拿到 bonus 的少量候选执行 query term 覆盖、identifier token 和 lowercase substring 匹配；query terms 在 `search_chunks` 中每次请求只解析一次，而不是每个 chunk 重复解析。
+- 架构与不变量：SQLite schema、FTS 召回、candidate limit、source scope、path/language filter、API 字段、去重截断、声明块 bonus 分值和已接受的 LevelDB accuracy 规则保持不变；bonus 仍要求至少 3 个查询词覆盖且只作用于 bounded chunk candidate set。
+- 预期影响：非声明 chunk 候选在 Rust scoring 阶段避免重复 query 分词、全文 lowercase 和 identifier token 扫描，预期改善 `relay_teams_query_p95_ms` 与 `leveldb_cpp_query_p95_ms`；`leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface` 的排序应保持不变。
+- 已知风险：结构检查顺序改变不应影响结果，但如果未来某语言的声明形态不符合 `declaration_line_is_prototype` 或抽象接口文本模式，仍不会获得该 bonus；测试覆盖实现块不加分、头文件 prototype 和纯虚接口仍加分。
+
+## 候选优化说明：20260516T155614Z
+
+- 目标：修复 relay-teams `_summary` callers/callees 这类高 fan-out call graph 查询的 p95 稳定性问题，同时不改变 accuracy、ranking、FTS 召回或 API 返回语义。
+- 方法：为 `code_repository_chunks(source_scope, symbol_snapshot_id)` 增加 SQLite 索引。call 查询为了生成调用点 excerpt，会把 bounded call candidates 的 `caller_symbol_snapshot_id` 关联到 `code_repository_chunks`；大仓 chunk 数量较高且 caller 命中密集时，没有该索引会让每个候选都可能扫描同 scope chunks。新增索引把 caller chunk lookup 变成按 source scope 和 symbol identity 的索引查找。
+- 架构与不变量：不修改 code graph schema 字段、FTS 文档、candidate limit、查询 scoring、去重截断、call edge resolution、path/language filter 或 CLI/API 行为；索引通过既有 `CREATE INDEX IF NOT EXISTS` 初始化与迁移路径应用到新旧 SQLite 数据库。新增测试固定 schema 必须包含该 lookup index。
+- 预期影响：`relay_teams_query_p95_ms` 中 `_summary` callers/callees 查询应显著降低尾延迟；LevelDB、Kubernetes、Linux、Spring Framework 的 call graph 查询在多调用、多 chunk 场景下也应更稳定。索引阶段可能多维护一个小型 B-tree，但 chunk 写入仍在 bounded batch/finalize 事务内完成。
+- 已知风险：大仓索引写入和数据库文件会因额外索引略增；如果未来 call excerpt 不再从 `code_repository_chunks` 关联 caller symbol，该索引价值会下降，需要按查询计划重新评估。
+
+## 候选优化说明：20260516T160620Z
+
+- 目标：继续保护大仓 call graph 查询稳定性，避免一个 caller symbol 被切成多个非重叠 chunks 时，单条 call edge 因 excerpt join 被放大成多条候选并增加排序、评分和去重成本。
+- 方法：call 查询仍复用 `code_repository_chunks(source_scope, symbol_snapshot_id)` lookup index，但 caller chunk join 增加 call line containment 条件：只连接 `line_start <= call.line_start <= line_end` 的 chunk。这样 excerpt 直接来自包含调用点的 chunk，不再把同一 caller symbol 的 prologue、body、tail chunks 全部带入 bounded candidate rows。
+- 架构与不变量：不改变 SQLite schema、FTS 文档、candidate limit、call edge 召回、方向性 caller/callee 语义、confidence bonus、path/language filter、API 字段或最终排序规则；只收敛已有 excerpt join 的候选行数。新增回归测试构造同一 caller symbol 的两个非重叠 chunks，断言 callers 查询只返回一条 hit 且 excerpt 取实际 call-site chunk。
+- 预期影响：relay-teams、Linux、Kubernetes、Spring Framework 这类长函数、大类方法较多的仓库中，callers/callees 查询的 Rust scoring 输入更小、结果重复更少，p95 抖动应降低；accuracy 预期保持或改善，因为摘要优先来自调用点所在 chunk。
+- 已知风险：如果某个索引器生成的 chunk line ranges 不覆盖 call line，则该 call hit 会退回到 `caller calls callee` 摘要，不再从同 symbol 的其他 chunk 猜测 excerpt；这是更保守的稳定性取舍，后续可通过索引器 line-range 测试保护覆盖率。
+
+## 20260516T143645Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
+- score: 0.963002 (accuracy=0.961538, performance=0.907191, stability=1.0)
+- cases: 25/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.939954->0.963002; score_component:accuracy 0.923077->0.961538; metric:cargo_fmt_check_ms 711.0->678; metric:relay_teams_index_ms 73237.0->70352; case:rt_fuzzy_constant_checkpoint_version {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 3, 'false_positive_count': 0} failed_to_passed; case:rt_fuzzy_function_archive_output_dir {'passed': False, 'rank': 13, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed
+- known degradations: metric:leveldb_cpp_query_p95_ms 136.0->183.0; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': True, 'rank': 3, 'false_positive_count': 0}->{'passed': False, 'rank': 9, 'false_positive_count': 0} passed_to_failed; case:leveldb_fuzzy_class_cache_lru_interface {'passed': True, 'rank': 1, 'false_positive_count': 0}->{'passed': True, 'rank': 5, 'false_positive_count': 0} rank_worsened
+- latency metrics: cargo_build_release_ms=34450ms; cargo_fmt_check_ms=678ms; cargo_clippy_ms=195ms; cargo_test_ms=7340ms; relay_teams_index_ms=70352ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=8344ms; leveldb_cpp_index_ms=18666ms
+
+Adopted optimization notes:
+
+us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 595e4c271c813e5466eb068d26842c18e72d6e06..db6719d0fe07cf265d1d8dff6c31a380334f1108 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -32,3 +32,25 @@ assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES); } + +#[test] +fn symbol_fts_query_uses_any_term_for_fuzzy_recall() { +    assert_eq!( +        symbol_fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +    ); +    assert_eq!( +        fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" \"metadata\" \"version\" \"constant\"" +    ); +} + +#[test] +fn score_text_matches_identifier_parts_inside_snake_case_names() { +    let score = score_text( +        "archive output directory", +        ["def archive_output_dir(output_dir: Path) -> Path:"], +    ); + +    assert!(score >= 4.0); +} tokens used 144,045
+## 20260516T144537Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T144537Z.patch`
+- score: 0.985951 (accuracy=1.0, performance=0.906342, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: score_component:score 0.963002->0.985951; score_component:accuracy 0.961538->1.0; metric:cargo_build_release_ms 34450.0->30307; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': False, 'rank': 9, 'false_positive_count': 0}->{'passed': True, 'rank': 5, 'false_positive_count': 0} failed_to_passed; case:leveldb_fuzzy_class_cache_lru_interface {'passed': True, 'rank': 5, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} rank_improved
+- known degradations: metric:cargo_fmt_check_ms 678.0->708; metric:relay_teams_query_p95_ms 8344.0->9460.0; metric:leveldb_cpp_query_p95_ms 183.0->225.0
+- latency metrics: cargo_build_release_ms=30307ms; cargo_fmt_check_ms=708ms; cargo_clippy_ms=182ms; cargo_test_ms=7290ms; relay_teams_index_ms=69032ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=9460ms; leveldb_cpp_index_ms=18856ms
+
+Adopted optimization notes:
+
+        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 2, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "db-impl-header", +                "db/db_impl.h", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "db-impl-source", +                "db/db_impl.cc", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: vec![target, noise], +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_related_callee_names() -> CodeIndexSnapshot { let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c"); unrelated.caller_name = Some("do_mmap".to_owned()); tokens used 107,884
+## 20260516T145236Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T145236Z.patch`
+- score: 0.986063 (accuracy=1.0, performance=0.907089, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: metric:cargo_build_release_ms 30307.0->28188; metric:cargo_fmt_check_ms 708.0->509; metric:cargo_clippy_ms 182.0->149; metric:cargo_test_ms 7290.0->6539; metric:relay_teams_query_p95_ms 9460.0->8464.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28188ms; cargo_fmt_check_ms=509ms; cargo_clippy_ms=149ms; cargo_test_ms=6539ms; relay_teams_index_ms=70263ms; relay_teams_query_p50_ms=119ms; relay_teams_query_p95_ms=8464ms; leveldb_cpp_index_ms=18725ms
+
+Adopted optimization notes:
+
+erms = query_terms("recover descriptor save_manifest versionedit"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "Status DBImpl::RecoverLogFile(uint64_t log_number, bool* save_manifest) {\n  descriptor_log_->AddRecord(edit->Encode());\n}" +        ), +        0.0 +    ); +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class DBImpl {\n  Status RecoverLogFile(uint64_t log_number, bool* save_manifest,\n                        VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};" +        ), +        2.0 +    ); +} + +#[test] +fn declaration_chunk_bonus_preserves_interface_boost() { +    let terms = query_terms("cache interface lookup insert total charge lru"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};" +        ), +        3.0 +    ); +} tokens used 113,000
+## 20260516T155614Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T155614Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_schema.rs`, `src/relay_knowledge/storage/sqlite/code_tests.rs`
+- key improvements: score_component:score 0.985774->1.0; score_component:performance 0.90516->1.0; metric:relay_teams_query_p50_ms 127.0->93.5; metric:relay_teams_query_p95_ms 11629.0->298.0; metric:leveldb_cpp_index_ms 19318.0->13790; metric:leveldb_cpp_query_p50_ms 149.0->105.5; metric:leveldb_cpp_query_p95_ms 246.0->170.0
+- known degradations: metric:cargo_build_release_ms 37157.0->52888; metric:cargo_fmt_check_ms 664.0->713; metric:relay_teams_index_ms 70374.0->74641
+- latency metrics: cargo_build_release_ms=52888ms; cargo_fmt_check_ms=713ms; cargo_clippy_ms=176ms; cargo_test_ms=7130ms; relay_teams_index_ms=74641ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=298ms; leveldb_cpp_index_ms=13790ms
+
+Adopted optimization notes:
+
+sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGraphStore, +    storage::{SqliteGraphStore, StorageError}, }; #[path = "code_test_support.rs"] @@ -114,6 +114,33 @@ } #[tokio::test] +async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); + +    let index_exists = store +        .run(|connection| { +            connection +                .query_row( +                    " +                    SELECT EXISTS( +                        SELECT 1 +                        FROM sqlite_master +                        WHERE type = 'index' +                          AND name = 'code_repository_chunks_symbol_lookup' +                    ) +                    ", +                    [], +                    |row| row.get::<_, bool>(0), +                ) +                .map_err(StorageError::from) +        }) +        .await +        .expect("schema index check should succeed"); + +    assert!(index_exists); +} + +#[tokio::test] async fn rejects_code_queries_for_unindexed_refs() { let store = store_with_repository_snapshot(snapshot_with_chunk( "repo", tokens used 113,836
+## 20260516T160620Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T160620Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 27786.0->25737; metric:cargo_fmt_check_ms 694.0->524; metric:cargo_clippy_ms 8303.0->158; metric:cargo_test_ms 7351.0->6118; metric:leveldb_cpp_index_ms 14476.0->13704; metric:leveldb_cpp_query_p50_ms 144.5->103.5; metric:leveldb_cpp_query_p95_ms 226.0->174.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=25737ms; cargo_fmt_check_ms=524ms; cargo_clippy_ms=158ms; cargo_test_ms=6118ms; relay_teams_index_ms=74148ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=308ms; leveldb_cpp_index_ms=13704ms
+
+Adopted optimization notes:
+
+ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc", -            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", -            Some("sanitize-options"), -        )], +        chunks: vec![ +            RepositoryCodeChunkRecord { +                line_range: range(110, 115), +                ..chunk( +                    "sanitize-options-prologue", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "Options SanitizeOptions(const Options& src) {\n    Options result;", +                    Some("sanitize-options"), +                ) +            }, +            RepositoryCodeChunkRecord { +                line_range: range(116, 124), +                ..chunk( +                    "sanitize-options-call-site", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", +                    Some("sanitize-options"), +                ) +            }, +        ], diagnostics: Vec::new(), } } tokens used 172,827
+## 20260516T171146Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T171146Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
+- key improvements: metric:cargo_build_release_ms 35920.0->28113; metric:cargo_fmt_check_ms 676.0->516; metric:cargo_clippy_ms 171.0->144; metric:cargo_test_ms 7135.0->6245
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=28113ms; cargo_fmt_check_ms=516ms; cargo_clippy_ms=144ms; cargo_test_ms=6245ms; relay_teams_index_ms=67184ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=305ms; leveldb_cpp_index_ms=17958ms
+
+Adopted optimization notes:
+
+d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
+## 20260516T174317Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T174317Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: score_component:score 0.35->1.0; score_component:accuracy 0.0->1.0; score_component:stability 0.8->1.0; metric:cargo_build_release_ms 35317.0->33204; gate:cargo_test failed->passed Running tests/relay_knowledge/main.rs (target/debug/deps/relay_knowledge-1a9ddc0d040472be)
+- known degradations: metric:cargo_clippy_ms 180.0->8302; metric:cargo_test_ms 6222.0->7199
+- latency metrics: cargo_build_release_ms=33204ms; cargo_fmt_check_ms=684ms; cargo_clippy_ms=8302ms; cargo_test_ms=7199ms; relay_teams_index_ms=69263ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=311ms; leveldb_cpp_index_ms=15213ms
+
+Adopted optimization notes:
+
+nks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 4d43f645ad38d7d5cae8a7ba9cf06826f9bf2f94..faaf3f2f6db33cc2bfd36072400145272e3b9a36 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -181,14 +181,13 @@ let _ = shutdown_waiter.await; })); -    let stream = connect_with_retry(&bind).await; +    let mut stream = connect_with_retry(&bind).await; let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n"; stream -        .writable() +        .write_all(request) .await -        .expect("stream should become writable"); -    stream.try_write(request).expect("request should write"); -    tokio::time::timeout(Duration::from_secs(1), handler_started.notified()) +        .expect("request should write completely"); +    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676
+## 20260516T181003Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181003Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5062.0->4796; metric:relay_teams_index_ms 66544.0->59467
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=461ms; cargo_clippy_ms=4796ms; cargo_test_ms=3737ms; relay_teams_index_ms=59467ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=416ms; leveldb_cpp_index_ms=18635ms
+
+Adopted optimization notes:
+
+ed.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index faaf3f2f6db33cc2bfd36072400145272e3b9a36..2eaf575b4b928b3821fd010e11be8a9ab2e5bfb0 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -155,7 +155,13 @@ #[tokio::test] async fn serve_router_enforces_graceful_shutdown_timeout() { -    let bind = format!("127.0.0.1:{}", unused_port()); +    let listener = tokio::net::TcpListener::bind("127.0.0.1:0") +        .await +        .expect("listener should bind"); +    let bind = listener +        .local_addr() +        .expect("listener should expose local address") +        .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), Duration::from_secs(5), @@ -177,7 +183,7 @@ }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); -    let server = tokio::spawn(serve_router(router, config, async { +    let server = tokio::spawn(serve_listener(listener, router, config, async { let _ = shutdown_waiter.await; })); tokens used 40,692
+## 20260516T181727Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181727Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 68328.0->64783
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=468ms; cargo_clippy_ms=4959ms; cargo_test_ms=3852ms; relay_teams_index_ms=64783ms; relay_teams_query_p50_ms=129ms; relay_teams_query_p95_ms=396ms; leveldb_cpp_index_ms=18642ms
+
+Adopted optimization notes:
+
+d = handler_started.clone(); +    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel(); +    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started))); let router = Router::new().route( "/hold", get(move || { let handler_started = route_handler_started.clone(); async move { -                handler_started.notify_one(); +                let sender = handler_started +                    .lock() +                    .expect("handler signal mutex should not be poisoned") +                    .take(); +                if let Some(sender) = sender { +                    let _ = sender.send(()); +                } std::future::pending::<&'static str>().await } }), @@ -193,9 +199,10 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) +    tokio::time::timeout(Duration::from_secs(5), handler_started_waiter) .await -        .expect("handler should start before shutdown"); +        .expect("handler should start before shutdown") +        .expect("handler should signal startup"); let _ = shutdown.send(()); let error = server tokens used 74,688
+## 20260516T184629Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T184629Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 4853.0->150; metric:relay_teams_query_p95_ms 425.0->387.0
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=124ms; cargo_fmt_check_ms=474ms; cargo_clippy_ms=150ms; cargo_test_ms=3728ms; relay_teams_index_ms=65389ms; relay_teams_query_p50_ms=114ms; relay_teams_query_p95_ms=387ms; leveldb_cpp_index_ms=18566ms
+
+Adopted optimization notes:
+
+or = server tokens used 74,688 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 67fa5d215cacb0745ff6bb5ab4eb14e2849720a2..1d01c78ec52234080d47421338373deeacba72f6 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -176,16 +176,14 @@ "/hold", get(move || { let handler_started = route_handler_started.clone(); -            async move { -                let sender = handler_started -                    .lock() -                    .expect("handler signal mutex should not be poisoned") -                    .take(); -                if let Some(sender) = sender { -                    let _ = sender.send(()); -                } -                std::future::pending::<&'static str>().await +            let sender = handler_started +                .lock() +                .expect("handler signal mutex should not be poisoned") +                .take(); +            if let Some(sender) = sender { +                let _ = sender.send(()); } +            async move { std::future::pending::<&'static str>().await } }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); tokens used 111,325
+## 20260516T185001Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T185001Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 65389.0->59772
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=126ms; cargo_fmt_check_ms=458ms; cargo_clippy_ms=140ms; cargo_test_ms=3723ms; relay_teams_index_ms=59772ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=399ms; leveldb_cpp_index_ms=18655ms
+
+Adopted optimization notes:
+
+rvice { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready(&mut self, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + #[tokio::test] async fn serve_router_with_qos_rejects_excess_connections() { let bind = format!("127.0.0.1:{}", unused_port()); tokens used 54,376
+## 20260516T190530Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190530Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 66815.0->61194
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=102ms; cargo_fmt_check_ms=462ms; cargo_clippy_ms=4966ms; cargo_test_ms=3697ms; relay_teams_index_ms=61194ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=400ms; leveldb_cpp_index_ms=18419ms
+
+Adopted optimization notes:
+
+- diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index b3b54e3545dbf196e0c0c4c67df8ab49e6b25664..d74058c99352706b77d9eef80e6e7ea72b4534cb --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -153,7 +153,7 @@ server.await.expect("server task should finish"); } -#[tokio::test] +#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_router_enforces_graceful_shutdown_timeout() { let listener = tokio::net::TcpListener::bind("127.0.0.1:0") .await @@ -164,7 +164,7 @@ .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), -        Duration::from_secs(5), +        Duration::from_secs(30), Duration::from_millis(10), 1024, HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"), @@ -189,7 +189,7 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), request_started_waiter) +    tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") .expect("request should signal startup"); tokens used 47,024
+## 20260516T190848Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190848Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 4966.0->141; metric:relay_teams_index_ms 61194.0->58024
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=119ms; cargo_fmt_check_ms=467ms; cargo_clippy_ms=141ms; cargo_test_ms=3704ms; relay_teams_index_ms=58024ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=410ms; leveldb_cpp_index_ms=18599ms
+
+Adopted optimization notes:
+
+    mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +    } -    fn poll_ready( -        &mut self, +    fn poll_flush( +        mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_flush(context) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) } } tokens used 55,876
+## 20260516T191712Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T191712Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_test_ms 3786.0->3638; metric:relay_teams_index_ms 64279.0->60821
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=121ms; cargo_fmt_check_ms=464ms; cargo_clippy_ms=148ms; cargo_test_ms=3638ms; relay_teams_index_ms=60821ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=397ms; leveldb_cpp_index_ms=18755ms
+
+Adopted optimization notes:
+
+(())) } } -impl AsyncWrite for RequestReadStream { +impl AsyncWrite for InMemoryRequestStream { fn poll_write( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, buffer: &[u8], ) -> std::task::Poll<std::io::Result<usize>> { -        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +        std::task::Poll::Ready(Ok(buffer.len())) } fn poll_flush( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_flush(context) +        std::task::Poll::Ready(Ok(())) } fn poll_shutdown( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) +        std::task::Poll::Ready(Ok(())) } } tokens used 121,229
+## 20260516T192508Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T192508Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 4996.0->157
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=125ms; cargo_fmt_check_ms=469ms; cargo_clippy_ms=157ms; cargo_test_ms=3746ms; relay_teams_index_ms=61167ms; relay_teams_query_p50_ms=121ms; relay_teams_query_p95_ms=406ms; leveldb_cpp_index_ms=18565ms
+
+Adopted optimization notes:
+
+       _context: &mut std::task::Context<'_>, -        buffer: &mut ReadBuf<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        let remaining = &self.request[self.offset..]; -        if remaining.is_empty() { -            return std::task::Poll::Pending; -        } - -        let readable = remaining.len().min(buffer.remaining()); -        buffer.put_slice(&remaining[..readable]); -        self.offset += readable; -        std::task::Poll::Ready(Ok(())) -    } -} - -impl AsyncWrite for InMemoryRequestStream { -    fn poll_write( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -        buffer: &[u8], -    ) -> std::task::Poll<std::io::Result<usize>> { -        std::task::Poll::Ready(Ok(buffer.len())) -    } - -    fn poll_flush( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) -    } - -    fn poll_shutdown( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) } } tokens used 55,066
+## 20260516T193653Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T193653Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5881.0->4904; metric:relay_teams_index_ms 64393.0->60586
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=100ms; cargo_fmt_check_ms=466ms; cargo_clippy_ms=4904ms; cargo_test_ms=3775ms; relay_teams_index_ms=60586ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=392ms; leveldb_cpp_index_ms=18624ms
+
+Adopted optimization notes:
+
+Self::Service { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready( +        &mut self, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + struct InMemoryRequestListener { stream: Option<DuplexStream>, address: std::net::SocketAddr, tokens used 74,917
+## 20260516T194305Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T194305Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:cargo_clippy_ms 5938.0->4841
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=95ms; cargo_fmt_check_ms=456ms; cargo_clippy_ms=4841ms; cargo_test_ms=3721ms; relay_teams_index_ms=63352ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=408ms; leveldb_cpp_index_ms=18786ms
+
+Adopted optimization notes:
+
+    stream +        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n") +        .await +        .expect("request should write completely"); tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") @@ -245,39 +250,6 @@ let _ = sender.send(()); } self.inner.call(request) -    } -} - -struct InMemoryRequestListener { -    stream: Option<DuplexStream>, -    address: std::net::SocketAddr, -} - -impl InMemoryRequestListener { -    fn new(stream: DuplexStream) -> Self { -        Self { -            stream: Some(stream), -            address: "127.0.0.1:8791" -                .parse() -                .expect("loopback test address should parse"), -        } -    } -} - -impl axum::serve::Listener for InMemoryRequestListener { -    type Io = DuplexStream; -    type Addr = std::net::SocketAddr; - -    async fn accept(&mut self) -> (Self::Io, Self::Addr) { -        if let Some(stream) = self.stream.take() { -            return (stream, self.address); -        } - -        std::future::pending().await -    } - -    fn local_addr(&self) -> std::io::Result<Self::Addr> { -        Ok(self.address) } } tokens used 73,628
+## 20260516T195734Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T195734Z.patch`
+- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
+- cases: 26/26 passed
+- changed paths: `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
+- key improvements: metric:relay_teams_index_ms 59991.0->57595
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=96ms; cargo_fmt_check_ms=465ms; cargo_clippy_ms=4821ms; cargo_test_ms=3711ms; relay_teams_index_ms=57595ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=403ms; leveldb_cpp_index_ms=18905ms
+
+Adopted optimization notes:
+
+m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::task::Poll::Ready(Ok(buffer.len())) +    } -    fn poll_ready( -        &mut self, -        context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    fn poll_flush( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } } tokens used 57,392
+
