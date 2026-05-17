@@ -44,7 +44,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches/`.
-4. Runs build, lint, tests, repository retrieval evaluations, the semantic/vector fixture, the external embedding provider probe when external backends are enabled, and the self-iteration documentation gate.
+4. Runs build, lint, tests, repository retrieval evaluations, the semantic/vector fixture, the external embedding provider probe when external backends are enabled, the research judge when configured, and the self-iteration documentation gate.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
 7. Writes progressive memory entries under `.git/relay-knowledge-self-iteration/memory/`.
@@ -82,7 +82,7 @@ relevant to the current gate, metric, case, path, or algorithm objective.
 
 ## Scoring and acceptance
 
-The score is:
+When the research judge is not configured, the score is:
 
 ```text
 foundational_capability * 0.25
@@ -91,6 +91,40 @@ foundational_capability * 0.25
 + performance * 0.10
 + stability * 0.25
 ```
+
+When the research judge is configured, `research_judge` becomes a protected
+objective and the weights switch to:
+
+```text
+foundational_capability * 0.20
++ competitive_capability * 0.20
++ semantic_vector * 0.12
++ research_judge * 0.15
++ performance * 0.08
++ stability * 0.25
+```
+
+The research judge evaluates research alignment, architecture soundness,
+reliability reasoning, performance generalization, implementation
+actionability, and fixture-special-casing risk. It can run through an
+OpenAI-compatible HTTP endpoint or through an open coding-agent CLI such as
+`relay-teams`, `codex`, `cc`, or `copilot`. All judge configuration comes from
+runtime environment variables:
+
+- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli`
+- HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`, `RELAY_KNOWLEDGE_JUDGE_API_KEY`,
+  `RELAY_KNOWLEDGE_JUDGE_MODEL`
+- CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`, with aliases
+  `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` and
+  `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`
+- Shared timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
+
+CLI commands receive the judge prompt on stdin by default. Command templates may
+also use `{workspace}`, `{prompt_file}`, or `{prompt}` placeholders. The harness
+requires either HTTP or CLI judges to return strict JSON. If no judge is
+configured, the run records `judge_skipped` and the default local loop remains
+unblocked; explicit misconfiguration, malformed JSON, low confidence, low
+overall score, or low anti-fixture-special-casing score rejects the candidate.
 
 Case objectives are continuous quality scores, not pass-rate counters. A passed case
 at rank 1 scores `1.0`; a passed case at rank `N > 1` scores `1.0 / N` even
@@ -139,6 +173,7 @@ The `chart` command writes:
   `file_query_p50_ms`, and `file_query_p95_ms`, and applies a subprocess
   timeout to each file query so a candidate cannot hang the evaluator.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
+- `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, and selected 02/03/04 documentation excerpts to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.

@@ -14,6 +14,15 @@ DEFAULT_WEIGHTS = {
     "stability": 0.25,
 }
 
+JUDGE_WEIGHTS = {
+    "foundational_capability": 0.20,
+    "competitive_capability": 0.20,
+    "semantic_vector": 0.12,
+    "research_judge": 0.15,
+    "performance": 0.08,
+    "stability": 0.25,
+}
+
 SCORE_EPSILON = 0.0005
 RATIO_EPSILON = 0.005
 METRIC_RELATIVE_EPSILON = 0.03
@@ -38,10 +47,13 @@ class CaseObservation:
     false_positive_count: int = 0
     message: str = ""
     objective: str = "foundational_capability"
+    score_override: float | None = None
 
     def score(self) -> float:
         if not self.passed:
             return 0.0
+        if self.score_override is not None:
+            return clamp_score(self.score_override)
         if self.rank is None or self.rank <= 0:
             rank_score = 1.0
         else:
@@ -83,6 +95,7 @@ class ScoreBreakdown:
     competitive_capability: float
     accuracy: float
     semantic_vector: float
+    research_judge: float | None
     performance: float
     stability: float
     accepted: bool
@@ -98,6 +111,11 @@ class ScoreBreakdown:
             "competitive_capability": round(self.competitive_capability, 6),
             "accuracy": round(self.accuracy, 6),
             "semantic_vector": round(self.semantic_vector, 6),
+            "research_judge": (
+                round(self.research_judge, 6)
+                if self.research_judge is not None
+                else None
+            ),
             "performance": round(self.performance, 6),
             "stability": round(self.stability, 6),
             "accepted": self.accepted,
@@ -113,7 +131,8 @@ def score_evaluation(
     previous_run: dict[str, Any] | None,
     weights: dict[str, float] | None = None,
 ) -> ScoreBreakdown:
-    active_weights = dict(DEFAULT_WEIGHTS)
+    research_judge_scores = objective_case_scores(observation.cases, "research_judge")
+    active_weights = dict(JUDGE_WEIGHTS if research_judge_scores else DEFAULT_WEIGHTS)
     if weights:
         active_weights.update(weights)
 
@@ -138,6 +157,11 @@ def score_evaluation(
         default=0.0,
     )
     semantic_vector = average(semantic_vector_scores, default=0.0)
+    research_judge = (
+        average(research_judge_scores, default=0.0)
+        if research_judge_scores
+        else None
+    )
     performance = average([metric.score() for metric in observation.metrics], default=1.0)
     stability = stability_score(observation.gates, observation.generated_diff)
     budget_failures = metric_budget_failures(observation.metrics)
@@ -145,6 +169,7 @@ def score_evaluation(
         foundational_capability * active_weights["foundational_capability"]
         + competitive_capability * active_weights["competitive_capability"]
         + semantic_vector * active_weights["semantic_vector"]
+        + (research_judge or 0.0) * active_weights.get("research_judge", 0.0)
         + performance * active_weights["performance"]
         + stability * active_weights["stability"]
     )
@@ -156,6 +181,7 @@ def score_evaluation(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -167,6 +193,7 @@ def score_evaluation(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -178,6 +205,7 @@ def score_evaluation(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -189,6 +217,7 @@ def score_evaluation(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         accepted=not reject_reasons,
@@ -206,6 +235,7 @@ def acceptance_reject_reasons(
     competitive_capability: float,
     accuracy: float,
     semantic_vector: float,
+    research_judge: float | None,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -223,6 +253,7 @@ def acceptance_reject_reasons(
         foundational_capability=foundational_capability,
         competitive_capability=competitive_capability,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         stability=stability,
         previous_run=previous_run,
     )
@@ -239,6 +270,7 @@ def acceptance_reject_reasons(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -253,6 +285,7 @@ def protected_objective_reject_reasons(
     foundational_capability: float,
     competitive_capability: float,
     semantic_vector: float,
+    research_judge: float | None,
     stability: float,
     previous_run: dict[str, Any],
 ) -> list[str]:
@@ -275,6 +308,19 @@ def protected_objective_reject_reasons(
                 f"({current:.6f}, previous {float(previous):.6f}, "
                 f"ratio_epsilon {RATIO_EPSILON:.6f})"
             )
+    if research_judge is not None:
+        previous = previous_run.get("research_judge")
+        if previous is not None and meaningful_decrease(
+            research_judge,
+            float(previous),
+            RATIO_EPSILON,
+            0.0,
+        ):
+            reasons.append(
+                f"protected research_judge objective regressed "
+                f"({research_judge:.6f}, previous {float(previous):.6f}, "
+                f"ratio_epsilon {RATIO_EPSILON:.6f})"
+            )
     return reasons
 
 
@@ -285,6 +331,7 @@ def epsilon_pareto_improved(
     competitive_capability: float,
     accuracy: float,
     semantic_vector: float,
+    research_judge: float | None,
     performance: float,
     stability: float,
     previous_run: dict[str, Any],
@@ -296,6 +343,7 @@ def epsilon_pareto_improved(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -307,6 +355,7 @@ def epsilon_pareto_improved(
         competitive_capability=competitive_capability,
         accuracy=accuracy,
         semantic_vector=semantic_vector,
+        research_judge=research_judge,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -329,6 +378,7 @@ def evaluation_degradations(
     competitive_capability: float,
     accuracy: float,
     semantic_vector: float,
+    research_judge: float | None,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -354,6 +404,22 @@ def evaluation_degradations(
             0.0,
         ):
             degradations.append(numeric_degradation("score_component", name, previous, current))
+    if research_judge is not None:
+        previous = previous_run.get("research_judge")
+        if previous is not None and meaningful_decrease(
+            research_judge,
+            float(previous),
+            RATIO_EPSILON,
+            0.0,
+        ):
+            degradations.append(
+                numeric_degradation(
+                    "score_component",
+                    "research_judge",
+                    previous,
+                    research_judge,
+                )
+            )
 
     previous_metrics = keyed_items(previous_run.get("metrics", []), "name")
     for metric in observation.metrics:
@@ -406,6 +472,7 @@ def evaluation_improvements(
     competitive_capability: float,
     accuracy: float,
     semantic_vector: float,
+    research_judge: float | None,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -431,6 +498,22 @@ def evaluation_improvements(
             0.0,
         ):
             improvements.append(numeric_change("score_component", name, previous, current))
+    if research_judge is not None:
+        previous = previous_run.get("research_judge")
+        if previous is not None and meaningful_increase(
+            research_judge,
+            float(previous),
+            RATIO_EPSILON,
+            0.0,
+        ):
+            improvements.append(
+                numeric_change(
+                    "score_component",
+                    "research_judge",
+                    previous,
+                    research_judge,
+                )
+            )
 
     previous_metrics = keyed_items(previous_run.get("metrics", []), "name")
     for metric in observation.metrics:
@@ -674,3 +757,7 @@ def average(values: list[float], default: float) -> float:
     if not values:
         return default
     return sum(values) / len(values)
+
+
+def clamp_score(value: float) -> float:
+    return min(1.0, max(0.0, float(value)))

@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-research-judge-cli-agent-20260517
+
+- 目标：把自迭代中带研究性质的评估从确定性 case 中分离出来，让功能、架构、可靠性和性能泛化判断可以由 LLM judge 或开放 coding-agent CLI 执行，同时保留 build/test/retrieval/static checks 作为可复现硬门禁。
+- 方法：新增 `research_judge_suite` 和 `llm_judge.py`，支持 OpenAI-compatible HTTP judge，也支持通过 `RELAY_KNOWLEDGE_JUDGE_COMMAND`、`RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 或 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND` 调用 `relay-teams`、`codex`、`cc`、`copilot` 等 CLI agent；CLI 默认从 stdin 接收 prompt，也支持 `{workspace}`、`{prompt_file}`、`{prompt}` 占位符。Judge 必须返回严格 JSON，并按研究对齐、架构合理性、可靠性、性能泛化、实现可操作性和 anti-fixture-special-casing 维度评分。
+- 架构与不变量：Judge 配置只从运行时环境读取，不写入 `cases.json`、报告或 prompt 中的密钥；未配置 judge 时记录 skipped 且不阻塞默认本地循环；显式配置但缺少变量、返回非法 JSON、低置信度、低总分或低 anti-fixture-special-casing 分数时作为硬 gate 拒绝。确定性 repo/file/semantic-vector cases、Cargo gates、provider probe 和文档 gate 保持原有职责。
+- 预期影响：后续候选可以把开放式研究质量和架构取舍交给 judge 评审，减少把研究判断硬编码成脆弱 fixture 的压力；CLI agent judge 让本地或企业内开放 coding agent 也能作为评审后端参与自迭代。
+- 已知风险：外部 judge 或 CLI agent 的稳定性、成本、输出格式和模型偏差会影响候选采纳；因此默认不启用 judge，启用后要求严格 JSON、置信度阈值和 anti-fixture-special-casing 阈值，并继续用确定性 gate 保护可复现行为。
+
 ## 候选优化说明：20260517T072446Z
 
 - 目标：在保持 `semantic_vector_provider_probe` 通过、foundational cases 和 semantic/vector 保护项不退化的前提下，提高大仓 call graph caller 查询的 rank 1 稳定性，尤其是泛化的 callee 查询被 C API、binding、wrapper、FFI 等适配层调用点按路径排序压到实现调用点之前的场景。
@@ -819,4 +827,3 @@ Adopted optimization notes:
 Adopted optimization notes:
 
  +        let callers = retrieval_request(CodeQueryKind::Callers); +        let callees = retrieval_request(CodeQueryKind::Callees); + +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "NewLRUCache", false), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus( +                4.0, +                "bindings/cache_wrapper.cc", +                &callers, +                "NewLRUCache", +                false, +            ), +            0.0 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "C API NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callers, "c_api NewLRUCache", false), +            0.2 +        ); +        assert_eq!( +            call_site_source_path_bonus(4.0, "db/c.cc", &callees, "NewLRUCache", false), +            0.2 +        ); +    } + +    #[test] fn query_mentions_test_or_benchmark_detects_explicit_intent() { assert!(!query_mentions_test_or_benchmark("NewLRUCache")); assert!(query_mentions_test_or_benchmark("NewLRUCache test caller")); tokens used 231,004
-

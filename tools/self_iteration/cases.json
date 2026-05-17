@@ -206,6 +206,27 @@
       }
     ]
   },
+  "research_judge_suite": {
+    "documents": [
+      "docs/zh/02-capabilities/15-evaluation-and-quality-gates.md",
+      "docs/zh/03-architecture-specs/02-engineering-hard-constraints.md",
+      "docs/zh/03-architecture-specs/17-background-service-recovery-and-self-healing.md",
+      "docs/zh/04-research/08-competitive-performance-research-2026.md"
+    ],
+    "rubric_dimensions": [
+      "research_alignment",
+      "architecture_soundness",
+      "reliability_resilience",
+      "performance_generalization",
+      "implementation_actionability",
+      "anti_fixture_special_casing"
+    ],
+    "min_score": 0.75,
+    "min_confidence": 0.6,
+    "min_anti_fixture_special_casing": 0.75,
+    "max_doc_chars": 4000,
+    "max_diff_chars": 30000
+  },
   "query_cases": [
     {
       "id": "rt_definition_connector_service",

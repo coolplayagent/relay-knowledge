@@ -43,6 +43,8 @@ def regression_memory(record: dict[str, Any]) -> dict[str, Any] | None:
     regression_kind = "performance_regression"
     if first.get("kind") == "case" and first.get("objective") == "semantic_vector":
         regression_kind = "semantic_vector_regression"
+    elif first.get("kind") == "case" and first.get("objective") == "research_judge":
+        regression_kind = "research_judge_regression"
     elif first.get("kind") == "case" and first.get("objective") == "competitive_capability":
         regression_kind = "competitive_capability_regression"
     elif first.get("kind") == "case":
@@ -225,6 +227,7 @@ def run_memory_detail(summary: str, record: dict[str, Any]) -> str:
         f"- competitive_capability: {record.get('competitive_capability', '')}\n"
         f"- accuracy: {record.get('accuracy', '')}\n"
         f"- semantic_vector: {record.get('semantic_vector', '')}\n"
+        f"- research_judge: {record.get('research_judge', '')}\n"
         f"- performance: {record.get('performance', '')}\n"
         f"- stability: {record.get('stability', '')}",
         markdown_list("Changed Paths", changed_paths(record)),
@@ -260,6 +263,7 @@ def score_impact(record: dict[str, Any]) -> dict[str, Any]:
         "competitive_capability": record.get("competitive_capability"),
         "accuracy": record.get("accuracy"),
         "semantic_vector": record.get("semantic_vector"),
+        "research_judge": record.get("research_judge"),
         "performance": record.get("performance"),
         "stability": record.get("stability"),
         "improvement_count": len(record.get("improvements", [])),

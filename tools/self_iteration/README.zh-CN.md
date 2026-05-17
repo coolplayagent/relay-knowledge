@@ -44,7 +44,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches/`。
-4. 运行 build、lint、tests、代码仓库检索评估、semantic/vector fixture、外部 embedding provider 探测（仅外部后端启用时）和自迭代文档 gate。
+4. 运行 build、lint、tests、代码仓库检索评估、semantic/vector fixture、外部 embedding provider 探测（仅外部后端启用时）、research judge（仅配置时）和自迭代文档 gate。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs.jsonl`。
 7. 将渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`。
@@ -70,7 +70,7 @@ prompt 只注入有界 memory index。Codex 应先按当前 gate、metric、case
 
 ## 评分和采纳
 
-加权分数为：
+未配置 research judge 时，加权分数为：
 
 ```text
 foundational_capability * 0.25
@@ -79,6 +79,26 @@ foundational_capability * 0.25
 + performance * 0.10
 + stability * 0.25
 ```
+
+配置 research judge 后，`research_judge` 成为受保护目标，分数权重切换为：
+
+```text
+foundational_capability * 0.20
++ competitive_capability * 0.20
++ semantic_vector * 0.12
++ research_judge * 0.15
++ performance * 0.08
++ stability * 0.25
+```
+
+research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `relay-teams`、`codex`、`cc` 或 `copilot`。所有 judge 配置都来自运行时环境变量：
+
+- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli`
+- HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`、`RELAY_KNOWLEDGE_JUDGE_API_KEY`、`RELAY_KNOWLEDGE_JUDGE_MODEL`
+- CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`，也支持别名 `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 和 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`
+- 通用 timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
+
+CLI command 默认通过 stdin 接收 judge prompt；命令模板也可以使用 `{workspace}`、`{prompt_file}` 或 `{prompt}` 占位符。harness 要求 HTTP 或 CLI judge 返回严格 JSON。未配置 judge 时记录 `judge_skipped`，不会阻塞默认本地自迭代；显式配置但缺少必需环境变量、返回非法 JSON、低置信度、低总分或低 anti-fixture-special-casing 分数时会拒绝候选。
 
 case objective 是连续质量分，不是通过率计数。case 在 rank 1 通过时得
 `1.0`；rank `N > 1` 即使仍在该 case 的 `max_rank` 采纳阈值内，也只得
@@ -124,6 +144,7 @@ and (
   `file_query_p50_ms` 和 `file_query_p95_ms`。每条文件查询都使用
   subprocess timeout，防止候选实现卡死 evaluator。
 - 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
+- `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要和选定的 02/03/04 文档片段交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。
