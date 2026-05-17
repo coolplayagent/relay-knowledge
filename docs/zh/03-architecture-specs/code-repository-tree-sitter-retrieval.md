@@ -440,24 +440,29 @@ query
 - `index_versions`
 - `stale` 和 `degraded_reason`
 
-词法候选窗口必须遵守以下实现约束:
+词法候选窗口约束分为必须约束、准确率契约和兼容性契约:
 
-- Symbol、reference、call、import 和 chunk 的 FTS 子查询必须先按 `source_scope`
-  和 effective path filters 过滤，再执行 `ORDER BY bm25(...)` 与候选窗口
-  `LIMIT`。Path filter 需要规范化 `./`、尾随斜杠和 SQL LIKE 字面量转义，且不能
-  放宽 registration scope。
-- Symbol fuzzy recall 可以使用 OR term 扩大召回，但最终仍必须通过 typed table、
-  path/language filter、identifier-aware scoring、去重和 limit 约束。Reference、
-  call、import 等 graph edge 查询除非另有产品契约和测试，不应放宽到 OR 召回。
-- Rust 层 scorer 可以在已召回的有界候选内加入确定性 ranking bonus，例如多段
-  identifier 覆盖、caller/callee 方向上下文、callee 相关名称、声明形态 chunk 或
-  interface chunk；bonus 必须受原始 query kind 方向语义约束，不能让不匹配主边端的
-  call edge 单独入选。
-- Call excerpt join 必须通过 caller `symbol_snapshot_id` 查找 chunk，并约束
-  `chunk.line_start <= call.line_start <= chunk.line_end`。如果没有覆盖调用行的
-  chunk，应退回到保守摘要，不应从同一 symbol 的无关 chunk 猜测 excerpt。
-- Finalize 阶段可以用集合式 SQL 批量重建 call FTS document，但 schema backfill 与
-  新 finalize 输出必须使用同一 content 字段集合，避免新旧库 query 行为分叉。
+- **必须约束**: Symbol、reference、call、import 和 chunk 的 FTS 子查询必须先按
+  `source_scope` 和 effective path filters 过滤，再执行 `ORDER BY bm25(...)` 与
+  候选窗口 `LIMIT`。Path filter 需要规范化 `./`、尾随斜杠和 SQL LIKE 字面量转义，
+  且不能放宽 registration scope。
+- **必须约束**: Call excerpt join 必须通过 caller `symbol_snapshot_id` 查找 chunk，
+  并约束 `chunk.line_start <= call.line_start <= chunk.line_end`。如果没有覆盖调用行
+  的 chunk，应退回到保守摘要，不应从同一 symbol 的无关 chunk 猜测 excerpt。
+- **准确率契约**: Symbol fuzzy recall 可以使用 OR term 扩大召回，但最终仍必须通过
+  typed table、path/language filter、identifier-aware scoring、去重和 limit 约束。
+  Reference、call、import 等 graph edge 查询除非另有产品契约和测试，不应放宽到
+  OR 召回。
+- **准确率契约**: Rust 层 scorer 可以在已召回的有界候选内加入确定性 ranking bonus，
+  例如多段 identifier 覆盖、caller/callee 方向上下文、callee 相关名称、声明形态
+  chunk 或 interface chunk；bonus 必须受原始 query kind 方向语义约束，不能让不匹配
+  主边端的 call edge 单独入选。
+- **兼容性契约**: Finalize 阶段可以用集合式 SQL 批量重建 call FTS document，但
+  schema backfill 与新 finalize 输出必须使用同一 content 字段集合，避免新旧库 query
+  行为分叉。
+
+如果未来替换 SQLite FTS5 或 BM25 后端，实现可以变化，但必须保持过滤先于候选窗口
+截断、候选按词法相关性排序、窗口有界、后续 scorer 不扩大召回的行为契约。
 
 ### 8.3 上下文打包
 

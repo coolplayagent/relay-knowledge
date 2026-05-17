@@ -441,31 +441,39 @@ query
 - `index_versions`
 - `stale` 和 `degraded_reason`
 
-Lexical candidate windows must follow these implementation constraints:
+Lexical candidate-window constraints are split into hard requirements, accuracy
+contracts, and compatibility contracts:
 
-- Symbol, reference, call, import, and chunk FTS subqueries must filter by
-  `source_scope` and effective path filters before `ORDER BY bm25(...)` and the
-  candidate-window `LIMIT`. Path filters must normalize `./`, trailing
-  separators, and SQL LIKE literals, and they must not widen the registered
-  scope.
-- Fuzzy symbol recall may use OR-term matching to improve multi-part identifier
-  recall, but final results must still pass the typed table join,
-  path/language filters, identifier-aware scoring, dedupe, and limit. Reference,
-  call, and import graph-edge queries should not loosen to OR recall unless a
-  product contract and regression tests explicitly require it.
-- The Rust scorer may add deterministic ranking bonuses inside an already
-  recalled bounded candidate set, such as multi-part identifier coverage,
-  caller/callee direction context, related callee names, declaration-shaped
-  chunks, or interface chunks. Bonuses must preserve the original query-kind
-  direction semantics and must not admit a call edge whose primary side does not
-  match the query.
-- Call excerpt joins must look up chunks by the caller `symbol_snapshot_id` and
-  constrain `chunk.line_start <= call.line_start <= chunk.line_end`. If no chunk
-  covers the call line, the result should fall back to a conservative summary
-  rather than guessing from an unrelated chunk of the same symbol.
-- The finalize phase may rebuild call FTS documents with set-based SQL, but
-  schema backfill and fresh finalize output must use the same content fields so
-  old and new SQLite databases keep the same query behavior.
+- **Hard requirement**: Symbol, reference, call, import, and chunk FTS subqueries
+  must filter by `source_scope` and effective path filters before
+  `ORDER BY bm25(...)` and the candidate-window `LIMIT`. Path filters must
+  normalize `./`, trailing separators, and SQL LIKE literals, and they must not
+  widen the registered scope.
+- **Hard requirement**: Call excerpt joins must look up chunks by the caller
+  `symbol_snapshot_id` and constrain
+  `chunk.line_start <= call.line_start <= chunk.line_end`. If no chunk covers the
+  call line, the result should fall back to a conservative summary rather than
+  guessing from an unrelated chunk of the same symbol.
+- **Accuracy contract**: Fuzzy symbol recall may use OR-term matching to improve
+  multi-part identifier recall, but final results must still pass the typed table
+  join, path/language filters, identifier-aware scoring, dedupe, and limit.
+  Reference, call, and import graph-edge queries should not loosen to OR recall
+  unless a product contract and regression tests explicitly require it.
+- **Accuracy contract**: The Rust scorer may add deterministic ranking bonuses
+  inside an already recalled bounded candidate set, such as multi-part identifier
+  coverage, caller/callee direction context, related callee names,
+  declaration-shaped chunks, or interface chunks. Bonuses must preserve the
+  original query-kind direction semantics and must not admit a call edge whose
+  primary side does not match the query.
+- **Compatibility contract**: The finalize phase may rebuild call FTS documents
+  with set-based SQL, but schema backfill and fresh finalize output must use the
+  same content fields so old and new SQLite databases keep the same query
+  behavior.
+
+If SQLite FTS5 or the BM25 backend is replaced in the future, the implementation
+may change, but it must preserve the behavioral contract: filters run before
+candidate-window truncation, candidates are ordered by lexical relevance, the
+window is bounded, and later scorers do not expand recall.
 
 ### 8.3 Context packing
 
