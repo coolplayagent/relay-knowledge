@@ -134,8 +134,8 @@ fn search_symbols(
             })
         },
     )?;
-    let query = request.query.to_lowercase();
-    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
+    let query = request.query.as_str();
+    let query_has_test_intent = query_mentions_test_or_benchmark(query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -145,7 +145,7 @@ fn search_symbols(
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let score = score_text(
-                &query,
+                query,
                 [
                     row.name.as_str(),
                     row.qualified_name.as_str(),
@@ -155,7 +155,7 @@ fn search_symbols(
                     row.path.as_str(),
                 ],
             ) + symbol_query_bonus(
-                &query,
+                query,
                 &row.name,
                 &row.qualified_name,
                 &row.signature,
@@ -384,8 +384,8 @@ fn search_calls(
             })
         },
     )?;
-    let query = request.query.to_lowercase();
-    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
+    let query = request.query.as_str();
+    let query_has_test_intent = query_mentions_test_or_benchmark(query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -399,23 +399,23 @@ fn search_calls(
                 CodeQueryKind::Callers => [&row.callee_name, ""],
                 _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
             };
-            let base_score = score_text(&query, search_fields);
+            let base_score = score_text(query, search_fields);
             let score = base_score
                 + directional_call_context_bonus(
-                    &query,
+                    query,
                     base_score,
                     row.caller_name.as_deref(),
                     &row.callee_name,
                     &row.path,
                     request,
                 )
-                + callee_related_name_bonus(&query, &row.callee_name, request);
+                + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score
                 + call_site_source_path_bonus(
                     base_score,
                     &row.path,
                     request,
-                    &query,
+                    query,
                     query_has_test_intent,
                 );
             (score > 0.0).then(|| {
