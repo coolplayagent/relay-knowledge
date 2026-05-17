@@ -113,7 +113,7 @@ jobs:
             archive: tar.gz
             cross: true
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             archive: tar.gz
             cross: false
           - target: aarch64-apple-darwin
@@ -201,7 +201,7 @@ jobs:
           Compress-Archive -Path "dist\$package" -DestinationPath "dist\$package.zip" -Force
 
       - name: Upload release archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}
           path: dist/${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}.${{ matrix.archive }}
@@ -274,7 +274,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
