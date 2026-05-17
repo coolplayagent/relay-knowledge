@@ -7,6 +7,15 @@
 > Reviewed revision: `40b7019`, 2025-12-27, `Merge pull request #19 from Deepak-png981/dj/Introduce-prompt-factory`
 > Scope: architecture, algorithm, performance, and reliability lessons only. This document does not introduce implementation changes or copy source code from the reference project.
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | The pinned `ai-knowledge-graph` open-source implementation, compared with this repository's async-first, service-first, and recoverable-indexing constraints. |
+| Goal | Extract productizable semantics from a minimal LLM graph-construction loop while identifying script-style risks that should not be transplanted. |
+| Competitive focus | relay-knowledge should absorb staged pipelines, candidate facts, and budget control while turning synchronous calls, missing durable task state, and weak evidence governance into negative constraints. |
+| Scenarios and future | Targets inspectable graph generation, proposal review, derived-fact explanation, and background task recovery rather than one-off offline visualization. |
+
 ## 1. Executive Summary
 
 `ai-knowledge-graph` is a Python single-machine pipeline: it reads a text file, chunks it by word count, uses an OpenAI-compatible Chat Completions endpoint to extract Subject-Predicate-Object triples, standardizes entities, infers relationships, and renders an interactive HTML graph with NetworkX, Louvain community detection, and PyVis. It is useful as a minimal closed loop for LLM-extracted knowledge graphs, but its implementation style should not be transplanted directly into `relay-knowledge`.

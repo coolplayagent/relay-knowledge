@@ -15,6 +15,15 @@ This is the English documentation page for `04-research/02-knowledge-graph-resea
 > 目标读者: 架构设计、核心实现、后续技术选型
 > 结论类型: 论文与工程研究总结，面向本项目落地
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | Knowledge-graph construction, KG refinement, RAG, GraphRAG, BM25/HNSW/RRF, and property-graph standardization papers, checked against graph database engineering practice. |
+| Goal | Define relay-knowledge as a continuously evolving, retrievable, explainable, and recoverable graph service rather than a one-time triple store. |
+| Competitive focus | Property graphs, provenance, graph versions, index freshness, three-layer retrieval, and event-driven refresh form the long-term foundation. |
+| Scenarios and future | Supports document graphs, code graphs, GraphRAG context packs, agent queries, background index recovery, and future dynamic knowledge plus multimodal evidence. |
+
 ## 1. 执行摘要
 
 `relay-knowledge` 的目标不是只保存三元组，而是建设一个可持续更新、可检索、可解释、可被 CLI 与 Web 共用的知识图谱核心服务。结合近年知识图谱构建、GraphRAG、混合检索、图数据库标准化研究，建议项目从第一版就按以下方向收敛:

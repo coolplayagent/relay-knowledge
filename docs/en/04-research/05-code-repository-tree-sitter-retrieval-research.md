@@ -15,6 +15,15 @@ This is the English documentation page for `04-research/05-code-repository-tree-
 > 研究范围: tree-sitter 结构化代码解析、Git 增量变更发现、代码知识图谱、高性能索引和检索
 > 输出用途: 支撑 `docs/zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md` 的设计取舍
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | Tree-sitter, Git, libgit2, GitHub code navigation, Codebase-Memory, and this repository's code-graph experience. |
+| Goal | Move repository retrieval from full-text search to a combination of Git snapshots, syntax structure, symbol/reference graphs, and incremental indexing. |
+| Competitive focus | Structured code facts, file-level incremental work, scope authorization, hybrid recall, impact analysis, and recoverable indexing are core agent-facing advantages. |
+| Scenarios and future | Targets large-repository understanding, dirty-worktree queries, code review, impact reports, agent context packing, and later language-service adapters. |
+
 ## 1. 研究结论
 
 代码仓库检索不能只靠全文索引。成熟方向是把 Git 版本边界、tree-sitter 语法结构、符号/引用图、文本/向量检索和增量索引组合起来:

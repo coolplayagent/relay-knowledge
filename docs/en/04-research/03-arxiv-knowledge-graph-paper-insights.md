@@ -15,6 +15,15 @@ This is the English documentation page for `04-research/03-arxiv-knowledge-graph
 > 范围: 以 arXiv 论文为主，覆盖知识图谱、LLM + KG、GraphRAG、动态图谱、KGC、评估与行业落地
 > 目标: 从论文趋势中提炼对本项目架构和路线的可执行判断
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | arXiv papers and surveys covering GraphRAG, LLM+KG, temporal graphs, KGC, explainable retrieval, and evaluation benchmarks. |
+| Goal | Maintain a frontier algorithm radar that separates architecture principles worth adopting soon from experimental directions that need more evidence. |
+| Competitive focus | Convert paper-level cost, latency, temporality, evidence organization, and robustness requirements into testable versioning, budget, path, and evaluation designs. |
+| Scenarios and future | Targets complex question decomposition, multi-hop evidence, time-sensitive knowledge, incremental GraphRAG, and trustworthy evaluation without special-casing one paper. |
+
 ## 1. 核心判断
 
 近三年 arXiv 上的知识图谱研究已经从“如何构建 KG”扩展为“如何把 KG 作为 LLM、RAG、Agent 和企业检索系统的可更新记忆层”。对 `relay-knowledge` 来说，最重要的不是追随单个 GraphRAG 框架，而是建立一个可演进的图谱核心: 可追溯事实、版本化图状态、可刷新索引、多模式检索和可验证回答。

@@ -15,6 +15,15 @@ This is the English documentation page for `04-research/07-relay-knowledge-imple
 > 范围: 结合 docs 中的知识图谱、GraphRAG、Agentic KG、Tree-sitter 代码图、协议接入和后台服务材料，对照当前 Rust 实现，记录已关闭能力和开放产品化路线。
 > 定位: 工程借鉴文档，不替代 `docs/zh/03-architecture-specs/` 中的硬约束和接口规格。
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | The previous six research chapters, current code and capability docs, and the GraphRAG, agentic KG, Tree-sitter, temporal graph, and multimodal-evidence directions. |
+| Goal | Compress research conclusions into an implementation path, clarifying what is already closed, what remains a gap, and what should stay as a future-facing interface. |
+| Competitive focus | The research path should compete through shared core services, versioned facts, explainable context packs, code graphs, and service operations rather than feature count. |
+| Scenarios and future | Targets v1 productization, later GraphRAG expansion, agent access, silent updates, evaluation loops, and install/deployment governance. |
+
 ## 1. 执行结论
 
 `relay-knowledge` 当前已经具备一个可继续演进的知识图谱底座: 统一 API、异步 application service、SQLite 图状态、图版本、结构化事实、索引新鲜度元数据、带 source hash/backend cursor/model metadata 的 scoped index cursor、bounded refresh queue、task lease/reconciler 诊断、结构化 stale reasons、FTS5 BM25 read model、local semantic/vector read model、可配置外部 semantic/vector embedding 后端契约、schema path/temporal/community retrieval、RRF context pack、本地确定性 rerank、Tree-sitter 代码仓库索引、多模态 evidence schema、后台/maintenance 多模态抽取提交入口、worker proposal lifecycle、MCP Streamable HTTP、本地 ACP session adapter、MCP resources/prompts、Prometheus metrics exporter、可选 JSONL audit sink、CLI/Web 入口、GraphRAG evaluation fixture gate、`env`/`paths`/`net` 基础边界和 QoS 配置。它还不是完整服务安装产品，当前开放产品化集中在具体外部 embedding/OCR/vision/table/layout provider、特权 service install/rollback/package manifests/watchdog、conflict/valid-time 产品语义、远端 ACP/A2A gateway、query router 和 release-facing 评测报告。

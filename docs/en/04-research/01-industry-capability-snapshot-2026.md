@@ -14,6 +14,15 @@ This is the English documentation page for `04-research/01-industry-capability-s
 > 编制日期: 2026-05-13
 > 范围: GraphRAG、agent protocol、托管检索、本地图谱检索和 relay-knowledge 易用性差距。
 
+## Research Positioning
+
+| Dimension | Conclusion |
+| --- | --- |
+| Sources | Primary sources are official Microsoft GraphRAG/DRIFT, MCP, A2A, OpenAI File Search, and Neo4j GraphRAG materials, cross-checked against this repository's current capability gaps. |
+| Goal | Convert industry signals into relay-knowledge product direction, separating capabilities that should be productized now from interfaces that should remain forward-looking. |
+| Competitive focus | Local-first operation, three-layer retrieval, explainable graph paths, authorization boundaries, service operation, and agent-protocol interoperability should combine into differentiation instead of chasing one managed-retrieval feature. |
+| Scenarios and future | Targets zero-config onboarding, enterprise knowledge retrieval, repository understanding, agent workspaces, and long-running background index operation. |
+
 ## Summary
 
 2026 年的主流方向已经从单纯 vector RAG 转向可解释、可治理、可互操作的知识系统:
@@ -63,5 +72,5 @@ Neo4j GraphRAG 生态把 GraphRAG 描述为结合知识图谱、vector search、
 - A2A Protocol specification: https://a2a-protocol.org/dev/specification/
 - A2A Protocol v1.0 announcement: https://a2a-protocol.org/latest/announcing-1.0/
 - Linux Foundation A2A adoption update, 2026-04-09: https://www.linuxfoundation.org/press/a2a-protocol-surpasses-150-organizations-lands-in-major-cloud-platforms-and-sees-enterprise-production-use-in-first-year
-- OpenAI File Search guide: https://developers.openai.com/api/docs/guides/tools-file-search
+- OpenAI File Search guide: https://platform.openai.com/docs/guides/tools-file-search/
 - Neo4j GraphRAG Labs: https://neo4j.com/labs/genai-ecosystem/graphrag/
