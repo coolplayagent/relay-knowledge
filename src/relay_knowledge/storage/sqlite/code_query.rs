@@ -232,7 +232,7 @@ fn search_references(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
+    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
@@ -252,7 +252,7 @@ fn search_references(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'reference'
-                {fts_path_filter}
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -262,7 +262,7 @@ fn search_references(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,
@@ -337,7 +337,7 @@ fn search_calls(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
+    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
@@ -376,7 +376,7 @@ fn search_calls(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'call'
-                {fts_path_filter}
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -386,7 +386,7 @@ fn search_calls(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,
@@ -510,7 +510,7 @@ fn search_imports(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
+    let fts_filter = fts_path_and_file_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
@@ -525,7 +525,7 @@ fn search_imports(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'import'
-                {fts_path_filter}
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -535,7 +535,7 @@ fn search_imports(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,

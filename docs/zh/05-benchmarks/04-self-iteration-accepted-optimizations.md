@@ -16,6 +16,13 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-edge-fts-file-language-pushdown-20260518
+- 目标：保护 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等多语言大仓的 full-scope code graph retrieval，修复 reference/call/import 查询在带 language selector 时仍可能先让范围外语言填满 bounded FTS candidate window 的召回风险。
+- 算法与架构：symbol/chunk 已使用 FTS 行内 language filter；本轮对 reference/call/import 查询新增 edge 专用 FTS 过滤 SQL，在 FTS 子查询内保留既有 path filter，并通过 `code_repository_files` 的 `(source_scope, path)` 主键关联校验 `language_id`。这样无需改写已有 FTS edge 文档或 schema，也兼容旧数据库中 edge search row 的空 `language_id`。Rust `selected_row` 后置过滤继续作为一致性保护。
+- 不变量：不改变索引写入、SQLite schema、FTS MATCH 表达式、candidate limit、BM25 排序、score/ranking/fusion、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP 边界或安装发布行为；无仓库、路径、符号或 case 特殊分支。
+- 预期影响：按语言查询 callers/callees/references/imports 时，候选剪枝发生在 scoring 前，避免 Python/JavaScript/Go 等噪声 edge 吃掉 Rust/Python 目标语言的候选窗口；预期提升 `ConnectorService` 这类 path/language filtered case 的稳定性，并降低无效 edge scoring。
+- 已知风险：只有带 language filter 的 edge 查询会多一次按 `(source_scope, path)` 的文件表存在性检查；无 language filter 查询仍走原 candidate plan。收益集中在多语言噪声较高的仓库，单语言仓库影响应接近零。
+
 ## 候选优化说明：manual-score-query-field-identifier-cache-20260518
 - 目标：在 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等大仓 full-scope 查询中，保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时修复近期 relay-teams query p50/p95 退化。
 - 算法与架构：保持 SQLite FTS、path/language filter、candidate limit、排序权重和 hit 去重不变；`ScoreQuery` 在每个候选字段内惰性缓存 identifier token 集合，避免多 token 查询对同一 symbol、signature、path 或 chunk 字段重复执行 snake/camel 拆分。
@@ -957,4 +964,17 @@ ition); +        let callers = retrieval_request(CodeQueryKind::Callers); + +   
 Adopted optimization notes:
 
 t mut tokens = identifier_match_terms(value); +    tokens.sort(); +    tokens.dedup(); + +    tokens +} + +fn identifier_match_terms(value: &str) -> Vec<String> { let mut tokens = Vec::new(); for token in identifier_tokens(value) { tokens.push(token.to_ascii_lowercase()); @@ -450,8 +483,6 @@ ); tokens.extend(camel_case_terms(token)); } -    tokens.sort(); -    tokens.dedup(); tokens } diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 35cd7526d97ab3c7b822b44d2746305154b65616..20e42ded6d92eaa6e8928e5912fbc2d3e148e60f --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -103,6 +103,17 @@ } #[test] +fn score_query_preserves_multi_token_identifier_scores() { +    let score = ScoreQuery::new("cache output archive").score([ +        "block_cache", +        "archiveOutput", +        "def archive_output_dir() -> Path:", +    ]); + +    assert_eq!(score, 6.0); +} + +#[test] fn declaration_chunk_bonus_requires_declaration_shape() { let terms = query_terms("recover descriptor save_manifest versionedit"); tokens used 195,402
+## 20260517T212719Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T212719Z.patch`
+- score: 0.958053 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.84, performance=0.955021, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:research_judge 0.83->0.84; metric:relay_teams_query_p50_ms 140.0->103.5; metric:relay_teams_query_p95_ms 389.0->293.0; metric:leveldb_cpp_index_ms 19287.0->16194
+- known degradations: metric:cargo_build_release_ms 99.0->33300; metric:cargo_fmt_check_ms 516.0->782; metric:cargo_clippy_ms 147.0->188; metric:cargo_test_ms 3931.0->8636; metric:relay_teams_index_ms 58973.0->68889; metric:semantic_vector_provider_probe_ms 1361.0->1516
+- latency metrics: cargo_build_release_ms=33300ms; cargo_fmt_check_ms=782ms; cargo_clippy_ms=188ms; cargo_test_ms=8636ms; relay_teams_index_ms=68889ms; relay_teams_query_p50_ms=104ms; relay_teams_query_p95_ms=293ms; leveldb_cpp_index_ms=16194ms
+
+Adopted optimization notes:
+
+); +        call.callee_name = "TargetThing".to_owned(); +        calls.push(call); +    } +    files.push(code_query_file("rust-target-file", "src/lib.rs", "rust")); +    let mut target = code_query_call("zz-rust-target-call", "rust-target-file", "src/lib.rs"); +    target.callee_name = "TargetThing".to_owned(); +    calls.push(target); +    let store = store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)) +        .await; +    let selector = +        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()]) +            .expect("selector should be valid"); +    let request = CodeRetrievalRequest::new( +        "TargetThing", +        selector, +        CodeQueryKind::Callers, +        5, +        FreshnessPolicy::AllowStale, +    ) +    .expect("request should be valid"); + +    let hits = store +        .search_code(request) +        .await +        .expect("language-filtered caller query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "src/lib.rs"); +    assert_eq!(hits[0].language_id, "rust"); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 194,101
 

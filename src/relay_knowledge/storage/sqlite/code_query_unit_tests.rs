@@ -454,6 +454,46 @@ async fn caller_search_matches_spaced_compound_identifier_query() {
     assert!(hits[0].excerpt.contains("NewLRUCache"));
 }
 
+#[tokio::test]
+async fn edge_queries_apply_language_filters_before_candidate_limit() {
+    let mut files = Vec::new();
+    let mut calls = Vec::new();
+    for index in 0..520 {
+        let file_id = format!("python-noise-file-{index}");
+        let path = format!("noise/module_{index}.py");
+        files.push(code_query_file(&file_id, &path, "python"));
+        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        call.callee_name = "TargetThing".to_owned();
+        calls.push(call);
+    }
+    files.push(code_query_file("rust-target-file", "src/lib.rs", "rust"));
+    let mut target = code_query_call("zz-rust-target-call", "rust-target-file", "src/lib.rs");
+    target.callee_name = "TargetThing".to_owned();
+    calls.push(target);
+    let store =
+        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should be valid");
+    let request = CodeRetrievalRequest::new(
+        "TargetThing",
+        selector,
+        CodeQueryKind::Callers,
+        5,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should be valid");
+
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("language-filtered caller query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/lib.rs");
+    assert_eq!(hits[0].language_id, "rust");
+}
+
 #[test]
 fn symbol_excerpt_adds_class_owner_for_member_context() {
     assert_eq!(

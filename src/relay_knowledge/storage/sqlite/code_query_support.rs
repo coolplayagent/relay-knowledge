@@ -686,27 +686,6 @@ pub(super) fn hybrid_chunk_fts_match_query(query: &str) -> String {
     }
 }
 
-pub(super) fn fts_values_for_limited(
-    source_scope: &str,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-    fts_query: &str,
-    fts_limit: usize,
-    limit: usize,
-) -> Vec<Value> {
-    let mut values = vec![
-        Value::Text(source_scope.to_owned()),
-        Value::Text(fts_query.to_owned()),
-        Value::Text(source_scope.to_owned()),
-    ];
-    push_path_filter_values(&mut values, &status.path_filters);
-    push_path_filter_values(&mut values, &request.repository.path_filters);
-    values.push(Value::Integer(fts_limit as i64));
-    values.push(Value::Integer(limit as i64));
-
-    values
-}
-
 pub(super) fn fts_values_for_limited_with_language(
     source_scope: &str,
     status: &CodeRepositoryStatus,
@@ -730,11 +709,41 @@ pub(super) fn fts_values_for_limited_with_language(
     values
 }
 
-pub(super) fn fts_path_filter_sql(
+pub(super) fn fts_path_and_file_language_filter_sql(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> String {
-    path_filter_sql_for_column("path", status, request)
+    let mut clauses = Vec::new();
+    push_path_filter_sql(&mut clauses, "path", &status.path_filters);
+    push_path_filter_sql(&mut clauses, "path", &request.repository.path_filters);
+    let mut language_clauses = Vec::new();
+    push_language_filter_sql(
+        &mut language_clauses,
+        "f.language_id",
+        &status.language_filters,
+    );
+    push_language_filter_sql(
+        &mut language_clauses,
+        "f.language_id",
+        &request.repository.language_filters,
+    );
+    if !language_clauses.is_empty() {
+        clauses.push(format!(
+            "EXISTS (
+                SELECT 1
+                FROM code_repository_files f
+                WHERE f.source_scope = code_repository_search.source_scope
+                  AND f.path = code_repository_search.path
+                  AND {}
+            )",
+            language_clauses.join(" AND ")
+        ));
+    }
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", clauses.join(" AND "))
+    }
 }
 
 pub(super) fn fts_path_and_language_filter_sql(
