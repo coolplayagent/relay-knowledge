@@ -42,8 +42,10 @@ class CaseObservation:
     def score(self) -> float:
         if not self.passed:
             return 0.0
-        rank = self.rank or self.max_rank
-        rank_score = 1.0 if rank <= self.max_rank else max(0.0, self.max_rank / rank)
+        if self.rank is None or self.rank <= 0:
+            rank_score = 1.0
+        else:
+            rank_score = 1.0 / self.rank
         false_positive_penalty = min(0.5, self.false_positive_count * 0.1)
         return max(0.0, rank_score - false_positive_penalty)
 
@@ -87,6 +89,7 @@ class ScoreBreakdown:
     reject_reasons: list[str]
     degradations: list[dict[str, Any]] = field(default_factory=list)
     improvements: list[dict[str, Any]] = field(default_factory=list)
+    metric_budget_failures: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +104,7 @@ class ScoreBreakdown:
             "reject_reasons": self.reject_reasons,
             "degradations": self.degradations,
             "improvements": self.improvements,
+            "metric_budget_failures": self.metric_budget_failures,
         }
 
 
@@ -113,25 +117,30 @@ def score_evaluation(
     if weights:
         active_weights.update(weights)
 
-    foundational_capability = objective_case_score(
+    foundational_scores = objective_case_scores(
         observation.cases,
         "foundational_capability",
-        default=1.0,
         aliases=("accuracy",),
     )
-    competitive_capability = objective_case_score(
-        observation.cases,
-        "competitive_capability",
-        default=1.0,
+    competitive_scores = objective_case_scores(observation.cases, "competitive_capability")
+    semantic_vector_scores = objective_case_scores(observation.cases, "semantic_vector")
+    foundational_capability = average(foundational_scores, default=0.0)
+    competitive_capability = average(competitive_scores, default=0.0)
+    accuracy = average(
+        [
+            score
+            for score, scores in (
+                (foundational_capability, foundational_scores),
+                (competitive_capability, competitive_scores),
+            )
+            if scores
+        ],
+        default=0.0,
     )
-    accuracy = average([foundational_capability, competitive_capability], default=1.0)
-    semantic_vector = objective_case_score(
-        observation.cases,
-        "semantic_vector",
-        default=1.0,
-    )
+    semantic_vector = average(semantic_vector_scores, default=0.0)
     performance = average([metric.score() for metric in observation.metrics], default=1.0)
     stability = stability_score(observation.gates, observation.generated_diff)
+    budget_failures = metric_budget_failures(observation.metrics)
     score = (
         foundational_capability * active_weights["foundational_capability"]
         + competitive_capability * active_weights["competitive_capability"]
@@ -186,6 +195,7 @@ def score_evaluation(
         reject_reasons=reject_reasons,
         degradations=degradations,
         improvements=improvements,
+        metric_budget_failures=budget_failures,
     )
 
 
@@ -628,17 +638,36 @@ def stability_score(gates: list[GateObservation], generated_diff: bool) -> float
     return sum(1.0 for gate in gates if gate.passed) / len(gates)
 
 
-def objective_case_score(
+def objective_case_scores(
     cases: list[CaseObservation],
     objective: str,
-    default: float,
     aliases: tuple[str, ...] = (),
-) -> float:
+) -> list[float]:
     objective_names = {objective, *aliases}
-    return average(
-        [case.score() for case in cases if case.objective in objective_names],
-        default=default,
-    )
+    return [case.score() for case in cases if case.objective in objective_names]
+
+
+def metric_budget_failures(metrics: list[MetricObservation]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for metric in metrics:
+        if metric.budget is None or metric.budget <= 0:
+            continue
+        misses_budget = (
+            metric.value > metric.budget
+            if metric.lower_is_better
+            else metric.value < metric.budget
+        )
+        if misses_budget:
+            failures.append(
+                {
+                    "name": metric.name,
+                    "value": round(metric.value, 6),
+                    "budget": round(metric.budget, 6),
+                    "lower_is_better": metric.lower_is_better,
+                    "score": round(metric.score(), 6),
+                }
+            )
+    return failures
 
 
 def average(values: list[float], default: float) -> float:

@@ -80,6 +80,14 @@ foundational_capability * 0.25
 + stability * 0.25
 ```
 
+case objective 是连续质量分，不是通过率计数。case 在 rank 1 通过时得
+`1.0`；rank `N > 1` 即使仍在该 case 的 `max_rank` 采纳阈值内，也只得
+`1.0 / N`。空结果负例以 `rank=0` 通过时仍得 `1.0`。缺失的
+foundational、competitive 或 semantic/vector objective 默认 `0.0`，不会因为
+没有 case 而显示为满分；`accuracy` 只汇总实际存在的 foundational 与
+competitive objective。超出预算的耗时指标会进入 `metric_budget_failures`
+诊断字段，现有按预算归一化的 `performance` 仍作为加权延迟信号。
+
 `accuracy` 保留为 foundational 与 competitive case 分数的兼容汇总。采纳策略使用 `带硬约束和加权分数决胜的 epsilon-Pareto 采纳策略`。从多目标优化角度看，build/test gate 和候选 diff 存在性是硬约束，foundational_capability、competitive_capability、semantic_vector 和 stability 是保证基础可用性、高阶检索质量、semantic/vector 来源覆盖和后端可用性的受保护目标，延迟观测也是目标，epsilon 阈值用于抑制测量噪声，加权分数是决胜项而不是唯一决策规则。
 
 候选在以下条件满足时被采纳：

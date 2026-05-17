@@ -426,6 +426,7 @@ def run_record(
         "reject_reasons": score["reject_reasons"],
         "degradations": score.get("degradations", []),
         "improvements": score.get("improvements", []),
+        "metric_budget_failures": score.get("metric_budget_failures", []),
         "patch": str(patch.path),
         "patch_sha256": patch.sha256,
         "report": str(report_path),
