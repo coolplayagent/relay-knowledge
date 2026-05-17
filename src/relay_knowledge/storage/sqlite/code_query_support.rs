@@ -568,8 +568,8 @@ pub(super) fn fts_values_for_limited(
         Value::Text(fts_query.to_owned()),
         Value::Text(source_scope.to_owned()),
     ];
-    push_fts_path_filter_values(&mut values, &status.path_filters);
-    push_fts_path_filter_values(&mut values, &request.repository.path_filters);
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
     values.push(Value::Integer(fts_limit as i64));
     values.push(Value::Integer(limit as i64));
 
@@ -580,9 +580,17 @@ pub(super) fn fts_path_filter_sql(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> String {
+    path_filter_sql_for_column("path", status, request)
+}
+
+pub(super) fn path_filter_sql_for_column(
+    column: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> String {
     let mut clauses = Vec::new();
-    push_fts_path_filter_sql(&mut clauses, &status.path_filters);
-    push_fts_path_filter_sql(&mut clauses, &request.repository.path_filters);
+    push_path_filter_sql(&mut clauses, column, &status.path_filters);
+    push_path_filter_sql(&mut clauses, column, &request.repository.path_filters);
     if clauses.is_empty() {
         String::new()
     } else {
@@ -590,18 +598,43 @@ pub(super) fn fts_path_filter_sql(
     }
 }
 
-fn push_fts_path_filter_sql(clauses: &mut Vec<String>, filters: &[String]) {
+pub(super) fn language_filter_sql_for_column(
+    column: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> String {
+    let mut clauses = Vec::new();
+    push_language_filter_sql(&mut clauses, column, &status.language_filters);
+    push_language_filter_sql(&mut clauses, column, &request.repository.language_filters);
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND {}", clauses.join(" AND "))
+    }
+}
+
+fn push_path_filter_sql(clauses: &mut Vec<String>, column: &str, filters: &[String]) {
     let clauses_for_filters = filters
         .iter()
         .filter_map(|filter| normalized_sql_path_filter(filter))
-        .map(|_| "(path = ? OR path LIKE ? ESCAPE '\\')".to_owned())
+        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')"))
         .collect::<Vec<_>>();
     if !clauses_for_filters.is_empty() {
         clauses.push(format!("({})", clauses_for_filters.join(" OR ")));
     }
 }
 
-fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+fn push_language_filter_sql(clauses: &mut Vec<String>, column: &str, filters: &[String]) {
+    let clauses_for_filters = filters
+        .iter()
+        .map(|_| format!("{column} = ?"))
+        .collect::<Vec<_>>();
+    if !clauses_for_filters.is_empty() {
+        clauses.push(format!("({})", clauses_for_filters.join(" OR ")));
+    }
+}
+
+pub(super) fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
     for filter in filters
         .iter()
         .filter_map(|filter| normalized_sql_path_filter(filter))
@@ -609,6 +642,10 @@ fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
         values.push(Value::Text(filter.clone()));
         values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
     }
+}
+
+pub(super) fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    values.extend(filters.iter().cloned().map(Value::Text));
 }
 
 fn normalized_sql_path_filter(filter: &str) -> Option<String> {

@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-import-target-filter-pushdown-20260517
+
+- 目标：提升大仓 full-scope import graph 在带 selector path/language filter 时的 target-symbol 查询准确性与稳定性，避免查询导入者范围时把过滤条件误施加到被导入符号定义，或让路径外/语言外导入边先填满 bounded candidate window。
+- 方法：import target-symbol fallback 分两阶段处理：第一阶段只在当前 indexed source scope 内用 bounded symbol FTS 找到查询命中的目标符号，并生成 path/package target hints；第二阶段通过 `code_repository_imports(source_scope, target_hint, path)` 查找导入边时，把 indexed scope 和本次 selector path filters 下推到 `i.path`，把 language filters 下推到 `f.language_id`，在 `ORDER BY ... LIMIT` 前裁剪导入者候选。
+- 架构与不变量：不改变 CLI/API 字段、SQLite 表结构、candidate limit、FTS 文档、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；最终 `selected_row` 仍保留为一致性保护，新增 SQL pushdown 只减少范围外 import edge 候选。目标符号发现不再使用本次导入者 path/language filter，因为 selector filter 描述的是返回的 import rows，而不是被导入符号必须所在的路径或语言。
+- 预期影响：Kubernetes/Go package import、Spring wildcard import、relay-teams Python re-export 等以符号名查询 import graph 的 case 在窄路径/语言查询和大仓噪声下更稳定；范围外 import noise 不会消耗 bounded target-hint lookup window，查询延迟也可能因更早裁剪导入边而改善。
+- 已知风险：target-symbol fallback 的符号发现阶段会在 source scope 内查看比 selector path/language filter 更宽的符号集合；最终 import rows 仍受 selector path/language 过滤和 bounded target-hint lookup 约束，因此风险主要是多一次 bounded symbol FTS 可能找到同名符号并生成额外 target hints，但不会返回范围外导入者。
+
 ## 候选优化说明：manual-java-wildcard-import-target-recall-20260517
 
 - 目标：提升 Spring Framework 等 Java 大仓 full-scope import graph 的符号查询召回，尤其是代码使用 `import package.*` 时，查询具体类名或 fully-qualified class name 能找到通配 package import 的导入者。
@@ -885,4 +893,17 @@ ssert!(!target_symbol_import_query("org.springframework.context.ApplicationConte
 Adopted optimization notes:
 
 tests.rs @@ -110,14 +110,32 @@ } #[test] +fn import_target_symbol_bonus_matches_fully_qualified_class_tail() { +    assert_eq!( +        import_target_symbol_bonus( +            "org.springframework.context.ApplicationContext", +            Some("ApplicationContext"), +        ), +        2.0 +    ); +    assert_eq!( +        import_target_symbol_bonus("org.springframework.context", Some("ApplicationContext")), +        0.0 +    ); +    assert_eq!(import_target_symbol_bonus("ApplicationContext", None), 0.0); +} + +#[test] fn target_symbol_import_query_skips_path_like_queries() { assert!(target_symbol_import_query("SharedInformerFactory")); assert!(target_symbol_import_query("DefaultListableBeanFactory")); -    assert!(!target_symbol_import_query("linux/debugfs.h")); -    assert!(!target_symbol_import_query( +    assert!(target_symbol_import_query( "org.springframework.context.ApplicationContext" )); +    assert!(!target_symbol_import_query("linux/debugfs.h")); +    assert!(!target_symbol_import_query("linux.debugfs.h")); assert!(!target_symbol_import_query("src\\debugfs.h")); +    assert!(!target_symbol_import_query("DefaultListableBeanFactory.java")); } #[test] tokens used 182,924
+## 20260517T102845Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T102845Z.patch`
+- score: 0.9769 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.954995, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_target_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: score_component:research_judge 0.85->0.87; metric:cargo_test_ms 10113.0->8801; metric:relay_teams_index_ms 91935.0->79775; metric:relay_teams_query_p95_ms 556.0->472.0; metric:leveldb_cpp_index_ms 21453.0->19412
+- known degradations: metric:cargo_build_release_ms 62256.0->66551; metric:cargo_clippy_ms 203.0->240; metric:semantic_vector_provider_probe_ms 1566.0->1835
+- latency metrics: cargo_build_release_ms=66551ms; cargo_fmt_check_ms=834ms; cargo_clippy_ms=240ms; cargo_test_ms=8801ms; relay_teams_index_ms=79775ms; relay_teams_query_p50_ms=138ms; relay_teams_query_p95_ms=472ms; leveldb_cpp_index_ms=19412ms
+
+Adopted optimization notes:
+
+'\\')".to_owned()) +        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')")) .collect::<Vec<_>>(); if !clauses_for_filters.is_empty() { clauses.push(format!("({})", clauses_for_filters.join(" OR "))); } } -fn push_fts_path_filter_values(values: &mut Vec<Value>, filters: &[String]) { +fn push_language_filter_sql(clauses: &mut Vec<String>, column: &str, filters: &[String]) { +    let clauses_for_filters = filters +        .iter() +        .map(|_| format!("{column} = ?")) +        .collect::<Vec<_>>(); +    if !clauses_for_filters.is_empty() { +        clauses.push(format!("({})", clauses_for_filters.join(" OR "))); +    } +} + +pub(super) fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) { for filter in filters .iter() .filter_map(|filter| normalized_sql_path_filter(filter)) @@ -611,6 +644,10 @@ } } +pub(super) fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) { +    values.extend(filters.iter().cloned().map(Value::Text)); +} + fn normalized_sql_path_filter(filter: &str) -> Option<String> { let mut filter = filter.trim_end_matches(['/', '\\']); while let Some(stripped) = filter.strip_prefix("./") { tokens used 245,044
 

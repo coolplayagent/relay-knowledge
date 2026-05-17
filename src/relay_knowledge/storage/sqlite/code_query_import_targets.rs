@@ -9,8 +9,8 @@ use crate::{
 
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
-    candidate_limit, fts_path_filter_sql, fts_values_for_limited, score_text,
-    symbol_fts_match_query,
+    candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
+    push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
 use super::required_scope;
 
@@ -45,6 +45,12 @@ pub(super) fn search_imports_by_target_symbols(
         },
     );
     let placeholders = placeholders(target_hints.len());
+    let import_path_filter = path_filter_sql_for_column("i.path", status, request);
+    let import_language_filter = language_filter_sql_for_column("f.language_id", status, request);
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
     values.push(Value::Integer(candidate_limit(request) as i64));
     let sql = format!(
         "
@@ -55,6 +61,8 @@ pub(super) fn search_imports_by_target_symbols(
             ON f.source_scope = i.source_scope AND f.path = i.path
         WHERE i.source_scope = ?
           AND i.target_hint IN ({placeholders})
+          {import_path_filter}
+          {import_language_filter}
         ORDER BY i.path ASC, i.line_start ASC
         LIMIT ?
         "
@@ -93,9 +101,7 @@ fn import_target_symbol_matches(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<ImportTargetSymbol>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
-    let sql = format!(
-        "
+    let sql = "
         SELECT path, name, language_id
         FROM code_repository_symbols
         WHERE source_scope = ?
@@ -105,20 +111,16 @@ fn import_target_symbol_matches(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
-                {fts_path_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
-          )
+        )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        "
-    );
-    let mut statement = connection.prepare(&sql)?;
+        ";
+    let mut statement = connection.prepare(sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(symbol_target_fts_values_for_limited(
             required_scope(status)?,
-            status,
-            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -150,6 +152,21 @@ fn import_target_symbol_matches(
     }
 
     Ok(targets)
+}
+
+fn symbol_target_fts_values_for_limited(
+    source_scope: &str,
+    fts_query: &str,
+    fts_limit: usize,
+    limit: usize,
+) -> Vec<Value> {
+    vec![
+        Value::Text(source_scope.to_owned()),
+        Value::Text(fts_query.to_owned()),
+        Value::Text(source_scope.to_owned()),
+        Value::Integer(fts_limit as i64),
+        Value::Integer(limit as i64),
+    ]
 }
 
 #[derive(PartialEq, Eq)]
