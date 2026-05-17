@@ -8,8 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scoring import (
     CaseObservation,
+    DEFAULT_WEIGHTS,
     EvaluationObservation,
     GateObservation,
+    JUDGE_WEIGHTS,
     MetricObservation,
     score_evaluation,
 )
@@ -52,6 +54,32 @@ def research_judge_case(score: float = 0.9) -> CaseObservation:
 
 
 class ScoringTests(unittest.TestCase):
+    def test_weight_policy_emphasizes_research_and_performance(self) -> None:
+        self.assertAlmostEqual(sum(DEFAULT_WEIGHTS.values()), 1.0)
+        self.assertEqual(DEFAULT_WEIGHTS["performance"], 0.18)
+        self.assertAlmostEqual(sum(JUDGE_WEIGHTS.values()), 1.0)
+        self.assertEqual(JUDGE_WEIGHTS["research_judge"], 0.22)
+        self.assertEqual(JUDGE_WEIGHTS["performance"], 0.15)
+
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases() + [research_judge_case(0.5)],
+                metrics=[MetricObservation("query_p95_ms", 200.0, budget=100.0)],
+            ),
+            previous_run=None,
+        )
+
+        expected = (
+            JUDGE_WEIGHTS["foundational_capability"]
+            + JUDGE_WEIGHTS["competitive_capability"]
+            + JUDGE_WEIGHTS["semantic_vector"]
+            + 0.5 * JUDGE_WEIGHTS["research_judge"]
+            + 0.5 * JUDGE_WEIGHTS["performance"]
+            + JUDGE_WEIGHTS["stability"]
+        )
+        self.assertAlmostEqual(score.score, expected)
+
     def test_first_successful_candidate_is_accepted(self) -> None:
         score = score_evaluation(
             EvaluationObservation(

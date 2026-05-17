@@ -85,10 +85,10 @@ relevant to the current gate, metric, case, path, or algorithm objective.
 When the research judge is not configured, the score is:
 
 ```text
-foundational_capability * 0.25
-+ competitive_capability * 0.25
-+ semantic_vector * 0.15
-+ performance * 0.10
+foundational_capability * 0.22
++ competitive_capability * 0.22
++ semantic_vector * 0.13
++ performance * 0.18
 + stability * 0.25
 ```
 
@@ -96,13 +96,17 @@ When the research judge is configured, `research_judge` becomes a protected
 objective and the weights switch to:
 
 ```text
-foundational_capability * 0.20
-+ competitive_capability * 0.20
-+ semantic_vector * 0.12
-+ research_judge * 0.15
-+ performance * 0.08
-+ stability * 0.25
+foundational_capability * 0.17
++ competitive_capability * 0.17
++ semantic_vector * 0.10
++ research_judge * 0.22
++ performance * 0.15
++ stability * 0.19
 ```
+
+This policy intentionally gives research quality and performance more influence
+than earlier self-iteration runs while keeping the other objectives protected by
+regression checks.
 
 The research judge evaluates research alignment, architecture soundness,
 reliability reasoning, performance generalization, implementation
@@ -160,7 +164,7 @@ and (
 - `ratio_epsilon = 0.005` for score components such as foundational_capability, competitive_capability, semantic_vector, performance, and stability
 - `metric_epsilon = max(25ms, previous_metric * 0.03)` for raw timing metrics
 
-This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Foundational, competitive, semantic_vector, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
+This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Foundational, competitive, semantic_vector, research_judge, performance, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, research_judge, performance, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
 
 The `chart` command writes:
 

@@ -7,20 +7,20 @@ from typing import Any
 
 
 DEFAULT_WEIGHTS = {
-    "foundational_capability": 0.25,
-    "competitive_capability": 0.25,
-    "semantic_vector": 0.15,
-    "performance": 0.10,
+    "foundational_capability": 0.22,
+    "competitive_capability": 0.22,
+    "semantic_vector": 0.13,
+    "performance": 0.18,
     "stability": 0.25,
 }
 
 JUDGE_WEIGHTS = {
-    "foundational_capability": 0.20,
-    "competitive_capability": 0.20,
-    "semantic_vector": 0.12,
-    "research_judge": 0.15,
-    "performance": 0.08,
-    "stability": 0.25,
+    "foundational_capability": 0.17,
+    "competitive_capability": 0.17,
+    "semantic_vector": 0.10,
+    "research_judge": 0.22,
+    "performance": 0.15,
+    "stability": 0.19,
 }
 
 SCORE_EPSILON = 0.0005

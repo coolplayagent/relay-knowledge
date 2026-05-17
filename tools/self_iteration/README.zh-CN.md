@@ -73,23 +73,25 @@ prompt 只注入有界 memory index。Codex 应先按当前 gate、metric、case
 未配置 research judge 时，加权分数为：
 
 ```text
-foundational_capability * 0.25
-+ competitive_capability * 0.25
-+ semantic_vector * 0.15
-+ performance * 0.10
+foundational_capability * 0.22
++ competitive_capability * 0.22
++ semantic_vector * 0.13
++ performance * 0.18
 + stability * 0.25
 ```
 
 配置 research judge 后，`research_judge` 成为受保护目标，分数权重切换为：
 
 ```text
-foundational_capability * 0.20
-+ competitive_capability * 0.20
-+ semantic_vector * 0.12
-+ research_judge * 0.15
-+ performance * 0.08
-+ stability * 0.25
+foundational_capability * 0.17
++ competitive_capability * 0.17
++ semantic_vector * 0.10
++ research_judge * 0.22
++ performance * 0.15
++ stability * 0.19
 ```
+
+这个策略有意提高 research 质量和性能对采纳分数的影响，同时继续通过回退检查保护其他目标。
 
 research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `opencode`、`relay-teams`、`codex`、`cc` 或 `copilot`。未提供 judge backend 或 HTTP 配置时，CLI judge 默认使用 `opencode`。所有 judge 覆盖配置都来自运行时环境变量：
 
@@ -127,7 +129,7 @@ and (
 - `ratio_epsilon = 0.005`，用于 foundational_capability、competitive_capability、semantic_vector、performance、stability 等分数组件
 - `metric_epsilon = max(25ms, previous_metric * 0.03)`，用于原始耗时指标
 
-这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。foundational、competitive、semantic_vector、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
+这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。foundational、competitive、semantic_vector、research_judge、performance、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、research_judge、performance、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
 
 `chart` 命令会写入：
 

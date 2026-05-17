@@ -470,8 +470,8 @@ def build_prompt(paths: Any, run_id: str) -> str:
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
-- Prioritize foundational capability, competitive capability, semantic/vector retrieval, and stability before performance; only optimize speed after preserving or improving those protected objectives.
-- Improve code repository tree parsing, code graph query accuracy, semantic/vector retrieval quality, stability, and performance across relay-teams, Linux, LevelDB, Kubernetes, Spring Framework, and the graph retrieval fixture.
+- Preserve foundational capability, competitive capability, semantic/vector retrieval, and stability as protected floors; the current weighted policy emphasizes research judge quality and performance after those floors are safe.
+- Improve code repository tree parsing, code graph query accuracy, semantic/vector retrieval quality, research alignment, performance generalization, stability, and measured performance across relay-teams, Linux, LevelDB, Kubernetes, Spring Framework, and the graph retrieval fixture.
 - Treat foundational repo retrieval, competitive repo retrieval, and semantic/vector retrieval as protected self-iteration objectives. Runtime semantic/vector and embedding settings are read from the process environment by the relay-knowledge binary; do not hard-code provider URLs, API keys, model names, or dimensions in candidate changes.
 - When the research judge is configured, treat its feedback as a protected objective. The judge may run through an OpenAI-compatible HTTP endpoint or an external coding-agent CLI such as relay-teams, codex, cc, or copilot. Do not hard-code judge provider URLs, API keys, model names, or CLI-specific secrets in candidate changes.
 - Focus on multi-repository, large-repository full-scope indexing and retrieval.
@@ -484,7 +484,7 @@ Constraints:
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
 - If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
-- Treat recent foundational, competitive, semantic/vector, case, and stability degradations as protected-objective regressions. Fix or explain them before pursuing pure latency/indexing gains, and do not trade away passing cases, backend availability, retriever source coverage, or quality gates for better timing.
+- Treat recent foundational, competitive, semantic/vector, research_judge, performance, case, and stability degradations as priority regression feedback. Fix or explain them before pursuing unrelated gains, and do not trade away passing cases, backend availability, retriever source coverage, research quality, quality gates, or measured latency for a narrow score win.
 - Any candidate that changes code, tests, benchmark cases, or self-iteration policy must also update {ACCEPTED_OPTIMIZATION_DOC} before evaluation. Write the optimization's algorithm, architecture, invariants, expected metric/case impact, and known risks in that document; the harness rejects undocumented implementation candidates before acceptance.
 - The self-iteration memory store is progressive context. Start with the bounded memory index below, read only relevant summary_path files, and open detail_path or patch files only when the summary proves relevant to the current objective.
 - The self-iteration patch directory is long-term memory. Use the patch memory index below to choose relevant historical patches, then read only the specific patch files you need in small ranges with commands like `sed -n '1,220p' .git/relay-knowledge-self-iteration/patches/<run>.patch`.
