@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T034817Z
+
+- 目标：修复当前 quality gate repair mode 指定的 `semantic_vector_provider_probe` 失败，避免 OpenAI-compatible embedding provider 的 base URL 已经指向版本化 API root（例如 `/v4`）时被错误拼成 `/v4/v1/embeddings`，优先恢复 semantic/vector 后端可用性 gate。
+- 方法：将 `retrieval::provider` 的 embedding endpoint 规范化从只识别 `/v1` 扩展为识别任意最终路径段形式的版本 root（`/vN`，N 为数字），对这类 base URL 直接追加 `/embeddings`；无路径的 host root 仍追加 `/v1/embeddings`，明确以 `/embeddings` 结尾的完整 endpoint 保持不变，query/fragment 不参与 endpoint 构造，非版本路径前缀继续沿用既有 `/v1/embeddings` 拼接规则。
+- 架构与不变量：provider URL、API key、模型名和维度仍只从运行时环境读取；不改变 env、paths、net 边界，不新增 provider 配置项，不改变 CLI/API 输出结构、索引刷新队列、查询热路径或本地 deterministic backend。新增单元测试覆盖 `/v4`、嵌套 `/v2`、完整 endpoint 和非版本路径前缀，确保修复不靠 provider 专名或 fixture 特例。
+- 预期影响：`provider probe` 在外部环境使用版本化 OpenAI-compatible API root 时会命中 `<base>/embeddings`，修复 `model_or_endpoint_not_found` gate；semantic/vector fixture 后续可以继续验证 retriever source coverage、backend status 和 ranking，而不会在探测阶段被 endpoint 拼接错误拦截。
+- 已知风险：无法从一个任意非版本 path 判断调用方期望的是 path prefix 还是 API root，因此该候选只泛化明确的版本段；使用自定义非版本 API root 的部署仍应配置完整 `/embeddings` endpoint 或当前兼容的 prefix 形式。
+
 ## 候选优化说明：manual-semantic-vector-self-iteration-dimension-20260517
 
 - 目标：把自迭代目标从代码仓库检索扩展到图谱 semantic/vector 检索，利用运行时环境中已经配置的外部 semantic/vector 和 OpenAI-compatible embedding metadata，让后续候选必须保护并改进向量/语义检索来源覆盖、后端可用性和排序质量。

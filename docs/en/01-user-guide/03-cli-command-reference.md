@@ -35,6 +35,8 @@ relay-knowledge provider probe --format json
 
 `provider probe` reads remote embedding provider configuration through the environment boundary and performs a lightweight probe. The JSON response includes `ok`, `provider`, `model`, `dimension`, optional `latency_ms`, and on failure `error_code`, `error_message`, and `retryable`. It does not print raw API keys or bypass the `env` module.
 
+The OpenAI-compatible embedding base URL may be a host root, a versioned API root such as `/v1` or `/v4`, or a full `/embeddings` endpoint. Non-version path prefixes keep resolving as `<prefix>/v1/embeddings`, and query or fragment suffixes are ignored during endpoint construction.
+
 Endpoint host, batch, timeout, concurrency, and cursor metadata belong to runtime diagnostics in `status`, `health`, or the Web Providers panel.
 
 ## 3.3 Setup Doctor and Profiles

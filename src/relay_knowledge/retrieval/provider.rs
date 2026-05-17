@@ -213,15 +213,39 @@ fn validate_vector(
 }
 
 fn embeddings_url(base_url: &str) -> String {
-    let trimmed = base_url.trim_end_matches('/');
-    if trimmed.ends_with("/embeddings") {
-        return trimmed.to_owned();
+    let base = base_url
+        .trim()
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+    if base.ends_with("/embeddings") {
+        return base.to_owned();
     }
-    if trimmed.ends_with("/v1") {
-        return format!("{trimmed}/embeddings");
+    if final_path_segment(base).is_some_and(is_api_version_segment) {
+        return format!("{base}/embeddings");
     }
 
-    format!("{trimmed}/v1/embeddings")
+    format!("{base}/v1/embeddings")
+}
+
+fn final_path_segment(url: &str) -> Option<&str> {
+    let after_authority = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let path = after_authority.split_once('/')?.1;
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+
+    path.rsplit('/').find(|segment| !segment.is_empty())
+}
+
+fn is_api_version_segment(segment: &str) -> bool {
+    let Some(digits) = segment
+        .strip_prefix('v')
+        .or_else(|| segment.strip_prefix('V'))
+    else {
+        return false;
+    };
+
+    !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit())
 }
 
 fn deterministic_vector(input: &str, dimension: usize) -> EmbeddingVector {
@@ -309,6 +333,26 @@ mod tests {
         assert_eq!(
             embeddings_url("https://example.test/v1/embeddings"),
             "https://example.test/v1/embeddings"
+        );
+        assert_eq!(
+            embeddings_url("https://example.test/v4"),
+            "https://example.test/v4/embeddings"
+        );
+        assert_eq!(
+            embeddings_url("https://example.test/openai/v2"),
+            "https://example.test/openai/v2/embeddings"
+        );
+        assert_eq!(
+            embeddings_url("https://example.test/openai"),
+            "https://example.test/openai/v1/embeddings"
+        );
+        assert_eq!(
+            embeddings_url("https://example.test/openai/v4/?probe=true#fragment"),
+            "https://example.test/openai/v4/embeddings"
+        );
+        assert_eq!(
+            embeddings_url("https://example.test/v4/embeddings?probe=true"),
+            "https://example.test/v4/embeddings"
         );
     }
 

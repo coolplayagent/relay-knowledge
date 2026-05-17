@@ -20,6 +20,8 @@ Semantic/vector providers are backend choices for derived read models, not knowl
 
 Provider mode enters the system only through typed `env` config.
 
+OpenAI-compatible embedding endpoint construction accepts a host root, a final version path segment such as `/v1` or `/v4`, or a full `/embeddings` endpoint. Query and fragment suffixes are not part of the provider endpoint identity.
+
 ## 3. Data Contract
 
 External embedding output does not write accepted facts. It writes index-family metadata or derived evidence metadata only. Each vector record binds scope, evidence/chunk id, model name, dimension, content hash, and graph version.
