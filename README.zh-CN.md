@@ -53,23 +53,23 @@ relay-knowledge service doctor
 ## 文档
 
 - [文档书架](docs/zh/README.md)：用户手册、已实现能力、架构规格、研究资料、基准记录和验证记录的书籍式入口。
-- [使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
-- [2026 行业能力快照](docs/zh/04-research/industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
-- [ai-knowledge-graph 参考项目分析](docs/zh/04-research/ai-knowledge-graph-reference-analysis.md)：对外部 LLM 抽取型知识图谱项目的架构、算法、性能和可靠性借鉴分析。
-- [GraphRAG 功能文档](docs/zh/02-capabilities/graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
-- [混合检索上下文包](docs/zh/02-capabilities/hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
-- [Semantic/Vector Provider 后端](docs/zh/02-capabilities/semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
-- [代码仓库 Tree-sitter 检索](docs/zh/02-capabilities/code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
-- [文档刷新审计](docs/zh/06-verification/documentation-book-refresh-2026-05-17.md)：文档新鲜度和已实现能力关闭状态的带日期验证记录。
+- [第一卷第 0 章：使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
+- [第四卷第 1 章：2026 行业能力快照](docs/zh/04-research/01-industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
+- [第四卷第 4 章：ai-knowledge-graph 参考项目分析](docs/zh/04-research/04-ai-knowledge-graph-reference-analysis.md)：对外部 LLM 抽取型知识图谱项目的架构、算法、性能和可靠性借鉴分析。
+- [第二卷第 1 章：GraphRAG 功能文档](docs/zh/02-capabilities/01-graphrag-capability-guide.md)：context pack、新鲜度、backend、多模态、代码图、恢复、Web、MCP 和 ACP 行为。
+- [第二卷第 2 章：混合检索上下文包](docs/zh/02-capabilities/02-hybrid-retrieval-context-pack.md)：检索器来源、RRF 融合、结构化图事实、图路径和后端状态。
+- [第二卷第 3 章：代码仓库 Tree-sitter 检索](docs/zh/02-capabilities/03-code-repository-tree-sitter-retrieval.md)：仓库索引、检索、报告和影响分析。
+- [第二卷第 4 章：Semantic/Vector Provider 后端](docs/zh/02-capabilities/04-semantic-vector-provider-backend.md)：外部 embedding provider 配置、脱敏诊断、Web provider 面板和降级行为。
+- [附录 B.1：文档刷新审计](docs/zh/06-verification/01-documentation-book-refresh-2026-05-17.md)：文档新鲜度和已实现能力关闭状态的带日期验证记录。
 
 关键规格：
 
-- [工程硬约束](docs/zh/03-architecture-specs/engineering-hard-constraints.md)
-- [GraphRAG 产品与实现路线规格](docs/zh/03-architecture-specs/graphrag-product-and-implementation-roadmap.md)
-- [开放 Agent Runtime 与混合检索架构](docs/zh/03-architecture-specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Semantic/Vector Provider Backend 规格](docs/zh/03-architecture-specs/semantic-vector-provider-backend.md)
-- [常驻进程 Agent 图检索访问规格](docs/zh/03-architecture-specs/resident-agent-graph-retrieval-access.md)
-- [安装部署与发布规格](docs/zh/03-architecture-specs/installation-and-release.md)
+- [第三卷第 1 章：工程硬约束](docs/zh/03-architecture-specs/01-engineering-hard-constraints.md)
+- [第三卷第 2 章：GraphRAG 产品与实现路线规格](docs/zh/03-architecture-specs/02-graphrag-product-and-implementation-roadmap.md)
+- [第三卷第 6 章：开放 Agent Runtime 与混合检索架构](docs/zh/03-architecture-specs/06-open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [第三卷第 10 章：Semantic/Vector Provider Backend 规格](docs/zh/03-architecture-specs/10-semantic-vector-provider-backend.md)
+- [第三卷第 12 章：常驻进程 Agent 图检索访问规格](docs/zh/03-architecture-specs/12-resident-agent-graph-retrieval-access.md)
+- [第三卷第 15 章：安装部署与发布规格](docs/zh/03-architecture-specs/15-installation-and-release.md)
 
 ## 开发
 

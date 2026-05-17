@@ -81,39 +81,39 @@ relay-knowledge service doctor
 - [Documentation Bookshelf](docs/en/README.md): book-style entry point for the
   user guide, implemented capabilities, architecture specs, research,
   benchmarks, and verification records.
-- [User Guide](docs/en/01-user-guide/README.md): executable local workflows for
+- [Book 1, Chapter 0: User Guide](docs/en/01-user-guide/README.md): executable local workflows for
   install/runtime directories, CLI output modes, GraphRAG, code repository
   indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
   and advanced configuration.
-- [2026 Industry Capability Snapshot](docs/en/04-research/industry-capability-snapshot-2026.md):
+- [Book 4, Chapter 1: 2026 Industry Capability Snapshot](docs/en/04-research/01-industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.
-- [ai-knowledge-graph Reference Analysis](docs/en/04-research/ai-knowledge-graph-reference-analysis.md):
+- [Book 4, Chapter 4: ai-knowledge-graph Reference Analysis](docs/en/04-research/04-ai-knowledge-graph-reference-analysis.md):
   architecture, algorithm, performance, and reliability lessons from an
   external LLM-extracted knowledge graph project.
-- [GraphRAG Capability Guide](docs/en/02-capabilities/graphrag-capability-guide.md): current context-pack,
+- [Book 2, Chapter 1: GraphRAG Capability Guide](docs/en/02-capabilities/01-graphrag-capability-guide.md): current context-pack,
   freshness, backend, multimodal, code graph, recovery, Web, MCP, and ACP
   behavior.
-- [Hybrid Retrieval Context Pack](docs/en/02-capabilities/hybrid-retrieval-context-pack.md):
+- [Book 2, Chapter 2: Hybrid Retrieval Context Pack](docs/en/02-capabilities/02-hybrid-retrieval-context-pack.md):
   retriever sources, RRF fusion, structured graph facts, graph paths, and
   backend status.
-- [Semantic/Vector Provider Backend](docs/en/02-capabilities/semantic-vector-provider-backend.md):
+- [Book 2, Chapter 3: Code Repository Tree-sitter Retrieval](docs/en/02-capabilities/03-code-repository-tree-sitter-retrieval.md):
+  repository indexing, retrieval, reports, and impact analysis.
+- [Book 2, Chapter 4: Semantic/Vector Provider Backend](docs/en/02-capabilities/04-semantic-vector-provider-backend.md):
   external embedding provider setup, redacted diagnostics, Web provider panels,
   and degradation behavior.
-- [Code Repository Tree-sitter Retrieval](docs/en/02-capabilities/code-repository-tree-sitter-retrieval.md):
-  repository indexing, retrieval, reports, and impact analysis.
-- [Documentation Refresh Audits](docs/en/06-verification/documentation-book-refresh-2026-05-17.md):
+- [Appendix B.1: Documentation Refresh Audits](docs/en/06-verification/01-documentation-book-refresh-2026-05-17.md):
   dated verification records for documentation freshness and implemented
   capability closures.
 
 Key specs:
 
-- [Engineering Hard Constraints](docs/en/03-architecture-specs/engineering-hard-constraints.md)
-- [GraphRAG Product and Implementation Roadmap](docs/en/03-architecture-specs/graphrag-product-and-implementation-roadmap.md)
-- [Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/03-architecture-specs/open-agent-runtime-and-hybrid-retrieval-architecture.md)
-- [Semantic/Vector Provider Backend Specification](docs/en/03-architecture-specs/semantic-vector-provider-backend.md)
-- [Resident Agent Graph Retrieval Access Specification](docs/en/03-architecture-specs/resident-agent-graph-retrieval-access.md)
-- [Installation and Release Specification](docs/en/03-architecture-specs/installation-and-release.md)
+- [Book 3, Chapter 1: Engineering Hard Constraints](docs/en/03-architecture-specs/01-engineering-hard-constraints.md)
+- [Book 3, Chapter 2: GraphRAG Product and Implementation Roadmap](docs/en/03-architecture-specs/02-graphrag-product-and-implementation-roadmap.md)
+- [Book 3, Chapter 6: Open Agent Runtime and Hybrid Retrieval Architecture](docs/en/03-architecture-specs/06-open-agent-runtime-and-hybrid-retrieval-architecture.md)
+- [Book 3, Chapter 10: Semantic/Vector Provider Backend Specification](docs/en/03-architecture-specs/10-semantic-vector-provider-backend.md)
+- [Book 3, Chapter 12: Resident Agent Graph Retrieval Access Specification](docs/en/03-architecture-specs/12-resident-agent-graph-retrieval-access.md)
+- [Book 3, Chapter 15: Installation and Release Specification](docs/en/03-architecture-specs/15-installation-and-release.md)
 
 ## Development
 

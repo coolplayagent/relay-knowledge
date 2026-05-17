@@ -109,4 +109,4 @@ Agent audit 持久化默认关闭。开启 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENA
 
 ## 1.5 安装与发布路径
 
-当前开发路径以 `cargo build`、本地二进制和仓库脚本为主。正式发布要求见 [安装部署与发布规格](../03-architecture-specs/installation-and-release.md): 稳定版本需要 GitHub Releases、crates.io、校验和、包管理器清单和平台 service manager 安装路径。使用指南中的命令均适用于本地构建出的 `relay-knowledge` 二进制。
+当前开发路径以 `cargo build`、本地二进制和仓库脚本为主。正式发布要求见 [安装部署与发布规格](../03-architecture-specs/15-installation-and-release.md): 稳定版本需要 GitHub Releases、crates.io、校验和、包管理器清单和平台 service manager 安装路径。使用指南中的命令均适用于本地构建出的 `relay-knowledge` 二进制。

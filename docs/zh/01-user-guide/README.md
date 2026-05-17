@@ -22,6 +22,7 @@
 
 ## 章节目录
 
+- 第 0 章 使用指南总览：当前页面。
 - [第 1 章 安装与运行时目录](01-install-and-runtime.md): 构建、运行、平台目录和环境变量覆盖。
 - [第 2 章 CLI 基础](02-cli-basics.md): 命令结构、输出格式、版本、状态、provider probe 和 freshness 策略。
 - [第 3 章 知识图谱工作流](03-knowledge-graph-workflow.md): evidence 写入、混合检索、图检查和索引刷新。

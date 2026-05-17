@@ -19,6 +19,11 @@ benchmarks, and verification records stay easy to compare.
 - `06-verification`: audit records, validation runs, and dated evidence that a
   documentation or implementation pass was checked.
 
+All content documents inside numbered volumes use a two-digit chapter prefix in
+the filename, such as `03-storage-layer-design.md`. `README.md` files are volume
+covers and tables of contents; when listed as readable pages they are treated as
+chapter 0.
+
 Documentation refresh audits belong in `06-verification`, not in
 `02-capabilities`, because they prove documentation freshness rather than
 describe a user-facing capability. Root-level legacy document paths were removed.
