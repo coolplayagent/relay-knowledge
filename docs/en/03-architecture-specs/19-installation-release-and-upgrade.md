@@ -15,6 +15,7 @@ Installation and release are part of product architecture. Stable releases are v
 - GitHub Releases publish cross-platform prebuilt archives, checksums, and release notes.
 - crates.io keeps `cargo install relay-knowledge` working.
 - Homebrew, Scoop, winget, or distro packages reference artifacts from the same release tag instead of rebuilding divergent snapshots.
+- Release tags use `vX.Y.Z`, `X.Y.Z`, or matching prerelease forms such as `vX.Y.Z-rc.1`; the numeric version must match `Cargo.toml` and `Cargo.lock` before the tag is pushed. Manual dry-run dispatches validate the same version contract without publishing crates.io or GitHub release artifacts.
 
 ## 3. Installation Experience
 

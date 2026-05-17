@@ -4,12 +4,13 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - '*.*.*'
   workflow_dispatch:
     inputs:
       dry_run_tag:
         description: Tag-like version to validate without creating a release.
         required: true
-        default: v0.1.0
+        default: v1.0.0
 
 permissions:
   contents: read
@@ -33,7 +34,7 @@ jobs:
       publish_crate: ${{ steps.version.outputs.publish_crate }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
@@ -50,8 +51,8 @@ jobs:
             tag="${GITHUB_REF_NAME}"
           fi
 
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must look like v0.1.0 or v0.1.0-rc.1: $tag" >&2
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v1.0.0, 1.0.0, or v1.0.0-rc.1: $tag" >&2
             exit 1
           fi
 
@@ -132,7 +133,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
@@ -217,7 +218,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
@@ -270,7 +271,7 @@ jobs:
       attestations: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download release archives
         uses: actions/download-artifact@v4

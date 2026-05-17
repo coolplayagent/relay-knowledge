@@ -15,6 +15,7 @@
 - GitHub Releases 发布跨平台预构建压缩包、checksums 和 release notes。
 - crates.io 保持 `cargo install relay-knowledge` 可用。
 - Homebrew、Scoop、winget 或发行版包应引用同一 release tag 产物，不重建分叉快照。
+- Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物。
 
 ## 3. 安装体验
 
