@@ -535,14 +535,18 @@ def quality_gate_repair_priority(paths: Any) -> str:
 def recent_failed_gate_names(paths: Any, limit: int = 8) -> list[str]:
     names: list[str] = []
     seen: set[str] = set()
+    resolved: set[str] = set()
     for run in reversed(load_runs(paths)):
-        if run.get("accepted"):
-            continue
         for gate in run.get("gates", []):
-            if not isinstance(gate, dict) or gate.get("passed", False):
+            if not isinstance(gate, dict):
                 continue
             name = str(gate.get("name", ""))
-            if not name or name in seen:
+            if not name:
+                continue
+            if gate.get("passed", False):
+                resolved.add(name)
+                continue
+            if name in resolved or name in seen:
                 continue
             seen.add(name)
             names.append(name)
@@ -581,14 +585,21 @@ def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
 
 def recent_failed_gate_diagnostics(paths: Any, limit: int = 3) -> str:
     diagnostics: list[str] = []
+    resolved: set[str] = set()
+    seen: set[str] = set()
     for run in reversed(load_runs(paths)):
-        if run.get("accepted"):
-            continue
-        failed_gate_names = [
-            str(gate.get("name", ""))
-            for gate in run.get("gates", [])
-            if isinstance(gate, dict) and not gate.get("passed", False)
-        ]
+        failed_gate_names: list[str] = []
+        for gate in run.get("gates", []):
+            if not isinstance(gate, dict):
+                continue
+            name = str(gate.get("name", ""))
+            if not name:
+                continue
+            if gate.get("passed", False):
+                resolved.add(name)
+            elif name not in resolved and name not in seen:
+                seen.add(name)
+                failed_gate_names.append(name)
         if not failed_gate_names:
             continue
         report = load_run_report(run.get("report"))

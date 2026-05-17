@@ -227,6 +227,54 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("kubernetes_go_sample_index", prompt)
             self.assertIn("Prioritize fixing these failed gates", prompt)
 
+    def test_prompt_ignores_gate_failures_resolved_by_newer_passing_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "old-failed-gate",
+                    "timestamp": "2026-05-15T00:00:00+00:00",
+                    "accepted": False,
+                    "reject_reasons": ["quality gates failed: relay_teams_index"],
+                    "gates": [
+                        {
+                            "name": "relay_teams_index",
+                            "passed": False,
+                            "duration_ms": 90,
+                            "message": "queued task returned before indexing",
+                        }
+                    ],
+                },
+            )
+            append_run(
+                paths,
+                {
+                    "run_id": "newer-passing-gate",
+                    "timestamp": "2026-05-15T00:01:00+00:00",
+                    "accepted": True,
+                    "score": 0.91,
+                    "accuracy": 1.0,
+                    "stability": 1.0,
+                    "gates": [
+                        {
+                            "name": "relay_teams_index",
+                            "passed": True,
+                            "duration_ms": 70_000,
+                            "message": "indexed",
+                        }
+                    ],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("No recent quality gate failures recorded", prompt)
+            self.assertIn("No failed quality gate diagnostics recorded yet.", prompt)
+            self.assertNotIn("queued task returned before indexing", prompt)
+
     def test_candidate_documentation_gate_rejects_undocumented_implementation(self) -> None:
         patch = self_iterate.PatchSnapshot(
             path=Path("candidate.patch"),
