@@ -550,7 +550,11 @@ fn search_imports(
                     row.target_hint.as_deref().unwrap_or_default(),
                     row.matched_symbol_name.as_deref().unwrap_or_default(),
                 ],
-            ) + score_exact_path(&query, &row.path);
+            ) + score_exact_path(&query, &row.path)
+                + import_target_symbol_bonus(
+                    request.query.as_str(),
+                    row.matched_symbol_name.as_deref(),
+                );
             let score = base_score
                 + import_line_priority(base_score, row.line_range.start)
                 + import_surface_bonus(base_score, &row.path);

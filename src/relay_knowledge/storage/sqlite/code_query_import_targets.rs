@@ -135,7 +135,7 @@ fn import_target_symbol_matches(
     let mut targets = Vec::new();
     for row in rows {
         let (path, name, language_id) = row?;
-        if score_text(query, [name.as_str(), path.as_str()]) <= 0.0 {
+        if !symbol_matches_import_target_query(query, &name, &path) {
             continue;
         }
         for target_hint in import_target_hints_for_symbol(&path, &language_id) {
@@ -159,9 +159,12 @@ struct ImportTargetSymbol {
 }
 
 fn import_target_hints_for_symbol(path: &str, _language_id: &str) -> Vec<String> {
-    let mut target_hints = vec![path.to_owned()];
+    let mut target_hints = Vec::new();
+    push_target_hint(&mut target_hints, path.to_owned());
+    push_target_hint(&mut target_hints, strip_source_root(path).to_owned());
     if let Some(parent) = parent_dir(path) {
-        target_hints.push(parent.to_owned());
+        push_target_hint(&mut target_hints, parent.to_owned());
+        push_target_hint(&mut target_hints, strip_source_root(parent).to_owned());
     }
     target_hints.sort();
     target_hints.dedup();
@@ -174,7 +177,7 @@ pub(super) fn target_symbol_import_query(query: &str) -> bool {
     !trimmed.is_empty()
         && !trimmed.contains('/')
         && !trimmed.contains('\\')
-        && !trimmed.contains('.')
+        && !query_contains_file_extension(trimmed)
 }
 
 fn parent_dir(path: &str) -> Option<&str> {
@@ -187,4 +190,93 @@ fn placeholders(count: usize) -> String {
     std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn symbol_matches_import_target_query(query: &str, name: &str, path: &str) -> bool {
+    score_text(query, [name, path]) > 0.0
+        || query_identifier_terms(query)
+            .last()
+            .is_some_and(|term| term.eq_ignore_ascii_case(name))
+}
+
+fn query_identifier_terms(query: &str) -> Vec<String> {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn query_contains_file_extension(query: &str) -> bool {
+    query.split_whitespace().any(|term| {
+        let term = term.trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.'))
+        });
+        let Some((stem, extension)) = term.rsplit_once('.') else {
+            return false;
+        };
+        !stem.is_empty() && file_extension_is_path_like(extension)
+    })
+}
+
+fn file_extension_is_path_like(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "c" | "cc"
+            | "cpp"
+            | "cs"
+            | "go"
+            | "gradle"
+            | "h"
+            | "hh"
+            | "hpp"
+            | "hxx"
+            | "java"
+            | "js"
+            | "json"
+            | "jsx"
+            | "kt"
+            | "md"
+            | "php"
+            | "py"
+            | "rb"
+            | "rs"
+            | "scala"
+            | "sh"
+            | "swift"
+            | "ts"
+            | "tsx"
+            | "txt"
+            | "xml"
+            | "yaml"
+            | "yml"
+    )
+}
+
+fn push_target_hint(target_hints: &mut Vec<String>, target_hint: String) {
+    if !target_hint.is_empty() && !target_hints.contains(&target_hint) {
+        target_hints.push(target_hint);
+    }
+}
+
+fn strip_source_root(path: &str) -> &str {
+    for prefix in [
+        "src/main/java/",
+        "src/test/java/",
+        "src/main/kotlin/",
+        "src/test/kotlin/",
+        "src/main/scala/",
+        "src/test/scala/",
+        "src/main/groovy/",
+        "src/test/groovy/",
+        "staging/src/",
+        "vendor/",
+        "src/",
+    ] {
+        if let Some(stripped) = path.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+
+    path
 }

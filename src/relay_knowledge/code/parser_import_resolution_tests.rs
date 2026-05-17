@@ -74,6 +74,41 @@ class ContextLoader {
 }
 
 #[test]
+fn java_wildcard_import_resolution_targets_normalized_package_directory() {
+    let snapshot = parse_sources(&[
+        (
+            "src/main/java/org/springframework/context/ApplicationContext.java",
+            r#"
+package org.springframework.context;
+
+public interface ApplicationContext {}
+"#,
+        ),
+        (
+            "src/main/java/org/springframework/context/support/ContextLoader.java",
+            r#"
+package org.springframework.context.support;
+
+import org.springframework.context.*;
+
+class ContextLoader {
+    ApplicationContext load() {
+        return null;
+    }
+}
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "org.springframework.context.*");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(
+        import.target_hint.as_deref(),
+        Some("org/springframework/context")
+    );
+}
+
+#[test]
 fn java_static_import_reports_overloaded_members_as_ambiguous() {
     let snapshot = parse_sources(&[
         (

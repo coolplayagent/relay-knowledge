@@ -34,7 +34,15 @@ pub(super) fn resolve_import_targets(
                 }
                 None => None,
             },
-            "java" => java::resolve_import(import, &context),
+            "java" => match java::resolve_import(import, &context) {
+                Some((resolution, target_hint)) => {
+                    if let Some(target_hint) = target_hint {
+                        import.target_hint = Some(target_hint);
+                    }
+                    Some(resolution)
+                }
+                None => None,
+            },
             "typescript" | "tsx" => typescript::resolve_import(import, &context),
             "c" | "cpp" => match cpp::resolve_import(import, &context) {
                 Some((resolution, target_hint)) => {

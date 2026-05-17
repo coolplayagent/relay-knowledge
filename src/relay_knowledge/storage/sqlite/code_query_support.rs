@@ -388,6 +388,25 @@ pub(super) fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
     }
 }
 
+pub(super) fn import_target_symbol_bonus(query: &str, matched_symbol_name: Option<&str>) -> f64 {
+    let Some(matched_symbol_name) = matched_symbol_name else {
+        return 0.0;
+    };
+    let terms = query_terms(query);
+    let Some(term) = terms.last() else {
+        return 0.0;
+    };
+    if term.len() >= 3
+        && matched_symbol_name
+            .split_whitespace()
+            .any(|name| name.eq_ignore_ascii_case(term))
+    {
+        2.0
+    } else {
+        0.0
+    }
+}
+
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))

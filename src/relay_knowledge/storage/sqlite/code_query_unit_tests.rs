@@ -110,14 +110,34 @@ fn import_surface_bonus_prefers_public_reexport_files() {
 }
 
 #[test]
+fn import_target_symbol_bonus_matches_fully_qualified_class_tail() {
+    assert_eq!(
+        import_target_symbol_bonus(
+            "org.springframework.context.ApplicationContext",
+            Some("ApplicationContext"),
+        ),
+        2.0
+    );
+    assert_eq!(
+        import_target_symbol_bonus("org.springframework.context", Some("ApplicationContext")),
+        0.0
+    );
+    assert_eq!(import_target_symbol_bonus("ApplicationContext", None), 0.0);
+}
+
+#[test]
 fn target_symbol_import_query_skips_path_like_queries() {
     assert!(target_symbol_import_query("SharedInformerFactory"));
     assert!(target_symbol_import_query("DefaultListableBeanFactory"));
-    assert!(!target_symbol_import_query("linux/debugfs.h"));
-    assert!(!target_symbol_import_query(
+    assert!(target_symbol_import_query(
         "org.springframework.context.ApplicationContext"
     ));
+    assert!(!target_symbol_import_query("linux/debugfs.h"));
+    assert!(!target_symbol_import_query("linux.debugfs.h"));
     assert!(!target_symbol_import_query("src\\debugfs.h"));
+    assert!(!target_symbol_import_query(
+        "DefaultListableBeanFactory.java"
+    ));
 }
 
 #[test]

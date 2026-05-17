@@ -60,16 +60,6 @@ impl<'a> ImportContext<'a> {
             .contains_key(normalize_module_path(module_path))
     }
 
-    pub(super) fn module_file_exists_with_language(
-        &self,
-        module_path: &str,
-        language_id: &str,
-    ) -> bool {
-        self.module_paths
-            .get(normalize_module_path(module_path))
-            .is_some_and(|files| files.iter().any(|file| file.language_id == language_id))
-    }
-
     pub(super) fn any_module_file_exists(&self, module_paths: &[String]) -> bool {
         module_paths
             .iter()

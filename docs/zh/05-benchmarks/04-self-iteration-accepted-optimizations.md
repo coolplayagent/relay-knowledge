@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-java-wildcard-import-target-recall-20260517
+
+- 目标：提升 Spring Framework 等 Java 大仓 full-scope import graph 的符号查询召回，尤其是代码使用 `import package.*` 时，查询具体类名或 fully-qualified class name 能找到通配 package import 的导入者。
+- 方法：Java import resolution 对 package wildcard 记录 source-root normalized package directory 作为 `target_hint`，直接类/静态通配 import 在可唯一解析时记录具体 Java 源文件；import target-symbol 查询把符号文件路径扩展为实际路径、实际父目录、去 source-root 路径和去 source-root 父目录，并允许不含路径分隔符的 fully-qualified class 查询进入 bounded symbol-target 扩展。
+- 架构与不变量：不改变 CLI/API 字段、SQLite 表结构、candidate limit、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；仍只在已有 bounded symbol FTS 召回后，通过 indexed `code_repository_imports(source_scope, target_hint, path)` 查找 import 候选。路径型查询和常见文件扩展名查询不会进入 symbol-target import fallback，避免把文件检索误扩成 package import 检索。
+- 预期影响：`org.springframework.context.ApplicationContext` 这类 FQN 查询可通过 `import org.springframework.context.*;` 返回导入文件；Spring package wildcard import、Kubernetes Go package import target-symbol fallback、relay-teams Python import、LevelDB C/C++ graph 查询和 semantic/vector source coverage 应保持或改善。
+- 已知风险：Java wildcard target hint 采用 source-root normalized package directory，而不是唯一物理目录；在同一 package 同时存在 main/test/generated 源根时，它会提升跨 source-root package import 召回，但 edge target 不再指向单个文件。该设计只用于 wildcard package 边，直接类 import 仍保留具体文件 target hint。
+
 ## 候选优化说明：manual-go-package-import-symbol-recall-20260517
 
 - 目标：提升 Kubernetes 等 Go 大仓 full-scope import graph 的基础边解析和竞争性检索召回，让查询导出类型或工厂符号时能返回导入对应本地包的源文件，而不是只匹配 import path 文本。
@@ -864,4 +872,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 ssert!(!target_symbol_import_query("org.springframework.context.ApplicationContext")); +    assert!(!target_symbol_import_query("src\\debugfs.h")); +} + +#[test] fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let callers = retrieval_request(CodeQueryKind::Callers); diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index 75c99f2cccc14da916ddc85f34e88870076001e8..564e1e2b35d2e9dfac55e76524f90e6f39d13dd2 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -218,6 +218,8 @@ ON code_repository_calls(source_scope, callee_name, caller_name, path); CREATE INDEX IF NOT EXISTS code_repository_imports_lookup ON code_repository_imports(source_scope, module, path); +        CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup +            ON code_repository_imports(source_scope, target_hint, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup ON code_repository_chunks(source_scope, path); CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup tokens used 573,424
+## 20260517T101427Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T101427Z.patch`
+- score: 0.973723 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.85, performance=0.952787, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/imports.rs`, `src/relay_knowledge/code/identity/java.rs`, `src/relay_knowledge/code/identity/mod.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:research_judge 0.84->0.85; metric:cargo_fmt_check_ms 871.0->819; metric:cargo_clippy_ms 238.0->203
+- known degradations: metric:cargo_build_release_ms 59702.0->62256; metric:cargo_test_ms 9129.0->10113; metric:relay_teams_index_ms 87763.0->91935; metric:relay_teams_query_p95_ms 486.0->556.0; metric:leveldb_cpp_index_ms 20493.0->21453; metric:semantic_vector_provider_probe_ms 1292.0->1566
+- latency metrics: cargo_build_release_ms=62256ms; cargo_fmt_check_ms=819ms; cargo_clippy_ms=203ms; cargo_test_ms=10113ms; relay_teams_index_ms=91935ms; relay_teams_query_p50_ms=142ms; relay_teams_query_p95_ms=556ms; leveldb_cpp_index_ms=21453ms
+
+Adopted optimization notes:
+
+tests.rs @@ -110,14 +110,32 @@ } #[test] +fn import_target_symbol_bonus_matches_fully_qualified_class_tail() { +    assert_eq!( +        import_target_symbol_bonus( +            "org.springframework.context.ApplicationContext", +            Some("ApplicationContext"), +        ), +        2.0 +    ); +    assert_eq!( +        import_target_symbol_bonus("org.springframework.context", Some("ApplicationContext")), +        0.0 +    ); +    assert_eq!(import_target_symbol_bonus("ApplicationContext", None), 0.0); +} + +#[test] fn target_symbol_import_query_skips_path_like_queries() { assert!(target_symbol_import_query("SharedInformerFactory")); assert!(target_symbol_import_query("DefaultListableBeanFactory")); -    assert!(!target_symbol_import_query("linux/debugfs.h")); -    assert!(!target_symbol_import_query( +    assert!(target_symbol_import_query( "org.springframework.context.ApplicationContext" )); +    assert!(!target_symbol_import_query("linux/debugfs.h")); +    assert!(!target_symbol_import_query("linux.debugfs.h")); assert!(!target_symbol_import_query("src\\debugfs.h")); +    assert!(!target_symbol_import_query("DefaultListableBeanFactory.java")); } #[test] tokens used 182,924
 

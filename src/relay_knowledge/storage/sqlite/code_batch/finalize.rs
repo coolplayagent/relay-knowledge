@@ -519,7 +519,7 @@ fn resolve_java_import(
         }
         Some(JavaImportRequest::PackageWildcard { package_path }) => {
             if directory_has_java_files(&package_path, indexed_module_paths) {
-                ImportResolution::Resolved(statement.to_owned())
+                ImportResolution::Resolved(package_path)
             } else {
                 ImportResolution::Unresolved
             }
