@@ -1,0 +1,191 @@
+use crate::{
+    domain::{
+        CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
+        CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
+        CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord,
+        RepositoryCodeRange, RepositoryCodeSymbolRecord,
+    },
+    storage::{CodeRepositoryStore, SqliteGraphStore},
+};
+
+#[tokio::test]
+async fn checkpointed_batches_finalize_typescript_named_import_edges() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:typescript-import-finalize";
+    let session = session_for_scope(source_scope, 2);
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "runtime-file", "src/runtime/client.ts")],
+            symbols: vec![symbol(
+                source_scope,
+                "runtime-client-symbol",
+                "runtime-file",
+                "src/runtime/client.ts",
+                "RuntimeClient",
+            )],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("target batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "importer-file", "src/app/use_client.ts")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![import(
+                source_scope,
+                "runtime-client-import",
+                "importer-file",
+                "src/app/use_client.ts",
+                "import { RuntimeClient } from \"../runtime/client\";",
+            )],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("import batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "RuntimeClient", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/app/use_client.ts");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("src/runtime/client.ts")
+    );
+}
+
+async fn registered_store() -> SqliteGraphStore {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+
+    store
+}
+
+fn file(source_scope: &str, file_id: &str, path: &str) -> RepositoryCodeFileRecord {
+    RepositoryCodeFileRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        blob_hash: format!("{file_id}-hash"),
+        byte_len: 20,
+        line_count: 1,
+        parse_status: CodeParseStatus::Parsed,
+        degraded_reason: None,
+    }
+}
+
+fn symbol(
+    source_scope: &str,
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        name: name.to_owned(),
+        qualified_name: format!("{}::{name}", path.replace('/', "::")),
+        kind: "class".to_owned(),
+        signature: format!("class {name}"),
+        doc_comment: None,
+        byte_range: range(0, 8),
+        line_range: range(1, 1),
+    }
+}
+
+fn import(
+    source_scope: &str,
+    import_id: &str,
+    file_id: &str,
+    path: &str,
+    module: &str,
+) -> CodeImportRecord {
+    CodeImportRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        import_id: import_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        module: module.to_owned(),
+        target_hint: Some(module.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 10_000,
+        confidence_tier: "extracted".to_owned(),
+        line_range: range(1, 1),
+    }
+}
+
+fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession {
+    CodeIndexSession {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        total_path_count,
+        changed_path_count: total_path_count,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"),
+    }
+}
+
+fn range(start: u32, end: u32) -> RepositoryCodeRange {
+    RepositoryCodeRange { start, end }
+}
+
+async fn search(
+    store: &SqliteGraphStore,
+    query: &str,
+    kind: CodeQueryKind,
+) -> Vec<CodeRetrievalHit> {
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    store
+        .search_code(
+            CodeRetrievalRequest::new(query, selector, kind, 5, FreshnessPolicy::AllowStale)
+                .expect("request should validate"),
+        )
+        .await
+        .expect("query should succeed")
+}

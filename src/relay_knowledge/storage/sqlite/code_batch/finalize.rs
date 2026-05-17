@@ -8,6 +8,8 @@ use crate::{domain::RepositoryCodeRange, storage::StorageError};
 mod go_imports;
 #[path = "finalize_search.rs"]
 mod search_documents;
+#[path = "finalize_typescript_imports.rs"]
+mod typescript_imports;
 
 pub(super) fn resolve_scope(
     transaction: &Transaction<'_>,
@@ -118,6 +120,9 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
                 .trim_end_matches(';')
                 .strip_prefix("import ")
                 .is_some_and(|body| body.trim_start().starts_with("static ")),
+            Some("typescript" | "tsx") => {
+                typescript_imports::needs_symbol_index(&import.path, statement)
+            }
             _ => false,
         }
     }) {
@@ -164,6 +169,12 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
             ),
             Some("go") => go_imports::resolve_import(&import.module, &module_paths),
             Some("java") => resolve_java_import(&import.module, &module_paths, &symbols_by_name),
+            Some("typescript" | "tsx") => typescript_imports::resolve_import(
+                &import.path,
+                &import.module,
+                &module_paths,
+                &symbols_by_name,
+            ),
             _ => ImportResolution::Unresolved,
         };
         let (state, confidence, tier, target_hint) =

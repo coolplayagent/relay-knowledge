@@ -38,6 +38,10 @@ mod code_tests;
 mod code_batch_finalize_tests;
 
 #[cfg(test)]
+#[path = "code_batch_finalize_typescript_tests.rs"]
+mod code_batch_finalize_typescript_tests;
+
+#[cfg(test)]
 #[path = "code_batch_search_tests.rs"]
 mod code_batch_search_tests;
 
