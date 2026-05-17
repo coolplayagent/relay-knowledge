@@ -8,9 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from evaluator import (
+from evaluator import CommandResult
+from file_fixture_eval import (
     AUTHORIZED_FILE_FIXTURE_SCOPE,
-    CommandResult,
     create_file_fixture,
     file_fixture_runtime_env,
     file_query_command,

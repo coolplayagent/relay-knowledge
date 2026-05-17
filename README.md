@@ -125,8 +125,8 @@ Use the repository scripts by responsibility:
 ./check.sh
 ```
 
-For unattended code-retrieval optimization experiments, the independent
-self-iteration loop can be started with:
+For unattended code and semantic/vector retrieval optimization experiments, the
+independent self-iteration loop can be started with:
 
 ```bash
 ./self-iterate.sh
@@ -136,7 +136,9 @@ self-iteration loop can be started with:
 
 It stores run history, reports, patches, and score curves under
 `.git/relay-knowledge-self-iteration/` and only commits candidates that improve
-the configured score.
+the configured score. The semantic/vector fixture inherits the same
+`RELAY_KNOWLEDGE_*` embedding environment as normal runtime commands and does
+not persist secrets in benchmark cases.
 
 The underlying quality gates are:
 

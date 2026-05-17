@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | English
 
-This directory contains an independent Codex-driven optimization loop for code repository retrieval quality. It is intentionally outside the Rust crate and stores all runtime state under `.git/relay-knowledge-self-iteration/`.
+This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It is intentionally outside the Rust crate and stores all runtime state under `.git/relay-knowledge-self-iteration/`.
 
 ## Start
 
@@ -44,7 +44,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches/`.
-4. Runs build, lint, tests, repository retrieval evaluations, and the self-iteration documentation gate.
+4. Runs build, lint, tests, repository retrieval evaluations, the semantic/vector fixture, the external embedding provider probe when external backends are enabled, and the self-iteration documentation gate.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
 7. Writes progressive memory entries under `.git/relay-knowledge-self-iteration/memory/`.
@@ -69,7 +69,7 @@ The progressive memory store is the first context entry point for future runs:
 
 - `memory/index.jsonl` is a compact machine-readable index of accepted
   optimizations, rejected attempts, quality-gate failures, and observed
-  accuracy or performance regressions.
+  foundational, competitive, semantic/vector, or performance regressions.
 - `memory/summaries/<id>.md` contains the short record Codex should read first.
 - `memory/details/<id>.md` contains the full score, gate, case, metric, patch,
   and report references for follow-up inspection.
@@ -85,16 +85,20 @@ relevant to the current gate, metric, case, path, or algorithm objective.
 The score is:
 
 ```text
-accuracy * 0.60 + performance * 0.15 + stability * 0.25
+foundational_capability * 0.25
++ competitive_capability * 0.25
++ semantic_vector * 0.15
++ performance * 0.10
++ stability * 0.25
 ```
 
-Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, accuracy and stability are protected objectives for basic usability, retrieval quality and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
+`accuracy` is retained as a compatibility roll-up of foundational and competitive case scores. Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, foundational_capability, competitive_capability, semantic_vector, and stability are protected objectives for basic usability, advanced retrieval quality, semantic/vector source coverage, backend availability, and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
 
 The candidate is accepted when:
 
 ```text
 hard_constraints_pass
-and no_protected_accuracy_or_stability_regression
+and no_protected_foundational_competitive_semantic_vector_or_stability_regression
 and (
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)
@@ -104,10 +108,10 @@ and (
 `epsilon_pareto_improved(candidate, previous)` means at least one tracked objective improves beyond its epsilon threshold and no tracked objective regresses beyond its epsilon threshold. The default thresholds are:
 
 - `score_epsilon = 0.0005`
-- `ratio_epsilon = 0.005` for score components such as accuracy, performance, and stability
+- `ratio_epsilon = 0.005` for score components such as foundational_capability, competitive_capability, semantic_vector, performance, and stability
 - `metric_epsilon = max(25ms, previous_metric * 0.03)` for raw timing metrics
 
-This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Accuracy, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
+This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Foundational, competitive, semantic_vector, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
 
 The `chart` command writes:
 
@@ -124,6 +128,7 @@ The `chart` command writes:
   `relay-knowledge files index/query`, records `file_index_ms`,
   `file_query_p50_ms`, and `file_query_p95_ms`, and applies a subprocess
   timeout to each file query so a candidate cannot hang the evaluator.
+- The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.

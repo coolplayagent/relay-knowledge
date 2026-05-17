@@ -417,7 +417,10 @@ def run_record(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "accepted": score["accepted"],
         "score": score["score"],
+        "foundational_capability": score.get("foundational_capability", score.get("accuracy", 0.0)),
+        "competitive_capability": score.get("competitive_capability", score.get("accuracy", 0.0)),
         "accuracy": score["accuracy"],
+        "semantic_vector": score.get("semantic_vector", 1.0),
         "performance": score["performance"],
         "stability": score["stability"],
         "reject_reasons": score["reject_reasons"],
@@ -441,15 +444,20 @@ def build_prompt(paths: Any, run_id: str) -> str:
     if best:
         best_summary = (
             f"Best accepted score={best.get('score')} "
-            f"accuracy={best.get('accuracy')} commit={best.get('commit')}"
+            f"foundational={best.get('foundational_capability', 'n/a')} "
+            f"competitive={best.get('competitive_capability', 'n/a')} "
+            f"accuracy={best.get('accuracy')} "
+            f"semantic_vector={best.get('semantic_vector', 'n/a')} "
+            f"commit={best.get('commit')}"
         )
     rejected_summary = recent_rejected_summary(paths)
     gate_priority = quality_gate_repair_priority(paths)
     return f"""You are running inside relay-knowledge self-iteration run {run_id}.
 
 Goal:
-- Prioritize accuracy and stability before performance because they protect the basic usability of code repository retrieval; only optimize speed after preserving or improving those protected objectives.
-- Improve code repository tree parsing, code graph query accuracy, stability, and performance across relay-teams, Linux, LevelDB, Kubernetes, and Spring Framework.
+- Prioritize foundational capability, competitive capability, semantic/vector retrieval, and stability before performance; only optimize speed after preserving or improving those protected objectives.
+- Improve code repository tree parsing, code graph query accuracy, semantic/vector retrieval quality, stability, and performance across relay-teams, Linux, LevelDB, Kubernetes, Spring Framework, and the graph retrieval fixture.
+- Treat foundational repo retrieval, competitive repo retrieval, and semantic/vector retrieval as protected self-iteration objectives. Runtime semantic/vector and embedding settings are read from the process environment by the relay-knowledge binary; do not hard-code provider URLs, API keys, model names, or dimensions in candidate changes.
 - Focus on multi-repository, large-repository full-scope indexing and retrieval.
 - Prefer algorithmic or architectural improvements over local special-casing: candidate pruning before scoring, SQLite/FTS-backed lookups, symbol identity normalization, import/call edge quality, bounded batch/finalize design, cache-aware query plans, and ranking fusion are all valid directions when test-backed.
 
@@ -460,7 +468,7 @@ Constraints:
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
 - If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
-- Treat recent accuracy, case, and stability degradations as protected-objective regressions. Fix or explain them before pursuing pure latency/indexing gains, and do not trade away passing cases or quality gates for better timing.
+- Treat recent foundational, competitive, semantic/vector, case, and stability degradations as protected-objective regressions. Fix or explain them before pursuing pure latency/indexing gains, and do not trade away passing cases, backend availability, retriever source coverage, or quality gates for better timing.
 - Any candidate that changes code, tests, benchmark cases, or self-iteration policy must also update {ACCEPTED_OPTIMIZATION_DOC} before evaluation. Write the optimization's algorithm, architecture, invariants, expected metric/case impact, and known risks in that document; the harness rejects undocumented implementation candidates before acceptance.
 - The self-iteration memory store is progressive context. Start with the bounded memory index below, read only relevant summary_path files, and open detail_path or patch files only when the summary proves relevant to the current objective.
 - The self-iteration patch directory is long-term memory. Use the patch memory index below to choose relevant historical patches, then read only the specific patch files you need in small ranges with commands like `sed -n '1,220p' .git/relay-knowledge-self-iteration/patches/<run>.patch`.
@@ -543,7 +551,10 @@ def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
             "- "
             f"run_id={run.get('run_id', '')} "
             f"score={run.get('score', '')} "
+            f"foundational={run.get('foundational_capability', '')} "
+            f"competitive={run.get('competitive_capability', '')} "
             f"accuracy={run.get('accuracy', '')} "
+            f"semantic_vector={run.get('semantic_vector', '')} "
             f"stability={run.get('stability', '')} "
             f"reasons={reasons} "
             f"report={run.get('report', '')}"
@@ -723,7 +734,10 @@ def comparison_metadata(previous_run: dict[str, Any] | None) -> dict[str, Any] |
     return {
         "run_id": previous_run.get("run_id"),
         "score": previous_run.get("score"),
+        "foundational_capability": previous_run.get("foundational_capability"),
+        "competitive_capability": previous_run.get("competitive_capability"),
         "accuracy": previous_run.get("accuracy"),
+        "semantic_vector": previous_run.get("semantic_vector"),
         "performance": previous_run.get("performance"),
         "stability": previous_run.get("stability"),
         "accepted": previous_run.get("accepted"),
@@ -791,7 +805,11 @@ def accepted_optimization_entry(
         f"## {run_id}\n\n"
         f"- patch: `{patch.path}`\n"
         f"- score: {score.get('score')} "
-        f"(accuracy={score.get('accuracy')}, performance={score.get('performance')}, "
+        f"(foundational={score.get('foundational_capability', 'n/a')}, "
+        f"competitive={score.get('competitive_capability', 'n/a')}, "
+        f"accuracy={score.get('accuracy')}, "
+        f"semantic_vector={score.get('semantic_vector', 'n/a')}, "
+        f"performance={score.get('performance')}, "
         f"stability={score.get('stability')})\n"
         f"- cases: {passed_cases}/{case_count} passed\n"
         f"- changed paths: {', '.join(f'`{path}`' for path in changed_paths) or 'none recorded'}\n"
@@ -868,7 +886,11 @@ def print_score(record: dict[str, Any]) -> None:
     status = "accepted" if record["accepted"] else "rejected"
     print(
         f"[self-iterate] {status} score={record['score']:.6f} "
-        f"accuracy={record['accuracy']:.6f} performance={record['performance']:.6f} "
+        f"foundational={record.get('foundational_capability', record['accuracy']):.6f} "
+        f"competitive={record.get('competitive_capability', record['accuracy']):.6f} "
+        f"accuracy={record['accuracy']:.6f} "
+        f"semantic_vector={record.get('semantic_vector', 1.0):.6f} "
+        f"performance={record['performance']:.6f} "
         f"stability={record['stability']:.6f}"
     )
     if record["reject_reasons"]:

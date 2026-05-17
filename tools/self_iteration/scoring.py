@@ -7,8 +7,10 @@ from typing import Any
 
 
 DEFAULT_WEIGHTS = {
-    "accuracy": 0.60,
-    "performance": 0.15,
+    "foundational_capability": 0.25,
+    "competitive_capability": 0.25,
+    "semantic_vector": 0.15,
+    "performance": 0.10,
     "stability": 0.25,
 }
 
@@ -35,6 +37,7 @@ class CaseObservation:
     max_rank: int = 1
     false_positive_count: int = 0
     message: str = ""
+    objective: str = "foundational_capability"
 
     def score(self) -> float:
         if not self.passed:
@@ -74,7 +77,10 @@ class EvaluationObservation:
 @dataclass(frozen=True)
 class ScoreBreakdown:
     score: float
+    foundational_capability: float
+    competitive_capability: float
     accuracy: float
+    semantic_vector: float
     performance: float
     stability: float
     accepted: bool
@@ -85,7 +91,10 @@ class ScoreBreakdown:
     def to_dict(self) -> dict[str, Any]:
         return {
             "score": round(self.score, 6),
+            "foundational_capability": round(self.foundational_capability, 6),
+            "competitive_capability": round(self.competitive_capability, 6),
             "accuracy": round(self.accuracy, 6),
+            "semantic_vector": round(self.semantic_vector, 6),
             "performance": round(self.performance, 6),
             "stability": round(self.stability, 6),
             "accepted": self.accepted,
@@ -104,11 +113,29 @@ def score_evaluation(
     if weights:
         active_weights.update(weights)
 
-    accuracy = average([case.score() for case in observation.cases], default=0.0)
+    foundational_capability = objective_case_score(
+        observation.cases,
+        "foundational_capability",
+        default=1.0,
+        aliases=("accuracy",),
+    )
+    competitive_capability = objective_case_score(
+        observation.cases,
+        "competitive_capability",
+        default=1.0,
+    )
+    accuracy = average([foundational_capability, competitive_capability], default=1.0)
+    semantic_vector = objective_case_score(
+        observation.cases,
+        "semantic_vector",
+        default=1.0,
+    )
     performance = average([metric.score() for metric in observation.metrics], default=1.0)
     stability = stability_score(observation.gates, observation.generated_diff)
     score = (
-        accuracy * active_weights["accuracy"]
+        foundational_capability * active_weights["foundational_capability"]
+        + competitive_capability * active_weights["competitive_capability"]
+        + semantic_vector * active_weights["semantic_vector"]
         + performance * active_weights["performance"]
         + stability * active_weights["stability"]
     )
@@ -116,7 +143,10 @@ def score_evaluation(
     reject_reasons = acceptance_reject_reasons(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -124,7 +154,10 @@ def score_evaluation(
     degradations = evaluation_degradations(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -132,7 +165,10 @@ def score_evaluation(
     improvements = evaluation_improvements(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -140,7 +176,10 @@ def score_evaluation(
 
     return ScoreBreakdown(
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         accepted=not reject_reasons,
@@ -153,7 +192,10 @@ def score_evaluation(
 def acceptance_reject_reasons(
     observation: EvaluationObservation,
     score: float,
+    foundational_capability: float,
+    competitive_capability: float,
     accuracy: float,
+    semantic_vector: float,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -168,7 +210,9 @@ def acceptance_reject_reasons(
         return reasons
 
     protected_rejections = protected_objective_reject_reasons(
-        accuracy=accuracy,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
+        semantic_vector=semantic_vector,
         stability=stability,
         previous_run=previous_run,
     )
@@ -181,7 +225,10 @@ def acceptance_reject_reasons(
     pareto_improved = epsilon_pareto_improved(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -193,12 +240,19 @@ def acceptance_reject_reasons(
 
 
 def protected_objective_reject_reasons(
-    accuracy: float,
+    foundational_capability: float,
+    competitive_capability: float,
+    semantic_vector: float,
     stability: float,
     previous_run: dict[str, Any],
 ) -> list[str]:
     reasons: list[str] = []
-    for name, current in (("accuracy", accuracy), ("stability", stability)):
+    for name, current in (
+        ("foundational_capability", foundational_capability),
+        ("competitive_capability", competitive_capability),
+        ("semantic_vector", semantic_vector),
+        ("stability", stability),
+    ):
         previous = previous_run.get(name)
         if previous is not None and meaningful_decrease(
             current,
@@ -217,7 +271,10 @@ def protected_objective_reject_reasons(
 def epsilon_pareto_improved(
     observation: EvaluationObservation,
     score: float,
+    foundational_capability: float,
+    competitive_capability: float,
     accuracy: float,
+    semantic_vector: float,
     performance: float,
     stability: float,
     previous_run: dict[str, Any],
@@ -225,7 +282,10 @@ def epsilon_pareto_improved(
     degradations = evaluation_degradations(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -233,7 +293,10 @@ def epsilon_pareto_improved(
     improvements = evaluation_improvements(
         observation=observation,
         score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
         accuracy=accuracy,
+        semantic_vector=semantic_vector,
         performance=performance,
         stability=stability,
         previous_run=previous_run,
@@ -252,7 +315,10 @@ def epsilon_pareto_reject_reason(score: float, previous_score: float) -> str:
 def evaluation_degradations(
     observation: EvaluationObservation,
     score: float,
+    foundational_capability: float,
+    competitive_capability: float,
     accuracy: float,
+    semantic_vector: float,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -263,7 +329,10 @@ def evaluation_degradations(
     degradations: list[dict[str, Any]] = []
     for name, current in (
         ("score", score),
+        ("foundational_capability", foundational_capability),
+        ("competitive_capability", competitive_capability),
         ("accuracy", accuracy),
+        ("semantic_vector", semantic_vector),
         ("performance", performance),
         ("stability", stability),
     ):
@@ -323,7 +392,10 @@ def evaluation_degradations(
 def evaluation_improvements(
     observation: EvaluationObservation,
     score: float,
+    foundational_capability: float,
+    competitive_capability: float,
     accuracy: float,
+    semantic_vector: float,
     performance: float,
     stability: float,
     previous_run: dict[str, Any] | None,
@@ -334,7 +406,10 @@ def evaluation_improvements(
     improvements: list[dict[str, Any]] = []
     for name, current in (
         ("score", score),
+        ("foundational_capability", foundational_capability),
+        ("competitive_capability", competitive_capability),
         ("accuracy", accuracy),
+        ("semantic_vector", semantic_vector),
         ("performance", performance),
         ("stability", stability),
     ):
@@ -484,6 +559,7 @@ def case_worsened(previous: dict[str, Any], current: CaseObservation) -> dict[st
         return None
     return {
         "kind": "case",
+        "objective": current.objective,
         "case_id": current.case_id,
         "repository": current.repository,
         "reason": reason,
@@ -520,6 +596,7 @@ def case_improved(previous: dict[str, Any], current: CaseObservation) -> dict[st
         return None
     return {
         "kind": "case",
+        "objective": current.objective,
         "case_id": current.case_id,
         "repository": current.repository,
         "reason": reason,
@@ -549,6 +626,19 @@ def stability_score(gates: list[GateObservation], generated_diff: bool) -> float
     if not gates:
         return 1.0
     return sum(1.0 for gate in gates if gate.passed) / len(gates)
+
+
+def objective_case_score(
+    cases: list[CaseObservation],
+    objective: str,
+    default: float,
+    aliases: tuple[str, ...] = (),
+) -> float:
+    objective_names = {objective, *aliases}
+    return average(
+        [case.score() for case in cases if case.objective in objective_names],
+        default=default,
+    )
 
 
 def average(values: list[float], default: float) -> float:

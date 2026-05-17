@@ -103,7 +103,7 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(score.accepted)
         self.assertTrue(any("quality gates failed" in reason for reason in score.reject_reasons))
 
-    def test_accuracy_regression_is_reported_and_rejected(self) -> None:
+    def test_foundational_capability_regression_is_reported_and_rejected(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
@@ -112,6 +112,7 @@ class ScoringTests(unittest.TestCase):
             ),
             previous_run={
                 "score": 0.1,
+                "foundational_capability": 1.0,
                 "accuracy": 1.0,
                 "cases": [
                     {
@@ -129,7 +130,10 @@ class ScoringTests(unittest.TestCase):
 
         self.assertFalse(score.accepted)
         self.assertTrue(
-            any("protected accuracy objective regressed" in reason for reason in score.reject_reasons)
+            any(
+                "protected foundational_capability objective regressed" in reason
+                for reason in score.reject_reasons
+            )
         )
         self.assertTrue(
             any(
@@ -321,6 +325,122 @@ class ScoringTests(unittest.TestCase):
             any(
                 degradation["kind"] == "metric" and degradation["name"] == "query_p95_ms"
                 for degradation in score.degradations
+            )
+        )
+
+    def test_semantic_vector_objective_is_reported_separately(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[
+                    CaseObservation("code", "repo", True, rank=1),
+                    CaseObservation(
+                        "semantic",
+                        "semantic_vector",
+                        False,
+                        rank=None,
+                        objective="semantic_vector",
+                    ),
+                ],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run=None,
+        )
+
+        self.assertEqual(score.accuracy, 1.0)
+        self.assertEqual(score.semantic_vector, 0.0)
+        self.assertEqual(score.to_dict()["semantic_vector"], 0.0)
+
+    def test_foundational_and_competitive_objectives_roll_up_to_accuracy(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[
+                    CaseObservation(
+                        "definition",
+                        "repo",
+                        True,
+                        rank=1,
+                        objective="foundational_capability",
+                    ),
+                    CaseObservation(
+                        "hybrid",
+                        "repo",
+                        False,
+                        rank=None,
+                        objective="competitive_capability",
+                    ),
+                ],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run=None,
+        )
+
+        self.assertEqual(score.foundational_capability, 1.0)
+        self.assertEqual(score.competitive_capability, 0.0)
+        self.assertEqual(score.accuracy, 0.5)
+        self.assertEqual(score.to_dict()["competitive_capability"], 0.0)
+
+    def test_competitive_capability_regression_is_protected(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[
+                    CaseObservation(
+                        "hybrid",
+                        "repo",
+                        False,
+                        rank=None,
+                        objective="competitive_capability",
+                    ),
+                ],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.1,
+                "competitive_capability": 1.0,
+                "semantic_vector": 1.0,
+                "stability": 1.0,
+            },
+        )
+
+        self.assertFalse(score.accepted)
+        self.assertTrue(
+            any(
+                "protected competitive_capability objective regressed" in reason
+                for reason in score.reject_reasons
+            )
+        )
+
+    def test_semantic_vector_regression_is_protected(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[
+                    CaseObservation("code", "repo", True, rank=1),
+                    CaseObservation(
+                        "semantic",
+                        "semantic_vector",
+                        False,
+                        rank=None,
+                        objective="semantic_vector",
+                    ),
+                ],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.1,
+                "accuracy": 1.0,
+                "semantic_vector": 1.0,
+                "stability": 1.0,
+            },
+        )
+
+        self.assertFalse(score.accepted)
+        self.assertTrue(
+            any(
+                "protected semantic_vector objective regressed" in reason
+                for reason in score.reject_reasons
             )
         )
 

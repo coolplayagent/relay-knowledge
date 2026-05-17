@@ -12,9 +12,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from file_fixture_eval import evaluate_file_fixtures
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
-
-AUTHORIZED_FILE_FIXTURE_SCOPE = "local-files"
 
 
 @dataclass(frozen=True)
@@ -129,168 +128,23 @@ def evaluate_candidate(config: EvaluatorConfig, generated_diff: bool) -> Evaluat
     case_observations.extend(file_report["cases"])
     metrics.extend(file_report["metrics"])
 
+    semantic_vector_config = cases_config.get("semantic_vector_suite")
+    if isinstance(semantic_vector_config, dict):
+        semantic_vector_report = evaluate_semantic_vector_suite(
+            binary=binary,
+            workspace=config.workspace,
+            env=env,
+            suite_config=semantic_vector_config,
+            timeout=config.command_timeout_seconds,
+        )
+        repo_reports.append(semantic_vector_report)
+        commands.extend(semantic_vector_report["commands"])
+        gates.extend(result.gate() for result in semantic_vector_report["commands"])
+        case_observations.extend(semantic_vector_report["cases"])
+        metrics.extend(semantic_vector_report["metrics"])
+
     return finish_evaluation(
         generated_diff, gates, case_observations, metrics, commands, repo_reports, run_home, config
-    )
-
-
-def evaluate_file_fixtures(
-    binary: Path,
-    workspace: Path,
-    env: dict[str, str],
-    run_home: Path,
-    fixtures: dict[str, Any],
-    all_cases: list[dict[str, Any]],
-    timeout: int,
-) -> dict[str, Any]:
-    commands: list[CommandResult] = []
-    case_observations: list[CaseObservation] = []
-    metrics: list[MetricObservation] = []
-    fixture_root = run_home / "file-fixtures"
-    fixture_root.mkdir(parents=True, exist_ok=True)
-
-    for fixture_name, fixture in fixtures.items():
-        root = fixture_root / fixture_name
-        create_file_fixture(root, fixture)
-        scope = AUTHORIZED_FILE_FIXTURE_SCOPE
-        fixture_env = file_fixture_runtime_env(env, root)
-        index = run_command(
-            f"{fixture_name}_files_index",
-            [
-                str(binary),
-                "files",
-                "index",
-                "--root",
-                str(root),
-                "--source",
-                scope,
-                "--format",
-                "json",
-            ],
-            workspace,
-            fixture_env,
-            timeout,
-        )
-        commands.append(index)
-        metrics.append(
-            MetricObservation(
-                name=f"{fixture_name}_file_index_ms",
-                value=index.duration_ms,
-                budget=float(fixture.get("index_budget_ms", 0)) or None,
-                key=True,
-            )
-        )
-        if not index.passed:
-            continue
-
-        durations: list[int] = []
-        for case in [case for case in all_cases if case.get("fixture") == fixture_name]:
-            query = run_command(
-                f"{fixture_name}_{case['id']}",
-                file_query_command(binary, scope, case),
-                workspace,
-                fixture_env,
-                min(timeout, int(case.get("timeout_seconds", 10))),
-            )
-            commands.append(query)
-            durations.append(query.duration_ms)
-            case_observations.append(score_file_case(fixture_name, case, query))
-
-        if durations:
-            metrics.append(
-                MetricObservation(
-                    name=f"{fixture_name}_file_query_p50_ms",
-                    value=float(median(durations)),
-                    budget=float(fixture.get("query_p50_budget_ms", 0)) or None,
-                    key=False,
-                )
-            )
-            metrics.append(
-                MetricObservation(
-                    name=f"{fixture_name}_file_query_p95_ms",
-                    value=float(percentile(durations, 95)),
-                    budget=float(fixture.get("query_p95_budget_ms", 0)) or None,
-                    key=True,
-                )
-            )
-
-    return {"commands": commands, "cases": case_observations, "metrics": metrics}
-
-
-def file_fixture_runtime_env(env: dict[str, str], root: Path) -> dict[str, str]:
-    fixture_env = dict(env)
-    root_value = str(root)
-    configured_roots = [
-        value
-        for value in fixture_env.get("RELAY_KNOWLEDGE_FILE_INDEX_ROOTS", "").split(";")
-        if value
-    ]
-    if root_value not in configured_roots:
-        configured_roots.append(root_value)
-    fixture_env["RELAY_KNOWLEDGE_FILE_INDEX_ROOTS"] = ";".join(configured_roots)
-    return fixture_env
-
-
-def create_file_fixture(root: Path, fixture: dict[str, Any]) -> None:
-    if root.exists():
-        shutil.rmtree(root)
-    root.mkdir(parents=True)
-    for file_config in fixture.get("files", []):
-        write_fixture_file(root / file_config["path"], file_config.get("content", "fixture"))
-    for index in range(int(fixture.get("generate_noise_files", 0))):
-        write_fixture_file(
-            root / "noise" / f"quarterly-design-noise-{index:04}.txt",
-            f"noise {index}",
-        )
-
-
-def write_fixture_file(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def file_query_command(binary: Path, scope: str, case: dict[str, Any]) -> list[str]:
-    return [
-        str(binary),
-        "files",
-        "query",
-        case["query"],
-        "--source",
-        scope,
-        "--limit",
-        str(case.get("limit", 10)),
-        "--format",
-        "json",
-    ]
-
-
-def score_file_case(fixture_name: str, case: dict[str, Any], result: CommandResult) -> CaseObservation:
-    if not result.passed:
-        return CaseObservation(
-            case_id=case["id"],
-            repository="local_files",
-            passed=False,
-            message=last_output_line(result.stdout, result.stderr),
-        )
-    payload = parse_json_output(result.stdout)
-    hits = payload.get("results", [])
-    expected = case.get("expected", [])
-    forbidden = case.get("forbidden", [])
-    max_rank = int(case.get("max_rank", 1))
-    rank = first_expected_rank(hits, expected)
-    false_positives = sum(1 for hit in hits if hit_matches_any(hit, forbidden))
-    passed = (not expected or (rank is not None and rank <= max_rank)) and false_positives == 0
-    if case.get("expect_empty"):
-        passed = len(hits) == 0
-        rank = 0 if passed else None
-    return CaseObservation(
-        case_id=case["id"],
-        repository=fixture_name,
-        passed=passed,
-        rank=rank,
-        max_rank=max_rank,
-        false_positive_count=false_positives,
-        message=f"results={len(hits)} rank={rank}",
     )
 
 
@@ -400,6 +254,383 @@ def evaluate_repository(
     return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json, scope)
 
 
+def evaluate_semantic_vector_suite(
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    suite_config: dict[str, Any],
+    timeout: int,
+) -> dict[str, Any]:
+    scope = suite_config.get("source_scope", "self-iteration-semantic-vector")
+    commands: list[CommandResult] = []
+    case_observations: list[CaseObservation] = []
+    metrics: list[MetricObservation] = []
+    runtime_profile = semantic_vector_runtime_profile(env)
+
+    if runtime_profile["external_requested"]:
+        env_check = semantic_vector_env_check(runtime_profile)
+        commands.append(env_check)
+        if not env_check.passed:
+            return serializable_repo_report(
+                "semantic_vector",
+                commands,
+                case_observations,
+                metrics,
+                {"summary": runtime_profile},
+                scope,
+            )
+        if suite_config.get("probe_provider_when_external", True):
+            probe = run_provider_probe(binary, workspace, env, timeout)
+            commands.append(probe)
+            metrics.append(
+                MetricObservation(
+                    name="semantic_vector_provider_probe_ms",
+                    value=probe.duration_ms,
+                    budget=float(suite_config.get("provider_probe_budget_ms", 0)) or None,
+                    key=True,
+                )
+            )
+
+    for index, evidence in enumerate(suite_config.get("evidence", []), start=1):
+        ingest = run_command(
+            f"semantic_vector_ingest_{index}",
+            semantic_vector_ingest_command(binary, scope, evidence),
+            workspace,
+            env,
+            timeout,
+        )
+        commands.append(ingest)
+        if not ingest.passed:
+            return serializable_repo_report(
+                "semantic_vector",
+                commands,
+                case_observations,
+                metrics,
+                {"summary": runtime_profile},
+                scope,
+            )
+
+    refresh = run_command(
+        "semantic_vector_index_refresh",
+        [
+            str(binary),
+            "index",
+            "refresh",
+            "--kind",
+            "semantic",
+            "--kind",
+            "vector",
+            "--format",
+            "json",
+        ],
+        workspace,
+        env,
+        timeout,
+    )
+    commands.append(refresh)
+    metrics.append(
+        MetricObservation(
+            name="semantic_vector_refresh_ms",
+            value=refresh.duration_ms,
+            budget=float(suite_config.get("refresh_budget_ms", 0)) or None,
+            key=True,
+        )
+    )
+    if not refresh.passed:
+        return serializable_repo_report(
+            "semantic_vector",
+            commands,
+            case_observations,
+            metrics,
+            parse_json_output(refresh.stdout) if refresh.passed else {"summary": runtime_profile},
+            scope,
+        )
+
+    query_durations: list[int] = []
+    for case in suite_config.get("query_cases", []):
+        query = run_command(
+            f"semantic_vector_{case['id']}",
+            semantic_vector_query_command(binary, scope, case),
+            workspace,
+            env,
+            timeout,
+        )
+        commands.append(query)
+        query_durations.append(query.duration_ms)
+        case_observations.append(score_semantic_vector_case(case, query))
+
+    if query_durations:
+        metrics.append(
+            MetricObservation(
+                name="semantic_vector_query_p50_ms",
+                value=float(median(query_durations)),
+                budget=float(suite_config.get("query_p50_budget_ms", 0)) or None,
+                key=False,
+            )
+        )
+        metrics.append(
+            MetricObservation(
+                name="semantic_vector_query_p95_ms",
+                value=float(percentile(query_durations, 95)),
+                budget=float(suite_config.get("query_p95_budget_ms", 0)) or None,
+                key=True,
+            )
+        )
+
+    return serializable_repo_report(
+        "semantic_vector",
+        commands,
+        case_observations,
+        metrics,
+        {"summary": runtime_profile},
+        scope,
+    )
+
+
+def semantic_vector_runtime_profile(env: dict[str, str]) -> dict[str, Any]:
+    semantic_backend = normalized_env_value(env, "RELAY_KNOWLEDGE_SEMANTIC_BACKEND", "local")
+    vector_backend = normalized_env_value(env, "RELAY_KNOWLEDGE_VECTOR_BACKEND", "local")
+    external_requested = "external" in {semantic_backend, vector_backend}
+    required = [
+        "RELAY_KNOWLEDGE_EMBEDDING_BASE_URL",
+        "RELAY_KNOWLEDGE_EMBEDDING_API_KEY",
+        "RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL",
+        "RELAY_KNOWLEDGE_EMBEDDING_DIMENSION",
+    ]
+    missing = [name for name in required if external_requested and not env.get(name, "").strip()]
+    return {
+        "semantic_backend": semantic_backend,
+        "vector_backend": vector_backend,
+        "external_requested": external_requested,
+        "missing_external_env": missing,
+        "llm_provider": normalized_env_value(env, "RELAY_KNOWLEDGE_LLM_PROVIDER", "openai_compatible"),
+        "text_embedding_model": env.get("RELAY_KNOWLEDGE_TEXT_EMBEDDING_MODEL", ""),
+        "embedding_dimension": env.get("RELAY_KNOWLEDGE_EMBEDDING_DIMENSION", ""),
+        "embedding_base_url_configured": bool(env.get("RELAY_KNOWLEDGE_EMBEDDING_BASE_URL", "").strip()),
+        "embedding_api_key_configured": bool(env.get("RELAY_KNOWLEDGE_EMBEDDING_API_KEY", "").strip()),
+    }
+
+
+def normalized_env_value(env: dict[str, str], name: str, default: str) -> str:
+    value = env.get(name, "").strip().lower()
+    return value or default
+
+
+def semantic_vector_env_check(profile: dict[str, Any]) -> CommandResult:
+    missing = profile.get("missing_external_env", [])
+    passed = not missing
+    message = (
+        "external semantic/vector environment is configured"
+        if passed
+        else "missing external semantic/vector env: " + ", ".join(str(name) for name in missing)
+    )
+    return CommandResult(
+        name="semantic_vector_external_env",
+        command=["validate", "semantic-vector-env"],
+        exit_code=0 if passed else 1,
+        duration_ms=0,
+        stdout=json.dumps(profile, sort_keys=True),
+        stderr="" if passed else message,
+    )
+
+
+def run_provider_probe(
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    timeout: int,
+) -> CommandResult:
+    raw = run_command(
+        "semantic_vector_provider_probe",
+        [str(binary), "provider", "probe", "--format", "json"],
+        workspace,
+        env,
+        timeout,
+    )
+    if not raw.passed:
+        return raw
+    payload = parse_json_output(raw.stdout)
+    if payload.get("ok") is True:
+        return raw
+    message = provider_probe_message(payload, raw)
+    return CommandResult(
+        name=raw.name,
+        command=raw.command,
+        exit_code=1,
+        duration_ms=raw.duration_ms,
+        stdout=raw.stdout,
+        stderr=message,
+    )
+
+
+def provider_probe_message(payload: dict[str, Any], raw: CommandResult) -> str:
+    code = payload.get("error_code") or "provider_probe_failed"
+    message = payload.get("error_message") or last_output_line(raw.stdout, raw.stderr)
+    return f"{code}: {message}"
+
+
+def semantic_vector_ingest_command(
+    binary: Path,
+    scope: str,
+    evidence: dict[str, Any],
+) -> list[str]:
+    command = [
+        str(binary),
+        "ingest",
+        "--source",
+        scope,
+        "--content",
+        str(evidence["content"]),
+    ]
+    for entity in evidence.get("entities", []):
+        command.extend(["--entity", str(entity)])
+    command.extend(["--format", "json"])
+    return command
+
+
+def semantic_vector_query_command(
+    binary: Path,
+    scope: str,
+    case: dict[str, Any],
+) -> list[str]:
+    return [
+        str(binary),
+        "query",
+        case["query"],
+        "--source",
+        scope,
+        "--freshness",
+        "wait-until-fresh",
+        "--limit",
+        str(case.get("limit", 10)),
+        "--format",
+        "json",
+    ]
+
+
+def score_semantic_vector_case(case: dict[str, Any], result: CommandResult) -> CaseObservation:
+    if not result.passed:
+        return CaseObservation(
+            case_id=case["id"],
+            repository="semantic_vector",
+            passed=False,
+            message=last_output_line(result.stdout, result.stderr),
+            objective="semantic_vector",
+        )
+    payload = parse_json_output(result.stdout)
+    hits = payload.get("results", [])
+    expected = case.get("expected", [])
+    forbidden = case.get("forbidden", [])
+    max_rank = int(case.get("max_rank", 1))
+    rank, matched_hit = first_expected_hit(hits, expected)
+    false_positives = sum(1 for hit in hits if hit_matches_any(hit, forbidden))
+    missing_sources = missing_required_sources(case, matched_hit, hits)
+    missing_backends = missing_required_backend_states(case, payload)
+    passed = (
+        (not expected or (rank is not None and rank <= max_rank))
+        and false_positives == 0
+        and not missing_sources
+        and not missing_backends
+    )
+    if case.get("expect_empty"):
+        passed = len(hits) == 0
+        rank = 0 if passed else None
+    return CaseObservation(
+        case_id=case["id"],
+        repository="semantic_vector",
+        passed=passed,
+        rank=rank,
+        max_rank=max_rank,
+        false_positive_count=false_positives,
+        message=semantic_vector_case_message(
+            hits,
+            rank,
+            matched_hit,
+            missing_sources,
+            missing_backends,
+            payload,
+        ),
+        objective="semantic_vector",
+    )
+
+
+def first_expected_hit(
+    hits: list[dict[str, Any]],
+    expected: list[dict[str, Any]],
+) -> tuple[int | None, dict[str, Any] | None]:
+    for index, hit in enumerate(hits, start=1):
+        if hit_matches_any(hit, expected):
+            return index, hit
+    return None, None
+
+
+def missing_required_sources(
+    case: dict[str, Any],
+    matched_hit: dict[str, Any] | None,
+    hits: list[dict[str, Any]],
+) -> list[str]:
+    required = {str(source) for source in case.get("required_sources", [])}
+    if not required:
+        return []
+    observed = hit_sources(matched_hit) if matched_hit else all_hit_sources(hits)
+    return sorted(required - observed)
+
+
+def hit_sources(hit: dict[str, Any] | None) -> set[str]:
+    if not isinstance(hit, dict):
+        return set()
+    return {str(source) for source in hit.get("retriever_sources", [])}
+
+
+def all_hit_sources(hits: list[dict[str, Any]]) -> set[str]:
+    sources: set[str] = set()
+    for hit in hits:
+        sources.update(hit_sources(hit))
+    return sources
+
+
+def missing_required_backend_states(
+    case: dict[str, Any],
+    payload: dict[str, Any],
+) -> list[str]:
+    required = case.get("required_backend_states", {})
+    if not isinstance(required, dict):
+        return []
+    states = {
+        str(status.get("source")): str(status.get("state"))
+        for status in payload.get("backend_statuses", [])
+        if isinstance(status, dict)
+    }
+    missing: list[str] = []
+    for source, allowed in required.items():
+        allowed_states = {str(state) for state in allowed}
+        current = states.get(str(source))
+        if current not in allowed_states:
+            missing.append(f"{source}:{current or 'missing'}")
+    return missing
+
+
+def semantic_vector_case_message(
+    hits: list[dict[str, Any]],
+    rank: int | None,
+    matched_hit: dict[str, Any] | None,
+    missing_sources: list[str],
+    missing_backends: list[str],
+    payload: dict[str, Any],
+) -> str:
+    backend_states = {
+        str(status.get("source")): str(status.get("state"))
+        for status in payload.get("backend_statuses", [])
+        if isinstance(status, dict)
+    }
+    sources = sorted(hit_sources(matched_hit) if matched_hit else all_hit_sources(hits))
+    return (
+        f"results={len(hits)} rank={rank} sources={sources} "
+        f"backend_states={backend_states} missing_sources={missing_sources} "
+        f"missing_backends={missing_backends}"
+    )
+
+
 def quality_gate_commands(profile: str) -> list[tuple[str, list[str], int]]:
     if profile == "smoke":
         return [("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120)]
@@ -472,12 +703,14 @@ def query_command(
 
 
 def score_query_case(repo_name: str, case: dict[str, Any], result: CommandResult) -> CaseObservation:
+    objective = repository_case_objective(case)
     if not result.passed:
         return CaseObservation(
             case_id=case["id"],
             repository=repo_name,
             passed=False,
             message=last_output_line(result.stdout, result.stderr),
+            objective=objective,
         )
     payload = parse_json_output(result.stdout)
     hits = payload.get("results", [])
@@ -498,7 +731,21 @@ def score_query_case(repo_name: str, case: dict[str, Any], result: CommandResult
         max_rank=max_rank,
         false_positive_count=false_positives,
         message=f"results={len(hits)} rank={rank}",
+        objective=objective,
     )
+
+
+def repository_case_objective(case: dict[str, Any]) -> str:
+    explicit = str(case.get("objective", "")).strip()
+    if explicit:
+        return explicit
+    kind = str(case.get("kind", "")).strip().lower()
+    case_id = str(case.get("id", "")).strip().lower()
+    competitive_kinds = {"hybrid", "callers", "callees"}
+    competitive_markers = ("hybrid", "fuzzy", "full_scope", "fanout", "callers", "callees")
+    if kind in competitive_kinds or any(marker in case_id for marker in competitive_markers):
+        return "competitive_capability"
+    return "foundational_capability"
 
 
 def first_expected_rank(hits: list[dict[str, Any]], expected: list[dict[str, Any]]) -> int | None:
@@ -539,6 +786,12 @@ def hit_matches(hit: dict[str, Any], pattern: dict[str, Any]) -> bool:
             return False
     if "excerpt_contains" in pattern:
         if pattern["excerpt_contains"] not in hit.get("excerpt", ""):
+            return False
+    if "content_contains" in pattern:
+        if pattern["content_contains"] not in hit.get("content", ""):
+            return False
+    if "retriever_source" in pattern:
+        if pattern["retriever_source"] not in hit.get("retriever_sources", []):
             return False
     return True
 

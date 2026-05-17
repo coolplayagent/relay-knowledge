@@ -146,6 +146,66 @@
       "expect_empty": true
     }
   ],
+  "semantic_vector_suite": {
+    "source_scope": "self-iteration-semantic-vector",
+    "probe_provider_when_external": true,
+    "provider_probe_budget_ms": 10000,
+    "refresh_budget_ms": 10000,
+    "query_p50_budget_ms": 250,
+    "query_p95_budget_ms": 500,
+    "evidence": [
+      {
+        "content": "Semantic vector recall anchors context packs with evidence sv-alpha-gradient, backend freshness, and retriever source attribution.",
+        "entities": ["SemanticVectorRecall", "ContextPack"]
+      },
+      {
+        "content": "Hybrid GraphRAG fusion keeps bm25, semantic, vector, and graph evidence signals explainable through sv-beta-fusion notes.",
+        "entities": ["HybridGraphRag", "FusionDiagnostics"]
+      },
+      {
+        "content": "External embedding metadata tracks model dimension, source hash, and cursor freshness for sv-gamma-provider diagnostics.",
+        "entities": ["EmbeddingProvider", "IndexCursor"]
+      }
+    ],
+    "query_cases": [
+      {
+        "id": "sv_semantic_context_pack_source",
+        "query": "semantic vector recall anchors context packs",
+        "limit": 10,
+        "max_rank": 1,
+        "required_sources": ["semantic"],
+        "required_backend_states": {
+          "semantic": ["available"],
+          "vector": ["available"]
+        },
+        "expected": [{"content_contains": "sv-alpha-gradient"}]
+      },
+      {
+        "id": "sv_vector_backend_freshness_source",
+        "query": "backend freshness retriever source attribution vector",
+        "limit": 10,
+        "max_rank": 2,
+        "required_sources": ["vector"],
+        "required_backend_states": {
+          "semantic": ["available"],
+          "vector": ["available"]
+        },
+        "expected": [{"content_contains": "sv-alpha-gradient"}]
+      },
+      {
+        "id": "sv_external_embedding_metadata_recall",
+        "query": "embedding metadata model dimension source hash cursor freshness",
+        "limit": 10,
+        "max_rank": 2,
+        "required_sources": ["semantic", "vector"],
+        "required_backend_states": {
+          "semantic": ["available"],
+          "vector": ["available"]
+        },
+        "expected": [{"content_contains": "sv-gamma-provider"}]
+      }
+    ]
+  },
   "query_cases": [
     {
       "id": "rt_definition_connector_service",
