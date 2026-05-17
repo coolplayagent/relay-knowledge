@@ -13,6 +13,7 @@ pub(super) struct SymbolRow {
     pub(super) name: String,
     pub(super) qualified_name: String,
     pub(super) kind: String,
+    pub(super) previous_symbol_context_start: Option<u32>,
 }
 
 pub(super) struct ReferenceRow {
@@ -40,6 +41,7 @@ pub(super) struct CallRow {
     pub(super) callee_symbol_snapshot_id: Option<String>,
     pub(super) callee_name: String,
     pub(super) line_range: RepositoryCodeRange,
+    pub(super) caller_line_range: Option<RepositoryCodeRange>,
     pub(super) target_hint: Option<String>,
     pub(super) resolution_state: String,
     pub(super) confidence_basis_points: u16,

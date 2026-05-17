@@ -16,6 +16,13 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-code-query-bounded-symbol-context-20260518
+- 目标：修复质量门禁中 relay-teams `ConnectorService` definition/hybrid/path-filtered definition 与 `_summary` callers/callees 的命中行范围过窄问题，同时保护 foundational、competitive、semantic/vector、research judge、stability 与 negative missing symbol 下限。
+- 算法与架构：SQLite code query 只在已通过 FTS candidate、selector filter 与既有 scoring 的 symbol/call graph 命中上扩展返回 `line_range`；class definition 可向前包含同文件 16 行内相邻上一 symbol 起点，caller/callee 查询可返回 call-site 所属 caller symbol 的 bounded range。新增 `(source_scope, path, line_end, line_start)` 索引支撑相邻 symbol 查找，避免全表扫描。
+- 不变量：不改变索引写入内容、FTS 查询表达式、candidate limit、排序权重、CLI/API 字段、semantic/vector provider URL/API key/model/dimension 环境读取、embedding 设置、judge 配置、HTTP/网络行为或 release/install 行为；没有仓库名、路径名或符号名特殊分支，最终排序仍由既有 score 和去重截断决定。
+- 预期影响：大型仓库中 class 声明前的 protocol/decorator/typed preamble 与 resolved call site 所属函数范围可被 line-based evaluator 和用户定位识别，预期修复 `ConnectorService` definition/hybrid/filter 与 `_summary` callers/callees 门禁，W3 request/import、LevelDB/Linux/Kubernetes/Spring 和 semantic/vector source coverage 保持不变。
+- 已知风险：少数 class 或 resolved call hit 的起始行会比精确语法节点更早，但窗口受同文件相邻 symbol 与 16 行上限约束，不会扩成整文件上下文；额外 SQL 子查询只作用于 bounded candidate rows。
+
 ## 候选优化说明：manual-cli-repo-index-inline-worker-20260518
 - 目标/算法/架构/不变量/影响/风险：修复质量门禁中 `repo index` 返回 queued task 后首个 `repo query --freshness wait-until-fresh` 立即报 “no index for ref” 的竞态；CLI 仍经 durable code-index task 建立 bounded full-index task，但当前进程会立即执行同一 task 的 worker lease 并在返回前刷新 status/checkpoint，不改变 Web/API `start_code_repository_index` 后台语义、SQLite schema、code graph parsing/ranking、query JSON、semantic/vector provider/env、embedding 或 judge 配置。预期 relay-teams 与 LevelDB full-scope gates 在显式 index 后已有 fresh scope，查询延迟保持在已建索引路径；风险是一次性 CLI index wall time 上升，但成本位于写索引命令内且 service/Web 后台模型保留。
 
@@ -977,38 +984,25 @@ ssert!(!target_symbol_import_query("org.springframework.context.ApplicationConte
 - known degradations: none recorded
 - latency metrics: cargo_build_release_ms=28662ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=177ms; cargo_test_ms=5044ms; relay_teams_index_ms=69745ms; relay_teams_query_p50_ms=99ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13980ms
 ## 20260517T134401Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T134401Z.patch`
-- score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0)
-- cases: 36/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
-- key improvements: score_component:research_judge 0.86->0.88; metric:cargo_fmt_check_ms 848.0->784; metric:cargo_test_ms 8803.0->8527
-- known degradations: score_component:performance 0.952029->0.936811; metric:cargo_build_release_ms 39891.0->41918; metric:leveldb_cpp_query_p50_ms 145.0->187.0; metric:leveldb_cpp_query_p95_ms 253.0->296.0; metric:local_documents_file_query_p50_ms 122.5->148.5; metric:local_documents_file_query_p95_ms 124.0->175.0; metric:local_noise_file_index_ms 374.0->473; metric:semantic_vector_refresh_ms 84.0->111
-- latency metrics: cargo_build_release_ms=41918ms; cargo_fmt_check_ms=784ms; cargo_clippy_ms=207ms; cargo_test_ms=8527ms; relay_teams_index_ms=80341ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=459ms; leveldb_cpp_index_ms=19962ms
+- score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0); cases: 36/36 passed.
+- summary: code query ranking/support changes improved research_judge while recording performance degradations that remain protected context in memory.
 ## 20260517T140829Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T140829Z.patch`
-- score: 0.97451 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.86, performance=0.943869, stability=1.0)
-- cases: 36/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
-- key improvements: score_component:score 0.964613->0.97451; score_component:research_judge 0.79->0.86; metric:semantic_vector_provider_probe_ms 1327.0->1240
-- known degradations: score_component:performance 0.951416->0.943869; metric:cargo_build_release_ms 41245.0->49017; metric:cargo_fmt_check_ms 840.0->910; metric:cargo_test_ms 8983.0->9888; metric:relay_teams_index_ms 83146.0->91550; metric:leveldb_cpp_query_p95_ms 259.0->287.0; metric:local_noise_file_index_ms 367.0->411; metric:local_noise_file_query_p50_ms 127.0->153.5
-- latency metrics: cargo_build_release_ms=49017ms; cargo_fmt_check_ms=910ms; cargo_clippy_ms=223ms; cargo_test_ms=9888ms; relay_teams_index_ms=91550ms; relay_teams_query_p50_ms=144ms; relay_teams_query_p95_ms=509ms; leveldb_cpp_index_ms=21322ms
-
-Adopted optimization notes:
-
-identifier_part_match(term, candidate) +            }) +        }) +        .count() as f64 +} -    score +fn fuzzy_identifier_part_match(query_term: &str, candidate: &str) -> bool { +    query_term.len() >= 3 && candidate.len() >= 3 && candidate.contains(query_term) } fn evidence_document_id(evidence_id: &str) -> String { diff --git a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs index 24416550eda523a632273dddf8b7dd55c2fbc11f..2bd9886479fa589a8ce06c8a9160360e3c1dd16d --- a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs +++ b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs @@ -418,4 +418,19 @@ assert_eq!(cache.vector(8).len(), 8); assert_eq!(cache.vectors.len(), 2); } + +    #[test] +    fn overlap_score_matches_identifier_variants_after_fast_path_miss() { +        let labels = vec!["RuntimeBudget".to_owned()]; + +        assert_eq!( +            overlap_score( +                "retry_policy", +                "Retry policy controls the runtime budget", +                &labels, +                Some("src/runtime/budget.rs"), +            ), +            2.0 +        ); +    } } tokens used 311,144
+- score: 0.97451 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.86, performance=0.943869, stability=1.0); cases: 36/36 passed.
+- summary: identifier-aware semantic/vector retrieval improved research_judge and provider probe behavior; performance degradations remain protected context in progressive memory and patch memory.
 ## 20260517T171331Z
+- score: 0.924213 (foundational=0.888889, competitive=0.857143, accuracy=0.873016, semantic_vector=1.0, research_judge=0.88, performance=0.958586, stability=1.0); cases: 32/36 passed.
+- summary: CLI repo index inline worker removed the `repo index` then `repo query --freshness wait-until-fresh` race; latency degradations remain protected context in memory.
+## 20260517T184611Z
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T171331Z.patch`
-- score: 0.924213 (foundational=0.888889, competitive=0.857143, accuracy=0.873016, semantic_vector=1.0, research_judge=0.88, performance=0.958586, stability=1.0)
-- cases: 32/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/interfaces/cli_spec_data.rs`, `src/relay_knowledge/interfaces/repo_cli.rs`, `src/relay_knowledge/interfaces/repo_cli_tests.rs`
-- key improvements: score_component:score 0.555901->0.924213; score_component:foundational_capability 0.333333->0.888889; score_component:competitive_capability 0.0->0.857143; score_component:accuracy 0.166667->0.873016; score_component:performance 0.857615->0.958586; score_component:stability 0.509434->1.0; score_component:research_judge 0.79->0.88; metric:cargo_build_release_ms 46960.0->43420
-- known degradations: metric:relay_teams_index_ms 90.0->77268; metric:relay_teams_query_p50_ms 24.5->125.5; metric:relay_teams_query_p95_ms 33.0->443.0; metric:leveldb_cpp_index_ms 50.0->18959; metric:leveldb_cpp_query_p50_ms 44.0->140.0; metric:leveldb_cpp_query_p95_ms 57.0->239.0; metric:local_documents_file_index_ms 50.0->114; metric:local_documents_file_query_p50_ms 39.5->112.5
-- latency metrics: cargo_build_release_ms=43420ms; cargo_fmt_check_ms=833ms; cargo_clippy_ms=226ms; cargo_test_ms=8438ms; relay_teams_index_ms=77268ms; relay_teams_query_p50_ms=126ms; relay_teams_query_p95_ms=443ms; leveldb_cpp_index_ms=18959ms
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T184611Z.patch`
+- score: 0.971201 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.9, performance=0.954676, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_line_context_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_line_ranges.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: score_component:score 0.738514->0.971201; score_component:foundational_capability 0.888889->1.0; score_component:competitive_capability 0.928571->1.0; score_component:accuracy 0.90873->1.0; score_component:stability 0.981132->1.0; score_component:research_judge 0.0->0.9; metric:cargo_fmt_check_ms 598.0->571; metric:cargo_test_ms 7836.0->7383
+- known degradations: metric:leveldb_cpp_index_ms 14668.0->16652
+- latency metrics: cargo_build_release_ms=31587ms; cargo_fmt_check_ms=571ms; cargo_clippy_ms=171ms; cargo_test_ms=7383ms; relay_teams_index_ms=69806ms; relay_teams_query_p50_ms=102ms; relay_teams_query_p95_ms=352ms; leveldb_cpp_index_ms=16652ms
 
 Adopted optimization notes:
 
-> { diff --git a/src/relay_knowledge/interfaces/repo_cli_tests.rs b/src/relay_knowledge/interfaces/repo_cli_tests.rs index 36023a1b07e2a1b03f27e81a15f83a2baa883ee4..8ba3cc5b64129744315262b6fac09e2ca5bfb34b --- a/src/relay_knowledge/interfaces/repo_cli_tests.rs +++ b/src/relay_knowledge/interfaces/repo_cli_tests.rs @@ -312,6 +312,28 @@ .expect("index should run"); assert!(indexed.contains("code.repo.index")); +    let fresh_definitions = run_repo( +        &service, +        RepoCommand::Query { +            alias: "fixture".to_owned(), +            query: "retry_policy".to_owned(), +            kind: CodeQueryKind::Definition, +            limit: 5, +            ref_selector: "HEAD".to_owned(), +            path_filters: Vec::new(), +            language_filters: Vec::new(), +            freshness: FreshnessPolicy::WaitUntilFresh, +        }, +        context("query-after-index"), +        OutputFormat::Json, +    ) +    .await +    .expect("query should run immediately after repo index"); +    assert_eq!( +        json_value(&fresh_definitions)["results"][0]["path"], +        "src/lib.rs" +    ); + run_repo( &service, RepoCommand::IndexWorker { task_id: None }, tokens used 201,813
+ pub(super) callee_symbol_snapshot_id: Option<String>, pub(super) callee_name: String, pub(super) line_range: RepositoryCodeRange, +    pub(super) caller_line_range: Option<RepositoryCodeRange>, pub(super) target_hint: Option<String>, pub(super) resolution_state: String, pub(super) confidence_basis_points: u16, diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index 67331672821affd200914df58ff5f4823771f1be..76203c46df86fd44ae823bc9cc4ca5809eccd4d4 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -244,6 +244,8 @@ ON code_repository_symbols(source_scope, name, qualified_name, path); CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup ON code_repository_symbols(source_scope, name, path); +        CREATE INDEX IF NOT EXISTS code_repository_symbols_path_line_lookup +            ON code_repository_symbols(source_scope, path, line_end, line_start); CREATE INDEX IF NOT EXISTS code_repository_references_lookup ON code_repository_references(source_scope, name, kind, path); CREATE INDEX IF NOT EXISTS code_repository_calls_lookup tokens used 221,017
 

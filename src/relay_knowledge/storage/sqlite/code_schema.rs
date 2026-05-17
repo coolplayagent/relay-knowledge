@@ -244,6 +244,8 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_symbols(source_scope, name, qualified_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup
             ON code_repository_symbols(source_scope, name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_symbols_path_line_lookup
+            ON code_repository_symbols(source_scope, path, line_end, line_start);
         CREATE INDEX IF NOT EXISTS code_repository_references_lookup
             ON code_repository_references(source_scope, name, kind, path);
         CREATE INDEX IF NOT EXISTS code_repository_calls_lookup

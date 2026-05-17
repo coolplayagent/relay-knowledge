@@ -44,6 +44,10 @@ mod code_query_accuracy_tests;
 mod code_query_import_target_tests;
 
 #[cfg(test)]
+#[path = "code_query_line_context_tests.rs"]
+mod code_query_line_context_tests;
+
+#[cfg(test)]
 #[path = "code_metadata_tests.rs"]
 mod code_metadata_tests;
 

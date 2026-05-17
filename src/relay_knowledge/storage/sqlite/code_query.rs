@@ -6,6 +6,8 @@ use rusqlite::{Connection, params_from_iter};
 
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
+#[path = "code_query_line_ranges.rs"]
+mod code_query_line_ranges;
 #[path = "code_query_path_ranking.rs"]
 mod code_query_path_ranking;
 #[path = "code_query_rows.rs"]
@@ -30,6 +32,10 @@ use super::code_status::{repository_scope_status, repository_status};
 use code_query_import_targets::search_imports_by_target_symbols;
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
+use code_query_line_ranges::{
+    SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, call_result_line_range,
+    optional_line_range_with_symbol_context, symbol_result_line_range,
+};
 use code_query_path_ranking::{
     call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
     symbol_test_path_penalty,
@@ -94,7 +100,15 @@ fn search_symbols(
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
-               byte_start, byte_end, line_start, line_end, name, qualified_name, kind
+               byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
+               (
+                   SELECT MIN(previous.line_start)
+                   FROM code_repository_symbols previous
+                   WHERE previous.source_scope = code_repository_symbols.source_scope
+                     AND previous.path = code_repository_symbols.path
+                     AND previous.line_end < code_repository_symbols.line_start
+                     AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
+               ) AS previous_symbol_context_start
         FROM code_repository_symbols
         WHERE source_scope = ?
           AND symbol_snapshot_id IN (
@@ -141,6 +155,7 @@ fn search_symbols(
                 name: row.get(11)?,
                 qualified_name: row.get(12)?,
                 kind: row.get(13)?,
+                previous_symbol_context_start: row.get(14)?,
             })
         },
     )?;
@@ -177,6 +192,7 @@ fn search_symbols(
                     + 2.0
                     + symbol_kind_bonus(&row.kind, request)
                     + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
+                let line_range = symbol_result_line_range(&row);
                 let excerpt = symbol_excerpt(
                     &row.name,
                     &row.qualified_name,
@@ -189,7 +205,7 @@ fn search_symbols(
                         path: row.path,
                         language_id: row.language_id,
                         byte_range: row.byte_range,
-                        line_range: row.line_range,
+                        line_range,
                         symbol_snapshot_id: Some(row.symbol_snapshot_id),
                         canonical_symbol_id: Some(row.canonical_symbol_id),
                         file_id: Some(row.file_id),
@@ -328,7 +344,16 @@ fn search_calls(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
                c.caller_name, c.callee_symbol_snapshot_id, c.callee_name,
-               c.line_start, c.line_end, c.target_hint, c.resolution_state,
+               c.line_start, c.line_end, caller.line_start, caller.line_end,
+               (
+                   SELECT MAX(previous.line_end)
+                   FROM code_repository_symbols previous
+                   WHERE previous.source_scope = c.source_scope
+                     AND previous.path = caller.path
+                     AND caller.line_start IS NOT NULL
+                     AND previous.line_end < caller.line_start
+               ) AS caller_previous_symbol_line_end,
+               c.target_hint, c.resolution_state,
                c.confidence_basis_points, c.confidence_tier,
                caller.canonical_symbol_id, callee.canonical_symbol_id,
                caller_chunk.content
@@ -384,13 +409,18 @@ fn search_calls(
                     start: row.get(7)?,
                     end: row.get(8)?,
                 },
-                target_hint: row.get(9)?,
-                resolution_state: row.get(10)?,
-                confidence_basis_points: row.get(11)?,
-                confidence_tier: row.get(12)?,
-                caller_canonical_symbol_id: row.get(13)?,
-                callee_canonical_symbol_id: row.get(14)?,
-                caller_excerpt: row.get(15)?,
+                caller_line_range: optional_line_range_with_symbol_context(
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                ),
+                target_hint: row.get(12)?,
+                resolution_state: row.get(13)?,
+                confidence_basis_points: row.get(14)?,
+                confidence_tier: row.get(15)?,
+                caller_canonical_symbol_id: row.get(16)?,
+                callee_canonical_symbol_id: row.get(17)?,
+                caller_excerpt: row.get(18)?,
             })
         },
     )?;
@@ -429,6 +459,7 @@ fn search_calls(
                     query_has_test_intent,
                 );
             (score > 0.0).then(|| {
+                let line_range = call_result_line_range(request.code_query_kind, &row);
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
                 let (symbol_snapshot_id, canonical_symbol_id) =
                     if request.code_query_kind == CodeQueryKind::Callees {
@@ -448,7 +479,7 @@ fn search_calls(
                         path: row.path,
                         language_id: row.language_id,
                         byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                        line_range: row.line_range,
+                        line_range,
                         symbol_snapshot_id,
                         canonical_symbol_id,
                         file_id: Some(row.file_id),
