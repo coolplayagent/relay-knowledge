@@ -20,6 +20,25 @@ pub(super) fn call_site_source_path_bonus(
     0.2
 }
 
+pub(super) fn declaration_surface_path_bonus(
+    declaration_bonus: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if declaration_bonus <= 0.0
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    if file_name_has_header_extension(file_name) {
+        0.35
+    } else {
+        0.0
+    }
+}
+
 pub(super) fn query_mentions_test_or_benchmark(query: &str) -> bool {
     query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -70,6 +89,17 @@ fn term_is_test_or_benchmark(term: &str) -> bool {
     )
 }
 
+fn file_name_has_header_extension(file_name: &str) -> bool {
+    let Some((_, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "h" | "hh" | "hpp" | "hxx" | "inc" | "ipp"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +144,37 @@ mod tests {
         assert!(!query_mentions_test_or_benchmark("NewLRUCache"));
         assert!(query_mentions_test_or_benchmark("NewLRUCache test caller"));
         assert!(query_mentions_test_or_benchmark("db_bench cache"));
+    }
+
+    #[test]
+    fn declaration_surface_path_bonus_prefers_non_test_headers() {
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+        let definition = retrieval_request(CodeQueryKind::Definition);
+
+        assert_eq!(
+            declaration_surface_path_bonus(2.0, "db/db_impl.h", &hybrid),
+            0.35
+        );
+        assert_eq!(
+            declaration_surface_path_bonus(2.0, "include/leveldb/cache.hpp", &hybrid),
+            0.35
+        );
+        assert_eq!(
+            declaration_surface_path_bonus(2.0, "db/db_impl.cc", &hybrid),
+            0.0
+        );
+        assert_eq!(
+            declaration_surface_path_bonus(2.0, "db/db_impl_test.h", &hybrid),
+            0.0
+        );
+        assert_eq!(
+            declaration_surface_path_bonus(0.0, "db/db_impl.h", &hybrid),
+            0.0
+        );
+        assert_eq!(
+            declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition),
+            0.0
+        );
     }
 
     fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest {

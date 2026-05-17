@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：20260517T063652Z
+
+- 目标：在保持 `semantic_vector_provider_probe` 通过、foundational cases 和稳定性不退化的前提下，提高大仓 full-scope hybrid 检索中声明面与实现面的排序区分，尤其是 C/C++ 头文件里已经含有完整 declaration evidence 的 API/恢复流程查询。
+- 方法：在 hybrid chunk 评分中加入小幅 declaration surface path signal；只有 chunk 已经通过既有 declaration-shape 判定获得正向 declaration bonus，且路径是非测试/非 benchmark 的 header-like 文件（`.h`、`.hh`、`.hpp`、`.hxx`、`.inc`、`.ipp`）时才加分。该信号与现有 BM25、identifier token、declaration prototype 计数、chunk quality 和 path 排序融合，不扩大 FTS candidate window。
+- 架构与不变量：不改变 SQLite schema、索引写入、candidate limit、symbol/reference/call/import edge resolution、CLI/API 字段、semantic/vector provider 配置、运行时环境读取方式或 self-iteration evaluator；实现 chunk 和 header chunk 都必须先被 bounded FTS 召回并已有正分，测试/benchmark header 不获得该优先级。
+- 预期影响：`leveldb_hybrid_recovery_manifest_full_scope` 中 `db/db_impl.h` 的 `Recover` declaration chunk 应从 pass 边界附近上移；`leveldb_hybrid_internal_key_comparator`、`leveldb_fuzzy_class_cache_lru_interface` 这类 header/interface 查询应保持或改善。relay-teams Python、semantic/vector source coverage、provider probe gate 和 exact definition/filter cases 不应退化。
+- 已知风险：少数项目会在 header 中放重实现或 generated declarations；由于该 bonus 需要 declaration-shape evidence 且排除 test/benchmark 路径，风险限制在同分或近同分 hybrid chunk 排序，不改变召回集合或后端可用性。
+
 ## 候选优化说明：20260517T062729Z
 
 - 目标：在保持 `semantic_vector_provider_probe` 既有 reachable-but-degraded 语义、foundational cases 和 stability 不退化的前提下，提高 protected competitive hybrid/fuzzy code retrieval 的排序余量，尤其是带上下文词的符号查询被常见 metadata/output/chunk 噪声压到后位的场景。
@@ -734,4 +742,18 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 l_name_query_bonus( +            "EvalCheckpointStore signature mismatch append result", +            "EvalCheckpointStore", +            &hybrid, +        ), +        2.0 +    ); +    assert!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &hybrid, +        ) > symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "FEISHU_METADATA_PLATFORM_KEY", +            &hybrid, +        ) +    ); +    assert_eq!( +        symbol_name_query_bonus( +            "checkpoint metadata version constant", +            "_CHECKPOINT_VERSION", +            &callers, +        ), +        0.0 +    ); +} + +fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { +    let selector = +        crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) +            .expect("selector should be valid"); + +    CodeRetrievalRequest::new( +        "checkpoint metadata version constant", +        selector, +        kind, +        10, +        crate::domain::FreshnessPolicy::AllowStale, +    ) +    .expect("request should be valid") +} tokens used 155,835
+-
+## 20260517T063652Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T063652Z.patch`
+- score: 0.968417 (foundational=1.0, competitive=0.892857, accuracy=0.946429, semantic_vector=1.0, performance=0.952029, stability=1.0)
+- cases: 35/35 passed
+- changed paths: `docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_path_ranking.rs`
+- key improvements: score_component:score 0.954226->0.968417; score_component:competitive_capability 0.835714->0.892857; score_component:accuracy 0.917857->0.946429; metric:cargo_build_release_ms 34955.0->99; metric:cargo_fmt_check_ms 780.0->489; metric:cargo_clippy_ms 213.0->144; metric:cargo_test_ms 8625.0->3828; metric:relay_teams_index_ms 80016.0->65576
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=99ms; cargo_fmt_check_ms=489ms; cargo_clippy_ms=144ms; cargo_test_ms=3828ms; relay_teams_index_ms=65576ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=442ms; leveldb_cpp_index_ms=19944ms
+
+Adopted optimization notes:
+
+cache")); } +    #[test] +    fn declaration_surface_path_bonus_prefers_non_test_headers() { +        let hybrid = retrieval_request(CodeQueryKind::Hybrid); +        let definition = retrieval_request(CodeQueryKind::Definition); + +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.h", &hybrid), +            0.35 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "include/leveldb/cache.hpp", &hybrid), +            0.35 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.cc", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl_test.h", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(0.0, "db/db_impl.h", &hybrid), +            0.0 +        ); +        assert_eq!( +            declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition), +            0.0 +        ); +    } + fn retrieval_request(kind: CodeQueryKind) -> CodeRetrievalRequest { let selector = crate::domain::CodeRepositorySelector::new("repo", "HEAD", Vec::new(), Vec::new()) tokens used 337,233
 

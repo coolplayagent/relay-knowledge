@@ -21,7 +21,9 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
-use code_query_path_ranking::{call_site_source_path_bonus, query_mentions_test_or_benchmark};
+use code_query_path_ranking::{
+    call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
+};
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
 use code_query_scope::path_matches_filter;
@@ -625,8 +627,10 @@ fn search_chunks(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
+            let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
             let score = score_text(&query, [&row.content, &row.path])
-                + declaration_chunk_bonus(&declaration_terms, &row.content);
+                + declaration_bonus
+                + declaration_surface_path_bonus(declaration_bonus, &row.path, request);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
