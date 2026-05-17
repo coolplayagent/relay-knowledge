@@ -1,0 +1,161 @@
+# Chapter 5: Code Repository Graph
+
+[English](../../en/01-user-guide/05-code-repository-graph.md) | [中文](../../zh/01-user-guide/05-code-repository-graph.md)
+
+The code repository graph brings Git trees, files, symbols, references, calls, and imports into one retrieval surface. It is not simple file search; queries and impact analysis depend on indexed code graph snapshots.
+
+## 5.1 Register a Repository
+
+Register a Git repository as a code retrieval source:
+
+```bash
+relay-knowledge repo register /path/to/repo \
+  --alias core \
+  --path src \
+  --language rust \
+  --format json
+```
+
+`--alias` is the short name used by later commands. `--path` and `--language` can be repeated. Registration scope limits indexing, queries, and impact analysis; later requests can narrow the scope but cannot widen it.
+
+Registration records the repository root, alias, and allowed scope. It does not parse files immediately. The path must point to a readable local Git worktree; the target ref or worktree overlay is resolved during indexing. Registering the same Git root again adds an alias to the same repository id. If an alias already belongs to another repository id, registration fails.
+
+## 5.2 Preview Scope
+
+Preview the files covered by the current scope before indexing:
+
+```bash
+relay-knowledge repo scope preview core --ref HEAD --format json
+```
+
+`repo index --dry-run` uses the same preview path:
+
+```bash
+relay-knowledge repo index core --ref HEAD --dry-run --format json
+```
+
+Preview is useful after narrowing `--path` or `--language` so unrelated directories are not written into the code graph. The default source preset excludes common generated directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Use a precise `--path` registration or request when those files are intentionally needed.
+
+## 5.3 Build the Code Graph Index
+
+Index current `HEAD`:
+
+```bash
+relay-knowledge repo index core --ref HEAD --format json
+```
+
+Indexing an immutable commit is better for reproducible experiments:
+
+```bash
+relay-knowledge repo index core --ref <commit-sha> --format json
+```
+
+Full indexing reads a clean tree through Git and parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter. Unsupported, invalid UTF-8, binary, oversized, or parser-failed files degrade to text-only or failed diagnostics without failing the whole batch.
+
+## 5.4 Query Symbols and Relationships
+
+Hybrid query:
+
+```bash
+relay-knowledge repo query core \
+  --query retry_policy \
+  --kind hybrid \
+  --ref HEAD \
+  --path src \
+  --language rust \
+  --freshness wait-until-fresh \
+  --limit 10 \
+  --format json
+```
+
+Narrow query kinds:
+
+```bash
+relay-knowledge repo query core --query RetryPolicy --kind symbol --format json
+relay-knowledge repo query core --query retry_policy --kind definition --format json
+relay-knowledge repo query core --query retry_policy --kind references --format json
+relay-knowledge repo query core --query retry_policy --kind callers --format json
+relay-knowledge repo query core --query retry_policy --kind callees --format json
+relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
+```
+
+Results include repository id, alias, `scope_id`, requested ref, resolved commit, tree hash, path, language, byte range, line range, symbol/file id, retrieval layer, index version, freshness, score, and excerpt.
+
+Branches, tags, and `HEAD` first resolve to commit/tree. Multiple branches with the same tree hash reuse one scope, while the response keeps the requested ref for audit. After rebase or force-move, index the new head before querying; the query fails instead of returning old branch content.
+
+Symbol hits also include `canonical_symbol_id` for expressing logical symbol identity across snapshots. Reference, call, and import hits return `edge_kind`, `edge_resolution_state`, `edge_target_hint`, `edge_confidence_basis_points`, and `edge_confidence_tier`. Uniquely unresolved targets are marked `unresolved` or `ambiguous` instead of being written as certain calls.
+
+## 5.5 Incremental Updates
+
+Index changes between two refs:
+
+```bash
+relay-knowledge repo update core --base main --head HEAD --format json
+```
+
+`repo update` applies the diff from `base` to `head` to the persisted `base` snapshot. `base` does not need to be the current active snapshot; it only needs to have been indexed for the same repository id, path filter, and language filter.
+
+If the CLI reports that no matching indexed base scope exists, index the base first:
+
+```bash
+relay-knowledge repo index core --ref main --format json
+relay-knowledge repo update core --base main --head HEAD --format json
+```
+
+The incremental path reads `git diff --name-status --find-renames -z` and rebuilds only added, modified, copied, renamed, or type-changed files. Deleted and renamed source paths are removed from the cloned base index, while rename lineage is kept as a tombstone.
+
+## 5.6 Worktree Overlay
+
+Use `--ref worktree` to index uncommitted work:
+
+```bash
+relay-knowledge repo index core --ref worktree --format json
+relay-knowledge repo query core --query retry_policy --ref worktree --format json
+```
+
+The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapshot identifier, and includes modified and untracked files. While an overlay is active, clean commit ref queries are rejected so uncommitted content is not mislabeled as a clean Git snapshot.
+
+## 5.7 Impact Analysis
+
+Analyze diff impact:
+
+```bash
+relay-knowledge repo impact core \
+  --base main \
+  --head HEAD \
+  --limit 100 \
+  --format json
+```
+
+Impact analysis verifies that `head_ref` has an indexed snapshot, filters changed paths through registration scope, then uses modules, symbols, callers, imports, and deleted symbol names to infer impacted locations.
+
+## 5.8 Reports and Status
+
+Generate a readable report:
+
+```bash
+relay-knowledge repo report core --format markdown
+```
+
+Use JSON for scripts:
+
+```bash
+relay-knowledge repo report core --format json
+relay-knowledge repo status core --format json
+```
+
+Reports include repository id, root, indexed commit, tree hash, file/symbol/reference/chunk totals, scope, representative queries, latency samples, and degradation summary. Markdown reports fit PRs or release notes; JSON reports fit CI comparisons of index quality.
+
+`repo report --format markdown` also summarizes edge resolution counts for resolved, ambiguous, and unresolved edges. Use this to tell whether the graph is mostly deterministic AST extraction or still has many ambiguous edges requiring parser improvements.
+
+## 5.9 Troubleshooting
+
+When `repo query` returns no results, check in order:
+
+1. Whether `repo status <alias>` shows an indexed clean commit or worktree overlay.
+2. Whether query `--ref` matches the indexed snapshot.
+3. Whether requested `--path` and `--language` only narrow the registered scope.
+4. Whether `--kind` is too narrow; start with `--kind hybrid` when unsure.
+5. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
+
+`repo impact` requires an indexed snapshot for `--head`. Run `repo index core --ref <head>` or `repo update core --base <base> --head <head>` before impact analysis.

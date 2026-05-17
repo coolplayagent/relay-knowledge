@@ -22,7 +22,7 @@
 | 文档组 | 状态 |
 | --- | --- |
 | 根 README 与文档索引 | 已覆盖当前 CLI、Web、MCP、服务和 setup 能力。 |
-| 用户指南 | 已覆盖本地安装、CLI 基础、GraphRAG、代码仓库工作流、Web 工作区、agent/service 运行、排障和高级配置。 |
+| 用户指南 | 已覆盖本地安装、CLI 基础、GraphRAG、代码仓库图谱、Web 工作区、agent/service 运行、排障和高级配置。 |
 | 功能文档 | 已覆盖 GraphRAG context pack、semantic/vector provider 和 tree-sitter 仓库检索；审计记录已移入验证卷。 |
 | 规格 | 按设计混合存在：硬约束和接口规格是当前契约；产品、存储、后台服务、架构和安装规格仍包含前瞻要求。 |
 | 研究材料 | 作为历史和参考资料保留，仍刻意保留路线图与差距分析语气，而不是改写成用户操作手册。 |

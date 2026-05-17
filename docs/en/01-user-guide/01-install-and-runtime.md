@@ -2,25 +2,19 @@
 
 [English](../../en/01-user-guide/01-install-and-runtime.md) | [中文](../../zh/01-user-guide/01-install-and-runtime.md)
 
-This is the English documentation page for `user-guide/01-install-and-runtime.md`. It follows the same structure, examples, commands, and implementation contracts as the Chinese edition so readers can switch languages without changing document location.
+This chapter covers the shortest path for getting the local development environment running. Full release, installer, and service-hosting requirements are covered in [Chapter 9: Resident Service](09-resident-service.md) and [Installation, Release, and Upgrade](../03-architecture-specs/19-installation-release-and-upgrade.md).
 
-> Translation status: the English edition preserves the current technical source text below while the full prose translation is maintained incrementally. Command examples, API paths, environment variables, filenames, and configuration contracts are authoritative.
+## 1.1 Prerequisites
 
-[Documentation index](../../en/README.md) | [GitHub repository](https://github.com/coolplayagent/relay-knowledge)
-
-## Source Content
-
-## 1.1 前置条件
-
-本仓库使用 Rust 2024 edition，`rust-toolchain.toml` 固定到兼容工具链。推荐通过 `rustup` 安装 Rust，然后在仓库根目录运行:
+The repository uses Rust 2024 edition, with a compatible toolchain pinned in `rust-toolchain.toml`. Install Rust with `rustup`, then run from the repository root:
 
 ```bash
 ./setup.sh
 ```
 
-`setup.sh` 只准备开发环境、Rust 组件和 hooks，不构建产物、不启动服务、不跑完整质量门。
+`setup.sh` prepares Rust components and hooks. It does not build release artifacts, start services, or run the full quality gate.
 
-常用脚本按职责拆分:
+Common scripts are split by responsibility:
 
 ```bash
 ./build.sh
@@ -30,13 +24,11 @@ This is the English documentation page for `user-guide/01-install-and-runtime.md
 ./check.sh
 ```
 
-`build.sh` 构建 `target/release/relay-knowledge` 和 `web/dist`。`run.sh` 只管理本地服务进程，发现缺少产物会提示先运行 `./build.sh`。`check.sh` 执行 fmt、clippy、测试、覆盖率、Web build 和可用时的浏览器集成门。
+`build.sh` builds `target/release/relay-knowledge` and `web/dist`. `run.sh` only manages a local service process and asks you to run `./build.sh` if artifacts are missing. `check.sh` runs fmt, clippy, tests, coverage, Web build, and the browser integration gate when available.
 
-开发环境还包含一个静态 Web 工作区和浏览器集成测试。需要验证 Web 时安装 Node.js、npm、Python 和 uv，然后运行第 7 章中的验证命令。
+## 1.2 Local Execution
 
-## 1.2 本地运行
-
-未安装到系统路径时，可以直接运行调试二进制:
+When the binary is not installed on `PATH`, run the debug binary directly:
 
 ```bash
 cargo build
@@ -45,16 +37,18 @@ target/debug/relay-knowledge --version
 target/debug/relay-knowledge setup doctor --format json
 ```
 
-也可以通过 Cargo 运行:
+You can also use Cargo:
 
 ```bash
 cargo run -- status --format json
 cargo run -- query -- --help
 ```
 
-`relay-knowledge` 启动 Tokio runtime，CLI、Web、MCP 和本地 agent adapter 都通过共享 application service 进入核心能力。
+`relay-knowledge` starts a Tokio runtime. CLI, Web, MCP, and the local ACP adapter all enter the core through the same application service so their behavior does not diverge.
 
-同端口 Web 服务:
+## 1.3 Same-Port Local Service
+
+When you need the browser workspace or a local MCP endpoint, build first and then start the same-port Web/API/MCP service:
 
 ```bash
 ./build.sh
@@ -63,58 +57,54 @@ curl http://127.0.0.1:8791/api/health
 ./run.sh stop --force
 ```
 
-底层入口是:
+The underlying command is:
 
 ```bash
 RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
   target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-## 1.3 零配置默认值
+Do not use unmanaged CLI loops for long-running background operation. Use the service-manager path in Chapter 9 instead.
 
-普通本地使用不需要先设置环境变量。默认行为是:
+## 1.4 Zero-Config Defaults
 
-- 运行时目录由平台规则解析，不写入仓库目录。
-- SQLite 本地存储和本地 deterministic semantic/vector read models 自动启用。
-- 网络和 QoS 使用保守默认值。
-- MCP 写入、index refresh tool 和远程监听默认关闭。
+Normal local use does not require environment variables. Defaults are:
 
-`status --format json` 会显示当前配置和状态。需要隔离一次性实验时，设置一个临时 `RELAY_KNOWLEDGE_HOME` 即可:
+- Runtime directories are resolved by platform rules and do not write into the repository.
+- Local SQLite storage and deterministic semantic/vector read models are enabled.
+- Network and QoS budgets use conservative defaults.
+- MCP writes, remote listening, and silent updates are disabled by default.
+
+`status --format json` shows current configuration and status. For an isolated one-off experiment, set a temporary `RELAY_KNOWLEDGE_HOME`:
 
 ```bash
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-demo \
   target/debug/relay-knowledge status --format json
 ```
 
-设置 `RELAY_KNOWLEDGE_HOME` 后，配置、数据、状态、缓存、日志、临时、runtime 和 service 目录都会落在该根目录下的子目录中。完整目录覆盖项见 [第 8 章 高级配置参考](08-advanced-configuration.md)。
-不确定当前机器的基础配置是否 ready 时，先运行 `relay-knowledge setup doctor --format json`；
-它会把 runtime path、network/QoS budget、retrieval backend metadata、MCP
-policy、service directory 和 worker budget 检查聚合到一个不触碰 SQLite 的只读响应里。
-随后用 `relay-knowledge health --format json` 或 `relay-knowledge service doctor --format json`
-确认 graph storage、index freshness 和 worker/service live health。
+After setting `RELAY_KNOWLEDGE_HOME`, config, data, state, cache, logs, temp, runtime, and service directories are placed under that root. See [Chapter 12: Advanced Configuration](12-advanced-configuration.md) for the full directory override list.
 
-## 1.4 网络与 QoS
+## 1.5 Configuration Readiness
 
-所有覆盖路径必须是绝对路径，且不能包含 `..`。路径解析只在 `env` 和 `paths` 边界内完成。
+If you are not sure whether the machine is ready, start with the read-only configuration diagnostic:
 
-常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。日常本地使用不需要调整网络预算；需要远程监听、调大请求体或复现代理问题时，再进入 [第 8 章](08-advanced-configuration.md)。常用覆盖项:
-
-```text
-RELAY_KNOWLEDGE_HTTP_BIND
-RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS
-RELAY_KNOWLEDGE_HTTP_SHUTDOWN_TIMEOUT_MS
-RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES
-RELAY_KNOWLEDGE_QOS_MAX_CONNECTIONS
-RELAY_KNOWLEDGE_QOS_MAX_IN_FLIGHT_REQUESTS
-RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
-RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED
-RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH
+```bash
+relay-knowledge setup doctor --format json
 ```
 
-代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。这些变量只在环境边界读取，业务模块不直接访问进程环境。
+`setup doctor` does not open SQLite, migrate schema, or refresh indexes. It checks runtime paths, network/QoS budgets, retrieval backend metadata, MCP policy, service directories, and worker budgets. After configuration passes, run:
 
-Agent audit 持久化默认关闭。开启 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，常驻 MCP 和本地 ACP adapter 会把 bounded audit events 异步镜像到当前 log 目录下的 `agent-audit.jsonl`；日志目录仍由 `paths` 模块解析，默认不写入仓库或当前工作目录。
+```bash
+relay-knowledge health --format json
+relay-knowledge service doctor --format json
+```
 
-## 1.5 安装与发布路径
+to check graph storage, index freshness, worker/service live health, and telemetry state.
 
-The current development path uses `cargo build`, local binaries, and repository scripts. Formal release requirements are defined in [Installation, Release, and Upgrade](../03-architecture-specs/19-installation-release-and-upgrade.md): stable versions require GitHub Releases, crates.io, checksums, package-manager manifests, and platform service-manager installation paths. The commands in this guide apply to locally built `relay-knowledge` binaries.
+## 1.6 Network and Path Boundaries
+
+All path overrides must be absolute paths and must not contain `..`. Path resolution is owned by the `env` and `paths` boundaries.
+
+Resident service and MCP Streamable HTTP use `net::http` and `net::qos` for network capabilities. Normal local use should not require network budget changes; use [Chapter 12](12-advanced-configuration.md) when enabling remote listening, increasing body limits, or reproducing proxy issues.
+
+Proxy and certificate verification settings inherit `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, and `SSL_VERIFY`. These variables are read only at the environment boundary; business modules do not read the process environment directly.

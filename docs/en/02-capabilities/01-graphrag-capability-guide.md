@@ -71,7 +71,7 @@ relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-代码仓库工作流:
+Code repository graph:
 
 ```bash
 relay-knowledge repo register /path/to/repo \

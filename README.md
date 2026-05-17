@@ -82,9 +82,9 @@ relay-knowledge service doctor
   user guide, implemented capabilities, architecture specs, research,
   benchmarks, and verification records.
 - [Book 1, Chapter 0: User Guide](docs/en/01-user-guide/README.md): executable local workflows for
-  install/runtime directories, CLI output modes, GraphRAG, code repository
-  indexing/reporting, Web operations, MCP/ACP service access, troubleshooting,
-  and advanced configuration.
+  install/runtime directories, CLI output modes, knowledge graphs, code
+  repository graphs, Web operations, MCP/ACP access, resident services,
+  troubleshooting, and advanced configuration.
 - [Book 4, Chapter 1: 2026 Industry Capability Snapshot](docs/en/04-research/01-industry-capability-snapshot-2026.md):
   current GraphRAG, MCP, A2A, hosted retrieval, and graph-agent ecosystem
   signals, plus relay-knowledge gaps.

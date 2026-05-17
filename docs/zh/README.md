@@ -8,15 +8,20 @@
 
 ## 第一卷：用户手册
 
-- [第 0 章 使用指南总览](01-user-guide/README.md)：安装、CLI、GraphRAG、代码仓库、Web、Agent 服务、排障和高级配置的主入口。
+- [第 0 章 使用指南总览](01-user-guide/README.md)：安装、CLI、知识图谱、代码仓库图谱、Web、Agent 接入、常驻服务、后台任务、可观测性、排障和高级配置的主入口。
 - [第 1 章 安装与运行时目录](01-user-guide/01-install-and-runtime.md)
 - [第 2 章 CLI 基础](01-user-guide/02-cli-basics.md)
-- [第 3 章 知识图谱工作流](01-user-guide/03-knowledge-graph-workflow.md)
-- [第 4 章 代码仓库工作流](01-user-guide/04-code-repository-workflow.md)
-- [第 5 章 Web 工作区](01-user-guide/05-web-workspace.md)
-- [第 6 章 Agent 与常驻服务](01-user-guide/06-agent-and-service.md)
-- [第 7 章 运维与排障](01-user-guide/07-operations-and-troubleshooting.md)
-- [第 8 章 高级配置参考](01-user-guide/08-advanced-configuration.md)
+- [第 3 章 CLI 命令参考](01-user-guide/03-cli-command-reference.md)
+- [第 4 章 知识图谱](01-user-guide/04-knowledge-graph.md)
+- [第 5 章 代码仓库图谱](01-user-guide/05-code-repository-graph.md)
+- [第 6 章 Web 工作区](01-user-guide/06-web-workspace.md)
+- [第 7 章 MCP Agent 接入](01-user-guide/07-mcp-agent-access.md)
+- [第 8 章 ACP 本地 Adapter](01-user-guide/08-acp-local-adapter.md)
+- [第 9 章 常驻服务](01-user-guide/09-resident-service.md)
+- [第 10 章 Worker、Proposal 与 Audit](01-user-guide/10-workers-proposals-audit.md)
+- [第 11 章 可观测性与遥测](01-user-guide/11-observability-and-telemetry.md)
+- [第 12 章 高级配置参考](01-user-guide/12-advanced-configuration.md)
+- [第 13 章 运维与排障](01-user-guide/13-operations-and-troubleshooting.md)
 
 ## 第二卷：能力说明
 

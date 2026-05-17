@@ -21,15 +21,20 @@ volume covers and count as chapter 0 when they appear in a reading path.
 
 ## Book 1: User Guide
 
-- [Chapter 0: User Guide Overview](01-user-guide/README.md): install, CLI, GraphRAG, code repositories, Web, agent services, troubleshooting, and advanced configuration.
+- [Chapter 0: User Guide Overview](01-user-guide/README.md): install, CLI, knowledge graphs, code repository graphs, Web, agent access, resident service operation, background tasks, observability, troubleshooting, and advanced configuration.
 - [Chapter 1: Installation and Runtime Directories](01-user-guide/01-install-and-runtime.md)
 - [Chapter 2: CLI Basics](01-user-guide/02-cli-basics.md)
-- [Chapter 3: Knowledge Graph Workflow](01-user-guide/03-knowledge-graph-workflow.md)
-- [Chapter 4: Code Repository Workflow](01-user-guide/04-code-repository-workflow.md)
-- [Chapter 5: Web Workspace](01-user-guide/05-web-workspace.md)
-- [Chapter 6: Agent and Resident Service](01-user-guide/06-agent-and-service.md)
-- [Chapter 7: Operations and Troubleshooting](01-user-guide/07-operations-and-troubleshooting.md)
-- [Chapter 8: Advanced Configuration](01-user-guide/08-advanced-configuration.md)
+- [Chapter 3: CLI Command Reference](01-user-guide/03-cli-command-reference.md)
+- [Chapter 4: Knowledge Graph](01-user-guide/04-knowledge-graph.md)
+- [Chapter 5: Code Repository Graph](01-user-guide/05-code-repository-graph.md)
+- [Chapter 6: Web Workspace](01-user-guide/06-web-workspace.md)
+- [Chapter 7: MCP Agent Access](01-user-guide/07-mcp-agent-access.md)
+- [Chapter 8: ACP Local Adapter](01-user-guide/08-acp-local-adapter.md)
+- [Chapter 9: Resident Service](01-user-guide/09-resident-service.md)
+- [Chapter 10: Workers, Proposals, and Audit](01-user-guide/10-workers-proposals-audit.md)
+- [Chapter 11: Observability and Telemetry](01-user-guide/11-observability-and-telemetry.md)
+- [Chapter 12: Advanced Configuration](01-user-guide/12-advanced-configuration.md)
+- [Chapter 13: Operations and Troubleshooting](01-user-guide/13-operations-and-troubleshooting.md)
 
 ## Book 2: Capabilities
 

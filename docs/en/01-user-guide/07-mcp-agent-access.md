@@ -1,0 +1,99 @@
+# Chapter 7: MCP Agent Access
+
+[English](../../en/01-user-guide/07-mcp-agent-access.md) | [中文](../../zh/01-user-guide/07-mcp-agent-access.md)
+
+MCP Streamable HTTP exposes local graph retrieval capabilities to external agent runtimes. It reuses the unified API, QoS, scope policy, and audit instead of exposing storage or indexing internals.
+
+## 7.1 Start an MCP Service
+
+Before starting, generate a read-only agent configuration profile:
+
+```bash
+relay-knowledge setup profile agent-readonly --format json
+```
+
+Minimal local startup:
+
+```bash
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
+relay-knowledge service run --mcp streamable-http
+```
+
+Default endpoint:
+
+```text
+http://127.0.0.1:8791/mcp
+```
+
+For same-port Web/API/MCP, see [Chapter 9: Resident Service](09-resident-service.md).
+
+## 7.2 Policy Variables
+
+Common MCP policy variables:
+
+```text
+RELAY_KNOWLEDGE_MCP_STREAMABLE_HTTP_ENABLED
+RELAY_KNOWLEDGE_MCP_ENDPOINT
+RELAY_KNOWLEDGE_MCP_ALLOWED_ORIGINS
+RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES
+RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE
+RELAY_KNOWLEDGE_MCP_MAX_LIMIT
+RELAY_KNOWLEDGE_MCP_MAX_CONTEXT_BYTES
+RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
+```
+
+Default policy requires explicit allowed scopes. Without `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`, graph tools reject unspecified scopes unless `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is set or the requested scope is already a code repository alias registered in the current runtime.
+
+Registered repository aliases are added to a process-local dynamic allow-list on first MCP access. Unknown scopes are still rejected and return a remediation hint such as `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>`. Remote binds are rejected by default; non-localhost listening requires `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`.
+
+Before allowing remote clients, verify HTTP bind, origin allow-list, scope allow-list, QoS budgets, and audit policy. Do not make remote bind plus unspecified scope the default configuration.
+
+## 7.3 Session Flow
+
+Clients must follow the MCP Streamable HTTP session flow:
+
+1. Call `initialize` and provide a supported `MCP-Protocol-Version`.
+2. Store the server-returned `Mcp-Session-Id`.
+3. Send `notifications/initialized`.
+4. Send later requests with `Mcp-Session-Id` and `MCP-Protocol-Version`.
+
+Missing session headers return HTTP 400. Unknown or retired session IDs return HTTP 404. Tool requests, `ping`, and `notifications/cancelled` are all bound to server-issued sessions.
+
+## 7.4 Tools, Resources, and Prompts
+
+Current MCP tool surface:
+
+- Graph retrieval.
+- Graph inspection.
+- Health status.
+- Service status.
+- Index status.
+- Authorized code graph query.
+- Authorized code impact analysis.
+
+Current MCP resource surface:
+
+- `relay://service/status`
+- `relay://service/health`
+- `relay://indexes/status`
+- `relay://graph/summary`, exposed only when `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true`.
+- `relay://metrics/prometheus`
+
+Current MCP prompt surface:
+
+- `relay_retrieve_context_prompt`
+- `relay_code_impact_prompt`
+
+Resources and prompts provide read-only diagnostics, context, and invocation templates. They cannot bypass access policy and do not enable mutation, index refresh, or repository indexing.
+
+## 7.5 Write Permission Boundary
+
+MCP does not expose index refresh or repository indexing. Repository indexing must be triggered explicitly through `relay-knowledge repo index` or `relay-knowledge repo update`; derived index refresh must be triggered through CLI/Web operational workflows.
+
+Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
+
+## 7.6 Metrics Endpoint
+
+`GET /mcp/metrics` returns a Prometheus text-format snapshot covering current graph version, index refresh queue depth, dead-letter count, QoS in-flight/queued request count, and stale state for each index. The endpoint still enters through the MCP router and QoS admission.
+
+MCP clients should use Streamable HTTP `/mcp`. `/mcp/sse` and `/mcp/message` are no longer compatibility entry points.

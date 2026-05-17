@@ -63,7 +63,7 @@ relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-代码仓库工作流:
+代码仓库图谱:
 
 ```bash
 relay-knowledge repo register /path/to/repo \
