@@ -9,6 +9,35 @@ pub(super) struct ScoreQuery {
     tokens: Vec<String>,
 }
 
+struct ScoreField {
+    original: String,
+    lower: String,
+    identifier_terms: Option<Vec<String>>,
+}
+
+impl ScoreField {
+    fn new(field: impl AsRef<str>) -> Self {
+        let original = field.as_ref().trim().to_owned();
+        let lower = original.to_lowercase();
+
+        Self {
+            original,
+            lower,
+            identifier_terms: None,
+        }
+    }
+
+    fn matches_identifier_token(&mut self, token: &str, cache_terms: bool) -> bool {
+        if !cache_terms {
+            return identifier_field_matches_token(&self.original, token);
+        }
+        let terms = self
+            .identifier_terms
+            .get_or_insert_with(|| identifier_match_terms(&self.original));
+        terms.iter().any(|term| term == token)
+    }
+}
+
 impl ScoreQuery {
     pub(super) fn new(query: &str) -> Self {
         let tokens = query
@@ -21,24 +50,20 @@ impl ScoreQuery {
     }
 
     pub(super) fn score(&self, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
-        let fields = fields
-            .into_iter()
-            .map(|field| {
-                let original = field.as_ref().trim().to_owned();
-                let lower = original.to_lowercase();
-                (original, lower)
-            })
-            .collect::<Vec<_>>();
+        let mut fields = fields.into_iter().map(ScoreField::new).collect::<Vec<_>>();
+        let cache_identifier_terms = self.tokens.len() > 1;
         let mut score = 0.0;
         for token in &self.tokens {
             let mut token_score = 0.0_f64;
-            for (field, lower_field) in &fields {
-                if lower_field == token {
+            for field in &mut fields {
+                if field.lower == token.as_str() {
                     token_score = token_score.max(4.0);
                     break;
-                } else if token_score < 2.0 && identifier_field_matches_token(field, token) {
+                } else if token_score < 2.0
+                    && field.matches_identifier_token(token, cache_identifier_terms)
+                {
                     token_score = token_score.max(2.0);
-                } else if token_score < 0.5 && lower_field.contains(token) {
+                } else if token_score < 0.5 && field.lower.contains(token) {
                     token_score = token_score.max(0.5);
                 }
             }
@@ -439,6 +464,14 @@ pub(super) fn query_terms(query: &str) -> Vec<String> {
 }
 
 fn identifier_search_tokens(value: &str) -> Vec<String> {
+    let mut tokens = identifier_match_terms(value);
+    tokens.sort();
+    tokens.dedup();
+
+    tokens
+}
+
+fn identifier_match_terms(value: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     for token in identifier_tokens(value) {
         tokens.push(token.to_ascii_lowercase());
@@ -450,8 +483,6 @@ fn identifier_search_tokens(value: &str) -> Vec<String> {
         );
         tokens.extend(camel_case_terms(token));
     }
-    tokens.sort();
-    tokens.dedup();
 
     tokens
 }

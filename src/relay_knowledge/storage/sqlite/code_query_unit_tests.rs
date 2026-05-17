@@ -103,6 +103,17 @@ fn score_query_preserves_score_text_semantics() {
 }
 
 #[test]
+fn score_query_preserves_multi_token_identifier_scores() {
+    let score = ScoreQuery::new("cache output archive").score([
+        "block_cache",
+        "archiveOutput",
+        "def archive_output_dir() -> Path:",
+    ]);
+
+    assert_eq!(score, 6.0);
+}
+
+#[test]
 fn declaration_chunk_bonus_requires_declaration_shape() {
     let terms = query_terms("recover descriptor save_manifest versionedit");
 
