@@ -16,6 +16,13 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-directional-call-candidate-filter-20260518
+- 目标：保护 relay-teams `_summary` callers/callees、ConnectorService hybrid、LevelDB/Kubernetes/Spring call graph 与 semantic/vector 下限，同时降低大仓 call graph 查询被反向 caller/callee 文本填满 bounded FTS candidate window 的风险。
+- 算法与架构：call graph FTS 文档继续保留 caller、callee、target hint 与 path 以支持 hybrid；当查询类型是 `callers` 或 `callees` 时，在 FTS 子查询内用 `code_repository_calls` 主键关联加入方向感知 SQL LIKE 过滤：`callers` 只让 callee 名称匹配查询 token 的 call 进入候选，`callees` 只让 caller 名称匹配查询 token 的 call 进入候选。最终 Rust scoring、line-range 扩展、去重融合与排序权重不变。
+- 不变量：不改变 SQLite schema、索引写入、FTS MATCH 表达式、candidate limit、CLI/API JSON、semantic/vector provider/env、embedding、research judge 配置、HTTP/网络边界或安装发布行为；没有仓库、路径、符号或 fixture 特殊分支，hybrid call 搜索仍保持原 undirected 候选集合。
+- 预期影响：多仓 full-scope 查询中，反向 caller/callee 噪声不会在 scoring 前耗尽 call candidate budget，`_summary` callers/callees、large-repo call graph 和 research judge 对架构泛化的评价应更稳定；无 call direction 查询、definition/import/chunk 与 semantic/vector coverage 应保持不变。
+- 已知风险：callers/callees 查询会在 FTS row 上多一次按 `(source_scope, call_id)` 的主键存在性检查和少量 LIKE token 过滤；成本受既有 bounded candidate window 控制，查询 token 上限为 8。
+
 ## 候选优化说明：manual-edge-fts-file-language-pushdown-20260518
 - 目标：保护 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等多语言大仓的 full-scope code graph retrieval，修复 reference/call/import 查询在带 language selector 时仍可能先让范围外语言填满 bounded FTS candidate window 的召回风险。
 - 算法与架构：symbol/chunk 已使用 FTS 行内 language filter；本轮对 reference/call/import 查询新增 edge 专用 FTS 过滤 SQL，在 FTS 子查询内保留既有 path filter，并通过 `code_repository_files` 的 `(source_scope, path)` 主键关联校验 `language_id`。这样无需改写已有 FTS edge 文档或 schema，也兼容旧数据库中 edge search row 的空 `language_id`。Rust `selected_row` 后置过滤继续作为一致性保护。
@@ -977,4 +984,17 @@ t mut tokens = identifier_match_terms(value); +    tokens.sort(); +    tokens.de
 Adopted optimization notes:
 
 ); +        call.callee_name = "TargetThing".to_owned(); +        calls.push(call); +    } +    files.push(code_query_file("rust-target-file", "src/lib.rs", "rust")); +    let mut target = code_query_call("zz-rust-target-call", "rust-target-file", "src/lib.rs"); +    target.callee_name = "TargetThing".to_owned(); +    calls.push(target); +    let store = store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)) +        .await; +    let selector = +        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()]) +            .expect("selector should be valid"); +    let request = CodeRetrievalRequest::new( +        "TargetThing", +        selector, +        CodeQueryKind::Callers, +        5, +        FreshnessPolicy::AllowStale, +    ) +    .expect("request should be valid"); + +    let hits = store +        .search_code(request) +        .await +        .expect("language-filtered caller query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "src/lib.rs"); +    assert_eq!(hits[0].language_id, "rust"); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 194,101
+## 20260517T213819Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T213819Z.patch`
+- score: 0.964671 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.95514, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.958053->0.964671; score_component:research_judge 0.84->0.87; metric:cargo_build_release_ms 33300.0->31246
+- known degradations: metric:leveldb_cpp_index_ms 16194.0->16815; metric:semantic_vector_provider_probe_ms 1516.0->2665
+- latency metrics: cargo_build_release_ms=31246ms; cargo_fmt_check_ms=796ms; cargo_clippy_ms=186ms; cargo_test_ms=8697ms; relay_teams_index_ms=70690ms; relay_teams_query_p50_ms=102ms; relay_teams_query_p95_ms=285ms; leveldb_cpp_index_ms=16815ms
+
+Adopted optimization notes:
+
+ile_id = format!("noise-file-{index}"); +        let path = format!("noise/callee_{index}.py"); +        files.push(code_query_file(&file_id, &path, "python")); +        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path); +        call.caller_name = Some("NoiseCaller".to_owned()); +        call.callee_name = "TargetThing".to_owned(); +        calls.push(call); +    } +    files.push(code_query_file("target-file", "src/service.py", "python")); +    let mut target = code_query_call("zz-target-call", "target-file", "src/service.py"); +    target.caller_name = Some("TargetThing".to_owned()); +    target.callee_name = "TargetCallee".to_owned(); +    calls.push(target); +    let store = +        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await; + +    let hits = store +        .search_code(code_search_request("TargetThing", CodeQueryKind::Callees)) +        .await +        .expect("callee query should succeed"); + +    assert_eq!(hits[0].path, "src/service.py"); +    assert!(hits[0].excerpt.contains("TargetCallee")); +} + #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 178,202
 

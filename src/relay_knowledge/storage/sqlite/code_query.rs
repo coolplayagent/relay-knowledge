@@ -338,6 +338,7 @@ fn search_calls(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = fts_match_query(&request.query);
     let fts_filter = fts_path_and_file_language_filter_sql(status, request);
+    let call_direction_filter = call_direction_fts_filter_sql(request);
     let sql = format!(
         "
         SELECT c.file_id, c.path, f.language_id, c.caller_symbol_snapshot_id,
@@ -377,6 +378,7 @@ fn search_calls(
                 AND source_scope = ?
                 AND document_kind = 'call'
                 {fts_filter}
+                {call_direction_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -386,7 +388,7 @@ fn search_calls(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
+        params_from_iter(fts_values_for_limited_with_language_and_call_direction(
             required_scope(status)?,
             status,
             request,
