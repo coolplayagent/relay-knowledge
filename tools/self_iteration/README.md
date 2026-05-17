@@ -92,6 +92,16 @@ foundational_capability * 0.25
 + stability * 0.25
 ```
 
+Case objectives are continuous quality scores, not pass-rate counters. A passed case
+at rank 1 scores `1.0`; a passed case at rank `N > 1` scores `1.0 / N` even
+when `N` is within the case's `max_rank` acceptance threshold. Empty negative
+cases that pass with `rank=0` still score `1.0`. Missing foundational,
+competitive, or semantic/vector objectives default to `0.0` instead of silently
+appearing complete, and `accuracy` averages only the foundational and
+competitive objectives that are actually present. Metric budget misses are
+reported in `metric_budget_failures` while the existing budget-normalized
+`performance` score remains the weighted latency signal.
+
 `accuracy` is retained as a compatibility roll-up of foundational and competitive case scores. Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, foundational_capability, competitive_capability, semantic_vector, and stability are protected objectives for basic usability, advanced retrieval quality, semantic/vector source coverage, backend availability, and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
 
 The candidate is accepted when:

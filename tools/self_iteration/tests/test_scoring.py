@@ -15,12 +15,37 @@ from scoring import (
 )
 
 
+def passing_case(
+    case_id: str,
+    objective: str = "foundational_capability",
+    repository: str = "repo",
+    rank: int = 1,
+    max_rank: int = 1,
+) -> CaseObservation:
+    return CaseObservation(
+        case_id,
+        repository,
+        True,
+        rank=rank,
+        max_rank=max_rank,
+        objective=objective,
+    )
+
+
+def full_objective_cases() -> list[CaseObservation]:
+    return [
+        passing_case("foundation"),
+        passing_case("competitive", objective="competitive_capability"),
+        passing_case("semantic", objective="semantic_vector", repository="semantic_vector"),
+    ]
+
+
 class ScoringTests(unittest.TestCase):
     def test_first_successful_candidate_is_accepted(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 100.0, budget=200.0)],
             ),
             previous_run=None,
@@ -29,11 +54,65 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(score.accepted)
         self.assertGreater(score.score, 0.9)
 
+    def test_passed_case_score_still_discounts_non_top_rank(self) -> None:
+        self.assertEqual(passing_case("rank_one", rank=1).score(), 1.0)
+        self.assertEqual(passing_case("rank_two", rank=2, max_rank=3).score(), 0.5)
+        self.assertEqual(passing_case("rank_five", rank=5, max_rank=5).score(), 0.2)
+
+    def test_empty_negative_case_scores_full_when_passed(self) -> None:
+        case = CaseObservation(
+            "negative",
+            "repo",
+            True,
+            rank=0,
+            max_rank=1,
+        )
+
+        self.assertEqual(case.score(), 1.0)
+
+    def test_missing_objectives_default_to_zero_not_full(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[passing_case("definition")],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run=None,
+        )
+
+        self.assertEqual(score.foundational_capability, 1.0)
+        self.assertEqual(score.competitive_capability, 0.0)
+        self.assertEqual(score.semantic_vector, 0.0)
+        self.assertEqual(score.accuracy, 1.0)
+
+    def test_metric_budget_failures_are_reported(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases(),
+                metrics=[MetricObservation("query_p95_ms", 700.0, budget=500.0)],
+            ),
+            previous_run=None,
+        )
+
+        self.assertEqual(
+            score.to_dict()["metric_budget_failures"],
+            [
+                {
+                    "name": "query_p95_ms",
+                    "value": 700.0,
+                    "budget": 500.0,
+                    "lower_is_better": True,
+                    "score": 0.714286,
+                }
+            ],
+        )
+
     def test_policy_rejects_previous_score_regression(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 100.0, budget=200.0)],
             ),
             previous_run={
@@ -50,7 +129,7 @@ class ScoringTests(unittest.TestCase):
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 90.0, budget=200.0)],
             ),
             previous_run={
@@ -67,7 +146,7 @@ class ScoringTests(unittest.TestCase):
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 140.0, budget=200.0)],
             ),
             previous_run={
@@ -90,7 +169,7 @@ class ScoringTests(unittest.TestCase):
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", False)],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 90.0, budget=200.0)],
             ),
             previous_run={
@@ -151,7 +230,7 @@ class ScoringTests(unittest.TestCase):
                     GateObservation("build", True),
                     GateObservation("clippy", False),
                 ],
-                cases=[CaseObservation("case", "repo", True, rank=1)],
+                cases=full_objective_cases(),
                 metrics=[MetricObservation("index_ms", 1.0, budget=200.0)],
             ),
             previous_run={
@@ -243,6 +322,12 @@ class ScoringTests(unittest.TestCase):
                 cases=[
                     CaseObservation("fixed", "repo", True, rank=1),
                     CaseObservation("steady", "repo", True, rank=1),
+                    passing_case("competitive", objective="competitive_capability"),
+                    passing_case(
+                        "semantic",
+                        objective="semantic_vector",
+                        repository="semantic_vector",
+                    ),
                 ],
                 metrics=[MetricObservation("query_p95_ms", 1000.0, budget=2000.0)],
             ),
@@ -290,6 +375,12 @@ class ScoringTests(unittest.TestCase):
                 cases=[
                     CaseObservation("fixed", "repo", True, rank=1),
                     CaseObservation("steady", "repo", True, rank=1),
+                    passing_case("competitive", objective="competitive_capability"),
+                    passing_case(
+                        "semantic",
+                        objective="semantic_vector",
+                        repository="semantic_vector",
+                    ),
                 ],
                 metrics=[MetricObservation("query_p95_ms", 1400.0, budget=2000.0)],
             ),
@@ -392,6 +483,11 @@ class ScoringTests(unittest.TestCase):
                         False,
                         rank=None,
                         objective="competitive_capability",
+                    ),
+                    passing_case(
+                        "semantic",
+                        objective="semantic_vector",
+                        repository="semantic_vector",
                     ),
                 ],
                 metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
