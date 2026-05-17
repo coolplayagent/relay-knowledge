@@ -24,6 +24,11 @@ DEFAULT_DIMENSIONS = [
     "implementation_actionability",
     "anti_fixture_special_casing",
 ]
+DEFAULT_CLI_JUDGE_COMMAND = (
+    'opencode run --file {prompt_file} '
+    '"Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests."'
+)
+DISABLED_BACKENDS = {"none", "off", "disabled", "skip", "false"}
 
 
 @dataclass(frozen=True)
@@ -81,7 +86,7 @@ def evaluate_research_judge_suite(
         gate = GateObservation(
             name="research_judge",
             passed=True,
-            message="judge skipped: no HTTP or CLI judge backend configured",
+            message="judge skipped: backend disabled",
         )
         report["gates"] = [gate]
         report["index_summary"]["status"] = "skipped"
@@ -165,7 +170,14 @@ def judge_settings_from_env(env: dict[str, str]) -> JudgeSettings:
     http_model = env.get("RELAY_KNOWLEDGE_JUDGE_MODEL", "").strip()
     http_present = any([http_base_url, http_api_key, http_model])
 
-    if backend in {"agent", "coding_agent", "cli_agent"}:
+    if backend in DISABLED_BACKENDS:
+        return JudgeSettings(
+            backend="none",
+            enabled=False,
+            missing=[],
+            timeout_seconds=timeout_seconds,
+        )
+    if backend in {"agent", "coding_agent", "cli_agent", "opencode", "open_code"}:
         backend = "cli"
     if not backend:
         if cli_command:
@@ -173,14 +185,12 @@ def judge_settings_from_env(env: dict[str, str]) -> JudgeSettings:
         elif http_present:
             backend = "http"
         else:
-            return JudgeSettings(
-                backend="none",
-                enabled=False,
-                missing=[],
-                timeout_seconds=timeout_seconds,
-            )
+            backend = "cli"
+            cli_command = DEFAULT_CLI_JUDGE_COMMAND
 
     if backend == "cli":
+        if not cli_command:
+            cli_command = DEFAULT_CLI_JUDGE_COMMAND
         missing = [] if cli_command else ["RELAY_KNOWLEDGE_JUDGE_COMMAND"]
         return JudgeSettings(
             backend=backend,

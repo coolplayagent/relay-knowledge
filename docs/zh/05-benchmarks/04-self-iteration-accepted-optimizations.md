@@ -16,6 +16,14 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-opencode-default-judge-cli-20260517
+
+- 目标：让自迭代 research judge 在本地默认走 `opencode` CLI，减少每次启用开放式质量评审时都要手动配置 judge command 的操作成本。
+- 方法：把未设置 `RELAY_KNOWLEDGE_JUDGE_BACKEND` 且没有 HTTP judge 配置的场景收敛到 CLI backend，并使用 `opencode run --file {prompt_file}` 默认命令；`RELAY_KNOWLEDGE_JUDGE_BACKEND=opencode` 作为 CLI alias，显式 CLI 命令和 HTTP 配置继续优先于默认值，同时保留 `RELAY_KNOWLEDGE_JUDGE_BACKEND=none/off/disabled/skip/false` 作为跳过 judge 的开关。
+- 架构与不变量：仍只从运行时环境读取 judge backend、HTTP endpoint、密钥、模型和自定义命令，不把 provider URL、API key、模型名或 CLI secret 写入 `cases.json`、prompt 或报告。默认命令通过 `{prompt_file}` 传递长 judge prompt，避免把完整 prompt 放入 argv；judge 返回严格 JSON、置信度阈值、总分阈值和 anti-fixture-special-casing 阈值保持不变。
+- 预期影响：默认 `self-iterate.py evaluate` 和候选评估会在可用的本地 `opencode` 环境中产生 `research_judge` objective；需要无 judge 的离线或 CI 场景可以显式设置 backend 为 `none`。
+- 已知风险：机器缺少 `opencode`、未配置 opencode provider 或模型输出非严格 JSON 时，默认 judge 会作为质量 gate 失败；该风险通过显式 disable backend、继续允许 HTTP/CLI 覆盖，以及单元测试覆盖默认、覆盖和禁用路径来控制。
+
 ## 候选优化说明：manual-research-judge-cli-agent-20260517
 
 - 目标：把自迭代中带研究性质的评估从确定性 case 中分离出来，让功能、架构、可靠性和性能泛化判断可以由 LLM judge 或开放 coding-agent CLI 执行，同时保留 build/test/retrieval/static checks 作为可复现硬门禁。
