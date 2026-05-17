@@ -119,12 +119,7 @@ async fn deterministic_semantic_and_vector_retrieval_match_identifier_variants()
         .expect("search should succeed");
 
     assert_eq!(hits[0].evidence_id, "ev-retry");
-    assert!(
-        hits[0]
-            .retriever_sources
-            .contains(&RetrieverSource::Semantic)
-            || hits[0].retriever_sources.contains(&RetrieverSource::Vector)
-    );
+    assert!(hits[0].retriever_sources.contains(&RetrieverSource::Vector));
 }
 
 #[tokio::test]

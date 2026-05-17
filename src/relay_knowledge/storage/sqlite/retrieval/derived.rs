@@ -418,4 +418,19 @@ mod tests {
         assert_eq!(cache.vector(8).len(), 8);
         assert_eq!(cache.vectors.len(), 2);
     }
+
+    #[test]
+    fn overlap_score_matches_identifier_variants_after_fast_path_miss() {
+        let labels = vec!["RuntimeBudget".to_owned()];
+
+        assert_eq!(
+            overlap_score(
+                "retry_policy",
+                "Retry policy controls the runtime budget",
+                &labels,
+                Some("src/runtime/budget.rs"),
+            ),
+            2.0
+        );
+    }
 }

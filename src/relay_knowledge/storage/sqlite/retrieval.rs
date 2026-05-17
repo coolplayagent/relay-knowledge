@@ -850,8 +850,34 @@ fn overlap_score(query: &str, content: &str, labels: &[String], source_path: Opt
             score += 1.0;
         }
     }
+    if score > 0.0 {
+        return score;
+    }
 
-    score
+    identifier_overlap_score(query, content, labels, source_path)
+}
+
+fn identifier_overlap_score(
+    query: &str,
+    content: &str,
+    labels: &[String],
+    source_path: Option<&str>,
+) -> f64 {
+    let query_terms = token_signature(query, &[], None, "");
+    let document_terms = token_signature(content, labels, source_path, "");
+    query_terms
+        .iter()
+        .filter(|term| {
+            let term = term.as_str();
+            document_terms
+                .iter()
+                .any(|candidate| candidate == term || fuzzy_identifier_part_match(term, candidate))
+        })
+        .count() as f64
+}
+
+fn fuzzy_identifier_part_match(query_term: &str, candidate: &str) -> bool {
+    query_term.len() >= 3 && candidate.len() >= 3 && candidate.contains(query_term)
 }
 
 fn evidence_document_id(evidence_id: &str) -> String {
