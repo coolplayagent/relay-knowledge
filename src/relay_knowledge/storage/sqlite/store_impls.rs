@@ -1,3 +1,8 @@
+use std::{
+    sync::TryLockError,
+    time::{Duration, Instant},
+};
+
 use crate::{
     domain::{
         CodeChunkRecord, CodeGraphBatch, CodeGraphCommitReceipt, CodeReferenceRecord,
@@ -6,18 +11,19 @@ use crate::{
     },
     storage::{
         AuditQueryRequest, CodeChunkSearchRequest, CodeGraphStore, CodeReferenceSearchRequest,
-        CodeSymbolSearchRequest, GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
-        GraphInspection, GraphSearchRequest, GraphStore, IndexCursor, IndexRefreshClaimRequest,
-        IndexRefreshCompletion, IndexRefreshDiagnostics, IndexRefreshFailure,
-        IndexRefreshQueueRequest, IndexRefreshTask, IndexStore, MutationLogEntry, MutationLogStore,
-        NewAuditEvent, NewProposal, ProposalDecision, ProposalListRequest, ServiceOperatorUpdate,
-        StorageFuture, WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure,
-        WorkerTaskSeed,
+        CodeSymbolSearchRequest, FileIndexDiagnostics, FileIndexRoot, FileIndexRootStatus,
+        FileIndexRootUpdate, FileSearchHit, FileSearchRequest, GraphCanvasStorageRequest,
+        GraphCanvasStorageSnapshot, GraphInspection, GraphSearchRequest, GraphStore, IndexCursor,
+        IndexRefreshClaimRequest, IndexRefreshCompletion, IndexRefreshDiagnostics,
+        IndexRefreshFailure, IndexRefreshQueueRequest, IndexRefreshTask, IndexStore,
+        MutationLogEntry, MutationLogStore, NewAuditEvent, NewProposal, ProposalDecision,
+        ProposalListRequest, ServiceOperatorUpdate, StorageError, StorageFuture,
+        WorkerTaskClaimRequest, WorkerTaskCompletion, WorkerTaskFailure, WorkerTaskSeed,
     },
 };
 
 use super::{
-    SqliteGraphStore, canvas, code_graph, commit_batch, current_graph_version,
+    SqliteGraphStore, canvas, code_graph, commit_batch, current_graph_version, file_index,
     helpers::read_mutations_after, indexing, inspect_graph, operations, retrieval,
 };
 
@@ -199,6 +205,57 @@ impl IndexStore for SqliteGraphStore {
         request: ServiceOperatorUpdate,
     ) -> StorageFuture<'_, crate::domain::ServiceOperatorStatus> {
         self.run(move |connection| operations::update_service_operator(connection, request))
+    }
+
+    fn replace_file_index_root(
+        &self,
+        update: FileIndexRootUpdate,
+    ) -> StorageFuture<'_, FileIndexRootStatus> {
+        self.run(move |connection| file_index::replace_root(connection, update))
+    }
+
+    fn mark_file_index_roots_unconfigured(
+        &self,
+        active_roots: Vec<FileIndexRoot>,
+        now_ms: u64,
+    ) -> StorageFuture<'_, FileIndexDiagnostics> {
+        self.run(move |connection| {
+            file_index::mark_unconfigured_roots(connection, active_roots, now_ms)
+        })
+    }
+
+    fn search_files(&self, request: FileSearchRequest) -> StorageFuture<'_, Vec<FileSearchHit>> {
+        let connection = std::sync::Arc::clone(&self.connection);
+
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let started = Instant::now();
+                let deadline = started
+                    .checked_add(Duration::from_millis(request.timeout_ms))
+                    .unwrap_or(started);
+                let guard = loop {
+                    match connection.try_lock() {
+                        Ok(guard) => break guard,
+                        Err(TryLockError::Poisoned(_)) => return Err(StorageError::LockPoisoned),
+                        Err(TryLockError::WouldBlock) => {
+                            if Instant::now() >= deadline {
+                                return Err(StorageError::InvalidInput(
+                                    "file query timed out waiting for storage lock".to_owned(),
+                                ));
+                            }
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                    }
+                };
+
+                file_index::search(&guard, request, deadline)
+            })
+            .await?
+        })
+    }
+
+    fn file_index_diagnostics(&self) -> StorageFuture<'_, FileIndexDiagnostics> {
+        self.run(|connection| file_index::diagnostics(connection))
     }
 }
 

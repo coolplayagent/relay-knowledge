@@ -22,11 +22,11 @@ use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::{
     api::{
-        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind,
-        GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest, GraphInspectionRequest,
-        HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence, IngestRequest, InterfaceKind,
-        ProposalDecisionApiRequest, ProposalListApiRequest, RequestContext, WorkerRunRequest,
-        WorkerStatusRequest,
+        ApiError, AuditQueryApiRequest, CodeRepositoryRegisterRequest, ErrorKind, FileIndexRequest,
+        FileQueryRequest, GRAPH_CANVAS_DEFAULT_LIMIT, GraphCanvasKind, GraphCanvasRequest,
+        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
+        IngestRequest, InterfaceKind, ProposalDecisionApiRequest, ProposalListApiRequest,
+        RequestContext, WorkerRunRequest, WorkerStatusRequest,
     },
     application::RelayKnowledgeService,
     domain::{
@@ -177,6 +177,18 @@ async fn dispatch_operation(
         "index.refresh" => {
             let response = service
                 .refresh_indexes(index_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "files.index" => {
+            let response = service
+                .index_files(file_index_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "files.query" => {
+            let response = service
+                .query_files(file_query_request(payload)?, context)
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
@@ -462,6 +474,22 @@ fn code_index_request(payload: &Value, mode: CodeIndexMode) -> Result<CodeIndexR
         repository: code_selector(payload)?,
         mode,
         freshness_policy: FreshnessPolicy::AllowStale,
+    })
+}
+
+fn file_index_request(payload: &Value) -> Result<FileIndexRequest, WebError> {
+    Ok(FileIndexRequest {
+        source_scope: optional_string_field(payload, "source_scope"),
+        roots: optional_string_array_field(payload, "roots")?,
+    })
+}
+
+fn file_query_request(payload: &Value) -> Result<FileQueryRequest, WebError> {
+    Ok(FileQueryRequest {
+        query: string_field(payload, "query")?.to_owned(),
+        source_scope: optional_string_field(payload, "source_scope"),
+        root_id: optional_string_field(payload, "root_id"),
+        limit: usize_field(payload, "limit")?,
     })
 }
 

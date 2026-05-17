@@ -14,6 +14,8 @@ from typing import Any
 
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 
+AUTHORIZED_FILE_FIXTURE_SCOPE = "local-files"
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -113,8 +115,182 @@ def evaluate_candidate(config: EvaluatorConfig, generated_diff: bool) -> Evaluat
         case_observations.extend(repo_report["cases"])
         metrics.extend(repo_report["metrics"])
 
+    file_report = evaluate_file_fixtures(
+        binary=binary,
+        workspace=config.workspace,
+        env=env,
+        run_home=run_home,
+        fixtures=cases_config.get("file_fixtures", {}),
+        all_cases=cases_config.get("file_query_cases", []),
+        timeout=config.command_timeout_seconds,
+    )
+    commands.extend(file_report["commands"])
+    gates.extend(result.gate() for result in file_report["commands"])
+    case_observations.extend(file_report["cases"])
+    metrics.extend(file_report["metrics"])
+
     return finish_evaluation(
         generated_diff, gates, case_observations, metrics, commands, repo_reports, run_home, config
+    )
+
+
+def evaluate_file_fixtures(
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    run_home: Path,
+    fixtures: dict[str, Any],
+    all_cases: list[dict[str, Any]],
+    timeout: int,
+) -> dict[str, Any]:
+    commands: list[CommandResult] = []
+    case_observations: list[CaseObservation] = []
+    metrics: list[MetricObservation] = []
+    fixture_root = run_home / "file-fixtures"
+    fixture_root.mkdir(parents=True, exist_ok=True)
+
+    for fixture_name, fixture in fixtures.items():
+        root = fixture_root / fixture_name
+        create_file_fixture(root, fixture)
+        scope = AUTHORIZED_FILE_FIXTURE_SCOPE
+        fixture_env = file_fixture_runtime_env(env, root)
+        index = run_command(
+            f"{fixture_name}_files_index",
+            [
+                str(binary),
+                "files",
+                "index",
+                "--root",
+                str(root),
+                "--source",
+                scope,
+                "--format",
+                "json",
+            ],
+            workspace,
+            fixture_env,
+            timeout,
+        )
+        commands.append(index)
+        metrics.append(
+            MetricObservation(
+                name=f"{fixture_name}_file_index_ms",
+                value=index.duration_ms,
+                budget=float(fixture.get("index_budget_ms", 0)) or None,
+                key=True,
+            )
+        )
+        if not index.passed:
+            continue
+
+        durations: list[int] = []
+        for case in [case for case in all_cases if case.get("fixture") == fixture_name]:
+            query = run_command(
+                f"{fixture_name}_{case['id']}",
+                file_query_command(binary, scope, case),
+                workspace,
+                fixture_env,
+                min(timeout, int(case.get("timeout_seconds", 10))),
+            )
+            commands.append(query)
+            durations.append(query.duration_ms)
+            case_observations.append(score_file_case(fixture_name, case, query))
+
+        if durations:
+            metrics.append(
+                MetricObservation(
+                    name=f"{fixture_name}_file_query_p50_ms",
+                    value=float(median(durations)),
+                    budget=float(fixture.get("query_p50_budget_ms", 0)) or None,
+                    key=False,
+                )
+            )
+            metrics.append(
+                MetricObservation(
+                    name=f"{fixture_name}_file_query_p95_ms",
+                    value=float(percentile(durations, 95)),
+                    budget=float(fixture.get("query_p95_budget_ms", 0)) or None,
+                    key=True,
+                )
+            )
+
+    return {"commands": commands, "cases": case_observations, "metrics": metrics}
+
+
+def file_fixture_runtime_env(env: dict[str, str], root: Path) -> dict[str, str]:
+    fixture_env = dict(env)
+    root_value = str(root)
+    configured_roots = [
+        value
+        for value in fixture_env.get("RELAY_KNOWLEDGE_FILE_INDEX_ROOTS", "").split(";")
+        if value
+    ]
+    if root_value not in configured_roots:
+        configured_roots.append(root_value)
+    fixture_env["RELAY_KNOWLEDGE_FILE_INDEX_ROOTS"] = ";".join(configured_roots)
+    return fixture_env
+
+
+def create_file_fixture(root: Path, fixture: dict[str, Any]) -> None:
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+    for file_config in fixture.get("files", []):
+        write_fixture_file(root / file_config["path"], file_config.get("content", "fixture"))
+    for index in range(int(fixture.get("generate_noise_files", 0))):
+        write_fixture_file(
+            root / "noise" / f"quarterly-design-noise-{index:04}.txt",
+            f"noise {index}",
+        )
+
+
+def write_fixture_file(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def file_query_command(binary: Path, scope: str, case: dict[str, Any]) -> list[str]:
+    return [
+        str(binary),
+        "files",
+        "query",
+        case["query"],
+        "--source",
+        scope,
+        "--limit",
+        str(case.get("limit", 10)),
+        "--format",
+        "json",
+    ]
+
+
+def score_file_case(fixture_name: str, case: dict[str, Any], result: CommandResult) -> CaseObservation:
+    if not result.passed:
+        return CaseObservation(
+            case_id=case["id"],
+            repository="local_files",
+            passed=False,
+            message=last_output_line(result.stdout, result.stderr),
+        )
+    payload = parse_json_output(result.stdout)
+    hits = payload.get("results", [])
+    expected = case.get("expected", [])
+    forbidden = case.get("forbidden", [])
+    max_rank = int(case.get("max_rank", 1))
+    rank = first_expected_rank(hits, expected)
+    false_positives = sum(1 for hit in hits if hit_matches_any(hit, forbidden))
+    passed = (not expected or (rank is not None and rank <= max_rank)) and false_positives == 0
+    if case.get("expect_empty"):
+        passed = len(hits) == 0
+        rank = 0 if passed else None
+    return CaseObservation(
+        case_id=case["id"],
+        repository=fixture_name,
+        passed=passed,
+        rank=rank,
+        max_rank=max_rank,
+        false_positive_count=false_positives,
+        message=f"results={len(hits)} rank={rank}",
     )
 
 
@@ -338,6 +514,14 @@ def hit_matches_any(hit: dict[str, Any], patterns: list[dict[str, Any]]) -> bool
 
 def hit_matches(hit: dict[str, Any], pattern: dict[str, Any]) -> bool:
     if "path" in pattern and hit.get("path") != pattern["path"]:
+        return False
+    if "relative_path" in pattern and hit.get("relative_path") != pattern["relative_path"]:
+        return False
+    if "file_name" in pattern and hit.get("file_name") != pattern["file_name"]:
+        return False
+    if "extension" in pattern and hit.get("extension") != pattern["extension"]:
+        return False
+    if "status" in pattern and hit.get("status") != pattern["status"]:
         return False
     if "line_start" in pattern:
         line_range = hit.get("line_range", {})

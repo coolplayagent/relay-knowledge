@@ -37,6 +37,11 @@ The startup reconciler:
 ## 5. Silent Updates
 
 Silent updates are user-configurable, pausable, observable, and reversible. They refresh graph data and derived indexes only within authorized scopes and expose fresh, stale, paused, degraded, and failed states.
+Resident local file indexing follows the same rule: scanners run only on
+configured absolute roots, reject relative root configuration before scanning,
+persist cursors and diagnostics, enforce scan/query timeout budgets, and report
+truncated roots, scan errors, freshness, and lag instead of blocking query paths
+or silently expanding to unapproved disks.
 
 ## 6. Acceptance Criteria
 

@@ -6,6 +6,10 @@ mod cli_grammar;
 mod cli_render;
 #[path = "cli_spec.rs"]
 mod cli_spec;
+#[path = "files_cli.rs"]
+mod files_cli;
+#[path = "knowledge_cli.rs"]
+mod knowledge_cli;
 #[path = "ops_cli.rs"]
 mod ops_cli;
 #[path = "repo_cli.rs"]
@@ -173,6 +177,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--reason"
             | "--operation"
             | "--input"
+            | "--root"
     )
 }
 
@@ -183,6 +188,7 @@ fn is_command_word(token: &str) -> bool {
             | "ingest"
             | "query"
             | "repo"
+            | "files"
             | "graph"
             | "index"
             | "worker"
@@ -211,6 +217,16 @@ pub enum CliAction {
         source_scope: Option<String>,
         limit: usize,
         freshness: FreshnessPolicy,
+    },
+    FilesIndex {
+        source_scope: Option<String>,
+        roots: Vec<String>,
+    },
+    FilesQuery {
+        query: String,
+        source_scope: Option<String>,
+        root_id: Option<String>,
+        limit: usize,
     },
     GraphInspect,
     IndexRefresh {
@@ -505,6 +521,11 @@ pub async fn run_with_service(
     {
         return Ok(output);
     }
+    if let Some(output) =
+        files_cli::run_files(service, &command.action, context.clone(), format).await?
+    {
+        return Ok(output);
+    }
     match command.action {
         CliAction::Status => {
             let response = service
@@ -633,6 +654,8 @@ pub async fn run_with_service(
         )),
         CliAction::Help { path } => cli_spec::render_help(&path, format),
         CliAction::WorkerStatus { .. }
+        | CliAction::FilesIndex { .. }
+        | CliAction::FilesQuery { .. }
         | CliAction::WorkerRunOnce { .. }
         | CliAction::ProposalList { .. }
         | CliAction::ProposalShow { .. }
@@ -654,19 +677,13 @@ pub async fn run_with_service(
     }
 }
 
-#[derive(serde::Serialize)]
-struct VersionResponse {
-    project_name: &'static str,
-    version: &'static str,
-}
-
 fn render_version(format: OutputFormat) -> Result<String, CliError> {
     match format {
         OutputFormat::Text => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
-        OutputFormat::Json => serialize_line(&VersionResponse {
-            project_name: PROJECT_NAME,
-            version: env!("CARGO_PKG_VERSION"),
-        }),
+        OutputFormat::Json => serialize_line(&serde_json::json!({
+            "project_name": PROJECT_NAME,
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
         OutputFormat::Markdown => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
         OutputFormat::StreamingJson => Err(CliError::UnsupportedVersionFormat(format)),
     }
@@ -684,11 +701,12 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
                 .cloned()
                 .unwrap_or_else(|| "status".to_owned()),
         )),
-        "ingest" => parse_ingest(&tokens[1..]),
-        "query" => parse_query(&tokens[1..]),
+        "ingest" => knowledge_cli::parse_ingest(&tokens[1..]),
+        "query" => knowledge_cli::parse_query(&tokens[1..]),
+        "files" => files_cli::parse_files(&tokens[1..]),
         "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
-        "graph" => parse_graph(&tokens[1..]),
-        "index" => parse_index(&tokens[1..]),
+        "graph" => knowledge_cli::parse_graph(&tokens[1..]),
+        "index" => knowledge_cli::parse_index(&tokens[1..]),
         "worker" => ops_cli::parse_worker(&tokens[1..]),
         "proposal" => ops_cli::parse_proposal(&tokens[1..]),
         "audit" => ops_cli::parse_audit(&tokens[1..]),
@@ -725,124 +743,6 @@ fn parse_provider(tokens: &[String]) -> Result<CliAction, CliError> {
     ))
 }
 
-fn parse_ingest(tokens: &[String]) -> Result<CliAction, CliError> {
-    let mut source_scope = None;
-    let mut content = None;
-    let mut entity_labels = Vec::new();
-    let mut index = 0;
-
-    while index < tokens.len() {
-        match tokens[index].as_str() {
-            "--source" => {
-                source_scope = Some(value_after(tokens, index, "--source")?);
-                index += 2;
-            }
-            "--content" => {
-                content = Some(value_after(tokens, index, "--content")?);
-                index += 2;
-            }
-            "--entity" => {
-                entity_labels.push(value_after(tokens, index, "--entity")?);
-                index += 2;
-            }
-            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-        }
-    }
-
-    Ok(CliAction::Ingest {
-        source_scope: source_scope.ok_or(CliError::MissingValue("--source"))?,
-        content: content.ok_or(CliError::MissingValue("--content"))?,
-        entity_labels,
-    })
-}
-
-fn parse_query(tokens: &[String]) -> Result<CliAction, CliError> {
-    let mut query = None;
-    let mut source_scope = None;
-    let mut limit = 10;
-    let mut freshness = FreshnessPolicy::default();
-    let mut index = 0;
-
-    while index < tokens.len() {
-        match tokens[index].as_str() {
-            "--" if query.is_none() => {
-                query = Some(value_after(tokens, index, "query")?);
-                index += 2;
-            }
-            "--source" => {
-                source_scope = Some(value_after(tokens, index, "--source")?);
-                index += 2;
-            }
-            "--limit" => {
-                let value = value_after(tokens, index, "--limit")?;
-                limit = value
-                    .parse::<usize>()
-                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
-                index += 2;
-            }
-            "--freshness" => {
-                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
-                index += 2;
-            }
-            other if !other.starts_with('-') && query.is_none() => {
-                let mut values = vec![other.to_owned()];
-                index += 1;
-                while index < tokens.len() && !tokens[index].starts_with('-') {
-                    values.push(tokens[index].clone());
-                    index += 1;
-                }
-                query = Some(values.join(" "));
-            }
-            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-        }
-    }
-
-    Ok(CliAction::Query {
-        query: query.ok_or(CliError::MissingValue("query"))?,
-        source_scope,
-        limit,
-        freshness,
-    })
-}
-
-fn parse_graph(tokens: &[String]) -> Result<CliAction, CliError> {
-    if tokens == ["inspect"] {
-        return Ok(CliAction::GraphInspect);
-    }
-
-    Err(CliError::UnexpectedArgument(
-        tokens
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "graph".to_owned()),
-    ))
-}
-
-fn parse_index(tokens: &[String]) -> Result<CliAction, CliError> {
-    if tokens.first().map(String::as_str) != Some("refresh") {
-        return Err(CliError::UnexpectedArgument(
-            tokens
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "index".to_owned()),
-        ));
-    }
-
-    let mut kinds = Vec::new();
-    let mut index = 1;
-    while index < tokens.len() {
-        match tokens[index].as_str() {
-            "--kind" => {
-                kinds.push(parse_index_kind(&value_after(tokens, index, "--kind")?)?);
-                index += 2;
-            }
-            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
-        }
-    }
-
-    Ok(CliAction::IndexRefresh { kinds })
-}
-
 pub(super) fn value_after(
     tokens: &[String],
     index: usize,
@@ -863,15 +763,6 @@ pub(super) fn parse_freshness(value: &str) -> Result<FreshnessPolicy, CliError> 
     }
 }
 
-fn parse_index_kind(value: &str) -> Result<IndexKind, CliError> {
-    match value {
-        "bm25" => Ok(IndexKind::Bm25),
-        "semantic" => Ok(IndexKind::Semantic),
-        "vector" => Ok(IndexKind::Vector),
-        other => Err(CliError::InvalidIndexKind(other.to_owned())),
-    }
-}
-
 async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<String, CliError> {
     let mut runtime = RuntimeConfiguration::from_process_environment()
         .await
@@ -886,6 +777,16 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
         .reconcile_startup_indexes(RequestContext::for_interface(InterfaceKind::Cli))
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.message))?;
+    let (file_index_shutdown, file_index_shutdown_receiver) = tokio::sync::watch::channel(false);
+    let file_index_task = if runtime.file_index.enabled {
+        Some(tokio::spawn(files_cli::run_file_index_loop(
+            service.clone(),
+            runtime.file_index.scan_interval,
+            file_index_shutdown_receiver,
+        )))
+    } else {
+        None
+    };
     if web_enabled {
         let network_config = runtime.network.current();
         ensure_web_remote_bind_allowed(
@@ -920,6 +821,10 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
             .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
     } else {
         service_shutdown_signal().await;
+    }
+    if let Some(task) = file_index_task {
+        let _ = file_index_shutdown.send(true);
+        let _ = task.await;
     }
     runtime.observability.shutdown();
 
