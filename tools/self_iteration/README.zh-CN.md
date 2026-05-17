@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量。它有意放在 Rust crate 之外，所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。
+本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量，以及图谱 semantic/vector 检索质量。它有意放在 Rust crate 之外，所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。
 
 ## 启动
 
@@ -44,7 +44,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches/`。
-4. 运行 build、lint、tests、代码仓库检索评估和自迭代文档 gate。
+4. 运行 build、lint、tests、代码仓库检索评估、semantic/vector fixture、外部 embedding provider 探测（仅外部后端启用时）和自迭代文档 gate。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs.jsonl`。
 7. 将渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`。
@@ -61,7 +61,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 
 渐进式记忆是后续 Codex 运行的第一层上下文入口：
 
-- `memory/index.jsonl`：紧凑的机器可读索引，记录已采纳优化、被拒绝尝试、质量门禁失败、准确率退化和性能退化。
+- `memory/index.jsonl`：紧凑的机器可读索引，记录已采纳优化、被拒绝尝试、质量门禁失败、准确率退化、semantic/vector 退化和性能退化。
 - `memory/summaries/<id>.md`：Codex 应优先读取的短摘要。
 - `memory/details/<id>.md`：完整评分、gate、case、metric、patch 和 report 引用。
 - `memory/artifacts/<id>/`：预留给裁剪后的报告片段、judge 输出或其他可选证据。
@@ -73,16 +73,20 @@ prompt 只注入有界 memory index。Codex 应先按当前 gate、metric、case
 加权分数为：
 
 ```text
-accuracy * 0.60 + performance * 0.15 + stability * 0.25
+foundational_capability * 0.25
++ competitive_capability * 0.25
++ semantic_vector * 0.15
++ performance * 0.10
++ stability * 0.25
 ```
 
-采纳策略使用 `带硬约束和加权分数决胜的 epsilon-Pareto 采纳策略`。从多目标优化角度看，build/test gate 和候选 diff 存在性是硬约束，accuracy 和 stability 是保证基础功能可用的受保护目标，检索质量与延迟观测是目标，epsilon 阈值用于抑制测量噪声，加权分数是决胜项而不是唯一决策规则。
+`accuracy` 保留为 foundational 与 competitive case 分数的兼容汇总。采纳策略使用 `带硬约束和加权分数决胜的 epsilon-Pareto 采纳策略`。从多目标优化角度看，build/test gate 和候选 diff 存在性是硬约束，foundational_capability、competitive_capability、semantic_vector 和 stability 是保证基础可用性、高阶检索质量、semantic/vector 来源覆盖和后端可用性的受保护目标，延迟观测也是目标，epsilon 阈值用于抑制测量噪声，加权分数是决胜项而不是唯一决策规则。
 
 候选在以下条件满足时被采纳：
 
 ```text
 hard_constraints_pass
-and no_protected_accuracy_or_stability_regression
+and no_protected_foundational_competitive_semantic_vector_or_stability_regression
 and (
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)
@@ -92,10 +96,10 @@ and (
 `epsilon_pareto_improved(candidate, previous)` 表示：至少一个被跟踪目标的改善超过其 epsilon 阈值，并且没有任何被跟踪目标的退化超过其 epsilon 阈值。默认阈值为：
 
 - `score_epsilon = 0.0005`
-- `ratio_epsilon = 0.005`，用于 accuracy、performance、stability 等分数组件
+- `ratio_epsilon = 0.005`，用于 foundational_capability、competitive_capability、semantic_vector、performance、stability 等分数组件
 - `metric_epsilon = max(25ms, previous_metric * 0.03)`，用于原始耗时指标
 
-这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。accuracy、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
+这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。foundational、competitive、semantic_vector、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
 
 `chart` 命令会写入：
 
@@ -111,6 +115,7 @@ and (
   `relay-knowledge files index/query`，记录 `file_index_ms`、
   `file_query_p50_ms` 和 `file_query_p95_ms`。每条文件查询都使用
   subprocess timeout，防止候选实现卡死 evaluator。
+- 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。

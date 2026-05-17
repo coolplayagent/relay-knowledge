@@ -86,7 +86,7 @@ relay-knowledge service doctor
 ./check.sh
 ```
 
-面向代码检索优化实验的独立自迭代循环可以直接启动：
+面向代码检索和 semantic/vector 检索优化实验的独立自迭代循环可以直接启动：
 
 ```bash
 ./self-iterate.sh
@@ -95,7 +95,8 @@ relay-knowledge service doctor
 ```
 
 运行历史、报告、patch 和评分曲线保存在
-`.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。
+`.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。semantic/vector fixture 会继承普通运行时使用的
+`RELAY_KNOWLEDGE_*` embedding 环境变量，不会把 provider URL、API key、模型名或维度写入 benchmark cases。
 
 底层质量门禁：
 

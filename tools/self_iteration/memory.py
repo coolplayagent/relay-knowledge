@@ -41,8 +41,12 @@ def regression_memory(record: dict[str, Any]) -> dict[str, Any] | None:
         return None
     first = degradations[0]
     regression_kind = "performance_regression"
-    if first.get("kind") == "case":
-        regression_kind = "accuracy_regression"
+    if first.get("kind") == "case" and first.get("objective") == "semantic_vector":
+        regression_kind = "semantic_vector_regression"
+    elif first.get("kind") == "case" and first.get("objective") == "competitive_capability":
+        regression_kind = "competitive_capability_regression"
+    elif first.get("kind") == "case":
+        regression_kind = "foundational_capability_regression"
     name = str(first.get("name") or first.get("case_id") or "regression")
     title = f"{record.get('run_id', '')} recorded {name} regression"
     summary = (
@@ -217,7 +221,10 @@ def run_memory_detail(summary: str, record: dict[str, Any]) -> str:
         summary,
         "## Score\n\n"
         f"- score: {record.get('score', '')}\n"
+        f"- foundational_capability: {record.get('foundational_capability', '')}\n"
+        f"- competitive_capability: {record.get('competitive_capability', '')}\n"
         f"- accuracy: {record.get('accuracy', '')}\n"
+        f"- semantic_vector: {record.get('semantic_vector', '')}\n"
         f"- performance: {record.get('performance', '')}\n"
         f"- stability: {record.get('stability', '')}",
         markdown_list("Changed Paths", changed_paths(record)),
@@ -249,7 +256,10 @@ def score_impact(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "accepted": bool(record.get("accepted")),
         "score": record.get("score"),
+        "foundational_capability": record.get("foundational_capability"),
+        "competitive_capability": record.get("competitive_capability"),
         "accuracy": record.get("accuracy"),
+        "semantic_vector": record.get("semantic_vector"),
         "performance": record.get("performance"),
         "stability": record.get("stability"),
         "improvement_count": len(record.get("improvements", [])),

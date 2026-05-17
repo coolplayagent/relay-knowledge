@@ -118,8 +118,72 @@ class MemoryTests(unittest.TestCase):
             self.assertIn("summary_path=", rendered)
             self.assertIn("detail_path=", rendered)
             self.assertIn("quality_gate_failure", rendered)
-            self.assertIn("accuracy_regression", rendered)
+            self.assertIn("foundational_capability_regression", rendered)
             self.assertNotIn("## Score", rendered)
+
+    def test_competitive_case_regression_gets_dedicated_memory_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            write_run_memory(
+                paths,
+                {
+                    "run_id": "competitive-regression",
+                    "timestamp": "2026-05-17T00:00:00+00:00",
+                    "accepted": False,
+                    "score": 0.4,
+                    "reject_reasons": ["protected competitive_capability objective regressed"],
+                    "gates": [],
+                    "degradations": [
+                        {
+                            "kind": "case",
+                            "objective": "competitive_capability",
+                            "case_id": "rt_hybrid_eval_checkpoint_store",
+                            "previous": {"passed": True},
+                            "current": {"passed": False},
+                        }
+                    ],
+                    "cases": [],
+                    "metrics": [],
+                },
+            )
+
+            kinds = {item["kind"] for item in load_memory_index(paths)}
+
+            self.assertIn("competitive_capability_regression", kinds)
+
+    def test_semantic_vector_case_regression_gets_dedicated_memory_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            write_run_memory(
+                paths,
+                {
+                    "run_id": "sv-regression",
+                    "timestamp": "2026-05-17T00:00:00+00:00",
+                    "accepted": False,
+                    "score": 0.4,
+                    "reject_reasons": ["protected semantic_vector objective regressed"],
+                    "gates": [],
+                    "degradations": [
+                        {
+                            "kind": "case",
+                            "objective": "semantic_vector",
+                            "case_id": "sv_semantic_context_pack_source",
+                            "previous": {"passed": True},
+                            "current": {"passed": False},
+                        }
+                    ],
+                    "cases": [],
+                    "metrics": [],
+                },
+            )
+
+            kinds = {item["kind"] for item in load_memory_index(paths)}
+
+            self.assertIn("semantic_vector_regression", kinds)
 
     def test_memory_index_is_jsonl(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

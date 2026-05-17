@@ -5,7 +5,7 @@
 ## 记录格式
 
 - `patch`: 本轮候选补丁在 `.git/relay-knowledge-self-iteration/patches/` 下的路径。
-- `score`: 采纳时的总分和 accuracy、performance、stability 分项。
+- `score`: 采纳时的总分和 foundational_capability、competitive_capability、accuracy、semantic_vector、performance、stability 分项。
 - `cases`: 采纳时通过的检索 case 数量。
 - `changed paths`: 本轮变更的主要文件。
 - `key improvements`: 相对上一轮改善的 case、gate 或 metric。
@@ -15,6 +15,22 @@
 ## 渐进式记忆
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+
+## 候选优化说明：manual-semantic-vector-self-iteration-dimension-20260517
+
+- 目标：把自迭代目标从代码仓库检索扩展到图谱 semantic/vector 检索，利用运行时环境中已经配置的外部 semantic/vector 和 OpenAI-compatible embedding metadata，让后续候选必须保护并改进向量/语义检索来源覆盖、后端可用性和排序质量。
+- 方法：在 `cases.json` 增加 `semantic_vector_suite`，评估器使用当前进程环境启动 `relay-knowledge`，外部后端启用时先执行 `provider probe`，随后写入自迭代专用 source scope 的小型 evidence、刷新 semantic/vector index，并用 `query --freshness wait-until-fresh` 验证 `retriever_sources`、`backend_statuses` 和内容排序。评分层新增 `semantic_vector` 分项，权重为 0.15，并作为受保护目标参与 epsilon-Pareto 采纳；普通代码检索的 foundational/competitive capability、性能和 stability 仍保持独立。
+- 架构与不变量：provider URL、API key、模型名和维度只由运行时环境读取，不写入 benchmark case、prompt 或命令参数；Rust 生产 env 边界、paths/net 边界、检索 API、索引刷新队列和查询热路径不改变。semantic/vector fixture 使用普通 CLI 入口和独立 `RELAY_KNOWLEDGE_HOME`，不会污染开发者默认数据目录。
+- 预期影响：后续自迭代会把 semantic/vector 缺失来源、后端不可用、provider 探测失败和相关查询排序退化记录为可见 regressions，避免只优化代码检索或延迟时悄悄破坏图谱向量/语义检索能力。
+- 已知风险：外部 provider 探测现在会在外部后端启用时成为质量 gate，网络、凭据或 provider 端限流故障会导致候选被拒绝；这符合外部检索维度的可观测性目标，但长周期无人值守运行时需要保证本机环境变量和网络状态稳定。
+
+## 候选优化说明：manual-foundational-competitive-self-iteration-dimensions-20260517
+
+- 目标：恢复自迭代中“基础功能完善”和“竞争力特性完善”两个一等评分维度，同时保留语义/向量检索维度，让候选不能用高级检索或向量能力改善掩盖基础定义、导入、过滤等能力退化，也不能用基础能力改善掩盖 hybrid、fuzzy、call graph 和全仓高阶查询退化。
+- 方法：评分公式调整为 `foundational_capability=0.25`、`competitive_capability=0.25`、`semantic_vector=0.15`、`performance=0.10`、`stability=0.25`；`accuracy` 只作为 foundational 与 competitive 的兼容汇总继续写入历史。评估器根据 case 的显式 `objective` 或 kind/id 自动把 definition/import/filter/negative 归入 foundational，把 hybrid/fuzzy/callers/callees/full_scope/fanout 归入 competitive。采纳保护目标扩展为 foundational、competitive、semantic_vector 和 stability，旧历史缺少新字段时不会对新维度触发硬回归保护。
+- 架构与不变量：不改变 Rust 检索 API、索引刷新、provider 配置、CLI 输出或 benchmark fixture 数据来源；只调整 Python harness 的评价、历史、prompt、记忆和文档。合并 `main` 的本地文件索引 fixture 后，将文件 fixture 评估拆到 `file_fixture_eval.py`，让 `evaluator.py` 继续满足单文件 1000 行硬约束。语义/向量外部 provider 仍由运行时环境读取，不能写入 case 或命令参数。
+- 预期影响：后续 Codex prompt、run history、CSV 和 memory 会区分基础能力退化、竞争力退化和 semantic/vector 退化，回归记忆可直接指出下一轮应优先修复的目标面。
+- 已知风险：新字段会让旧 `accuracy` 历史与新分项历史并存；为保持可比性，历史记录继续输出 `accuracy`，但新维度的 protected regression 只在上一轮已经记录对应字段时生效。
 
 ## 候选优化说明：20260516T195734Z
 
