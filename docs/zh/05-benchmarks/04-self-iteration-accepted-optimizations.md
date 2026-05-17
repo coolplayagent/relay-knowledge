@@ -16,6 +16,13 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
+## 候选优化说明：manual-code-query-score-query-token-cache-20260518
+- 目标：在保护 foundational、competitive、semantic/vector、research judge 与 stability 下限的前提下，降低 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等大仓 full-scope code query 的候选评分 CPU 成本。
+- 算法与架构：SQLite 仍先用既有 FTS、path/language filter 与 bounded candidate limit 剪枝；Rust scoring 热路径新增 request-scoped `ScoreQuery`，把 query whitespace token 的 lowercase 归一化从每个候选重复执行改为每个请求执行一次，并在 symbol、reference、call、import 与 hybrid chunk 层复用同一 token 集合。
+- 不变量：不改变 SQLite schema、索引写入、FTS MATCH 表达式、candidate limit、排序权重、去重截断、CLI/API JSON、semantic/vector provider/env、embedding 设置、judge 配置、网络/HTTP 边界或 release/install 行为；保留 `score_text` 兼容入口并用单元测试锁定分数语义一致。
+- 预期影响：多 token、多候选的大仓查询减少重复分词与 lowercase 分配，预期改善 query p50/p95 的稳定性；由于候选集合与分数公式不变，`ConnectorService`、W3 request、callers/callees、negative missing symbol、LevelDB competitive 与 semantic/vector source coverage 应保持通过。
+- 已知风险：收益依赖候选窗口大小和 query token 数；短查询或低候选量 case 可能只有轻微性能变化。`ScoreQuery` 仍按候选字段计算 field lowercase 与 identifier part match，因此不牺牲现有精确/identifier/substring scoring 行为。
+
 ## 候选优化说明：manual-code-query-bounded-symbol-context-20260518
 - 目标：修复质量门禁中 relay-teams `ConnectorService` definition/hybrid/path-filtered definition 与 `_summary` callers/callees 的命中行范围过窄问题，同时保护 foundational、competitive、semantic/vector、research judge、stability 与 negative missing symbol 下限。
 - 算法与架构：SQLite code query 只在已通过 FTS candidate、selector filter 与既有 scoring 的 symbol/call graph 命中上扩展返回 `line_range`；class definition 可向前包含同文件 16 行内相邻上一 symbol 起点，caller/callee 查询可返回 call-site 所属 caller symbol 的 bounded range。新增 `(source_scope, path, line_end, line_start)` 索引支撑相邻 symbol 查找，避免全表扫描。
@@ -957,32 +964,11 @@ ssert!(!target_symbol_import_query("org.springframework.context.ApplicationConte
 - known degradations: score_component:performance 0.974548->0.956274; metric:leveldb_cpp_query_p95_ms 174.0->231.0; metric:local_documents_file_index_ms 87.0->117; metric:local_documents_file_query_p50_ms 87.5->118.0; metric:local_documents_file_query_p95_ms 90.0->119.0; metric:local_noise_file_index_ms 265.0->360; metric:local_noise_file_query_p50_ms 87.0->114.0; metric:local_noise_file_query_p95_ms 88.0->115.0
 - latency metrics: cargo_build_release_ms=29561ms; cargo_fmt_check_ms=578ms; cargo_clippy_ms=195ms; cargo_test_ms=8056ms; relay_teams_index_ms=74219ms; relay_teams_query_p50_ms=90ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13809ms
 ## 20260517T113610Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T113610Z.patch`
-- score: 0.979868 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.954596, stability=1.0)
-- cases: 36/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/mod.rs`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/graph_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`
-- key improvements: score_component:score 0.966917->0.979868; score_component:foundational_capability 0.972222->1.0; score_component:accuracy 0.986111->1.0; score_component:research_judge 0.83->0.89; metric:cargo_build_release_ms 38844.0->29541; metric:cargo_fmt_check_ms 737.0->671; metric:relay_teams_index_ms 77412.0->73020; metric:relay_teams_query_p50_ms 134.5->92.5
-- known degradations: score_component:performance 0.974652->0.954596; metric:cargo_test_ms 7671.0->7925; metric:leveldb_cpp_index_ms 14765.0->15884; metric:leveldb_cpp_query_p50_ms 106.5->145.0; metric:leveldb_cpp_query_p95_ms 188.0->244.0; metric:local_documents_file_index_ms 94.0->120; metric:local_documents_file_query_p50_ms 88.0->122.5; metric:local_documents_file_query_p95_ms 90.0->128.0
-- latency metrics: cargo_build_release_ms=29541ms; cargo_fmt_check_ms=671ms; cargo_clippy_ms=196ms; cargo_test_ms=7925ms; relay_teams_index_ms=73020ms; relay_teams_query_p50_ms=92ms; relay_teams_query_p95_ms=337ms; leveldb_cpp_index_ms=15884ms
+- score: 0.979868; cases: 36/36 passed; summary: semantic/vector identifier-aware retrieval restored foundational accuracy and research judge quality, with performance regressions preserved in memory details.
 ## 20260517T115627Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T115627Z.patch`
-- score: 0.97996 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.89, performance=0.955749, stability=1.0)
-- cases: 36/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/retrieval/rerank.rs`, `src/relay_knowledge/retrieval/terms.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
-- key improvements: score_component:research_judge 0.88->0.89; metric:cargo_build_release_ms 33186.0->29988; metric:cargo_fmt_check_ms 719.0->559; metric:cargo_clippy_ms 180.0->154; metric:cargo_test_ms 7819.0->6294; metric:semantic_vector_provider_probe_ms 1390.0->1189
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=29988ms; cargo_fmt_check_ms=559ms; cargo_clippy_ms=154ms; cargo_test_ms=6294ms; relay_teams_index_ms=68979ms; relay_teams_query_p50_ms=96ms; relay_teams_query_p95_ms=346ms; leveldb_cpp_index_ms=16392ms
+- score: 0.97996; cases: 36/36 passed; summary: semantic/vector read-model cache reuse preserved score while improving judge and local gate timings.
 ## 20260517T122624Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T122624Z.patch`
-- score: 0.978379 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.973492, stability=1.0)
-- cases: 36/36 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
-- key improvements: score_component:score 0.954626->0.978379; score_component:foundational_capability 0.944444->1.0; score_component:competitive_capability 0.942857->1.0; score_component:accuracy 0.943651->1.0; score_component:performance 0.958323->0.973492; metric:cargo_build_release_ms 31583.0->28662; metric:cargo_fmt_check_ms 828.0->563; metric:cargo_test_ms 7997.0->5044
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=28662ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=177ms; cargo_test_ms=5044ms; relay_teams_index_ms=69745ms; relay_teams_query_p50_ms=99ms; relay_teams_query_p95_ms=334ms; leveldb_cpp_index_ms=13980ms
+- score: 0.978379; cases: 36/36 passed; summary: code query score-text saturation improved protected repo capability and performance without recorded degradations.
 ## 20260517T134401Z
 - score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0); cases: 36/36 passed.
 - summary: code query ranking/support changes improved research_judge while recording performance degradations that remain protected context in memory.
@@ -1004,5 +990,18 @@ ssert!(!target_symbol_import_query("org.springframework.context.ApplicationConte
 
 Adopted optimization notes:
 
- pub(super) callee_symbol_snapshot_id: Option<String>, pub(super) callee_name: String, pub(super) line_range: RepositoryCodeRange, +    pub(super) caller_line_range: Option<RepositoryCodeRange>, pub(super) target_hint: Option<String>, pub(super) resolution_state: String, pub(super) confidence_basis_points: u16, diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index 67331672821affd200914df58ff5f4823771f1be..76203c46df86fd44ae823bc9cc4ca5809eccd4d4 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -244,6 +244,8 @@ ON code_repository_symbols(source_scope, name, qualified_name, path); CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup ON code_repository_symbols(source_scope, name, path); +        CREATE INDEX IF NOT EXISTS code_repository_symbols_path_line_lookup +            ON code_repository_symbols(source_scope, path, line_end, line_start); CREATE INDEX IF NOT EXISTS code_repository_references_lookup ON code_repository_references(source_scope, name, kind, path); CREATE INDEX IF NOT EXISTS code_repository_calls_lookup tokens used 221,017
+- summary: bounded symbol/call line context fixed relay-teams definition, hybrid, caller, callee, import and negative gates by expanding only already-scored hits with indexed adjacent-symbol lookup.
+## 20260517T190803Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T190803Z.patch`
+- score: 0.972277 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.905, performance=0.954513, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.964698->0.972277; score_component:research_judge 0.87->0.905
+- known degradations: metric:cargo_build_release_ms 32909.0->38964; metric:semantic_vector_provider_probe_ms 1320.0->3826
+- latency metrics: cargo_build_release_ms=38964ms; cargo_fmt_check_ms=765ms; cargo_clippy_ms=202ms; cargo_test_ms=8301ms; relay_teams_index_ms=69616ms; relay_teams_query_p50_ms=105ms; relay_teams_query_p95_ms=372ms; leveldb_cpp_index_ms=16597ms
+
+Adopted optimization notes:
+
+=> 0.35 * score_text(query, [caller_name.unwrap_or_default(), path]), -        CodeQueryKind::Callees => 0.35 * score_text(query, [callee_name, path]), +        CodeQueryKind::Callers => 0.35 * query.score([caller_name.unwrap_or_default(), path]), +        CodeQueryKind::Callees => 0.35 * query.score([callee_name, path]), _ => 0.0, } } diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 6a93523a00b3ba3e48aba89347745ca402454ea2..6c393ec30676e095b635ce081ac0a4ad9c787c3d --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -91,6 +91,15 @@ } #[test] +fn score_query_preserves_score_text_semantics() { +    let query = "Cache archiveOutput"; +    let fields = ["block_cache", "def archive_output_dir() -> Path:"]; + +    assert_eq!(ScoreQuery::new(query).score(fields), score_text(query, fields)); +    assert_eq!(ScoreQuery::new("   ").score(["anything"]), 0.0); +} + +#[test] fn declaration_chunk_bonus_requires_declaration_shape() { let terms = query_terms("recover descriptor save_manifest versionedit"); tokens used 169,859
 

@@ -160,6 +160,7 @@ fn search_symbols(
         },
     )?;
     let query = request.query.as_str();
+    let score_query = ScoreQuery::new(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -169,17 +170,14 @@ fn search_symbols(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(
-                query,
-                [
-                    row.name.as_str(),
-                    row.qualified_name.as_str(),
-                    row.kind.as_str(),
-                    row.signature.as_str(),
-                    row.doc_comment.as_deref().unwrap_or_default(),
-                    row.path.as_str(),
-                ],
-            ) + symbol_query_bonus(
+            let score = score_query.score([
+                row.name.as_str(),
+                row.qualified_name.as_str(),
+                row.kind.as_str(),
+                row.signature.as_str(),
+                row.doc_comment.as_deref().unwrap_or_default(),
+                row.path.as_str(),
+            ]) + symbol_query_bonus(
                 query,
                 &row.name,
                 &row.qualified_name,
@@ -296,7 +294,7 @@ fn search_references(
             })
         },
     )?;
-    let query = request.query.to_lowercase();
+    let score_query = ScoreQuery::new(&request.query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -305,7 +303,7 @@ fn search_references(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_text(&query, [&row.name, &row.kind]);
+            let score = score_query.score([&row.name, &row.kind]);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -425,6 +423,7 @@ fn search_calls(
         },
     )?;
     let query = request.query.as_str();
+    let score_query = ScoreQuery::new(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -439,10 +438,10 @@ fn search_calls(
                 CodeQueryKind::Callers => [&row.callee_name, ""],
                 _ => [row.caller_name.as_deref().unwrap_or(""), &row.callee_name],
             };
-            let base_score = score_text(query, search_fields);
+            let base_score = score_query.score(search_fields);
             let score = base_score
                 + directional_call_context_bonus(
-                    query,
+                    &score_query,
                     base_score,
                     row.caller_name.as_deref(),
                     &row.callee_name,
@@ -563,6 +562,7 @@ fn search_imports(
         },
     )?;
     let query = request.query.to_lowercase();
+    let score_query = ScoreQuery::new(&request.query);
     let mut rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -574,14 +574,11 @@ fn search_imports(
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let base_score = score_text(
-                &query,
-                [
-                    row.module.as_str(),
-                    row.target_hint.as_deref().unwrap_or_default(),
-                    row.matched_symbol_name.as_deref().unwrap_or_default(),
-                ],
-            ) + score_exact_path(&query, &row.path)
+            let base_score = score_query.score([
+                row.module.as_str(),
+                row.target_hint.as_deref().unwrap_or_default(),
+                row.matched_symbol_name.as_deref().unwrap_or_default(),
+            ]) + score_exact_path(&query, &row.path)
                 + import_target_symbol_bonus(
                     request.query.as_str(),
                     row.matched_symbol_name.as_deref(),
@@ -681,6 +678,7 @@ fn search_chunks(
         },
     )?;
     let query = request.query.to_lowercase();
+    let score_query = ScoreQuery::new(&request.query);
     let declaration_terms = query_terms(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -691,7 +689,7 @@ fn search_chunks(
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
-            let score = score_text(&query, [&row.content, &row.path])
+            let score = score_query.score([&row.content, &row.path])
                 + declaration_bonus
                 + declaration_surface_path_bonus(declaration_bonus, &row.path, request);
             (score > 0.0).then(|| {

@@ -5,36 +5,52 @@ use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 #[cfg(test)]
 use super::MAX_CANDIDATE_BIND_VALUES;
 
-pub(super) fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
-    let fields = fields
-        .into_iter()
-        .map(|field| {
-            let original = field.as_ref().trim().to_owned();
-            let lower = original.to_lowercase();
-            (original, lower)
-        })
-        .collect::<Vec<_>>();
-    let mut score = 0.0;
-    for token in query.split_whitespace() {
-        let token = token.to_lowercase();
-        if token.is_empty() {
-            continue;
-        }
-        let mut token_score = 0.0_f64;
-        for (field, lower_field) in &fields {
-            if lower_field == &token {
-                token_score = token_score.max(4.0);
-                break;
-            } else if token_score < 2.0 && identifier_field_matches_token(field, &token) {
-                token_score = token_score.max(2.0);
-            } else if token_score < 0.5 && lower_field.contains(&token) {
-                token_score = token_score.max(0.5);
-            }
-        }
-        score += token_score;
+pub(super) struct ScoreQuery {
+    tokens: Vec<String>,
+}
+
+impl ScoreQuery {
+    pub(super) fn new(query: &str) -> Self {
+        let tokens = query
+            .split_whitespace()
+            .map(str::to_lowercase)
+            .filter(|token| !token.is_empty())
+            .collect();
+
+        Self { tokens }
     }
 
-    score
+    pub(super) fn score(&self, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
+        let fields = fields
+            .into_iter()
+            .map(|field| {
+                let original = field.as_ref().trim().to_owned();
+                let lower = original.to_lowercase();
+                (original, lower)
+            })
+            .collect::<Vec<_>>();
+        let mut score = 0.0;
+        for token in &self.tokens {
+            let mut token_score = 0.0_f64;
+            for (field, lower_field) in &fields {
+                if lower_field == token {
+                    token_score = token_score.max(4.0);
+                    break;
+                } else if token_score < 2.0 && identifier_field_matches_token(field, token) {
+                    token_score = token_score.max(2.0);
+                } else if token_score < 0.5 && lower_field.contains(token) {
+                    token_score = token_score.max(0.5);
+                }
+            }
+            score += token_score;
+        }
+
+        score
+    }
+}
+
+pub(super) fn score_text(query: &str, fields: impl IntoIterator<Item = impl AsRef<str>>) -> f64 {
+    ScoreQuery::new(query).score(fields)
 }
 
 pub(super) fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
@@ -307,7 +323,7 @@ pub(super) fn callee_related_name_bonus(
 }
 
 pub(super) fn directional_call_context_bonus(
-    query: &str,
+    query: &ScoreQuery,
     base_score: f64,
     caller_name: Option<&str>,
     callee_name: &str,
@@ -318,8 +334,8 @@ pub(super) fn directional_call_context_bonus(
         return 0.0;
     }
     match request.code_query_kind {
-        CodeQueryKind::Callers => 0.35 * score_text(query, [caller_name.unwrap_or_default(), path]),
-        CodeQueryKind::Callees => 0.35 * score_text(query, [callee_name, path]),
+        CodeQueryKind::Callers => 0.35 * query.score([caller_name.unwrap_or_default(), path]),
+        CodeQueryKind::Callees => 0.35 * query.score([callee_name, path]),
         _ => 0.0,
     }
 }
