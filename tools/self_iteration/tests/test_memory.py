@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from history import history_paths
-from memory import load_memory_index, progressive_memory_index, write_run_memory
+from memory import load_memory_index, progressive_memory_index, write_memory_index, write_run_memory
 
 
 class MemoryTests(unittest.TestCase):
@@ -142,6 +142,36 @@ class MemoryTests(unittest.TestCase):
 
             line = paths.memory_index.read_text(encoding="utf-8").strip()
             self.assertEqual(json.loads(line)["id"], "jsonl-rejected_attempt")
+
+    def test_malformed_memory_index_lines_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            paths.memory.mkdir(parents=True)
+            paths.memory_index.write_text(
+                '{"id":"valid","kind":"accepted_optimization"}\n'
+                '{"id":\n'
+                '[]\n',
+                encoding="utf-8",
+            )
+
+            index = load_memory_index(paths)
+            rendered = progressive_memory_index(paths)
+
+            self.assertEqual([item["id"] for item in index], ["valid"])
+            self.assertIn("id=valid", rendered)
+
+    def test_memory_index_writes_through_temp_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+
+            write_memory_index(paths, [{"id": "one", "kind": "accepted_optimization"}])
+
+            self.assertEqual(load_memory_index(paths)[0]["id"], "one")
+            self.assertFalse(paths.memory_index.with_suffix(".jsonl.tmp").exists())
 
 
 if __name__ == "__main__":

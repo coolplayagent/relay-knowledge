@@ -132,17 +132,25 @@ def load_memory_index(paths: HistoryPaths) -> list[dict[str, Any]]:
     with paths.memory_index.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
-            if line:
-                items.append(json.loads(line))
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                items.append(item)
     return items
 
 
 def write_memory_index(paths: HistoryPaths, items: list[dict[str, Any]]) -> None:
     ensure_history(paths)
-    with paths.memory_index.open("w", encoding="utf-8") as handle:
+    temp_path = paths.memory_index.with_suffix(".jsonl.tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
         for item in items:
             handle.write(json.dumps(item, sort_keys=True, ensure_ascii=False))
             handle.write("\n")
+    temp_path.replace(paths.memory_index)
 
 
 def progressive_memory_index(paths: HistoryPaths, limit: int = 12) -> str:
