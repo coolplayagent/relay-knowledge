@@ -247,6 +247,52 @@ async fn symbol_search_preserves_case_for_name_bonus() {
 }
 
 #[tokio::test]
+async fn symbol_search_pushes_language_filters_before_candidate_limit() {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..550 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("pkg/noise_{index:03}.py");
+        files.push(code_query_file(&file_id, &path, "python"));
+        symbols.push(code_query_symbol(
+            &format!("noise-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "target",
+        ));
+    }
+
+    files.push(code_query_file("target-file", "src/lib.rs", "rust"));
+    let mut target = code_query_symbol("target-symbol", "target-file", "src/lib.rs", "target");
+    target.language_id = "rust".to_owned();
+    target.signature = "fn target() {}".to_owned();
+    symbols.push(target);
+    let store =
+        store_with_case_intent_snapshot(code_query_snapshot(files, symbols, Vec::new())).await;
+    let selector =
+        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            CodeRetrievalRequest::new(
+                "target",
+                selector,
+                CodeQueryKind::Definition,
+                1,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("language-filtered symbol query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/lib.rs");
+    assert_eq!(hits[0].language_id, "rust");
+}
+
+#[tokio::test]
 async fn symbol_search_preserves_case_for_test_intent() {
     let store = store_with_case_intent_snapshot(code_query_snapshot(
         vec![code_query_file(

@@ -90,7 +90,7 @@ fn search_symbols(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
@@ -103,7 +103,7 @@ fn search_symbols(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
-                {fts_path_filter}
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -113,7 +113,7 @@ fn search_symbols(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,
@@ -591,7 +591,7 @@ fn search_chunks(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_query = hybrid_chunk_fts_match_query(&request.query);
-    let fts_path_filter = fts_path_filter_sql(status, request);
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
@@ -610,7 +610,7 @@ fn search_chunks(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'chunk'
-                {fts_path_filter}
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
           )
@@ -620,7 +620,7 @@ fn search_chunks(
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,

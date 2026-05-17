@@ -16,8 +16,13 @@
 
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 
-## 候选优化说明：manual-score-text-saturation-20260517
+## 候选优化说明：manual-code-query-language-filter-pushdown-20260517
+- 目标与算法：在保持 foundational、competitive、semantic/vector、stability 与 research judge 目标不变的前提下，把 code graph symbol/chunk 查询的 selector language filter 下推到 `code_repository_search` FTS bounded candidate window，避免多语言大仓中范围外语言先填满候选上限后再被 Rust 层丢弃。
+- 架构与不变量：不改变 SQLite schema、FTS 文档内容、candidate limit、BM25 排序、score_text、CLI/API 字段、provider URL/API key/model/dimension/env 读取或 judge 配置；path filter 与 language filter 的 SQL 占位值顺序保持显式对应，最终 `selected_row` 仍作为一致性保护。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等 full-scope 多语言索引在按语言查询 definition/hybrid chunk 时提升召回稳定性并减少无效候选评分；无 language filter 的既有 case 和 semantic/vector source coverage 应保持不变。
+- 已知风险：收益集中在 language-filtered symbol/chunk 查询；reference/call/import FTS 文档当前不携带可靠 language_id，因此仍保留既有后置过滤以避免误裁剪。
 
+## 候选优化说明：manual-score-text-saturation-20260517
 - 目标：在保持 foundational、competitive、semantic/vector、accuracy、stability 与 research judge 保护目标不变的前提下，降低大仓 code graph query scoring 热路径中重复的 identifier 分解和 substring 检查成本。
 - 方法：`score_text` 保留 exact、identifier-part、substring 三层分值不变，但当当前 query token 已达到 exact match 最高分时立即结束该 token 的字段扫描；当已达到 identifier-part 分值时，后续字段只继续检查可能提升到 exact 的分支，不再重复执行无法提高分数的 identifier 或 substring 检查。
 - 架构与不变量：不改变 SQLite schema、FTS candidate expression、candidate limit、path/language filter、排序权重、CLI/API 字段、semantic/vector provider、embedding 设置、judge 配置或环境变量读取；这是对确定性 scoring 的饱和短路，不扩大或收窄候选集合。
@@ -25,7 +30,6 @@
 - 已知风险：该候选是语义保持型优化，主要收益取决于候选窗口中重复 identifier 命中的比例；如果查询通常只有一个字段命中或候选很少，可观测延迟改善可能较小。
 
 ## 候选优化说明：manual-derived-read-model-cache-preserve-score-20260517
-
 - 目标：在保持 foundational、competitive、semantic/vector、accuracy 与 research judge 保护目标不变的前提下，降低 semantic/vector 本地 read model 和 local rerank 热路径中的重复分配与重复 query vector 哈希成本。
 - 方法：共享标识符 normalizer 增加可扩展现有 `BTreeSet` 的接口，semantic signature、hashed vector 与 rerank fact/label term 收集复用同一集合而不是构造临时集合；vector candidate loop 为每个查询按维度缓存本次 hashed query vector，避免同一维度候选逐行重算。
 - 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、candidate filter、candidate limit、RRF fusion、local deterministic scoring公式、external provider URL/API key/model/dimension/env 读取、embedding payload、freshness、QoS、judge 或 self-iteration harness；semantic/vector 最终分数与结果排序应与现有算法一致。
@@ -33,7 +37,6 @@
 - 已知风险：该候选主要优化 CPU/分配，不扩大召回、不剪枝候选、不改变评分权重，因此质量风险低；可观测性能改善取决于候选窗口大小和向量维度分布，通常在多候选同维度 vector read model 查询中最明显。
 
 ## 候选优化说明：manual-identifier-aware-semantic-vector-rerank-20260517
-
 - 目标：提升 graph semantic/vector 与本地 rerank 对代码符号、实体标签和路径中复合标识符的泛化检索质量，避免 `GraphRAGContextPack`、`SemanticVectorRecall`、`retry_policy`、`RESTClient` 这类标识符只作为一个不透明 token 参与语义签名、向量哈希或 rerank 覆盖度。
 - 方法：新增检索层共享 term normalizer，在保留完整 token 的同时拆分 snake_case、PascalCase/CamelCase、连续大写缩写与数字边界，并为多段标识符加入 acronym token；SQLite semantic signature、local hashed vector 与本地 deterministic rerank 统一使用该 normalizer。新增单元与存储集成测试锁定 label-only 标识符拆分后同时贡献 semantic/vector 来源。
 - 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、code graph query behavior、external provider URL/API key/model/dimension/env 读取、embedding payload、candidate limit、RRF fusion、freshness、QoS 或 self-iteration harness；完整原始 token 仍保留，新增 term 只扩展已有 semantic/vector/rerank 内部表示。
@@ -41,7 +44,6 @@
 - 已知风险：semantic/vector read-model token 集合会因标识符拆分和 acronym 增加少量项，可能轻微增加刷新与查询 CPU；实现限制在已有 bounded candidate/rerank 流程内，且保留完整 token 以降低精确标识符查询退化风险。
 
 ## 候选优化说明：manual-compound-identifier-fts-query-recall-20260517
-
 - 目标：提升大仓 full-scope code graph 与 hybrid chunk 查询对自然语言拆分标识符的召回，避免 `new lru cache`、`default listable bean factory` 这类查询在 FTS 候选阶段错过 `NewLRUCache` 或 `new_lru_cache` 形态。
 - 方法：在代码查询 FTS MATCH 构造阶段，为 bounded call/reference/import 与 hybrid chunk 查询追加受限的复合标识符候选，把 2 到 6 个安全 ASCII 查询项扩展为 compact 与 snake_case 两种 OR 分支；symbol 查询保持已有 symbol 文档侧 camel/snake 扩展，不重复扩大候选。
 - 架构与不变量：不改变 CLI/API 字段、SQLite schema、索引写入格式、candidate limit、排序截断、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；新增扩展只影响查询表达式，且限制词数、part 长度、总标识符长度和单字符噪声，最终仍由 `score_text`、path/language filter 与既有 layer 排序决定返回顺序。
@@ -49,7 +51,6 @@
 - 已知风险：OR 分支会让少量 compact/snake 标识符命中的候选进入 bounded window；扩展只对短查询项集合生效，并保留后续文本评分过滤，因此主要风险是极少数同名复合标识符在近同分情况下改变排序。
 
 ## 候选优化说明：manual-import-target-filter-pushdown-20260517
-
 - 目标：提升大仓 full-scope import graph 在带 selector path/language filter 时的 target-symbol 查询准确性与稳定性，避免查询导入者范围时把过滤条件误施加到被导入符号定义，或让路径外/语言外导入边先填满 bounded candidate window。
 - 方法：import target-symbol fallback 分两阶段处理：第一阶段只在当前 indexed source scope 内用 bounded symbol FTS 找到查询命中的目标符号，并生成 path/package target hints；第二阶段通过 `code_repository_imports(source_scope, target_hint, path)` 查找导入边时，把 indexed scope 和本次 selector path filters 下推到 `i.path`，把 language filters 下推到 `f.language_id`，在 `ORDER BY ... LIMIT` 前裁剪导入者候选。
 - 架构与不变量：不改变 CLI/API 字段、SQLite 表结构、candidate limit、FTS 文档、semantic/vector provider、embedding、rerank、judge 或环境变量读取方式；最终 `selected_row` 仍保留为一致性保护，新增 SQL pushdown 只减少范围外 import edge 候选。目标符号发现不再使用本次导入者 path/language filter，因为 selector filter 描述的是返回的 import rows，而不是被导入符号必须所在的路径或语言。
@@ -991,4 +992,17 @@ tinue; } @@ -279,6 +277,26 @@ Ok(hits) } +struct QueryVectorCache<'a> { +    que
 Adopted optimization notes:
 
             } else if identifier_field_matches_token(field, &token) { +                break; +            } else if token_score < 2.0 && identifier_field_matches_token(field, &token) { token_score = token_score.max(2.0); -            } else if lower_field.contains(&token) { +            } else if token_score < 0.5 && lower_field.contains(&token) { token_score = token_score.max(0.5); } } diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index db7b1c25dbe05a06fe9f0828fb949c421adfdd4e..a660b44d1998162b4135809b055a33be9a25e998 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -84,6 +84,13 @@ } #[test] +fn score_text_preserves_exact_match_ceiling_after_identifier_match() { +    assert_eq!(score_text("cache", ["block_cache", "cache"]), 4.0); +    assert_eq!(score_text("cache", ["block_cache"]), 2.0); +    assert_eq!(score_text("cach", ["block_cache"]), 0.5); +} + +#[test] fn declaration_chunk_bonus_requires_declaration_shape() { let terms = query_terms("recover descriptor save_manifest versionedit"); tokens used 221,588
+## 20260517T134401Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260517T134401Z.patch`
+- score: 0.976945 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.88, performance=0.936811, stability=1.0)
+- cases: 36/36 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:research_judge 0.86->0.88; metric:cargo_fmt_check_ms 848.0->784; metric:cargo_test_ms 8803.0->8527
+- known degradations: score_component:performance 0.952029->0.936811; metric:cargo_build_release_ms 39891.0->41918; metric:leveldb_cpp_query_p50_ms 145.0->187.0; metric:leveldb_cpp_query_p95_ms 253.0->296.0; metric:local_documents_file_query_p50_ms 122.5->148.5; metric:local_documents_file_query_p95_ms 124.0->175.0; metric:local_noise_file_index_ms 374.0->473; metric:semantic_vector_refresh_ms 84.0->111
+- latency metrics: cargo_build_release_ms=41918ms; cargo_fmt_check_ms=784ms; cargo_clippy_ms=207ms; cargo_test_ms=8527ms; relay_teams_index_ms=80341ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=459ms; leveldb_cpp_index_ms=19962ms
+
+Adopted optimization notes:
+
+t = code_query_symbol("target-symbol", "target-file", "src/lib.rs", "target"); +    target.language_id = "rust".to_owned(); +    target.signature = "fn target() {}".to_owned(); +    symbols.push(target); +    let store = store_with_case_intent_snapshot(code_query_snapshot(files, symbols, Vec::new())) +        .await; +    let selector = +        CodeRepositorySelector::new("repo", "commit", Vec::new(), vec!["rust".to_owned()]) +            .expect("selector should validate"); + +    let hits = store +        .search_code( +            CodeRetrievalRequest::new( +                "target", +                selector, +                CodeQueryKind::Definition, +                1, +                FreshnessPolicy::AllowStale, +            ) +            .expect("request should validate"), +        ) +        .await +        .expect("language-filtered symbol query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "src/lib.rs"); +    assert_eq!(hits[0].language_id, "rust"); +} + +#[tokio::test] async fn symbol_search_preserves_case_for_test_intent() { let store = store_with_case_intent_snapshot(code_query_snapshot( vec![code_query_file( tokens used 210,118
 
