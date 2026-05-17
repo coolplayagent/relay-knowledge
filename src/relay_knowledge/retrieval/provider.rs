@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{EmbeddingProviderKind, RemoteEmbeddingConfig};
 
+const PROVIDER_ERROR_MESSAGE_LIMIT: usize = 240;
+
 pub type EmbeddingFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, EmbeddingProviderError>> + Send + 'a>>;
 
@@ -264,7 +266,12 @@ fn deterministic_vector(input: &str, dimension: usize) -> EmbeddingVector {
 }
 
 fn status_error(status_code: u16, body: Option<String>) -> EmbeddingProviderError {
-    let retry = if matches!(status_code, 408 | 429 | 500..=599) {
+    let resource_limited = matches!(status_code, 402 | 429)
+        || (matches!(status_code, 400 | 403)
+            && body
+                .as_deref()
+                .is_some_and(provider_error_reports_resource_limit));
+    let retry = if resource_limited || matches!(status_code, 408 | 500..=599) {
         ProviderRetryClass::Retryable
     } else {
         ProviderRetryClass::Permanent
@@ -273,9 +280,9 @@ fn status_error(status_code: u16, body: Option<String>) -> EmbeddingProviderErro
     EmbeddingProviderError {
         retry,
         status_code: Some(status_code),
-        code: status_code_error_code(status_code).to_owned(),
+        code: status_code_error_code(status_code, resource_limited).to_owned(),
         message: body
-            .map(|value| value.chars().take(240).collect())
+            .map(error_body_preview)
             .unwrap_or_else(|| "provider request failed".to_owned()),
     }
 }
@@ -304,16 +311,80 @@ fn permanent_error(code: &'static str, message: impl Into<String>) -> EmbeddingP
     }
 }
 
-fn status_code_error_code(status_code: u16) -> &'static str {
+fn status_code_error_code(status_code: u16, resource_limited: bool) -> &'static str {
+    if resource_limited {
+        return "rate_limited";
+    }
+
     match status_code {
         400 => "invalid_request",
         401 | 403 => "auth_invalid",
         404 => "model_or_endpoint_not_found",
         408 => "network_timeout",
-        429 => "rate_limited",
         500..=599 => "provider_unavailable",
         _ => "provider_http_error",
     }
+}
+
+fn provider_error_reports_resource_limit(body: &str) -> bool {
+    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(body) {
+        let provider_error = payload.get("error").unwrap_or(&payload);
+        if let Some(text) = provider_error.as_str() {
+            return text_reports_resource_limit(text);
+        }
+
+        let mut inspected_fields = false;
+        for field in ["code", "type", "message", "status", "detail"] {
+            if let Some(text) = provider_error
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+            {
+                inspected_fields = true;
+                if text_reports_resource_limit(text) {
+                    return true;
+                }
+            }
+        }
+        if inspected_fields {
+            return false;
+        }
+    }
+
+    text_reports_resource_limit(body)
+}
+
+fn text_reports_resource_limit(text: &str) -> bool {
+    let normalized = text
+        .chars()
+        .map(|character| {
+            if character == '_' || character == '-' {
+                ' '
+            } else {
+                character.to_ascii_lowercase()
+            }
+        })
+        .collect::<String>();
+
+    [
+        "rate limit",
+        "too many request",
+        "insufficient quota",
+        "quota exceeded",
+        "quota exhausted",
+        "out of quota",
+        "insufficient balance",
+        "resource exhausted",
+        "no resource package",
+        "capacity exceeded",
+        "billing limit",
+        "payment required",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+fn error_body_preview(value: String) -> String {
+    value.chars().take(PROVIDER_ERROR_MESSAGE_LIMIT).collect()
 }
 
 #[cfg(test)]
@@ -376,6 +447,51 @@ mod tests {
 
         assert_eq!(error.retry, ProviderRetryClass::Retryable);
         assert_eq!(error.code, "rate_limited");
+    }
+
+    #[test]
+    fn classifies_provider_resource_limit_bodies_as_retryable() {
+        let payment_required = status_error(402, None);
+        let quota_forbidden = status_error(
+            403,
+            Some(
+                r#"{"error":{"code":"insufficient_quota","message":"Insufficient balance or no resource package."}}"#
+                    .to_owned(),
+            ),
+        );
+        let invalid_request_quota = status_error(
+            400,
+            Some(
+                r#"{"error":{"type":"resource_exhausted","message":"quota exceeded"}}"#.to_owned(),
+            ),
+        );
+
+        assert_eq!(payment_required.retry, ProviderRetryClass::Retryable);
+        assert_eq!(payment_required.code, "rate_limited");
+        assert_eq!(quota_forbidden.retry, ProviderRetryClass::Retryable);
+        assert_eq!(quota_forbidden.code, "rate_limited");
+        assert_eq!(invalid_request_quota.retry, ProviderRetryClass::Retryable);
+        assert_eq!(invalid_request_quota.code, "rate_limited");
+    }
+
+    #[test]
+    fn preserves_permanent_provider_errors_without_resource_limit_signals() {
+        let auth_forbidden = status_error(
+            403,
+            Some(r#"{"error":{"code":"invalid_api_key","message":"Invalid API key"}}"#.to_owned()),
+        );
+        let invalid_request = status_error(
+            400,
+            Some(
+                r#"{"error":{"code":"invalid_request","message":"quota field is not supported"}}"#
+                    .to_owned(),
+            ),
+        );
+
+        assert_eq!(auth_forbidden.retry, ProviderRetryClass::Permanent);
+        assert_eq!(auth_forbidden.code, "auth_invalid");
+        assert_eq!(invalid_request.retry, ProviderRetryClass::Permanent);
+        assert_eq!(invalid_request.code, "invalid_request");
     }
 
     #[test]

@@ -33,7 +33,7 @@ relay-knowledge service doctor --format json
 relay-knowledge provider probe --format json
 ```
 
-`provider probe` reads remote embedding provider configuration through the environment boundary and performs a lightweight probe. The JSON response includes `ok`, `provider`, `model`, `dimension`, optional `latency_ms`, and on failure `error_code`, `error_message`, and `retryable`. HTTP 429 quota/backpressure responses mean the endpoint, auth boundary, and model route were reachable, so they report `ok=true` while keeping `error_code=rate_limited` and `retryable=true` as observable degraded diagnostics. It does not print raw API keys or bypass the `env` module.
+`provider probe` reads remote embedding provider configuration through the environment boundary and performs a lightweight probe. The JSON response includes `ok`, `provider`, `model`, `dimension`, optional `latency_ms`, and on failure `error_code`, `error_message`, and `retryable`. HTTP 429, HTTP 402, and quota/backpressure-shaped HTTP 400 or HTTP 403 responses mean the endpoint, auth boundary, and model route were reachable, so they report `ok=true` while keeping `error_code=rate_limited` and `retryable=true` as observable degraded diagnostics. Plain authentication, endpoint, model, timeout, and malformed-response failures still report `ok=false`. It does not print raw API keys or bypass the `env` module.
 
 The OpenAI-compatible embedding base URL may be a host root, a versioned API root such as `/v1` or `/v4`, or a full `/embeddings` endpoint. Non-version path prefixes keep resolving as `<prefix>/v1/embeddings`, and query or fragment suffixes are ignored during endpoint construction.
 

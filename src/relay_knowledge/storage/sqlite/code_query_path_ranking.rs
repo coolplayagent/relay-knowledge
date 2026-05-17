@@ -39,6 +39,26 @@ pub(super) fn declaration_surface_path_bonus(
     }
 }
 
+pub(super) fn symbol_test_path_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_test_intent
+        || !matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol | CodeQueryKind::Hybrid
+        )
+        || !path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    -0.75
+}
+
 pub(super) fn query_mentions_test_or_benchmark(query: &str) -> bool {
     query
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -173,6 +193,38 @@ mod tests {
         );
         assert_eq!(
             declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition),
+            0.0
+        );
+    }
+
+    #[test]
+    fn symbol_test_path_penalty_demotes_test_symbols_without_test_intent() {
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+        let definition = retrieval_request(CodeQueryKind::Definition);
+        let callers = retrieval_request(CodeQueryKind::Callers);
+
+        assert_eq!(
+            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &hybrid, false),
+            -0.75
+        );
+        assert_eq!(
+            symbol_test_path_penalty(6.0, "benchmarks/db_bench.cc", &definition, false),
+            -0.75
+        );
+        assert_eq!(
+            symbol_test_path_penalty(6.0, "src/checkpoint.py", &hybrid, false),
+            0.0
+        );
+        assert_eq!(
+            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &hybrid, true),
+            0.0
+        );
+        assert_eq!(
+            symbol_test_path_penalty(0.0, "tests/unit/test_checkpoint.py", &hybrid, false),
+            0.0
+        );
+        assert_eq!(
+            symbol_test_path_penalty(6.0, "tests/unit/test_checkpoint.py", &callers, false),
             0.0
         );
     }

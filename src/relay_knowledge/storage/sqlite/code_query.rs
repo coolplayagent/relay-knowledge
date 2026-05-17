@@ -23,6 +23,7 @@ const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 use super::code_status::{repository_scope_status, repository_status};
 use code_query_path_ranking::{
     call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
+    symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
@@ -134,6 +135,7 @@ fn search_symbols(
         },
     )?;
     let query = request.query.to_lowercase();
+    let query_has_test_intent = query_mentions_test_or_benchmark(&query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -161,6 +163,10 @@ fn search_symbols(
                 request,
             );
             (score > 0.0).then(|| {
+                let score = score
+                    + 2.0
+                    + symbol_kind_bonus(&row.kind, request)
+                    + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
                 let mut excerpt = row.signature.clone();
                 if let Some(doc) = &row.doc_comment {
                     excerpt = format!("{doc}\n{}", row.signature);
@@ -179,7 +185,7 @@ fn search_symbols(
                             CodeRetrievalLayer::Symbol,
                             CodeRetrievalLayer::Definition,
                         ],
-                        score: score + 2.0 + symbol_kind_bonus(&row.kind, request),
+                        score,
                         excerpt,
                         degraded_reason: None,
                         edge_kind: None,
