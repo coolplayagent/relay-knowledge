@@ -13,6 +13,7 @@ from statistics import median
 from typing import Any
 
 from file_fixture_eval import evaluate_file_fixtures
+from llm_judge import evaluate_research_judge_suite
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 
 
@@ -54,7 +55,11 @@ class EvaluatorConfig:
     keep_workdirs: bool = False
 
 
-def evaluate_candidate(config: EvaluatorConfig, generated_diff: bool) -> EvaluationRun:
+def evaluate_candidate(
+    config: EvaluatorConfig,
+    generated_diff: bool,
+    candidate_diff: str = "",
+) -> EvaluationRun:
     cases_config = load_cases(config.cases_path)
     run_home = config.state_work_dir / "home"
     if run_home.exists() and not config.keep_workdirs:
@@ -142,6 +147,25 @@ def evaluate_candidate(config: EvaluatorConfig, generated_diff: bool) -> Evaluat
         gates.extend(result.gate() for result in semantic_vector_report["commands"])
         case_observations.extend(semantic_vector_report["cases"])
         metrics.extend(semantic_vector_report["metrics"])
+
+    research_judge_config = cases_config.get("research_judge_suite")
+    if isinstance(research_judge_config, dict):
+        research_judge_report = evaluate_research_judge_suite(
+            workspace=config.workspace,
+            run_home=run_home,
+            env=env,
+            suite_config=research_judge_config,
+            generated_diff=generated_diff,
+            candidate_diff=candidate_diff,
+            gates=gates,
+            cases=case_observations,
+            metrics=metrics,
+            repo_reports=repo_reports,
+        )
+        repo_reports.append(research_judge_report)
+        gates.extend(research_judge_report.get("gates", []))
+        case_observations.extend(research_judge_report.get("cases", []))
+        metrics.extend(research_judge_report.get("metrics", []))
 
     return finish_evaluation(
         generated_diff, gates, case_observations, metrics, commands, repo_reports, run_home, config
@@ -926,6 +950,7 @@ def serializable_repository_report(report: dict[str, Any]) -> dict[str, Any]:
         "repository": report["repository"],
         "scope": report.get("scope", "all"),
         "commands": [serializable_command(command) for command in report["commands"]],
+        "gates": [gate.__dict__ for gate in report.get("gates", [])],
         "cases": [case.__dict__ for case in report["cases"]],
         "metrics": [metric.__dict__ for metric in report["metrics"]],
         "index_summary": report.get("index_summary", {}),

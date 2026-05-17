@@ -40,6 +40,17 @@ def full_objective_cases() -> list[CaseObservation]:
     ]
 
 
+def research_judge_case(score: float = 0.9) -> CaseObservation:
+    return CaseObservation(
+        "research_judge",
+        "research_judge",
+        True,
+        rank=1,
+        objective="research_judge",
+        score_override=score,
+    )
+
+
 class ScoringTests(unittest.TestCase):
     def test_first_successful_candidate_is_accepted(self) -> None:
         score = score_evaluation(
@@ -83,6 +94,7 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(score.foundational_capability, 1.0)
         self.assertEqual(score.competitive_capability, 0.0)
         self.assertEqual(score.semantic_vector, 0.0)
+        self.assertIsNone(score.research_judge)
         self.assertEqual(score.accuracy, 1.0)
 
     def test_metric_budget_failures_are_reported(self) -> None:
@@ -536,6 +548,45 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "protected semantic_vector objective regressed" in reason
+                for reason in score.reject_reasons
+            )
+        )
+
+    def test_research_judge_score_override_is_reported_when_present(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases() + [research_judge_case(0.82)],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run=None,
+        )
+
+        self.assertEqual(score.research_judge, 0.82)
+        self.assertEqual(score.to_dict()["research_judge"], 0.82)
+        self.assertTrue(score.accepted)
+
+    def test_research_judge_regression_is_protected_when_configured(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases() + [research_judge_case(0.4)],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.1,
+                "foundational_capability": 1.0,
+                "competitive_capability": 1.0,
+                "semantic_vector": 1.0,
+                "research_judge": 0.9,
+                "stability": 1.0,
+            },
+        )
+
+        self.assertFalse(score.accepted)
+        self.assertTrue(
+            any(
+                "protected research_judge objective regressed" in reason
                 for reason in score.reject_reasons
             )
         )

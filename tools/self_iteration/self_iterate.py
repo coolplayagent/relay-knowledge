@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import shlex
 import subprocess
@@ -149,9 +150,9 @@ def run_loop(args: argparse.Namespace, workspace: Path, paths: Any) -> int:
 
 def run_evaluate(args: argparse.Namespace, workspace: Path, paths: Any) -> int:
     patch = capture_patch(workspace, paths, "manual-evaluate")
-    evaluation = evaluate_candidate(
+    evaluation = evaluate_candidate_for_patch(
         evaluator_config(args, workspace, paths, "manual-evaluate"),
-        generated_diff=patch.has_diff,
+        patch,
     )
     run_record = persist_scored_run(
         workspace=workspace,
@@ -219,9 +220,9 @@ def run_generation_iteration(args: argparse.Namespace, workspace: Path, paths: A
         return False
 
     print(f"[self-iterate] candidate patch: {patch.path}")
-    evaluation = evaluate_candidate(
+    evaluation = evaluate_candidate_for_patch(
         evaluator_config(args, workspace, paths, run_id),
-        generated_diff=patch.has_diff,
+        patch,
     )
     apply_candidate_documentation_gate(evaluation, patch)
     previous_run = previous_scored_run(paths)
@@ -275,6 +276,17 @@ def evaluator_config(
         command_timeout_seconds=args.command_timeout_seconds,
         keep_workdirs=args.keep_workdirs,
     )
+
+
+def evaluate_candidate_for_patch(config: EvaluatorConfig, patch: PatchSnapshot) -> Any:
+    parameters = inspect.signature(evaluate_candidate).parameters
+    if "candidate_diff" in parameters:
+        return evaluate_candidate(
+            config,
+            generated_diff=patch.has_diff,
+            candidate_diff=patch.diff,
+        )
+    return evaluate_candidate(config, generated_diff=patch.has_diff)
 
 
 def apply_candidate_documentation_gate(evaluation: Any, patch: PatchSnapshot) -> None:
@@ -421,6 +433,7 @@ def run_record(
         "competitive_capability": score.get("competitive_capability", score.get("accuracy", 0.0)),
         "accuracy": score["accuracy"],
         "semantic_vector": score.get("semantic_vector", 1.0),
+        "research_judge": score.get("research_judge"),
         "performance": score["performance"],
         "stability": score["stability"],
         "reject_reasons": score["reject_reasons"],
@@ -449,6 +462,7 @@ def build_prompt(paths: Any, run_id: str) -> str:
             f"competitive={best.get('competitive_capability', 'n/a')} "
             f"accuracy={best.get('accuracy')} "
             f"semantic_vector={best.get('semantic_vector', 'n/a')} "
+            f"research_judge={best.get('research_judge', 'n/a')} "
             f"commit={best.get('commit')}"
         )
     rejected_summary = recent_rejected_summary(paths)
@@ -459,6 +473,7 @@ Goal:
 - Prioritize foundational capability, competitive capability, semantic/vector retrieval, and stability before performance; only optimize speed after preserving or improving those protected objectives.
 - Improve code repository tree parsing, code graph query accuracy, semantic/vector retrieval quality, stability, and performance across relay-teams, Linux, LevelDB, Kubernetes, Spring Framework, and the graph retrieval fixture.
 - Treat foundational repo retrieval, competitive repo retrieval, and semantic/vector retrieval as protected self-iteration objectives. Runtime semantic/vector and embedding settings are read from the process environment by the relay-knowledge binary; do not hard-code provider URLs, API keys, model names, or dimensions in candidate changes.
+- When the research judge is configured, treat its feedback as a protected objective. The judge may run through an OpenAI-compatible HTTP endpoint or an external coding-agent CLI such as relay-teams, codex, cc, or copilot. Do not hard-code judge provider URLs, API keys, model names, or CLI-specific secrets in candidate changes.
 - Focus on multi-repository, large-repository full-scope indexing and retrieval.
 - Prefer algorithmic or architectural improvements over local special-casing: candidate pruning before scoring, SQLite/FTS-backed lookups, symbol identity normalization, import/call edge quality, bounded batch/finalize design, cache-aware query plans, and ranking fusion are all valid directions when test-backed.
 
@@ -556,6 +571,7 @@ def recent_rejected_summary(paths: Any, limit: int = 3) -> str:
             f"competitive={run.get('competitive_capability', '')} "
             f"accuracy={run.get('accuracy', '')} "
             f"semantic_vector={run.get('semantic_vector', '')} "
+            f"research_judge={run.get('research_judge', '')} "
             f"stability={run.get('stability', '')} "
             f"reasons={reasons} "
             f"report={run.get('report', '')}"
@@ -739,6 +755,7 @@ def comparison_metadata(previous_run: dict[str, Any] | None) -> dict[str, Any] |
         "competitive_capability": previous_run.get("competitive_capability"),
         "accuracy": previous_run.get("accuracy"),
         "semantic_vector": previous_run.get("semantic_vector"),
+        "research_judge": previous_run.get("research_judge"),
         "performance": previous_run.get("performance"),
         "stability": previous_run.get("stability"),
         "accepted": previous_run.get("accepted"),
@@ -810,6 +827,7 @@ def accepted_optimization_entry(
         f"competitive={score.get('competitive_capability', 'n/a')}, "
         f"accuracy={score.get('accuracy')}, "
         f"semantic_vector={score.get('semantic_vector', 'n/a')}, "
+        f"research_judge={score.get('research_judge', 'n/a')}, "
         f"performance={score.get('performance')}, "
         f"stability={score.get('stability')})\n"
         f"- cases: {passed_cases}/{case_count} passed\n"
@@ -891,12 +909,22 @@ def print_score(record: dict[str, Any]) -> None:
         f"competitive={record.get('competitive_capability', record['accuracy']):.6f} "
         f"accuracy={record['accuracy']:.6f} "
         f"semantic_vector={record.get('semantic_vector', 1.0):.6f} "
+        f"research_judge={format_optional_score(record.get('research_judge'))} "
         f"performance={record['performance']:.6f} "
         f"stability={record['stability']:.6f}"
     )
     if record["reject_reasons"]:
         print("[self-iterate] reasons: " + "; ".join(record["reject_reasons"]))
     print(f"[self-iterate] report: {record['report']}")
+
+
+def format_optional_score(value: object) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.6f}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def patch_metadata(patch: PatchSnapshot) -> dict[str, Any]:
