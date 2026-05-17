@@ -112,10 +112,40 @@ fn go_import_specs(import_declaration: &str) -> Vec<String> {
 }
 
 fn next_go_import_quote(value: &str, start: usize) -> Option<(usize, char)> {
-    value[start..]
-        .char_indices()
-        .find(|(_, character)| matches!(character, '"' | '`'))
-        .map(|(offset, character)| (start + offset, character))
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut characters = value[start..].char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        let index = start + offset;
+        if line_comment {
+            if character == '\n' {
+                line_comment = false;
+            }
+            continue;
+        }
+        if block_comment {
+            if character == '*' && value[index + character.len_utf8()..].starts_with('/') {
+                characters.next();
+                block_comment = false;
+            }
+            continue;
+        }
+        if character == '/' && value[index + character.len_utf8()..].starts_with('/') {
+            characters.next();
+            line_comment = true;
+            continue;
+        }
+        if character == '/' && value[index + character.len_utf8()..].starts_with('*') {
+            characters.next();
+            block_comment = true;
+            continue;
+        }
+        if matches!(character, '"' | '`') {
+            return Some((index, character));
+        }
+    }
+
+    None
 }
 
 fn go_import_spec_before_quote(
@@ -170,5 +200,28 @@ fn is_import_node(node: Node<'_>) -> bool {
         | "using_declaration"
         | "using_directive" => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::go_import_specs;
+
+    #[test]
+    fn go_import_specs_ignore_quotes_inside_multiline_comments() {
+        let specs = go_import_specs(
+            r#"
+import (
+    "context"
+    /*
+       alias "example.com/commented"
+       "example.com/also-commented"
+    */
+    named "example.com/used"
+)
+"#,
+        );
+
+        assert_eq!(specs, ["context", "named example.com/used"]);
     }
 }

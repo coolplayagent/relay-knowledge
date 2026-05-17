@@ -4,6 +4,7 @@ use crate::domain::{
     CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeSymbolRecord,
 };
+use rusqlite::limits::Limit;
 
 const TEST_SOURCE_SCOPE: &str = "code:test:import-target:commit:tree";
 
@@ -38,8 +39,62 @@ async fn target_symbol_import_queries_filter_importing_paths_before_limit() {
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
 }
 
+#[tokio::test]
+async fn target_symbol_import_queries_chunk_large_hint_sets() {
+    let store = store_with_snapshot(snapshot_with_many_target_symbol_hints()).await;
+    store
+        .run(|connection| {
+            connection.set_limit(Limit::SQLITE_LIMIT_VARIABLE_NUMBER, 520);
+            Ok(())
+        })
+        .await
+        .expect("sqlite variable limit should be set");
+    let selector =
+        CodeRepositorySelector::new("fixture", "commit", Vec::new(), vec!["go".to_owned()])
+            .expect("selector should validate");
+
+    let hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "TargetSymbol",
+                selector,
+                CodeQueryKind::Imports,
+                5,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("large target-symbol import query should stay within sqlite bind limits");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/consumer.go");
+    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("pkg139"));
+}
+
 fn snapshot_with_path_filtered_target_symbol_imports() -> CodeIndexSnapshot {
-    let mut files = vec![file("target-symbol-file", "lib/target.go", "go")];
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..550 {
+        let file_id = format!("noise-symbol-file-{index:03}");
+        let path = format!("vendor/noise_{index:03}/target.go");
+        files.push(file(&file_id, &path, "go"));
+        symbols.push(symbol(
+            &format!("noise-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "TargetSymbol",
+            "go",
+        ));
+    }
+    files.push(file("target-symbol-file", "src/lib/target.go", "go"));
+    symbols.push(symbol(
+        "target-symbol",
+        "target-symbol-file",
+        "src/lib/target.go",
+        "TargetSymbol",
+        "go",
+    ));
     let mut imports = Vec::new();
     for index in 0..550 {
         let file_id = format!("noise-importer-file-{index:03}");
@@ -76,15 +131,55 @@ fn snapshot_with_path_filtered_target_symbol_imports() -> CodeIndexSnapshot {
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
         files,
-        symbols: vec![symbol(
-            "target-symbol",
-            "target-symbol-file",
-            "lib/target.go",
-            "TargetSymbol",
-            "go",
-        )],
+        symbols,
         references: Vec::new(),
         imports,
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+fn snapshot_with_many_target_symbol_hints() -> CodeIndexSnapshot {
+    let mut files = Vec::new();
+    let mut symbols = Vec::new();
+    for index in 0..140 {
+        let file_id = format!("target-symbol-file-{index:03}");
+        let path = format!("src/pkg{index:03}/target.go");
+        files.push(file(&file_id, &path, "go"));
+        symbols.push(symbol(
+            &format!("target-symbol-{index:03}"),
+            &file_id,
+            &path,
+            "TargetSymbol",
+            "go",
+        ));
+    }
+    files.push(file("consumer-file", "src/consumer.go", "go"));
+
+    CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols,
+        references: Vec::new(),
+        imports: vec![import(
+            "consumer-import",
+            "consumer-file",
+            "src/consumer.go",
+            "example.com/pkg139",
+            Some("pkg139"),
+        )],
         calls: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

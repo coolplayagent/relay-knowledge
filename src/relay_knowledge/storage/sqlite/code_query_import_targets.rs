@@ -9,10 +9,13 @@ use crate::{
 
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
-    candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
-    push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
+    candidate_limit, fts_path_and_language_filter_sql, fts_values_for_limited_with_language,
+    language_filter_sql_for_column, path_filter_sql_for_column, push_language_filter_values,
+    push_path_filter_values, score_text, symbol_fts_match_query,
 };
 use super::required_scope;
+
+const SQLITE_BIND_BATCH_SIZE: usize = 500;
 
 pub(super) fn search_imports_by_target_symbols(
     connection: &Connection,
@@ -26,14 +29,12 @@ pub(super) fn search_imports_by_target_symbols(
     if symbol_targets.is_empty() {
         return Ok(Vec::new());
     }
-    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
     let target_hints = symbol_targets
         .iter()
         .map(|target| target.target_hint.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    values.extend(target_hints.iter().cloned().map(Value::Text));
     let matched_names_by_hint = symbol_targets.into_iter().fold(
         BTreeMap::<String, Vec<String>>::new(),
         |mut matched, target| {
@@ -44,6 +45,30 @@ pub(super) fn search_imports_by_target_symbols(
             matched
         },
     );
+
+    let mut rows = Vec::new();
+    for target_hint_chunk in target_hints.chunks(SQLITE_BIND_BATCH_SIZE) {
+        rows.extend(search_imports_by_target_hint_chunk(
+            connection,
+            status,
+            request,
+            target_hint_chunk,
+            &matched_names_by_hint,
+        )?);
+    }
+
+    Ok(rows)
+}
+
+fn search_imports_by_target_hint_chunk(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    target_hints: &[String],
+    matched_names_by_hint: &BTreeMap<String, Vec<String>>,
+) -> Result<Vec<ImportRow>, StorageError> {
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(target_hints.iter().cloned().map(Value::Text));
     let placeholders = placeholders(target_hints.len());
     let import_path_filter = path_filter_sql_for_column("i.path", status, request);
     let import_language_filter = language_filter_sql_for_column("f.language_id", status, request);
@@ -101,7 +126,9 @@ fn import_target_symbol_matches(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<ImportTargetSymbol>, StorageError> {
     let fts_query = symbol_fts_match_query(&request.query);
-    let sql = "
+    let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let sql = format!(
+        "
         SELECT path, name, language_id
         FROM code_repository_symbols
         WHERE source_scope = ?
@@ -111,16 +138,20 @@ fn import_target_symbol_matches(
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'symbol'
+                {fts_filter}
               ORDER BY bm25(code_repository_search) ASC, record_id ASC
               LIMIT ?
         )
         ORDER BY path ASC, line_start ASC
         LIMIT ?
-        ";
-    let mut statement = connection.prepare(sql)?;
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
-        params_from_iter(symbol_target_fts_values_for_limited(
+        params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
+            status,
+            request,
             &fts_query,
             candidate_limit(request),
             candidate_limit(request),
@@ -152,21 +183,6 @@ fn import_target_symbol_matches(
     }
 
     Ok(targets)
-}
-
-fn symbol_target_fts_values_for_limited(
-    source_scope: &str,
-    fts_query: &str,
-    fts_limit: usize,
-    limit: usize,
-) -> Vec<Value> {
-    vec![
-        Value::Text(source_scope.to_owned()),
-        Value::Text(fts_query.to_owned()),
-        Value::Text(source_scope.to_owned()),
-        Value::Integer(fts_limit as i64),
-        Value::Integer(limit as i64),
-    ]
 }
 
 #[derive(PartialEq, Eq)]
