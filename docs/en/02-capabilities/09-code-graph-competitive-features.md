@@ -20,6 +20,8 @@ Code graph capability lifts code search from text matching to structural underst
 
 Ordinary code search cannot distinguish same-named symbols across snapshots and cannot explain whether call edges are resolved. The code graph models snapshot symbols and canonical symbols together and returns uncertainty as metadata.
 
+Compared with pure grep, pure trigram, or pure embedding search, the code graph combines Sourcegraph/Zoekt-style lexical candidates, Tree-sitter structural captures, BM25 chunks, semantic/vector explanation recall, and revision scopes. Exact symbols and resolved edges take priority, while semantic similarity remains a supporting signal so natural-language relevance does not override structural facts.
+
 ## Command/API Entry Points
 
 ```bash
@@ -30,6 +32,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 ## Degradation and Diagnostics
 
 Parser or query failure is isolated to affected files and does not abort the entire repository batch. Unresolved or ambiguous edges are not presented as certain calls.
+Broad regex matches, unresolved edges, parser degradation, and stale code indexes are visible in responses; benchmark improvements must not rely on known path, query, or symbol special cases.
 
 ## Related Architecture Chapters
 

@@ -60,9 +60,10 @@ relay-knowledge service doctor
 - Code repository registration, tree-sitter indexing, full and incremental
   refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
   impact analysis.
-- Local file-location indexing without Everything or other external search
-  software: explicitly scan authorized roots and use SQLite/FTS5 to quickly
-  find files by name, path, extension, and directory.
+- Local file-location indexing without Everything, Spotlight, Windows Search,
+  locate, or other external search software: explicitly scan authorized roots
+  and use SQLite/FTS5 to quickly find files by name, path, extension, and
+  directory.
 - Bounded index refresh queues, persistent leases, retry/dead-letter handling,
   startup reconciliation, stale diagnostics, and scoped cursor metadata.
 - Worker queues, deterministic fallback proposals, manual proposal acceptance,

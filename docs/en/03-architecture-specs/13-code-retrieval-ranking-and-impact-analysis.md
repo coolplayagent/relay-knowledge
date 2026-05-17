@@ -25,9 +25,13 @@ Advanced code retrieval comes from fusing structural signals with lexical and se
 
 Signals include BM25, identifier-part matches, CamelCase/snake_case segmentation, normalized query-to-symbol name overlap, symbol-kind priors, path proximity, language filters, graph-edge confidence, call direction, non-test source path priority for caller/callee queries, a small symbol test/benchmark path penalty when the query has no test intent, class-member excerpt context for qualified method hits, import surface/re-export files, declaration surface priority for header chunks that already match declaration-shape evidence, chunk quality, freshness, semantic/vector rank, and rerank explanations. Test/benchmark path adjustments are disabled when the query itself asks for tests or benchmarks.
 
+Industry code-search practice requires lexical, structural, and semantic layering: Zoekt/Google Code Search style trigram candidates are good for substring and regex screening, BM25 for natural language and documentation chunks, Tree-sitter captures for symbols and edges, and semantic/vector retrieval for conceptual explanation queries. Ranking must not let semantic scores override exact symbols or resolved edges, and broad regex results cannot bypass scope, path, language, or revision filters.
+
 ## 4. Candidate Window
 
 FTS candidate windows apply scope/path/language filters before bounded scoring. High fan-out caller/callee queries are truncated by edge score and line containment so one call edge is not multiplied across unrelated chunks.
+
+Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
 
 ## 5. Impact Analysis
 
@@ -49,6 +53,7 @@ Impact output is not an absolute conclusion; it is a risk grouping with evidence
 - Query `foo_bar` can match `fooBar`, `FooBar`, and multipart symbol names, while typed edge queries stay narrower.
 - Caller/callee results point to chunks containing the call line.
 - Impact output explains whether each result came from diff, call, reference, import, or test signals.
+- Benchmarks are not improved by enumerating known queries, paths, or symbols; improvements come from general ranking signals, index structures, or candidate pushdown.
 
 ---
 

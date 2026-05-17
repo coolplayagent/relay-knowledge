@@ -41,11 +41,16 @@ CLI 可以生成服务定义和执行 doctor，但不应伪装成后台常驻管
 在扫描前拒绝相对路径配置，持久化 cursor 和诊断，执行扫描/查询 timeout 预算，
 报告被截断 root、扫描错误、新鲜度和 lag，不能阻塞查询路径，也不能静默扩大到未授权磁盘。
 
+文件系统 watcher 和 scan worker 必须按平台能力降级：Windows 可使用 USN cursor，macOS 可使用 FSEvents cursor，Linux 可使用 inotify/fanotify 或定期 bounded rescan。事件 overflow、journal reset、权限变化、root missing 和 cursor invalidation 都进入可恢复诊断状态，而不是触发无界全盘扫描。
+
+Overload 处理遵循 SRE 和 adaptive concurrency 原则：当队列、IO、CPU 或 provider budget 饱和时，系统优先拒绝新后台 work、延迟低优先级内容索引、保留查询热路径预算，并返回 retryable/paused/degraded 状态。
+
 ## 6. 验收标准
 
 - 崩溃重启后不会丢失必要刷新工作。
 - dead-letter task 不被诊断路径自动复活。
 - 后台 CPU/IO-heavy work 不阻塞查询热路径。
+- watcher lag、scan backlog、cursor invalidation 和 overload decision 可在 health/service doctor 中解释。
 
 ---
 

@@ -108,8 +108,11 @@ normalize file query
 - ripgrep performance notes: https://burntsushi.net/ripgrep/
 - Everything indexes and USN journal: https://www.voidtools.com/support/everything/indexes
 - Everything FAQ: https://www.voidtools.com/faq/
+- Windows Search property handlers: https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-propertyhandlers
+- Windows Search protocol handlers: https://learn.microsoft.com/en-us/windows/win32/search/-search-3x-wds-extidx-prot-implementing
 - Apple FSEvents: https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/TechnologyOverview/TechnologyOverview.html
 - Linux inotify: https://man7.org/linux/man-pages/man7/inotify.7.html
+- Linux fanotify: https://man7.org/linux/man-pages/man7/fanotify.7.html
 - plocate: https://plocate.sesse.net/
 - Google Zanzibar: https://www.usenix.org/conference/atc19/presentation/pang
 - Meta RAMP-TAO: https://engineering.fb.com/2021/08/18/core-infra/ramp-tao/
