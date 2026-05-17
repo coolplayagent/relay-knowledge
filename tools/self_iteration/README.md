@@ -108,23 +108,28 @@ The research judge evaluates research alignment, architecture soundness,
 reliability reasoning, performance generalization, implementation
 actionability, and fixture-special-casing risk. It can run through an
 OpenAI-compatible HTTP endpoint or through an open coding-agent CLI such as
-`relay-teams`, `codex`, `cc`, or `copilot`. All judge configuration comes from
-runtime environment variables:
+`opencode`, `relay-teams`, `codex`, `cc`, or `copilot`. When no judge backend or
+HTTP settings are provided, the CLI judge defaults to `opencode`. All judge
+overrides come from runtime environment variables:
 
-- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli`
+- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`; `opencode` is a
+  CLI alias that uses the default opencode command unless a custom command is
+  also set
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`, `RELAY_KNOWLEDGE_JUDGE_API_KEY`,
   `RELAY_KNOWLEDGE_JUDGE_MODEL`
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`, with aliases
   `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` and
-  `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`
+  `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`; when unset, the default is
+  `opencode run --file {prompt_file} "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests."`
 - Shared timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
 
-CLI commands receive the judge prompt on stdin by default. Command templates may
-also use `{workspace}`, `{prompt_file}`, or `{prompt}` placeholders. The harness
-requires either HTTP or CLI judges to return strict JSON. If no judge is
-configured, the run records `judge_skipped` and the default local loop remains
-unblocked; explicit misconfiguration, malformed JSON, low confidence, low
-overall score, or low anti-fixture-special-casing score rejects the candidate.
+Custom CLI commands receive the judge prompt on stdin by default. Command
+templates may also use `{workspace}`, `{prompt_file}`, or `{prompt}`
+placeholders. The harness requires either HTTP or CLI judges to return strict
+JSON. Set `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` to record `judge_skipped`; `off`,
+`disabled`, `skip`, and `false` are accepted as disable aliases. Explicit
+misconfiguration, malformed JSON, low confidence, low overall score, or low
+anti-fixture-special-casing score rejects the candidate.
 
 Case objectives are continuous quality scores, not pass-rate counters. A passed case
 at rank 1 scores `1.0`; a passed case at rank `N > 1` scores `1.0 / N` even

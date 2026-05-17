@@ -91,14 +91,14 @@ foundational_capability * 0.20
 + stability * 0.25
 ```
 
-research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `relay-teams`、`codex`、`cc` 或 `copilot`。所有 judge 配置都来自运行时环境变量：
+research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `opencode`、`relay-teams`、`codex`、`cc` 或 `copilot`。未提供 judge backend 或 HTTP 配置时，CLI judge 默认使用 `opencode`。所有 judge 覆盖配置都来自运行时环境变量：
 
-- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli`
+- `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`；`opencode` 是 CLI alias，未设置自定义命令时使用默认 opencode 命令
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`、`RELAY_KNOWLEDGE_JUDGE_API_KEY`、`RELAY_KNOWLEDGE_JUDGE_MODEL`
-- CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`，也支持别名 `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 和 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`
+- CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`，也支持别名 `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 和 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`；未设置时默认命令为 `opencode run --file {prompt_file} "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests."`
 - 通用 timeout: `RELAY_KNOWLEDGE_JUDGE_TIMEOUT_SECONDS`
 
-CLI command 默认通过 stdin 接收 judge prompt；命令模板也可以使用 `{workspace}`、`{prompt_file}` 或 `{prompt}` 占位符。harness 要求 HTTP 或 CLI judge 返回严格 JSON。未配置 judge 时记录 `judge_skipped`，不会阻塞默认本地自迭代；显式配置但缺少必需环境变量、返回非法 JSON、低置信度、低总分或低 anti-fixture-special-casing 分数时会拒绝候选。
+自定义 CLI command 默认通过 stdin 接收 judge prompt；命令模板也可以使用 `{workspace}`、`{prompt_file}` 或 `{prompt}` 占位符。harness 要求 HTTP 或 CLI judge 返回严格 JSON。设置 `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` 时记录 `judge_skipped`；`off`、`disabled`、`skip` 和 `false` 也作为禁用别名。显式配置但缺少必需环境变量、返回非法 JSON、低置信度、低总分或低 anti-fixture-special-casing 分数时会拒绝候选。
 
 case objective 是连续质量分，不是通过率计数。case 在 rank 1 通过时得
 `1.0`；rank `N > 1` 即使仍在该 case 的 `max_rank` 采纳阈值内，也只得
