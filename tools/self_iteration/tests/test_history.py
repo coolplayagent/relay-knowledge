@@ -8,7 +8,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from history import append_run, best_accepted_run, export_history, history_paths, previous_scored_run
+from history import (
+    append_run,
+    best_accepted_run,
+    ensure_history,
+    export_history,
+    history_paths,
+    previous_scored_run,
+)
 
 
 class HistoryTests(unittest.TestCase):
@@ -77,6 +84,18 @@ class HistoryTests(unittest.TestCase):
             )
 
             self.assertEqual(previous_scored_run(paths)["run_id"], "latest")
+
+    def test_history_initializes_progressive_memory_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+
+            ensure_history(paths)
+
+            self.assertTrue(paths.memory_summaries.is_dir())
+            self.assertTrue(paths.memory_details.is_dir())
+            self.assertTrue(paths.memory_artifacts.is_dir())
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ class HistoryPaths:
     reports: Path
     patches: Path
     work: Path
+    memory: Path
+    memory_index: Path
+    memory_summaries: Path
+    memory_details: Path
+    memory_artifacts: Path
     runs_jsonl: Path
     score_csv: Path
     score_svg: Path
@@ -27,6 +32,11 @@ def history_paths(workspace: Path) -> HistoryPaths:
         reports=root / "reports",
         patches=root / "patches",
         work=root / "work",
+        memory=root / "memory",
+        memory_index=root / "memory" / "index.jsonl",
+        memory_summaries=root / "memory" / "summaries",
+        memory_details=root / "memory" / "details",
+        memory_artifacts=root / "memory" / "artifacts",
         runs_jsonl=root / "runs.jsonl",
         score_csv=root / "score.csv",
         score_svg=root / "score.svg",
@@ -37,6 +47,9 @@ def ensure_history(paths: HistoryPaths) -> None:
     paths.reports.mkdir(parents=True, exist_ok=True)
     paths.patches.mkdir(parents=True, exist_ok=True)
     paths.work.mkdir(parents=True, exist_ok=True)
+    paths.memory_summaries.mkdir(parents=True, exist_ok=True)
+    paths.memory_details.mkdir(parents=True, exist_ok=True)
+    paths.memory_artifacts.mkdir(parents=True, exist_ok=True)
 
 
 def append_run(paths: HistoryPaths, record: dict[str, Any]) -> None:

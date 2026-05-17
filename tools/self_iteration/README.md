@@ -47,15 +47,16 @@ Each iteration:
 4. Runs build, lint, tests, repository retrieval evaluations, and the self-iteration documentation gate.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
-7. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md` before committing.
-8. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
-9. Restores the iteration start commit when the candidate is rejected.
+7. Writes progressive memory entries under `.git/relay-knowledge-self-iteration/memory/`.
+8. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md` before committing.
+9. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
+10. Restores the iteration start commit when the candidate is rejected.
 
 If the worktree is dirty at startup, the loop exits immediately instead of
 retrying the same non-retryable precondition failure.
 
 Implementation candidates must update
-`docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md` with the
+`docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md` with the
 algorithm, architecture, invariants, expected case/metric impact, and known
 risks before evaluation. The harness adds a
 `self_iteration_algorithm_documentation` gate to reject code, test, benchmark,
@@ -63,6 +64,21 @@ or harness-policy changes that do not carry those notes. The prompt also treats
 `.git/relay-knowledge-self-iteration/patches/` as long-term memory: it lists a
 bounded patch index and instructs Codex to read only relevant historical patch
 files in small ranges when reasoning about the next candidate.
+
+The progressive memory store is the first context entry point for future runs:
+
+- `memory/index.jsonl` is a compact machine-readable index of accepted
+  optimizations, rejected attempts, quality-gate failures, and observed
+  accuracy or performance regressions.
+- `memory/summaries/<id>.md` contains the short record Codex should read first.
+- `memory/details/<id>.md` contains the full score, gate, case, metric, patch,
+  and report references for follow-up inspection.
+- `memory/artifacts/<id>/` is reserved for optional extracted artifacts such as
+  trimmed report snippets or judge output.
+
+The prompt includes only a bounded memory index. Codex should load matching
+summary files first, then open detail or patch files only when the summary is
+relevant to the current gate, metric, case, path, or algorithm objective.
 
 ## Scoring and acceptance
 

@@ -47,16 +47,26 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 4. 运行 build、lint、tests、代码仓库检索评估和自迭代文档 gate。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs.jsonl`。
-7. 采纳候选前，将本轮采用的优化思路、变更文件、指标改善和已知退化追加到 `docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`。
-8. 只有当上一轮改进采纳策略接受候选时，才把候选净改动和采纳记录 squash 成一个 commit。
-9. 候选被拒绝时，恢复到本轮开始的 commit。
+7. 将渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`。
+8. 采纳候选前，将本轮采用的优化思路、变更文件、指标改善和已知退化追加到 `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`。
+9. 只有当上一轮改进采纳策略接受候选时，才把候选净改动和采纳记录 squash 成一个 commit。
+10. 候选被拒绝时，恢复到本轮开始的 commit。
 
 如果启动时工作树是 dirty 状态，循环会立即退出，而不是重复重试同一个不可重试的前置条件失败。
 
 实现类候选必须在评估前更新
-`docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md`，写清算法、架构、不变量、预期 case/metric 影响和已知风险。harness 会追加
+`docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`，写清算法、架构、不变量、预期 case/metric 影响和已知风险。harness 会追加
 `self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 也会把
 `.git/relay-knowledge-self-iteration/patches/` 当作长期记忆：先列出有界 patch 索引，再要求 Codex 只对相关历史 patch 做小范围渐进读取。
+
+渐进式记忆是后续 Codex 运行的第一层上下文入口：
+
+- `memory/index.jsonl`：紧凑的机器可读索引，记录已采纳优化、被拒绝尝试、质量门禁失败、准确率退化和性能退化。
+- `memory/summaries/<id>.md`：Codex 应优先读取的短摘要。
+- `memory/details/<id>.md`：完整评分、gate、case、metric、patch 和 report 引用。
+- `memory/artifacts/<id>/`：预留给裁剪后的报告片段、judge 输出或其他可选证据。
+
+prompt 只注入有界 memory index。Codex 应先按当前 gate、metric、case、路径或算法目标读取相关 summary，再在必要时打开 detail 或 patch，不能一次性读取全部 reports、patches 或 memory details。
 
 ## 评分和采纳
 

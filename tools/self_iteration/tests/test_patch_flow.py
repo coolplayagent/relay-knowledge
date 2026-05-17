@@ -16,6 +16,7 @@ import self_iterate
 from codex_driver import CodexResult
 from evaluator import EvaluationRun, register_command
 from history import append_run, history_paths
+from memory import write_run_memory
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 from self_iterate import capture_patch, commit_candidate, reject_candidate, run_loop
 
@@ -111,7 +112,7 @@ class PatchFlowTests(unittest.TestCase):
 
             prompt = self_iterate.build_prompt(paths, "next")
 
-            self.assertIn("must also update docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md", prompt)
+            self.assertIn("must also update docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md", prompt)
             self.assertIn("algorithm, architecture, invariants", prompt)
             self.assertIn("Long-term patch memory index:", prompt)
             self.assertIn(str(patch_path), prompt)
@@ -251,9 +252,9 @@ class PatchFlowTests(unittest.TestCase):
                 "diff --git a/src/relay_knowledge/code.rs b/src/relay_knowledge/code.rs\n"
                 "--- a/src/relay_knowledge/code.rs\n"
                 "+++ b/src/relay_knowledge/code.rs\n"
-                "diff --git a/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md b/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
-                "--- a/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
-                "+++ b/docs/zh/05-benchmarks/self-iteration-accepted-optimizations.md\n"
+                "diff --git a/docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md b/docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md\n"
+                "--- a/docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md\n"
+                "+++ b/docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md\n"
             ),
             sha256="abc",
             base_ref="HEAD",
@@ -379,6 +380,32 @@ class PatchFlowTests(unittest.TestCase):
             self.assertIn("commit=abc123", prompt)
             self.assertIn("SQLite preselection", prompt)
 
+    def test_prompt_includes_progressive_memory_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            write_run_memory(
+                paths,
+                {
+                    "run_id": "memory-run",
+                    "timestamp": "2026-05-17T00:00:00+00:00",
+                    "accepted": False,
+                    "score": 0.2,
+                    "reject_reasons": ["quality gates failed: cargo_test"],
+                    "gates": [{"name": "cargo_test", "passed": False}],
+                    "cases": [],
+                    "metrics": [],
+                },
+            )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Progressive memory index:", prompt)
+            self.assertIn("summary_path=", prompt)
+            self.assertIn("detail_path=", prompt)
+            self.assertIn("Do not bulk-read all reports", prompt)
+
     def test_full_scope_register_ignores_repository_filters(self) -> None:
         command = register_command(
             Path("/bin/relay-knowledge"),
@@ -432,7 +459,7 @@ class PatchFlowTests(unittest.TestCase):
                 / "docs"
                 / "zh"
                 / "05-benchmarks"
-                / "self-iteration-accepted-optimizations.md"
+                / "04-self-iteration-accepted-optimizations.md"
             ).read_text(encoding="utf-8")
             self.assertIn("## run", doc)
             self.assertIn("bounded candidate index", doc)
@@ -569,7 +596,7 @@ class PatchFlowTests(unittest.TestCase):
             self.assertEqual(run(workspace, ["git", "rev-list", "--count", f"{base_ref}..HEAD"]).stdout.strip(), "1")
             self.assertEqual((workspace / "tracked.txt").read_text(encoding="utf-8"), "candidate\n")
             self.assertEqual((workspace / "generated.txt").read_text(encoding="utf-8"), "generated\n")
-            notes = workspace / "docs" / "zh" / "05-benchmarks" / "self-iteration-accepted-optimizations.md"
+            notes = workspace / "docs" / "zh" / "05-benchmarks" / "04-self-iteration-accepted-optimizations.md"
             self.assertIn("candidate algorithm", notes.read_text(encoding="utf-8"))
             status = run(workspace, ["git", "status", "--short"]).stdout.strip()
             self.assertEqual(status, "")
@@ -613,7 +640,7 @@ def fake_committing_codex(config: object, _prompt: str) -> CodexResult:
     run(workspace, ["git", "add", "tracked.txt"])
     run(workspace, ["git", "commit", "-m", "candidate one"])
     (workspace / "generated.txt").write_text("generated\n", encoding="utf-8")
-    notes = workspace / "docs" / "zh" / "05-benchmarks" / "self-iteration-accepted-optimizations.md"
+    notes = workspace / "docs" / "zh" / "05-benchmarks" / "04-self-iteration-accepted-optimizations.md"
     notes.parent.mkdir(parents=True)
     notes.write_text("candidate algorithm and architecture notes\n", encoding="utf-8")
     run(workspace, ["git", "add", "generated.txt", str(notes)])
