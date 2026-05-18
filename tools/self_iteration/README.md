@@ -147,14 +147,25 @@ misconfiguration, malformed JSON, low confidence, low overall score, or low
 anti-fixture-special-casing score rejects the candidate.
 
 Case objectives are continuous quality scores, not pass-rate counters. A passed case
-at rank 1 scores `1.0`; a passed case at rank `N > 1` scores `1.0 / N` even
-when `N` is within the case's `max_rank` acceptance threshold. Empty negative
-cases that pass with `rank=0` still score `1.0`. Missing foundational,
-competitive, or semantic/vector objectives default to `0.0` instead of silently
-appearing complete, and `accuracy` averages only the foundational and
-competitive objectives that are actually present. Metric budget misses are
-reported in `metric_budget_failures` while the existing budget-normalized
-`performance` score remains the weighted latency signal.
+at rank 1 starts from `1.0`; a passed case at rank `N > 1` starts from
+`1.0 / N` even when `N` is within the case's `max_rank` acceptance threshold.
+Cases may also declare `expected_all`, `expected_sequence`, `min_score`,
+`require_expected_all`, `require_expected_sequence`,
+`forbidden_rank_penalty`, and `forbidden_rank_penalty_only`. These fields let a
+case pass while still scoring below `1.0` when it finds only part of a
+relationship set, misses execution-flow steps, or ranks a forbidden result too
+high. Empty negative cases that pass with `rank=0` still score `1.0`. Missing
+foundational, competitive, or semantic/vector objectives default to `0.0`
+instead of silently appearing complete, and `accuracy` averages only the
+foundational and competitive objectives that are actually present. Metric
+budget misses are reported in `metric_budget_failures`.
+
+`performance` uses `budget_relative_v1`. If no compatible previous run exists,
+metrics use their budget-normalized score. Once the previous run also used this
+strategy, each metric blends budget fit with relative progress against the
+previous value, so a latency metric that is merely under budget no longer stays
+at `1.0`; real improvements keep producing bounded scoring signal while normal
+metric noise is still filtered by the epsilon policy.
 
 `accuracy` is retained as a compatibility roll-up of foundational and competitive case scores. Acceptance uses an `epsilon-Pareto acceptance with hard constraints and weighted-score tie-breaker` policy. In multi-objective optimization terms, build/test gates and candidate diff existence are hard constraints, foundational_capability, competitive_capability, semantic_vector, and stability are protected objectives for basic usability, advanced retrieval quality, semantic/vector source coverage, backend availability, and latency observations are objectives, epsilon thresholds suppress measurement noise, and the weighted score is a tie-breaker rather than the only decision rule.
 
@@ -212,12 +223,18 @@ enumerating cases.
   evaluator.
 - Multi-language repository retrieval targets cover relay-teams Python and
   JavaScript, opencode TypeScript/TSX, LevelDB C++, and Linux C in the default
-  profile; Kubernetes Go and Spring Framework Java remain in the exhaustive
-  profile. The JavaScript, TypeScript/TSX, Java, C, and C++ cases intentionally
-  include nested classes, exported functions, caller/callee lookup, relative and
-  tsconfig-alias imports, hybrid concept queries, and path/language filters to
-  drive parser, identity, edge-finalize, FTS/BM25, and ranking-fusion
-  improvements.
+  profile; Kubernetes Go, Spring Framework Java, RustFS Rust, and Codex Python
+  remain in the exhaustive profile. Relationship targets are split into
+  regression and challenge groups. Regression cases keep path filters and
+  broader rank thresholds as stable guardrails. Challenge cases remove path
+  filters, lower limits and max ranks, and add `expected_all` or
+  `expected_sequence` scoring so passed Rust, Go, C, C++, Java, Python,
+  JavaScript, and TypeScript inheritance, dependency, caller-chain, and
+  execution-flow cases still leave ranking and coverage improvement room. The
+  cases intentionally include nested classes, exported functions, callback/trait
+  relationships, caller/callee lookup, relative and tsconfig-alias imports,
+  hybrid concept queries, and path/language filters to drive parser, identity,
+  edge-finalize, FTS/BM25, and ranking-fusion improvements.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
   and add combined `register_index_budget_ms` budgets. The evaluator records
@@ -233,5 +250,7 @@ enumerating cases.
 - `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.
 - `/opt/workspace/kubernetes` full `scope=all` Go indexing in the `exhaustive` profile for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
 - `/opt/workspace/spring-framework` full `scope=all` Java indexing in the `exhaustive` profile for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
+- `/opt/workspace/rustfs` full `scope=all` Rust indexing in the `exhaustive` profile for trait implementation, function-local imports, authentication caller chains, and startup execution flow.
+- `/opt/workspace/codex` full `scope=all` Python indexing in the `exhaustive` profile for exception inheritance, relative imports, retry caller chains, and app-server stdio execution flow.
 
 All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux, Kubernetes, or Spring Framework full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

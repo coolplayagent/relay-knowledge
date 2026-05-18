@@ -14,6 +14,11 @@ from typing import Any
 
 from file_fixture_eval import evaluate_file_fixtures
 from llm_judge import evaluate_research_judge_suite
+from ranked_case_scoring import (
+    RankedHitAssessment,
+    assess_ranked_hits,
+    hit_matches_any,
+)
 from scoring import CaseObservation, EvaluationObservation, GateObservation, MetricObservation
 
 
@@ -749,21 +754,29 @@ def score_query_case(repo_name: str, case: dict[str, Any], result: CommandResult
     expected = case.get("expected", [])
     forbidden = case.get("forbidden", [])
     max_rank = int(case.get("max_rank", 1))
-    rank = first_expected_rank(hits, expected)
-    false_positives = sum(1 for hit in hits if hit_matches_any(hit, forbidden))
-    passed = (not expected or (rank is not None and rank <= max_rank)) and false_positives == 0
+    assessment = assess_ranked_hits(case, hits, expected, forbidden)
+    rank = assessment.rank
+    passed = not assessment.failures
     if case.get("expect_empty"):
         passed = len(hits) == 0
         rank = 0 if passed else None
+        assessment = RankedHitAssessment(
+            rank=rank,
+            false_positive_count=0,
+            score=1.0 if passed else 0.0,
+            details="expect_empty",
+            failures=[] if passed else [f"expected_empty_results={len(hits)}"],
+        )
     return CaseObservation(
         case_id=case["id"],
         repository=repo_name,
         passed=passed,
         rank=rank,
         max_rank=max_rank,
-        false_positive_count=false_positives,
-        message=f"results={len(hits)} rank={rank}",
+        false_positive_count=assessment.false_positive_count,
+        message=f"results={len(hits)} rank={rank} {assessment.details}".strip(),
         objective=objective,
+        score_override=assessment.score,
     )
 
 
@@ -778,54 +791,6 @@ def repository_case_objective(case: dict[str, Any]) -> str:
     if kind in competitive_kinds or any(marker in case_id for marker in competitive_markers):
         return "competitive_capability"
     return "foundational_capability"
-
-
-def first_expected_rank(hits: list[dict[str, Any]], expected: list[dict[str, Any]]) -> int | None:
-    for index, hit in enumerate(hits, start=1):
-        if hit_matches_any(hit, expected):
-            return index
-    return None
-
-
-def hit_matches_any(hit: dict[str, Any], patterns: list[dict[str, Any]]) -> bool:
-    return any(hit_matches(hit, pattern) for pattern in patterns)
-
-
-def hit_matches(hit: dict[str, Any], pattern: dict[str, Any]) -> bool:
-    if "path" in pattern and hit.get("path") != pattern["path"]:
-        return False
-    if "relative_path" in pattern and hit.get("relative_path") != pattern["relative_path"]:
-        return False
-    if "file_name" in pattern and hit.get("file_name") != pattern["file_name"]:
-        return False
-    if "extension" in pattern and hit.get("extension") != pattern["extension"]:
-        return False
-    if "status" in pattern and hit.get("status") != pattern["status"]:
-        return False
-    if "line_start" in pattern:
-        line_range = hit.get("line_range", {})
-        start = int(line_range.get("start", -1))
-        end = int(line_range.get("end", -1))
-        expected = int(pattern["line_start"])
-        if not (start <= expected <= end or start == expected):
-            return False
-    if "edge_resolution_state" in pattern:
-        if hit.get("edge_resolution_state") != pattern["edge_resolution_state"]:
-            return False
-    if "edge_target_hint" in pattern:
-        target = hit.get("edge_target_hint") or ""
-        if pattern["edge_target_hint"] not in target:
-            return False
-    if "excerpt_contains" in pattern:
-        if pattern["excerpt_contains"] not in hit.get("excerpt", ""):
-            return False
-    if "content_contains" in pattern:
-        if pattern["content_contains"] not in hit.get("content", ""):
-            return False
-    if "retriever_source" in pattern:
-        if pattern["retriever_source"] not in hit.get("retriever_sources", []):
-            return False
-    return True
 
 
 def finish_evaluation(

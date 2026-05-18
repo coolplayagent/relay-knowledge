@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +28,7 @@ SCORE_EPSILON = 0.0005
 RATIO_EPSILON = 0.005
 METRIC_RELATIVE_EPSILON = 0.03
 METRIC_ABSOLUTE_EPSILON = 25.0
+PERFORMANCE_STRATEGY = "budget_relative_v1"
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,7 @@ class ScoreBreakdown:
     stability: float
     accepted: bool
     reject_reasons: list[str]
+    performance_strategy: str = PERFORMANCE_STRATEGY
     degradations: list[dict[str, Any]] = field(default_factory=list)
     improvements: list[dict[str, Any]] = field(default_factory=list)
     metric_budget_failures: list[dict[str, Any]] = field(default_factory=list)
@@ -117,6 +120,7 @@ class ScoreBreakdown:
                 else None
             ),
             "performance": round(self.performance, 6),
+            "performance_strategy": self.performance_strategy,
             "stability": round(self.stability, 6),
             "accepted": self.accepted,
             "reject_reasons": self.reject_reasons,
@@ -162,7 +166,7 @@ def score_evaluation(
         if research_judge_scores
         else None
     )
-    performance = average([metric.score() for metric in observation.metrics], default=1.0)
+    performance = performance_score(observation.metrics, previous_run)
     stability = stability_score(observation.gates, observation.generated_diff)
     budget_failures = metric_budget_failures(observation.metrics)
     score = (
@@ -595,6 +599,42 @@ def keyed_items(items: Any, key: str) -> dict[str, dict[str, Any]]:
     }
 
 
+def performance_score(
+    metrics: list[MetricObservation],
+    previous_run: dict[str, Any] | None,
+) -> float:
+    if not metrics:
+        return 1.0
+    previous_metrics = {}
+    if previous_run and previous_run.get("performance_strategy") == PERFORMANCE_STRATEGY:
+        previous_metrics = keyed_items(previous_run.get("metrics", []), "name")
+    return average(
+        [
+            metric_progress_score(metric, previous_metrics.get(metric.name))
+            for metric in metrics
+        ],
+        default=1.0,
+    )
+
+
+def metric_progress_score(
+    metric: MetricObservation,
+    previous_metric: dict[str, Any] | None,
+) -> float:
+    budget_score = metric.score()
+    if previous_metric is None:
+        return budget_score
+    previous_value = float(previous_metric.get("value", -1.0))
+    if previous_value <= 0.0 or metric.value <= 0.0:
+        return budget_score
+    if metric.lower_is_better:
+        ratio = previous_value / metric.value
+    else:
+        ratio = metric.value / previous_value
+    progress_score = clamp_score(0.5 + math.log(max(ratio, 0.01), 2) * 0.25)
+    return clamp_score((budget_score * 0.8) + (progress_score * 0.2))
+
+
 def numeric_degradation(
     kind: str,
     name: str,
@@ -666,6 +706,14 @@ def numeric_change(
 
 def case_worsened(previous: dict[str, Any], current: CaseObservation) -> dict[str, Any] | None:
     previous_passed = bool(previous.get("passed"))
+    previous_score = previous_case_score(previous)
+    current_score = current.score()
+    score_worsened = meaningful_decrease(
+        current_score,
+        previous_score,
+        RATIO_EPSILON,
+        0.0,
+    )
     rank_worsened = rank_value(current.rank, current.max_rank) > rank_value(
         previous.get("rank"),
         int(previous.get("max_rank", current.max_rank)),
@@ -679,9 +727,11 @@ def case_worsened(previous: dict[str, Any], current: CaseObservation) -> dict[st
         reason = "rank_worsened"
     elif false_positives_worsened:
         reason = "false_positives_increased"
+    elif score_worsened:
+        reason = "score_worsened"
     else:
         return None
-    return {
+    change = {
         "kind": "case",
         "objective": current.objective,
         "case_id": current.case_id,
@@ -691,18 +741,29 @@ def case_worsened(previous: dict[str, Any], current: CaseObservation) -> dict[st
             "passed": previous_passed,
             "rank": previous.get("rank"),
             "false_positive_count": previous.get("false_positive_count", 0),
+            "score": round(previous_score, 6),
         },
         "current": {
             "passed": current.passed,
             "rank": current.rank,
             "false_positive_count": current.false_positive_count,
+            "score": round(current_score, 6),
         },
         "message": current.message,
     }
+    return change
 
 
 def case_improved(previous: dict[str, Any], current: CaseObservation) -> dict[str, Any] | None:
     previous_passed = bool(previous.get("passed"))
+    previous_score = previous_case_score(previous)
+    current_score = current.score()
+    score_improved = meaningful_increase(
+        current_score,
+        previous_score,
+        RATIO_EPSILON,
+        0.0,
+    )
     rank_improved = rank_value(current.rank, current.max_rank) < rank_value(
         previous.get("rank"),
         int(previous.get("max_rank", current.max_rank)),
@@ -716,9 +777,11 @@ def case_improved(previous: dict[str, Any], current: CaseObservation) -> dict[st
         reason = "rank_improved"
     elif false_positives_improved:
         reason = "false_positives_decreased"
+    elif score_improved:
+        reason = "score_improved"
     else:
         return None
-    return {
+    change = {
         "kind": "case",
         "objective": current.objective,
         "case_id": current.case_id,
@@ -728,14 +791,31 @@ def case_improved(previous: dict[str, Any], current: CaseObservation) -> dict[st
             "passed": previous_passed,
             "rank": previous.get("rank"),
             "false_positive_count": previous.get("false_positive_count", 0),
+            "score": round(previous_score, 6),
         },
         "current": {
             "passed": current.passed,
             "rank": current.rank,
             "false_positive_count": current.false_positive_count,
+            "score": round(current_score, 6),
         },
         "message": current.message,
     }
+    return change
+
+
+def previous_case_score(previous: dict[str, Any]) -> float:
+    if "score_override" in previous and previous["score_override"] is not None:
+        return clamp_score(float(previous["score_override"]))
+    if not bool(previous.get("passed")):
+        return 0.0
+    rank = previous.get("rank")
+    if rank is None or int(rank) <= 0:
+        rank_score = 1.0
+    else:
+        rank_score = 1.0 / int(rank)
+    false_positive_penalty = min(0.5, int(previous.get("false_positive_count", 0)) * 0.1)
+    return max(0.0, rank_score - false_positive_penalty)
 
 
 def rank_value(rank: Any, max_rank: int) -> int:

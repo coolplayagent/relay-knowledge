@@ -1,0 +1,708 @@
+{
+  "query_cases": [
+    {
+      "id": "rustfs_rust_inheritance_iam_auth_s3auth",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "IAMAuth implements S3Auth async get_secret_key",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "rustfs/src/auth.rs"
+      ],
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "get_secret_key"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "rustfs_rust_dependency_auth_keystone",
+      "repository": "rustfs_rust",
+      "kind": "imports",
+      "query": "crate::auth_keystone",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "rustfs/src/auth.rs"
+      ],
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "crate::auth_keystone"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "rustfs_rust_call_chain_check_claims_from_token",
+      "repository": "rustfs_rust",
+      "kind": "callers",
+      "query": "check_claims_from_token",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "rustfs/src/auth.rs"
+      ],
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_key_valid"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "rustfs_rust_execution_flow_main_startup_observability",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "main startup init_obs set_global_guard init_allocator_reclaim",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "rustfs/src/main.rs"
+      ],
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "async_main"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "kubernetes_go_inheritance_ttl_controller_receiver_methods",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "Controller Run worker processItem TTL controller receiver methods",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "pkg/controller/ttl/ttl_controller.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "func (ttlc *Controller) Run"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "kubernetes_go_dependency_client_go_kubernetes",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "k8s.io/client-go/kubernetes",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "pkg/controller/ttl/ttl_controller.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "k8s.io/client-go/kubernetes"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "kubernetes_go_call_chain_process_item_worker",
+      "repository": "kubernetes_go_sample",
+      "kind": "callers",
+      "query": "processItem",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "pkg/controller/ttl/ttl_controller.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "worker"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "kubernetes_go_execution_flow_ttl_queue_patch",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "TTL controller enqueueNode processItem updateNodeIfNeeded patchNodeWithAnnotation",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "pkg/controller/ttl/ttl_controller.go"
+      ],
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "updateNodeIfNeeded"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "linux_c_inheritance_page_idle_bin_attribute_callbacks",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "page_idle_bitmap_attr bin_attribute page_idle_bitmap_read page_idle_bitmap_write callbacks",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "mm/page_idle.c"
+      ],
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "linux_c_dependency_linux_mm_header",
+      "repository": "linux_sample",
+      "kind": "imports",
+      "query": "linux/mm.h",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "mm/page_idle.c"
+      ],
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "linux/mm.h"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "linux_c_call_chain_page_idle_clear_refs",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "page_idle_clear_pte_refs",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "mm/page_idle.c"
+      ],
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "linux_c_execution_flow_page_idle_bitmap",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "page idle bitmap read write clear pte refs sysfs group init",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "mm/page_idle.c"
+      ],
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "leveldb_cpp_inheritance_filter_policy_override",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "BloomFilterPolicy inherits FilterPolicy KeyMayMatch override",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "util/bloom.cc"
+      ],
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "util/bloom.cc",
+          "excerpt_contains": "class BloomFilterPolicy : public FilterPolicy"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "leveldb_cpp_dependency_filter_policy_header",
+      "repository": "leveldb_cpp",
+      "kind": "imports",
+      "query": "leveldb/filter_policy.h",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "table/filter_block.cc"
+      ],
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "table/filter_block.cc",
+          "excerpt_contains": "leveldb/filter_policy.h"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "leveldb_cpp_call_chain_key_may_match_internal_get",
+      "repository": "leveldb_cpp",
+      "kind": "callers",
+      "query": "KeyMayMatch",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "table/table.cc"
+      ],
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "table/table.cc",
+          "excerpt_contains": "filter->KeyMayMatch"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "leveldb_cpp_execution_flow_version_set_builder_apply",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "VersionSet Builder Apply compact pointers deleted files added files SaveTo",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "db/version_set.cc"
+      ],
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "void Apply"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "spring_java_inheritance_extended_bean_info",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "ExtendedBeanInfo implements BeanInfo property descriptors",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "implements BeanInfo"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "spring_java_dependency_object_utils",
+      "repository": "spring_framework_java",
+      "kind": "imports",
+      "query": "org.springframework.util.ObjectUtils",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "org.springframework.util.ObjectUtils"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "spring_java_call_chain_candidate_write_method",
+      "repository": "spring_framework_java",
+      "kind": "callers",
+      "query": "isCandidateWriteMethod",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "findCandidateWriteMethods"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "spring_java_execution_flow_bean_wrapper_property_handler",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "CachedIntrospectionResults local property handler not writable property exception",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java"
+      ],
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "getLocalPropertyHandler"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "codex_python_inheritance_rpc_error_hierarchy",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "JsonRpcError AppServerRpcError ServerBusyError RetryLimitExceededError inheritance",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "sdk/python/src/codex_app_server/errors.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/errors.py",
+          "excerpt_contains": "class ServerBusyError(AppServerRpcError)"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "codex_python_dependency_retry_on_overload",
+      "repository": "codex_python",
+      "kind": "imports",
+      "query": ".retry retry_on_overload",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "sdk/python/src/codex_app_server/client.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "retry_on_overload"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "codex_python_call_chain_retry_on_overload",
+      "repository": "codex_python",
+      "kind": "callers",
+      "query": "retry_on_overload",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "sdk/python/src/codex_app_server/client.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "request_with_retry_on_overload"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "codex_python_execution_flow_app_server_client_stdio",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "AppServerClient start initialize request read message stdio app-server",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "sdk/python/src/codex_app_server/client.py"
+      ],
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "args.extend"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "relay_teams_js_inheritance_role_capability_workflow",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "normalizeRoleOption normalizeModelCapabilities role input modality capability matrix",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "frontend/dist/js/core/state.js"
+      ],
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "excerpt_contains": "normalizeModelCapabilities"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "relay_teams_js_dependency_event_router",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "./eventRouter.js",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "frontend/dist/js/core/stream.js"
+      ],
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "./eventRouter.js"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "relay_teams_js_call_chain_release_active_stream_handle",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "releaseActiveStreamHandle",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "frontend/dist/js/core/stream.js"
+      ],
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "attachRunStream"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "relay_teams_js_execution_flow_background_multiplex_stream",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "background stream discovery reconcile multiplex run event source reconnect",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "frontend/dist/js/core/stream.js"
+      ],
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "openRunStreamConnection"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "opencode_ts_inheritance_agent_service_context",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "Service extends Context.Service Agent Interface schema generate",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "packages/opencode/src/agent/agent.ts"
+      ],
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "extends Context.Service"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "opencode_ts_dependency_cache_policy_schema_options",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "./schema/options",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "packages/llm/src/cache-policy.ts"
+      ],
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/llm/src/cache-policy.ts",
+          "excerpt_contains": "./schema/options"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "opencode_ts_call_chain_generate_object_agent_service",
+      "repository": "opencode_typescript",
+      "kind": "callers",
+      "query": "generateObject",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": [
+        "packages/opencode/src/agent/agent.ts"
+      ],
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "calls generateObject"
+        }
+      ],
+      "case_group": "relationship_regression"
+    },
+    {
+      "id": "opencode_ts_execution_flow_openai_chat_protocol",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "OpenAI Chat protocol SSE tool calls lifecycle finish events route transport",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": [
+        "packages/llm/src/protocols/openai-chat.ts"
+      ],
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "ToolStream.empty"
+        }
+      ],
+      "case_group": "relationship_regression"
+    }
+  ]
+}

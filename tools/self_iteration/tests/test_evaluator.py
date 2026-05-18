@@ -12,6 +12,7 @@ from evaluator import (
     CommandResult,
     load_cases,
     repository_case_objective,
+    score_query_case,
     score_semantic_vector_case,
     semantic_vector_env_check,
     semantic_vector_runtime_profile,
@@ -195,6 +196,87 @@ class EvaluatorTests(unittest.TestCase):
 
         self.assertFalse(observation.passed)
         self.assertIn("missing_sources=['vector']", observation.message)
+
+    def test_repository_case_scores_expected_all_and_sequence_coverage(self) -> None:
+        case = {
+            "id": "flow_challenge",
+            "kind": "hybrid",
+            "query": "startup flow",
+            "max_rank": 1,
+            "min_score": 0.8,
+            "expected": [{"path": "src/main.rs", "excerpt_contains": "main"}],
+            "expected_all": [
+                {"path": "src/main.rs", "excerpt_contains": "main"},
+                {"path": "src/main.rs", "excerpt_contains": "missing step"},
+            ],
+            "expected_sequence": [
+                {"path": "src/main.rs", "excerpt_contains": "main"},
+                {"path": "src/main.rs", "excerpt_contains": "async_main"},
+            ],
+            "require_expected_all": False,
+        }
+        result = command_result(
+            {
+                "results": [
+                    {"path": "src/main.rs", "excerpt": "fn main()"},
+                    {"path": "src/main.rs", "excerpt": "async_main awaits service"},
+                ]
+            }
+        )
+
+        observation = score_query_case("repo", case, result)
+
+        self.assertTrue(observation.passed)
+        self.assertAlmostEqual(observation.score(), 0.833333, places=5)
+        self.assertIn("expected_all=1/2", observation.message)
+        self.assertIn("expected_sequence=2/2", observation.message)
+
+    def test_repository_case_can_require_all_expected_hits(self) -> None:
+        case = {
+            "id": "strict_all",
+            "kind": "hybrid",
+            "query": "strict all",
+            "max_rank": 1,
+            "expected": [{"path": "src/main.rs", "excerpt_contains": "main"}],
+            "expected_all": [
+                {"path": "src/main.rs", "excerpt_contains": "main"},
+                {"path": "src/main.rs", "excerpt_contains": "missing step"},
+            ],
+        }
+        result = command_result({"results": [{"path": "src/main.rs", "excerpt": "fn main()"}]})
+
+        observation = score_query_case("repo", case, result)
+
+        self.assertFalse(observation.passed)
+        self.assertIn("failures=expected_all=1/2", observation.message)
+
+    def test_repository_case_penalizes_ranked_forbidden_hits(self) -> None:
+        case = {
+            "id": "soft_forbidden",
+            "kind": "hybrid",
+            "query": "target",
+            "max_rank": 2,
+            "min_score": 0.2,
+            "forbidden_rank_penalty": 0.2,
+            "forbidden_rank_penalty_only": True,
+            "expected": [{"path": "target.rs", "excerpt_contains": "target"}],
+            "forbidden": [{"path": "noise.rs"}],
+        }
+        result = command_result(
+            {
+                "results": [
+                    {"path": "noise.rs", "excerpt": "wrong high-rank hit"},
+                    {"path": "target.rs", "excerpt": "target symbol"},
+                ]
+            }
+        )
+
+        observation = score_query_case("repo", case, result)
+
+        self.assertTrue(observation.passed)
+        self.assertEqual(observation.false_positive_count, 1)
+        self.assertAlmostEqual(observation.score(), 0.3)
+        self.assertIn("forbidden_penalty=0.200", observation.message)
 
 
 def command_result(payload: dict[str, object]) -> CommandResult:

@@ -1,0 +1,584 @@
+{
+  "query_cases": [
+    {
+      "id": "rustfs_rust_inheritance_iam_auth_s3auth_challenge",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "IAMAuth implements S3Auth async get_secret_key",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "get_secret_key"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/auth.rs"
+        },
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "IAMAuth"
+        }
+      ]
+    },
+    {
+      "id": "rustfs_rust_dependency_auth_keystone_challenge",
+      "repository": "rustfs_rust",
+      "kind": "imports",
+      "query": "crate::auth_keystone",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "crate::auth_keystone"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/auth.rs"
+        },
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "auth_keystone"
+        }
+      ]
+    },
+    {
+      "id": "rustfs_rust_call_chain_check_claims_from_token_challenge",
+      "repository": "rustfs_rust",
+      "kind": "callers",
+      "query": "check_claims_from_token",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_key_valid"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/auth.rs"
+        },
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_claims_from_token"
+        }
+      ]
+    },
+    {
+      "id": "rustfs_rust_execution_flow_main_startup_observability_challenge",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "main startup init_obs set_global_guard init_allocator_reclaim",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "async_main"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/main.rs"
+        },
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "init_obs"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "main"
+        },
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "async_main"
+        },
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "init_obs"
+        },
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "set_global_guard"
+        },
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "init_allocator_reclaim"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_inheritance_ttl_controller_receiver_methods_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "Controller Run worker processItem TTL controller receiver methods",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "func (ttlc *Controller) Run"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "processItem"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_dependency_client_go_kubernetes_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "k8s.io/client-go/kubernetes",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "k8s.io/client-go/kubernetes"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "kubernetes.Interface"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_call_chain_process_item_worker_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "callers",
+      "query": "processItem",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "worker"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "processItem"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_execution_flow_ttl_queue_patch_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "TTL controller enqueueNode processItem updateNodeIfNeeded patchNodeWithAnnotation",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "updateNodeIfNeeded"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "patchNodeWithAnnotation"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "enqueueNode"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "processItem"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "updateNodeIfNeeded"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "patchNodeWithAnnotation"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_inheritance_page_idle_bin_attribute_callbacks_challenge",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "page_idle_bitmap_attr bin_attribute page_idle_bitmap_read page_idle_bitmap_write callbacks",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/page_idle.c"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_attr"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_dependency_linux_mm_header_challenge",
+      "repository": "linux_sample",
+      "kind": "imports",
+      "query": "linux/mm.h",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "linux/mm.h"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/page_idle.c"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "linux/page-flags.h"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_call_chain_page_idle_clear_refs_challenge",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "page_idle_clear_pte_refs",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/page_idle.c"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_clear_pte_refs"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_execution_flow_page_idle_bitmap_challenge",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "page idle bitmap read write clear pte refs sysfs group init",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/page_idle.c"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_write"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_read"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_clear_pte_refs"
+        },
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_bitmap_write"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_inheritance_filter_policy_override_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "BloomFilterPolicy inherits FilterPolicy KeyMayMatch override",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "util/bloom.cc",
+          "excerpt_contains": "class BloomFilterPolicy : public FilterPolicy"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "util/bloom.cc"
+        },
+        {
+          "path": "util/bloom.cc",
+          "excerpt_contains": "CreateFilter"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_dependency_filter_policy_header_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "imports",
+      "query": "leveldb/filter_policy.h",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "table/filter_block.cc",
+          "excerpt_contains": "leveldb/filter_policy.h"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "table/filter_block.cc"
+        },
+        {
+          "path": "table/filter_block.cc",
+          "excerpt_contains": "FilterPolicy"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_call_chain_key_may_match_internal_get_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "callers",
+      "query": "KeyMayMatch",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "table/table.cc",
+          "excerpt_contains": "filter->KeyMayMatch"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "table/table.cc"
+        },
+        {
+          "path": "table/table.cc",
+          "excerpt_contains": "KeyMayMatch"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_execution_flow_version_set_builder_apply_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "VersionSet Builder Apply compact pointers deleted files added files SaveTo",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "void Apply"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "db/version_set.cc"
+        },
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "SaveTo"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "Builder"
+        },
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "Apply"
+        },
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "SaveTo"
+        }
+      ]
+    }
+  ]
+}
