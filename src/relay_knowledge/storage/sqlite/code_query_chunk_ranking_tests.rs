@@ -11,6 +11,45 @@ use crate::{
 
 const TEST_SOURCE_SCOPE: &str = "code:test:chunk-ranking:commit:tree";
 
+#[test]
+fn declaration_bonus_boosts_type_relationship_surfaces() {
+    let terms = query_terms("BloomFilterPolicy inherits FilterPolicy KeyMayMatch override");
+
+    assert_eq!(
+        declaration_chunk_bonus(
+            &terms,
+            "class BloomFilterPolicy : public FilterPolicy {\n public:\n  void CreateFilter(const Slice* keys, int n, std::string* dst) const override;\n  bool KeyMayMatch(const Slice& key, const Slice& filter) const override;\n};",
+        ),
+        2.75
+    );
+}
+
+#[test]
+fn declaration_bonus_accepts_exported_class_relationship_surfaces() {
+    let terms = query_terms("ChatRoute extends BaseRoute override");
+
+    assert_eq!(
+        declaration_chunk_bonus(
+            &terms,
+            "export class ChatRoute extends BaseRoute {\n  override handle() {}\n}",
+        ),
+        2.75
+    );
+}
+
+#[test]
+fn declaration_bonus_requires_relationship_declaration_shape() {
+    let terms = query_terms("BloomFilterPolicy inherits FilterPolicy KeyMayMatch override");
+
+    assert_eq!(
+        declaration_chunk_bonus(
+            &terms,
+            "bool BloomFilterPolicy::KeyMayMatch(const Slice& key, const Slice& filter) const {\n  return filter_policy_->KeyMayMatch(key, filter);\n}",
+        ),
+        0.0
+    );
+}
+
 #[tokio::test]
 async fn hybrid_chunks_rank_attached_symbol_identity() {
     let path = "src/routes/provider/openai.ts";

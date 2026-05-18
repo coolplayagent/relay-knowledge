@@ -85,6 +85,8 @@ pub(super) fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
     let abstract_interface = terms.iter().any(|term| term == "interface")
         && content.contains("virtual ")
         && (content.contains("= 0;") || content.contains("=0;"));
+    let relationship_declaration = terms.iter().any(|term| type_relationship_intent(term))
+        && content_has_type_relationship_declaration(content);
     let declaration_lines = if abstract_interface {
         0
     } else {
@@ -95,7 +97,7 @@ pub(super) fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
             .take(2)
             .count()
     };
-    if !abstract_interface && declaration_lines < 2 {
+    if !abstract_interface && declaration_lines < 2 && !relationship_declaration {
         return 0.0;
     }
 
@@ -114,11 +116,54 @@ pub(super) fn declaration_chunk_bonus(terms: &[String], content: &str) -> f64 {
 
     if abstract_interface {
         3.0
+    } else if relationship_declaration {
+        2.75
     } else if declaration_lines >= 2 {
         2.0
     } else {
         0.0
     }
+}
+
+fn type_relationship_intent(term: &str) -> bool {
+    matches!(
+        term,
+        "derive"
+            | "derived"
+            | "extend"
+            | "extends"
+            | "implement"
+            | "implements"
+            | "inherit"
+            | "inheritance"
+            | "inherited"
+            | "inherits"
+            | "override"
+            | "overrides"
+            | "overriding"
+            | "subclass"
+            | "subclasses"
+    )
+}
+
+fn content_has_type_relationship_declaration(content: &str) -> bool {
+    content.lines().map(str::trim).any(|line| {
+        if line.starts_with("//") || line.starts_with('*') {
+            return false;
+        }
+        let type_declaration = line
+            .split(|character: char| character.is_whitespace() || matches!(character, '{' | '('))
+            .filter(|word| !word.is_empty())
+            .take(4)
+            .any(|word| matches!(word, "class" | "struct" | "interface"));
+        type_declaration
+            && (line.contains(" : ")
+                || line.contains(": public ")
+                || line.contains(": protected ")
+                || line.contains(": private ")
+                || line.contains(" extends ")
+                || line.contains(" implements "))
+    })
 }
 
 fn declaration_line_is_prototype(line: &str) -> bool {

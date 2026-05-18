@@ -1,6 +1,12 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-type-relationship-declaration-chunk-bonus-20260518T224034Z
+- 算法：在 Hybrid chunk 后置评分中识别“继承、扩展、实现、覆盖”等关系意图查询；当候选 chunk 同时具有 `class`、`struct`、`interface` 或 `abstract class` 的继承/实现声明形态，并满足既有三词以上内容覆盖门槛时，把普通声明块 bonus 从 2.0 提升为 2.75，单纯实现函数或无关系声明的 chunk 不加分。
+- 架构：变更限定在 SQLite code query 的 bounded candidate Rust scoring 层，不扩大 FTS MATCH、candidate limit、SQLite schema、索引事实、parser extraction、semantic/vector provider、CLI/API、judge、HTTP/QoS 或安装发布行为。
+- 不变量：抽象接口 `interface` boost、普通多 prototype 声明块、path/language filter、symbol/edge scoring、dedupe/truncate、freshness/version metadata 和环境读取规则保持不变；关系 bonus 只作用于已召回的 Hybrid lexical chunk。
+- 预期影响：LevelDB、Linux、Kubernetes、Spring、TypeScript/JavaScript 等大仓中，询问 inheritance/override/implements/extends 的研究型查询更容易把类型关系声明块排在方法实现或邻近 helper 之前，重点改善 `BloomFilterPolicy inherits FilterPolicy KeyMayMatch override` 这类 competitive relationship case 与 judge 对代码图关系解释性的评价。
+- 已知风险：少数包含继承声明且匹配多查询词的 declaration chunk 会小幅上移；风险受关系意图词、声明形态、多词覆盖、bounded candidates 和既有 truncate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-shared-finalize-symbol-cache-20260519
 - 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，降低多仓 full-scope `repo register` finalize 阶段重复读取 symbol 表的固定成本；scope finalize 增加惰性 `SymbolKey` cache，Python/Java/TypeScript symbol-aware import resolution 与 call graph rebuild 共享同一批已排序 symbol keys，C/C++ 等无需 symbol-aware import 的仓库仍延迟到 call rebuild 才加载。SQLite schema、事实表内容、reference/import/call resolution 规则、search document、candidate limit、ranking/scoring、CLI/API、provider/env、judge、网络/QoS、安装发布与 self-iteration harness 行为保持不变。
 - 预期影响/风险：opencode、relay-teams、Kubernetes、Spring 等含大量 TS/Python/Java named import 或 static import 的仓库少一次全量 `code_repository_symbols` scan 和一次 call rebuild symbol clone，预期改善 register-to-index wall time 与 finalize 稳定性；风险是 finalize 期间共享 cache 的生命周期变长，但仍限于单 scope transaction、惰性加载、既有 row budgets 和 deterministic caller line lookup 单测。
@@ -547,173 +553,10 @@
 - 架构与不变量：自迭代仍独立于 Rust crate；repository target 仍保持 `scope=all`；case 级 path/language filter 只用于查询端过滤验证；epsilon-Pareto 仍用于噪声抑制和非受保护目标决策，build/test gate 继续作为硬约束。
 - 预期影响：后续候选会更少用性能提升换取 accuracy 或 gate 稳定性退化；新增 case 提高对 Python 方法重名、Python/C++/Java/Go 常量变量、C 宏/函数、C++ 工厂函数与类、Java servlet 类型、Go authorizer API 的覆盖，并把更多全仓查询纳入 p50/p95 性能观测。
 - 已知风险：新增 case 会改变 accuracy 平均值基线，首次运行可能需要重新建立可比历史；`limit=20` case 会略微增加查询评估耗时，但能更早暴露大仓候选集和排序退化。
-## 20260516T135345Z
+## 20260516 scored retrieval-indexing entries
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135345Z.patch`
-- score: 0.939527 (accuracy=0.923077, performance=0.904539, stability=1.0)
-- cases: 24/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch_finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=59850ms; cargo_fmt_check_ms=842ms; cargo_clippy_ms=209ms; cargo_test_ms=8835ms; relay_teams_index_ms=87582ms; relay_teams_query_p50_ms=136ms; relay_teams_query_p95_ms=13219ms; leveldb_cpp_index_ms=19926ms
-Adopted optimization notes:
-w( +                    " +                    SELECT COUNT(*) +                    FROM code_repository_search +                    WHERE source_scope = ?1 AND document_kind = ?2 +                    ", +                    (&source_scope, &document_kind), +                    |row| row.get(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("search document count should load") +} diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877..0946af7022d8361c66c6443600975234efc916e8 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -373,7 +373,8 @@ source_scope, document_kind, record_id, path, language_id, content ) SELECT source_scope, 'call', call_id, path, '', -               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '') +               coalesce(caller_name, '') || ' ' || callee_name || ' ' || +               coalesce(target_hint, '') || ' ' || path FROM code_repository_calls ", [], tokens used 135,337
-## 20260516T135933Z
+- archived summary: `20260516T135345Z`, `20260516T135933Z`, `20260516T140540Z`, `20260516T142335Z`, `20260516T143645Z`, `20260516T144537Z`, `20260516T145236Z`, `20260516T155614Z`, `20260516T160620Z`, and `20260516T171146Z` 的详细 patch、score、case、指标和 raw diff excerpt 保留在 `.git/relay-knowledge-self-iteration/patches/` 与渐进式 memory 中；主文档保留上方候选算法说明，并以归档摘要满足单文件 1000 行硬上限。
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T135933Z.patch`
-- score: 0.939577 (accuracy=0.923077, performance=0.904871, stability=1.0)
-- cases: 24/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: metric:cargo_build_release_ms 59850.0->56550; metric:cargo_fmt_check_ms 842.0->755; metric:cargo_test_ms 8835.0->7792; metric:relay_teams_index_ms 87582.0->83515; metric:relay_teams_query_p95_ms 13219.0->12317.0
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=56550ms; cargo_fmt_check_ms=755ms; cargo_clippy_ms=204ms; cargo_test_ms=7792ms; relay_teams_index_ms=83515ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=12317ms; leveldb_cpp_index_ms=19595ms
-Adopted optimization notes:
- "exact-file", "src/exact_owner.py"); +    exact.caller_name = Some("exactOwner".to_owned()); +    exact.callee_name = "TargetCall".to_owned(); +    exact.target_hint = Some("TargetCall".to_owned()); +    exact.resolution_state = "resolved".to_owned(); +    exact.confidence_basis_points = 8_000; +    exact.confidence_tier = "inferred".to_owned(); +    calls.push(exact); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls, +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 157,522
-
-## 候选优化说明：20260516T140540Z
-
-- 目标：提升大仓 call graph 查询准确率，避免 `Callers`/`Callees` 方向查询在主边端相同的大量候选中，只按路径或插入顺序处理 tie，导致带有 caller、callee 或路径上下文的自然语言查询排不到目标结果。
-- 方法：在 call FTS bounded candidate set 已经命中后，先保持既有方向语义：`Callers` 必须由 callee 字段产生正分，`Callees` 必须由 caller 字段产生正分；只有主边端 `base_score > 0` 时，再用非主边端和 path 计算一个 0.35 系数的上下文 bonus。这样 `TargetCall exactOwner` 仍只返回调用 `TargetCall` 的 caller，但会把 caller 名或路径含 `exactOwner` 的边排在同 callee 噪声之前。
-- 架构与不变量：SQLite schema、FTS 文档、candidate limit、source scope、path/language filter、API 字段、call edge resolution/confidence bonus、去重和最终截断规则不变；新增单元级集成测试构造同 callee、同 confidence、不同 caller/path 的噪声，断言 caller 上下文能稳定打破 tie。
-- 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 中高 fan-out API、工厂函数、hook、handler 的 callers/callees 查询更容易利用用户给出的 owner、component、file/path 上下文，提升 top-rank 准确率；计算只发生在最多 500-2000 个候选的 Rust scoring 阶段，对索引与 SQLite 查询性能无影响。
-- 已知风险：上下文 bonus 可能把路径或 caller/callee 名里包含额外查询词的结果排到更前；由于 bonus 受主边端正分门控，不能让不调用目标 callee 或不属于目标 caller 的边单独入选。
-
-## 候选优化说明：20260516T142335Z
-
-- 目标：提升 fuzzy definition/hybrid 查询对多段函数名的排序准确率，尤其是 `archive old eval output directory timestamp suffix` 这类自然语言查询应优先返回 `archive_output_dir`，而不是只命中单个通用词的 output、directory 或 archive 噪声符号。
-- 方法：仅在 symbol 查询已由 FTS 召回后，在既有 `symbol_name_query_bonus` 中增加受限的部分覆盖 bonus；当至少 3 个长度不小于 3 的查询词能与 symbol name 的规范化 identifier token 精确匹配，或存在清晰前缀关系（例如 `directory` 与 `dir`）时，最多增加 2.0 分。新增回归测试构造 `archive_output_dir` 与 output/directory/archive 单词噪声，断言多段符号名排在首位。
-- 架构与不变量：不改变 SQLite schema、FTS content、candidate limit、source scope、path/language filter、API 字段、call/reference/import 查询语义、去重或最终截断；只调整 bounded symbol candidate set 内的 Rust 排序，且 bonus 需要 3 个匹配词门槛，避免 1-2 个通用词扩大噪声优势。
-- 预期影响：relay-teams、LevelDB、Kubernetes、Spring Framework 中以 snake_case、CamelCase 或缩写命名的函数、类、常量，在自然语言查询同时描述多个 name parts 时更容易排到 top-rank；对性能的影响限于已召回 symbol 候选的少量 identifier token 比较。
-- 已知风险：包含 3 个以上通用短 identifier parts 的符号可能获得额外分数；门槛、长度限制、2.0 上限和不修改 FTS 召回可限制对现有准确率与 p95 的扰动。
-## 20260516T140540Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T140540Z.patch`
-- score: 0.939609 (accuracy=0.923077, performance=0.905086, stability=1.0)
-- cases: 24/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: metric:cargo_build_release_ms 56550.0->48946; metric:cargo_fmt_check_ms 755.0->728; metric:relay_teams_query_p95_ms 12317.0->11797.0
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=48946ms; cargo_fmt_check_ms=728ms; cargo_clippy_ms=200ms; cargo_test_ms=8023ms; relay_teams_index_ms=81709ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=11797ms; leveldb_cpp_index_ms=19861ms
-Adopted optimization notes:
-rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 3, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "first-noise-file", +                "src/a_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "second-noise-file", +                "src/b_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "exact-file", +                "src/z_exact_owner.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: vec![first_noise, second_noise, exact], +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 132,437
-## 20260516T142335Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T142335Z.patch`
-- score: 0.939946 (accuracy=0.923077, performance=0.90733, stability=1.0)
-- cases: 24/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: score_component:score 0.893508->0.939946; score_component:accuracy 0.846154->0.923077; metric:cargo_build_release_ms 35177.0->33618; metric:cargo_fmt_check_ms 718.0->682; metric:relay_teams_index_ms 76655.0->70526; metric:relay_teams_query_p95_ms 11039.0->8185.0; case:rt_hybrid_eval_checkpoint_store {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed; case:rt_fuzzy_function_archive_output_dir {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': False, 'rank': 13, 'false_positive_count': 0} rank_improved
-- known degradations: case:rt_fuzzy_constant_checkpoint_version {'passed': True, 'rank': 1, 'false_positive_count': 0}->{'passed': False, 'rank': None, 'false_positive_count': 0} passed_to_failed
-- latency metrics: cargo_build_release_ms=33618ms; cargo_fmt_check_ms=682ms; cargo_clippy_ms=179ms; cargo_test_ms=7211ms; relay_teams_index_ms=70526ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=8185ms; leveldb_cpp_index_ms=18800ms
-Adopted optimization notes:
-              None, +            ), +            file( +                "output-file", +                "src/relay_teams/sessions/runs/background_tasks/projection.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "directory-file", +                "src/relay_teams/workspace/directory_picker.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "archive-file", +                "tests/unit_tests/net/test_github_cli.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: vec![target, output_noise, directory_noise, archive_noise], +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot { let mut ambiguous = call("ambiguous-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); tokens used 172,862
-
-## 候选优化说明：20260516T143645Z
-
-- 目标：修复 fuzzy symbol/hybrid 查询在自然语言 query 含额外描述词时的召回缺口，优先保护 `rt_fuzzy_constant_checkpoint_version` 和 `rt_fuzzy_function_archive_output_dir` 这类代码仓库检索准确率。
-- 方法：仅对 symbol FTS bounded candidate recall 使用多 term `OR`，避免 `_CHECKPOINT_VERSION`、`archive_output_dir` 这类真实符号因 `metadata`、`old`、`timestamp`、`suffix` 等描述词未出现在符号文档内而在评分前被排除；reference、call、import 继续使用原有 all-term FTS 召回。Rust 侧 `score_text` 改为识别 snake_case 和 CamelCase identifier part，且 symbol 评分字段纳入 `kind`，让召回后的候选仍按符号名、类型、签名、路径上下文排序。
-- 架构与不变量：SQLite schema、FTS document 内容、candidate limit、source scope、path/language filter、API 字段、graph edge 查询、去重和最终截断规则不变；召回扩展只发生在 bounded symbol candidate set 内，最终排序仍由统一 scorer、symbol kind bonus 和既有融合规则决定。
-- 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 中含常量、函数、类名的自然语言 fuzzy definition/hybrid 查询更容易召回真实多段 identifier，并用 kind/name part 排在单词噪声前；`archive_output_dir` 和 checkpoint version 常量应提升 rank，已通过单元与集成回归测试覆盖。
-- 已知风险：symbol FTS 的 `OR` 召回会让宽查询进入更多候选，可能增加少量 SQLite FTS 和 Rust scoring CPU；候选窗口仍受 500-2000 上限约束，且非 symbol graph 查询保持原有精确召回以控制 fan-out。
-
-## 候选优化说明：20260516T144537Z
-
-- 目标：修复宽 hybrid 查询在 LevelDB 大仓中把 API 声明块排在使用样例或实现块之后的问题，优先保护 `leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface`，同时保留上一轮 fuzzy symbol 召回收益。
-- 方法：在 chunk 层 scoring 后增加受限声明块 bonus；只有当查询至少 3 个长度不小于 3 的词能命中 chunk identifier/text，且 chunk 形态像 API 声明时才加分。抽象接口查询要求 query 含 `interface` 且 chunk 含 `virtual ... = 0;`，普通声明上下文要求至少两行函数声明式原型。该规则补充 ranking fusion，不改变 FTS 召回、symbol/edge 查询或最终 API schema。
-- 架构与不变量：SQLite schema、索引内容、source scope、path/language filter、bounded candidate limit、去重截断、symbol FTS `OR` 召回和 graph edge 查询语义不变；bonus 只在已召回的 hybrid chunk 候选内生效，并要求多词覆盖以避免单词噪声被提升。
-- 预期影响：LevelDB、Linux、Kubernetes、Spring Framework 中面向接口、头文件声明、恢复/manifest 这类 API 上下文的自然语言 hybrid 查询，应更稳定地返回声明入口，而不是测试 fixture、构造函数使用点或实现细节；`leveldb_fuzzy_class_cache_lru_interface` 预期回到 rank 1，`leveldb_hybrid_recovery_manifest_full_scope` 预期进入通过阈值。
-- 已知风险：部分实现文件也可能包含多个声明式行或纯虚接口文本，存在小幅 rank 变化风险；规则要求多词覆盖和声明形态，且仅对 chunk hit 加 bounded bonus，以避免牺牲精确 symbol/query cases。
-
-## 候选优化说明：20260516T145236Z
-
-- 目标：保留 20260516T144537Z 对 LevelDB hybrid/API 声明块排序的准确率收益，同时降低该声明块 bonus 在 relay-teams 和 LevelDB 宽 hybrid 查询 p95 上的 per-candidate CPU 成本。
-- 方法：chunk scoring 仍使用同一个声明块 bonus，但先用廉价结构检查判断 chunk 是否包含抽象接口或至少两个声明式 prototype，再对可能拿到 bonus 的少量候选执行 query term 覆盖、identifier token 和 lowercase substring 匹配；query terms 在 `search_chunks` 中每次请求只解析一次，而不是每个 chunk 重复解析。
-- 架构与不变量：SQLite schema、FTS 召回、candidate limit、source scope、path/language filter、API 字段、去重截断、声明块 bonus 分值和已接受的 LevelDB accuracy 规则保持不变；bonus 仍要求至少 3 个查询词覆盖且只作用于 bounded chunk candidate set。
-- 预期影响：非声明 chunk 候选在 Rust scoring 阶段避免重复 query 分词、全文 lowercase 和 identifier token 扫描，预期改善 `relay_teams_query_p95_ms` 与 `leveldb_cpp_query_p95_ms`；`leveldb_hybrid_recovery_manifest_full_scope` 和 `leveldb_fuzzy_class_cache_lru_interface` 的排序应保持不变。
-- 已知风险：结构检查顺序改变不应影响结果，但如果未来某语言的声明形态不符合 `declaration_line_is_prototype` 或抽象接口文本模式，仍不会获得该 bonus；测试覆盖实现块不加分、头文件 prototype 和纯虚接口仍加分。
-
-## 候选优化说明：20260516T155614Z
-
-- 目标：修复 relay-teams `_summary` callers/callees 这类高 fan-out call graph 查询的 p95 稳定性问题，同时不改变 accuracy、ranking、FTS 召回或 API 返回语义。
-- 方法：为 `code_repository_chunks(source_scope, symbol_snapshot_id)` 增加 SQLite 索引。call 查询为了生成调用点 excerpt，会把 bounded call candidates 的 `caller_symbol_snapshot_id` 关联到 `code_repository_chunks`；大仓 chunk 数量较高且 caller 命中密集时，没有该索引会让每个候选都可能扫描同 scope chunks。新增索引把 caller chunk lookup 变成按 source scope 和 symbol identity 的索引查找。
-- 架构与不变量：不修改 code graph schema 字段、FTS 文档、candidate limit、查询 scoring、去重截断、call edge resolution、path/language filter 或 CLI/API 行为；索引通过既有 `CREATE INDEX IF NOT EXISTS` 初始化与迁移路径应用到新旧 SQLite 数据库。新增测试固定 schema 必须包含该 lookup index。
-- 预期影响：`relay_teams_query_p95_ms` 中 `_summary` callers/callees 查询应显著降低尾延迟；LevelDB、Kubernetes、Linux、Spring Framework 的 call graph 查询在多调用、多 chunk 场景下也应更稳定。索引阶段可能多维护一个小型 B-tree，但 chunk 写入仍在 bounded batch/finalize 事务内完成。
-- 已知风险：大仓索引写入和数据库文件会因额外索引略增；如果未来 call excerpt 不再从 `code_repository_chunks` 关联 caller symbol，该索引价值会下降，需要按查询计划重新评估。
-
-## 候选优化说明：20260516T160620Z
-
-- 目标：继续保护大仓 call graph 查询稳定性，避免一个 caller symbol 被切成多个非重叠 chunks 时，单条 call edge 因 excerpt join 被放大成多条候选并增加排序、评分和去重成本。
-- 方法：call 查询仍复用 `code_repository_chunks(source_scope, symbol_snapshot_id)` lookup index，但 caller chunk join 增加 call line containment 条件：只连接 `line_start <= call.line_start <= line_end` 的 chunk。这样 excerpt 直接来自包含调用点的 chunk，不再把同一 caller symbol 的 prologue、body、tail chunks 全部带入 bounded candidate rows。
-- 架构与不变量：不改变 SQLite schema、FTS 文档、candidate limit、call edge 召回、方向性 caller/callee 语义、confidence bonus、path/language filter、API 字段或最终排序规则；只收敛已有 excerpt join 的候选行数。新增回归测试构造同一 caller symbol 的两个非重叠 chunks，断言 callers 查询只返回一条 hit 且 excerpt 取实际 call-site chunk。
-- 预期影响：relay-teams、Linux、Kubernetes、Spring Framework 这类长函数、大类方法较多的仓库中，callers/callees 查询的 Rust scoring 输入更小、结果重复更少，p95 抖动应降低；accuracy 预期保持或改善，因为摘要优先来自调用点所在 chunk。
-- 已知风险：如果某个索引器生成的 chunk line ranges 不覆盖 call line，则该 call hit 会退回到 `caller calls callee` 摘要，不再从同 symbol 的其他 chunk 猜测 excerpt；这是更保守的稳定性取舍，后续可通过索引器 line-range 测试保护覆盖率。
-
-## 20260516T143645Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T143645Z.patch`
-- score: 0.963002 (accuracy=0.961538, performance=0.907191, stability=1.0)
-- cases: 25/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
-- key improvements: score_component:score 0.939954->0.963002; score_component:accuracy 0.923077->0.961538; metric:cargo_fmt_check_ms 711.0->678; metric:relay_teams_index_ms 73237.0->70352; case:rt_fuzzy_constant_checkpoint_version {'passed': False, 'rank': None, 'false_positive_count': 0}->{'passed': True, 'rank': 3, 'false_positive_count': 0} failed_to_passed; case:rt_fuzzy_function_archive_output_dir {'passed': False, 'rank': 13, 'false_positive_count': 0}->{'passed': True, 'rank': 2, 'false_positive_count': 0} failed_to_passed
-- known degradations: metric:leveldb_cpp_query_p95_ms 136.0->183.0; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': True, 'rank': 3, 'false_positive_count': 0}->{'passed': False, 'rank': 9, 'false_positive_count': 0} passed_to_failed; case:leveldb_fuzzy_class_cache_lru_interface {'passed': True, 'rank': 1, 'false_positive_count': 0}->{'passed': True, 'rank': 5, 'false_positive_count': 0} rank_worsened
-- latency metrics: cargo_build_release_ms=34450ms; cargo_fmt_check_ms=678ms; cargo_clippy_ms=195ms; cargo_test_ms=7340ms; relay_teams_index_ms=70352ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=8344ms; leveldb_cpp_index_ms=18666ms
-Adopted optimization notes:
-us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 595e4c271c813e5466eb068d26842c18e72d6e06..db6719d0fe07cf265d1d8dff6c31a380334f1108 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -32,3 +32,25 @@ assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES); } + +#[test] +fn symbol_fts_query_uses_any_term_for_fuzzy_recall() { +    assert_eq!( +        symbol_fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +    ); +    assert_eq!( +        fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" \"metadata\" \"version\" \"constant\"" +    ); +} + +#[test] +fn score_text_matches_identifier_parts_inside_snake_case_names() { +    let score = score_text( +        "archive output directory", +        ["def archive_output_dir(output_dir: Path) -> Path:"], +    ); + +    assert!(score >= 4.0); +} tokens used 144,045
-## 20260516T144537Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T144537Z.patch`
-- score: 0.985951 (accuracy=1.0, performance=0.906342, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: score_component:score 0.963002->0.985951; score_component:accuracy 0.961538->1.0; metric:cargo_build_release_ms 34450.0->30307; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': False, 'rank': 9, 'false_positive_count': 0}->{'passed': True, 'rank': 5, 'false_positive_count': 0} failed_to_passed; case:leveldb_fuzzy_class_cache_lru_interface {'passed': True, 'rank': 5, 'false_positive_count': 0}->{'passed': True, 'rank': 1, 'false_positive_count': 0} rank_improved
-- known degradations: metric:cargo_fmt_check_ms 678.0->708; metric:relay_teams_query_p95_ms 8344.0->9460.0; metric:leveldb_cpp_query_p95_ms 183.0->225.0
-- latency metrics: cargo_build_release_ms=30307ms; cargo_fmt_check_ms=708ms; cargo_clippy_ms=182ms; cargo_test_ms=7290ms; relay_teams_index_ms=69032ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=9460ms; leveldb_cpp_index_ms=18856ms
-Adopted optimization notes:
-        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 2, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "db-impl-header", +                "db/db_impl.h", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "db-impl-source", +                "db/db_impl.cc", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: vec![target, noise], +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_related_callee_names() -> CodeIndexSnapshot { let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c"); unrelated.caller_name = Some("do_mmap".to_owned()); tokens used 107,884
-## 20260516T145236Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T145236Z.patch`
-- score: 0.986063 (accuracy=1.0, performance=0.907089, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
-- key improvements: metric:cargo_build_release_ms 30307.0->28188; metric:cargo_fmt_check_ms 708.0->509; metric:cargo_clippy_ms 182.0->149; metric:cargo_test_ms 7290.0->6539; metric:relay_teams_query_p95_ms 9460.0->8464.0
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=28188ms; cargo_fmt_check_ms=509ms; cargo_clippy_ms=149ms; cargo_test_ms=6539ms; relay_teams_index_ms=70263ms; relay_teams_query_p50_ms=119ms; relay_teams_query_p95_ms=8464ms; leveldb_cpp_index_ms=18725ms
-Adopted optimization notes:
-erms = query_terms("recover descriptor save_manifest versionedit"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "Status DBImpl::RecoverLogFile(uint64_t log_number, bool* save_manifest) {\n  descriptor_log_->AddRecord(edit->Encode());\n}" +        ), +        0.0 +    ); +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class DBImpl {\n  Status RecoverLogFile(uint64_t log_number, bool* save_manifest,\n                        VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};" +        ), +        2.0 +    ); +} + +#[test] +fn declaration_chunk_bonus_preserves_interface_boost() { +    let terms = query_terms("cache interface lookup insert total charge lru"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};" +        ), +        3.0 +    ); +} tokens used 113,000
-## 20260516T155614Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T155614Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_schema.rs`, `src/relay_knowledge/storage/sqlite/code_tests.rs`
-- key improvements: score_component:score 0.985774->1.0; score_component:performance 0.90516->1.0; metric:relay_teams_query_p50_ms 127.0->93.5; metric:relay_teams_query_p95_ms 11629.0->298.0; metric:leveldb_cpp_index_ms 19318.0->13790; metric:leveldb_cpp_query_p50_ms 149.0->105.5; metric:leveldb_cpp_query_p95_ms 246.0->170.0
-- known degradations: metric:cargo_build_release_ms 37157.0->52888; metric:cargo_fmt_check_ms 664.0->713; metric:relay_teams_index_ms 70374.0->74641
-- latency metrics: cargo_build_release_ms=52888ms; cargo_fmt_check_ms=713ms; cargo_clippy_ms=176ms; cargo_test_ms=7130ms; relay_teams_index_ms=74641ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=298ms; leveldb_cpp_index_ms=13790ms
-Adopted optimization notes:
-sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGraphStore, +    storage::{SqliteGraphStore, StorageError}, }; #[path = "code_test_support.rs"] @@ -114,6 +114,33 @@ } #[tokio::test] +async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); + +    let index_exists = store +        .run(|connection| { +            connection +                .query_row( +                    " +                    SELECT EXISTS( +                        SELECT 1 +                        FROM sqlite_master +                        WHERE type = 'index' +                          AND name = 'code_repository_chunks_symbol_lookup' +                    ) +                    ", +                    [], +                    |row| row.get::<_, bool>(0), +                ) +                .map_err(StorageError::from) +        }) +        .await +        .expect("schema index check should succeed"); + +    assert!(index_exists); +} + +#[tokio::test] async fn rejects_code_queries_for_unindexed_refs() { let store = store_with_repository_snapshot(snapshot_with_chunk( "repo", tokens used 113,836
-## 20260516T160620Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T160620Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: metric:cargo_build_release_ms 27786.0->25737; metric:cargo_fmt_check_ms 694.0->524; metric:cargo_clippy_ms 8303.0->158; metric:cargo_test_ms 7351.0->6118; metric:leveldb_cpp_index_ms 14476.0->13704; metric:leveldb_cpp_query_p50_ms 144.5->103.5; metric:leveldb_cpp_query_p95_ms 226.0->174.0
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=25737ms; cargo_fmt_check_ms=524ms; cargo_clippy_ms=158ms; cargo_test_ms=6118ms; relay_teams_index_ms=74148ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=308ms; leveldb_cpp_index_ms=13704ms
-Adopted optimization notes:
-ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc", -            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", -            Some("sanitize-options"), -        )], +        chunks: vec![ +            RepositoryCodeChunkRecord { +                line_range: range(110, 115), +                ..chunk( +                    "sanitize-options-prologue", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "Options SanitizeOptions(const Options& src) {\n    Options result;", +                    Some("sanitize-options"), +                ) +            }, +            RepositoryCodeChunkRecord { +                line_range: range(116, 124), +                ..chunk( +                    "sanitize-options-call-site", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", +                    Some("sanitize-options"), +                ) +            }, +        ], diagnostics: Vec::new(), } } tokens used 172,827
-## 20260516T171146Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T171146Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_accuracy_tests.rs`
-- key improvements: metric:cargo_build_release_ms 35920.0->28113; metric:cargo_fmt_check_ms 676.0->516; metric:cargo_clippy_ms 171.0->144; metric:cargo_test_ms 7135.0->6245
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=28113ms; cargo_fmt_check_ms=516ms; cargo_clippy_ms=144ms; cargo_test_ms=6245ms; relay_teams_index_ms=67184ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=305ms; leveldb_cpp_index_ms=17958ms
-Adopted optimization notes:
-d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
 ## 20260516 HTTP test stability entries
 
 - runs: `20260516T174317Z`, `20260516T181003Z`, `20260516T181727Z`, `20260516T184629Z`, `20260516T185001Z`, `20260516T190530Z`, `20260516T190848Z`, `20260516T191712Z`, `20260516T192508Z`, `20260516T193653Z`, `20260516T194305Z`, `20260516T195734Z`
@@ -1027,4 +870,17 @@ ymbol_cache +        .as_deref() +        .expect("symbol cache should be initia
 Adopted optimization notes:
 
 /llm/example/tutorial.ts", +                &hybrid, +                false, +            ), +            0.0 +        ); +        assert_eq!( +            call_site_example_path_penalty( +                0.0, +                "packages/llm/example/tutorial.ts", +                &callers, +                false, +            ), +            0.0 +        ); +    } + +    #[test] fn call_site_source_path_bonus_demotes_adapter_surfaces_without_adapter_intent() { let callers = retrieval_request(CodeQueryKind::Callers); let callees = retrieval_request(CodeQueryKind::Callees); @@ -407,6 +546,14 @@ } #[test] +    fn query_mentions_example_or_sample_detects_explicit_intent() { +        assert!(!query_mentions_example_or_sample("generateObject")); +        assert!(query_mentions_example_or_sample("generateObject tutorial")); +        assert!(query_mentions_example_or_sample("sample-controller worker")); +        assert!(query_mentions_example_or_sample("QuickstartDemo")); +    } + +    #[test] fn declaration_surface_path_bonus_prefers_non_test_headers() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let definition = retrieval_request(CodeQueryKind::Definition); tokens used 359,557
+## 20260518T224034Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T224034Z.patch`
+- score: 0.915903 (foundational=0.969136, competitive=0.888889, accuracy=0.929012, semantic_vector=1.0, research_judge=0.82, performance=0.864257, stability=1.0)
+- cases: 87/87 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: score_component:score 0.907037->0.915903; score_component:competitive_capability 0.874008->0.888889; score_component:accuracy 0.921572->0.929012; score_component:research_judge 0.79->0.82; metric:cargo_fmt_check_ms 841.0->794; metric:opencode_typescript_index_ms 21471.0->20766; metric:opencode_typescript_register_index_ms 21681.0->20973; metric:local_documents_file_query_p95_ms 480.0->451.0
+- known degradations: metric:cargo_build_release_ms 34431.0->35486; metric:leveldb_cpp_index_ms 1601.0->1668; metric:leveldb_cpp_register_index_ms 1802.0->1864; metric:semantic_vector_provider_probe_ms 1879.0->2045; metric:semantic_vector_query_p95_ms 422.0->450.0
+- latency metrics: cargo_build_release_ms=35486ms; cargo_fmt_check_ms=794ms; cargo_clippy_ms=187ms; cargo_test_ms=9054ms; relay_teams_index_ms=33163ms; relay_teams_register_index_ms=33246ms; relay_teams_query_p50_ms=216ms; relay_teams_query_p95_ms=645ms
+
+Adopted optimization notes:
+
+plements" +            | "inherit" +            | "inheritance" +            | "inherited" +            | "inherits" +            | "override" +            | "overrides" +            | "overriding" +            | "subclass" +            | "subclasses" +    ) +} + +fn content_has_type_relationship_declaration(content: &str) -> bool { +    content.lines().map(str::trim).any(|line| { +        if line.starts_with("//") || line.starts_with('*') { +            return false; +        } +        let type_declaration = line +            .split(|character: char| character.is_whitespace() || matches!(character, '{' | '(')) +            .filter(|word| !word.is_empty()) +            .take(4) +            .any(|word| matches!(word, "class" | "struct" | "interface")); +        type_declaration +            && (line.contains(" : ") +                || line.contains(": public ") +                || line.contains(": protected ") +                || line.contains(": private ") +                || line.contains(" extends ") +                || line.contains(" implements ")) +    }) +} + fn declaration_line_is_prototype(line: &str) -> bool { line.ends_with(';') && line.contains('(') tokens used 312,483
 
