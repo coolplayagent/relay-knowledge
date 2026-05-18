@@ -142,6 +142,10 @@
 - 不变量：不改变索引写入内容、FTS 查询表达式、candidate limit、排序权重、CLI/API 字段、semantic/vector provider URL/API key/model/dimension 环境读取、embedding 设置、judge 配置、HTTP/网络行为或 release/install 行为；没有仓库名、路径名或符号名特殊分支，最终排序仍由既有 score 和去重截断决定。
 - 预期影响：大型仓库中 class 声明前的 protocol/decorator/typed preamble 与 resolved call site 所属函数范围可被 line-based evaluator 和用户定位识别，预期修复 `ConnectorService` definition/hybrid/filter 与 `_summary` callers/callees 门禁，W3 request/import、LevelDB/Linux/Kubernetes/Spring 和 semantic/vector source coverage 保持不变。
 - 已知风险：少数 class 或 resolved call hit 的起始行会比精确语法节点更早，但窗口受同文件相邻 symbol 与 16 行上限约束，不会扩成整文件上下文；额外 SQL 子查询只作用于 bounded candidate rows。
+## 候选优化说明：manual-streamed-call-finalize-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，降低多仓 full-scope `repo register` finalize 阶段 call graph rebuild 的内存与分配成本；符号按 path 移入 `HashMap<Vec<SymbolKey>>`，call reference 从 SQLite cursor 流式读取并立即写入 `code_repository_calls`。
+- 不变量/风险：不改变 SQLite schema、reference/import/symbol 事实、call id、caller resolution、FTS search document、ranking、CLI/API、provider/env、judge 配置或安装行为；风险仅在 cursor 与 insert statement 同事务并行使用，现有 rusqlite prepared statement 生命周期和单元/批处理测试覆盖。
+- 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 等 reference-heavy 仓库少一次全量 call reference `Vec` 收集和 symbol clone，降低 cold register-to-index finalize wall time 与峰值内存；查询结果和 semantic/vector coverage 应保持不变。
 ## 候选优化说明：manual-cli-repo-index-inline-worker-20260518
 - 目标/算法/架构/不变量/影响/风险：修复质量门禁中 `repo index` 返回 queued task 后首个 `repo query --freshness wait-until-fresh` 立即报 “no index for ref” 的竞态；CLI 仍经 durable code-index task 建立 bounded full-index task，但当前进程会立即执行同一 task 的 worker lease 并在返回前刷新 status/checkpoint，不改变 Web/API `start_code_repository_index` 后台语义、SQLite schema、code graph parsing/ranking、query JSON、semantic/vector provider/env、embedding 或 judge 配置。预期 relay-teams 与 LevelDB full-scope gates 在显式 index 后已有 fresh scope，查询延迟保持在已建索引路径；风险是一次性 CLI index wall time 上升，但成本位于写索引命令内且 service/Web 后台模型保留。
 ## 候选优化说明：manual-vector-overlap-identifier-fallback-20260517
