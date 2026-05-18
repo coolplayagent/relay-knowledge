@@ -72,19 +72,7 @@ fn insert_search_document_with_statement<'a>(
     language_id: &str,
     fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), StorageError> {
-    let fields = fields
-        .into_iter()
-        .filter(|field| !field.trim().is_empty())
-        .collect::<Vec<_>>();
-    let mut content = fields.join(" ");
-    if document_kind == "symbol" {
-        let terms =
-            identifier_search_terms(&fields.iter().take(2).copied().collect::<Vec<_>>().join(" "));
-        if !terms.is_empty() {
-            content.push(' ');
-            content.push_str(&terms.join(" "));
-        }
-    }
+    let content = search_document_content(document_kind, fields);
     statement.execute(params![
         source_scope,
         document_kind,
@@ -97,8 +85,45 @@ fn insert_search_document_with_statement<'a>(
     Ok(())
 }
 
-fn identifier_search_terms(content: &str) -> Vec<String> {
-    let mut terms = Vec::new();
+fn search_document_content<'a>(
+    document_kind: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let mut content = String::new();
+    let mut symbol_search_fields = 0usize;
+    let mut symbol_terms = Vec::new();
+    for field in fields {
+        if field.trim().is_empty() {
+            continue;
+        }
+        append_search_field(&mut content, field);
+        if document_kind == "symbol" && symbol_search_fields < 2 {
+            push_identifier_search_terms(field, &mut symbol_terms);
+        }
+        symbol_search_fields += 1;
+    }
+
+    if document_kind == "symbol" && !symbol_terms.is_empty() {
+        symbol_terms.sort();
+        symbol_terms.dedup();
+        for term in symbol_terms {
+            append_search_field(&mut content, &term);
+        }
+    }
+
+    content
+}
+
+fn append_search_field(content: &mut String, field: &str) {
+    let separator_bytes = usize::from(!content.is_empty());
+    content.reserve(separator_bytes.saturating_add(field.len()));
+    if separator_bytes > 0 {
+        content.push(' ');
+    }
+    content.push_str(field);
+}
+
+fn push_identifier_search_terms(content: &str, terms: &mut Vec<String>) {
     for token in
         content.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
     {
@@ -111,36 +136,60 @@ fn identifier_search_terms(content: &str) -> Vec<String> {
                 .filter(|part| !part.is_empty())
                 .map(str::to_ascii_lowercase),
         );
-        terms.extend(camel_case_terms(token));
+        push_camel_case_terms(token, terms);
     }
-    terms.sort();
-    terms.dedup();
-
-    terms
 }
 
-fn camel_case_terms(token: &str) -> Vec<String> {
-    let mut terms = Vec::new();
+fn push_camel_case_terms(token: &str, terms: &mut Vec<String>) {
     let mut start = 0;
     let mut previous: Option<char> = None;
-    let chars = token.char_indices().collect::<Vec<_>>();
-    for (index, (byte_index, character)) in chars.iter().enumerate() {
-        let next = chars.get(index + 1).map(|(_, next)| *next);
+    let mut characters = token.char_indices().peekable();
+    while let Some((byte_index, character)) = characters.next() {
+        let next = characters.peek().map(|(_, next)| *next);
         let starts_upper_word = character.is_ascii_uppercase()
             && previous.is_some_and(|previous| {
                 previous.is_ascii_lowercase()
                     || previous.is_ascii_digit()
                     || next.is_some_and(|next| next.is_ascii_lowercase())
             });
-        if *byte_index > start && starts_upper_word {
-            terms.push(token[start..*byte_index].to_ascii_lowercase());
-            start = *byte_index;
+        if byte_index > start && starts_upper_word {
+            terms.push(token[start..byte_index].to_ascii_lowercase());
+            start = byte_index;
         }
-        previous = Some(*character);
+        previous = Some(character);
     }
     if start < token.len() {
         terms.push(token[start..].to_ascii_lowercase());
     }
+}
 
-    terms
+#[cfg(test)]
+mod tests {
+    use super::search_document_content;
+
+    #[test]
+    fn symbol_search_content_preserves_identifier_expansion() {
+        let content = search_document_content(
+            "symbol",
+            [
+                "NewLRUCache",
+                "",
+                "leveldb::NewLRUCache",
+                "function",
+                "db/cache.cc",
+            ],
+        );
+
+        assert_eq!(
+            content,
+            "NewLRUCache leveldb::NewLRUCache function db/cache.cc cache leveldb lru new newlrucache"
+        );
+    }
+
+    #[test]
+    fn non_symbol_search_content_keeps_only_nonempty_fields() {
+        let content = search_document_content("chunk", ["", "body text", "  ", "src/lib.rs"]);
+
+        assert_eq!(content, "body text src/lib.rs");
+    }
 }
