@@ -9,10 +9,13 @@ pub(super) fn manual_definitions(
     node: Node<'_>,
 ) -> Vec<(String, &'static str, SyntaxRange)> {
     match node.kind() {
-        "function_definition" => node
-            .child_by_field_name("declarator")
-            .and_then(|declarator| declarator_name(content, declarator))
-            .map(|name| vec![(name, "function", syntax_range(node))])
+        "function_definition" => decorated_cpp_class_symbol(content, node)
+            .map(|symbol| vec![symbol])
+            .or_else(|| {
+                node.child_by_field_name("declarator")
+                    .and_then(|declarator| declarator_name(content, declarator))
+                    .map(|name| vec![(name, "function", syntax_range(node))])
+            })
             .unwrap_or_default(),
         "declaration" if !has_ancestor_kind(node, "compound_statement") => {
             if is_typedef_declaration(content, node) {
@@ -33,6 +36,43 @@ pub(super) fn manual_definitions(
         }
         _ => Vec::new(),
     }
+}
+
+fn decorated_cpp_class_symbol(
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    let text = node_text(content, node);
+    let head = text.split('{').next()?.trim();
+    let tail = head.strip_prefix("class ")?;
+    let declaration = tail.split(':').next().unwrap_or(tail);
+    let name = declaration
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .rfind(|token| cpp_class_name_candidate(token))?;
+
+    Some((name.to_owned(), "class", syntax_range(node)))
+}
+
+fn cpp_class_name_candidate(token: &str) -> bool {
+    if token.is_empty() || matches!(token, "final") || cpp_decorator_token(token) {
+        return false;
+    }
+    let mut characters = token.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn cpp_decorator_token(token: &str) -> bool {
+    token.starts_with("__")
+        || token.ends_with("_API")
+        || token.ends_with("_EXPORT")
+        || token.ends_with("_EXPORTS")
+        || (token.chars().any(|character| character == '_')
+            && token
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_uppercase()))
 }
 
 fn syscall_macro_definition(

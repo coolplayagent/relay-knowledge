@@ -141,6 +141,43 @@ void init_debugfs(void) {}
 }
 
 #[test]
+fn c_header_decorated_cpp_class_uses_real_type_name() {
+    let snapshot = parse_source_snapshot(
+        "include/leveldb/filter_policy.h",
+        br#"
+namespace leveldb {
+
+class LEVELDB_EXPORT FilterPolicy {
+ public:
+  virtual bool KeyMayMatch() const = 0;
+};
+
+}
+"#,
+    );
+    let file = snapshot
+        .files
+        .iter()
+        .find(|file| file.path == "include/leveldb/filter_policy.h")
+        .expect("header file should be indexed");
+
+    assert_eq!(file.language_id, "c");
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.name == "FilterPolicy" && symbol.kind == "class" })
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.name == "LEVELDB_EXPORT" && symbol.kind == "function" }),
+        "export macros should not replace the real C++ class name"
+    );
+}
+
+#[test]
 fn c_function_pointer_declarations_are_not_function_symbols() {
     let snapshot = parse_source_snapshot(
         "include/linux/callbacks.h",
