@@ -1,0 +1,234 @@
+{
+  "repositories": {
+    "opencode_typescript": {
+      "path": "/opt/workspace/opencode",
+      "alias": "opencode-typescript-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 120000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900
+    }
+  },
+  "query_cases": [
+    {
+      "id": "opencode_ts_definition_generate_object",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "generateObject",
+      "limit": 20,
+      "path_filters": ["packages/llm/src/llm.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 2,
+      "expected": [{"path": "packages/llm/src/llm.ts", "line_start": 167}]
+    },
+    {
+      "id": "opencode_ts_definition_provider_shared_json_post",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "jsonPost",
+      "limit": 20,
+      "path_filters": ["packages/llm/src/protocols/shared.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 1,
+      "expected": [{"path": "packages/llm/src/protocols/shared.ts", "line_start": 233}]
+    },
+    {
+      "id": "opencode_ts_definition_openai_helper",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "openaiHelper",
+      "limit": 20,
+      "path_filters": ["packages/console/app/src/routes/zen/util/provider/openai.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 2,
+      "expected": [{"path": "packages/console/app/src/routes/zen/util/provider/openai.ts", "line_start": 15}]
+    },
+    {
+      "id": "opencode_tsx_definition_command_palette_provider",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "CommandPaletteProvider",
+      "limit": 20,
+      "path_filters": ["packages/opencode/src/cli/cmd/tui/context/command-palette.tsx"],
+      "language_filters": ["tsx"],
+      "max_rank": 2,
+      "expected": [{"path": "packages/opencode/src/cli/cmd/tui/context/command-palette.tsx", "line_start": 44}]
+    },
+    {
+      "id": "opencode_ts_definition_http_recorder_secret_findings",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "secretFindings",
+      "limit": 20,
+      "path_filters": ["packages/http-recorder/src/redaction.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 1,
+      "expected": [{"path": "packages/http-recorder/src/redaction.ts", "line_start": 106}]
+    },
+    {
+      "id": "opencode_ts_callers_generate_object_agent_create",
+      "repository": "opencode_typescript",
+      "kind": "callers",
+      "query": "generateObject",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "generateObject(params)"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_callees_llm_stream_tool_runtime",
+      "repository": "opencode_typescript",
+      "kind": "callees",
+      "query": "streamWith",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/llm/src/route/client.ts",
+          "excerpt_contains": "ToolRuntime.stream"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_callers_parse_tool_input_tool_stream",
+      "repository": "opencode_typescript",
+      "kind": "callers",
+      "query": "parseToolInput",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/llm/src/protocols/utils/tool-stream.ts",
+          "excerpt_contains": "parseToolInput"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_callers_redact_url_recorder",
+      "repository": "opencode_typescript",
+      "kind": "callers",
+      "query": "redactUrl",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/http-recorder/src/redactor.ts",
+          "excerpt_contains": "redactUrl(snapshot.url"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_imports_relative_redaction",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "./redaction",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "packages/http-recorder/src/matching.ts", "excerpt_contains": "secretFindings"}]
+    },
+    {
+      "id": "opencode_ts_imports_provider_shared",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "ProviderShared",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "packages/llm/src/protocols/openai-chat.ts", "excerpt_contains": "ProviderShared"}]
+    },
+    {
+      "id": "opencode_ts_imports_alias_session_schema",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "@/session/schema",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "packages/opencode/src/server/routes/instance/httpapi/groups/v2/message.ts", "excerpt_contains": "SessionID"}]
+    },
+    {
+      "id": "opencode_ts_imports_console_handler_alias",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "~/routes/zen/util/handler",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "packages/console/app/src/routes/zen/v1/chat/completions.ts", "excerpt_contains": "handler"}]
+    },
+    {
+      "id": "opencode_ts_hybrid_provider_format_conversion",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "openai responses tool calls function_call_output convert common chunk",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/console/app/src/routes/zen/util/provider/openai.ts",
+          "excerpt_contains": "fromOpenaiChunk"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_hybrid_record_replay_redacts_cassettes",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "record replay cassette unsafe secret findings redacted headers request matcher",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/http-recorder/src/effect.ts",
+          "excerpt_contains": "recordingLayer"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_hybrid_llm_protocol_sse_tool_stream",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "OpenAI Chat protocol sse tool call delta lifecycle finish events",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "ToolStream.finishAll"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_filter_openai_chat_protocol",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "protocol",
+      "limit": 20,
+      "path_filters": ["packages/llm/src/protocols/openai-chat.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 1,
+      "expected": [{"path": "packages/llm/src/protocols/openai-chat.ts", "line_start": 382}]
+    },
+    {
+      "id": "opencode_ts_negative_missing_symbol",
+      "repository": "opencode_typescript",
+      "kind": "definition",
+      "query": "DefinitelyMissingOpencodeTypeScriptSymbol",
+      "limit": 10,
+      "expect_empty": true
+    }
+  ]
+}

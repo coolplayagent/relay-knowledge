@@ -211,11 +211,12 @@ enumerating cases.
   timeout is applied to each file query so a candidate cannot hang the
   evaluator.
 - Multi-language repository retrieval targets cover relay-teams Python and
-  JavaScript, LevelDB C++, and Linux C in the default profile; Kubernetes Go and
-  Spring Framework Java remain in the exhaustive profile. The JavaScript, Java,
-  C, and C++ cases intentionally include nested classes, macros, exported
-  functions, caller/callee lookup, hybrid concept queries, and path/language
-  filters to drive parser, identity, edge-finalize, FTS/BM25, and ranking-fusion
+  JavaScript, opencode TypeScript/TSX, LevelDB C++, and Linux C in the default
+  profile; Kubernetes Go and Spring Framework Java remain in the exhaustive
+  profile. The JavaScript, TypeScript/TSX, Java, C, and C++ cases intentionally
+  include nested classes, exported functions, caller/callee lookup, relative and
+  tsconfig-alias imports, hybrid concept queries, and path/language filters to
+  drive parser, identity, edge-finalize, FTS/BM25, and ranking-fusion
   improvements.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
@@ -226,6 +227,7 @@ enumerating cases.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
+- `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
 - `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.

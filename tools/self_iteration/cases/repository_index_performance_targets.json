@@ -8,6 +8,10 @@
       "index_budget_ms": 12000,
       "register_index_budget_ms": 12500
     },
+    "opencode_typescript": {
+      "index_budget_ms": 120000,
+      "register_index_budget_ms": 122000
+    },
     "linux_sample": {
       "index_budget_ms": 180000,
       "register_index_budget_ms": 181000

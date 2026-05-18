@@ -1,6 +1,7 @@
 {
   "include_files": [
     "cases/file_background_targets.json",
+    "cases/repository_opencode_targets.json",
     "cases/repository_index_performance_targets.json",
     "cases/repository_multilang_targets.json"
   ],

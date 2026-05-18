@@ -152,11 +152,12 @@ and (
   `relay-knowledge files index/query`，记录 `file_index_ms`、
   `file_query_p50_ms` 和 `file_query_p95_ms`。文件 case 可声明
   `objective`、`max_results`、`truncated`、`degraded_reason` 和更细粒度的命中字段，用来表达路径/内容分离、scope 前置、候选收缩、后台索引和诊断目标。每条文件查询都使用 subprocess timeout，防止候选实现卡死 evaluator。
-- 多语言代码仓库检索 targets：默认 profile 覆盖 relay-teams Python 与 JavaScript、LevelDB C++、Linux C；exhaustive profile 继续覆盖 Kubernetes Go 和 Spring Framework Java。JavaScript、Java、C、C++ cases 有意包含 nested class、宏、导出函数、caller/callee、hybrid 概念查询和 path/language filter 场景，用于推动后续自迭代补齐 parser、identity、edge finalize、FTS/BM25 和 ranking fusion 能力。
+- 多语言代码仓库检索 targets：默认 profile 覆盖 relay-teams Python 与 JavaScript、opencode TypeScript/TSX、LevelDB C++、Linux C；exhaustive profile 继续覆盖 Kubernetes Go 和 Spring Framework Java。JavaScript、TypeScript/TSX、Java、C、C++ cases 有意包含 nested class、宏、导出函数、caller/callee、relative import、tsconfig alias import、hybrid 概念查询和 path/language filter 场景，用于推动后续自迭代补齐 parser、identity、edge finalize、FTS/BM25 和 ranking fusion 能力。
 - 仓库注册后索引性能 targets：`cases/repository_index_performance_targets.json` 收紧 `index_budget_ms`，并新增 `register_index_budget_ms` 组合预算。评估器会同时记录 `*_index_ms` 与 `*_register_index_ms`，让自迭代优先优化 `repo register` 后 cold index 的批处理、解析吞吐、SQLite 写入、finalize 和增量复用路径。
 - 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
 - `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要、选定的 02/03/04 文档片段、竞争力特性目标和实现护栏交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
+- `/opt/workspace/opencode`：`scope=all` 全仓 TypeScript/TSX monorepo 索引与查询，覆盖 overloaded function、exported const、TSX component、caller/callee、relative import、`@/` 与 `~/` alias import、HTTP recorder redaction flow、LLM protocol streaming flow 和负例 symbol lookup。该目标有意选择 import-heavy 代码，让自迭代循环演进稳定 TypeScript import identity 和重复 edge 处理，而不是只优化小 fixture。
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。
 - `/opt/workspace/leveldb`：`scope=all` 全仓 C/C++ 索引与查询，覆盖类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。
