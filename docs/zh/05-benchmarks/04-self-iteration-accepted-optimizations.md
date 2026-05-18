@@ -1,6 +1,9 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-typescript-function-factory-member-symbols-20260519
+- 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，把 JS/TS object/class member 中由 curried function factory 返回的成员函数识别为 `function` symbol，并让 call excerpt 优先选择真实调用语法行；只检查成员 value 的 bounded call-expression 链和直接 function/generator/arrow 参数，不改变 schema、FTS、candidate limit、ranking、CLI/API、provider/env、judge、网络/QoS、安装发布或 harness 行为。
+- 预期影响/风险：Opencode、relay-teams 等 TS/JS 服务对象、协议适配器和 effect-style layer 的 caller/callee 命中可获得拥有者 symbol、chunk excerpt 与更准 line range，改善 `generateObject(params)` 这类调用点上下文；风险是少数 curried function-factory 成员新增 symbol 参与近同分排序，且 excerpt 会跳过同一 chunk 中早于调用行的类型引用，但受成员 node kind、标识符校验、curried call 形态、直接函数参数、bounded 深度和 mention fallback 限制。
 ## 候选优化说明：manual-single-scope-parser-worker-set-20260519
 - 目标/算法/架构/不变量：保护核心目标下限，降低多仓 full-scope `repo register` 冷索引中的 parser worker 固定成本；每个 git blob fetch group 只创建一组有界 scoped worker，按 stride 分配并按原始 index 合并，不改变 schema、事实、search document、candidate limit、ranking、filters、CLI/API、provider/env、judge、网络/QoS、安装发布或 harness 行为。
 - 预期影响/风险：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring 等大仓减少 thread spawn/join 开销；stride 分配可能轻微负载不均，但受文件数、字节数与 row budget 限制，合并排序保持确定性。
@@ -972,3 +975,17 @@ d' +          AND EXISTS ( +                SELECT 1 +                FROM uniqu
 
 Adopted optimization notes:
  version constant"), -        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); assert_eq!( +        symbol_fts_match_query("new lru cache"), +        "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\"" +    ); +    assert_eq!( fts_match_query("checkpoint metadata version constant"), "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); @@ -290,6 +294,14 @@ )) .await .expect("lowercase symbol query should succeed"); +    let spaced_hits = store +        .search_code(code_search_request( +            "eval checkpoint store", +            CodeQueryKind::Definition, +        )) +        .await +        .expect("spaced compound symbol query should succeed"); +    assert_eq!(spaced_hits[0].symbol_snapshot_id.as_deref(), Some("eval-checkpoint-store")); assert!( hit.score > lower_hits[0].score + 1.5, "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}", tokens used 159,018
+## 20260518T164005Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T164005Z.patch`
+- score: 0.894178 (foundational=0.962963, competitive=0.81746, accuracy=0.890212, semantic_vector=1.0, research_judge=0.78, performance=0.866042, stability=1.0)
+- cases: 82/87 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_identity_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_excerpt_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=40365ms; cargo_fmt_check_ms=846ms; cargo_clippy_ms=193ms; cargo_test_ms=8515ms; relay_teams_index_ms=33337ms; relay_teams_register_index_ms=33452ms; relay_teams_query_p50_ms=288ms; relay_teams_query_p95_ms=829ms
+
+Adopted optimization notes:
+
+orage/sqlite/code_query_support.rs b/src/relay_knowledge/storage/sqlite/code_query_support.rs index 9ecf472cad2200a71d8aea84fddd77aefbe60be6..ecd035cd43fea05293a5d141e59bb153600ba1f4 --- a/src/relay_knowledge/storage/sqlite/code_query_support.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_support.rs @@ -467,14 +467,24 @@ } fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String { -    caller_excerpt +    let matching_line = caller_excerpt .lines() -        .find(|line| line.contains(callee)) +        .find(|line| line_looks_like_call_to(line, callee)) +        .or_else(|| caller_excerpt.lines().find(|line| line.contains(callee))); +    matching_line .map(compact_excerpt_line) .filter(|line| !line.is_empty()) .unwrap_or_else(|| compact_excerpt_line(caller_excerpt)) } +fn line_looks_like_call_to(line: &str, callee: &str) -> bool { +    let Some((_, suffix)) = line.split_once(callee) else { +        return false; +    }; +    let suffix = suffix.trim_start(); +    suffix.starts_with('(') || (suffix.starts_with('<') && suffix.contains('(')) +} + fn compact_excerpt_line(line: &str) -> String { line.split_whitespace().collect::<Vec<_>>().join(" ") } tokens used 213,902
+

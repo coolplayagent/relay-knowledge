@@ -98,6 +98,58 @@ impl IAMAuth { fn new() -> Self { IAMAuth } }
     );
 }
 
+#[test]
+fn typescript_function_factory_members_are_call_containers() {
+    let snapshot = parse_snapshot(
+        "src/agent.ts",
+        br#"
+export const layer = Service.of({
+  generate: Effect.fn("Agent.generate")(function* (input: Input) {
+    const params = buildParams(input)
+    return yield* Effect.promise(() => generateObject(params).then((r) => r.object))
+  }),
+})
+"#,
+    );
+    let generate = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "generate")
+        .expect("function factory object member should be indexed as a symbol");
+    let call = snapshot
+        .calls
+        .iter()
+        .find(|call| call.callee_name == "generateObject")
+        .expect("generateObject call should be indexed");
+    let chunk = snapshot
+        .chunks
+        .iter()
+        .find(|chunk| chunk.symbol_snapshot_id.as_deref() == Some(&generate.symbol_snapshot_id))
+        .expect("function factory member should have a retrievable chunk");
+
+    assert_eq!(call.caller_name.as_deref(), Some("generate"));
+    assert!(chunk.content.contains("generateObject(params)"));
+}
+
+#[test]
+fn typescript_data_transform_members_are_not_function_factory_symbols() {
+    let snapshot = parse_snapshot(
+        "src/converter.ts",
+        br#"
+const converted = {
+  tool_calls: content.filter((c) => c.type === "tool_use").map((c) => ({ id: c.id })),
+}
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .all(|symbol| symbol.name != "tool_calls")
+    );
+}
+
 fn parse_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
     let mut build = snapshot_build();
     parse_indexed_file(&mut build, path, source).expect("file should parse");

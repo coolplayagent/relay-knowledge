@@ -796,3 +796,7 @@ fn search_chunks(
 #[cfg(test)]
 #[path = "code_query_unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "code_query_excerpt_tests.rs"]
+mod excerpt_tests;

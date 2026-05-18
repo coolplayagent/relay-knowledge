@@ -104,7 +104,7 @@ fn javascript_like_function_value_definition(
         return None;
     }
     let value = function_value_node(node)?;
-    if !matches!(value.kind(), "arrow_function" | "function_expression") {
+    if !javascript_like_function_value(node, value) {
         return None;
     }
     let name = function_value_name(content, node)?;
@@ -113,6 +113,55 @@ fn javascript_like_function_value_definition(
     }
 
     Some((name, "function", syntax_range(node)))
+}
+
+fn javascript_like_function_value(owner: Node<'_>, value: Node<'_>) -> bool {
+    if javascript_like_function_node(value) {
+        return true;
+    }
+    matches!(owner.kind(), "pair" | "public_field_definition")
+        && javascript_like_function_factory_call(value, 0)
+}
+
+const MAX_FUNCTION_FACTORY_CALL_DEPTH: usize = 4;
+
+fn javascript_like_function_factory_call(value: Node<'_>, depth: usize) -> bool {
+    if depth >= MAX_FUNCTION_FACTORY_CALL_DEPTH || value.kind() != "call_expression" {
+        return false;
+    }
+    let curried_factory = value
+        .child_by_field_name("function")
+        .is_some_and(|function| function.kind() == "call_expression");
+    if !curried_factory {
+        return false;
+    }
+    if value
+        .child_by_field_name("arguments")
+        .is_some_and(arguments_include_function_node)
+    {
+        return true;
+    }
+    value
+        .child_by_field_name("function")
+        .is_some_and(|function| javascript_like_function_factory_call(function, depth + 1))
+}
+
+fn arguments_include_function_node(arguments: Node<'_>) -> bool {
+    (0..arguments.child_count()).any(|index| {
+        let Ok(index) = u32::try_from(index) else {
+            return false;
+        };
+        arguments
+            .child(index)
+            .is_some_and(javascript_like_function_node)
+    })
+}
+
+fn javascript_like_function_node(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "arrow_function" | "function_expression" | "generator_function"
+    )
 }
 
 fn javascript_like_exported_constructed_value_definition(

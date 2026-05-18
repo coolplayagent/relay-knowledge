@@ -467,12 +467,22 @@ pub(super) fn call_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &
 }
 
 fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String {
-    caller_excerpt
+    let matching_line = caller_excerpt
         .lines()
-        .find(|line| line.contains(callee))
+        .find(|line| line_looks_like_call_to(line, callee))
+        .or_else(|| caller_excerpt.lines().find(|line| line.contains(callee)));
+    matching_line
         .map(compact_excerpt_line)
         .filter(|line| !line.is_empty())
         .unwrap_or_else(|| compact_excerpt_line(caller_excerpt))
+}
+
+fn line_looks_like_call_to(line: &str, callee: &str) -> bool {
+    let Some((_, suffix)) = line.split_once(callee) else {
+        return false;
+    };
+    let suffix = suffix.trim_start();
+    suffix.starts_with('(') || (suffix.starts_with('<') && suffix.contains('('))
 }
 
 fn compact_excerpt_line(line: &str) -> String {
