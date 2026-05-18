@@ -5,6 +5,11 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-single-scope-parser-worker-set-20260519
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，降低多仓 full-scope `repo register` 冷索引中的 parser worker 固定成本；每个 git blob fetch group 现在只创建一组有界 scoped worker，按 stride 分配文件并在合并后按原始 index 恢复顺序，而不是为每个小 chunk 重复创建一批短生命周期线程。
+- 不变量：不改变 SQLite schema、事实表内容、search document、candidate limit、ranking/scoring、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；`CodeIndexBatch.files/symbols/references/imports/chunks/diagnostics` 的提交顺序仍与 git tree path 顺序一致，解析错误和 worker panic 仍映射为 `CodeIndexError`。
+- 预期影响：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring Framework 等大仓在默认 256 文件 batch 下减少 thread spawn/join 开销，特别是小文件密集仓库的 register-to-index wall time 应改善或保持中性；检索质量、semantic/vector source coverage 和 query latency 不应因图事实不变而退化。
+- 已知风险：stride 分配可能让一个 worker拿到多个较大文件而产生轻微负载不均；fetch group 仍受文件数、字节数与 row budget 限制，合并排序保持确定性，现有 full-index plan order 测试覆盖顺序不变。
 ## 候选优化说明：manual-exported-constructed-value-definition-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，补齐 JavaScript/TypeScript 大仓中导出运行时对象的 definition 召回；parser 仅把 `export const name = Owner.factory(...)` 这类 member-call 构造值和 `export const name = new Type(...)` 记录为 `constant` symbol，使 `protocol`、`route` 等公开协议/服务对象进入既有 symbol FTS 与 definition 查询路径。
 - 不变量：不改变 SQLite schema、FTS 表结构、candidate limit、ranking 权重、import/call/reference finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；非导出局部常量、普通标识符函数调用、对象/数组字面量和超长构造块仍不进入 symbol 表。
@@ -520,7 +525,6 @@
 - latency metrics: cargo_build_release_ms=40757ms; cargo_fmt_check_ms=692ms; cargo_clippy_ms=193ms; cargo_test_ms=7479ms; relay_teams_index_ms=81836ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=11574ms; leveldb_cpp_index_ms=19215ms
 
 Adopted optimization notes:
-
 dd", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = CodeIndexResourceBudget::new(128, "fn a() {}\nfn b() {}\n".len(), 50_000) +        .expect("budget should validate"); +    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget) +        .expect("plan should prepare"); + +    let (plan, first_batch) = plan.parse_next_batch().expect("first batch should parse"); +    let (plan, second_batch) = plan.parse_next_batch().expect("second batch should parse"); +    let (_, third_batch) = plan.parse_next_batch().expect("third batch should parse"); + +    let first_batch = first_batch.expect("first batch should exist"); +    let second_batch = second_batch.expect("second batch should exist"); +    assert!(third_batch.is_none()); +    assert_eq!(first_batch.files.len(), 2); +    assert_eq!(first_batch.files[0].path, "src/a.rs"); +    assert_eq!(first_batch.files[1].path, "src/b.rs"); +    assert_eq!(second_batch.files.len(), 1); +    assert_eq!(second_batch.files[0].path, "src/c.rs"); +} + +#[test] fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() { let registration = CodeRepositoryRegistration::new( "repo", tokens used 165,514
 ## 20260516T122811Z
 
@@ -533,7 +537,6 @@ dd", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = CodeIndex
 - latency metrics: cargo_build_release_ms=49471ms; cargo_fmt_check_ms=688ms; cargo_clippy_ms=194ms; cargo_test_ms=7428ms; relay_teams_index_ms=81898ms; relay_teams_query_p50_ms=127ms; relay_teams_query_p95_ms=11662ms; leveldb_cpp_index_ms=19586ms
 
 Adopted optimization notes:
-
             row.get::<_, u16>(3)?, +                        row.get::<_, String>(4)?, +                    ), +                )) +            })?; + +            rows.collect::<Result<BTreeMap<_, _>, _>>() +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("reference rows should load") +} + fn file( source_scope: &str, file_id: &str, diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index f3aec34be9ed352e5e1013106078e718c3bc9168..d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -210,6 +210,8 @@ CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup ON code_repository_symbols(source_scope, name, qualified_name, path); +        CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup +            ON code_repository_symbols(source_scope, name, path); CREATE INDEX IF NOT EXISTS code_repository_references_lookup ON code_repository_references(source_scope, name, kind, path); CREATE INDEX IF NOT EXISTS code_repository_calls_lookup tokens used 143,069
 ## 20260516T124101Z
 
@@ -546,7 +549,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=51187ms; cargo_fmt_check_ms=684ms; cargo_clippy_ms=187ms; cargo_test_ms=7430ms; relay_teams_index_ms=81070ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=11621ms; leveldb_cpp_index_ms=19352ms
 
 Adopted optimization notes:
-
 e) } fn load_symbol_keys( @@ -797,3 +799,39 @@ hash } + +#[cfg(test)] +mod tests { +    use super::{SymbolKey, caller_for_line}; +    use crate::domain::RepositoryCodeRange; + +    #[test] +    fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() { +        let symbols = vec![ +            symbol("outer", 10, 100), +            symbol("same_start_outer", 20, 80), +            symbol("same_start_inner", 20, 40), +            symbol("after_call", 60, 70), +        ]; + +        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match"); + +        assert_eq!(caller.name, "same_start_inner"); +    } + +    #[test] +    fn caller_lookup_ignores_symbols_that_start_after_call_line() { +        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)]; + +        assert!(caller_for_line(Some(&symbols), 10).is_none()); +    } + +    fn symbol(name: &str, start: u32, end: u32) -> SymbolKey { +        SymbolKey { +            symbol_snapshot_id: format!("symbol:{name}"), +            path: "src/lib.rs".to_owned(), +            name: name.to_owned(), +            line_range: RepositoryCodeRange { start, end }, +        } +    } +} tokens used 88,978
 ## 20260516T130000Z
 
@@ -559,7 +561,6 @@ e) } fn load_symbol_keys( @@ -797,3 +799,39 @@ hash } + +#[cfg(test)] +mod tests
 - latency metrics: cargo_build_release_ms=54020ms; cargo_fmt_check_ms=717ms; cargo_clippy_ms=198ms; cargo_test_ms=7706ms; relay_teams_index_ms=83470ms; relay_teams_query_p50_ms=129ms; relay_teams_query_p95_ms=11995ms; leveldb_cpp_index_ms=20417ms
 
 Adopted optimization notes:
-
 3b88 --- a/src/relay_knowledge/code/tests.rs +++ b/src/relay_knowledge/code/tests.rs @@ -265,6 +265,31 @@ } #[test] +fn full_index_plan_preserves_order_across_bounded_parallel_parse_chunks() { +    let repo = TempGitRepo::create("parallel-fetch-order"); +    for index in 0..40 { +        repo.write( +            &format!("src/file_{index:02}.rs"), +            &format!("fn f_{index}() {{}}\n"), +        ); +    } +    repo.git(["add", "."]); +    repo.git(["commit", "-m", "base"]); +    let budget = +        CodeIndexResourceBudget::new(40, 1024 * 1024, 50_000).expect("budget should validate"); +    let plan = prepare_full_index_plan(repo.registration(), repo.selector(), budget) +        .expect("plan should prepare"); + +    let (_, batch) = plan.parse_next_batch().expect("batch should parse"); +    let batch = batch.expect("batch should exist"); + +    assert_eq!(batch.files.len(), 40); +    for (index, file) in batch.files.iter().enumerate() { +        assert_eq!(file.path, format!("src/file_{index:02}.rs")); +    } +} + +#[test] fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() { let registration = CodeRepositoryRegistration::new( "repo", tokens used 84,035
 ## 20260516T132656Z
 
@@ -572,7 +573,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=60487ms; cargo_fmt_check_ms=818ms; cargo_clippy_ms=214ms; cargo_test_ms=8794ms; relay_teams_index_ms=86086ms; relay_teams_query_p50_ms=133ms; relay_teams_query_p95_ms=13289ms; leveldb_cpp_index_ms=20307ms
 
 Adopted optimization notes:
-
   caller.map(|symbol| symbol.name.clone()), -                reference.target_symbol_snapshot_id, -                reference.name, -                reference.target_hint, -                reference.resolution_state, -                reference.confidence_basis_points, -                reference.confidence_tier, -                reference.line_start, -                reference.line_end, -            ], -        )?; -        super::super::insert_search_document( -            transaction, +        insert_call.execute(params![ +            repository_id, +            source_scope, +            call_id, +            reference.file_id, +            reference.path, +            caller.map(|symbol| symbol.symbol_snapshot_id.clone()), +            caller.map(|symbol| symbol.name.clone()), +            reference.target_symbol_snapshot_id, +            reference.name, +            reference.target_hint, +            reference.resolution_state, +            reference.confidence_basis_points, +            reference.confidence_tier, +            reference.line_start, +            reference.line_end, +        ])?; +        search_documents.insert( source_scope, "call", &call_id, tokens used 98,611
 
 ## 候选优化说明：accuracy/stability 优先与 case 扩展
@@ -594,7 +594,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=59850ms; cargo_fmt_check_ms=842ms; cargo_clippy_ms=209ms; cargo_test_ms=8835ms; relay_teams_index_ms=87582ms; relay_teams_query_p50_ms=136ms; relay_teams_query_p95_ms=13219ms; leveldb_cpp_index_ms=19926ms
 
 Adopted optimization notes:
-
 w( +                    " +                    SELECT COUNT(*) +                    FROM code_repository_search +                    WHERE source_scope = ?1 AND document_kind = ?2 +                    ", +                    (&source_scope, &document_kind), +                    |row| row.get(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("search document count should load") +} diff --git a/src/relay_knowledge/storage/sqlite/code_schema.rs b/src/relay_knowledge/storage/sqlite/code_schema.rs index d7b8cb2e9a40adc1e7c21eb825c6220fb8fd9877..0946af7022d8361c66c6443600975234efc916e8 --- a/src/relay_knowledge/storage/sqlite/code_schema.rs +++ b/src/relay_knowledge/storage/sqlite/code_schema.rs @@ -373,7 +373,8 @@ source_scope, document_kind, record_id, path, language_id, content ) SELECT source_scope, 'call', call_id, path, '', -               coalesce(caller_name, '') || ' ' || callee_name || ' ' || coalesce(target_hint, '') +               coalesce(caller_name, '') || ' ' || callee_name || ' ' || +               coalesce(target_hint, '') || ' ' || path FROM code_repository_calls ", [], tokens used 135,337
 ## 20260516T135933Z
 
@@ -607,7 +606,6 @@ w( +                    " +                    SELECT COUNT(*) +                
 - latency metrics: cargo_build_release_ms=56550ms; cargo_fmt_check_ms=755ms; cargo_clippy_ms=204ms; cargo_test_ms=7792ms; relay_teams_index_ms=83515ms; relay_teams_query_p50_ms=132ms; relay_teams_query_p95_ms=12317ms; leveldb_cpp_index_ms=19595ms
 
 Adopted optimization notes:
-
  "exact-file", "src/exact_owner.py"); +    exact.caller_name = Some("exactOwner".to_owned()); +    exact.callee_name = "TargetCall".to_owned(); +    exact.target_hint = Some("TargetCall".to_owned()); +    exact.resolution_state = "resolved".to_owned(); +    exact.confidence_basis_points = 8_000; +    exact.confidence_tier = "inferred".to_owned(); +    calls.push(exact); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls, +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 157,522
 
 ## 候选优化说明：20260516T140540Z
@@ -636,7 +634,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=48946ms; cargo_fmt_check_ms=728ms; cargo_clippy_ms=200ms; cargo_test_ms=8023ms; relay_teams_index_ms=81709ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=11797ms; leveldb_cpp_index_ms=19861ms
 
 Adopted optimization notes:
-
 rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 3, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "first-noise-file", +                "src/a_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "second-noise-file", +                "src/b_noise.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "exact-file", +                "src/z_exact_owner.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: vec![first_noise, second_noise, exact], +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot { let mut caller = symbol( "sanitize-options", tokens used 132,437
 ## 20260516T142335Z
 
@@ -649,7 +646,6 @@ rs: Vec::new(), +        language_filters: Vec::new(), +        full_replace: tr
 - latency metrics: cargo_build_release_ms=33618ms; cargo_fmt_check_ms=682ms; cargo_clippy_ms=179ms; cargo_test_ms=7211ms; relay_teams_index_ms=70526ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=8185ms; leveldb_cpp_index_ms=18800ms
 
 Adopted optimization notes:
-
               None, +            ), +            file( +                "output-file", +                "src/relay_teams/sessions/runs/background_tasks/projection.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "directory-file", +                "src/relay_teams/workspace/directory_picker.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "archive-file", +                "tests/unit_tests/net/test_github_cli.py", +                "python", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: vec![target, output_noise, directory_noise, archive_noise], +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot { let mut ambiguous = call("ambiguous-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); tokens used 172,862
 
 ## 候选优化说明：20260516T143645Z
@@ -703,7 +699,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=34450ms; cargo_fmt_check_ms=678ms; cargo_clippy_ms=195ms; cargo_test_ms=7340ms; relay_teams_index_ms=70352ms; relay_teams_query_p50_ms=128ms; relay_teams_query_p95_ms=8344ms; leveldb_cpp_index_ms=18666ms
 
 Adopted optimization notes:
-
 us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_debugfs_init".to_owned()); diff --git a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs index 595e4c271c813e5466eb068d26842c18e72d6e06..db6719d0fe07cf265d1d8dff6c31a380334f1108 --- a/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs @@ -32,3 +32,25 @@ assert!(values.len() <= MAX_CANDIDATE_BIND_VALUES); } + +#[test] +fn symbol_fts_query_uses_any_term_for_fuzzy_recall() { +    assert_eq!( +        symbol_fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +    ); +    assert_eq!( +        fts_match_query("checkpoint metadata version constant"), +        "\"checkpoint\" \"metadata\" \"version\" \"constant\"" +    ); +} + +#[test] +fn score_text_matches_identifier_parts_inside_snake_case_names() { +    let score = score_text( +        "archive output directory", +        ["def archive_output_dir(output_dir: Path) -> Path:"], +    ); + +    assert!(score >= 4.0); +} tokens used 144,045
 ## 20260516T144537Z
 
@@ -716,7 +711,6 @@ us-callee", "cma-source", "mm/cma_debug.c"); ambiguous.caller_name = Some("cma_d
 - latency metrics: cargo_build_release_ms=30307ms; cargo_fmt_check_ms=708ms; cargo_clippy_ms=182ms; cargo_test_ms=7290ms; relay_teams_index_ms=69032ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=9460ms; leveldb_cpp_index_ms=18856ms
 
 Adopted optimization notes:
-
         base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: 2, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files: vec![ +            file( +                "db-impl-header", +                "db/db_impl.h", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +            file( +                "db-impl-source", +                "db/db_impl.cc", +                "cpp", +                CodeParseStatus::Parsed, +                None, +            ), +        ], +        symbols: Vec::new(), +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: vec![target, noise], +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_related_callee_names() -> CodeIndexSnapshot { let mut unrelated = call("unmapped-area", "mmap-source", "mm/mmap.c"); unrelated.caller_name = Some("do_mmap".to_owned()); tokens used 107,884
 ## 20260516T145236Z
 
@@ -729,7 +723,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=28188ms; cargo_fmt_check_ms=509ms; cargo_clippy_ms=149ms; cargo_test_ms=6539ms; relay_teams_index_ms=70263ms; relay_teams_query_p50_ms=119ms; relay_teams_query_p95_ms=8464ms; leveldb_cpp_index_ms=18725ms
 
 Adopted optimization notes:
-
 erms = query_terms("recover descriptor save_manifest versionedit"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "Status DBImpl::RecoverLogFile(uint64_t log_number, bool* save_manifest) {\n  descriptor_log_->AddRecord(edit->Encode());\n}" +        ), +        0.0 +    ); +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class DBImpl {\n  Status RecoverLogFile(uint64_t log_number, bool* save_manifest,\n                        VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n  Status WriteLevel0Table(MemTable* mem, VersionEdit* edit)\n      EXCLUSIVE_LOCKS_REQUIRED(mutex_);\n};" +        ), +        2.0 +    ); +} + +#[test] +fn declaration_chunk_bonus_preserves_interface_boost() { +    let terms = query_terms("cache interface lookup insert total charge lru"); + +    assert_eq!( +        declaration_chunk_bonus( +            &terms, +            "class Cache {\n public:\n  virtual Handle* Insert(const Slice& key, void* value, size_t charge) = 0;\n  virtual Handle* Lookup(const Slice& key) = 0;\n  virtual size_t TotalCharge() const = 0;\n};" +        ), +        3.0 +    ); +} tokens used 113,000
 ## 20260516T155614Z
 
@@ -742,7 +735,6 @@ erms = query_terms("recover descriptor save_manifest versionedit"); + +    asser
 - latency metrics: cargo_build_release_ms=52888ms; cargo_fmt_check_ms=713ms; cargo_clippy_ms=176ms; cargo_test_ms=7130ms; relay_teams_index_ms=74641ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=298ms; leveldb_cpp_index_ms=13790ms
 
 Adopted optimization notes:
-
 sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGraphStore, +    storage::{SqliteGraphStore, StorageError}, }; #[path = "code_test_support.rs"] @@ -114,6 +114,33 @@ } #[tokio::test] +async fn schema_indexes_chunks_by_symbol_for_call_excerpt_lookup() { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); + +    let index_exists = store +        .run(|connection| { +            connection +                .query_row( +                    " +                    SELECT EXISTS( +                        SELECT 1 +                        FROM sqlite_master +                        WHERE type = 'index' +                          AND name = 'code_repository_chunks_symbol_lookup' +                    ) +                    ", +                    [], +                    |row| row.get::<_, bool>(0), +                ) +                .map_err(StorageError::from) +        }) +        .await +        .expect("schema index check should succeed"); + +    assert!(index_exists); +} + +#[tokio::test] async fn rejects_code_queries_for_unindexed_refs() { let store = store_with_repository_snapshot(snapshot_with_chunk( "repo", tokens used 113,836
 ## 20260516T160620Z
 
@@ -755,7 +747,6 @@ sitorySelector, CodeRetrievalLayer, FreshnessPolicy, }, -    storage::SqliteGrap
 - latency metrics: cargo_build_release_ms=25737ms; cargo_fmt_check_ms=524ms; cargo_clippy_ms=158ms; cargo_test_ms=6118ms; relay_teams_index_ms=74148ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=308ms; leveldb_cpp_index_ms=13704ms
 
 Adopted optimization notes:
-
 ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc", -            "Options SanitizeOptions(const Options& src) {\n    Options result;\n    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", -            Some("sanitize-options"), -        )], +        chunks: vec![ +            RepositoryCodeChunkRecord { +                line_range: range(110, 115), +                ..chunk( +                    "sanitize-options-prologue", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "Options SanitizeOptions(const Options& src) {\n    Options result;", +                    Some("sanitize-options"), +                ) +            }, +            RepositoryCodeChunkRecord { +                line_range: range(116, 124), +                ..chunk( +                    "sanitize-options-call-site", +                    "db-impl-source", +                    "db/db_impl.cc", +                    "    result.block_cache = NewLRUCache(8 << 20);\n    return result;\n}", +                    Some("sanitize-options"), +                ) +            }, +        ], diagnostics: Vec::new(), } } tokens used 172,827
 ## 20260516T171146Z
 
@@ -768,7 +759,6 @@ ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc",
 - latency metrics: cargo_build_release_ms=28113ms; cargo_fmt_check_ms=516ms; cargo_clippy_ms=144ms; cargo_test_ms=6245ms; relay_teams_index_ms=67184ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=305ms; leveldb_cpp_index_ms=17958ms
 
 Adopted optimization notes:
-
 d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
 ## 20260516 HTTP test stability entries
 
@@ -834,7 +824,6 @@ d, +            &path, +            "target", +        )); +    } + +    files.p
 - latency metrics: cargo_build_release_ms=34804ms; cargo_fmt_check_ms=903ms; cargo_clippy_ms=216ms; cargo_test_ms=8606ms; relay_teams_index_ms=72605ms; relay_teams_query_p50_ms=308ms; relay_teams_query_p95_ms=539ms; leveldb_cpp_index_ms=20291ms
 
 Adopted optimization notes:
-
 erms = query_terms("recover descriptor save_manifest versionedit"); @@ -455,6 +484,32 @@ } #[tokio::test] +async fn caller_search_accepts_scoped_target_hint_prefilter() { +    let mut call = code_query_call("scoped-target-call", "service-file", "src/pkg/service.py"); +    call.caller_name = Some("Caller".to_owned()); +    call.callee_name = "TargetThing".to_owned(); +    call.target_hint = Some("pkg.service.TargetThing".to_owned()); +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![code_query_file("service-file", "src/pkg/service.py", "python")], +        Vec::new(), +        vec![call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request( +            "pkg.service.TargetThing", +            CodeQueryKind::Callers, +        )) +        .await +        .expect("scoped caller query should succeed"); + +    assert_eq!(hits.len(), 1); +    assert_eq!(hits[0].path, "src/pkg/service.py"); +    assert!(hits[0].score >= 5.0, "score was {}", hits[0].score); +} + +#[tokio::test] async fn edge_queries_apply_language_filters_before_candidate_limit() { let mut files = Vec::new(); let mut calls = Vec::new(); tokens used 195,287
 ## 20260517T230922Z
 
@@ -847,7 +836,6 @@ erms = query_terms("recover descriptor save_manifest versionedit"); @@ -455,6 +4
 - latency metrics: cargo_build_release_ms=32030ms; cargo_fmt_check_ms=810ms; cargo_clippy_ms=196ms; cargo_test_ms=8756ms; relay_teams_index_ms=71477ms; relay_teams_query_p50_ms=220ms; relay_teams_query_p95_ms=401ms; leveldb_cpp_index_ms=19272ms
 
 Adopted optimization notes:
-
 ), +        source_scope: source_scope.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        total_path_count, +        changed_path_count: total_path_count, +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        resource_budget: CodeIndexResourceBudget::new(1, 1024, 1024).expect("budget"), +    } +} + +fn range(start: u32, end: u32) -> RepositoryCodeRange { +    RepositoryCodeRange { start, end } +} + +async fn search( +    store: &SqliteGraphStore, +    query: &str, +    kind: CodeQueryKind, +) -> Vec<CodeRetrievalHit> { +    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new()) +        .expect("selector should validate"); +    store +        .search_code( +            CodeRetrievalRequest::new(query, selector, kind, 5, FreshnessPolicy::AllowStale) +                .expect("request should validate"), +        ) +        .await +        .expect("query should succeed") +} tokens used 162,097
 ## 20260517T234741Z
 
@@ -860,7 +848,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=40908ms; cargo_fmt_check_ms=816ms; cargo_clippy_ms=217ms; cargo_test_ms=9323ms; relay_teams_index_ms=81573ms; relay_teams_query_p50_ms=294ms; relay_teams_query_p95_ms=537ms; leveldb_cpp_index_ms=18234ms
 
 Adopted optimization notes:
-
 onnectorSaveRequest, +): Promise<void> => { +    await client.save(request); +}; + +const normalizeConnector = function ( +    request: W3ConnectorSaveRequest, +): W3ConnectorSaveRequest { +    return request; +}; + +class ConnectorService { +    saveLater = (request: W3ConnectorSaveRequest): void => { +        saveW3Connector(request); +    }; +} +"#, +    ); + +    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed); +    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] { +        let symbol = snapshot +            .symbols +            .iter() +            .find(|symbol| symbol.name == name) +            .unwrap_or_else(|| panic!("{name} should be extracted as a function symbol")); +        assert_eq!(symbol.kind, "function"); +        assert!(symbol.signature.contains("W3ConnectorSaveRequest")); +    } +    assert!( +        !snapshot +            .symbols +            .iter() +            .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS") +    ); +} + +#[test] fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() { let mut source = "def retry_policy(value=\"".to_owned(); source.push_str(&"\u{00e9}".repeat(300)); tokens used 242,666
 ## 20260518T014540Z
 
@@ -873,7 +860,6 @@ onnectorSaveRequest, +): Promise<void> => { +    await client.save(request); +};
 - latency metrics: cargo_build_release_ms=48540ms; cargo_fmt_check_ms=1034ms; cargo_clippy_ms=277ms; cargo_test_ms=7191ms; relay_teams_index_ms=101175ms; relay_teams_register_index_ms=101283ms; relay_teams_query_p50_ms=382ms; relay_teams_query_p95_ms=781ms
 
 Adopted optimization notes:
-
 te/retrieval/derived.rs index 2bd9886479fa589a8ce06c8a9160360e3c1dd16d..45ab7b45722182c02bb33364cdba1e451123e21f --- a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs +++ b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs @@ -21,7 +21,7 @@ connection: &Connection, request: &GraphSearchRequest, ) -> Result<Vec<ScoredHit>, StorageError> { -    let query_terms = token_signature(&request.query, &[], None, "") +    let query_terms = token_signature(&request.query, &[], None) .into_iter() .collect::<BTreeSet<_>>(); if query_terms.is_empty() { @@ -149,7 +149,7 @@ request: &GraphSearchRequest, ) -> Result<Vec<ScoredHit>, StorageError> { let result_limit = bounded_candidate_limit(request); -    let query_terms = token_signature(&request.query, &[], None, "") +    let query_terms = token_signature(&request.query, &[], None) .into_iter() .collect::<BTreeSet<_>>(); if query_terms.is_empty() { @@ -296,7 +296,7 @@ fn vector(&mut self, dimension: usize) -> &[f64] { self.vectors .entry(dimension) -            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension)) +            .or_insert_with(|| hashed_vector(self.query, &[], None, dimension)) } } tokens used 226,901
 ## 20260518T035623Z
 
@@ -886,7 +872,6 @@ te/retrieval/derived.rs index 2bd9886479fa589a8ce06c8a9160360e3c1dd16d..45ab7b45
 - latency metrics: cargo_build_release_ms=48370ms; cargo_fmt_check_ms=1066ms; cargo_clippy_ms=268ms; cargo_test_ms=7302ms; relay_teams_index_ms=107180ms; relay_teams_register_index_ms=107313ms; relay_teams_query_p50_ms=392ms; relay_teams_query_p95_ms=819ms
 
 Adopted optimization notes:
-
     let mut production_call = +        code_query_call("ambiguous-production-call", "table-file", "table/table.cc"); +    production_call.caller_name = Some("InternalGet".to_owned()); +    production_call.callee_name = "KeyMayMatch".to_owned(); +    production_call.target_hint = Some("KeyMayMatch".to_owned()); +    production_call.confidence_basis_points = 5_000; +    production_call.confidence_tier = "ambiguous".to_owned(); + +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"), +            code_query_file("table-file", "table/table.cc", "cpp"), +        ], +        Vec::new(), +        vec![test_call, production_call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "table/table.cc"); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn callee_search_applies_direction_before_candidate_limit() { let mut files = Vec::new(); let mut calls = Vec::new(); tokens used 185,291
 ## 20260518T041031Z
 
@@ -899,7 +884,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=40362ms; cargo_fmt_check_ms=641ms; cargo_clippy_ms=167ms; cargo_test_ms=6218ms; relay_teams_index_ms=67478ms; relay_teams_register_index_ms=67566ms; relay_teams_query_p50_ms=238ms; relay_teams_query_p95_ms=475ms
 
 Adopted optimization notes:
-
 ?; -    let rows = statement.query_map(params![source_scope], |row| { -        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)) -    })?; +    for path in missing_paths { +        if let Some(language_id) = statement +            .query_row(params![batch.source_scope.as_str(), path.as_str()], |row| { +                row.get(0) +            }) +            .optional()? +        { +            languages.insert(path, language_id); +        } +    } + +    Ok(languages) +} -    rows.collect::<Result<BTreeMap<_, _>, _>>() -        .map_err(StorageError::from) +fn edge_paths_missing_from_batch( +    batch: &CodeIndexBatch, +    languages: &BTreeMap<String, String>, +) -> Vec<String> { +    let mut missing_paths = Vec::<String>::new(); +    for path in batch +        .references +        .iter() +        .map(|reference| reference.path.as_str()) +        .chain(batch.imports.iter().map(|import| import.path.as_str())) +    { +        if !languages.contains_key(path) +            && !missing_paths.iter().any(|known| known.as_str() == path) +        { +            missing_paths.push(path.to_owned()); +        } +    } + +    missing_paths } fn insert_diagnostics( tokens used 343,083
 ## 20260518T051523Z
 
@@ -912,7 +896,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=31835ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=144ms; cargo_test_ms=5347ms; relay_teams_index_ms=69579ms; relay_teams_register_index_ms=69655ms; relay_teams_query_p50_ms=289ms; relay_teams_query_p95_ms=583ms
 
 Adopted optimization notes:
-
 ".to_owned(); + +    let mut production_call = +        code_query_call("ambiguous-production-call", "service-file", "src/service.cc"); +    production_call.caller_name = Some("Dispatch".to_owned()); +    production_call.callee_name = "TargetCall".to_owned(); +    production_call.target_hint = Some("TargetCall".to_owned()); +    production_call.confidence_basis_points = 5_000; +    production_call.confidence_tier = "ambiguous".to_owned(); + +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("router-file", "src/router.cc", "cpp"), +            code_query_file("service-file", "src/service.cc", "cpp"), +        ], +        Vec::new(), +        vec![wrapper_call, production_call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("TargetCall", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "src/service.cc"); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn callee_search_applies_direction_before_candidate_limit() { let mut files = Vec::new(); let mut calls = Vec::new(); tokens used 231,480
 ## 20260518T052713Z
 
@@ -925,7 +908,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=32286ms; cargo_fmt_check_ms=599ms; cargo_clippy_ms=172ms; cargo_test_ms=8553ms; relay_teams_index_ms=42134ms; relay_teams_register_index_ms=42222ms; relay_teams_query_p50_ms=216ms; relay_teams_query_p95_ms=437ms
 
 Adopted optimization notes:
-
       " +                UPDATE code_repositories +                SET last_indexed_scope_id = ?1 +                WHERE repository_id = 'repo' +                ", +                [source_scope], +            )?; + +            Ok(()) +        }) +        .await +        .expect("active scope should update"); +} + +async fn mark_scope_retained(store: &SqliteGraphStore, source_scope: &str) { +    let source_scope = source_scope.to_owned(); +    store +        .run(move |connection| { +            connection.execute( +                " +                INSERT INTO code_repository_scopes ( +                    source_scope, repository_id, resolved_commit_sha, tree_hash, +                    path_filters_json, language_filters_json, indexed_file_count, +                    symbol_count, reference_count, chunk_count, stale, degraded_reason +                ) +                VALUES (?1, 'repo', 'commit', 'tree', '[]', '[]', 0, 0, 0, 0, 0, NULL) +                ", +                params![source_scope], +            )?; + +            Ok(()) +        }) +        .await +        .expect("retained scope should insert"); +} + fn file( source_scope: &str, file_id: &str, tokens used 214,659
 ## 20260518T062727Z
 
@@ -938,7 +920,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=32332ms; cargo_fmt_check_ms=603ms; cargo_clippy_ms=149ms; cargo_test_ms=5631ms; relay_teams_index_ms=42534ms; relay_teams_register_index_ms=42600ms; relay_teams_query_p50_ms=301ms; relay_teams_query_p95_ms=589ms
 
 Adopted optimization notes:
-
 ()); +    attach_second.caller_name = Some("attachRunStream".to_owned()); +    attach_second.callee_symbol_snapshot_id = Some("release-symbol".to_owned()); +    attach_second.callee_name = "releaseActiveStreamHandle".to_owned(); +    attach_second.target_hint = Some("releaseActiveStreamHandle".to_owned()); +    attach_second.line_range = code_query_range(492, 492); + +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![code_query_file("stream-file", path, "javascript")], +        vec![start, end, attach], +        vec![start_call, end_call, attach_first, attach_second], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request( +            "releaseActiveStreamHandle", +            CodeQueryKind::Callers, +        )) +        .await +        .expect("caller query should succeed"); + +    assert!(hits[0].excerpt.contains("attachRunStream")); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn caller_search_accepts_scoped_target_hint_prefilter() { let mut call = code_query_call("scoped-target-call", "service-file", "src/pkg/service.py"); call.caller_name = Some("Caller".to_owned()); tokens used 219,367
 ## 20260518T071744Z
 
@@ -951,7 +932,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=33212ms; cargo_fmt_check_ms=605ms; cargo_clippy_ms=153ms; cargo_test_ms=5611ms; relay_teams_index_ms=46304ms; relay_teams_register_index_ms=46381ms; relay_teams_query_p50_ms=216ms; relay_teams_query_p95_ms=426ms
 
 Adopted optimization notes:
-
 ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_tier = "inferred".to_owned(); +        call.line_range = code_query_range(line, line); +        repeated_test_calls.push(call); +    } + +    let mut calls = vec![production_call]; +    calls.extend(repeated_test_calls); +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("table-file", "table/table.cc", "cpp"), +            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"), +        ], +        Vec::new(), +        calls, +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "table/table.cc"); +    assert!(hits[0].excerpt.contains("InternalGet")); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn caller_search_demotes_same_named_wrapper_call_sites() { let mut wrapper_call = code_query_call("resolved-wrapper-call", "router-file", "src/router.cc"); wrapper_call.caller_name = Some("Router::TargetCall".to_owned()); tokens used 139,240
 ## 20260518T093310Z
 
@@ -964,7 +944,6 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 - latency metrics: cargo_build_release_ms=50392ms; cargo_fmt_check_ms=1090ms; cargo_clippy_ms=11447ms; cargo_test_ms=7553ms; relay_teams_index_ms=55235ms; relay_teams_register_index_ms=55358ms; relay_teams_query_p50_ms=422ms; relay_teams_query_p95_ms=817ms
 
 Adopted optimization notes:
-
 b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs b/src/relay_knowledge/domain/code_repository.rs index 7fdb92681e37fddd260c690100eb19edddf757be..03d7ec2af60d7bcbc718b240d4f64b5ffa42f3a1 --- a/src/relay_knowledge/domain/code_repository.rs +++ b/src/relay_knowledge/domain/code_repository.rs @@ -435,7 +435,7 @@ } impl CodeIndexResourceBudget { -    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 128; +    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 256; pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024; pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000; @@ -911,4 +911,19 @@ assert_eq!(error.field, "line_range"); } + +    #[test] +    fn default_code_index_budget_batches_more_small_files_without_raising_row_or_byte_caps() { +        let budget = CodeIndexResourceBudget::default(); + +        assert_eq!(budget.max_files_per_batch, 256); +        assert_eq!( +            budget.max_bytes_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH +        ); +        assert_eq!( +            budget.max_rows_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_ROWS_PER_BATCH +        ); +    } } tokens used 237,921
 ## 20260518T094852Z
 
@@ -977,7 +956,6 @@ b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs 
 - latency metrics: cargo_build_release_ms=47327ms; cargo_fmt_check_ms=1082ms; cargo_clippy_ms=297ms; cargo_test_ms=7399ms; relay_teams_index_ms=20009ms; relay_teams_register_index_ms=20140ms; relay_teams_query_p50_ms=402ms; relay_teams_query_p95_ms=799ms
 
 Adopted optimization notes:
-
      source_scope, document_kind, record_id, path, language_id, content +                    ) +                    VALUES (?1, 'symbol', ?2, ?2, 'rust', 'target') +                    ", +                    rusqlite::params!["scope", path], +                ) +                .expect("search row should insert"); +        } + +        let transaction = connection.transaction().expect("transaction should open"); +        delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"]) +            .expect("paths should delete"); +        transaction.commit().expect("transaction should commit"); + +        for table in PATH_TABLES +            .iter() +            .copied() +            .chain(["code_repository_search"]) +        { +            let remaining = connection +                .query_row( +                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"), +                    [], +                    |row| row.get::<_, usize>(0), +                ) +                .expect("remaining row count should load"); +            assert_eq!(remaining, 1, "{table} should keep only the unmatched path"); +        } +    } +} tokens used 217,237
 ## 20260518T114107Z
 
@@ -990,7 +968,6 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=50953ms; cargo_fmt_check_ms=1136ms; cargo_clippy_ms=387ms; cargo_test_ms=7592ms; relay_teams_index_ms=46379ms; relay_teams_register_index_ms=46512ms; relay_teams_query_p50_ms=410ms; relay_teams_query_p95_ms=816ms
 
 Adopted optimization notes:
-
 d' +          AND EXISTS ( +                SELECT 1 +                FROM unique_path_symbol +                WHERE unique_path_symbol.name = code_repository_references.name +                  AND unique_path_symbol.path = code_repository_references.path +          ) ", params![source_scope], )?; transaction.execute( " -        UPDATE code_repository_references AS reference +        WITH symbol_names AS ( +            SELECT DISTINCT name +            FROM code_repository_symbols +            WHERE source_scope = ?1 +        ) +        UPDATE code_repository_references SET resolution_state = 'ambiguous', confidence_basis_points = 5000, confidence_tier = 'ambiguous' -        WHERE reference.source_scope = ?1 -          AND reference.resolution_state = 'unresolved' -          AND EXISTS ( -                SELECT 1 -                FROM code_repository_symbols AS symbol -                WHERE symbol.source_scope = reference.source_scope -                  AND symbol.name = reference.name -            ) +        WHERE source_scope = ?1 +          AND resolution_state = 'unresolved' +          AND name IN (SELECT name FROM symbol_names) ", params![source_scope], )?; tokens used 189,842
 ## 20260518T114915Z
 
@@ -1003,5 +980,4 @@ d' +          AND EXISTS ( +                SELECT 1 +                FROM uniqu
 - latency metrics: cargo_build_release_ms=49009ms; cargo_fmt_check_ms=1104ms; cargo_clippy_ms=10965ms; cargo_test_ms=7508ms; relay_teams_index_ms=45712ms; relay_teams_register_index_ms=45832ms; relay_teams_query_p50_ms=392ms; relay_teams_query_p95_ms=791ms
 
 Adopted optimization notes:
-
  version constant"), -        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); assert_eq!( +        symbol_fts_match_query("new lru cache"), +        "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\"" +    ); +    assert_eq!( fts_match_query("checkpoint metadata version constant"), "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); @@ -290,6 +294,14 @@ )) .await .expect("lowercase symbol query should succeed"); +    let spaced_hits = store +        .search_code(code_search_request( +            "eval checkpoint store", +            CodeQueryKind::Definition, +        )) +        .await +        .expect("spaced compound symbol query should succeed"); +    assert_eq!(spaced_hits[0].symbol_snapshot_id.as_deref(), Some("eval-checkpoint-store")); assert!( hit.score > lower_hits[0].score + 1.5, "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}", tokens used 159,018

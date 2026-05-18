@@ -136,27 +136,27 @@ fn parse_fetched_files(
             .collect();
     }
 
-    let mut parsed = Vec::with_capacity(paths.len());
-    for (path_chunk, blob_chunk) in paths.chunks(worker_count).zip(blobs.chunks(worker_count)) {
-        let chunk = thread::scope(|scope| {
-            let handles = path_chunk
-                .iter()
-                .zip(blob_chunk.iter())
-                .map(|(path, bytes)| scope.spawn(move || parse_one_file(plan, path, bytes)))
-                .collect::<Vec<_>>();
-            handles
-                .into_iter()
-                .map(|handle| {
-                    handle.join().map_err(|_| {
-                        CodeIndexError::InvalidInput("code parser worker panicked".to_owned())
-                    })?
+    let mut parsed = thread::scope(|scope| {
+        let handles = (0..worker_count)
+            .map(|worker_index| {
+                scope.spawn(move || {
+                    parse_worker_stride(plan, paths, blobs, worker_index, worker_count)
                 })
-                .collect::<Result<Vec<_>, _>>()
-        })?;
-        parsed.extend(chunk);
-    }
+            })
+            .collect::<Vec<_>>();
+        let mut parsed = Vec::with_capacity(paths.len());
+        for handle in handles {
+            let worker_output = handle.join().map_err(|_| {
+                CodeIndexError::InvalidInput("code parser worker panicked".to_owned())
+            })??;
+            parsed.extend(worker_output);
+        }
 
-    Ok(parsed)
+        Ok::<_, CodeIndexError>(parsed)
+    })?;
+    parsed.sort_by_key(|(index, _)| *index);
+
+    Ok(parsed.into_iter().map(|(_, build)| build).collect())
 }
 
 fn parse_one_file(
@@ -176,6 +176,23 @@ fn parse_one_file(
     parse_indexed_file(&mut build, path, bytes)?;
 
     Ok(build)
+}
+
+fn parse_worker_stride(
+    plan: &CodeIndexPlan,
+    paths: &[String],
+    blobs: &[Vec<u8>],
+    worker_index: usize,
+    worker_count: usize,
+) -> Result<Vec<(usize, SnapshotBuild)>, CodeIndexError> {
+    let mut parsed = Vec::new();
+    let mut index = worker_index;
+    while index < paths.len() {
+        parsed.push((index, parse_one_file(plan, &paths[index], &blobs[index])?));
+        index += worker_count;
+    }
+
+    Ok(parsed)
 }
 
 fn worker_count(item_count: usize) -> usize {
