@@ -15,6 +15,11 @@
 - 不变量：不改变 SQLite schema、事实字段、FTS 文档字段、candidate limit、ranking、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；静态 import 语义、Go/Python/Java/C/C++ import 提取与 TypeScript 相对路径解析仍走既有路径。
 - 预期影响：Opencode、relay-teams 前端代码和其他 import-heavy JS/TS 仓库在 checkpointed register/index 时不再因同一行 import 主键冲突失败，直接字符串动态 import 可参与既有 import resolution 与 import search；`import.meta`、裸 `import` token、变量拼接和非字符串动态 specifier 不再进入 import facts。
 - 已知风险：新索引中的 import_id 字符串从 line-based 变为 byte+line-based，旧索引记录 ID 不逐字复用；动态 import 只覆盖直接字符串参数，避免为运行时路径做错误猜测。
+## 候选优化说明：manual-windowed-compound-identifier-fts-recall-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，提升长自然语言 code query 对 CamelCase/PascalCase/snake_case 复合标识符的候选召回；在既有 whole-query compact/snake FTS alternative 之外，为安全 ASCII 查询词生成最多 24 个相邻 2 到 4 词窗口的 compact 与 snake_case exact token 分支。
+- 不变量：不改变 SQLite schema、索引写入、FTS 文档内容、事实表、candidate limit、Rust 后置 scoring/dedupe、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；扩展只发生在 query MATCH 表达式构造阶段，并受 ASCII、part 长度、总标识符长度和固定 alternatives 上限约束。
+- 预期影响：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring Framework 中较长 hybrid、caller、callee、reference、import 与 definition 查询更容易召回嵌入源码 chunk 或 edge 文档中的复合标识符子短语，例如 `CachedIntrospectionResults`、`localPropertyHandler` 和 `NotWritablePropertyException`。
+- 已知风险：额外 OR 分支会让少量同名 compact/snake token 进入 bounded FTS candidate window，并可能增加单次查询的 FTS MATCH 解析成本；风险由最多 24 个 alternatives、既有 candidate limit、typed row filter、ScoreQuery、path/language filter、dedupe/truncate 和单测覆盖控制。
 ## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
 - 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。
