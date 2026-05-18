@@ -74,6 +74,7 @@
 - [第 6 章 Agent 协议图检索接入研究](04-research/06-agent-protocol-graph-retrieval-research.md)
 - [第 7 章 relay-knowledge 实现借鉴落地路线](04-research/07-relay-knowledge-implementation-reference.md)
 - [第 8 章 竞争力、高性能与本机文件检索研究 2026](04-research/08-competitive-performance-research-2026.md)
+- [第 9 章 GitNexus 功能与界面实现研究 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 
 ## 附录 A：基准记录
 

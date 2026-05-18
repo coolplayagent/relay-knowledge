@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from llm_judge import (  # noqa: E402
     DEFAULT_CLI_JUDGE_COMMAND,
+    build_judge_prompt,
     cli_command,
     evaluate_research_judge_suite,
     judge_outcome,
@@ -131,6 +132,34 @@ class LlmJudgeTests(unittest.TestCase):
         self.assertFalse(outcome["gate_passed"])
         self.assertFalse(outcome["case_passed"])
         self.assertIn("anti_fixture_special_casing", outcome["message"])
+
+    def test_judge_prompt_includes_configured_research_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = build_judge_prompt(
+                workspace=Path(tmp),
+                suite_config={
+                    "competitive_feature_targets": [
+                        "group code-query results by process and evidence path",
+                        "web graph workspace with shareable selections",
+                    ],
+                    "implementation_guardrails": [
+                        "reject fixture-specific query enumeration",
+                    ],
+                    "documents": ["docs/missing.md"],
+                    "max_doc_chars": 80,
+                },
+                generated_diff=True,
+                candidate_diff="diff --git a/a b/a\n+research target\n",
+                gates=[GateObservation("cargo_test", True)],
+                cases=[],
+                metrics=[],
+                repo_reports=[],
+            )
+
+        self.assertIn("Research competitive feature targets:", prompt)
+        self.assertIn("group code-query results by process", prompt)
+        self.assertIn("Implementation guardrails:", prompt)
+        self.assertIn("reject fixture-specific query enumeration", prompt)
 
     def test_cli_agent_judge_returns_research_case(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

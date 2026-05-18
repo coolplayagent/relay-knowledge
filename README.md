@@ -100,6 +100,9 @@ relay-knowledge service doctor
 - [Book 4, Chapter 8: Competitive, High-Performance, and Local File Retrieval Research](docs/en/04-research/08-competitive-performance-research-2026.md):
   broader paper and industry-system references for GraphRAG, hybrid search,
   vector indexes, code search, fast local file retrieval, graph storage, and SRE.
+- [Book 4, Chapter 9: GitNexus Feature and UI Implementation Research](docs/en/04-research/09-gitnexus-reference-analysis-2026.md):
+  GitNexus CLI/MCP/HTTP backend, code graph, Web graph UI, agent workflows, and
+  product improvement points for relay-knowledge.
 - [Book 2, Chapter 1: Capability Overview](docs/en/02-capabilities/01-capability-overview.md): foundational behaviors and competitive differentiators.
 - [Book 2, Chapter 4: Query and Context Pack Basics](docs/en/02-capabilities/04-query-and-context-pack-basics.md): query metadata, context items, budgets, truncation, and source spans.
 - [Book 2, Chapter 5: Hybrid Retrieval Advantage](docs/en/02-capabilities/05-hybrid-retrieval-advantage.md): BM25, semantic, vector, graph evidence, code graph, RRF, and ranking explanations.

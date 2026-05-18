@@ -287,6 +287,16 @@ def build_judge_prompt(
     max_doc_chars = int(suite_config.get("max_doc_chars", 4000))
     max_diff_chars = int(suite_config.get("max_diff_chars", 30000))
     docs = document_excerpts(workspace, suite_config.get("documents", []), max_doc_chars)
+    research_targets = configured_list_section(
+        "Research competitive feature targets",
+        suite_config.get("competitive_feature_targets", []),
+        "No explicit target list configured; infer priorities from the reference docs.",
+    )
+    guardrails = configured_list_section(
+        "Implementation guardrails",
+        suite_config.get("implementation_guardrails", []),
+        "No additional guardrails configured beyond the rubric and project docs.",
+    )
     diff_text = candidate_diff.strip() or "(no candidate diff captured)"
     if len(diff_text) > max_diff_chars:
         diff_text = diff_text[:max_diff_chars] + "\n...diff truncated..."
@@ -320,6 +330,10 @@ Rubric:
 - implementation_actionability: change is concrete, maintainable, tested, and scoped.
 - anti_fixture_special_casing: no known query/path/symbol/repository enumeration unless it is a documented product contract.
 
+{research_targets}
+
+{guardrails}
+
 Deterministic evaluation summary:
 {deterministic_summary(gates, cases, metrics, repo_reports, generated_diff)}
 
@@ -331,6 +345,14 @@ Candidate diff:
 Reference document excerpts:
 {docs}
 """
+
+
+def configured_list_section(title: str, values: Any, empty_message: str) -> str:
+    items = string_list(values, 32)
+    if not items:
+        return f"{title}:\n- {empty_message}"
+    lines = [f"- {item}" for item in items]
+    return f"{title}:\n" + "\n".join(lines)
 
 
 def document_excerpts(workspace: Path, documents: Any, max_doc_chars: int) -> str:

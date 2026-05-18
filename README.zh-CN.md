@@ -57,6 +57,8 @@ relay-knowledge service doctor
 - [第一卷第 0 章：使用指南](docs/zh/01-user-guide/README.md)：安装与运行时目录、CLI 输出模式、GraphRAG、代码仓库索引/报告、Web 操作、MCP/ACP service 接入、排障和高级配置。
 - [第四卷第 1 章：2026 行业能力快照](docs/zh/04-research/01-industry-capability-snapshot-2026.md)：当前 GraphRAG、MCP、A2A、托管检索和图 agent 生态信号，以及 relay-knowledge 的差距。
 - [第四卷第 4 章：ai-knowledge-graph 参考项目分析](docs/zh/04-research/04-ai-knowledge-graph-reference-analysis.md)：对外部 LLM 抽取型知识图谱项目的架构、算法、性能和可靠性借鉴分析。
+- [第四卷第 8 章：竞争力、高性能与本机文件检索研究](docs/zh/04-research/08-competitive-performance-research-2026.md)：GraphRAG、混合搜索、向量索引、代码搜索、本机文件检索、图存储和 SRE 的系统参考。
+- [第四卷第 9 章：GitNexus 功能与界面实现研究](docs/zh/04-research/09-gitnexus-reference-analysis-2026.md)：GitNexus CLI/MCP/HTTP 后端、代码图谱、Web 图谱界面、Agent 工作流和后续改进点。
 - [第二卷第 1 章：能力版图总览](docs/zh/02-capabilities/01-capability-overview.md)：基础功能与竞争力特性的阅读导览。
 - [第二卷第 4 章：查询与 Context Pack 基础](docs/zh/02-capabilities/04-query-and-context-pack-basics.md)：查询元数据、上下文项、预算、截断和来源范围。
 - [第二卷第 5 章：混合检索竞争力](docs/zh/02-capabilities/05-hybrid-retrieval-advantage.md)：BM25、semantic、vector、图证据、代码图、RRF 和排序解释。

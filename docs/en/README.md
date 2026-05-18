@@ -87,6 +87,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 6: Agent Protocol Graph Retrieval Research](04-research/06-agent-protocol-graph-retrieval-research.md)
 - [Chapter 7: relay-knowledge Implementation Reference](04-research/07-relay-knowledge-implementation-reference.md)
 - [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](04-research/08-competitive-performance-research-2026.md)
+- [Chapter 9: GitNexus Feature and UI Implementation Research 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 
 ## Appendix A: Benchmarks
 

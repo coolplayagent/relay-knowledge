@@ -96,6 +96,8 @@ foundational_capability * 0.17
 
 research judge 用于判断研究对齐、架构合理性、可靠性推理、性能泛化、实现可操作性和是否存在 fixture 特化。它可以通过 OpenAI-compatible HTTP endpoint 运行，也可以通过开放 coding agent CLI 运行，例如 `opencode`、`relay-teams`、`codex`、`cc` 或 `copilot`。未提供 judge backend 或 HTTP 配置时，CLI judge 默认使用 `opencode`。所有 judge 覆盖配置都来自运行时环境变量：
 
+`cases.json` 也可以配置 judge workload。`documents` 选择有界的 02/03/04 文档片段，`competitive_feature_targets` 列出候选补丁应推进的研究竞争力能力，`implementation_guardrails` 列出反 fixture 特化、async 边界、freshness/version 证据和同变更文档更新等不可放松约束。
+
 - `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`；`opencode` 是 CLI alias，未设置自定义命令时使用默认 opencode 命令
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`、`RELAY_KNOWLEDGE_JUDGE_API_KEY`、`RELAY_KNOWLEDGE_JUDGE_MODEL`
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`，也支持别名 `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` 和 `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`；未设置时默认命令为 `opencode run "Read the attached relay-knowledge judge prompt and return only the strict JSON object it requests." --file {prompt_file}`
@@ -153,7 +155,7 @@ and (
 - 多语言代码仓库检索 targets：默认 profile 覆盖 relay-teams Python 与 JavaScript、LevelDB C++、Linux C；exhaustive profile 继续覆盖 Kubernetes Go 和 Spring Framework Java。JavaScript、Java、C、C++ cases 有意包含 nested class、宏、导出函数、caller/callee、hybrid 概念查询和 path/language filter 场景，用于推动后续自迭代补齐 parser、identity、edge finalize、FTS/BM25 和 ranking fusion 能力。
 - 仓库注册后索引性能 targets：`cases/repository_index_performance_targets.json` 收紧 `index_budget_ms`，并新增 `register_index_budget_ms` 组合预算。评估器会同时记录 `*_index_ms` 与 `*_register_index_ms`，让自迭代优先优化 `repo register` 后 cold index 的批处理、解析吞吐、SQLite 写入、finalize 和增量复用路径。
 - 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
-- `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要和选定的 02/03/04 文档片段交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
+- `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要、选定的 02/03/04 文档片段、竞争力特性目标和实现护栏交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖函数、syscall 风格宏、导出符号、include、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。

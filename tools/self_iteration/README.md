@@ -121,6 +121,12 @@ OpenAI-compatible HTTP endpoint or through an open coding-agent CLI such as
 HTTP settings are provided, the CLI judge defaults to `opencode`. All judge
 overrides come from runtime environment variables:
 
+`cases.json` can also configure the judge workload. `documents` selects bounded
+02/03/04 excerpts, `competitive_feature_targets` lists the research-derived
+capabilities candidates should advance, and `implementation_guardrails` lists
+non-negotiable constraints such as anti-fixture behavior, async boundaries,
+freshness/version evidence, and same-change documentation updates.
+
 - `RELAY_KNOWLEDGE_JUDGE_BACKEND=http|cli|opencode|none`; `opencode` is a
   CLI alias that uses the default opencode command unless a custom command is
   also set
@@ -218,7 +224,7 @@ enumerating cases.
   indexing wall time after `repo register`, including batching, parser
   throughput, SQLite writes, finalize work, and incremental reuse.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
-- `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, and selected 02/03/04 documentation excerpts to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
+- `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
