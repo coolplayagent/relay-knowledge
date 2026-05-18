@@ -41,11 +41,11 @@ pub(super) use super::code_query_scope::{language_filter_allows, path_filter_all
 use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_line_priority, import_surface_bonus,
-    import_target_symbol_bonus,
+    import_target_symbol_bonus, query_looks_like_import_path,
 };
-use code_query_import_targets::search_imports_by_target_symbols;
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
+use code_query_import_targets::{attach_import_target_symbols, search_imports_by_target_symbols};
 use code_query_line_ranges::{
     SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, call_result_line_range,
     optional_line_range_with_symbol_context, symbol_result_line_range,
@@ -623,6 +623,7 @@ fn search_imports(
                 language_id: row.get(2)?,
                 module: row.get(3)?,
                 matched_symbol_name: None,
+                target_symbol_names: None,
                 line_range: RepositoryCodeRange {
                     start: row.get(4)?,
                     end: row.get(5)?,
@@ -643,6 +644,11 @@ fn search_imports(
     rows.extend(search_imports_by_target_symbols(
         connection, status, request,
     )?);
+    if request.code_query_kind == CodeQueryKind::Imports
+        && query_looks_like_import_path(&request.query)
+    {
+        attach_import_target_symbols(connection, status, &mut rows)?;
+    }
 
     Ok(rows
         .into_iter()
@@ -690,7 +696,7 @@ fn search_imports(
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
                         score: score + 1.0,
-                        excerpt: row.module,
+                        excerpt: import_excerpt(&row.module, row.target_symbol_names.as_deref()),
                         degraded_reason: None,
                         edge_kind: Some("import".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),
@@ -702,6 +708,17 @@ fn search_imports(
             })
         })
         .collect())
+}
+
+fn import_excerpt(module: &str, target_symbol_names: Option<&str>) -> String {
+    let Some(target_symbol_names) = target_symbol_names
+        .map(str::trim)
+        .filter(|target_symbol_names| !target_symbol_names.is_empty())
+    else {
+        return module.to_owned();
+    };
+
+    format!("{module} target symbols: {target_symbol_names}")
 }
 
 fn search_chunks(

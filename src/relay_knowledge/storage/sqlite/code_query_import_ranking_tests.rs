@@ -3,7 +3,7 @@ use crate::{
     domain::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
-        RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -60,6 +60,61 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
         .expect("import query should succeed");
 
     assert_eq!(hits[0].path, openai_path);
+}
+
+#[tokio::test]
+async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
+    let importer_path = "table/filter_block.cc";
+    let target_path = "include/leveldb/filter_policy.h";
+    let mut include_import = import(
+        "filter-policy-include",
+        "importer-file",
+        importer_path,
+        "#include \"leveldb/filter_policy.h\"",
+    );
+    include_import.target_hint = Some(target_path.to_owned());
+    include_import.resolution_state = "resolved".to_owned();
+    include_import.confidence_basis_points = 8_000;
+    include_import.confidence_tier = "inferred".to_owned();
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("importer-file", importer_path, "cpp"),
+            file("target-file", target_path, "cpp"),
+        ],
+        symbols: vec![symbol(
+            "filter-policy-symbol",
+            "target-file",
+            target_path,
+            "FilterPolicy",
+        )],
+        references: Vec::new(),
+        imports: vec![include_import],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("leveldb/filter_policy.h", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, importer_path);
+    assert!(hits[0].excerpt.contains("leveldb/filter_policy.h"));
+    assert!(hits[0].excerpt.contains("FilterPolicy"));
 }
 
 #[tokio::test]
@@ -134,6 +189,30 @@ fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecor
         line_count: 1,
         parse_status: CodeParseStatus::Parsed,
         degraded_reason: None,
+    }
+}
+
+fn symbol(
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "cpp".to_owned(),
+        name: name.to_owned(),
+        qualified_name: format!("leveldb::{name}"),
+        kind: "class".to_owned(),
+        signature: format!("class {name};"),
+        doc_comment: None,
+        byte_range: range(0, 1),
+        line_range: range(5, 5),
     }
 }
 

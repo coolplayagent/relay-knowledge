@@ -15,6 +15,79 @@ use super::code_query_support::{
 use super::required_scope;
 
 const SQLITE_BIND_BATCH_SIZE: usize = 500;
+const MAX_TARGET_SYMBOL_NAMES_PER_IMPORT: usize = 4;
+
+pub(super) fn attach_import_target_symbols(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    rows: &mut [ImportRow],
+) -> Result<(), StorageError> {
+    let target_paths = rows
+        .iter()
+        .filter_map(|row| row.target_hint.as_deref())
+        .filter(|target_hint| !target_hint.trim().is_empty())
+        .collect::<BTreeSet<_>>();
+    if target_paths.is_empty() {
+        return Ok(());
+    }
+
+    let target_paths = target_paths.into_iter().collect::<Vec<_>>();
+    let mut symbols_by_path = BTreeMap::<String, Vec<String>>::new();
+    for target_path_chunk in target_paths.chunks(SQLITE_BIND_BATCH_SIZE - 1) {
+        for (path, name) in import_target_symbols(connection, status, target_path_chunk)? {
+            let names = symbols_by_path.entry(path).or_default();
+            if names.len() < MAX_TARGET_SYMBOL_NAMES_PER_IMPORT && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+
+    for row in rows {
+        let Some(target_hint) = row.target_hint.as_deref() else {
+            continue;
+        };
+        let Some(names) = symbols_by_path
+            .get(target_hint)
+            .filter(|names| !names.is_empty())
+        else {
+            continue;
+        };
+        row.target_symbol_names = Some(names.join(" "));
+    }
+
+    Ok(())
+}
+
+fn import_target_symbols(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    target_paths: &[&str],
+) -> Result<Vec<(String, String)>, StorageError> {
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(
+        target_paths
+            .iter()
+            .map(|target_path| Value::Text((*target_path).to_owned())),
+    );
+    let placeholders = placeholders(target_paths.len());
+    let sql = format!(
+        "
+        SELECT path, name
+        FROM code_repository_symbols
+        WHERE source_scope = ?
+          AND path IN ({placeholders})
+          AND kind <> 'module'
+        ORDER BY path ASC, line_start ASC, name ASC
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
 
 pub(super) fn search_imports_by_target_symbols(
     connection: &Connection,
@@ -104,6 +177,7 @@ fn search_imports_by_target_hint_chunk(
             language_id: row.get(2)?,
             module: row.get(3)?,
             matched_symbol_name,
+            target_symbol_names: None,
             line_range: RepositoryCodeRange {
                 start: row.get(4)?,
                 end: row.get(5)?,

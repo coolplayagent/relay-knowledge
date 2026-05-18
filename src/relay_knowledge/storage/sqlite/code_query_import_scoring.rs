@@ -120,7 +120,7 @@ fn import_field_matches_query_term(field: &str, term: &str) -> bool {
     })
 }
 
-fn query_looks_like_import_path(query: &str) -> bool {
+pub(super) fn query_looks_like_import_path(query: &str) -> bool {
     let trimmed = query.trim();
     trimmed.contains('/') || trimmed.contains('\\') || query_contains_file_extension(trimmed)
 }
