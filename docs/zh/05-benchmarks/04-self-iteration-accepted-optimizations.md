@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-default-code-index-batch-256-20260518
+- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时降低多仓 full-scope `repo register` 冷索引的固定批处理开销，优先改善 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 的 register-to-index wall time。
+- 算法与架构：默认 `CodeIndexResourceBudget` 的 `max_files_per_batch` 从 128 提升到 256；`max_bytes_per_batch=16MiB`、`max_rows_per_batch=50000`、checkpoint、crash recovery、FTS materialization、finalize resolution 与查询排序保持不变。小文件仓库可用更少的 git `cat-file --batch` 分组和 SQLite 事务完成索引，edge-heavy 或大文件仓库仍由字节/行预算提前截断。
+- 不变量：不改变 SQLite schema、事实表内容、search document 格式、candidate limit、CLI/API JSON 字段、semantic/vector provider/env、embedding 设置、research judge 配置、HTTP/QoS 或安装发布行为；批次仍有明确文件数、字节数和行数上界，已持久化的 checkpoint 会继续携带自身 resource budget。
+- 预期影响：大仓冷索引中每 129-256 个小文件少一次 batch parse/apply/finalize-progress 往返，降低 transaction commit、prepared statement、git process 和 checkpoint update 固定成本；retrieval floors 与 semantic/vector coverage 不应变化，因为最终图事实和派生索引内容不变。
+- 已知风险：单个默认 batch 的 peak memory 和 transaction duration 可能上升，但受 16MiB blob 与 50000 row 上界限制；极端超高 fan-out 文件集合仍会按 row budget 提前切批。
 ## 候选优化说明：manual-production-scoped-repeated-caller-bonus-20260518
 - 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时修复 repeated caller-site ranking 对无 test intent 的测试调用点过度加权，优先恢复 LevelDB `KeyMayMatch` production caller rank，并减少非 caller 查询中的额外计数开销。
 - 算法与架构：`search_calls` 只在 `CodeQueryKind::Callers` 下构建候选内 caller-target call-site 计数；重复调用点 bonus 先经过既有 path/test intent scoring，再仅对获得 production source path bonus 或 query 明确包含 test/benchmark intent 的候选生效。测试、benchmark 与无 adapter intent 的 adapter surface 不再凭多次调用同一目标压过 production caller。
@@ -981,4 +987,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_tier = "inferred".to_owned(); +        call.line_range = code_query_range(line, line); +        repeated_test_calls.push(call); +    } + +    let mut calls = vec![production_call]; +    calls.extend(repeated_test_calls); +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("table-file", "table/table.cc", "cpp"), +            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"), +        ], +        Vec::new(), +        calls, +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "table/table.cc"); +    assert!(hits[0].excerpt.contains("InternalGet")); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn caller_search_demotes_same_named_wrapper_call_sites() { let mut wrapper_call = code_query_call("resolved-wrapper-call", "router-file", "src/router.cc"); wrapper_call.caller_name = Some("Router::TargetCall".to_owned()); tokens used 139,240
+## 20260518T093310Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T093310Z.patch`
+- score: 0.935946 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.763642, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `docs/zh/06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md`, `src/relay_knowledge/code/scope.rs`, `src/relay_knowledge/code/tests.rs`, `src/relay_knowledge/domain/code_repository.rs`
+- key improvements: score_component:score 0.924475->0.935946; score_component:research_judge 0.82->0.87; metric:relay_teams_index_ms 63213.0->55235; metric:relay_teams_register_index_ms 63328.0->55358; metric:local_noise_file_index_ms 736.0->705; metric:semantic_vector_provider_probe_ms 1638.0->1178
+- known degradations: metric:cargo_fmt_check_ms 1044.0->1090; metric:cargo_clippy_ms 345.0->11447; metric:local_background_auto_index_file_index_ms 359.0->389; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 1037.0->1168.0; metric:semantic_vector_refresh_ms 398.0->464; metric:semantic_vector_query_p95_ms 419.0->449.0
+- latency metrics: cargo_build_release_ms=50392ms; cargo_fmt_check_ms=1090ms; cargo_clippy_ms=11447ms; cargo_test_ms=7553ms; relay_teams_index_ms=55235ms; relay_teams_register_index_ms=55358ms; relay_teams_query_p50_ms=422ms; relay_teams_query_p95_ms=817ms
+
+Adopted optimization notes:
+
+b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs b/src/relay_knowledge/domain/code_repository.rs index 7fdb92681e37fddd260c690100eb19edddf757be..03d7ec2af60d7bcbc718b240d4f64b5ffa42f3a1 --- a/src/relay_knowledge/domain/code_repository.rs +++ b/src/relay_knowledge/domain/code_repository.rs @@ -435,7 +435,7 @@ } impl CodeIndexResourceBudget { -    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 128; +    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 256; pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024; pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000; @@ -911,4 +911,19 @@ assert_eq!(error.field, "line_range"); } + +    #[test] +    fn default_code_index_budget_batches_more_small_files_without_raising_row_or_byte_caps() { +        let budget = CodeIndexResourceBudget::default(); + +        assert_eq!(budget.max_files_per_batch, 256); +        assert_eq!( +            budget.max_bytes_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH +        ); +        assert_eq!( +            budget.max_rows_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_ROWS_PER_BATCH +        ); +    } } tokens used 237,921
 

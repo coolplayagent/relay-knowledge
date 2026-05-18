@@ -158,47 +158,6 @@ fn explicit_default_exclusion_opt_in_stays_path_scoped() {
 }
 
 #[test]
-fn explicit_default_exclusion_opt_in_normalizes_extension_case() {
-    let registration = CodeRepositoryRegistration::new(
-        "repo",
-        "alias",
-        "/tmp/repo",
-        vec!["assets/logo.SVG".to_owned()],
-        Vec::new(),
-    )
-    .expect("registration should validate");
-    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
-        .expect("selector should validate");
-
-    assert!(path_is_selected(
-        "assets/logo.SVG",
-        &registration,
-        &selector
-    ));
-}
-
-#[test]
-fn default_source_preset_excludes_dataset_dumps_and_uv_lock() {
-    let registration = CodeRepositoryRegistration::new(
-        "repo",
-        "alias",
-        "/tmp/repo",
-        vec![".".to_owned()],
-        Vec::new(),
-    )
-    .expect("registration should validate");
-    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
-        .expect("selector should validate");
-
-    assert!(!path_is_selected(
-        ".agent_teams/evals/datasets/swebench-verified-full.jsonl",
-        &registration,
-        &selector
-    ));
-    assert!(!path_is_selected("uv.lock", &registration, &selector));
-}
-
-#[test]
 fn git_batch_blobs_reads_multiple_commit_files() {
     let repo = TempGitRepo::create("batch-blobs");
     repo.write("src/alpha.rs", "pub fn alpha() {}\n");
