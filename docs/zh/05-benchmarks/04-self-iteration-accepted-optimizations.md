@@ -5,6 +5,11 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-symbol-compound-identifier-fts-recall-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时补齐 definition/symbol 查询对自然语言拆分标识符的候选召回；复用既有 bounded compound identifier FTS 扩展，把 2 到 6 个安全 ASCII 查询项额外映射为 compact 与 snake_case exact token 分支，使 `new lru cache`、`default listable bean factory` 等查询可进入 `NewLRUCache`、`DefaultListableBeanFactory` 符号候选窗口。
+- 不变量：不改变 SQLite schema、索引写入、事实表、FTS 文档、candidate limit、后置评分/排序、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；扩展仍受现有词数、part 长度、总标识符长度和单字符噪声边界约束。
+- 预期影响：relay-teams、LevelDB、Kubernetes、Spring Framework 等大仓中以空格分词询问 CamelCase/PascalCase/snake_case 符号的 definition、symbol 与 hybrid 前段 symbol 召回更稳定，尤其改善研究 judge 对自然语言代码检索泛化能力的评价；精确符号查询和 edge/hybrid 既有 compound recall 语义保持不变。
+- 已知风险：少量 compact 或 snake_case 同名符号可能进入 bounded FTS candidate window，但最终仍由 `ScoreQuery`、symbol name bonus、scoped identity bonus、path/language filter 与 dedupe/truncate 排序控制；额外 OR 分支最多两个，查询开销应保持有界。
 ## 候选优化说明：manual-grouped-reference-finalize-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时降低多仓 full-scope `repo register` 冷索引 finalize 阶段的 reference resolution 固定成本；把逐 reference correlated `COUNT(*)` 查询改为按 scope 分组的 unique-name、unique-name+path 与 existing-name CTE，再用同一批 UPDATE 维持全局唯一解析、同文件唯一解析、ambiguous 与 unresolved 规则。
 - 不变量：不改变 SQLite schema、事实表字段、FTS 文档字段、call/import finalize、candidate limit、ranking/scoring、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；reference 的默认 target_hint、confidence、resolution_state 与既有唯一性规则保持不变。
@@ -963,4 +968,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 d' +          AND EXISTS ( +                SELECT 1 +                FROM unique_path_symbol +                WHERE unique_path_symbol.name = code_repository_references.name +                  AND unique_path_symbol.path = code_repository_references.path +          ) ", params![source_scope], )?; transaction.execute( " -        UPDATE code_repository_references AS reference +        WITH symbol_names AS ( +            SELECT DISTINCT name +            FROM code_repository_symbols +            WHERE source_scope = ?1 +        ) +        UPDATE code_repository_references SET resolution_state = 'ambiguous', confidence_basis_points = 5000, confidence_tier = 'ambiguous' -        WHERE reference.source_scope = ?1 -          AND reference.resolution_state = 'unresolved' -          AND EXISTS ( -                SELECT 1 -                FROM code_repository_symbols AS symbol -                WHERE symbol.source_scope = reference.source_scope -                  AND symbol.name = reference.name -            ) +        WHERE source_scope = ?1 +          AND resolution_state = 'unresolved' +          AND name IN (SELECT name FROM symbol_names) ", params![source_scope], )?; tokens used 189,842
+## 20260518T114915Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T114915Z.patch`
+- score: 0.94613 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.831535, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.94048->0.94613; score_component:performance 0.8232->0.831535; score_component:research_judge 0.85->0.87; metric:cargo_build_release_ms 50953.0->49009; metric:local_documents_file_query_p50_ms 392.0->364.5; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 1271.0->738.0; metric:semantic_vector_provider_probe_ms 3141.0->2866; metric:semantic_vector_refresh_ms 555.0->401
+- known degradations: metric:cargo_clippy_ms 387.0->10965
+- latency metrics: cargo_build_release_ms=49009ms; cargo_fmt_check_ms=1104ms; cargo_clippy_ms=10965ms; cargo_test_ms=7508ms; relay_teams_index_ms=45712ms; relay_teams_register_index_ms=45832ms; relay_teams_query_p50_ms=392ms; relay_teams_query_p95_ms=791ms
+
+Adopted optimization notes:
+
+ version constant"), -        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); assert_eq!( +        symbol_fts_match_query("new lru cache"), +        "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\"" +    ); +    assert_eq!( fts_match_query("checkpoint metadata version constant"), "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); @@ -290,6 +294,14 @@ )) .await .expect("lowercase symbol query should succeed"); +    let spaced_hits = store +        .search_code(code_search_request( +            "eval checkpoint store", +            CodeQueryKind::Definition, +        )) +        .await +        .expect("spaced compound symbol query should succeed"); +    assert_eq!(spaced_hits[0].symbol_snapshot_id.as_deref(), Some("eval-checkpoint-store")); assert!( hit.score > lower_hits[0].score + 1.5, "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}", tokens used 159,018
 

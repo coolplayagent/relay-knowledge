@@ -637,7 +637,7 @@ pub(super) fn fts_match_query(query: &str) -> String {
 }
 
 pub(super) fn symbol_fts_match_query(query: &str) -> String {
-    fts_match_query_with_operator(query, " OR ", false)
+    fts_match_query_with_operator(query, " OR ", true)
 }
 
 fn fts_match_query_with_operator(

@@ -62,7 +62,11 @@ fn candidate_condition_caps_bind_values_for_long_queries() {
 fn symbol_fts_query_uses_any_term_for_fuzzy_recall() {
     assert_eq!(
         symbol_fts_match_query("checkpoint metadata version constant"),
-        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\""
+        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    );
+    assert_eq!(
+        symbol_fts_match_query("new lru cache"),
+        "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\""
     );
     assert_eq!(
         fts_match_query("checkpoint metadata version constant"),
@@ -290,6 +294,17 @@ async fn symbol_search_preserves_case_for_name_bonus() {
         ))
         .await
         .expect("lowercase symbol query should succeed");
+    let spaced_hits = store
+        .search_code(code_search_request(
+            "eval checkpoint store",
+            CodeQueryKind::Definition,
+        ))
+        .await
+        .expect("spaced compound symbol query should succeed");
+    assert_eq!(
+        spaced_hits[0].symbol_snapshot_id.as_deref(),
+        Some("eval-checkpoint-store")
+    );
     assert!(
         hit.score > lower_hits[0].score + 1.5,
         "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}",
