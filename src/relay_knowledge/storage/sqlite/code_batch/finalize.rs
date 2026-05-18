@@ -6,6 +6,8 @@ use crate::{domain::RepositoryCodeRange, storage::StorageError};
 
 #[path = "finalize_go_imports.rs"]
 mod go_imports;
+#[path = "finalize_imported_references.rs"]
+mod imported_references;
 #[path = "finalize_search.rs"]
 mod search_documents;
 #[path = "finalize_typescript_imports.rs"]
@@ -18,8 +20,9 @@ pub(super) fn resolve_scope(
 ) -> Result<(), StorageError> {
     let mut symbol_cache = None;
     resolve_references(transaction, source_scope)?;
-    search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
     resolve_imports(transaction, source_scope, &mut symbol_cache)?;
+    imported_references::resolve_references(transaction, source_scope, &mut symbol_cache)?;
+    search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
     rebuild_calls(transaction, source_scope, repository_id, &mut symbol_cache)
 }
 

@@ -12,6 +12,23 @@ pub(super) fn needs_symbol_index(import_path: &str, statement: &str) -> bool {
         .is_some_and(|request| !request.imported_names.is_empty())
 }
 
+pub(super) struct NamedImportBinding {
+    pub(super) imported_name: String,
+    pub(super) local_name: String,
+}
+
+pub(super) fn named_import_bindings(statement: &str) -> Vec<NamedImportBinding> {
+    let statement = statement.trim().trim_end_matches(';').trim();
+    let Some(body) = statement.strip_prefix("import ") else {
+        return Vec::new();
+    };
+    let Some((imports, _)) = body.rsplit_once(" from ") else {
+        return Vec::new();
+    };
+
+    parse_named_import_bindings(imports)
+}
+
 pub(super) fn resolve_import(
     import_path: &str,
     statement: &str,
@@ -64,6 +81,13 @@ impl TypeScriptImportRequest {
 }
 
 fn parse_named_imports(imports: &str) -> Vec<String> {
+    parse_named_import_bindings(imports)
+        .into_iter()
+        .map(|binding| binding.imported_name)
+        .collect()
+}
+
+fn parse_named_import_bindings(imports: &str) -> Vec<NamedImportBinding> {
     let imports = imports
         .trim()
         .strip_prefix("type ")
@@ -86,10 +110,13 @@ fn parse_named_imports(imports: &str) -> Vec<String> {
                 .strip_prefix("type ")
                 .unwrap_or(part.trim())
                 .trim();
-            let name = part
+            let (imported_name, local_name) = part
                 .split_once(" as ")
-                .map_or(part, |(name, _)| name.trim());
-            (!name.is_empty()).then(|| name.to_owned())
+                .map_or((part, part), |(name, alias)| (name.trim(), alias.trim()));
+            (!imported_name.is_empty() && !local_name.is_empty()).then(|| NamedImportBinding {
+                imported_name: imported_name.to_owned(),
+                local_name: local_name.to_owned(),
+            })
         })
         .collect()
 }

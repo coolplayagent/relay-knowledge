@@ -3,7 +3,7 @@ use crate::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
         CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
         CodeRetrievalHit, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord,
-        RepositoryCodeRange, RepositoryCodeSymbolRecord,
+        RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
@@ -74,6 +74,107 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
         hits[0].edge_target_hint.as_deref(),
         Some("src/runtime/client.ts")
     );
+}
+
+#[tokio::test]
+async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:typescript-imported-reference-finalize";
+    let session = session_for_scope(source_scope, 3);
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 40,
+            files: vec![
+                file(
+                    source_scope,
+                    "redaction-file",
+                    "packages/http-recorder/src/redaction.ts",
+                ),
+                file(
+                    source_scope,
+                    "executor-file",
+                    "packages/llm/src/route/executor.ts",
+                ),
+            ],
+            symbols: vec![
+                symbol(
+                    source_scope,
+                    "redaction-redact-url",
+                    "redaction-file",
+                    "packages/http-recorder/src/redaction.ts",
+                    "redactUrl",
+                ),
+                symbol(
+                    source_scope,
+                    "executor-redact-url",
+                    "executor-file",
+                    "packages/llm/src/route/executor.ts",
+                    "redactUrl",
+                ),
+            ],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("target batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![file(
+                source_scope,
+                "redactor-file",
+                "packages/http-recorder/src/redactor.ts",
+            )],
+            symbols: Vec::new(),
+            references: vec![reference(
+                source_scope,
+                "redactor-call",
+                "redactor-file",
+                "packages/http-recorder/src/redactor.ts",
+                "redactUrl",
+            )],
+            imports: vec![import(
+                source_scope,
+                "redactor-import",
+                "redactor-file",
+                "packages/http-recorder/src/redactor.ts",
+                "import { redactUrl } from \"./redaction\";",
+            )],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("importer batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "redactUrl", CodeQueryKind::Callers).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "packages/http-recorder/src/redactor.ts");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        reference_target(&store, source_scope, "redactor-call")
+            .await
+            .as_deref(),
+        Some("redaction-redact-url")
+    );
+    assert_eq!(hits[0].edge_confidence_basis_points, Some(8_500));
 }
 
 async fn registered_store() -> SqliteGraphStore {
@@ -151,6 +252,31 @@ fn import(
     }
 }
 
+fn reference(
+    source_scope: &str,
+    reference_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeReferenceRecord {
+    RepositoryCodeReferenceRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        reference_id: reference_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        name: name.to_owned(),
+        kind: "call".to_owned(),
+        target_symbol_snapshot_id: None,
+        target_hint: Some(name.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 2_500,
+        confidence_tier: "ambiguous".to_owned(),
+        byte_range: range(0, 8),
+        line_range: range(1, 1),
+    }
+}
+
 fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession {
     CodeIndexSession {
         repository_id: "repo".to_owned(),
@@ -188,4 +314,29 @@ async fn search(
         )
         .await
         .expect("query should succeed")
+}
+
+async fn reference_target(
+    store: &SqliteGraphStore,
+    source_scope: &str,
+    reference_id: &str,
+) -> Option<String> {
+    let source_scope = source_scope.to_owned();
+    let reference_id = reference_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT target_symbol_snapshot_id
+                    FROM code_repository_references
+                    WHERE source_scope = ?1 AND reference_id = ?2
+                    ",
+                    (&source_scope, &reference_id),
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("reference target should load")
 }
