@@ -78,6 +78,45 @@ class PatchFlowTests(unittest.TestCase):
             self.assertNotIn("rejected_without_reason", prompt)
             self.assertNotIn("run_id=accepted", prompt)
 
+    def test_prompt_requires_recent_memory_review_after_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            (workspace / ".git").mkdir()
+            paths = history_paths(workspace)
+            append_run(
+                paths,
+                {
+                    "run_id": "latest-rejected",
+                    "timestamp": "2026-05-15T00:10:00+00:00",
+                    "accepted": False,
+                    "score": 0.7,
+                    "reject_reasons": ["neither score nor epsilon-pareto objectives improved"],
+                },
+            )
+            for index in range(6):
+                write_run_memory(
+                    paths,
+                    {
+                        "run_id": f"memory-{index}",
+                        "timestamp": f"2026-05-15T00:0{index}:00+00:00",
+                        "accepted": False,
+                        "score": index / 10,
+                        "reject_reasons": [f"reason-{index}"],
+                        "gates": [],
+                        "cases": [],
+                        "metrics": [],
+                    },
+                )
+
+            prompt = self_iterate.build_prompt(paths, "next")
+
+            self.assertIn("Rejected recovery memory to inspect:", prompt)
+            self.assertIn("Rejected recovery mode is active", prompt)
+            self.assertIn("Read summary_path for 3 to 5 recent memory entries", prompt)
+            self.assertIn("run_id=memory-5", prompt)
+            self.assertIn("run_id=memory-1", prompt)
+            self.assertNotIn("run_id=memory-0", prompt)
+
     def test_prompt_requires_algorithm_documentation_and_indexes_patch_memory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)

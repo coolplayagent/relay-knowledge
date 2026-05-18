@@ -261,6 +261,21 @@ def acceptance_reject_reasons(
         reasons.extend(protected_rejections)
         return reasons
 
+    improvements = evaluation_improvements(
+        observation=observation,
+        score=score,
+        foundational_capability=foundational_capability,
+        competitive_capability=competitive_capability,
+        accuracy=accuracy,
+        semantic_vector=semantic_vector,
+        research_judge=research_judge,
+        performance=performance,
+        stability=stability,
+        previous_run=previous_run,
+    )
+    if bug_fix_priority_improved(improvements):
+        return reasons
+
     previous_score = float(previous_run.get("score", 0.0))
     score_improved = meaningful_increase(score, previous_score, SCORE_EPSILON, 0.0)
     pareto_improved = epsilon_pareto_improved(
@@ -279,6 +294,22 @@ def acceptance_reject_reasons(
         reasons.append(epsilon_pareto_reject_reason(score, previous_score))
 
     return reasons
+
+
+def bug_fix_priority_improved(improvements: list[dict[str, Any]]) -> bool:
+    for improvement in improvements:
+        if improvement.get("kind") == "gate":
+            if (
+                improvement.get("previous") == "failed"
+                and improvement.get("current") == "passed"
+            ):
+                return True
+        if (
+            improvement.get("kind") == "case"
+            and improvement.get("reason") == "failed_to_passed"
+        ):
+            return True
+    return False
 
 
 def protected_objective_reject_reasons(

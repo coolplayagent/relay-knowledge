@@ -67,6 +67,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 - `memory/artifacts/<id>/`：预留给裁剪后的报告片段、judge 输出或其他可选证据。
 
 prompt 只注入有界 memory index。Codex 应先按当前 gate、metric、case、路径或算法目标读取相关 summary，再在必要时打开 detail 或 patch，不能一次性读取全部 reports、patches 或 memory details。
+如果最新一次有评分的运行被 rejected，下一轮 prompt 会进入 rejected recovery mode，明确要求 Codex 先查看最近 3 到 5 条自迭代记忆的 summary，再提出新的候选补丁。这样连续 rejected 时会基于近期证据调整方向，而不是重复同一种失败补丁。
 
 ## 评分和采纳
 
@@ -118,10 +119,14 @@ competitive objective。超出预算的耗时指标会进入 `metric_budget_fail
 hard_constraints_pass
 and no_protected_foundational_competitive_semantic_vector_or_stability_regression
 and (
+  bug_fix_priority_improved(candidate, previous)
+  or
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)
 )
 ```
+
+`bug_fix_priority_improved(candidate, previous)` 表示候选修复了已观测到的程序失败：上一轮失败的 quality gate 变为通过，或上一轮失败的 evaluation case 变为通过。这个优先级可以越过加权分数决胜项和原始耗时退化，但不能越过缺少 diff、当前 quality gate 失败或受保护目标回退。
 
 `epsilon_pareto_improved(candidate, previous)` 表示：至少一个被跟踪目标的改善超过其 epsilon 阈值，并且没有任何被跟踪目标的退化超过其 epsilon 阈值。默认阈值为：
 

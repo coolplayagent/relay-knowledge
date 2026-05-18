@@ -79,6 +79,11 @@ The progressive memory store is the first context entry point for future runs:
 The prompt includes only a bounded memory index. Codex should load matching
 summary files first, then open detail or patch files only when the summary is
 relevant to the current gate, metric, case, path, or algorithm objective.
+When the latest scored run was rejected, the next prompt enters rejected
+recovery mode and explicitly asks Codex to inspect the summary files for the
+most recent three to five self-iteration memory entries before making another
+candidate. This keeps repeated rejections tied to recent evidence instead of
+retrying the same shape of patch.
 
 ## Scoring and acceptance
 
@@ -153,10 +158,19 @@ The candidate is accepted when:
 hard_constraints_pass
 and no_protected_foundational_competitive_semantic_vector_or_stability_regression
 and (
+  bug_fix_priority_improved(candidate, previous)
+  or
   weighted_score > previous_weighted_score + score_epsilon
   or epsilon_pareto_improved(candidate, previous)
 )
 ```
+
+`bug_fix_priority_improved(candidate, previous)` is true when the candidate
+fixes an observed program failure by turning a previously failed quality gate
+into a passing gate or a previously failing evaluation case into a passing
+case. This priority can override the weighted-score tie-breaker and raw timing
+degradations, but it does not override missing diffs, current quality-gate
+failures, or protected objective regressions.
 
 `epsilon_pareto_improved(candidate, previous)` means at least one tracked objective improves beyond its epsilon threshold and no tracked objective regresses beyond its epsilon threshold. The default thresholds are:
 

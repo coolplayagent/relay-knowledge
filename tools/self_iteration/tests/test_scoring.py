@@ -222,6 +222,41 @@ class ScoringTests(unittest.TestCase):
         self.assertFalse(score.accepted)
         self.assertTrue(any("quality gates failed" in reason for reason in score.reject_reasons))
 
+    def test_resolved_gate_bug_fix_is_accepted_despite_performance_degradation(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("cargo_test", True)],
+                cases=full_objective_cases(),
+                metrics=[MetricObservation("index_ms", 10_000.0, budget=100.0)],
+            ),
+            previous_run={
+                "score": 0.99,
+                "foundational_capability": 1.0,
+                "competitive_capability": 1.0,
+                "accuracy": 1.0,
+                "semantic_vector": 1.0,
+                "performance": 1.0,
+                "stability": 0.5,
+                "gates": [{"name": "cargo_test", "passed": False}],
+                "metrics": [{"name": "index_ms", "value": 100.0}],
+            },
+        )
+
+        self.assertTrue(score.accepted)
+        self.assertEqual(score.reject_reasons, [])
+        self.assertTrue(
+            any(
+                improvement["kind"] == "gate" and improvement["name"] == "cargo_test"
+                for improvement in score.improvements
+            )
+        )
+        self.assertTrue(
+            any(
+                degradation["kind"] == "metric" and degradation["name"] == "index_ms"
+                for degradation in score.degradations
+            )
+        )
+
     def test_foundational_capability_regression_is_reported_and_rejected(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
@@ -408,7 +443,7 @@ class ScoringTests(unittest.TestCase):
             )
         )
 
-    def test_epsilon_pareto_rejects_case_improvement_with_significant_regression(self) -> None:
+    def test_epsilon_pareto_rejects_rank_improvement_with_significant_regression(self) -> None:
         score = score_evaluation(
             EvaluationObservation(
                 gates=[GateObservation("build", True)],
@@ -433,9 +468,9 @@ class ScoringTests(unittest.TestCase):
                     {
                         "case_id": "fixed",
                         "repository": "repo",
-                        "passed": False,
-                        "rank": None,
-                        "max_rank": 1,
+                        "passed": True,
+                        "rank": 5,
+                        "max_rank": 5,
                         "false_positive_count": 0,
                     },
                     {

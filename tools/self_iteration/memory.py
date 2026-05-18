@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from history import HistoryPaths, ensure_history, load_runs
+from history import HistoryPaths, ensure_history, load_runs, previous_scored_run
 
 
 def write_run_memory(paths: HistoryPaths, record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -101,6 +101,7 @@ def write_memory_item(paths: HistoryPaths, item: dict[str, Any]) -> dict[str, An
     detail_path.write_text(memory_markdown(item, "detail"), encoding="utf-8")
     index_item = {
         "id": item_id,
+        "run_id": item["run_id"],
         "kind": item["kind"],
         "title": item["title"],
         "tags": item["tags"],
@@ -160,7 +161,7 @@ def write_memory_index(paths: HistoryPaths, items: list[dict[str, Any]]) -> None
 
 
 def progressive_memory_index(paths: HistoryPaths, limit: int = 12) -> str:
-    items = sorted(load_memory_index(paths), key=lambda item: str(item.get("created_at", "")), reverse=True)
+    items = sorted_memory_items(paths)
     if not items:
         return "No progressive memory entries recorded yet."
     lines = [
@@ -180,6 +181,53 @@ def progressive_memory_index(paths: HistoryPaths, limit: int = 12) -> str:
     if len(items) > limit:
         lines.append(f"- {len(items) - limit} older memory item(s) omitted from the prompt index.")
     return "\n".join(lines)
+
+
+def rejection_recovery_memory_review(paths: HistoryPaths, limit: int = 5) -> str:
+    latest = previous_scored_run(paths)
+    if latest is None:
+        return "No scored self-iteration run yet; no rejection recovery memory review required."
+    if latest.get("accepted"):
+        return "Latest scored run was accepted; no rejection recovery memory review required."
+
+    items = sorted_memory_items(paths)[:limit]
+    if not items:
+        return (
+            f"Latest scored run {latest.get('run_id', '')} was rejected, but no "
+            "progressive memory entries are recorded yet."
+        )
+
+    lines = [
+        (
+            "Rejected recovery mode is active because the latest scored run "
+            f"{latest.get('run_id', '')} was rejected. Read summary_path for "
+            f"3 to {limit} recent memory entries below when available; if fewer "
+            "than 3 exist, read every listed summary. Open detail_path or patch "
+            "files only for entries matching the current rejection reason, gate, "
+            "case, metric, path, or algorithm."
+        )
+    ]
+    for item in items:
+        tags = ",".join(str(tag) for tag in item.get("tags", [])[:8])
+        lines.append(
+            "- "
+            f"id={item.get('id', '')} "
+            f"run_id={item.get('run_id', '')} "
+            f"kind={item.get('kind', '')} "
+            f"title={compact_prompt_text(str(item.get('title', '')), 160)} "
+            f"tags={tags or 'none'} "
+            f"summary_path={item.get('summary_path', '')} "
+            f"detail_path={item.get('detail_path', '')}"
+        )
+    return "\n".join(lines)
+
+
+def sorted_memory_items(paths: HistoryPaths) -> list[dict[str, Any]]:
+    return sorted(
+        load_memory_index(paths),
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
 
 
 def primary_memory_kind(record: dict[str, Any]) -> str:

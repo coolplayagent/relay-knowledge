@@ -34,6 +34,7 @@ from memory import (
     compact_score_changes,
     historical_patch_memory_index,
     progressive_memory_index,
+    rejection_recovery_memory_review,
     write_run_memory,
 )
 from scoring import EvaluationObservation, GateObservation, score_evaluation
@@ -485,6 +486,7 @@ Constraints:
 - Do not add broad rewrites, speculative APIs, dead code, or shallow wrappers.
 - Preserve existing CLI/API behavior unless a test-backed correctness fix requires a compatible adjustment.
 - Run relevant local checks for your change when feasible.
+- Treat real program bug fixes as high-priority candidates: if recent diagnostics, tests, or cases expose a concrete bug, make the smallest general fix and preserve the evidence that proves it.
 - If recent quality gate diagnostics are present, treat them as the primary objective: reproduce or inspect the failed gate first, make the candidate directly address those failures, and only pursue ordinary score/ranking improvements after the failing gates have a concrete fix.
 - Treat recent foundational, competitive, semantic/vector, research_judge, performance, case, and stability degradations as priority regression feedback. Fix or explain them before pursuing unrelated gains, and do not trade away passing cases, backend availability, retriever source coverage, research quality, quality gates, or measured latency for a narrow score win.
 - Any candidate that changes code, tests, benchmark cases, or self-iteration policy must also update {ACCEPTED_OPTIMIZATION_DOC} before evaluation. Write the optimization's algorithm, architecture, invariants, expected metric/case impact, and known risks in that document; the harness rejects undocumented implementation candidates before acceptance.
@@ -501,6 +503,9 @@ Historical context:
 
 Recent rejected attempts to avoid:
 {rejected_summary}
+
+Rejected recovery memory to inspect:
+{rejection_recovery_memory_review(paths)}
 
 Recent failed quality gate diagnostics:
 {recent_failed_gate_diagnostics(paths)}
