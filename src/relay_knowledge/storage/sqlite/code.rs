@@ -5,6 +5,12 @@ use rusqlite::{Connection, params};
 #[path = "code_query.rs"]
 mod code_query;
 
+#[path = "code_query_hits.rs"]
+mod code_query_hits;
+
+#[path = "code_query_scope.rs"]
+mod code_query_scope;
+
 #[path = "code_impact.rs"]
 mod code_impact;
 
