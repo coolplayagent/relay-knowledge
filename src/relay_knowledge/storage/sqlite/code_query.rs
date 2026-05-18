@@ -52,7 +52,7 @@ use code_query_line_ranges::{
 };
 use code_query_path_ranking::{
     call_site_source_path_bonus, call_site_test_path_penalty, declaration_surface_path_bonus,
-    query_mentions_test_or_benchmark, symbol_test_path_penalty,
+    import_test_path_penalty, query_mentions_test_or_benchmark, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 use code_query_support::*;
@@ -636,6 +636,7 @@ fn search_imports(
     )?;
     let query = request.query.to_lowercase();
     let score_query = ScoreQuery::new(&request.query);
+    let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
     let mut rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -674,6 +675,7 @@ fn search_imports(
                     row.matched_symbol_name.as_deref(),
                     request.code_query_kind,
                 )
+                + import_test_path_penalty(base_score, &row.path, request, query_has_test_intent)
                 + import_surface_bonus(base_score, &row.path);
             (score > 0.0).then(|| {
                 hit_from_parts(

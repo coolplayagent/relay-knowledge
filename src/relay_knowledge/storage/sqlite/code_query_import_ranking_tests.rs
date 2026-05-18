@@ -62,6 +62,59 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
     assert_eq!(hits[0].path, openai_path);
 }
 
+#[tokio::test]
+async fn path_import_queries_demote_test_importers_without_test_intent() {
+    let production_path = "table/filter_block.cc";
+    let test_path = "table/filter_block_test.cc";
+    let mut production_import = import(
+        "production-filter-policy",
+        "production-file",
+        production_path,
+        "#include \"leveldb/filter_policy.h\"",
+    );
+    production_import.line_range = range(7, 7);
+    let mut test_import = import(
+        "test-filter-policy",
+        "test-file",
+        test_path,
+        "#include \"leveldb/filter_policy.h\"",
+    );
+    test_import.line_range = range(5, 5);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("production-file", production_path, "cpp"),
+            file("test-file", test_path, "cpp"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![test_import, production_import],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("leveldb/filter_policy.h", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, production_path);
+    assert_eq!(hits[1].path, test_path);
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");

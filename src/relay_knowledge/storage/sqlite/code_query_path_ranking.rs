@@ -67,6 +67,26 @@ pub(super) fn declaration_surface_path_bonus(
     }
 }
 
+pub(super) fn import_test_path_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_test_intent
+        || !matches!(
+            request.code_query_kind,
+            CodeQueryKind::Hybrid | CodeQueryKind::Imports
+        )
+        || !path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    -0.35
+}
+
 pub(super) fn symbol_test_path_penalty(
     base_score: f64,
     path: &str,
@@ -413,6 +433,38 @@ mod tests {
         );
         assert_eq!(
             declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition),
+            0.0
+        );
+    }
+
+    #[test]
+    fn import_test_path_penalty_demotes_test_importers_without_test_intent() {
+        let imports = retrieval_request(CodeQueryKind::Imports);
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+        let definition = retrieval_request(CodeQueryKind::Definition);
+
+        assert_eq!(
+            import_test_path_penalty(3.0, "table/filter_block_test.cc", &imports, false),
+            -0.35
+        );
+        assert_eq!(
+            import_test_path_penalty(3.0, "src/__tests__/provider.ts", &hybrid, false),
+            -0.35
+        );
+        assert_eq!(
+            import_test_path_penalty(3.0, "table/filter_block.cc", &imports, false),
+            0.0
+        );
+        assert_eq!(
+            import_test_path_penalty(3.0, "table/filter_block_test.cc", &imports, true),
+            0.0
+        );
+        assert_eq!(
+            import_test_path_penalty(0.0, "table/filter_block_test.cc", &imports, false),
+            0.0
+        );
+        assert_eq!(
+            import_test_path_penalty(3.0, "table/filter_block_test.cc", &definition, false),
             0.0
         );
     }
