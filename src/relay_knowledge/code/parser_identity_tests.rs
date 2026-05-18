@@ -150,6 +150,38 @@ const converted = {
     );
 }
 
+#[test]
+fn java_object_creation_expressions_are_constructor_call_edges() {
+    let snapshot = parse_snapshot(
+        "src/app/Worker.java",
+        br#"
+class Box<T> {}
+class Session {}
+
+class Worker {
+    Box<Session> create() {
+        return new Box<Session>();
+    }
+}
+"#,
+    );
+    let call = snapshot
+        .calls
+        .iter()
+        .find(|call| call.callee_name == "Box")
+        .expect("generic object construction should be indexed as a call to the constructed type");
+
+    assert_eq!(call.caller_name.as_deref(), Some("create"));
+    assert_eq!(call.resolution_state, "resolved");
+    assert!(
+        !snapshot
+            .calls
+            .iter()
+            .any(|call| call.callee_name == "Session"),
+        "generic type arguments must not become constructor callees",
+    );
+}
+
 fn parse_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
     let mut build = snapshot_build();
     parse_indexed_file(&mut build, path, source).expect("file should parse");

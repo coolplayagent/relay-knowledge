@@ -295,10 +295,66 @@ fn manual_call(context: &FileParseContext<'_>, node: Node<'_>) -> Option<(String
     if !language_nodes::is_call_node(context.language_id, node.kind()) {
         return None;
     }
+    if let Some(call) = constructed_type_call(context.content, node) {
+        return Some(call);
+    }
     let function = node
         .child_by_field_name("function")
         .or_else(|| node.child_by_field_name("constructor"))
         .or_else(|| node.child(0))?;
 
     last_identifier_text(context.content, function).map(|name| (name, syntax_range(function)))
+}
+
+fn constructed_type_call(content: &str, node: Node<'_>) -> Option<(String, SyntaxRange)> {
+    let type_node = node.child_by_field_name("type")?;
+    let name = constructed_type_name(content, type_node)?;
+
+    Some((name, syntax_range(type_node)))
+}
+
+fn constructed_type_name(content: &str, node: Node<'_>) -> Option<String> {
+    match node.kind() {
+        "generic_type" => first_constructed_type_child(node)
+            .and_then(|inner| constructed_type_name(content, inner)),
+        "array_type" => node
+            .child_by_field_name("element")
+            .and_then(|inner| constructed_type_name(content, inner)),
+        "scoped_type_identifier" => last_type_identifier_text(content, node),
+        "identifier" | "type_identifier" => Some(node_text(content, node)),
+        _ => last_type_identifier_text(content, node),
+    }
+}
+
+fn first_constructed_type_child(node: Node<'_>) -> Option<Node<'_>> {
+    (0..node.child_count()).find_map(|index| {
+        let index = u32::try_from(index).ok()?;
+        let child = node.child(index)?;
+        constructed_type_node(child.kind()).then_some(child)
+    })
+}
+
+fn last_type_identifier_text(content: &str, node: Node<'_>) -> Option<String> {
+    let mut stack = Vec::with_capacity(node.child_count().saturating_add(1));
+    stack.push(node);
+    let mut last = None;
+    while let Some(current) = stack.pop() {
+        if current.kind() == "type_arguments" {
+            continue;
+        }
+        if matches!(current.kind(), "identifier" | "type_identifier") {
+            last = Some(node_text(content, current));
+            continue;
+        }
+        push_children_reverse(current, &mut stack);
+    }
+
+    last
+}
+
+fn constructed_type_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "array_type" | "generic_type" | "identifier" | "scoped_type_identifier" | "type_identifier"
+    )
 }
