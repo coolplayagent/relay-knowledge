@@ -99,6 +99,12 @@ fn score_text_matches_identifier_parts_inside_snake_case_names() {
     );
 
     assert!(score >= 4.0);
+    assert_eq!(score_text("service ip range", ["getServiceIPRanges"]), 6.0);
+    assert_eq!(
+        score_text("bloom filter policies", ["NewBloomFilterPolicy"]),
+        6.0
+    );
+    assert_eq!(score_text("status", ["statu"]), 0.0);
 }
 
 #[test]
@@ -231,6 +237,10 @@ fn symbol_name_bonus_splits_query_identifiers_for_hybrid_context() {
             "EvalCheckpointStore",
             &hybrid,
         ),
+        2.0
+    );
+    assert_eq!(
+        symbol_name_query_bonus("bloom filter policies", "NewBloomFilterPolicy", &hybrid),
         2.0
     );
     assert!(

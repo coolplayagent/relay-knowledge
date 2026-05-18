@@ -5,6 +5,11 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
+- 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。
+- 预期影响：relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 中自然语言 fuzzy/hybrid/definition 查询对复合代码标识符的 rank 更稳定，尤其改善 `service ip range`、`bloom filter policies`、`deleted files` 这类词形与符号不完全一致的研究型检索；register-to-index wall time 应保持不变。
+- 已知风险：少数同词根但语义不同的标识符可能获得小幅 scoring 提升；实现排除非 ASCII、过短项、`ss/us/is` 结尾和 `series/species`，并仍由 FTS bounded candidate、path/test scoring、dedupe/truncate 控制最终结果。
 ## 候选优化说明：manual-symbol-compound-identifier-fts-recall-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时补齐 definition/symbol 查询对自然语言拆分标识符的候选召回；复用既有 bounded compound identifier FTS 扩展，把 2 到 6 个安全 ASCII 查询项额外映射为 compact 与 snake_case exact token 分支，使 `new lru cache`、`default listable bean factory` 等查询可进入 `NewLRUCache`、`DefaultListableBeanFactory` 符号候选窗口。
 - 不变量：不改变 SQLite schema、索引写入、事实表、FTS 文档、candidate limit、后置评分/排序、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；扩展仍受现有词数、part 长度、总标识符长度和单字符噪声边界约束。
@@ -981,4 +986,3 @@ d' +          AND EXISTS ( +                SELECT 1 +                FROM uniqu
 Adopted optimization notes:
 
  version constant"), -        "\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\"" +        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); assert_eq!( +        symbol_fts_match_query("new lru cache"), +        "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\"" +    ); +    assert_eq!( fts_match_query("checkpoint metadata version constant"), "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\"" ); @@ -290,6 +294,14 @@ )) .await .expect("lowercase symbol query should succeed"); +    let spaced_hits = store +        .search_code(code_search_request( +            "eval checkpoint store", +            CodeQueryKind::Definition, +        )) +        .await +        .expect("spaced compound symbol query should succeed"); +    assert_eq!(spaced_hits[0].symbol_snapshot_id.as_deref(), Some("eval-checkpoint-store")); assert!( hit.score > lower_hits[0].score + 1.5, "mixed-case query should keep CamelCase symbol-name bonus, got {} vs lowercase {}", tokens used 159,018
-

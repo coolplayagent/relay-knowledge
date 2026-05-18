@@ -4,6 +4,8 @@ use rusqlite::{Connection, params_from_iter};
 
 #[path = "code_query_call_counts.rs"]
 mod code_query_call_counts;
+#[path = "code_query_identifiers.rs"]
+mod code_query_identifiers;
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
 #[path = "code_query_line_ranges.rs"]

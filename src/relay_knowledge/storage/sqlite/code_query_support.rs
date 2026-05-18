@@ -1,5 +1,6 @@
 use rusqlite::types::Value;
 
+use super::code_query_identifiers::identifier_terms_equivalent;
 use crate::domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest};
 
 #[cfg(test)]
@@ -34,7 +35,9 @@ impl ScoreField {
         let terms = self
             .identifier_terms
             .get_or_insert_with(|| identifier_match_terms(&self.original));
-        terms.iter().any(|term| term == token)
+        terms
+            .iter()
+            .any(|term| identifier_terms_equivalent(term, token))
     }
 }
 
@@ -128,14 +131,14 @@ fn declaration_line_is_prototype(line: &str) -> bool {
 
 fn identifier_field_matches_token(field: &str, token: &str) -> bool {
     identifier_tokens(field).any(|candidate| {
-        candidate.eq_ignore_ascii_case(token)
+        identifier_terms_equivalent(candidate, token)
             || candidate
                 .split('_')
                 .filter(|part| !part.is_empty())
-                .any(|part| part.eq_ignore_ascii_case(token))
+                .any(|part| identifier_terms_equivalent(part, token))
             || camel_case_terms(candidate)
                 .iter()
-                .any(|part| part.eq_ignore_ascii_case(token))
+                .any(|part| identifier_terms_equivalent(part, token))
     })
 }
 
@@ -186,10 +189,11 @@ pub(super) fn symbol_name_query_bonus(
         return 0.0;
     }
     let name_tokens = identifier_search_tokens(name);
-    if query_terms
-        .iter()
-        .all(|term| name_tokens.iter().any(|token| token == term))
-    {
+    if query_terms.iter().all(|term| {
+        name_tokens
+            .iter()
+            .any(|token| identifier_terms_equivalent(token, term))
+    }) {
         2.0
     } else {
         partial_symbol_name_query_bonus(&query_terms, &name_tokens)
@@ -202,7 +206,7 @@ fn partial_symbol_name_query_bonus(query_terms: &[String], name_tokens: &[String
         .filter(|term| {
             term.len() >= 3
                 && name_tokens.iter().any(|token| {
-                    token == *term
+                    identifier_terms_equivalent(token, term)
                         || (token.len() >= 3
                             && (term.starts_with(token) || token.starts_with(term.as_str())))
                 })
