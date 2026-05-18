@@ -6,6 +6,8 @@ use rusqlite::{Connection, params_from_iter};
 mod code_query_call_counts;
 #[path = "code_query_identifiers.rs"]
 mod code_query_identifiers;
+#[path = "code_query_import_scoring.rs"]
+mod code_query_import_scoring;
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
 #[path = "code_query_line_ranges.rs"]
@@ -37,6 +39,9 @@ pub(super) use super::code_query_hits::{
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
+use code_query_import_scoring::{
+    import_line_priority, import_surface_bonus, import_target_symbol_bonus,
+};
 use code_query_import_targets::search_imports_by_target_symbols;
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
@@ -658,7 +663,7 @@ fn search_imports(
                     row.matched_symbol_name.as_deref(),
                 );
             let score = base_score
-                + import_line_priority(base_score, row.line_range.start)
+                + import_line_priority(base_score, row.line_range.start, &request.query)
                 + import_surface_bonus(base_score, &row.path);
             (score > 0.0).then(|| {
                 hit_from_parts(

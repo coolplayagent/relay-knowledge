@@ -489,50 +489,6 @@ fn compact_excerpt_line(line: &str) -> String {
     line.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub(super) fn import_line_priority(base_score: f64, line_start: u32) -> f64 {
-    if base_score <= 0.0 {
-        return 0.0;
-    }
-
-    1.0 / f64::from(line_start.clamp(1, 1_000))
-}
-
-pub(super) fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
-    if base_score <= 0.0 {
-        return 0.0;
-    }
-    if path
-        .split('/')
-        .any(|segment| matches!(segment, "test" | "tests" | "__tests__"))
-    {
-        return 0.0;
-    }
-    match path.rsplit('/').next().unwrap_or(path) {
-        "__init__.py" | "mod.rs" | "lib.rs" | "index.js" | "index.jsx" | "index.ts"
-        | "index.tsx" => 0.2,
-        _ => 0.0,
-    }
-}
-
-pub(super) fn import_target_symbol_bonus(query: &str, matched_symbol_name: Option<&str>) -> f64 {
-    let Some(matched_symbol_name) = matched_symbol_name else {
-        return 0.0;
-    };
-    let terms = query_terms(query);
-    let Some(term) = terms.last() else {
-        return 0.0;
-    };
-    if term.len() >= 3
-        && matched_symbol_name
-            .split_whitespace()
-            .any(|name| name.eq_ignore_ascii_case(term))
-    {
-        2.0
-    } else {
-        0.0
-    }
-}
-
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
