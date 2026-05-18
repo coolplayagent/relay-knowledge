@@ -52,8 +52,8 @@ use code_query_line_ranges::{
 };
 use code_query_path_ranking::{
     call_site_example_path_penalty, call_site_source_path_bonus, call_site_test_path_penalty,
-    declaration_surface_path_bonus, import_test_path_penalty, query_mentions_example_or_sample,
-    query_mentions_test_or_benchmark, symbol_test_path_penalty,
+    callee_member_context_bonus, declaration_surface_path_bonus, import_test_path_penalty,
+    query_mentions_example_or_sample, query_mentions_test_or_benchmark, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 use code_query_support::*;
@@ -534,6 +534,12 @@ fn search_calls(
                     &row.path,
                     request,
                 )
+                + callee_member_context_bonus(
+                    base_score,
+                    row.caller_excerpt.as_deref(),
+                    &row.callee_name,
+                    request,
+                )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
@@ -852,6 +858,10 @@ fn search_chunks(
 #[cfg(test)]
 #[path = "code_query_unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "code_query_call_ranking_tests.rs"]
+mod call_ranking_tests;
 
 #[cfg(test)]
 #[path = "code_query_chunk_ranking_tests.rs"]

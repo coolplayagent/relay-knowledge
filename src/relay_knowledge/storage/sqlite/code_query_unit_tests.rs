@@ -813,36 +813,6 @@ async fn caller_search_demotes_same_named_wrapper_call_sites() {
     assert!(hits[0].score > hits[1].score);
 }
 
-#[tokio::test]
-async fn callee_search_applies_direction_before_candidate_limit() {
-    let mut files = Vec::new();
-    let mut calls = Vec::new();
-    for index in 0..520 {
-        let file_id = format!("noise-file-{index}");
-        let path = format!("noise/callee_{index}.py");
-        files.push(code_query_file(&file_id, &path, "python"));
-        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
-        call.caller_name = Some("NoiseCaller".to_owned());
-        call.callee_name = "TargetThing".to_owned();
-        calls.push(call);
-    }
-    files.push(code_query_file("target-file", "src/service.py", "python"));
-    let mut target = code_query_call("zz-target-call", "target-file", "src/service.py");
-    target.caller_name = Some("TargetThing".to_owned());
-    target.callee_name = "TargetCallee".to_owned();
-    calls.push(target);
-    let store =
-        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await;
-
-    let hits = store
-        .search_code(code_search_request("TargetThing", CodeQueryKind::Callees))
-        .await
-        .expect("callee query should succeed");
-
-    assert_eq!(hits[0].path, "src/service.py");
-    assert!(hits[0].excerpt.contains("TargetCallee"));
-}
-
 #[test]
 fn symbol_excerpt_adds_class_owner_for_member_context() {
     assert_eq!(

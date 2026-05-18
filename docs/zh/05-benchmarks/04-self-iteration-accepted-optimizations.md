@@ -1,6 +1,12 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-callee-member-call-context-bonus-20260519
+- 算法：在 `callees` 查询的 bounded call graph 后置评分中检测 caller chunk 里的 receiver-qualified 调用行，例如 `ToolRuntime.stream(...)`、`object.method(...)`、`Owner::method(...)` 或 `ptr->method(...)`；当候选已由 caller 名称进入正分集合且 callee 名称以成员调用形式出现时，给予小额 0.45 bonus，让具体成员调用证据能压过近同分的本地 helper 调用。
+- 架构：变更限定在 SQLite code query Rust scoring 层，复用已查询出的 caller chunk excerpt，不扩大 FTS MATCH、candidate limit、SQLite schema、索引事实、parser extraction、semantic/vector provider、CLI/API、judge、HTTP/QoS 或安装发布行为。
+- 不变量：只有 `CodeQueryKind::Callees` 且 base score 为正的候选参与；普通 `function(...)`、对象字面量属性 `method: value`、空 callee、caller/callee/import/hybrid 其它查询、path/language filter、confidence、dedupe/truncate、freshness/version metadata 和环境读取规则保持不变。
+- 预期影响：Opencode TypeScript、relay-teams JS、Kubernetes Go、Spring Java、LevelDB C++ 等大仓中，询问某个函数的 callees 时，带 receiver 的直接外部/服务调用不再被 resolved helper 因 confidence 微弱优势压过，重点改善 `streamWith` -> `ToolRuntime.stream` 这类 call graph query rank 与 research judge 对代码图证据解释性的评价。
+- 已知风险：少数 receiver-qualified 成员调用会在同一 caller 的 callee 列表中小幅上移；风险受正 base score、callee-only 作用域、明确成员调用前缀、调用后缀、bounded candidates 和既有 truncate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-type-relationship-declaration-chunk-bonus-20260518T224034Z
 - 算法：在 Hybrid chunk 后置评分中识别“继承、扩展、实现、覆盖”等关系意图查询；当候选 chunk 同时具有 `class`、`struct`、`interface` 或 `abstract class` 的继承/实现声明形态，并满足既有三词以上内容覆盖门槛时，把普通声明块 bonus 从 2.0 提升为 2.75，单纯实现函数或无关系声明的 chunk 不加分。
 - 架构：变更限定在 SQLite code query 的 bounded candidate Rust scoring 层，不扩大 FTS MATCH、candidate limit、SQLite schema、索引事实、parser extraction、semantic/vector provider、CLI/API、judge、HTTP/QoS 或安装发布行为。
@@ -883,4 +889,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 plements" +            | "inherit" +            | "inheritance" +            | "inherited" +            | "inherits" +            | "override" +            | "overrides" +            | "overriding" +            | "subclass" +            | "subclasses" +    ) +} + +fn content_has_type_relationship_declaration(content: &str) -> bool { +    content.lines().map(str::trim).any(|line| { +        if line.starts_with("//") || line.starts_with('*') { +            return false; +        } +        let type_declaration = line +            .split(|character: char| character.is_whitespace() || matches!(character, '{' | '(')) +            .filter(|word| !word.is_empty()) +            .take(4) +            .any(|word| matches!(word, "class" | "struct" | "interface")); +        type_declaration +            && (line.contains(" : ") +                || line.contains(": public ") +                || line.contains(": protected ") +                || line.contains(": private ") +                || line.contains(" extends ") +                || line.contains(" implements ")) +    }) +} + fn declaration_line_is_prototype(line: &str) -> bool { line.ends_with(';') && line.contains('(') tokens used 312,483
+## 20260518T225420Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T225420Z.patch`
+- score: 0.929207 (foundational=0.969136, competitive=0.897817, accuracy=0.933477, semantic_vector=1.0, research_judge=0.87, performance=0.869498, stability=1.0)
+- cases: 87/87 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_call_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_path_ranking.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.915903->0.929207; score_component:competitive_capability 0.888889->0.897817; score_component:performance 0.864257->0.869498; score_component:research_judge 0.82->0.87; metric:cargo_build_release_ms 35486.0->32014; metric:cargo_fmt_check_ms 794.0->636; metric:cargo_test_ms 9054.0->5519; metric:relay_teams_index_ms 33163.0->27826
+- known degradations: metric:relay_teams_query_p50_ms 216.0->289.5; metric:relay_teams_query_p95_ms 645.0->921.0; metric:leveldb_cpp_index_ms 1668.0->2373; metric:leveldb_cpp_register_index_ms 1864.0->2641; metric:leveldb_cpp_query_p50_ms 224.0->296.0; metric:leveldb_cpp_query_p95_ms 421.0->572.0; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 771.0->917.0
+- latency metrics: cargo_build_release_ms=32014ms; cargo_fmt_check_ms=636ms; cargo_clippy_ms=164ms; cargo_test_ms=5519ms; relay_teams_index_ms=27826ms; relay_teams_register_index_ms=27897ms; relay_teams_query_p50_ms=290ms; relay_teams_query_p95_ms=921ms
+
+Adopted optimization notes:
+
+ile_id = format!("noise-file-{index}"); -        let path = format!("noise/callee_{index}.py"); -        files.push(code_query_file(&file_id, &path, "python")); -        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path); -        call.caller_name = Some("NoiseCaller".to_owned()); -        call.callee_name = "TargetThing".to_owned(); -        calls.push(call); -    } -    files.push(code_query_file("target-file", "src/service.py", "python")); -    let mut target = code_query_call("zz-target-call", "target-file", "src/service.py"); -    target.caller_name = Some("TargetThing".to_owned()); -    target.callee_name = "TargetCallee".to_owned(); -    calls.push(target); -    let store = -        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await; - -    let hits = store -        .search_code(code_search_request("TargetThing", CodeQueryKind::Callees)) -        .await -        .expect("callee query should succeed"); - -    assert_eq!(hits[0].path, "src/service.py"); -    assert!(hits[0].excerpt.contains("TargetCallee")); -} - #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 274,559
 
