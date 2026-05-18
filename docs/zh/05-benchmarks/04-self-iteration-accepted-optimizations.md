@@ -11,11 +11,11 @@
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
 ## 候选优化说明：manual-typescript-function-value-symbols-20260518
-- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升多仓 TypeScript/TSX 仓库对 `export const name = (...) => ...` 和 class field arrow handler 的 definition、hybrid 与 call graph 检索覆盖。
-- 算法与架构：在既有 tree-sitter tag capture 后的 manual node pass 中，只对 JavaScript/TypeScript family 的 `variable_declarator`/`public_field_definition` 且 value 为 `arrow_function` 或 `function_expression` 的节点补充 function symbol，复用现有 symbol id、签名、chunk、call/reference、identity enrich 与 bounded query pipeline。
-- 不变量：不改变 SQLite schema、FTS/candidate limit、ranking 权重、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、HTTP/QoS、安装发布或仓库/case 特殊分支；非函数常量、destructuring binding、普通字段和外部配置仍不会被当成函数 symbol。
-- 预期影响：relay-teams 以外的前端/服务混合大仓可把现代 TypeScript 函数值纳入 code graph，改善 full-scope repository tree parsing、symbol definition recall、hybrid chunks 和 caller/callee ownership；现有 Python/Go/Java/C++ cases 与 semantic/vector source coverage 应保持不变。
-- 已知风险：新增 symbol 可能让同名 TypeScript function-valued bindings 参与近同分排序；风险受语言、node kind、function-valued `value`、identifier-name 验证、existing upsert 去重和最终 score/dedupe/truncate 限制。
+- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升多仓 JavaScript/TypeScript 仓库对 `export const name = (...) => ...`、class field arrow handler、object handler maps 和 CommonJS/member assignment functions 的 definition、hybrid 与 call graph 检索覆盖。
+- 算法与架构：在既有 tree-sitter tag capture 后的 manual node pass 中，只对 JavaScript/TypeScript family 的 `variable_declarator`、`public_field_definition`、`pair`、`assignment_expression` 且 value/right 为 `arrow_function` 或 `function_expression` 的节点补充 function symbol；名称只来自直接 identifier/property/member property，复用现有 symbol id、签名、chunk、call/reference、identity enrich 与 bounded query pipeline。
+- 不变量：不改变 SQLite schema、FTS/candidate limit、ranking 权重、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、HTTP/QoS、安装发布或仓库/case 特殊分支；非函数常量、destructuring binding、普通字段、computed/subscript assignment 和 `module.exports = function` 默认导出仍不会被当成命名 function symbol。
+- 预期影响：relay-teams 以外的前端/服务混合大仓可把现代 JS/TS 函数值纳入 code graph，改善 full-scope repository tree parsing、symbol definition recall、hybrid chunks 和 caller/callee ownership；现有 Python/Go/Java/C++ cases 与 semantic/vector source coverage 应保持不变。
+- 已知风险：新增 symbol 可能让同名 JS/TS function-valued bindings 参与近同分排序；风险受语言、node kind、function-valued value/right、identifier-name 验证、computed-key 排除、existing upsert 去重和最终 score/dedupe/truncate 限制。
 ## 候选优化说明：manual-checkpointed-typescript-import-resolution-20260518
 - 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时补齐 checkpointed full-scope indexing 对 TypeScript/TSX 相对导入边的解析，降低多仓前端/服务混合代码库中 import graph 的遗漏。
 - 算法与架构：checkpointed batch finalize 在已有 Python/Go/Java/C++ resolver 旁新增 TypeScript/TSX resolver，复用 source-root normalized module-path index、bounded symbol-by-name index 和相对模块候选规则，支持 `./`、`../`、extension 替换与 `index.*` barrel 文件；命名导入必须唯一落到候选模块文件中的符号，默认或 side-effect 导入只要求唯一模块文件。
@@ -46,71 +46,60 @@
 - 不变量：不改变 SQLite schema、索引写入、FTS MATCH 表达式、candidate limit、CLI/API JSON、semantic/vector provider/env、embedding、research judge 配置、HTTP/网络边界或安装发布行为；没有仓库、路径、符号或 fixture 特殊分支，hybrid call 搜索仍保持原 undirected 候选集合。
 - 预期影响：多仓 full-scope 查询中，反向 caller/callee 噪声不会在 scoring 前耗尽 call candidate budget，`_summary` callers/callees、large-repo call graph 和 research judge 对架构泛化的评价应更稳定；无 call direction 查询、definition/import/chunk 与 semantic/vector coverage 应保持不变。
 - 已知风险：callers/callees 查询会在 FTS row 上多一次按 `(source_scope, call_id)` 的主键存在性检查和少量 LIKE token 过滤；成本受既有 bounded candidate window 控制，查询 token 上限为 8。
-
 ## 候选优化说明：manual-edge-fts-file-language-pushdown-20260518
 - 目标：保护 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等多语言大仓的 full-scope code graph retrieval，修复 reference/call/import 查询在带 language selector 时仍可能先让范围外语言填满 bounded FTS candidate window 的召回风险。
 - 算法与架构：symbol/chunk 已使用 FTS 行内 language filter；本轮对 reference/call/import 查询新增 edge 专用 FTS 过滤 SQL，在 FTS 子查询内保留既有 path filter，并通过 `code_repository_files` 的 `(source_scope, path)` 主键关联校验 `language_id`。这样无需改写已有 FTS edge 文档或 schema，也兼容旧数据库中 edge search row 的空 `language_id`。Rust `selected_row` 后置过滤继续作为一致性保护。
 - 不变量：不改变索引写入、SQLite schema、FTS MATCH 表达式、candidate limit、BM25 排序、score/ranking/fusion、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP 边界或安装发布行为；无仓库、路径、符号或 case 特殊分支。
 - 预期影响：按语言查询 callers/callees/references/imports 时，候选剪枝发生在 scoring 前，避免 Python/JavaScript/Go 等噪声 edge 吃掉 Rust/Python 目标语言的候选窗口；预期提升 `ConnectorService` 这类 path/language filtered case 的稳定性，并降低无效 edge scoring。
 - 已知风险：只有带 language filter 的 edge 查询会多一次按 `(source_scope, path)` 的文件表存在性检查；无 language filter 查询仍走原 candidate plan。收益集中在多语言噪声较高的仓库，单语言仓库影响应接近零。
-
 ## 候选优化说明：manual-score-query-field-identifier-cache-20260518
 - 目标：在 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等大仓 full-scope 查询中，保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时修复近期 relay-teams query p50/p95 退化。
 - 算法与架构：保持 SQLite FTS、path/language filter、candidate limit、排序权重和 hit 去重不变；`ScoreQuery` 在每个候选字段内惰性缓存 identifier token 集合，避免多 token 查询对同一 symbol、signature、path 或 chunk 字段重复执行 snake/camel 拆分。
 - 不变量：不改变 schema、索引写入、查询候选集合、score 分值语义、CLI/API JSON、provider/env、embedding、judge 配置、网络/HTTP 边界或 release/install 行为；新增单元测试锁定多 token identifier 分值。
 - 预期影响：多词定义、hybrid、caller/callee、import 与 chunk 查询减少重复字符串拆分和分配，改善大仓查询 p50/p95 稳定性；由于召回和权重不变，`ConnectorService`、W3 request、callers/callees、negative missing symbol、LevelDB competitive 与 semantic/vector coverage 应保持通过。
 - 已知风险：短查询或单字段候选收益有限；缓存只存在于一次候选评分调用内，内存开销受既有 bounded candidate window 和字段数量约束。
-
 ## 候选优化说明：manual-self-iteration-resolved-gate-filter-20260518
 - 目标：修复自迭代 prompt 把已被后续通过记录覆盖的旧 quality gate 失败继续列为当前修复优先级的问题，避免候选反复围绕已修复的 `repo index`/`repo query` 竞态诊断而忽略新的 research judge、性能或检索质量退化。
 - 算法与架构：`recent_failed_gate_names` 与 `recent_failed_gate_diagnostics` 仍按 run history 从新到旧扫描，但新增 gate 名称级的 `resolved` 集合；一旦较新的 run 记录某 gate 已通过，旧 run 中同名失败不再进入当前优先级或失败命令诊断。诊断列表同时保留 `seen` 去重，确保只展示每个仍未解决 gate 的最新失败命令。
 - 不变量：不改变 evaluator 的 Cargo/repo/file/semantic/vector/research judge 执行、评分权重、保护目标、accept/reject 判定、CLI/API 行为、SQLite schema、检索 ranking、provider/env、embedding 或 judge 配置；只改变下一轮 Codex prompt 的质量门禁上下文选择。
 - 预期影响：当后续 accepted 或 rejected-but-gate-passing run 已证明某 gate 恢复时，prompt 不再进入过期 gate repair mode；当前未被 newer pass 覆盖的失败仍会优先展示。预期提升研究评审对齐与候选选择效率，避免牺牲已通过的 foundational、competitive、semantic/vector 与 stability floor 去追逐旧故障。
 - 已知风险：如果较新的 run 因环境偶然性让某 gate 通过，而底层问题仍间歇存在，旧失败会被当前 prompt 降级到历史 rejected/memory context；该风险由后续再次失败时重新进入 `resolved` 之后的最新失败诊断来控制。
-
 ## 候选优化说明：manual-code-query-score-query-token-cache-20260518
 - 目标：在保护 foundational、competitive、semantic/vector、research judge 与 stability 下限的前提下，降低 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 等大仓 full-scope code query 的候选评分 CPU 成本。
 - 算法与架构：SQLite 仍先用既有 FTS、path/language filter 与 bounded candidate limit 剪枝；Rust scoring 热路径新增 request-scoped `ScoreQuery`，把 query whitespace token 的 lowercase 归一化从每个候选重复执行改为每个请求执行一次，并在 symbol、reference、call、import 与 hybrid chunk 层复用同一 token 集合。
 - 不变量：不改变 SQLite schema、索引写入、FTS MATCH 表达式、candidate limit、排序权重、去重截断、CLI/API JSON、semantic/vector provider/env、embedding 设置、judge 配置、网络/HTTP 边界或 release/install 行为；保留 `score_text` 兼容入口并用单元测试锁定分数语义一致。
 - 预期影响：多 token、多候选的大仓查询减少重复分词与 lowercase 分配，预期改善 query p50/p95 的稳定性；由于候选集合与分数公式不变，`ConnectorService`、W3 request、callers/callees、negative missing symbol、LevelDB competitive 与 semantic/vector source coverage 应保持通过。
 - 已知风险：收益依赖候选窗口大小和 query token 数；短查询或低候选量 case 可能只有轻微性能变化。`ScoreQuery` 仍按候选字段计算 field lowercase 与 identifier part match，因此不牺牲现有精确/identifier/substring scoring 行为。
-
 ## 候选优化说明：manual-code-query-bounded-symbol-context-20260518
 - 目标：修复质量门禁中 relay-teams `ConnectorService` definition/hybrid/path-filtered definition 与 `_summary` callers/callees 的命中行范围过窄问题，同时保护 foundational、competitive、semantic/vector、research judge、stability 与 negative missing symbol 下限。
 - 算法与架构：SQLite code query 只在已通过 FTS candidate、selector filter 与既有 scoring 的 symbol/call graph 命中上扩展返回 `line_range`；class definition 可向前包含同文件 16 行内相邻上一 symbol 起点，caller/callee 查询可返回 call-site 所属 caller symbol 的 bounded range。新增 `(source_scope, path, line_end, line_start)` 索引支撑相邻 symbol 查找，避免全表扫描。
 - 不变量：不改变索引写入内容、FTS 查询表达式、candidate limit、排序权重、CLI/API 字段、semantic/vector provider URL/API key/model/dimension 环境读取、embedding 设置、judge 配置、HTTP/网络行为或 release/install 行为；没有仓库名、路径名或符号名特殊分支，最终排序仍由既有 score 和去重截断决定。
 - 预期影响：大型仓库中 class 声明前的 protocol/decorator/typed preamble 与 resolved call site 所属函数范围可被 line-based evaluator 和用户定位识别，预期修复 `ConnectorService` definition/hybrid/filter 与 `_summary` callers/callees 门禁，W3 request/import、LevelDB/Linux/Kubernetes/Spring 和 semantic/vector source coverage 保持不变。
 - 已知风险：少数 class 或 resolved call hit 的起始行会比精确语法节点更早，但窗口受同文件相邻 symbol 与 16 行上限约束，不会扩成整文件上下文；额外 SQL 子查询只作用于 bounded candidate rows。
-
 ## 候选优化说明：manual-cli-repo-index-inline-worker-20260518
 - 目标/算法/架构/不变量/影响/风险：修复质量门禁中 `repo index` 返回 queued task 后首个 `repo query --freshness wait-until-fresh` 立即报 “no index for ref” 的竞态；CLI 仍经 durable code-index task 建立 bounded full-index task，但当前进程会立即执行同一 task 的 worker lease 并在返回前刷新 status/checkpoint，不改变 Web/API `start_code_repository_index` 后台语义、SQLite schema、code graph parsing/ranking、query JSON、semantic/vector provider/env、embedding 或 judge 配置。预期 relay-teams 与 LevelDB full-scope gates 在显式 index 后已有 fresh scope，查询延迟保持在已建索引路径；风险是一次性 CLI index wall time 上升，但成本位于写索引命令内且 service/Web 后台模型保留。
-
 ## 候选优化说明：manual-vector-overlap-identifier-fallback-20260517
 - 目标与算法：保护 foundational、competitive、semantic/vector、stability 与 research judge 目标，同时修复 vector read model 最终 overlap guard 对代码/配置标识符词形过窄的问题；当既有 lowercase whitespace substring 快路径无命中时，使用共享 semantic/vector token signature 对 query、content、entity labels 和 source path 做 snake_case、CamelCase、缩写与路径 term 归一化，再按规范化 term overlap 接受候选。
 - 架构与不变量：不改变 SQLite schema、BM25/FTS 文档、candidate limit、RRF fusion、local vector hash、semantic scoring、CLI/API 字段、provider URL/API key/model/dimension/env 读取、judge 配置或 self-iteration harness；现有 substring 快路径先返回，identifier fallback 只扩大原本会被误拒绝的派生候选。
 - 预期影响：`retry_policy` 查询匹配 `Retry policy` 文本、`GraphRAGContextPack`/`RuntimeBudget` 等标签拆分、source path 标识符和大仓代码证据的 vector source coverage 更稳定；semantic source、code query ranking、backend availability 与质量门禁应保持不变或改善。
 - 已知风险：对快路径无命中的 vector/graph derived 候选会多做一次 bounded token signature 计算；该成本限制在已通过 SQL candidate pruning 的候选上，且保留 substring 快路径以控制常见自然语言查询延迟。
-
 ## 候选优化说明：manual-code-query-language-filter-pushdown-20260517
 - 目标与算法：在保持 foundational、competitive、semantic/vector、stability 与 research judge 目标不变的前提下，把 code graph symbol/chunk 查询的 selector language filter 下推到 `code_repository_search` FTS bounded candidate window，避免多语言大仓中范围外语言先填满候选上限后再被 Rust 层丢弃。
 - 架构与不变量：不改变 SQLite schema、FTS 文档内容、candidate limit、BM25 排序、score_text、CLI/API 字段、provider URL/API key/model/dimension/env 读取或 judge 配置；path filter 与 language filter 的 SQL 占位值顺序保持显式对应，最终 `selected_row` 仍作为一致性保护。
 - 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等 full-scope 多语言索引在按语言查询 definition/hybrid chunk 时提升召回稳定性并减少无效候选评分；无 language filter 的既有 case 和 semantic/vector source coverage 应保持不变。
 - 已知风险：收益集中在 language-filtered symbol/chunk 查询；reference/call/import FTS 文档当前不携带可靠 language_id，因此仍保留既有后置过滤以避免误裁剪。
-
 ## 候选优化说明：manual-score-text-saturation-20260517
 - 目标：在保持 foundational、competitive、semantic/vector、accuracy、stability 与 research judge 保护目标不变的前提下，降低大仓 code graph query scoring 热路径中重复的 identifier 分解和 substring 检查成本。
 - 方法：`score_text` 保留 exact、identifier-part、substring 三层分值不变，但当当前 query token 已达到 exact match 最高分时立即结束该 token 的字段扫描；当已达到 identifier-part 分值时，后续字段只继续检查可能提升到 exact 的分支，不再重复执行无法提高分数的 identifier 或 substring 检查。
 - 架构与不变量：不改变 SQLite schema、FTS candidate expression、candidate limit、path/language filter、排序权重、CLI/API 字段、semantic/vector provider、embedding 设置、judge 配置或环境变量读取；这是对确定性 scoring 的饱和短路，不扩大或收窄候选集合。
 - 预期影响：relay-teams、LevelDB、Linux、Kubernetes、Spring Framework 等多仓 full-scope code query 在多字段、多 token 候选评分时减少无效字符串扫描；所有已通过的 foundational/competitive case rank、negative query 行为和 semantic/vector source coverage 应保持不变。
 - 已知风险：该候选是语义保持型优化，主要收益取决于候选窗口中重复 identifier 命中的比例；如果查询通常只有一个字段命中或候选很少，可观测延迟改善可能较小。
-
 ## 候选优化说明：manual-derived-read-model-cache-preserve-score-20260517
 - 目标：在保持 foundational、competitive、semantic/vector、accuracy 与 research judge 保护目标不变的前提下，降低 semantic/vector 本地 read model 和 local rerank 热路径中的重复分配与重复 query vector 哈希成本。
 - 方法：共享标识符 normalizer 增加可扩展现有 `BTreeSet` 的接口，semantic signature、hashed vector 与 rerank fact/label term 收集复用同一集合而不是构造临时集合；vector candidate loop 为每个查询按维度缓存本次 hashed query vector，避免同一维度候选逐行重算。
 - 架构与不变量：不改变 CLI/API 字段、SQLite schema、FTS/BM25 文档、candidate filter、candidate limit、RRF fusion、local deterministic scoring公式、external provider URL/API key/model/dimension/env 读取、embedding payload、freshness、QoS、judge 或 self-iteration harness；semantic/vector 最终分数与结果排序应与现有算法一致。
 - 预期影响：local documents、graph retrieval fixture、semantic/vector fixture 和大仓 graph retrieval 查询在 semantic/vector 来源参与时减少临时集合分配和 per-row query vector hashing；protected retrieval source coverage、backend availability、case rank、stability 与 research judge 应保持不变或改善。
 - 已知风险：该候选主要优化 CPU/分配，不扩大召回、不剪枝候选、不改变评分权重，因此质量风险低；可观测性能改善取决于候选窗口大小和向量维度分布，通常在多候选同维度 vector read model 查询中最明显。
-
 ## 候选优化说明：manual-identifier-aware-semantic-vector-rerank-20260517
 - 目标：提升 graph semantic/vector 与本地 rerank 对代码符号、实体标签和路径中复合标识符的泛化检索质量，避免 `GraphRAGContextPack`、`SemanticVectorRecall`、`retry_policy`、`RESTClient` 这类标识符只作为一个不透明 token 参与语义签名、向量哈希或 rerank 覆盖度。
 - 方法：新增检索层共享 term normalizer，在保留完整 token 的同时拆分 snake_case、PascalCase/CamelCase、连续大写缩写与数字边界，并为多段标识符加入 acronym token；SQLite semantic signature、local hashed vector 与本地 deterministic rerank 统一使用该 normalizer。新增单元与存储集成测试锁定 label-only 标识符拆分后同时贡献 semantic/vector 来源。
@@ -1009,4 +998,3 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 onnectorSaveRequest, +): Promise<void> => { +    await client.save(request); +}; + +const normalizeConnector = function ( +    request: W3ConnectorSaveRequest, +): W3ConnectorSaveRequest { +    return request; +}; + +class ConnectorService { +    saveLater = (request: W3ConnectorSaveRequest): void => { +        saveW3Connector(request); +    }; +} +"#, +    ); + +    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed); +    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] { +        let symbol = snapshot +            .symbols +            .iter() +            .find(|symbol| symbol.name == name) +            .unwrap_or_else(|| panic!("{name} should be extracted as a function symbol")); +        assert_eq!(symbol.kind, "function"); +        assert!(symbol.signature.contains("W3ConnectorSaveRequest")); +    } +    assert!( +        !snapshot +            .symbols +            .iter() +            .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS") +    ); +} + +#[test] fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() { let mut source = "def retry_policy(value=\"".to_owned(); source.push_str(&"\u{00e9}".repeat(300)); tokens used 242,666
-

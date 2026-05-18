@@ -44,8 +44,13 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
                 || language_nodes::definition_kind(language_id, node_kind).is_some()
         }
         "javascript" | "jsx" | "typescript" | "tsx" => {
-            matches!(node_kind, "variable_declarator" | "public_field_definition")
-                || language_nodes::definition_kind(language_id, node_kind).is_some()
+            matches!(
+                node_kind,
+                "assignment_expression"
+                    | "pair"
+                    | "public_field_definition"
+                    | "variable_declarator"
+            ) || language_nodes::definition_kind(language_id, node_kind).is_some()
         }
         _ => language_nodes::definition_kind(language_id, node_kind).is_some(),
     }
@@ -86,22 +91,71 @@ fn javascript_like_function_value_definition(
     if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
         || !matches!(
             node.kind(),
-            "variable_declarator" | "public_field_definition"
+            "assignment_expression" | "pair" | "public_field_definition" | "variable_declarator"
         )
     {
         return None;
     }
-    let value = node.child_by_field_name("value")?;
+    let value = function_value_node(node)?;
     if !matches!(value.kind(), "arrow_function" | "function_expression") {
         return None;
     }
-    let name = node.child_by_field_name("name")?;
-    let name = node_text(content, name);
+    let name = function_value_name(content, node)?;
     if !javascript_identifier_name(&name) {
         return None;
     }
 
     Some((name, "function", syntax_range(node)))
+}
+
+fn function_value_node(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "assignment_expression" => node.child_by_field_name("right"),
+        "pair" | "public_field_definition" | "variable_declarator" => {
+            node.child_by_field_name("value")
+        }
+        _ => None,
+    }
+}
+
+fn function_value_name(content: &str, node: Node<'_>) -> Option<String> {
+    match node.kind() {
+        "assignment_expression" => {
+            assignment_target_name(content, node.child_by_field_name("left")?)
+        }
+        "pair" => named_property_text(content, node.child_by_field_name("key")?),
+        "public_field_definition" | "variable_declarator" => {
+            named_property_text(content, node.child_by_field_name("name")?)
+        }
+        _ => None,
+    }
+}
+
+fn assignment_target_name(content: &str, target: Node<'_>) -> Option<String> {
+    match target.kind() {
+        "identifier" => named_property_text(content, target),
+        "member_expression" => {
+            let property = target.child_by_field_name("property")?;
+            let name = named_property_text(content, property)?;
+            if name == "exports"
+                && target
+                    .child_by_field_name("object")
+                    .is_some_and(|object| node_text(content, object) == "module")
+            {
+                return None;
+            }
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn named_property_text(content: &str, node: Node<'_>) -> Option<String> {
+    matches!(
+        node.kind(),
+        "identifier" | "private_property_identifier" | "property_identifier"
+    )
+    .then(|| node_text(content, node))
 }
 
 fn javascript_identifier_name(name: &str) -> bool {

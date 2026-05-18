@@ -669,11 +669,43 @@ class ConnectorService {
         saveW3Connector(request);
     };
 }
+
+export const connectorActions = {
+    persistW3Connector: async (request: W3ConnectorSaveRequest): Promise<void> => {
+        await saveW3Connector(request);
+    },
+    timeoutMs: CONNECTOR_TIMEOUT_MS,
+};
+
+exports.retryW3Connector = function (request: W3ConnectorSaveRequest): void {
+    saveW3Connector(request);
+};
+
+ConnectorService.prototype.flushW3Connector = async (
+    request: W3ConnectorSaveRequest,
+): Promise<void> => {
+    await saveW3Connector(request);
+};
+
+module.exports = function hiddenDefault(request: W3ConnectorSaveRequest): void {
+    saveW3Connector(request);
+};
+
+handlers[dynamicName] = async (request: W3ConnectorSaveRequest): Promise<void> => {
+    await saveW3Connector(request);
+};
 "#,
     );
 
     assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
-    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] {
+    for name in [
+        "saveW3Connector",
+        "normalizeConnector",
+        "saveLater",
+        "persistW3Connector",
+        "retryW3Connector",
+        "flushW3Connector",
+    ] {
         let symbol = snapshot
             .symbols
             .iter()
@@ -688,6 +720,10 @@ class ConnectorService {
             .iter()
             .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS")
     );
+    assert!(!snapshot.symbols.iter().any(|symbol| matches!(
+        symbol.name.as_str(),
+        "timeoutMs" | "exports" | "dynamicName"
+    )));
 }
 
 #[test]
