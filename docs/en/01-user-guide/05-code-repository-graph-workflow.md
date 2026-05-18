@@ -34,7 +34,7 @@ relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --dry-run --format json
 ```
 
-Preview is useful after narrowing `--path` or `--language` so unrelated directories are not written into the code graph. The default source preset excludes common generated directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Use a precise `--path` registration or request when those files are intentionally needed.
+Preview is useful after narrowing `--path` or `--language` so unrelated directories are not written into the code graph. The default source preset excludes dependency/cache/vendor/build/out/target directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Git-tracked source-language runtime subtrees under `dist`, such as `dist/js/core` or `dist/js/app`, are indexed, while minified files, CSS/assets, and other distribution subtrees remain excluded by default. Use a precise `--path` registration or request when other default-excluded files are intentionally needed.
 
 ## 5.3 Build the Code Graph Index
 

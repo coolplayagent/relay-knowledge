@@ -28,6 +28,26 @@ pub(super) fn call_site_source_path_bonus(
     0.2
 }
 
+pub(super) fn call_site_test_path_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_test_intent
+        || !matches!(
+            request.code_query_kind,
+            CodeQueryKind::Callers | CodeQueryKind::Callees
+        )
+        || !path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    -0.35
+}
+
 pub(super) fn declaration_surface_path_bonus(
     declaration_bonus: f64,
     path: &str,
@@ -272,6 +292,38 @@ mod tests {
         );
         assert_eq!(
             call_site_source_path_bonus(4.0, "db/db_impl.cc", &callers, "NewLRUCache", true),
+            0.0
+        );
+    }
+
+    #[test]
+    fn call_site_test_path_penalty_demotes_tests_without_test_intent() {
+        let callers = retrieval_request(CodeQueryKind::Callers);
+        let callees = retrieval_request(CodeQueryKind::Callees);
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+
+        assert_eq!(
+            call_site_test_path_penalty(4.0, "table/filter_block_test.cc", &callers, false),
+            -0.35
+        );
+        assert_eq!(
+            call_site_test_path_penalty(4.0, "util/bloom_test.cc", &callees, false),
+            -0.35
+        );
+        assert_eq!(
+            call_site_test_path_penalty(4.0, "table/table.cc", &callers, false),
+            0.0
+        );
+        assert_eq!(
+            call_site_test_path_penalty(4.0, "table/filter_block_test.cc", &callers, true),
+            0.0
+        );
+        assert_eq!(
+            call_site_test_path_penalty(4.0, "table/filter_block_test.cc", &hybrid, false),
+            0.0
+        );
+        assert_eq!(
+            call_site_test_path_penalty(0.0, "table/filter_block_test.cc", &callers, false),
             0.0
         );
     }

@@ -3,14 +3,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::{
     domain::{CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexSession},
     storage::StorageError,
 };
 
-use super::{code_status, count_code_rows, delete_path_index, delete_scope_index};
+use super::{code_status, count_code_rows, delete_path_indexes, delete_scope_index};
 
 #[path = "code_batch/finalize.rs"]
 mod finalize;
@@ -50,13 +50,21 @@ pub(super) fn apply_batch(
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
     let transaction = connection.transaction()?;
-    for file in &batch.files {
-        delete_path_index(&transaction, &batch.source_scope, &file.path)?;
-    }
+    delete_path_indexes(
+        &transaction,
+        &batch.source_scope,
+        batch.files.iter().map(|file| file.path.as_str()),
+    )?;
     insert_files(&transaction, &batch)?;
     insert_symbols(&transaction, &batch)?;
-    insert_references(&transaction, &batch)?;
-    insert_imports(&transaction, &batch)?;
+    let edge_search_languages =
+        if should_materialize_intermediate_edge_search(&transaction, &batch)? {
+            Some(edge_file_languages_by_path(&transaction, &batch)?)
+        } else {
+            None
+        };
+    insert_references(&transaction, &batch, edge_search_languages.as_ref())?;
+    insert_imports(&transaction, &batch, edge_search_languages.as_ref())?;
     insert_chunks(&transaction, &batch)?;
     insert_diagnostics(&transaction, &batch)?;
     update_checkpoint_after_batch(&transaction, &batch)?;
@@ -236,8 +244,8 @@ fn insert_symbols(
 fn insert_references(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
+    file_languages_by_path: Option<&BTreeMap<String, String>>,
 ) -> Result<(), StorageError> {
-    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_references (
@@ -249,7 +257,11 @@ fn insert_references(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         ",
     )?;
-    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
+    let mut search_documents = if file_languages_by_path.is_some() {
+        Some(super::SearchDocumentInserter::new(transaction)?)
+    } else {
+        None
+    };
     for reference in &batch.references {
         statement.execute(params![
             reference.repository_id,
@@ -269,22 +281,26 @@ fn insert_references(
             reference.line_range.start,
             reference.line_range.end,
         ])?;
-        search_documents.insert(
-            &reference.source_scope,
-            "reference",
-            &reference.reference_id,
-            &reference.path,
-            file_languages_by_path
-                .get(reference.path.as_str())
-                .map(String::as_str)
-                .unwrap_or_default(),
-            [
-                reference.name.as_str(),
-                reference.kind.as_str(),
-                reference.target_hint.as_deref().unwrap_or_default(),
-                reference.path.as_str(),
-            ],
-        )?;
+        if let (Some(search_documents), Some(file_languages_by_path)) =
+            (search_documents.as_mut(), file_languages_by_path)
+        {
+            search_documents.insert(
+                &reference.source_scope,
+                "reference",
+                &reference.reference_id,
+                &reference.path,
+                file_languages_by_path
+                    .get(reference.path.as_str())
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                [
+                    reference.name.as_str(),
+                    reference.kind.as_str(),
+                    reference.target_hint.as_deref().unwrap_or_default(),
+                    reference.path.as_str(),
+                ],
+            )?;
+        }
     }
 
     Ok(())
@@ -293,8 +309,8 @@ fn insert_references(
 fn insert_imports(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
+    file_languages_by_path: Option<&BTreeMap<String, String>>,
 ) -> Result<(), StorageError> {
-    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_imports (
@@ -304,7 +320,11 @@ fn insert_imports(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ",
     )?;
-    let mut search_documents = super::SearchDocumentInserter::new(transaction)?;
+    let mut search_documents = if file_languages_by_path.is_some() {
+        Some(super::SearchDocumentInserter::new(transaction)?)
+    } else {
+        None
+    };
     for import in &batch.imports {
         statement.execute(params![
             import.repository_id,
@@ -320,21 +340,25 @@ fn insert_imports(
             import.line_range.start,
             import.line_range.end,
         ])?;
-        search_documents.insert(
-            &import.source_scope,
-            "import",
-            &import.import_id,
-            &import.path,
-            file_languages_by_path
-                .get(import.path.as_str())
-                .map(String::as_str)
-                .unwrap_or_default(),
-            [
-                import.module.as_str(),
-                import.target_hint.as_deref().unwrap_or_default(),
-                import.path.as_str(),
-            ],
-        )?;
+        if let (Some(search_documents), Some(file_languages_by_path)) =
+            (search_documents.as_mut(), file_languages_by_path)
+        {
+            search_documents.insert(
+                &import.source_scope,
+                "import",
+                &import.import_id,
+                &import.path,
+                file_languages_by_path
+                    .get(import.path.as_str())
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                [
+                    import.module.as_str(),
+                    import.target_hint.as_deref().unwrap_or_default(),
+                    import.path.as_str(),
+                ],
+            )?;
+        }
     }
 
     Ok(())
@@ -386,23 +410,105 @@ fn insert_chunks(
     Ok(())
 }
 
-fn file_languages_by_path(
+fn should_materialize_intermediate_edge_search(
     transaction: &Transaction<'_>,
-    source_scope: &str,
+    batch: &CodeIndexBatch,
+) -> Result<bool, StorageError> {
+    if batch.references.is_empty() && batch.imports.is_empty() {
+        return Ok(false);
+    }
+
+    let active_scope = transaction
+        .query_row(
+            "
+            SELECT last_indexed_scope_id
+            FROM code_repositories
+            WHERE repository_id = ?1
+            ",
+            params![batch.repository_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+
+    if active_scope.as_deref() == Some(batch.source_scope.as_str()) {
+        return Ok(true);
+    }
+
+    transaction
+        .query_row(
+            "
+            SELECT 1
+            FROM code_repository_scopes
+            WHERE source_scope = ?1
+              AND repository_id = ?2
+            ",
+            params![batch.source_scope, batch.repository_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+        .map_err(StorageError::from)
+}
+
+fn edge_file_languages_by_path(
+    transaction: &Transaction<'_>,
+    batch: &CodeIndexBatch,
 ) -> Result<BTreeMap<String, String>, StorageError> {
+    if batch.references.is_empty() && batch.imports.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut languages = batch
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.language_id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let missing_paths = edge_paths_missing_from_batch(batch, &languages);
+    if missing_paths.is_empty() {
+        return Ok(languages);
+    }
+
     let mut statement = transaction.prepare(
         "
-        SELECT path, language_id
+        SELECT language_id
         FROM code_repository_files
-        WHERE source_scope = ?1
+        WHERE source_scope = ?1 AND path = ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+    for path in missing_paths {
+        if let Some(language_id) = statement
+            .query_row(params![batch.source_scope.as_str(), path.as_str()], |row| {
+                row.get(0)
+            })
+            .optional()?
+        {
+            languages.insert(path, language_id);
+        }
+    }
 
-    rows.collect::<Result<BTreeMap<_, _>, _>>()
-        .map_err(StorageError::from)
+    Ok(languages)
+}
+
+fn edge_paths_missing_from_batch(
+    batch: &CodeIndexBatch,
+    languages: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut missing_paths = Vec::<String>::new();
+    for path in batch
+        .references
+        .iter()
+        .map(|reference| reference.path.as_str())
+        .chain(batch.imports.iter().map(|import| import.path.as_str()))
+    {
+        if !languages.contains_key(path)
+            && !missing_paths.iter().any(|known| known.as_str() == path)
+        {
+            missing_paths.push(path.to_owned());
+        }
+    }
+
+    missing_paths
 }
 
 fn insert_diagnostics(

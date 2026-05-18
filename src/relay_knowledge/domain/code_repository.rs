@@ -435,7 +435,7 @@ pub struct CodeIndexResourceBudget {
 }
 
 impl CodeIndexResourceBudget {
-    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 128;
+    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 256;
     pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024;
     pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000;
 
@@ -910,5 +910,20 @@ mod tests {
         let error = RepositoryCodeRange::new("line_range", 3, 2).expect_err("range should fail");
 
         assert_eq!(error.field, "line_range");
+    }
+
+    #[test]
+    fn default_code_index_budget_batches_more_small_files_without_raising_row_or_byte_caps() {
+        let budget = CodeIndexResourceBudget::default();
+
+        assert_eq!(budget.max_files_per_batch, 256);
+        assert_eq!(
+            budget.max_bytes_per_batch,
+            CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH
+        );
+        assert_eq!(
+            budget.max_rows_per_batch,
+            CodeIndexResourceBudget::DEFAULT_MAX_ROWS_PER_BATCH
+        );
     }
 }

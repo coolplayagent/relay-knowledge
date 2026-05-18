@@ -339,6 +339,21 @@ pub(super) fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
 }
 
+pub(super) fn repeated_call_site_bonus(
+    base_score: f64,
+    call_site_count: usize,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Callers
+        || call_site_count <= 1
+    {
+        return 0.0;
+    }
+
+    (call_site_count.saturating_sub(1).min(3) as f64) * 0.25
+}
+
 pub(super) fn callee_related_name_bonus(
     query: &str,
     callee_name: &str,
@@ -380,6 +395,44 @@ pub(super) fn directional_call_context_bonus(
         CodeQueryKind::Callees => 0.35 * query.score([callee_name, path]),
         _ => 0.0,
     }
+}
+
+pub(super) fn same_named_caller_penalty(
+    caller_name: Option<&str>,
+    callee_name: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Callers {
+        return 0.0;
+    }
+    let Some(caller_leaf) = caller_name.and_then(leaf_identifier) else {
+        return 0.0;
+    };
+    let Some(callee_leaf) = leaf_identifier(callee_name) else {
+        return 0.0;
+    };
+    let caller = compact_identifier(&caller_leaf);
+    let callee = compact_identifier(&callee_leaf);
+    if !caller.is_empty() && caller == callee {
+        -2.0
+    } else {
+        0.0
+    }
+}
+
+fn leaf_identifier(value: &str) -> Option<String> {
+    value
+        .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|term| !term.is_empty())
+        .map(str::to_owned)
+}
+
+fn compact_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect()
 }
 
 fn callee_identifier_part_count(callee_name: &str) -> f64 {

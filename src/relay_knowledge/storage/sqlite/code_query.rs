@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
-
 #[cfg(test)]
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
+#[path = "code_query_call_counts.rs"]
+mod code_query_call_counts;
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
 #[path = "code_query_line_ranges.rs"]
@@ -12,8 +12,6 @@ mod code_query_line_ranges;
 mod code_query_path_ranking;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
-#[path = "code_query_scope.rs"]
-mod code_query_scope;
 #[path = "code_query_support.rs"]
 mod code_query_support;
 
@@ -28,7 +26,15 @@ use crate::{
 #[cfg(test)]
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
-use super::code_status::{repository_scope_status, repository_status};
+use super::code_query_hits::selected_row;
+pub(super) use super::code_query_hits::{
+    HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, required_repository,
+    required_scope,
+};
+#[cfg(test)]
+use super::code_query_scope::path_matches_filter;
+pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
+use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
 use code_query_import_targets::search_imports_by_target_symbols;
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
@@ -37,14 +43,10 @@ use code_query_line_ranges::{
     optional_line_range_with_symbol_context, symbol_result_line_range,
 };
 use code_query_path_ranking::{
-    call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
-    symbol_test_path_penalty,
+    call_site_source_path_bonus, call_site_test_path_penalty, declaration_surface_path_bonus,
+    query_mentions_test_or_benchmark, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
-#[cfg(test)]
-use code_query_scope::path_matches_filter;
-use code_query_scope::selector_filters_fit_indexed_scope;
-pub(super) use code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_support::*;
 
 pub(super) fn search_code(
@@ -445,11 +447,19 @@ fn search_calls(
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
+    let call_site_counts = (request.code_query_kind == CodeQueryKind::Callers)
+        .then(|| caller_target_call_counts(&rows));
 
     Ok(rows
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
+            let caller_target_call_count = call_site_counts
+                .as_ref()
+                .and_then(|counts| {
+                    caller_target_call_key(&row).and_then(|key| counts.get(&key).copied())
+                })
+                .unwrap_or(1);
             let caller_name = row.caller_name.as_deref().unwrap_or_default();
             let target_hint = row.target_hint.as_deref().unwrap_or_default();
             let caller_canonical_id = row
@@ -483,6 +493,21 @@ fn search_calls(
                     ),
                 ),
             };
+            let source_path_bonus = call_site_source_path_bonus(
+                base_score,
+                &row.path,
+                request,
+                query,
+                query_has_test_intent,
+            );
+            let test_path_penalty =
+                call_site_test_path_penalty(base_score, &row.path, request, query_has_test_intent);
+            let repeated_site_bonus =
+                if test_path_penalty >= 0.0 && (source_path_bonus > 0.0 || query_has_test_intent) {
+                    repeated_call_site_bonus(base_score, caller_target_call_count, request)
+                } else {
+                    0.0
+                };
             let score = base_score
                 + scoped_identity_bonus
                 + directional_call_context_bonus(
@@ -493,15 +518,10 @@ fn search_calls(
                     &row.path,
                     request,
                 )
+                + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
+                + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
-            let score = score
-                + call_site_source_path_bonus(
-                    base_score,
-                    &row.path,
-                    request,
-                    query,
-                    query_has_test_intent,
-                );
+            let score = score + source_path_bonus + test_path_penalty;
             (score > 0.0).then(|| {
                 let line_range = call_result_line_range(request.code_query_kind, &row);
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
@@ -769,212 +789,6 @@ fn search_chunks(
             })
         })
         .collect())
-}
-
-pub(super) fn required_repository(
-    connection: &mut Connection,
-    selector: &crate::domain::CodeRepositorySelector,
-) -> Result<CodeRepositoryStatus, StorageError> {
-    let status = repository_status(connection, &selector.repository)?.ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "code repository '{}' is not registered",
-            selector.repository
-        ))
-    })?;
-    let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
-    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
-    let scoped_status = match repository_scope_status(
-        connection,
-        &selector.repository,
-        &selector.ref_selector,
-        &path_filters,
-        &language_filters,
-    )? {
-        Some(status) => Some(status),
-        None if (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
-            && selector_filters_fit_indexed_scope(
-                &status.path_filters,
-                &status.language_filters,
-                &selector.path_filters,
-                &selector.language_filters,
-            ) =>
-        {
-            repository_scope_status(
-                connection,
-                &selector.repository,
-                &selector.ref_selector,
-                &status.path_filters,
-                &status.language_filters,
-            )?
-        }
-        None => None,
-    }
-    .ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "code repository '{}' has no index for ref {} and requested filters",
-            selector.repository, selector.ref_selector
-        ))
-    })?;
-
-    Ok(scoped_status)
-}
-
-fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
-    let mut merged = Vec::new();
-    for value in left.iter().chain(right.iter()) {
-        if !merged.contains(value) {
-            merged.push(value.clone());
-        }
-    }
-
-    merged
-}
-
-fn selected_row(
-    path: &str,
-    language_id: &str,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-) -> bool {
-    path_filter_allows(path, &status.path_filters)
-        && path_filter_allows(path, &request.repository.path_filters)
-        && language_filter_allows(language_id, &status.language_filters)
-        && language_filter_allows(language_id, &request.repository.language_filters)
-}
-
-pub(super) fn chunk_layers(parse_status: &str) -> Vec<CodeRetrievalLayer> {
-    let mut layers = vec![CodeRetrievalLayer::Lexical];
-    if parse_status != "parsed" {
-        layers.push(CodeRetrievalLayer::TextFallback);
-    }
-
-    layers
-}
-
-pub(super) struct HitParts {
-    pub(super) path: String,
-    pub(super) language_id: String,
-    pub(super) byte_range: RepositoryCodeRange,
-    pub(super) line_range: RepositoryCodeRange,
-    pub(super) symbol_snapshot_id: Option<String>,
-    pub(super) canonical_symbol_id: Option<String>,
-    pub(super) file_id: Option<String>,
-    pub(super) retrieval_layers: Vec<CodeRetrievalLayer>,
-    pub(super) score: f64,
-    pub(super) excerpt: String,
-    pub(super) degraded_reason: Option<String>,
-    pub(super) edge_kind: Option<String>,
-    pub(super) edge_resolution_state: Option<String>,
-    pub(super) edge_target_hint: Option<String>,
-    pub(super) edge_confidence_basis_points: Option<u16>,
-    pub(super) edge_confidence_tier: Option<String>,
-}
-
-pub(super) fn hit_from_parts(status: &CodeRepositoryStatus, parts: HitParts) -> CodeRetrievalHit {
-    CodeRetrievalHit {
-        repository_id: status.repository_id.clone(),
-        scope_id: status.last_indexed_scope_id.clone().unwrap_or_default(),
-        resolved_commit_sha: status.last_indexed_commit.clone().unwrap_or_default(),
-        tree_hash: status.tree_hash.clone().unwrap_or_default(),
-        path: parts.path,
-        language_id: parts.language_id,
-        byte_range: parts.byte_range,
-        line_range: parts.line_range,
-        symbol_snapshot_id: parts.symbol_snapshot_id,
-        canonical_symbol_id: parts.canonical_symbol_id,
-        file_id: parts.file_id,
-        retrieval_layers: parts.retrieval_layers,
-        index_versions: vec![format!(
-            "code:{}:{}",
-            status
-                .last_indexed_scope_id
-                .as_deref()
-                .unwrap_or("unscoped"),
-            status.tree_hash.as_deref().unwrap_or("unindexed")
-        )],
-        stale: status.stale,
-        degraded_reason: parts.degraded_reason,
-        edge_kind: parts.edge_kind,
-        edge_resolution_state: parts.edge_resolution_state,
-        edge_target_hint: parts.edge_target_hint,
-        edge_confidence_basis_points: parts.edge_confidence_basis_points,
-        edge_confidence_tier: parts.edge_confidence_tier,
-        score: parts.score,
-        excerpt: parts.excerpt,
-    }
-}
-
-pub(super) fn required_scope(status: &CodeRepositoryStatus) -> Result<&str, StorageError> {
-    status.last_indexed_scope_id.as_deref().ok_or_else(|| {
-        StorageError::InvalidInput(format!(
-            "code repository '{}' does not have an indexed source scope",
-            status.alias
-        ))
-    })
-}
-
-pub(super) fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usize) {
-    let mut best = BTreeMap::<(String, u32, String), CodeRetrievalHit>::new();
-    for hit in hits.drain(..) {
-        let key = (hit.path.clone(), hit.line_range.start, hit.excerpt.clone());
-        match best.get(&key) {
-            Some(existing) if existing.score >= hit.score => {
-                let existing = best.get_mut(&key).expect("checked entry should exist");
-                merge_hit_provenance(existing, &hit);
-            }
-            Some(_) => {
-                let mut hit = hit;
-                if let Some(existing) = best.get(&key) {
-                    merge_hit_provenance(&mut hit, existing);
-                }
-                best.insert(key, hit);
-            }
-            _ => {
-                best.insert(key, hit);
-            }
-        }
-    }
-    hits.extend(best.into_values());
-    hits.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| left.path.cmp(&right.path))
-            .then_with(|| left.line_range.start.cmp(&right.line_range.start))
-    });
-    hits.truncate(limit);
-}
-
-fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
-    for layer in &source.retrieval_layers {
-        if !target.retrieval_layers.contains(layer) {
-            target.retrieval_layers.push(*layer);
-        }
-    }
-    for version in &source.index_versions {
-        if !target.index_versions.contains(version) {
-            target.index_versions.push(version.clone());
-        }
-    }
-    if target.degraded_reason.is_none() {
-        target.degraded_reason = source.degraded_reason.clone();
-    }
-    if target.symbol_snapshot_id.is_none() {
-        target.symbol_snapshot_id = source.symbol_snapshot_id.clone();
-    }
-    if target.canonical_symbol_id.is_none() {
-        target.canonical_symbol_id = source.canonical_symbol_id.clone();
-    }
-    if target.file_id.is_none() {
-        target.file_id = source.file_id.clone();
-    }
-    if target.edge_kind.is_none() {
-        target.edge_kind = source.edge_kind.clone();
-        target.edge_resolution_state = source.edge_resolution_state.clone();
-        target.edge_target_hint = source.edge_target_hint.clone();
-        target.edge_confidence_basis_points = source.edge_confidence_basis_points;
-        target.edge_confidence_tier = source.edge_confidence_tier.clone();
-    }
 }
 
 #[cfg(test)]

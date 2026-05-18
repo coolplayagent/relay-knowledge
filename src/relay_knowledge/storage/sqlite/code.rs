@@ -5,6 +5,12 @@ use rusqlite::{Connection, params};
 #[path = "code_query.rs"]
 mod code_query;
 
+#[path = "code_query_hits.rs"]
+mod code_query_hits;
+
+#[path = "code_query_scope.rs"]
+mod code_query_scope;
+
 #[path = "code_impact.rs"]
 mod code_impact;
 
@@ -76,7 +82,7 @@ use crate::{
 };
 
 use super::SqliteGraphStore;
-use code_cleanup::{count_code_rows, delete_path_index, delete_scope_index};
+use code_cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index};
 pub(super) use code_search::SearchDocumentInserter;
 use code_search::insert_search_document;
 use code_status::{canonical_filter_values, canonical_path_filters, parse_json_list};
@@ -311,9 +317,11 @@ fn apply_snapshot(
         for path in &snapshot.deleted_paths {
             delete_path_index(&transaction, &snapshot.source_scope, path)?;
         }
-        for file in &snapshot.files {
-            delete_path_index(&transaction, &snapshot.source_scope, &file.path)?;
-        }
+        delete_path_indexes(
+            &transaction,
+            &snapshot.source_scope,
+            snapshot.files.iter().map(|file| file.path.as_str()),
+        )?;
     }
 
     for file in &snapshot.files {
