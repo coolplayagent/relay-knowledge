@@ -16,10 +16,11 @@ pub(super) fn resolve_scope(
     source_scope: &str,
     repository_id: &str,
 ) -> Result<(), StorageError> {
+    let mut symbol_cache = None;
     resolve_references(transaction, source_scope)?;
     search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
-    resolve_imports(transaction, source_scope)?;
-    rebuild_calls(transaction, source_scope, repository_id)
+    resolve_imports(transaction, source_scope, &mut symbol_cache)?;
+    rebuild_calls(transaction, source_scope, repository_id, &mut symbol_cache)
 }
 
 fn resolve_references(
@@ -112,7 +113,11 @@ fn resolve_references(
     Ok(())
 }
 
-fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<(), StorageError> {
+fn resolve_imports(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    symbol_cache: &mut Option<Vec<SymbolKey>>,
+) -> Result<(), StorageError> {
     let files = load_file_languages(transaction, source_scope)?;
     let module_paths = module_path_index(files.keys());
     let imports = load_import_keys(transaction, source_scope)?;
@@ -131,11 +136,11 @@ fn resolve_imports(transaction: &Transaction<'_>, source_scope: &str) -> Result<
         }
     }) {
         let mut symbols_by_name = BTreeMap::<String, Vec<SymbolKey>>::new();
-        for symbol in load_symbol_keys(transaction, source_scope)? {
+        for symbol in load_symbol_keys_once(transaction, source_scope, symbol_cache)? {
             symbols_by_name
                 .entry(symbol.name.clone())
                 .or_default()
-                .push(symbol);
+                .push(symbol.clone());
         }
         symbols_by_name
     } else {
@@ -212,6 +217,7 @@ fn rebuild_calls(
     transaction: &Transaction<'_>,
     source_scope: &str,
     repository_id: &str,
+    symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
     transaction.execute(
         "DELETE FROM code_repository_calls WHERE source_scope = ?1",
@@ -224,9 +230,12 @@ fn rebuild_calls(
         ",
         params![source_scope],
     )?;
-    let mut by_path = HashMap::<String, Vec<SymbolKey>>::new();
-    for symbol in load_symbol_keys(transaction, source_scope)? {
-        by_path.entry(symbol.path.clone()).or_default().push(symbol);
+    let mut by_path = HashMap::<&str, Vec<&SymbolKey>>::new();
+    for symbol in load_symbol_keys_once(transaction, source_scope, symbol_cache)? {
+        by_path
+            .entry(symbol.path.as_str())
+            .or_default()
+            .push(symbol);
     }
     let mut insert_call = transaction.prepare(
         "
@@ -250,7 +259,7 @@ fn rebuild_calls(
     let mut references = select_references.query(params![source_scope])?;
     while let Some(row) = references.next()? {
         let reference = reference_from_row(row)?;
-        let caller = caller_for_line(by_path.get(&reference.path), reference.line_start);
+        let caller = caller_for_line(by_path.get(reference.path.as_str()), reference.line_start);
         let call_id = stable_id(
             "call",
             [
@@ -268,8 +277,8 @@ fn rebuild_calls(
             call_id,
             reference.file_id,
             reference.path,
-            caller.map(|symbol| symbol.symbol_snapshot_id.clone()),
-            caller.map(|symbol| symbol.name.clone()),
+            caller.map(|symbol| symbol.symbol_snapshot_id.as_str()),
+            caller.map(|symbol| symbol.name.as_str()),
             reference.target_symbol_snapshot_id,
             reference.name,
             reference.target_hint,
@@ -285,7 +294,7 @@ fn rebuild_calls(
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct SymbolKey {
     symbol_snapshot_id: String,
     path: String,
@@ -315,13 +324,28 @@ struct ImportKey {
     module: String,
 }
 
-fn caller_for_line(symbols: Option<&Vec<SymbolKey>>, line: u32) -> Option<&SymbolKey> {
+fn caller_for_line<'a>(symbols: Option<&Vec<&'a SymbolKey>>, line: u32) -> Option<&'a SymbolKey> {
     let symbols = symbols?;
     let candidate_end = symbols.partition_point(|symbol| symbol.line_range.start <= line);
     symbols[..candidate_end]
         .iter()
         .rev()
         .find(|symbol| symbol.line_range.end >= line)
+        .copied()
+}
+
+fn load_symbol_keys_once<'a>(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+    symbol_cache: &'a mut Option<Vec<SymbolKey>>,
+) -> Result<&'a [SymbolKey], StorageError> {
+    if symbol_cache.is_none() {
+        *symbol_cache = Some(load_symbol_keys(transaction, source_scope)?);
+    }
+
+    Ok(symbol_cache
+        .as_deref()
+        .expect("symbol cache should be initialized after load"))
 }
 
 fn load_symbol_keys(
@@ -937,23 +961,25 @@ mod tests {
 
     #[test]
     fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() {
-        let symbols = vec![
+        let symbols = [
             symbol("outer", 10, 100),
             symbol("same_start_outer", 20, 80),
             symbol("same_start_inner", 20, 40),
             symbol("after_call", 60, 70),
         ];
+        let symbol_refs = symbols.iter().collect::<Vec<_>>();
 
-        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match");
+        let caller = caller_for_line(Some(&symbol_refs), 30).expect("caller should match");
 
         assert_eq!(caller.name, "same_start_inner");
     }
 
     #[test]
     fn caller_lookup_ignores_symbols_that_start_after_call_line() {
-        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)];
+        let symbols = [symbol("before", 1, 5), symbol("after", 20, 30)];
+        let symbol_refs = symbols.iter().collect::<Vec<_>>();
 
-        assert!(caller_for_line(Some(&symbols), 10).is_none());
+        assert!(caller_for_line(Some(&symbol_refs), 10).is_none());
     }
 
     fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
