@@ -10,7 +10,7 @@ use crate::{
     storage::StorageError,
 };
 
-use super::{code_status, count_code_rows, delete_path_index, delete_scope_index};
+use super::{code_status, count_code_rows, delete_path_indexes, delete_scope_index};
 
 #[path = "code_batch/finalize.rs"]
 mod finalize;
@@ -50,9 +50,11 @@ pub(super) fn apply_batch(
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
     let transaction = connection.transaction()?;
-    for file in &batch.files {
-        delete_path_index(&transaction, &batch.source_scope, &file.path)?;
-    }
+    delete_path_indexes(
+        &transaction,
+        &batch.source_scope,
+        batch.files.iter().map(|file| file.path.as_str()),
+    )?;
     insert_files(&transaction, &batch)?;
     insert_symbols(&transaction, &batch)?;
     let edge_search_languages =

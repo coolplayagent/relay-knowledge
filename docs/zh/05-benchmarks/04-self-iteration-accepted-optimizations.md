@@ -1,15 +1,13 @@
 # 自迭代采纳优化记录
 本文档由自迭代 harness 在候选通过质量门禁并被采纳时追加，用于把本轮采用的优化思路传递给后续 Codex 迭代。人工维护的总结可以继续补充在对应条目下。
 ## 记录格式
-- `patch`: 本轮候选补丁在 `.git/relay-knowledge-self-iteration/patches/` 下的路径。
-- `score`: 采纳时的总分和 foundational_capability、competitive_capability、accuracy、semantic_vector、performance、stability 分项。
-- `cases`: 采纳时通过的检索 case 数量。
-- `changed paths`: 本轮变更的主要文件。
-- `key improvements`: 相对上一轮改善的 case、gate 或 metric。
-- `known degradations`: 相对上一轮已观测到的退化，后续迭代必须优先保护或修复。
-- `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
+- `patch`/`score`/`cases`/`changed paths`: 本轮候选补丁、采纳分数、通过 case 数和主要文件。
+- `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-batched-path-cleanup-20260518
+- 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，把 checkpointed batch 和 snapshot incremental 的 same-scope path cleanup 从逐文件逐表 `DELETE` 收敛为去重后的 bounded `IN` 删除；SQLite schema、事实内容、FTS 文档字段、finalize、ranking、CLI/API、provider/env、judge 配置和安装行为不变，单条语句最多绑定 500 个 path 以保留 SQLite 参数上界。
+- 预期影响/风险：大仓 `repo register` 冷索引和增量替换批次减少 delete statement 固定开销，尤其配合 256 文件 batch 降低 relay-teams、LevelDB、Linux、Kubernetes、Spring 的 apply-batch wall time；风险是极少数异常重复 path batch 会一起清理旧 rows，但这与既有逐路径幂等语义一致，并由多 path cleanup 单测覆盖普通表与 FTS 表。
 ## 候选优化说明：manual-default-code-index-batch-256-20260518
 - 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时降低多仓 full-scope `repo register` 冷索引的固定批处理开销，优先改善 relay-teams、LevelDB、Linux、Kubernetes 与 Spring Framework 的 register-to-index wall time。
 - 算法与架构：默认 `CodeIndexResourceBudget` 的 `max_files_per_batch` 从 128 提升到 256；`max_bytes_per_batch=16MiB`、`max_rows_per_batch=50000`、checkpoint、crash recovery、FTS materialization、finalize resolution 与查询排序保持不变。小文件仓库可用更少的 git `cat-file --batch` 分组和 SQLite 事务完成索引，edge-heavy 或大文件仓库仍由字节/行预算提前截断。
@@ -1000,4 +998,17 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 Adopted optimization notes:
 
 b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs b/src/relay_knowledge/domain/code_repository.rs index 7fdb92681e37fddd260c690100eb19edddf757be..03d7ec2af60d7bcbc718b240d4f64b5ffa42f3a1 --- a/src/relay_knowledge/domain/code_repository.rs +++ b/src/relay_knowledge/domain/code_repository.rs @@ -435,7 +435,7 @@ } impl CodeIndexResourceBudget { -    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 128; +    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 256; pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024; pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000; @@ -911,4 +911,19 @@ assert_eq!(error.field, "line_range"); } + +    #[test] +    fn default_code_index_budget_batches_more_small_files_without_raising_row_or_byte_caps() { +        let budget = CodeIndexResourceBudget::default(); + +        assert_eq!(budget.max_files_per_batch, 256); +        assert_eq!( +            budget.max_bytes_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH +        ); +        assert_eq!( +            budget.max_rows_per_batch, +            CodeIndexResourceBudget::DEFAULT_MAX_ROWS_PER_BATCH +        ); +    } } tokens used 237,921
+## 20260518T094852Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T094852Z.patch`
+- score: 0.945694 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.828627, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code.rs`, `src/relay_knowledge/storage/sqlite/code_batch.rs`, `src/relay_knowledge/storage/sqlite/code_cleanup.rs`
+- key improvements: score_component:score 0.935946->0.945694; score_component:performance 0.763642->0.828627; metric:cargo_build_release_ms 50392.0->47327; metric:cargo_clippy_ms 11447.0->297; metric:relay_teams_index_ms 55235.0->20009; metric:relay_teams_register_index_ms 55358.0->20140; metric:leveldb_cpp_index_ms 26028.0->2699; metric:leveldb_cpp_register_index_ms 26417.0->3082
+- known degradations: metric:semantic_vector_provider_probe_ms 1178.0->1300
+- latency metrics: cargo_build_release_ms=47327ms; cargo_fmt_check_ms=1082ms; cargo_clippy_ms=297ms; cargo_test_ms=7399ms; relay_teams_index_ms=20009ms; relay_teams_register_index_ms=20140ms; relay_teams_query_p50_ms=402ms; relay_teams_query_p95_ms=799ms
+
+Adopted optimization notes:
+
+     source_scope, document_kind, record_id, path, language_id, content +                    ) +                    VALUES (?1, 'symbol', ?2, ?2, 'rust', 'target') +                    ", +                    rusqlite::params!["scope", path], +                ) +                .expect("search row should insert"); +        } + +        let transaction = connection.transaction().expect("transaction should open"); +        delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"]) +            .expect("paths should delete"); +        transaction.commit().expect("transaction should commit"); + +        for table in PATH_TABLES +            .iter() +            .copied() +            .chain(["code_repository_search"]) +        { +            let remaining = connection +                .query_row( +                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"), +                    [], +                    |row| row.get::<_, usize>(0), +                ) +                .expect("remaining row count should load"); +            assert_eq!(remaining, 1, "{table} should keep only the unmatched path"); +        } +    } +} tokens used 217,237
 

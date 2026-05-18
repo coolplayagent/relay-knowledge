@@ -1,6 +1,8 @@
-use rusqlite::params;
+use rusqlite::{params, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
+
+const MAX_PATH_DELETE_PATHS_PER_STATEMENT: usize = 500;
 
 pub(super) fn delete_scope_index(
     transaction: &rusqlite::Transaction<'_>,
@@ -31,6 +33,21 @@ pub(super) fn delete_path_index(
     source_scope: &str,
     path: &str,
 ) -> Result<(), StorageError> {
+    delete_path_indexes(transaction, source_scope, [path])
+}
+
+pub(super) fn delete_path_indexes<'path>(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    paths: impl IntoIterator<Item = &'path str>,
+) -> Result<(), StorageError> {
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort_unstable();
+    paths.dedup();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
     for table in [
         "code_repository_file_diagnostics",
         "code_repository_chunks",
@@ -41,10 +58,22 @@ pub(super) fn delete_path_index(
         "code_repository_files",
         "code_repository_search",
     ] {
-        transaction.execute(
-            &format!("DELETE FROM {table} WHERE source_scope = ?1 AND path = ?2"),
-            params![source_scope, path],
-        )?;
+        for path_chunk in paths.chunks(MAX_PATH_DELETE_PATHS_PER_STATEMENT) {
+            let placeholders = std::iter::repeat_n("?", path_chunk.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut values = Vec::with_capacity(path_chunk.len() + 1);
+            values.push(Value::Text(source_scope.to_owned()));
+            values.extend(
+                path_chunk
+                    .iter()
+                    .map(|path| Value::Text((*path).to_owned())),
+            );
+            transaction.execute(
+                &format!("DELETE FROM {table} WHERE source_scope = ? AND path IN ({placeholders})"),
+                params_from_iter(values),
+            )?;
+        }
     }
 
     Ok(())
@@ -62,4 +91,93 @@ pub(super) fn count_code_rows(
             |row| row.get(0),
         )
         .map_err(StorageError::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::*;
+
+    const PATH_TABLES: &[&str] = &[
+        "code_repository_file_diagnostics",
+        "code_repository_chunks",
+        "code_repository_calls",
+        "code_repository_imports",
+        "code_repository_references",
+        "code_repository_symbols",
+        "code_repository_files",
+    ];
+
+    #[test]
+    fn delete_path_indexes_removes_multiple_paths_from_all_path_tables() {
+        let mut connection = Connection::open_in_memory().expect("connection should open");
+        for table in PATH_TABLES {
+            connection
+                .execute(
+                    &format!(
+                        "CREATE TABLE {table} (source_scope TEXT NOT NULL, path TEXT NOT NULL)"
+                    ),
+                    [],
+                )
+                .expect("table should create");
+        }
+        connection
+            .execute(
+                "
+                CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                    source_scope UNINDEXED,
+                    document_kind UNINDEXED,
+                    record_id UNINDEXED,
+                    path UNINDEXED,
+                    language_id UNINDEXED,
+                    content
+                )
+                ",
+                [],
+            )
+            .expect("search table should create");
+
+        for path in ["src/a.rs", "src/b.rs", "src/c.rs"] {
+            for table in PATH_TABLES {
+                connection
+                    .execute(
+                        &format!("INSERT INTO {table} (source_scope, path) VALUES (?1, ?2)"),
+                        rusqlite::params!["scope", path],
+                    )
+                    .expect("path row should insert");
+            }
+            connection
+                .execute(
+                    "
+                    INSERT INTO code_repository_search (
+                        source_scope, document_kind, record_id, path, language_id, content
+                    )
+                    VALUES (?1, 'symbol', ?2, ?2, 'rust', 'target')
+                    ",
+                    rusqlite::params!["scope", path],
+                )
+                .expect("search row should insert");
+        }
+
+        let transaction = connection.transaction().expect("transaction should open");
+        delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"])
+            .expect("paths should delete");
+        transaction.commit().expect("transaction should commit");
+
+        for table in PATH_TABLES
+            .iter()
+            .copied()
+            .chain(["code_repository_search"])
+        {
+            let remaining = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"),
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .expect("remaining row count should load");
+            assert_eq!(remaining, 1, "{table} should keep only the unmatched path");
+        }
+    }
 }
