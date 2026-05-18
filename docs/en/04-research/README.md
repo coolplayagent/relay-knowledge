@@ -56,3 +56,4 @@ Core primary-source entry points:
 - [Chapter 6: Agent Protocol Graph Retrieval Research](06-agent-protocol-graph-retrieval-research.md): plans graph-retrieval interoperability across MCP, ACP, and future A2A gateways.
 - [Chapter 7: relay-knowledge Implementation Reference](07-relay-knowledge-implementation-reference.md): turns research conclusions into implementation priorities and gap closure.
 - [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](08-competitive-performance-research-2026.md): extracts optimization guidance from GraphRAG, hybrid search, vector indexing, code search, local file retrieval, graph storage, and SRE practice.
+- [Chapter 9: GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md): analyzes GitNexus CLI/MCP/HTTP backend, code graph, Web graph UI, agent workflows, and future improvement points.

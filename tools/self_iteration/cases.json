@@ -214,9 +214,33 @@
   "research_judge_suite": {
     "documents": [
       "docs/zh/02-capabilities/15-evaluation-and-quality-gates.md",
+      "docs/zh/02-capabilities/09-code-graph-competitive-features.md",
+      "docs/zh/02-capabilities/12-web-workspace-capabilities.md",
+      "docs/zh/02-capabilities/13-agent-access-capabilities.md",
       "docs/zh/03-architecture-specs/02-engineering-hard-constraints.md",
+      "docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md",
+      "docs/zh/03-architecture-specs/16-unified-api-and-interface-architecture.md",
       "docs/zh/03-architecture-specs/17-background-service-recovery-and-self-healing.md",
-      "docs/zh/04-research/08-competitive-performance-research-2026.md"
+      "docs/zh/04-research/08-competitive-performance-research-2026.md",
+      "docs/zh/04-research/09-gitnexus-reference-analysis-2026.md"
+    ],
+    "competitive_feature_targets": [
+      "P0 grouped code-query results by process, module, evidence path, source span, freshness, and ranking explanation.",
+      "P0 web code-graph workspace with graph canvas, file tree, code references, process list, query/chat state, and shareable selections.",
+      "P0 unified SSE progress and cancellation for repository indexing, semantic/vector refresh, local-file indexing, and worker proposals.",
+      "P1 route, tool, and shape derived indexes for API, MCP, RPC, CLI, GraphQL, and event consumer impact analysis.",
+      "P1 MCP and agent contracts with intent fields for goal, task context, max symbols, content inclusion, freshness policy, and audit context.",
+      "P1 source groups and cross-repository contract read models that expose stale, version, provider, consumer, and confidence states.",
+      "P1 chat grounding and citations bound to context-pack provenance, graph/index versions, source spans, and freshness indicators.",
+      "P2 server-side or cached graph layout and scope lenses for large graph navigation without blocking query hot paths.",
+      "P2 read-only rename or refactor proposals with confidence, affected references, suggested tests, and explicit approval before writes."
+    ],
+    "implementation_guardrails": [
+      "Do not improve a case by enumerating known queries, paths, repositories, symbols, routes, or fixture-specific strings.",
+      "Keep env, paths, net, HTTP, and QoS ownership boundaries intact; runtime state must not default to repository-local paths.",
+      "Keep query hot paths async and bounded; heavy layout, extraction, embedding, indexing, and rebuild work must run behind worker or maintenance boundaries.",
+      "Tie retrieval, context packs, citations, and UI views to explicit graph/index freshness, versions, and source spans.",
+      "Update deterministic cases, research judge evidence, and user or maintainer documentation in the same change set."
     ],
     "rubric_dimensions": [
       "research_alignment",
@@ -229,7 +253,7 @@
     "min_score": 0.75,
     "min_confidence": 0.6,
     "min_anti_fixture_special_casing": 0.75,
-    "max_doc_chars": 4000,
+    "max_doc_chars": 3000,
     "max_diff_chars": 30000
   },
   "query_cases": [
