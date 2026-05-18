@@ -7,6 +7,8 @@ use super::{
     records::{reference_record, symbol_record, upsert_reference, upsert_symbol},
 };
 
+const MAX_EXPORTED_CONSTRUCTED_VALUE_LINES: usize = 64;
+
 pub(super) fn collect_manual_nodes(
     context: &FileParseContext<'_>,
     root: Node<'_>,
@@ -77,6 +79,11 @@ pub(super) fn manual_definitions(
     {
         return vec![definition];
     }
+    if let Some(definition) =
+        javascript_like_exported_constructed_value_definition(content, language_id, node)
+    {
+        return vec![definition];
+    }
 
     generic_manual_definition(content, language_id, node)
         .into_iter()
@@ -106,6 +113,57 @@ fn javascript_like_function_value_definition(
     }
 
     Some((name, "function", syntax_range(node)))
+}
+
+fn javascript_like_exported_constructed_value_definition(
+    content: &str,
+    language_id: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
+        || node.kind() != "variable_declarator"
+        || !has_export_statement_ancestor(node)
+    {
+        return None;
+    }
+    let value = node.child_by_field_name("value")?;
+    if !javascript_like_constructed_value(value) {
+        return None;
+    }
+    let name = named_property_text(content, node.child_by_field_name("name")?)?;
+    if !javascript_identifier_name(&name) {
+        return None;
+    }
+    let range = syntax_range(node);
+    if range.line_end.saturating_sub(range.line_start) > MAX_EXPORTED_CONSTRUCTED_VALUE_LINES {
+        return None;
+    }
+
+    Some((name, "constant", range))
+}
+
+fn javascript_like_constructed_value(value: Node<'_>) -> bool {
+    if value.kind() == "new_expression" {
+        return true;
+    }
+    value.kind() == "call_expression"
+        && value
+            .child_by_field_name("function")
+            .is_some_and(|function| function.kind() == "member_expression")
+}
+
+fn has_export_statement_ancestor(mut node: Node<'_>) -> bool {
+    for _ in 0..4 {
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        if parent.kind() == "export_statement" {
+            return true;
+        }
+        node = parent;
+    }
+
+    false
 }
 
 fn function_value_node(node: Node<'_>) -> Option<Node<'_>> {

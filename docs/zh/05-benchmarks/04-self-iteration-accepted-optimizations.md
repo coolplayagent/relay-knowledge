@@ -5,6 +5,11 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-exported-constructed-value-definition-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，补齐 JavaScript/TypeScript 大仓中导出运行时对象的 definition 召回；parser 仅把 `export const name = Owner.factory(...)` 这类 member-call 构造值和 `export const name = new Type(...)` 记录为 `constant` symbol，使 `protocol`、`route` 等公开协议/服务对象进入既有 symbol FTS 与 definition 查询路径。
+- 不变量：不改变 SQLite schema、FTS 表结构、candidate limit、ranking 权重、import/call/reference finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；非导出局部常量、普通标识符函数调用、对象/数组字面量和超长构造块仍不进入 symbol 表。
+- 预期影响：Opencode TypeScript `packages/llm/src/protocols/openai-chat.ts` 中 `export const protocol = Protocol.make(...)` 可被 path/language-filtered definition 查询命中，类似 relay-teams 或大型 TS/JS 仓库的公开协议、route、transport、layer 对象召回更稳定；索引写入仅增加短导出构造值的 symbol/chunk，register-to-index wall time 应接近中性。
+- 已知风险：少量导出工厂结果会以 `constant` kind 参与 definition/hybrid 排名，可能改变同名导出值附近的排序；实现要求 export ancestor、member call 或 `new` expression、合法 JS 标识符和 64 行长度上界，以避免把大型配置对象或普通局部变量变成宽泛噪声。
 ## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
 - 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。

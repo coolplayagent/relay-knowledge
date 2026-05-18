@@ -727,6 +727,51 @@ handlers[dynamicName] = async (request: W3ConnectorSaveRequest): Promise<void> =
 }
 
 #[test]
+fn typescript_exported_constructed_values_are_definition_symbols() {
+    let large_body = (0..70)
+        .map(|index| format!("  item{index}: buildItem({index}),\n"))
+        .collect::<String>();
+    let source = format!(
+        r#"
+const helper = Protocol.make({{}});
+
+export const protocol = Protocol.make({{
+  id: "openai-chat",
+  stream: {{
+    initial: () => ({{}}),
+  }},
+}});
+export const route = new Route(protocol);
+export const plain = makeProtocol({{}});
+export const large = Layer.effect({{
+{large_body}}});
+"#
+    );
+    let snapshot = parse_source_snapshot("src/protocol.ts", source.as_bytes());
+    let protocol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "protocol")
+        .expect("exported constructed protocol should be a definition symbol");
+    let route = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "route")
+        .expect("exported constructed route should be a definition symbol");
+
+    assert_eq!(protocol.kind, "constant");
+    assert!(protocol.signature.contains("Protocol.make"));
+    assert_eq!(route.kind, "constant");
+    assert!(route.signature.contains("new Route"));
+    for ignored in ["helper", "plain", "large"] {
+        assert!(
+            !snapshot.symbols.iter().any(|symbol| symbol.name == ignored),
+            "{ignored} should not be indexed as an exported constructed value",
+        );
+    }
+}
+
+#[test]
 fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() {
     let mut source = "def retry_policy(value=\"".to_owned();
     source.push_str(&"\u{00e9}".repeat(300));
