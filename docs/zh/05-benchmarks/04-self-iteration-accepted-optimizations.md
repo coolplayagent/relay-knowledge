@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-same-named-caller-demotion-20260518
+- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升 large-repo caller 查询对外部调用点的排序质量，尤其避免 wrapper、递归或同名转发函数在查询 “who calls X” 时压过真实业务调用点。
+- 算法与架构：在既有 bounded FTS candidate、方向过滤、path/language filter 与 Rust scoring 之后，对 `callers` 查询新增同名 caller penalty：只比较 caller leaf identifier 与 callee leaf identifier 的 ASCII alphanumeric 规范化形态，若二者相同则小额降权。该逻辑不扩大候选窗口，也不改变 callees/hybrid/definition/reference/import 查询。
+- 不变量：不改变 SQLite schema、索引写入、FTS MATCH 表达式、candidate limit、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、HTTP/QoS、安装发布或仓库/路径/符号/case 特殊分支；resolved/ambiguous confidence、test path intent、caller context bonus 与最终 dedupe/truncate 仍按既有流程执行。
+- 预期影响：LevelDB、Linux、Kubernetes、Spring Framework 等大仓中，`KeyMayMatch`、`RunKubelet`、adapter/wrapper 风格函数的 caller 查询会把外部调用点排在同名 wrapper/recursive edge 之前，提高 competitive caller rank 与 research judge 对泛化排序策略的评价；基础 `_summary`、JS runtime、semantic/vector 与 negative cases 应保持不变。
+- 已知风险：用户明确寻找递归或 wrapper 自调用时，同名 caller edge 会被轻微降权但仍保留在结果中；该取舍符合默认 caller 查询优先展示外部影响面的语义，可通过更具体的 caller context query 恢复排序。
 ## 候选优化说明：manual-batch-edge-language-map-20260518
 - 目标：在保护 foundational、competitive、semantic/vector、research judge 与 stability 下限的前提下，降低多仓 full-scope `repo register` 到 `repo index` 的 SQLite 写入与 finalize 前批处理成本，优先改善 relay-teams、LevelDB、Spring/Kubernetes 等大仓 cold indexing wall time。
 - 算法与架构：checkpointed batch 写入 reference/import search document 时，先从当前 `CodeIndexBatch.files` 构造 path -> language_id 映射；只有发现 edge path 不在本批文件集合中时，才按缺失 path 逐条回查 `code_repository_files` 作为兼容兜底。reference 与 import 共用同一映射，避免每个 batch 对整个 source scope 重复扫描文件表。
@@ -905,4 +911,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 ?; -    let rows = statement.query_map(params![source_scope], |row| { -        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)) -    })?; +    for path in missing_paths { +        if let Some(language_id) = statement +            .query_row(params![batch.source_scope.as_str(), path.as_str()], |row| { +                row.get(0) +            }) +            .optional()? +        { +            languages.insert(path, language_id); +        } +    } + +    Ok(languages) +} -    rows.collect::<Result<BTreeMap<_, _>, _>>() -        .map_err(StorageError::from) +fn edge_paths_missing_from_batch( +    batch: &CodeIndexBatch, +    languages: &BTreeMap<String, String>, +) -> Vec<String> { +    let mut missing_paths = Vec::<String>::new(); +    for path in batch +        .references +        .iter() +        .map(|reference| reference.path.as_str()) +        .chain(batch.imports.iter().map(|import| import.path.as_str())) +    { +        if !languages.contains_key(path) +            && !missing_paths.iter().any(|known| known.as_str() == path) +        { +            missing_paths.push(path.to_owned()); +        } +    } + +    missing_paths } fn insert_diagnostics( tokens used 343,083
+## 20260518T051523Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T051523Z.patch`
+- score: 0.951562 (foundational=1.0, competitive=0.971014, accuracy=0.985507, semantic_vector=1.0, research_judge=0.88, performance=0.885931, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.939403->0.951562; score_component:competitive_capability 0.938406->0.971014; score_component:accuracy 0.969203->0.985507; score_component:performance 0.871162->0.885931; score_component:research_judge 0.86->0.88; metric:cargo_clippy_ms 175.0->144; metric:leveldb_cpp_index_ms 20003.0->14611; metric:leveldb_cpp_register_index_ms 20274.0->14886
+- known degradations: metric:relay_teams_index_ms 61634.0->69579; metric:relay_teams_register_index_ms 61711.0->69655; metric:semantic_vector_provider_probe_ms 1278.0->1418
+- latency metrics: cargo_build_release_ms=31835ms; cargo_fmt_check_ms=563ms; cargo_clippy_ms=144ms; cargo_test_ms=5347ms; relay_teams_index_ms=69579ms; relay_teams_register_index_ms=69655ms; relay_teams_query_p50_ms=289ms; relay_teams_query_p95_ms=583ms
+
+Adopted optimization notes:
+
+".to_owned(); + +    let mut production_call = +        code_query_call("ambiguous-production-call", "service-file", "src/service.cc"); +    production_call.caller_name = Some("Dispatch".to_owned()); +    production_call.callee_name = "TargetCall".to_owned(); +    production_call.target_hint = Some("TargetCall".to_owned()); +    production_call.confidence_basis_points = 5_000; +    production_call.confidence_tier = "ambiguous".to_owned(); + +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("router-file", "src/router.cc", "cpp"), +            code_query_file("service-file", "src/service.cc", "cpp"), +        ], +        Vec::new(), +        vec![wrapper_call, production_call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("TargetCall", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "src/service.cc"); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn callee_search_applies_direction_before_candidate_limit() { let mut files = Vec::new(); let mut calls = Vec::new(); tokens used 231,480
 

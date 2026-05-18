@@ -493,6 +493,7 @@ fn search_calls(
                     &row.path,
                     request,
                 )
+                + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score
                 + call_site_source_path_bonus(

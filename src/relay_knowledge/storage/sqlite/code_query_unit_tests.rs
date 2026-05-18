@@ -626,6 +626,46 @@ async fn caller_search_demotes_test_call_sites_without_test_intent() {
 }
 
 #[tokio::test]
+async fn caller_search_demotes_same_named_wrapper_call_sites() {
+    let mut wrapper_call = code_query_call("resolved-wrapper-call", "router-file", "src/router.cc");
+    wrapper_call.caller_name = Some("Router::TargetCall".to_owned());
+    wrapper_call.callee_name = "TargetCall".to_owned();
+    wrapper_call.target_hint = Some("TargetCall".to_owned());
+    wrapper_call.resolution_state = "resolved".to_owned();
+    wrapper_call.confidence_basis_points = 8_000;
+    wrapper_call.confidence_tier = "inferred".to_owned();
+
+    let mut production_call = code_query_call(
+        "ambiguous-production-call",
+        "service-file",
+        "src/service.cc",
+    );
+    production_call.caller_name = Some("Dispatch".to_owned());
+    production_call.callee_name = "TargetCall".to_owned();
+    production_call.target_hint = Some("TargetCall".to_owned());
+    production_call.confidence_basis_points = 5_000;
+    production_call.confidence_tier = "ambiguous".to_owned();
+
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![
+            code_query_file("router-file", "src/router.cc", "cpp"),
+            code_query_file("service-file", "src/service.cc", "cpp"),
+        ],
+        Vec::new(),
+        vec![wrapper_call, production_call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request("TargetCall", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, "src/service.cc");
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
 async fn callee_search_applies_direction_before_candidate_limit() {
     let mut files = Vec::new();
     let mut calls = Vec::new();

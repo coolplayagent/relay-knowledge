@@ -382,6 +382,44 @@ pub(super) fn directional_call_context_bonus(
     }
 }
 
+pub(super) fn same_named_caller_penalty(
+    caller_name: Option<&str>,
+    callee_name: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Callers {
+        return 0.0;
+    }
+    let Some(caller_leaf) = caller_name.and_then(leaf_identifier) else {
+        return 0.0;
+    };
+    let Some(callee_leaf) = leaf_identifier(callee_name) else {
+        return 0.0;
+    };
+    let caller = compact_identifier(&caller_leaf);
+    let callee = compact_identifier(&callee_leaf);
+    if !caller.is_empty() && caller == callee {
+        -2.0
+    } else {
+        0.0
+    }
+}
+
+fn leaf_identifier(value: &str) -> Option<String> {
+    value
+        .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|term| !term.is_empty())
+        .map(str::to_owned)
+}
+
+fn compact_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect()
+}
+
 fn callee_identifier_part_count(callee_name: &str) -> f64 {
     let part_count = identifier_tokens(callee_name)
         .flat_map(|token| token.split('_'))
