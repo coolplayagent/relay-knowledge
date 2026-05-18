@@ -40,67 +40,71 @@ fn resolve_references(
     )?;
     transaction.execute(
         "
-        UPDATE code_repository_references AS reference
+        WITH unique_symbol AS (
+            SELECT name, MIN(symbol_snapshot_id) AS symbol_snapshot_id
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name
+            HAVING COUNT(*) = 1
+        )
+        UPDATE code_repository_references
         SET target_symbol_snapshot_id = (
-                SELECT symbol.symbol_snapshot_id
-                FROM code_repository_symbols AS symbol
-                WHERE symbol.source_scope = reference.source_scope
-                  AND symbol.name = reference.name
-                LIMIT 1
+                SELECT unique_symbol.symbol_snapshot_id
+                FROM unique_symbol
+                WHERE unique_symbol.name = code_repository_references.name
             ),
             resolution_state = 'resolved',
             confidence_basis_points = 8000,
             confidence_tier = 'inferred'
-        WHERE reference.source_scope = ?1
-          AND (
-                SELECT COUNT(*)
-                FROM code_repository_symbols AS symbol
-                WHERE symbol.source_scope = reference.source_scope
-                  AND symbol.name = reference.name
-            ) = 1
+        WHERE source_scope = ?1
+          AND name IN (SELECT name FROM unique_symbol)
         ",
         params![source_scope],
     )?;
     transaction.execute(
         "
-        UPDATE code_repository_references AS reference
+        WITH unique_path_symbol AS (
+            SELECT name, path, MIN(symbol_snapshot_id) AS symbol_snapshot_id
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+            GROUP BY name, path
+            HAVING COUNT(*) = 1
+        )
+        UPDATE code_repository_references
         SET target_symbol_snapshot_id = (
-                SELECT symbol.symbol_snapshot_id
-                FROM code_repository_symbols AS symbol
-                WHERE symbol.source_scope = reference.source_scope
-                  AND symbol.name = reference.name
-                  AND symbol.path = reference.path
-                LIMIT 1
+                SELECT unique_path_symbol.symbol_snapshot_id
+                FROM unique_path_symbol
+                WHERE unique_path_symbol.name = code_repository_references.name
+                  AND unique_path_symbol.path = code_repository_references.path
             ),
             resolution_state = 'resolved',
             confidence_basis_points = 8000,
             confidence_tier = 'inferred'
-        WHERE reference.source_scope = ?1
-          AND reference.resolution_state != 'resolved'
-          AND (
-                SELECT COUNT(*)
-                FROM code_repository_symbols AS symbol
-                WHERE symbol.source_scope = reference.source_scope
-                  AND symbol.name = reference.name
-                  AND symbol.path = reference.path
-            ) = 1
+        WHERE source_scope = ?1
+          AND resolution_state != 'resolved'
+          AND EXISTS (
+                SELECT 1
+                FROM unique_path_symbol
+                WHERE unique_path_symbol.name = code_repository_references.name
+                  AND unique_path_symbol.path = code_repository_references.path
+          )
         ",
         params![source_scope],
     )?;
     transaction.execute(
         "
-        UPDATE code_repository_references AS reference
+        WITH symbol_names AS (
+            SELECT DISTINCT name
+            FROM code_repository_symbols
+            WHERE source_scope = ?1
+        )
+        UPDATE code_repository_references
         SET resolution_state = 'ambiguous',
             confidence_basis_points = 5000,
             confidence_tier = 'ambiguous'
-        WHERE reference.source_scope = ?1
-          AND reference.resolution_state = 'unresolved'
-          AND EXISTS (
-                SELECT 1
-                FROM code_repository_symbols AS symbol
-                WHERE symbol.source_scope = reference.source_scope
-                  AND symbol.name = reference.name
-            )
+        WHERE source_scope = ?1
+          AND resolution_state = 'unresolved'
+          AND name IN (SELECT name FROM symbol_names)
         ",
         params![source_scope],
     )?;

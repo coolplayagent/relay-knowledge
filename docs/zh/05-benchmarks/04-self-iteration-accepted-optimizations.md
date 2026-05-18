@@ -5,6 +5,11 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-grouped-reference-finalize-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时降低多仓 full-scope `repo register` 冷索引 finalize 阶段的 reference resolution 固定成本；把逐 reference correlated `COUNT(*)` 查询改为按 scope 分组的 unique-name、unique-name+path 与 existing-name CTE，再用同一批 UPDATE 维持全局唯一解析、同文件唯一解析、ambiguous 与 unresolved 规则。
+- 不变量：不改变 SQLite schema、事实表字段、FTS 文档字段、call/import finalize、candidate limit、ranking/scoring、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；reference 的默认 target_hint、confidence、resolution_state 与既有唯一性规则保持不变。
+- 预期影响：relay-teams、Linux、LevelDB、Kubernetes 与 Spring Framework 等 reference-heavy 仓库在 finalize reference resolution 时减少 symbol 表重复扫描和 per-row 聚合开销，降低 register-to-index wall time；code graph completeness、caller rebuild 和 query result ranks 应保持不变。
+- 已知风险：SQLite 对 CTE 的执行计划仍可能因版本和数据分布产生临时 B-tree 成本；收益主要出现在 references 数量明显大于 symbol-name 分组数量的大仓，极小仓库影响应接近中性。
 ## 候选优化说明：manual-batched-path-cleanup-20260518
 - 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，把 checkpointed batch 和 snapshot incremental 的 same-scope path cleanup 从逐文件逐表 `DELETE` 收敛为去重后的 bounded `IN` 删除；SQLite schema、事实内容、FTS 文档字段、finalize、ranking、CLI/API、provider/env、judge 配置和安装行为不变，单条语句最多绑定 500 个 path 以保留 SQLite 参数上界。
 - 预期影响/风险：大仓 `repo register` 冷索引和增量替换批次减少 delete statement 固定开销，尤其配合 256 文件 batch 降低 relay-teams、LevelDB、Linux、Kubernetes、Spring 的 apply-batch wall time；风险是极少数异常重复 path batch 会一起清理旧 rows，但这与既有逐路径幂等语义一致，并由多 path cleanup 单测覆盖普通表与 FTS 表。
@@ -945,3 +950,17 @@ b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs 
 Adopted optimization notes:
 
      source_scope, document_kind, record_id, path, language_id, content +                    ) +                    VALUES (?1, 'symbol', ?2, ?2, 'rust', 'target') +                    ", +                    rusqlite::params!["scope", path], +                ) +                .expect("search row should insert"); +        } + +        let transaction = connection.transaction().expect("transaction should open"); +        delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"]) +            .expect("paths should delete"); +        transaction.commit().expect("transaction should commit"); + +        for table in PATH_TABLES +            .iter() +            .copied() +            .chain(["code_repository_search"]) +        { +            let remaining = connection +                .query_row( +                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"), +                    [], +                    |row| row.get::<_, usize>(0), +                ) +                .expect("remaining row count should load"); +            assert_eq!(remaining, 1, "{table} should keep only the unmatched path"); +        } +    } +} tokens used 217,237
+## 20260518T114107Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T114107Z.patch`
+- score: 0.94048 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.85, performance=0.8232, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=50953ms; cargo_fmt_check_ms=1136ms; cargo_clippy_ms=387ms; cargo_test_ms=7592ms; relay_teams_index_ms=46379ms; relay_teams_register_index_ms=46512ms; relay_teams_query_p50_ms=410ms; relay_teams_query_p95_ms=816ms
+
+Adopted optimization notes:
+
+d' +          AND EXISTS ( +                SELECT 1 +                FROM unique_path_symbol +                WHERE unique_path_symbol.name = code_repository_references.name +                  AND unique_path_symbol.path = code_repository_references.path +          ) ", params![source_scope], )?; transaction.execute( " -        UPDATE code_repository_references AS reference +        WITH symbol_names AS ( +            SELECT DISTINCT name +            FROM code_repository_symbols +            WHERE source_scope = ?1 +        ) +        UPDATE code_repository_references SET resolution_state = 'ambiguous', confidence_basis_points = 5000, confidence_tier = 'ambiguous' -        WHERE reference.source_scope = ?1 -          AND reference.resolution_state = 'unresolved' -          AND EXISTS ( -                SELECT 1 -                FROM code_repository_symbols AS symbol -                WHERE symbol.source_scope = reference.source_scope -                  AND symbol.name = reference.name -            ) +        WHERE source_scope = ?1 +          AND resolution_state = 'unresolved' +          AND name IN (SELECT name FROM symbol_names) ", params![source_scope], )?; tokens used 189,842
+
