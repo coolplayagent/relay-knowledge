@@ -37,8 +37,8 @@ use code_query_line_ranges::{
     optional_line_range_with_symbol_context, symbol_result_line_range,
 };
 use code_query_path_ranking::{
-    call_site_source_path_bonus, declaration_surface_path_bonus, query_mentions_test_or_benchmark,
-    symbol_test_path_penalty,
+    call_site_source_path_bonus, call_site_test_path_penalty, declaration_surface_path_bonus,
+    query_mentions_test_or_benchmark, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 #[cfg(test)]
@@ -500,6 +500,12 @@ fn search_calls(
                     &row.path,
                     request,
                     query,
+                    query_has_test_intent,
+                )
+                + call_site_test_path_penalty(
+                    base_score,
+                    &row.path,
+                    request,
                     query_has_test_intent,
                 );
             (score > 0.0).then(|| {

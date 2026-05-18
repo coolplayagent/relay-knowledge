@@ -585,6 +585,47 @@ async fn caller_search_applies_direction_before_candidate_limit() {
 }
 
 #[tokio::test]
+async fn caller_search_demotes_test_call_sites_without_test_intent() {
+    let mut test_call = code_query_call(
+        "resolved-test-call",
+        "filter-test-file",
+        "table/filter_block_test.cc",
+    );
+    test_call.caller_name = Some("TEST_F".to_owned());
+    test_call.callee_name = "KeyMayMatch".to_owned();
+    test_call.target_hint = Some("KeyMayMatch".to_owned());
+    test_call.resolution_state = "resolved".to_owned();
+    test_call.confidence_basis_points = 8_000;
+    test_call.confidence_tier = "inferred".to_owned();
+
+    let mut production_call =
+        code_query_call("ambiguous-production-call", "table-file", "table/table.cc");
+    production_call.caller_name = Some("InternalGet".to_owned());
+    production_call.callee_name = "KeyMayMatch".to_owned();
+    production_call.target_hint = Some("KeyMayMatch".to_owned());
+    production_call.confidence_basis_points = 5_000;
+    production_call.confidence_tier = "ambiguous".to_owned();
+
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![
+            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"),
+            code_query_file("table-file", "table/table.cc", "cpp"),
+        ],
+        Vec::new(),
+        vec![test_call, production_call],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, "table/table.cc");
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
 async fn callee_search_applies_direction_before_candidate_limit() {
     let mut files = Vec::new();
     let mut calls = Vec::new();

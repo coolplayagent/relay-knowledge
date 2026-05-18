@@ -34,7 +34,7 @@ relay-knowledge repo scope preview core --ref HEAD --format json
 relay-knowledge repo index core --ref HEAD --dry-run --format json
 ```
 
-preview 适合在收窄 `--path` 或 `--language` 后确认不会把无关目录写入代码图谱。默认 source preset 会排除常见生成目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；确实需要检索时，用精确 `--path` 注册或请求对应文件即可显式纳入。
+preview 适合在收窄 `--path` 或 `--language` 后确认不会把无关目录写入代码图谱。默认 source preset 会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
 
 ## 5.3 建立代码图谱索引
 

@@ -45,6 +45,18 @@ const DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
     "woff", "woff2", "zip", "zst",
 ];
 const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &[".relay-knowledgeignore", "uv.lock"];
+const DEFAULT_DISTRIBUTION_SEGMENT: &str = "dist";
+const DEFAULT_DISTRIBUTION_LANGUAGE_SEGMENTS: &[&str] = &[
+    "javascript",
+    "js",
+    "src",
+    "source",
+    "sources",
+    "ts",
+    "typescript",
+];
+const DEFAULT_DISTRIBUTION_RUNTIME_SEGMENTS: &[&str] =
+    &["app", "client", "core", "runtime", "server"];
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
 pub fn preview_repository_scope(
@@ -341,7 +353,7 @@ fn default_source_preset_excludes(path: &str) -> bool {
     }
     if normalized
         .split('/')
-        .any(|segment| DEFAULT_EXCLUDED_SEGMENTS.contains(&segment))
+        .any(|segment| default_excluded_segment_excludes_path(segment, normalized))
     {
         return true;
     }
@@ -351,6 +363,30 @@ fn default_source_preset_excludes(path: &str) -> bool {
             DEFAULT_EXCLUDED_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
         })
         .unwrap_or(false)
+}
+
+fn default_excluded_segment_excludes_path(segment: &str, path: &str) -> bool {
+    DEFAULT_EXCLUDED_SEGMENTS.contains(&segment)
+        && (segment != DEFAULT_DISTRIBUTION_SEGMENT || distribution_segment_excludes_path(path))
+}
+
+fn distribution_segment_excludes_path(path: &str) -> bool {
+    let segments = path.split('/').collect::<Vec<_>>();
+
+    !distribution_runtime_source_path_is_indexable(path, &segments)
+}
+
+fn distribution_runtime_source_path_is_indexable(path: &str, segments: &[&str]) -> bool {
+    language_id(path).is_some()
+        && !path
+            .rsplit('/')
+            .next()
+            .is_some_and(|file_name| file_name.to_ascii_lowercase().contains(".min."))
+        && segments.windows(3).any(|window| {
+            window[0] == DEFAULT_DISTRIBUTION_SEGMENT
+                && DEFAULT_DISTRIBUTION_LANGUAGE_SEGMENTS.contains(&window[1])
+                && DEFAULT_DISTRIBUTION_RUNTIME_SEGMENTS.contains(&window[2])
+        })
 }
 
 fn explicit_path_filter_opts_into_default_exclusion<'a>(
@@ -415,4 +451,33 @@ fn normalize_path_filter(filter: &str) -> &str {
     }
 
     filter
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_preset_keeps_distribution_runtime_sources_indexable() {
+        assert!(!default_source_preset_excludes(
+            "frontend/dist/js/core/stream.js"
+        ));
+        assert!(!default_source_preset_excludes(
+            "frontend/dist/js/app/bootstrap.js"
+        ));
+        assert!(!default_source_preset_excludes(
+            "web/dist/src/runtime/session.ts"
+        ));
+        assert!(default_source_preset_excludes("dist/bundle.js"));
+        assert!(default_source_preset_excludes(
+            "frontend/dist/js/components/sidebar.js"
+        ));
+        assert!(default_source_preset_excludes(
+            "frontend/dist/js/core/highlight.min.js"
+        ));
+        assert!(default_source_preset_excludes("frontend/dist/css/app.css"));
+        assert!(default_source_preset_excludes(
+            "node_modules/pkg/dist/js/core/index.js"
+        ));
+    }
 }
