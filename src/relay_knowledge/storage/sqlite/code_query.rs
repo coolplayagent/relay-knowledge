@@ -715,7 +715,8 @@ fn search_chunks(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
                c.line_start, c.line_end, c.symbol_snapshot_id,
-               symbol.canonical_symbol_id, f.parse_status, f.degraded_reason
+               symbol.canonical_symbol_id, symbol.name, symbol.qualified_name,
+               f.parse_status, f.degraded_reason
         FROM code_repository_chunks c
         INNER JOIN code_repository_files f
             ON f.source_scope = c.source_scope AND f.path = c.path
@@ -763,8 +764,10 @@ fn search_chunks(
                 },
                 symbol_snapshot_id: row.get(8)?,
                 canonical_symbol_id: row.get(9)?,
-                parse_status: row.get(10)?,
-                degraded_reason: row.get(11)?,
+                symbol_name: row.get(10)?,
+                symbol_qualified_name: row.get(11)?,
+                parse_status: row.get(12)?,
+                degraded_reason: row.get(13)?,
             })
         },
     )?;
@@ -780,9 +783,20 @@ fn search_chunks(
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
             let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
+            let symbol_bonus = row.symbol_name.as_deref().map_or(0.0, |name| {
+                symbol_query_bonus(
+                    &request.query,
+                    name,
+                    row.symbol_qualified_name.as_deref().unwrap_or_default(),
+                    "",
+                    row.canonical_symbol_id.as_deref().unwrap_or_default(),
+                    request,
+                )
+            });
             let score = score_query.score([&row.content, &row.path])
                 + declaration_bonus
-                + declaration_surface_path_bonus(declaration_bonus, &row.path, request);
+                + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
+                + symbol_bonus;
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -813,6 +827,10 @@ fn search_chunks(
 #[cfg(test)]
 #[path = "code_query_unit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "code_query_chunk_ranking_tests.rs"]
+mod chunk_ranking_tests;
 
 #[cfg(test)]
 #[path = "code_query_excerpt_tests.rs"]

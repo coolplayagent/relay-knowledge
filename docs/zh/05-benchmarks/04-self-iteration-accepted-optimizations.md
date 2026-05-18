@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-hybrid-chunk-symbol-context-ranking-20260519
+- 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，在 Hybrid lexical chunk 后置评分中把已链接 parsed symbol 的 name、qualified name 与 canonical id 交给既有 identifier-aware symbol bonus；不扩大 FTS candidate、不改变 SQLite schema、索引事实、path/language filter、CLI/API JSON、provider/env、judge、网络/QoS、安装发布或 self-iteration harness 行为。
+- 预期影响：大型 TypeScript、Python、Java、C/C++、Go 仓库中，函数/方法级 chunk 在长概念查询里可凭拥有者符号身份压过同文件相邻 converter/helper chunk，优先改善 `fromOpenaiChunk` 这类“内容词相近但目标函数名更匹配”的 hybrid retrieval rank，并保持 register-to-index wall time 基本不变。
+- 已知风险：少数 chunk 会因符号名匹配自然语言查询而上移；风险受已有 FTS bounded candidate、linked symbol、identifier normalization、dedupe/truncate 和 path/language filters 限制，未引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-import-test-path-demotion-20260519
 - 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，在 `imports` 与 Hybrid import edge 评分中复用既有 test/benchmark intent 识别；当 query 未显式包含 test/benchmark 意图且 import 候选已获得正分时，对 test/benchmark 路径施加小额有界负分，让同一 dependency/header 的 production importer 不被测试文件早行号或同分排序压过。不改变 SQLite schema、FTS 文档、candidate limit、path/language filter、索引事实、CLI/API、provider/env、judge、网络/QoS、安装发布或 harness 行为。
 - 预期影响/风险：LevelDB、Linux、Kubernetes、Spring 与 TypeScript 大仓的 dependency/include/import 查询应更稳定地把 production 依赖使用点排在 test noise 前，尤其改善 `leveldb/filter_policy.h` 这类同 header 多 importer 的 competitive challenge；风险是用户未写 test intent 时测试 import 结果会轻微下移，但仍保留在 bounded top-k 候选内，且 query 包含 test/benchmark 时不降权。
@@ -973,7 +977,6 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - latency metrics: cargo_build_release_ms=32184ms; cargo_fmt_check_ms=622ms; cargo_clippy_ms=161ms; cargo_test_ms=5428ms; relay_teams_index_ms=32108ms; relay_teams_register_index_ms=32199ms; relay_teams_query_p50_ms=295ms; relay_teams_query_p95_ms=825ms
 Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 ## 20260518T182621Z
-
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T182621Z.patch`
 - score: 0.909482 (foundational=0.969136, competitive=0.827381, accuracy=0.898258, semantic_vector=1.0, research_judge=0.84, performance=0.861827, stability=1.0)
 - cases: 84/87 passed
@@ -983,7 +986,6 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - latency metrics: cargo_build_release_ms=135ms; cargo_fmt_check_ms=539ms; cargo_clippy_ms=144ms; cargo_test_ms=4037ms; relay_teams_index_ms=24860ms; relay_teams_register_index_ms=24920ms; relay_teams_query_p50_ms=226ms; relay_teams_query_p95_ms=674ms
 Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 ## 20260518T184904Z
-
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T184904Z.patch`
 - score: 0.911517 (foundational=0.969136, competitive=0.827381, accuracy=0.898258, semantic_vector=1.0, research_judge=0.84, performance=0.875398, stability=1.0)
 - cases: 84/87 passed
@@ -991,8 +993,18 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: score_component:performance 0.861827->0.875398; metric:relay_teams_query_p95_ms 674.0->637.0; metric:opencode_typescript_query_p95_ms 1510.0->1451.0; metric:local_documents_file_index_ms 485.0->416; metric:local_documents_file_query_p95_ms 461.0->423.0; metric:local_noise_file_index_ms 664.0->637; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 1263.0->773.0; metric:semantic_vector_query_p50_ms 446.0->313.0
 - known degradations: metric:cargo_build_release_ms 135.0->31673; metric:cargo_fmt_check_ms 539.0->612; metric:cargo_test_ms 4037.0->8640; metric:relay_teams_index_ms 24860.0->31375; metric:relay_teams_register_index_ms 24920.0->31471; metric:opencode_typescript_index_ms 18545.0->20695; metric:opencode_typescript_register_index_ms 18765.0->20912; metric:semantic_vector_provider_probe_ms 1808.0->3618
 - latency metrics: cargo_build_release_ms=31673ms; cargo_fmt_check_ms=612ms; cargo_clippy_ms=158ms; cargo_test_ms=8640ms; relay_teams_index_ms=31375ms; relay_teams_register_index_ms=31471ms; relay_teams_query_p50_ms=212ms; relay_teams_query_p95_ms=637ms
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
+## 20260518T195201Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T195201Z.patch`
+- score: 0.916918 (foundational=0.969136, competitive=0.844246, accuracy=0.906691, semantic_vector=1.0, research_judge=0.86, performance=0.862951, stability=1.0)
+- cases: 86/87 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`
+- key improvements: score_component:score 0.898945->0.916918; score_component:research_judge 0.78->0.86; metric:cargo_build_release_ms 35185.0->30988; metric:cargo_fmt_check_ms 794.0->608; metric:cargo_clippy_ms 181.0->141; metric:cargo_test_ms 8712.0->5566; metric:relay_teams_index_ms 32227.0->26419; metric:relay_teams_register_index_ms 32310.0->26486
+- known degradations: metric:relay_teams_query_p95_ms 637.0->671.0; metric:opencode_typescript_index_ms 22595.0->24022; metric:opencode_typescript_register_index_ms 22821.0->24244; metric:opencode_typescript_query_p95_ms 1443.0->1535.0; metric:local_documents_file_query_p95_ms 440.0->469.0; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 798.0->1209.0; metric:semantic_vector_refresh_ms 349.0->387; case:leveldb_hybrid_recovery_manifest_full_scope {'passed': True, 'rank': 1, 'false_positive_count': 0, 'score': 1.0}->{'passed': True, 'rank': 2, 'false_positive_count': 0, 'score': 0.5} rank_worsened
+- latency metrics: cargo_build_release_ms=30988ms; cargo_fmt_check_ms=608ms; cargo_clippy_ms=141ms; cargo_test_ms=5566ms; relay_teams_index_ms=26419ms; relay_teams_register_index_ms=26486ms; relay_teams_query_p50_ms=224ms; relay_teams_query_p95_ms=671ms
 
 Adopted optimization notes:
 
-brid = retrieval_request(CodeQueryKind::Hybrid); +        let definition = retrieval_request(CodeQueryKind::Definition); + +        assert_eq!( +            import_test_path_penalty(3.0, "table/filter_block_test.cc", &imports, false), +            -0.35 +        ); +        assert_eq!( +            import_test_path_penalty(3.0, "src/__tests__/provider.ts", &hybrid, false), +            -0.35 +        ); +        assert_eq!( +            import_test_path_penalty(3.0, "table/filter_block.cc", &imports, false), +            0.0 +        ); +        assert_eq!( +            import_test_path_penalty(3.0, "table/filter_block_test.cc", &imports, true), +            0.0 +        ); +        assert_eq!( +            import_test_path_penalty(0.0, "table/filter_block_test.cc", &imports, false), +            0.0 +        ); +        assert_eq!( +            import_test_path_penalty(3.0, "table/filter_block_test.cc", &definition, false), +            0.0 +        ); +    } + +    #[test] fn symbol_test_path_penalty_demotes_test_symbols_without_test_intent() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let definition = retrieval_request(CodeQueryKind::Definition); tokens used 180,972
+e { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); +    let registration = +        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new()) +            .expect("registration should validate"); +    store +        .upsert_code_repository(registration) +        .await +        .expect("repository should persist"); +    store +        .apply_code_index_snapshot(snapshot) +        .await +        .expect("snapshot should apply"); + +    store +} diff --git a/src/relay_knowledge/storage/sqlite/code_query_rows.rs b/src/relay_knowledge/storage/sqlite/code_query_rows.rs index 71a5600633ab0bbd658e790fb35b0db031b9bbc9..293d5c0f7414f8519de29b5e88c1f03975e5e481 --- a/src/relay_knowledge/storage/sqlite/code_query_rows.rs +++ b/src/relay_knowledge/storage/sqlite/code_query_rows.rs @@ -73,6 +73,8 @@ pub(super) line_range: RepositoryCodeRange, pub(super) symbol_snapshot_id: Option<String>, pub(super) canonical_symbol_id: Option<String>, +    pub(super) symbol_name: Option<String>, +    pub(super) symbol_qualified_name: Option<String>, pub(super) parse_status: String, pub(super) degraded_reason: Option<String>, } tokens used 340,090
 

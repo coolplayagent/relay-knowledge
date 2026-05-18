@@ -73,6 +73,8 @@ pub(super) struct ChunkRow {
     pub(super) line_range: RepositoryCodeRange,
     pub(super) symbol_snapshot_id: Option<String>,
     pub(super) canonical_symbol_id: Option<String>,
+    pub(super) symbol_name: Option<String>,
+    pub(super) symbol_qualified_name: Option<String>,
     pub(super) parse_status: String,
     pub(super) degraded_reason: Option<String>,
 }
