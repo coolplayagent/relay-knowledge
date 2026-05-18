@@ -417,12 +417,7 @@ fn replace_semantic_document(
     connection: &Connection,
     input: SemanticDocumentInput<'_>,
 ) -> Result<(), StorageError> {
-    let signature = token_signature(
-        input.content,
-        input.entity_labels,
-        input.source_path,
-        input.source_hash,
-    );
+    let signature = token_signature(input.content, input.entity_labels, input.source_path);
     connection.execute(
         "DELETE FROM graph_semantic_documents WHERE document_id = ?1",
         params![input.document_id],
@@ -482,7 +477,6 @@ fn replace_vector_document(
         input.content,
         input.entity_labels,
         input.source_path,
-        input.source_hash,
         input.dimension,
     );
     connection.execute(
@@ -763,17 +757,11 @@ fn fts_query(query: &str) -> Option<String> {
     (!tokens.is_empty()).then(|| tokens.join(" OR "))
 }
 
-fn token_signature(
-    content: &str,
-    labels: &[String],
-    source_path: Option<&str>,
-    source_hash: &str,
-) -> Vec<String> {
+fn token_signature(content: &str, labels: &[String], source_path: Option<&str>) -> Vec<String> {
     let mut terms = BTreeSet::new();
     collect_terms(content, &mut terms);
     collect_terms(&labels.join(" "), &mut terms);
     collect_terms(source_path.unwrap_or_default(), &mut terms);
-    collect_terms(source_hash, &mut terms);
 
     terms.into_iter().collect()
 }
@@ -786,13 +774,12 @@ fn hashed_vector(
     content: &str,
     labels: &[String],
     source_path: Option<&str>,
-    source_hash: &str,
     dimension: usize,
 ) -> Vec<f64> {
     if dimension == 0 {
         return Vec::new();
     }
-    let terms = token_signature(content, labels, source_path, source_hash);
+    let terms = token_signature(content, labels, source_path);
     let mut vector = vec![0.0; dimension];
     for term in terms {
         let hash = stable_hash64(term.as_bytes());
@@ -868,8 +855,8 @@ fn identifier_overlap_score(
     labels: &[String],
     source_path: Option<&str>,
 ) -> f64 {
-    let query_terms = token_signature(query, &[], None, "");
-    let document_terms = token_signature(content, labels, source_path, "");
+    let query_terms = token_signature(query, &[], None);
+    let document_terms = token_signature(content, labels, source_path);
     query_terms
         .iter()
         .filter(|term| {
@@ -961,9 +948,9 @@ mod tests {
     #[test]
     fn token_signature_and_vector_are_deterministic() {
         let labels = vec!["Rust".to_owned()];
-        let signature = token_signature("Async Rust graph", &labels, Some("src/lib.rs"), "abc");
-        let first = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), "abc", 8);
-        let second = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), "abc", 8);
+        let signature = token_signature("Async Rust graph", &labels, Some("src/lib.rs"));
+        let first = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), 8);
+        let second = hashed_vector("Async Rust graph", &labels, Some("src/lib.rs"), 8);
 
         assert!(signature.contains(&"rust".to_owned()));
         assert_eq!(first, second);
@@ -973,12 +960,60 @@ mod tests {
     #[test]
     fn token_signature_adds_identifier_parts_for_semantic_and_vector_recall() {
         let labels = vec!["SemanticVectorRecall".to_owned()];
-        let signature = token_signature("GraphRAGContextPack", &labels, None, "abc");
+        let signature = token_signature("GraphRAGContextPack", &labels, None);
 
         for term in [
             "semantic", "vector", "recall", "graph", "rag", "context", "pack",
         ] {
             assert!(signature.contains(&term.to_owned()), "missing term {term}");
         }
+    }
+
+    #[test]
+    fn semantic_document_stores_source_hash_without_retrieval_token_noise() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        connection
+            .execute_batch("CREATE TABLE evidence (status TEXT NOT NULL);")
+            .expect("evidence table should exist for retrieval migration checks");
+        initialize_schema(&connection).expect("schema should initialize");
+        let labels = vec!["SemanticVectorRecall".to_owned()];
+        replace_semantic_document(
+            &connection,
+            SemanticDocumentInput {
+                document_id: "doc",
+                document_kind: "evidence",
+                evidence_id: "ev",
+                parent_evidence_id: None,
+                modality: EvidenceModality::TextSpan,
+                source_scope: "scope",
+                source_path: Some("docs/source.md"),
+                entity_labels: &labels,
+                content: "backend freshness source attribution",
+                source_hash: "sha256:abcdef123456",
+                graph_version: 1,
+                model: LOCAL_SEMANTIC_MODEL,
+                dimension: LOCAL_VECTOR_DIMENSION,
+            },
+        )
+        .expect("semantic document should insert");
+        let (signature_json, source_hash): (String, String) = connection
+            .query_row(
+                "
+                SELECT token_signature_json, source_hash
+                FROM graph_semantic_documents
+                WHERE document_id = 'doc'
+                ",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("semantic row should load");
+        let signature = parse_string_array(&signature_json).expect("signature should parse");
+
+        assert_eq!(source_hash, "sha256:abcdef123456");
+        assert!(signature.contains(&"backend".to_owned()));
+        assert!(signature.contains(&"semantic".to_owned()));
+        assert!(signature.contains(&"source".to_owned()));
+        assert!(!signature.contains(&"sha256".to_owned()));
+        assert!(!signature.contains(&"abcdef123456".to_owned()));
     }
 }

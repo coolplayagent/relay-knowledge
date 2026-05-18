@@ -487,7 +487,7 @@ impl TemporalQuery {
             .filter(|token| strip_as_of_value(token).is_none())
             .collect::<Vec<_>>()
             .join(" ");
-        let time_terms = token_signature(&scrubbed_query, &[], None, "")
+        let time_terms = token_signature(&scrubbed_query, &[], None)
             .into_iter()
             .filter(|term| term.len() == 4 && term.chars().all(|ch| ch.is_ascii_digit()))
             .collect::<Vec<_>>();

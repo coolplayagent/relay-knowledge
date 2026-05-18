@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-semantic-vector-source-hash-metadata-only-20260518
+- 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升本地 semantic/vector read model 在多源、多仓索引中的排序稳定性，避免文档唯一 source hash 作为检索 token 或向量特征稀释真实语义重叠。
+- 算法与架构：`graph_semantic_documents` 与 `graph_vector_documents` 继续持久化 `source_hash`、model、dimension、graph version 与 tokenizer metadata；但 token signature 和 hashed vector 只由 content、entity labels 与 source path 生成。查询侧、semantic overlap、vector ANN 和 temporal term parsing 复用同一 metadata-free signature。
+- 不变量：不改变 SQLite schema、刷新队列、CLI/API JSON、BM25、code graph retrieval、provider/env 配置、外部 embedding URL/API key/model/dimension 读取方式、research judge 配置、HTTP/QoS 或安装发布行为；source hash 仍作为 freshness、diagnostics 和 cursor metadata 存储，不参与用户 query scoring。
+- 预期影响：semantic/vector fixture 中内容词、实体 label 和 source path 的相似度不再被每条文档独有 hash token 降低，`sv_semantic_context_pack_source`、`sv_vector_backend_freshness_source` 与 provider metadata recall 的排序余量应改善或保持；代码仓库查询和 indexing wall time 应基本不变。
+- 已知风险：如果用户把 source hash 本身作为检索 query，本地 semantic/vector family 不再通过该 hash token 返回文档；这是有意的 metadata/query 分离，hash 仍可通过 diagnostics、index cursor 与 storage metadata 审计。
 ## 候选优化说明：manual-typescript-function-value-symbols-20260518
 - 目标：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，同时提升多仓 JavaScript/TypeScript 仓库对 `export const name = (...) => ...`、class field arrow handler、object handler maps 和 CommonJS/member assignment functions 的 definition、hybrid 与 call graph 检索覆盖。
 - 算法与架构：在既有 tree-sitter tag capture 后的 manual node pass 中，只对 JavaScript/TypeScript family 的 `variable_declarator`、`public_field_definition`、`pair`、`assignment_expression` 且 value/right 为 `arrow_function` 或 `function_expression` 的节点补充 function symbol；名称只来自直接 identifier/property/member property，复用现有 symbol id、签名、chunk、call/reference、identity enrich 与 bounded query pipeline。
@@ -998,3 +1004,17 @@ Adopted optimization notes:
 Adopted optimization notes:
 
 onnectorSaveRequest, +): Promise<void> => { +    await client.save(request); +}; + +const normalizeConnector = function ( +    request: W3ConnectorSaveRequest, +): W3ConnectorSaveRequest { +    return request; +}; + +class ConnectorService { +    saveLater = (request: W3ConnectorSaveRequest): void => { +        saveW3Connector(request); +    }; +} +"#, +    ); + +    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed); +    for name in ["saveW3Connector", "normalizeConnector", "saveLater"] { +        let symbol = snapshot +            .symbols +            .iter() +            .find(|symbol| symbol.name == name) +            .unwrap_or_else(|| panic!("{name} should be extracted as a function symbol")); +        assert_eq!(symbol.kind, "function"); +        assert!(symbol.signature.contains("W3ConnectorSaveRequest")); +    } +    assert!( +        !snapshot +            .symbols +            .iter() +            .any(|symbol| symbol.name == "CONNECTOR_TIMEOUT_MS") +    ); +} + +#[test] fn long_multibyte_symbol_signatures_truncate_on_utf8_boundary() { let mut source = "def retry_policy(value=\"".to_owned(); source.push_str(&"\u{00e9}".repeat(300)); tokens used 242,666
+## 20260518T014540Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T014540Z.patch`
+- score: 0.907794 (foundational=1.0, competitive=0.782609, accuracy=0.891304, semantic_vector=1.0, research_judge=0.92, performance=0.749005, stability=1.0)
+- cases: 40/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/advanced.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=48540ms; cargo_fmt_check_ms=1034ms; cargo_clippy_ms=277ms; cargo_test_ms=7191ms; relay_teams_index_ms=101175ms; relay_teams_register_index_ms=101283ms; relay_teams_query_p50_ms=382ms; relay_teams_query_p95_ms=781ms
+
+Adopted optimization notes:
+
+te/retrieval/derived.rs index 2bd9886479fa589a8ce06c8a9160360e3c1dd16d..45ab7b45722182c02bb33364cdba1e451123e21f --- a/src/relay_knowledge/storage/sqlite/retrieval/derived.rs +++ b/src/relay_knowledge/storage/sqlite/retrieval/derived.rs @@ -21,7 +21,7 @@ connection: &Connection, request: &GraphSearchRequest, ) -> Result<Vec<ScoredHit>, StorageError> { -    let query_terms = token_signature(&request.query, &[], None, "") +    let query_terms = token_signature(&request.query, &[], None) .into_iter() .collect::<BTreeSet<_>>(); if query_terms.is_empty() { @@ -149,7 +149,7 @@ request: &GraphSearchRequest, ) -> Result<Vec<ScoredHit>, StorageError> { let result_limit = bounded_candidate_limit(request); -    let query_terms = token_signature(&request.query, &[], None, "") +    let query_terms = token_signature(&request.query, &[], None) .into_iter() .collect::<BTreeSet<_>>(); if query_terms.is_empty() { @@ -296,7 +296,7 @@ fn vector(&mut self, dimension: usize) -> &[f64] { self.vectors .entry(dimension) -            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension)) +            .or_insert_with(|| hashed_vector(self.query, &[], None, dimension)) } } tokens used 226,901
+

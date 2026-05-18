@@ -21,7 +21,7 @@ pub(super) fn semantic_candidates(
     connection: &Connection,
     request: &GraphSearchRequest,
 ) -> Result<Vec<ScoredHit>, StorageError> {
-    let query_terms = token_signature(&request.query, &[], None, "")
+    let query_terms = token_signature(&request.query, &[], None)
         .into_iter()
         .collect::<BTreeSet<_>>();
     if query_terms.is_empty() {
@@ -149,7 +149,7 @@ pub(super) fn vector_candidates(
     request: &GraphSearchRequest,
 ) -> Result<Vec<ScoredHit>, StorageError> {
     let result_limit = bounded_candidate_limit(request);
-    let query_terms = token_signature(&request.query, &[], None, "")
+    let query_terms = token_signature(&request.query, &[], None)
         .into_iter()
         .collect::<BTreeSet<_>>();
     if query_terms.is_empty() {
@@ -296,7 +296,7 @@ impl<'a> QueryVectorCache<'a> {
     fn vector(&mut self, dimension: usize) -> &[f64] {
         self.vectors
             .entry(dimension)
-            .or_insert_with(|| hashed_vector(self.query, &[], None, "", dimension))
+            .or_insert_with(|| hashed_vector(self.query, &[], None, dimension))
     }
 }
 
