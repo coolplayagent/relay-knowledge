@@ -1,10 +1,12 @@
+use std::collections::BTreeSet;
+
 use tree_sitter::Node;
 
 use crate::domain::{CodeImportRecord, RepositoryCodeRange};
 
 use super::{
     super::{CodeIndexError, SnapshotBuild, stable_id},
-    nodes::{compact_whitespace, node_text, push_children_reverse, syntax_range},
+    nodes::{SyntaxRange, compact_whitespace, node_text, push_children_reverse, syntax_range},
 };
 
 pub(super) fn collect_imports(
@@ -15,65 +17,101 @@ pub(super) fn collect_imports(
     content: &str,
     root: Node<'_>,
 ) -> Result<Vec<CodeImportRecord>, CodeIndexError> {
-    let mut imports = Vec::new();
+    let mut imports = ImportCollector::new(build, path, file_id);
     let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
     stack.push(root);
     while let Some(node) = stack.pop() {
-        if is_import_node(node) {
-            push_import_records(
-                build,
-                path,
-                file_id,
-                language_id,
-                content,
-                node,
-                &mut imports,
-            )?;
+        if let Some((module, range)) = javascript_like_dynamic_import(language_id, content, node) {
+            imports.push_record(module, &range)?;
+        } else if is_import_node(language_id, node) {
+            imports.push_records(language_id, content, node)?;
         }
         push_children_reverse(node, &mut stack);
     }
 
-    Ok(imports)
+    Ok(imports.into_records())
 }
 
-fn push_import_records(
-    build: &SnapshotBuild,
-    path: &str,
-    file_id: &str,
-    language_id: &str,
-    content: &str,
-    node: Node<'_>,
-    imports: &mut Vec<CodeImportRecord>,
-) -> Result<(), CodeIndexError> {
-    let module_text = node_text(content, node);
-    let modules = if language_id == "go" {
-        go_import_specs(&module_text)
-    } else {
-        Vec::new()
-    };
-    let modules = if modules.is_empty() {
-        vec![compact_whitespace(&module_text)]
-    } else {
-        modules
-    };
-    let range = syntax_range(node);
-    for module in modules {
-        imports.push(CodeImportRecord {
-            repository_id: build.repository_id.clone(),
-            source_scope: build.source_scope.clone(),
-            import_id: stable_id(
-                "import",
-                [
-                    &build.repository_id,
-                    &build.source_scope,
-                    path,
-                    &module,
-                    &range.line_start.to_string(),
-                    &range.line_end.to_string(),
-                ],
-            ),
-            file_id: file_id.to_owned(),
-            path: path.to_owned(),
+struct ImportCollector<'a> {
+    build: &'a SnapshotBuild,
+    path: &'a str,
+    file_id: &'a str,
+    seen_import_ids: BTreeSet<String>,
+    records: Vec<CodeImportRecord>,
+}
+
+impl<'a> ImportCollector<'a> {
+    fn new(build: &'a SnapshotBuild, path: &'a str, file_id: &'a str) -> Self {
+        Self {
+            build,
+            path,
+            file_id,
+            seen_import_ids: BTreeSet::new(),
+            records: Vec::new(),
+        }
+    }
+
+    fn into_records(self) -> Vec<CodeImportRecord> {
+        self.records
+    }
+
+    fn push_records(
+        &mut self,
+        language_id: &str,
+        content: &str,
+        node: Node<'_>,
+    ) -> Result<(), CodeIndexError> {
+        let module_text = node_text(content, node);
+        let modules = if language_id == "go" {
+            go_import_specs(&module_text)
+        } else {
+            Vec::new()
+        };
+        let modules = if modules.is_empty() {
+            vec![compact_whitespace(&module_text)]
+        } else {
+            modules
+        };
+        let range = syntax_range(node);
+        for module in modules {
+            self.push_record(module, &range)?;
+        }
+
+        Ok(())
+    }
+
+    fn push_record(&mut self, module: String, range: &SyntaxRange) -> Result<(), CodeIndexError> {
+        let module = module.trim().to_owned();
+        if module.is_empty() || module == "import" {
+            return Ok(());
+        }
+        let byte_start = range.byte_start.to_string();
+        let byte_end = range.byte_end.to_string();
+        let line_start = range.line_start.to_string();
+        let line_end = range.line_end.to_string();
+        let import_id = stable_id(
+            "import",
+            [
+                &self.build.repository_id,
+                &self.build.source_scope,
+                self.path,
+                &module,
+                &byte_start,
+                &byte_end,
+                &line_start,
+                &line_end,
+            ],
+        );
+        if !self.seen_import_ids.insert(import_id.clone()) {
+            return Ok(());
+        }
+
+        self.records.push(CodeImportRecord {
+            repository_id: self.build.repository_id.clone(),
+            source_scope: self.build.source_scope.clone(),
+            import_id,
+            file_id: self.file_id.to_owned(),
+            path: self.path.to_owned(),
             module,
             target_hint: None,
             resolution_state: "unresolved".to_owned(),
@@ -82,9 +120,44 @@ fn push_import_records(
             line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
                 .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         });
+
+        Ok(())
+    }
+}
+
+fn javascript_like_dynamic_import(
+    language_id: &str,
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, SyntaxRange)> {
+    if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
+        || node.kind() != "call_expression"
+    {
+        return None;
+    }
+    let function = node.child_by_field_name("function")?;
+    if function.kind() != "import" {
+        return None;
+    }
+    let arguments = node.child_by_field_name("arguments")?;
+    let specifier = first_direct_string_argument(content, arguments)?;
+
+    Some((format!("import {specifier}"), syntax_range(node)))
+}
+
+fn first_direct_string_argument(content: &str, arguments: Node<'_>) -> Option<String> {
+    for index in 0..arguments.named_child_count() {
+        let Ok(index) = u32::try_from(index) else {
+            continue;
+        };
+        let child = arguments.named_child(index)?;
+        if matches!(child.kind(), "string" | "string_literal") {
+            return Some(node_text(content, child));
+        }
+        return None;
     }
 
-    Ok(())
+    None
 }
 
 fn go_import_specs(import_declaration: &str) -> Vec<String> {
@@ -188,9 +261,11 @@ fn go_identifier(value: &str) -> bool {
         && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
 
-fn is_import_node(node: Node<'_>) -> bool {
+fn is_import_node(language_id: &str, node: Node<'_>) -> bool {
     match node.kind() {
-        "import" => node.is_named(),
+        "import" => {
+            node.is_named() && !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
+        }
         "import_declaration"
         | "import_from_statement"
         | "import_statement"

@@ -10,6 +10,11 @@
 - 不变量：不改变 SQLite schema、FTS 表结构、candidate limit、ranking 权重、import/call/reference finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；非导出局部常量、普通标识符函数调用、对象/数组字面量和超长构造块仍不进入 symbol 表。
 - 预期影响：Opencode TypeScript `packages/llm/src/protocols/openai-chat.ts` 中 `export const protocol = Protocol.make(...)` 可被 path/language-filtered definition 查询命中，类似 relay-teams 或大型 TS/JS 仓库的公开协议、route、transport、layer 对象召回更稳定；索引写入仅增加短导出构造值的 symbol/chunk，register-to-index wall time 应接近中性。
 - 已知风险：少量导出工厂结果会以 `constant` kind 参与 definition/hybrid 排名，可能改变同名导出值附近的排序；实现要求 export ancestor、member call 或 `new` expression、合法 JS 标识符和 64 行长度上界，以避免把大型配置对象或普通局部变量变成宽泛噪声。
+## 候选优化说明：manual-typescript-import-identity-and-dynamic-import-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，修复 JavaScript/TypeScript 大仓中同一行重复 import、`import.meta` 和动态 `import(...)` 造成的 import fact 身份噪声；import stable id 纳入 AST byte range，parser 输出按 import_id 去重，并仅把直接字符串参数的动态 import 规范化为 `import "specifier"`。
+- 不变量：不改变 SQLite schema、事实字段、FTS 文档字段、candidate limit、ranking、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；静态 import 语义、Go/Python/Java/C/C++ import 提取与 TypeScript 相对路径解析仍走既有路径。
+- 预期影响：Opencode、relay-teams 前端代码和其他 import-heavy JS/TS 仓库在 checkpointed register/index 时不再因同一行 import 主键冲突失败，直接字符串动态 import 可参与既有 import resolution 与 import search；`import.meta`、裸 `import` token、变量拼接和非字符串动态 specifier 不再进入 import facts。
+- 已知风险：新索引中的 import_id 字符串从 line-based 变为 byte+line-based，旧索引记录 ID 不逐字复用；动态 import 只覆盖直接字符串参数，避免为运行时路径做错误猜测。
 ## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
 - 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。

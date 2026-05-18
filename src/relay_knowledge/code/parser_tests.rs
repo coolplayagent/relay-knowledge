@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
 
 use super::*;
@@ -769,6 +771,50 @@ export const large = Layer.effect({{
             "{ignored} should not be indexed as an exported constructed value",
         );
     }
+}
+
+#[test]
+fn typescript_imports_have_site_stable_ids_and_skip_import_expression_tokens() {
+    let snapshot = parse_source_snapshot(
+        "src/runtime.ts",
+        br#"
+import "./polyfill"; import "./polyfill";
+const root = new URL(".", import.meta.url);
+if (import.meta.env.DEV) await import("./dev");
+if (import.meta.env.TEST) await import(runtimeModule);
+
+export function runtimeRoot(): string {
+    return root.href;
+}
+"#,
+    );
+    let modules = snapshot
+        .imports
+        .iter()
+        .map(|import| import.module.as_str())
+        .collect::<Vec<_>>();
+    let ids = snapshot
+        .imports
+        .iter()
+        .map(|import| import.import_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(snapshot.imports.len(), 3);
+    assert_eq!(ids.len(), snapshot.imports.len());
+    assert_eq!(
+        modules
+            .iter()
+            .filter(|module| module.contains("\"./polyfill\""))
+            .count(),
+        2
+    );
+    assert!(modules.contains(&"import \"./dev\""));
+    assert!(!modules.contains(&"import"));
+    assert!(
+        !modules
+            .iter()
+            .any(|module| module.contains("runtimeModule"))
+    );
 }
 
 #[test]
