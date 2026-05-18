@@ -14,6 +14,7 @@ pub(super) fn call_site_source_path_bonus(
             CodeQueryKind::Callers | CodeQueryKind::Callees
         )
         || path_looks_like_test_or_benchmark(path)
+        || (!query_mentions_example_or_sample(query) && path_looks_like_example_or_sample(path))
     {
         return 0.0;
     }
@@ -46,6 +47,26 @@ pub(super) fn call_site_test_path_penalty(
     }
 
     -0.35
+}
+
+pub(super) fn call_site_example_path_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_example_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_example_intent
+        || !matches!(
+            request.code_query_kind,
+            CodeQueryKind::Callers | CodeQueryKind::Callees
+        )
+        || !path_looks_like_example_or_sample(path)
+    {
+        return 0.0;
+    }
+
+    -0.6
 }
 
 pub(super) fn declaration_surface_path_bonus(
@@ -114,10 +135,23 @@ pub(super) fn query_mentions_test_or_benchmark(query: &str) -> bool {
         .any(term_mentions_test_or_benchmark)
 }
 
+pub(super) fn query_mentions_example_or_sample(query: &str) -> bool {
+    query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .any(term_mentions_example_or_sample)
+}
+
 fn term_mentions_test_or_benchmark(term: &str) -> bool {
     identifier_intent_parts(term)
         .iter()
         .any(|part| term_is_test_or_benchmark(part))
+}
+
+fn term_mentions_example_or_sample(term: &str) -> bool {
+    identifier_intent_parts(term)
+        .iter()
+        .any(|part| term_is_example_or_sample(part))
 }
 
 fn path_looks_like_test_or_benchmark(path: &str) -> bool {
@@ -129,6 +163,17 @@ fn path_looks_like_test_or_benchmark(path: &str) -> bool {
             .rsplit('/')
             .next()
             .is_some_and(file_name_looks_like_test_or_benchmark)
+}
+
+fn path_looks_like_example_or_sample(path: &str) -> bool {
+    let lower_path = path.to_ascii_lowercase();
+    lower_path
+        .split('/')
+        .any(segment_mentions_example_or_sample)
+        || lower_path
+            .rsplit('/')
+            .next()
+            .is_some_and(file_name_looks_like_example_or_sample)
 }
 
 fn path_looks_like_adapter_surface(path: &str) -> bool {
@@ -170,11 +215,38 @@ fn term_is_test_or_benchmark(term: &str) -> bool {
     )
 }
 
+fn file_name_looks_like_example_or_sample(file_name: &str) -> bool {
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    segment_mentions_example_or_sample(stem)
+}
+
+fn term_is_example_or_sample(term: &str) -> bool {
+    matches!(
+        term,
+        "demo"
+            | "demos"
+            | "example"
+            | "examples"
+            | "quickstart"
+            | "quickstarts"
+            | "sample"
+            | "samples"
+            | "tutorial"
+            | "tutorials"
+    )
+}
+
 fn file_name_looks_like_adapter_surface(file_name: &str) -> bool {
     let stem = file_name
         .rsplit_once('.')
         .map_or(file_name, |(stem, _)| stem);
     stem == "c" || segment_mentions_adapter_surface(stem)
+}
+
+fn segment_mentions_example_or_sample(segment: &str) -> bool {
+    term_mentions_example_or_sample(segment)
 }
 
 fn segment_mentions_adapter_surface(segment: &str) -> bool {
@@ -303,6 +375,26 @@ mod tests {
             0.0
         );
         assert_eq!(
+            call_site_source_path_bonus(
+                4.0,
+                "packages/llm/example/tutorial.ts",
+                &callers,
+                "generateObject",
+                false,
+            ),
+            0.0
+        );
+        assert_eq!(
+            call_site_source_path_bonus(
+                4.0,
+                "packages/llm/example/tutorial.ts",
+                &callers,
+                "generateObject tutorial",
+                false,
+            ),
+            0.2
+        );
+        assert_eq!(
             call_site_source_path_bonus(0.0, "db/db_impl.cc", &callers, "NewLRUCache", false),
             0.0
         );
@@ -344,6 +436,48 @@ mod tests {
         );
         assert_eq!(
             call_site_test_path_penalty(0.0, "table/filter_block_test.cc", &callers, false),
+            0.0
+        );
+    }
+
+    #[test]
+    fn call_site_example_path_penalty_demotes_examples_without_example_intent() {
+        let callers = retrieval_request(CodeQueryKind::Callers);
+        let callees = retrieval_request(CodeQueryKind::Callees);
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+
+        assert_eq!(
+            call_site_example_path_penalty(
+                4.0,
+                "packages/llm/example/tutorial.ts",
+                &callers,
+                false,
+            ),
+            -0.6
+        );
+        assert_eq!(
+            call_site_example_path_penalty(4.0, "examples/cache_demo.cc", &callees, false),
+            -0.6
+        );
+        assert_eq!(
+            call_site_example_path_penalty(4.0, "src/sample_controller/handler.go", &callers, true),
+            0.0
+        );
+        assert_eq!(
+            call_site_example_path_penalty(4.0, "src/service.ts", &callers, false),
+            0.0
+        );
+        assert_eq!(
+            call_site_example_path_penalty(4.0, "packages/llm/example/tutorial.ts", &hybrid, false,),
+            0.0
+        );
+        assert_eq!(
+            call_site_example_path_penalty(
+                0.0,
+                "packages/llm/example/tutorial.ts",
+                &callers,
+                false,
+            ),
             0.0
         );
     }
@@ -404,6 +538,14 @@ mod tests {
         assert!(query_mentions_test_or_benchmark("db_bench cache"));
         assert!(query_mentions_test_or_benchmark("UnitTestCoverage"));
         assert!(query_mentions_test_or_benchmark("BenchmarkSuite"));
+    }
+
+    #[test]
+    fn query_mentions_example_or_sample_detects_explicit_intent() {
+        assert!(!query_mentions_example_or_sample("generateObject"));
+        assert!(query_mentions_example_or_sample("generateObject tutorial"));
+        assert!(query_mentions_example_or_sample("sample-controller worker"));
+        assert!(query_mentions_example_or_sample("QuickstartDemo"));
     }
 
     #[test]

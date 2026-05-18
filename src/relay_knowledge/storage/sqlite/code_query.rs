@@ -51,8 +51,9 @@ use code_query_line_ranges::{
     optional_line_range_with_symbol_context, symbol_result_line_range,
 };
 use code_query_path_ranking::{
-    call_site_source_path_bonus, call_site_test_path_penalty, declaration_surface_path_bonus,
-    import_test_path_penalty, query_mentions_test_or_benchmark, symbol_test_path_penalty,
+    call_site_example_path_penalty, call_site_source_path_bonus, call_site_test_path_penalty,
+    declaration_surface_path_bonus, import_test_path_penalty, query_mentions_example_or_sample,
+    query_mentions_test_or_benchmark, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 use code_query_support::*;
@@ -452,6 +453,7 @@ fn search_calls(
     let query = request.query.as_str();
     let score_query = ScoreQuery::new(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
+    let query_has_example_intent = query_mentions_example_or_sample(query);
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -510,6 +512,12 @@ fn search_calls(
             );
             let test_path_penalty =
                 call_site_test_path_penalty(base_score, &row.path, request, query_has_test_intent);
+            let example_path_penalty = call_site_example_path_penalty(
+                base_score,
+                &row.path,
+                request,
+                query_has_example_intent,
+            );
             let repeated_site_bonus =
                 if test_path_penalty >= 0.0 && (source_path_bonus > 0.0 || query_has_test_intent) {
                     repeated_call_site_bonus(base_score, caller_target_call_count, request)
@@ -529,7 +537,7 @@ fn search_calls(
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
-            let score = score + source_path_bonus + test_path_penalty;
+            let score = score + source_path_bonus + test_path_penalty + example_path_penalty;
             (score > 0.0).then(|| {
                 let line_range = call_result_line_range(request.code_query_kind, &row);
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());
