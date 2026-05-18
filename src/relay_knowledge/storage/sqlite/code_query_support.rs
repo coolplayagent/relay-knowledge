@@ -339,6 +339,21 @@ pub(super) fn call_edge_confidence_bonus(confidence_basis_points: u16) -> f64 {
     f64::from(confidence_basis_points) / 10_000.0
 }
 
+pub(super) fn repeated_call_site_bonus(
+    base_score: f64,
+    call_site_count: usize,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Callers
+        || call_site_count <= 1
+    {
+        return 0.0;
+    }
+
+    (call_site_count.saturating_sub(1).min(3) as f64) * 0.25
+}
+
 pub(super) fn callee_related_name_bonus(
     query: &str,
     callee_name: &str,

@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
+#[path = "code_query_call_counts.rs"]
+mod code_query_call_counts;
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
 #[path = "code_query_line_ranges.rs"]
@@ -29,6 +31,7 @@ use crate::{
 const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_status::{repository_scope_status, repository_status};
+use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
 use code_query_import_targets::search_imports_by_target_symbols;
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
@@ -445,11 +448,15 @@ fn search_calls(
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
+    let call_site_counts = caller_target_call_counts(&rows);
 
     Ok(rows
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
+            let caller_target_call_count = caller_target_call_key(&row)
+                .and_then(|key| call_site_counts.get(&key).copied())
+                .unwrap_or(1);
             let caller_name = row.caller_name.as_deref().unwrap_or_default();
             let target_hint = row.target_hint.as_deref().unwrap_or_default();
             let caller_canonical_id = row
@@ -494,6 +501,7 @@ fn search_calls(
                     request,
                 )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
+                + repeated_call_site_bonus(base_score, caller_target_call_count, request)
                 + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score
                 + call_site_source_path_bonus(

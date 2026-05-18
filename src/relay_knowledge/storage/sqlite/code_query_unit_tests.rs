@@ -484,6 +484,67 @@ async fn caller_search_matches_spaced_compound_identifier_query() {
 }
 
 #[tokio::test]
+async fn caller_search_prefers_callers_with_repeated_target_sites() {
+    let path = "frontend/dist/js/core/stream.js";
+    let mut start = code_query_symbol("start-symbol", "stream-file", path, "startIntentStream");
+    start.line_range = code_query_range(100, 180);
+    let mut end = code_query_symbol("end-symbol", "stream-file", path, "endStream");
+    end.line_range = code_query_range(260, 290);
+    let mut attach = code_query_symbol("attach-symbol", "stream-file", path, "attachRunStream");
+    attach.line_range = code_query_range(450, 512);
+
+    let mut start_call = code_query_call("start-call", "stream-file", path);
+    start_call.caller_symbol_snapshot_id = Some("start-symbol".to_owned());
+    start_call.caller_name = Some("startIntentStream".to_owned());
+    start_call.callee_symbol_snapshot_id = Some("release-symbol".to_owned());
+    start_call.callee_name = "releaseActiveStreamHandle".to_owned();
+    start_call.target_hint = Some("releaseActiveStreamHandle".to_owned());
+    start_call.line_range = code_query_range(146, 146);
+
+    let mut end_call = code_query_call("end-call", "stream-file", path);
+    end_call.caller_symbol_snapshot_id = Some("end-symbol".to_owned());
+    end_call.caller_name = Some("endStream".to_owned());
+    end_call.callee_symbol_snapshot_id = Some("release-symbol".to_owned());
+    end_call.callee_name = "releaseActiveStreamHandle".to_owned();
+    end_call.target_hint = Some("releaseActiveStreamHandle".to_owned());
+    end_call.line_range = code_query_range(286, 286);
+
+    let mut attach_first = code_query_call("attach-first-call", "stream-file", path);
+    attach_first.caller_symbol_snapshot_id = Some("attach-symbol".to_owned());
+    attach_first.caller_name = Some("attachRunStream".to_owned());
+    attach_first.callee_symbol_snapshot_id = Some("release-symbol".to_owned());
+    attach_first.callee_name = "releaseActiveStreamHandle".to_owned();
+    attach_first.target_hint = Some("releaseActiveStreamHandle".to_owned());
+    attach_first.line_range = code_query_range(478, 478);
+
+    let mut attach_second = code_query_call("attach-second-call", "stream-file", path);
+    attach_second.caller_symbol_snapshot_id = Some("attach-symbol".to_owned());
+    attach_second.caller_name = Some("attachRunStream".to_owned());
+    attach_second.callee_symbol_snapshot_id = Some("release-symbol".to_owned());
+    attach_second.callee_name = "releaseActiveStreamHandle".to_owned();
+    attach_second.target_hint = Some("releaseActiveStreamHandle".to_owned());
+    attach_second.line_range = code_query_range(492, 492);
+
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![code_query_file("stream-file", path, "javascript")],
+        vec![start, end, attach],
+        vec![start_call, end_call, attach_first, attach_second],
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request(
+            "releaseActiveStreamHandle",
+            CodeQueryKind::Callers,
+        ))
+        .await
+        .expect("caller query should succeed");
+
+    assert!(hits[0].excerpt.contains("attachRunStream"));
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
 async fn caller_search_accepts_scoped_target_hint_prefilter() {
     let mut call = code_query_call("scoped-target-call", "service-file", "src/pkg/service.py");
     call.caller_name = Some("Caller".to_owned());
