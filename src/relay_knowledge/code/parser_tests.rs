@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
 
 use super::*;
@@ -724,6 +726,95 @@ handlers[dynamicName] = async (request: W3ConnectorSaveRequest): Promise<void> =
         symbol.name.as_str(),
         "timeoutMs" | "exports" | "dynamicName"
     )));
+}
+
+#[test]
+fn typescript_exported_constructed_values_are_definition_symbols() {
+    let large_body = (0..70)
+        .map(|index| format!("  item{index}: buildItem({index}),\n"))
+        .collect::<String>();
+    let source = format!(
+        r#"
+const helper = Protocol.make({{}});
+
+export const protocol = Protocol.make({{
+  id: "openai-chat",
+  stream: {{
+    initial: () => ({{}}),
+  }},
+}});
+export const route = new Route(protocol);
+export const plain = makeProtocol({{}});
+export const large = Layer.effect({{
+{large_body}}});
+"#
+    );
+    let snapshot = parse_source_snapshot("src/protocol.ts", source.as_bytes());
+    let protocol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "protocol")
+        .expect("exported constructed protocol should be a definition symbol");
+    let route = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "route")
+        .expect("exported constructed route should be a definition symbol");
+
+    assert_eq!(protocol.kind, "constant");
+    assert!(protocol.signature.contains("Protocol.make"));
+    assert_eq!(route.kind, "constant");
+    assert!(route.signature.contains("new Route"));
+    for ignored in ["helper", "plain", "large"] {
+        assert!(
+            !snapshot.symbols.iter().any(|symbol| symbol.name == ignored),
+            "{ignored} should not be indexed as an exported constructed value",
+        );
+    }
+}
+
+#[test]
+fn typescript_imports_have_site_stable_ids_and_skip_import_expression_tokens() {
+    let snapshot = parse_source_snapshot(
+        "src/runtime.ts",
+        br#"
+import "./polyfill"; import "./polyfill";
+const root = new URL(".", import.meta.url);
+if (import.meta.env.DEV) await import("./dev");
+if (import.meta.env.TEST) await import(runtimeModule);
+
+export function runtimeRoot(): string {
+    return root.href;
+}
+"#,
+    );
+    let modules = snapshot
+        .imports
+        .iter()
+        .map(|import| import.module.as_str())
+        .collect::<Vec<_>>();
+    let ids = snapshot
+        .imports
+        .iter()
+        .map(|import| import.import_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(snapshot.imports.len(), 3);
+    assert_eq!(ids.len(), snapshot.imports.len());
+    assert_eq!(
+        modules
+            .iter()
+            .filter(|module| module.contains("\"./polyfill\""))
+            .count(),
+        2
+    );
+    assert!(modules.contains(&"import \"./dev\""));
+    assert!(!modules.contains(&"import"));
+    assert!(
+        !modules
+            .iter()
+            .any(|module| module.contains("runtimeModule"))
+    );
 }
 
 #[test]

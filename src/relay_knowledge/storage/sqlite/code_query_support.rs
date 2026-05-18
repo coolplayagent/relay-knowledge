@@ -693,16 +693,41 @@ fn quote_fts_term(term: &str) -> String {
     format!("\"{}\"", term.replace('"', "\"\""))
 }
 
-fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
-    const MAX_COMPOUND_QUERY_TERMS: usize = 6;
-    const MAX_COMPOUND_IDENTIFIER_PARTS: usize = 8;
-    const MIN_COMPOUND_IDENTIFIER_LEN: usize = 6;
-    const MAX_COMPOUND_IDENTIFIER_LEN: usize = 80;
+const MAX_COMPOUND_QUERY_TERMS: usize = 6;
+const MAX_COMPOUND_IDENTIFIER_PARTS: usize = 8;
+const MIN_COMPOUND_IDENTIFIER_LEN: usize = 6;
+const MAX_COMPOUND_IDENTIFIER_LEN: usize = 80;
+const MIN_SUBPHRASE_IDENTIFIER_PARTS: usize = 2;
+const MAX_SUBPHRASE_IDENTIFIER_PARTS: usize = 4;
+const MAX_COMPOUND_FTS_ALTERNATIVES: usize = 24;
 
-    if terms.len() < 2 || terms.len() > MAX_COMPOUND_QUERY_TERMS {
+fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
+    if terms.len() < 2 {
         return Vec::new();
     }
+    let Some(parts) = compound_identifier_parts(terms) else {
+        return Vec::new();
+    };
 
+    let mut alternatives = Vec::new();
+    if terms.len() <= MAX_COMPOUND_QUERY_TERMS && parts.len() <= MAX_COMPOUND_IDENTIFIER_PARTS {
+        push_compound_identifier_window(&mut alternatives, terms, &parts);
+    }
+    if parts.len() > MAX_SUBPHRASE_IDENTIFIER_PARTS - 1 {
+        for window_len in (MIN_SUBPHRASE_IDENTIFIER_PARTS..=MAX_SUBPHRASE_IDENTIFIER_PARTS).rev() {
+            for window in parts.windows(window_len) {
+                push_compound_identifier_window(&mut alternatives, terms, window);
+                if alternatives.len() >= MAX_COMPOUND_FTS_ALTERNATIVES {
+                    return alternatives;
+                }
+            }
+        }
+    }
+
+    alternatives
+}
+
+fn compound_identifier_parts(terms: &[String]) -> Option<Vec<String>> {
     let mut parts = Vec::new();
     for term in terms {
         for part in term.split('_').filter(|part| !part.is_empty()) {
@@ -711,26 +736,28 @@ fn compound_identifier_fts_terms(terms: &[String]) -> Vec<String> {
                     .chars()
                     .all(|character| character.is_ascii_alphanumeric())
             {
-                return Vec::new();
+                return None;
             }
             parts.push(part.to_ascii_lowercase());
         }
     }
-    if parts.len() < 2 || parts.len() > MAX_COMPOUND_IDENTIFIER_PARTS {
-        return Vec::new();
-    }
 
+    (parts.len() >= 2).then_some(parts)
+}
+
+fn push_compound_identifier_window(
+    alternatives: &mut Vec<String>,
+    original_terms: &[String],
+    parts: &[String],
+) {
     let compact = parts.join("");
     if !(MIN_COMPOUND_IDENTIFIER_LEN..=MAX_COMPOUND_IDENTIFIER_LEN).contains(&compact.len()) {
-        return Vec::new();
+        return;
     }
 
     let snake = parts.join("_");
-    let mut alternatives = Vec::new();
-    push_compound_identifier_alternative(&mut alternatives, terms, compact);
-    push_compound_identifier_alternative(&mut alternatives, terms, snake);
-
-    alternatives
+    push_compound_identifier_alternative(alternatives, original_terms, compact);
+    push_compound_identifier_alternative(alternatives, original_terms, snake);
 }
 
 fn push_compound_identifier_alternative(

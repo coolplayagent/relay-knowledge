@@ -60,22 +60,25 @@ fn candidate_condition_caps_bind_values_for_long_queries() {
 
 #[test]
 fn symbol_fts_query_uses_any_term_for_fuzzy_recall() {
-    assert_eq!(
-        symbol_fts_match_query("checkpoint metadata version constant"),
-        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    let symbol_query = symbol_fts_match_query("checkpoint metadata version constant");
+    assert!(
+        symbol_query.starts_with("(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\")")
     );
+    assert!(symbol_query.contains("\"checkpointmetadataversionconstant\""));
+    assert!(symbol_query.contains("\"metadataversionconstant\""));
     assert_eq!(
         symbol_fts_match_query("new lru cache"),
         "(\"new\" OR \"lru\" OR \"cache\") OR \"newlrucache\" OR \"new_lru_cache\""
     );
-    assert_eq!(
-        fts_match_query("checkpoint metadata version constant"),
-        "(\"checkpoint\" \"metadata\" \"version\" \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
+    let edge_query = fts_match_query("checkpoint metadata version constant");
+    assert!(edge_query.starts_with("(\"checkpoint\" \"metadata\" \"version\" \"constant\")"));
+    assert!(edge_query.contains("\"checkpointmetadataversionconstant\""));
+    assert!(edge_query.contains("\"checkpoint_metadata_version\""));
+    let chunk_query = hybrid_chunk_fts_match_query("checkpoint metadata version constant");
+    assert!(
+        chunk_query.starts_with("(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\")")
     );
-    assert_eq!(
-        hybrid_chunk_fts_match_query("checkpoint metadata version constant"),
-        "(\"checkpoint\" OR \"metadata\" OR \"version\" OR \"constant\") OR \"checkpointmetadataversionconstant\" OR \"checkpoint_metadata_version_constant\""
-    );
+    assert!(chunk_query.contains("\"checkpointmetadataversionconstant\""));
 }
 
 #[test]
@@ -85,10 +88,19 @@ fn fts_query_compound_identifier_alternatives_are_bounded() {
         "(\"new\" \"lru\" \"cache\") OR \"newlrucache\" OR \"new_lru_cache\""
     );
     assert_eq!(fts_match_query("a b"), "\"a\" \"b\"");
-    assert_eq!(
-        fts_match_query("one two three four five six seven"),
-        "\"one\" \"two\" \"three\" \"four\" \"five\" \"six\" \"seven\""
+    let long_query = fts_match_query(
+        "cached introspection results local property handler not writable property exception",
     );
+    assert!(long_query.starts_with(
+        "(\"cached\" \"introspection\" \"results\" \"local\" \"property\" \"handler\""
+    ));
+    assert!(long_query.contains("\"cachedintrospectionresultslocal\""));
+    assert!(long_query.contains("\"notwritablepropertyexception\""));
+    assert!(
+        !long_query
+            .contains("cachedintrospectionresultslocalpropertyhandlernotwritablepropertyexception")
+    );
+    assert!(long_query.matches(" OR \"").count() <= 24);
 }
 
 #[test]

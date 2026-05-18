@@ -5,6 +5,21 @@
 - `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-exported-constructed-value-definition-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，补齐 JavaScript/TypeScript 大仓中导出运行时对象的 definition 召回；parser 仅把 `export const name = Owner.factory(...)` 这类 member-call 构造值和 `export const name = new Type(...)` 记录为 `constant` symbol，使 `protocol`、`route` 等公开协议/服务对象进入既有 symbol FTS 与 definition 查询路径。
+- 不变量：不改变 SQLite schema、FTS 表结构、candidate limit、ranking 权重、import/call/reference finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；非导出局部常量、普通标识符函数调用、对象/数组字面量和超长构造块仍不进入 symbol 表。
+- 预期影响：Opencode TypeScript `packages/llm/src/protocols/openai-chat.ts` 中 `export const protocol = Protocol.make(...)` 可被 path/language-filtered definition 查询命中，类似 relay-teams 或大型 TS/JS 仓库的公开协议、route、transport、layer 对象召回更稳定；索引写入仅增加短导出构造值的 symbol/chunk，register-to-index wall time 应接近中性。
+- 已知风险：少量导出工厂结果会以 `constant` kind 参与 definition/hybrid 排名，可能改变同名导出值附近的排序；实现要求 export ancestor、member call 或 `new` expression、合法 JS 标识符和 64 行长度上界，以避免把大型配置对象或普通局部变量变成宽泛噪声。
+## 候选优化说明：manual-typescript-import-identity-and-dynamic-import-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，修复 JavaScript/TypeScript 大仓中同一行重复 import、`import.meta` 和动态 `import(...)` 造成的 import fact 身份噪声；import stable id 纳入 AST byte range，parser 输出按 import_id 去重，并仅把直接字符串参数的动态 import 规范化为 `import "specifier"`。
+- 不变量：不改变 SQLite schema、事实字段、FTS 文档字段、candidate limit、ranking、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；静态 import 语义、Go/Python/Java/C/C++ import 提取与 TypeScript 相对路径解析仍走既有路径。
+- 预期影响：Opencode、relay-teams 前端代码和其他 import-heavy JS/TS 仓库在 checkpointed register/index 时不再因同一行 import 主键冲突失败，直接字符串动态 import 可参与既有 import resolution 与 import search；`import.meta`、裸 `import` token、变量拼接和非字符串动态 specifier 不再进入 import facts。
+- 已知风险：新索引中的 import_id 字符串从 line-based 变为 byte+line-based，旧索引记录 ID 不逐字复用；动态 import 只覆盖直接字符串参数，避免为运行时路径做错误猜测。
+## 候选优化说明：manual-windowed-compound-identifier-fts-recall-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，提升长自然语言 code query 对 CamelCase/PascalCase/snake_case 复合标识符的候选召回；在既有 whole-query compact/snake FTS alternative 之外，为安全 ASCII 查询词生成最多 24 个相邻 2 到 4 词窗口的 compact 与 snake_case exact token 分支。
+- 不变量：不改变 SQLite schema、索引写入、FTS 文档内容、事实表、candidate limit、Rust 后置 scoring/dedupe、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；扩展只发生在 query MATCH 表达式构造阶段，并受 ASCII、part 长度、总标识符长度和固定 alternatives 上限约束。
+- 预期影响：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring Framework 中较长 hybrid、caller、callee、reference、import 与 definition 查询更容易召回嵌入源码 chunk 或 edge 文档中的复合标识符子短语，例如 `CachedIntrospectionResults`、`localPropertyHandler` 和 `NotWritablePropertyException`。
+- 已知风险：额外 OR 分支会让少量同名 compact/snake token 进入 bounded FTS candidate window，并可能增加单次查询的 FTS MATCH 解析成本；风险由最多 24 个 alternatives、既有 candidate limit、typed row filter、ScoreQuery、path/language filter、dedupe/truncate 和单测覆盖控制。
 ## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
 - 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。
@@ -137,6 +152,10 @@
 - 不变量：不改变索引写入内容、FTS 查询表达式、candidate limit、排序权重、CLI/API 字段、semantic/vector provider URL/API key/model/dimension 环境读取、embedding 设置、judge 配置、HTTP/网络行为或 release/install 行为；没有仓库名、路径名或符号名特殊分支，最终排序仍由既有 score 和去重截断决定。
 - 预期影响：大型仓库中 class 声明前的 protocol/decorator/typed preamble 与 resolved call site 所属函数范围可被 line-based evaluator 和用户定位识别，预期修复 `ConnectorService` definition/hybrid/filter 与 `_summary` callers/callees 门禁，W3 request/import、LevelDB/Linux/Kubernetes/Spring 和 semantic/vector source coverage 保持不变。
 - 已知风险：少数 class 或 resolved call hit 的起始行会比精确语法节点更早，但窗口受同文件相邻 symbol 与 16 行上限约束，不会扩成整文件上下文；额外 SQL 子查询只作用于 bounded candidate rows。
+## 候选优化说明：manual-streamed-call-finalize-20260518
+- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，降低多仓 full-scope `repo register` finalize 阶段 call graph rebuild 的内存与分配成本；符号按 path 移入 `HashMap<Vec<SymbolKey>>`，call reference 从 SQLite cursor 流式读取并立即写入 `code_repository_calls`。
+- 不变量/风险：不改变 SQLite schema、reference/import/symbol 事实、call id、caller resolution、FTS search document、ranking、CLI/API、provider/env、judge 配置或安装行为；风险仅在 cursor 与 insert statement 同事务并行使用，现有 rusqlite prepared statement 生命周期和单元/批处理测试覆盖。
+- 预期影响：relay-teams、Linux、LevelDB、Kubernetes、Spring Framework 等 reference-heavy 仓库少一次全量 call reference `Vec` 收集和 symbol clone，降低 cold register-to-index finalize wall time 与峰值内存；查询结果和 semantic/vector coverage 应保持不变。
 ## 候选优化说明：manual-cli-repo-index-inline-worker-20260518
 - 目标/算法/架构/不变量/影响/风险：修复质量门禁中 `repo index` 返回 queued task 后首个 `repo query --freshness wait-until-fresh` 立即报 “no index for ref” 的竞态；CLI 仍经 durable code-index task 建立 bounded full-index task，但当前进程会立即执行同一 task 的 worker lease 并在返回前刷新 status/checkpoint，不改变 Web/API `start_code_repository_index` 后台语义、SQLite schema、code graph parsing/ranking、query JSON、semantic/vector provider/env、embedding 或 judge 配置。预期 relay-teams 与 LevelDB full-scope gates 在显式 index 后已有 fresh scope，查询延迟保持在已建索引路径；风险是一次性 CLI index wall time 上升，但成本位于写索引命令内且 service/Web 后台模型保留。
 ## 候选优化说明：manual-vector-overlap-identifier-fallback-20260517

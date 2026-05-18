@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::{Transaction, params};
 
@@ -224,13 +224,9 @@ fn rebuild_calls(
         ",
         params![source_scope],
     )?;
-    let symbols = load_symbol_keys(transaction, source_scope)?;
-    let mut by_path = BTreeMap::<String, Vec<SymbolKey>>::new();
-    for symbol in &symbols {
-        by_path
-            .entry(symbol.path.clone())
-            .or_default()
-            .push(symbol.clone());
+    let mut by_path = HashMap::<String, Vec<SymbolKey>>::new();
+    for symbol in load_symbol_keys(transaction, source_scope)? {
+        by_path.entry(symbol.path.clone()).or_default().push(symbol);
     }
     let mut insert_call = transaction.prepare(
         "
@@ -242,7 +238,18 @@ fn rebuild_calls(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
     )?;
-    for reference in load_call_references(transaction, source_scope)? {
+    let mut select_references = transaction.prepare(
+        "
+        SELECT reference_id, file_id, path, name, line_start, line_end,
+               target_symbol_snapshot_id, target_hint, resolution_state,
+               confidence_basis_points, confidence_tier
+        FROM code_repository_references
+        WHERE source_scope = ?1 AND kind = 'call'
+        ",
+    )?;
+    let mut references = select_references.query(params![source_scope])?;
+    while let Some(row) = references.next()? {
+        let reference = reference_from_row(row)?;
         let caller = caller_for_line(by_path.get(&reference.path), reference.line_start);
         let call_id = stable_id(
             "call",
@@ -278,7 +285,7 @@ fn rebuild_calls(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct SymbolKey {
     symbol_snapshot_id: String,
     path: String,
@@ -340,25 +347,6 @@ fn load_symbol_keys(
             },
         })
     })?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)
-}
-
-fn load_call_references(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<Vec<ReferenceKey>, StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        SELECT reference_id, file_id, path, name, line_start, line_end,
-               target_symbol_snapshot_id, target_hint, resolution_state,
-               confidence_basis_points, confidence_tier
-        FROM code_repository_references
-        WHERE source_scope = ?1 AND kind = 'call'
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], reference_from_row)?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)

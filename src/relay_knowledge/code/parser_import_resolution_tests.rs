@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::domain::{
     CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
 };
@@ -194,6 +196,56 @@ export function buildClient(): Session {
     ]);
 
     assert_import_state(&snapshot, "requests", "unresolved");
+}
+
+#[test]
+fn typescript_dynamic_imports_use_string_specifier_identity() {
+    let snapshot = parse_sources(&[
+        ("src/lazy/alpha.ts", "export function alpha(): void {}"),
+        ("src/lazy/beta.ts", "export function beta(): void {}"),
+        (
+            "src/loader.ts",
+            r#"
+export async function loadLazy() {
+    const moduleName = "./lazy/runtime";
+    return Promise.all([
+        import("./lazy/alpha"),
+        import("./lazy/beta"),
+        import(moduleName),
+    ]);
+}
+"#,
+        ),
+    ]);
+    let loader_imports = snapshot
+        .imports
+        .iter()
+        .filter(|import| import.path == "src/loader.ts")
+        .collect::<Vec<_>>();
+    let ids = loader_imports
+        .iter()
+        .map(|import| import.import_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(loader_imports.len(), 2);
+    assert_eq!(ids.len(), loader_imports.len());
+    assert!(
+        loader_imports
+            .iter()
+            .any(|import| import.module == "import \"./lazy/alpha\"")
+    );
+    assert!(
+        loader_imports
+            .iter()
+            .any(|import| import.module == "import \"./lazy/beta\"")
+    );
+    assert!(
+        !loader_imports
+            .iter()
+            .any(|import| import.module == "import" || import.module.contains("moduleName"))
+    );
+    assert_import_state(&snapshot, "./lazy/alpha", "resolved");
+    assert_import_state(&snapshot, "./lazy/beta", "resolved");
 }
 
 #[test]
