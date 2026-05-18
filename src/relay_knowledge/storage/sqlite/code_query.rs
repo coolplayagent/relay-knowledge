@@ -448,14 +448,18 @@ fn search_calls(
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
-    let call_site_counts = caller_target_call_counts(&rows);
+    let call_site_counts = (request.code_query_kind == CodeQueryKind::Callers)
+        .then(|| caller_target_call_counts(&rows));
 
     Ok(rows
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let caller_target_call_count = caller_target_call_key(&row)
-                .and_then(|key| call_site_counts.get(&key).copied())
+            let caller_target_call_count = call_site_counts
+                .as_ref()
+                .and_then(|counts| {
+                    caller_target_call_key(&row).and_then(|key| counts.get(&key).copied())
+                })
                 .unwrap_or(1);
             let caller_name = row.caller_name.as_deref().unwrap_or_default();
             let target_hint = row.target_hint.as_deref().unwrap_or_default();
@@ -490,6 +494,21 @@ fn search_calls(
                     ),
                 ),
             };
+            let source_path_bonus = call_site_source_path_bonus(
+                base_score,
+                &row.path,
+                request,
+                query,
+                query_has_test_intent,
+            );
+            let test_path_penalty =
+                call_site_test_path_penalty(base_score, &row.path, request, query_has_test_intent);
+            let repeated_site_bonus =
+                if test_path_penalty >= 0.0 && (source_path_bonus > 0.0 || query_has_test_intent) {
+                    repeated_call_site_bonus(base_score, caller_target_call_count, request)
+                } else {
+                    0.0
+                };
             let score = base_score
                 + scoped_identity_bonus
                 + directional_call_context_bonus(
@@ -501,22 +520,9 @@ fn search_calls(
                     request,
                 )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
-                + repeated_call_site_bonus(base_score, caller_target_call_count, request)
+                + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
-            let score = score
-                + call_site_source_path_bonus(
-                    base_score,
-                    &row.path,
-                    request,
-                    query,
-                    query_has_test_intent,
-                )
-                + call_site_test_path_penalty(
-                    base_score,
-                    &row.path,
-                    request,
-                    query_has_test_intent,
-                );
+            let score = score + source_path_bonus + test_path_penalty;
             (score > 0.0).then(|| {
                 let line_range = call_result_line_range(request.code_query_kind, &row);
                 let caller = row.caller_name.unwrap_or_else(|| "<module>".to_owned());

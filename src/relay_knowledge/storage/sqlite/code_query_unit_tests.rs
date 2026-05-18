@@ -687,6 +687,56 @@ async fn caller_search_demotes_test_call_sites_without_test_intent() {
 }
 
 #[tokio::test]
+async fn caller_search_does_not_promote_repeated_test_sites_without_test_intent() {
+    let mut production_call = code_query_call("production-call", "table-file", "table/table.cc");
+    production_call.caller_name = Some("InternalGet".to_owned());
+    production_call.callee_name = "KeyMayMatch".to_owned();
+    production_call.target_hint = Some("KeyMayMatch".to_owned());
+    production_call.confidence_basis_points = 5_000;
+    production_call.confidence_tier = "ambiguous".to_owned();
+
+    let mut repeated_test_calls = Vec::new();
+    for line in [58, 61, 66, 69] {
+        let mut call = code_query_call(
+            &format!("filter-test-call-{line}"),
+            "filter-test-file",
+            "table/filter_block_test.cc",
+        );
+        call.caller_symbol_snapshot_id = Some("filter-test-case".to_owned());
+        call.caller_name = Some("TEST_F".to_owned());
+        call.callee_symbol_snapshot_id = Some("filter-reader-key-may-match".to_owned());
+        call.callee_name = "KeyMayMatch".to_owned();
+        call.target_hint = Some("KeyMayMatch".to_owned());
+        call.resolution_state = "resolved".to_owned();
+        call.confidence_basis_points = 8_000;
+        call.confidence_tier = "inferred".to_owned();
+        call.line_range = code_query_range(line, line);
+        repeated_test_calls.push(call);
+    }
+
+    let mut calls = vec![production_call];
+    calls.extend(repeated_test_calls);
+    let store = store_with_case_intent_snapshot(code_query_snapshot(
+        vec![
+            code_query_file("table-file", "table/table.cc", "cpp"),
+            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"),
+        ],
+        Vec::new(),
+        calls,
+    ))
+    .await;
+
+    let hits = store
+        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, "table/table.cc");
+    assert!(hits[0].excerpt.contains("InternalGet"));
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
 async fn caller_search_demotes_same_named_wrapper_call_sites() {
     let mut wrapper_call = code_query_call("resolved-wrapper-call", "router-file", "src/router.cc");
     wrapper_call.caller_name = Some("Router::TargetCall".to_owned());
