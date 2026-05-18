@@ -138,13 +138,15 @@ and (
 
 ## 评估数据
 
-`cases.json` 定义 benchmark targets：
+`cases.json` 及其 `include_files` 定义自迭代目标工作负载。它不是“当前已经全部实现”的能力清单；新增 case 可以代表下一轮候选需要补齐的竞争力目标。候选应改进通用 parser、图边、候选收缩、排序、service workflow 或可观测性，不能通过删除、放宽或枚举 case 获得分数。
 
 - 本地文件索引 fixture：在临时目录中生成 `user documents`、Linux `/opt`
   风格路径、Windows `D:` 风格路径、深层目录和高噪声文件集合，运行
   `relay-knowledge files index/query`，记录 `file_index_ms`、
-  `file_query_p50_ms` 和 `file_query_p95_ms`。每条文件查询都使用
-  subprocess timeout，防止候选实现卡死 evaluator。
+  `file_query_p50_ms` 和 `file_query_p95_ms`。文件 case 可声明
+  `objective`、`max_results`、`truncated`、`degraded_reason` 和更细粒度的命中字段，用来表达路径/内容分离、scope 前置、候选收缩、后台索引和诊断目标。每条文件查询都使用 subprocess timeout，防止候选实现卡死 evaluator。
+- 多语言代码仓库检索 targets：默认 profile 覆盖 relay-teams Python 与 JavaScript、LevelDB C++、Linux C；exhaustive profile 继续覆盖 Kubernetes Go 和 Spring Framework Java。JavaScript、Java、C、C++ cases 有意包含 nested class、宏、导出函数、caller/callee、hybrid 概念查询和 path/language filter 场景，用于推动后续自迭代补齐 parser、identity、edge finalize、FTS/BM25 和 ranking fusion 能力。
+- 仓库注册后索引性能 targets：`cases/repository_index_performance_targets.json` 收紧 `index_budget_ms`，并新增 `register_index_budget_ms` 组合预算。评估器会同时记录 `*_index_ms` 与 `*_register_index_ms`，让自迭代优先优化 `repo register` 后 cold index 的批处理、解析吞吐、SQLite 写入、finalize 和增量复用路径。
 - 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
 - `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要和选定的 02/03/04 文档片段交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
 - `/opt/workspace/relay-teams`：`scope=all` 全仓索引和 Python 服务、connector、eval checkpoint、re-export 等查询。

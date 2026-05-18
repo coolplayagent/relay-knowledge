@@ -1,0 +1,28 @@
+{
+  "repositories": {
+    "relay_teams": {
+      "index_budget_ms": 45000,
+      "register_index_budget_ms": 46000
+    },
+    "leveldb_cpp": {
+      "index_budget_ms": 12000,
+      "register_index_budget_ms": 12500
+    },
+    "linux_sample": {
+      "index_budget_ms": 180000,
+      "register_index_budget_ms": 181000
+    },
+    "linux_full": {
+      "index_budget_ms": 180000,
+      "register_index_budget_ms": 181000
+    },
+    "kubernetes_go_sample": {
+      "index_budget_ms": 210000,
+      "register_index_budget_ms": 211000
+    },
+    "spring_framework_java": {
+      "index_budget_ms": 120000,
+      "register_index_budget_ms": 121000
+    }
+  }
+}

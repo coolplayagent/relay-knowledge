@@ -475,6 +475,8 @@ Goal:
 - Treat foundational repo retrieval, competitive repo retrieval, and semantic/vector retrieval as protected self-iteration objectives. Runtime semantic/vector and embedding settings are read from the process environment by the relay-knowledge binary; do not hard-code provider URLs, API keys, model names, or dimensions in candidate changes.
 - When the research judge is configured, treat its feedback as a protected objective. The judge may run through an OpenAI-compatible HTTP endpoint or an external coding-agent CLI such as relay-teams, codex, cc, or copilot. Do not hard-code judge provider URLs, API keys, model names, or CLI-specific secrets in candidate changes.
 - Focus on multi-repository, large-repository full-scope indexing and retrieval.
+- Prioritize the repository register-to-index path when performance feedback is present. Improvements should reduce cold indexing wall time after `repo register` through batching, incremental reuse, parser/extraction throughput, SQLite write layout, finalize efficiency, or worker boundaries without weakening graph completeness.
+- Treat cases.json as the target workload for self-improvement, not only as a snapshot of already-working behavior. If newly added JavaScript, Java, C, C++, local-file, or background-indexing targets fail, improve the underlying parser, graph extraction, candidate retrieval, ranking, or service workflow rather than deleting or weakening the case.
 - Prefer algorithmic or architectural improvements over local special-casing: candidate pruning before scoring, SQLite/FTS-backed lookups, symbol identity normalization, import/call edge quality, bounded batch/finalize design, cache-aware query plans, and ranking fusion are all valid directions when test-backed.
 
 Constraints:

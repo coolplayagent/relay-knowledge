@@ -173,14 +173,36 @@ The `chart` command writes:
 
 ## Evaluation data
 
-`cases.json` defines the benchmark targets:
+`cases.json` and its `include_files` define the self-improvement target
+workload. It is not just a list of behavior that already works; newly added cases may represent
+competitive targets that future candidates must complete. Candidates should
+improve general parser, graph-edge, candidate-pruning, ranking, service
+workflow, or observability behavior instead of deleting, weakening, or
+enumerating cases.
 
 - Local file-index fixtures create deterministic temporary roots for user
   documents, Linux `/opt`-style paths, Windows `D:`-style paths, deep
   directories, and high-noise file sets. The evaluator runs
   `relay-knowledge files index/query`, records `file_index_ms`,
-  `file_query_p50_ms`, and `file_query_p95_ms`, and applies a subprocess
-  timeout to each file query so a candidate cannot hang the evaluator.
+  `file_query_p50_ms`, and `file_query_p95_ms`. File cases can declare
+  `objective`, `max_results`, `truncated`, `degraded_reason`, and more precise
+  hit fields to express path/content separation, scope-first filtering,
+  candidate pruning, background indexing, and diagnostics targets. A subprocess
+  timeout is applied to each file query so a candidate cannot hang the
+  evaluator.
+- Multi-language repository retrieval targets cover relay-teams Python and
+  JavaScript, LevelDB C++, and Linux C in the default profile; Kubernetes Go and
+  Spring Framework Java remain in the exhaustive profile. The JavaScript, Java,
+  C, and C++ cases intentionally include nested classes, macros, exported
+  functions, caller/callee lookup, hybrid concept queries, and path/language
+  filters to drive parser, identity, edge-finalize, FTS/BM25, and ranking-fusion
+  improvements.
+- Repository register-to-index performance targets in
+  `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
+  and add combined `register_index_budget_ms` budgets. The evaluator records
+  both `*_index_ms` and `*_register_index_ms` so self-iteration prioritizes cold
+  indexing wall time after `repo register`, including batching, parser
+  throughput, SQLite writes, finalize work, and incremental reuse.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, and selected 02/03/04 documentation excerpts to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.

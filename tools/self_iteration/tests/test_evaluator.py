@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evaluator import (
     CommandResult,
+    load_cases,
     repository_case_objective,
     score_semantic_vector_case,
     semantic_vector_env_check,
@@ -50,6 +52,58 @@ class EvaluatorTests(unittest.TestCase):
             ),
             "competitive_capability",
         )
+
+    def test_load_cases_merges_included_case_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "extra.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": {
+                            "relay_teams": {
+                                "register_index_budget_ms": 46000,
+                            }
+                        },
+                        "file_fixtures": {"background": {"files": []}},
+                        "file_query_cases": [{"id": "file-target"}],
+                        "query_cases": [{"id": "repo-target"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases_path = root / "cases.json"
+            cases_path.write_text(
+                json.dumps(
+                    {
+                        "include_files": ["extra.json"],
+                        "repositories": {
+                            "relay_teams": {
+                                "path": "/repo",
+                                "index_budget_ms": 90000,
+                            }
+                        },
+                        "file_fixtures": {"base": {"files": []}},
+                        "file_query_cases": [{"id": "file-base"}],
+                        "query_cases": [{"id": "repo-base"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_cases(cases_path)
+
+        self.assertEqual(set(config["file_fixtures"]), {"base", "background"})
+        self.assertEqual(
+            [case["id"] for case in config["file_query_cases"]],
+            ["file-base", "file-target"],
+        )
+        self.assertEqual(
+            [case["id"] for case in config["query_cases"]],
+            ["repo-base", "repo-target"],
+        )
+        self.assertEqual(config["repositories"]["relay_teams"]["path"], "/repo")
+        self.assertEqual(config["repositories"]["relay_teams"]["index_budget_ms"], 90000)
+        self.assertEqual(config["repositories"]["relay_teams"]["register_index_budget_ms"], 46000)
 
     def test_semantic_vector_profile_reads_external_runtime_env(self) -> None:
         profile = semantic_vector_runtime_profile(

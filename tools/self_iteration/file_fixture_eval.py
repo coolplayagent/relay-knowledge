@@ -88,7 +88,11 @@ def evaluate_file_fixtures(
             continue
 
         durations: list[int] = []
-        for case in [case for case in all_cases if case.get("fixture") == fixture_name]:
+        for case in [
+            case
+            for case in all_cases
+            if case.get("fixture") == fixture_name and case.get("mode") != "background_auto_index"
+        ]:
             query = run_command(
                 f"{fixture_name}_{case['id']}",
                 file_query_command(binary, scope, case),
@@ -118,6 +122,19 @@ def evaluate_file_fixtures(
                 )
             )
 
+    background_report = evaluate_background_file_index_cases(
+        binary=binary,
+        workspace=workspace,
+        env=env,
+        fixture_root=fixture_root,
+        fixtures=fixtures,
+        all_cases=all_cases,
+        timeout=timeout,
+    )
+    commands.extend(background_report["commands"])
+    case_observations.extend(background_report["cases"])
+    metrics.extend(background_report["metrics"])
+
     return {"commands": commands, "cases": case_observations, "metrics": metrics}
 
 
@@ -132,6 +149,19 @@ def file_fixture_runtime_env(env: dict[str, str], root: Path) -> dict[str, str]:
     if root_value not in configured_roots:
         configured_roots.append(root_value)
     fixture_env["RELAY_KNOWLEDGE_FILE_INDEX_ROOTS"] = ";".join(configured_roots)
+    return fixture_env
+
+
+def background_file_fixture_runtime_env(
+    env: dict[str, str],
+    root: Path,
+    scan_interval_ms: int,
+) -> dict[str, str]:
+    fixture_env = file_fixture_runtime_env(env, root)
+    fixture_env["RELAY_KNOWLEDGE_FILE_INDEX_ENABLED"] = "true"
+    fixture_env["RELAY_KNOWLEDGE_FILE_INDEX_SCAN_INTERVAL_MS"] = str(scan_interval_ms)
+    fixture_env.setdefault("RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS", "5000")
+    fixture_env.setdefault("RELAY_KNOWLEDGE_FILE_INDEX_QUERY_TIMEOUT_MS", "750")
     return fixture_env
 
 
@@ -168,6 +198,119 @@ def file_query_command(binary: Path, scope: str, case: dict[str, Any]) -> list[s
     ]
 
 
+def evaluate_background_file_index_cases(
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    fixture_root: Path,
+    fixtures: dict[str, Any],
+    all_cases: list[dict[str, Any]],
+    timeout: int,
+) -> dict[str, Any]:
+    commands: list[FileCommandResult] = []
+    case_observations: list[CaseObservation] = []
+    metrics: list[MetricObservation] = []
+    cases = [case for case in all_cases if case.get("mode") == "background_auto_index"]
+    for case in cases:
+        fixture_name = str(case["fixture"])
+        fixture = fixtures.get(fixture_name)
+        if not isinstance(fixture, dict):
+            case_observations.append(
+                CaseObservation(
+                    case_id=case["id"],
+                    repository=fixture_name,
+                    passed=False,
+                    message=f"missing fixture {fixture_name}",
+                    objective=str(case.get("objective", "competitive_capability")),
+                )
+            )
+            continue
+        root = fixture_root / f"{fixture_name}-{case['id']}"
+        create_file_fixture(root, fixture)
+        scan_interval_ms = int(case.get("scan_interval_ms", 250))
+        fixture_env = background_file_fixture_runtime_env(env, root, scan_interval_ms)
+        service = subprocess.Popen(
+            [str(binary), "service", "run"],
+            cwd=workspace,
+            env=fixture_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        started = time.monotonic()
+        final_query: FileCommandResult | None = None
+        try:
+            for action in case.get("actions_after_start", []):
+                apply_fixture_action(root, action)
+            deadline = started + min(timeout, int(case.get("timeout_seconds", 8)))
+            while time.monotonic() < deadline:
+                if service.poll() is not None:
+                    break
+                query = run_command(
+                    f"{fixture_name}_{case['id']}_query",
+                    file_query_command(binary, AUTHORIZED_FILE_FIXTURE_SCOPE, case),
+                    workspace,
+                    fixture_env,
+                    min(5, max(1, int(deadline - time.monotonic()) + 1)),
+                )
+                final_query = query
+                if score_file_case(fixture_name, case, query).passed:
+                    break
+                time.sleep(float(case.get("poll_interval_ms", 200)) / 1000.0)
+        finally:
+            stop_background_service(service)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        if final_query is None:
+            final_query = FileCommandResult(
+                name=f"{fixture_name}_{case['id']}_query",
+                command=file_query_command(binary, AUTHORIZED_FILE_FIXTURE_SCOPE, case),
+                exit_code=1,
+                duration_ms=duration_ms,
+                stdout="",
+                stderr="background file index service exited before query",
+            )
+        commands.append(final_query)
+        observation = score_file_case(fixture_name, case, final_query)
+        case_observations.append(observation)
+        metrics.append(
+            MetricObservation(
+                name=f"{fixture_name}_{case['id']}_file_auto_index_first_seen_ms",
+                value=float(duration_ms),
+                budget=float(case.get("auto_index_budget_ms", 0)) or None,
+                key=True,
+            )
+        )
+
+    return {"commands": commands, "cases": case_observations, "metrics": metrics}
+
+
+def apply_fixture_action(root: Path, action: dict[str, Any]) -> None:
+    action_type = action.get("type")
+    if action_type == "write":
+        write_fixture_file(root / action["path"], action.get("content", "fixture"))
+    elif action_type == "delete":
+        path = root / action["path"]
+        if path.exists():
+            path.unlink()
+    elif action_type == "rename":
+        source = root / action["from"]
+        target = root / action["to"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+    else:
+        raise ValueError(f"unsupported file fixture action: {action_type}")
+
+
+def stop_background_service(service: subprocess.Popen[str]) -> None:
+    if service.poll() is None:
+        service.terminate()
+        try:
+            service.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            service.kill()
+            service.communicate(timeout=5)
+
+
 def score_file_case(fixture_name: str, case: dict[str, Any], result: Any) -> CaseObservation:
     if not result.passed:
         return CaseObservation(
@@ -175,6 +318,7 @@ def score_file_case(fixture_name: str, case: dict[str, Any], result: Any) -> Cas
             repository="local_files",
             passed=False,
             message=last_output_line(result.stdout, result.stderr),
+            objective=str(case.get("objective", "foundational_capability")),
         )
     payload = parse_json_output(result.stdout)
     hits = payload.get("results", [])
@@ -183,10 +327,27 @@ def score_file_case(fixture_name: str, case: dict[str, Any], result: Any) -> Cas
     max_rank = int(case.get("max_rank", 1))
     rank = first_expected_rank(hits, expected)
     false_positives = sum(1 for hit in hits if hit_matches_any(hit, forbidden))
-    passed = (not expected or (rank is not None and rank <= max_rank)) and false_positives == 0
+    failures = []
+    if expected and (rank is None or rank > max_rank):
+        failures.append(f"rank={rank} max_rank={max_rank}")
+    if false_positives:
+        failures.append(f"false_positives={false_positives}")
+    if "max_results" in case and len(hits) > int(case["max_results"]):
+        failures.append(f"results={len(hits)} max_results={case['max_results']}")
+    if "truncated" in case and bool(payload.get("truncated")) != bool(case["truncated"]):
+        failures.append(f"truncated={payload.get('truncated')}")
+    if "degraded_reason" in case and payload.get("degraded_reason") != case["degraded_reason"]:
+        failures.append(f"degraded_reason={payload.get('degraded_reason')}")
+    if "degraded_reason_contains" in case:
+        degraded_reason = str(payload.get("degraded_reason") or "")
+        if str(case["degraded_reason_contains"]) not in degraded_reason:
+            failures.append(f"degraded_reason={degraded_reason}")
+    passed = not failures
     if case.get("expect_empty"):
         passed = len(hits) == 0
         rank = 0 if passed else None
+        if not passed:
+            failures.append(f"expected_empty_results={len(hits)}")
     return CaseObservation(
         case_id=case["id"],
         repository=fixture_name,
@@ -194,7 +355,10 @@ def score_file_case(fixture_name: str, case: dict[str, Any], result: Any) -> Cas
         rank=rank,
         max_rank=max_rank,
         false_positive_count=false_positives,
-        message=f"results={len(hits)} rank={rank}",
+        message=f"results={len(hits)} rank={rank}" + (
+            f" failures={'; '.join(failures)}" if failures else ""
+        ),
+        objective=str(case.get("objective", "foundational_capability")),
     )
 
 
@@ -247,8 +411,18 @@ def hit_matches_any(hit: dict[str, Any], patterns: list[dict[str, Any]]) -> bool
 
 
 def hit_matches(hit: dict[str, Any], pattern: dict[str, Any]) -> bool:
-    for field in ("relative_path", "file_name", "extension", "status"):
+    for field in ("scope_id", "root_id", "relative_path", "file_name", "extension", "status"):
         if field in pattern and hit.get(field) != pattern[field]:
+            return False
+    if "parent_dir" in pattern and hit.get("parent_dir") != pattern["parent_dir"]:
+        return False
+    for field, contains_field in (
+        ("path", "path_contains"),
+        ("relative_path", "relative_path_contains"),
+        ("file_name", "file_name_contains"),
+        ("parent_dir", "parent_dir_contains"),
+    ):
+        if contains_field in pattern and str(pattern[contains_field]) not in str(hit.get(field, "")):
             return False
     return True
 

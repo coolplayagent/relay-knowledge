@@ -1,4 +1,9 @@
 {
+  "include_files": [
+    "cases/file_background_targets.json",
+    "cases/repository_index_performance_targets.json",
+    "cases/repository_multilang_targets.json"
+  ],
   "repositories": {
     "relay_teams": {
       "path": "/opt/workspace/relay-teams",

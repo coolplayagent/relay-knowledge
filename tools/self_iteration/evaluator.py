@@ -241,6 +241,14 @@ def evaluate_repository(
             key=True,
         )
     )
+    metrics.append(
+        MetricObservation(
+            name=f"{repo_name}_register_index_ms",
+            value=register.duration_ms + index.duration_ms,
+            budget=float(repo_config.get("register_index_budget_ms", 0)) or None,
+            key=True,
+        )
+    )
     if not index.passed:
         return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json, scope)
 
@@ -888,7 +896,37 @@ def run_command(
 
 
 def load_cases(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    config = json.loads(path.read_text(encoding="utf-8"))
+    include_files = config.pop("include_files", [])
+    for include_file in include_files:
+        included = load_cases(path.parent / include_file)
+        merge_case_config(config, included)
+    return config
+
+
+def merge_case_config(config: dict[str, Any], included: dict[str, Any]) -> None:
+    for key, value in included.items():
+        if isinstance(value, list):
+            target = config.setdefault(key, [])
+            if not isinstance(target, list):
+                raise ValueError(f"cannot merge list case config into non-list key: {key}")
+            target.extend(value)
+        elif isinstance(value, dict):
+            target = config.setdefault(key, {})
+            if not isinstance(target, dict):
+                raise ValueError(f"cannot merge map case config into non-map key: {key}")
+            merge_nested_map(target, value)
+        else:
+            config[key] = value
+
+
+def merge_nested_map(target: dict[str, Any], included: dict[str, Any]) -> None:
+    for key, value in included.items():
+        existing = target.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merge_nested_map(existing, value)
+        else:
+            target[key] = value
 
 
 def parse_json_output(stdout: str) -> dict[str, Any]:

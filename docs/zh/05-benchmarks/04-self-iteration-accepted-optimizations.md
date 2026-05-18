@@ -992,7 +992,7 @@ Adopted optimization notes:
 - cases: 36/36 passed
 - changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_tests.rs`
 - key improvements: score_component:score 0.757755->0.961262; score_component:performance 0.875598->0.917747; score_component:stability 0.981132->1.0; score_component:research_judge 0.0->0.88; metric:cargo_build_release_ms 50825.0->40908; metric:leveldb_cpp_index_ms 19874.0->18234; metric:leveldb_cpp_query_p50_ms 300.0->222.5; metric:leveldb_cpp_query_p95_ms 387.0->279.0
-- known degradations: none recorded
+- known degradations: none recorded. 2026-05-18 target-case expansion treats self-iteration cases and included case files as forward workload, adding competitive JavaScript/Java/C/C++, background file-index, and register-to-index performance targets without allowing fixture-specific shortcuts.
 - latency metrics: cargo_build_release_ms=40908ms; cargo_fmt_check_ms=816ms; cargo_clippy_ms=217ms; cargo_test_ms=9323ms; relay_teams_index_ms=81573ms; relay_teams_query_p50_ms=294ms; relay_teams_query_p95_ms=537ms; leveldb_cpp_index_ms=18234ms
 
 Adopted optimization notes:

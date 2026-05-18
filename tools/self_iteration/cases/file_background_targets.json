@@ -1,0 +1,44 @@
+{
+  "file_fixtures": {
+    "local_background_auto_index": {
+      "scope": "local-files",
+      "index_budget_ms": 5000,
+      "query_p50_budget_ms": 80,
+      "query_p95_budget_ms": 200,
+      "files": [
+        {
+          "path": "Inbox/background-index-seed.txt",
+          "content": "seed placeholder"
+        }
+      ]
+    }
+  },
+  "file_query_cases": [
+    {
+      "id": "files_background_service_auto_indexes_new_document",
+      "fixture": "local_background_auto_index",
+      "mode": "background_auto_index",
+      "objective": "competitive_capability",
+      "query": "background auto indexed note",
+      "limit": 10,
+      "max_rank": 1,
+      "timeout_seconds": 8,
+      "poll_interval_ms": 200,
+      "scan_interval_ms": 200,
+      "auto_index_budget_ms": 8000,
+      "actions_after_start": [
+        {
+          "type": "write",
+          "path": "Inbox/background-auto-indexed-note.md",
+          "content": "background auto indexed note should appear without a manual files index command"
+        }
+      ],
+      "expected": [
+        {
+          "relative_path": "Inbox/background-auto-indexed-note.md",
+          "extension": "md"
+        }
+      ]
+    }
+  ]
+}
