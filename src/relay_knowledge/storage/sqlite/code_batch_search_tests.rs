@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use rusqlite::params;
+
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
@@ -50,6 +52,12 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         })
         .await
         .expect("batch should persist");
+    assert!(
+        search_document_languages(&store, source_scope)
+            .await
+            .is_empty(),
+        "cold scopes should defer edge search rows until finalize rebuilds them"
+    );
     store
         .finalize_code_index_session(session)
         .await
@@ -71,6 +79,104 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
     );
 }
 
+#[tokio::test]
+async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:active-edge-languages";
+    let session = session_for_scope(source_scope);
+    let rust_file = file(source_scope, "rust-file", "src/lib.rs", "rust");
+    let python_file = file(source_scope, "python-file", "py/app.py", "python");
+    let rust_reference = reference(
+        source_scope,
+        "rust-reference",
+        "rust-file",
+        "src/lib.rs",
+        "target",
+    );
+    let python_import = import(
+        source_scope,
+        "python-import",
+        "python-file",
+        "py/app.py",
+        "from service import TargetService",
+    );
+
+    store
+        .begin_code_index_session(session)
+        .await
+        .expect("session should begin");
+    mark_scope_active(&store, source_scope).await;
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![rust_file, python_file],
+            symbols: Vec::new(),
+            references: vec![rust_reference],
+            imports: vec![python_import],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+
+    let languages = search_document_languages(&store, source_scope).await;
+
+    assert_eq!(
+        languages.get(&("reference".to_owned(), "src/lib.rs".to_owned())),
+        Some(&"rust".to_owned())
+    );
+    assert_eq!(
+        languages.get(&("import".to_owned(), "py/app.py".to_owned())),
+        Some(&"python".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn retained_scope_reindex_keeps_intermediate_edge_search_rows() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:retained-edge-languages";
+    let session = session_for_scope(source_scope);
+    mark_scope_retained(&store, source_scope).await;
+    let rust_file = file(source_scope, "rust-file", "src/lib.rs", "rust");
+    let rust_reference = reference(
+        source_scope,
+        "rust-reference",
+        "rust-file",
+        "src/lib.rs",
+        "target",
+    );
+
+    store
+        .begin_code_index_session(session)
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![rust_file],
+            symbols: Vec::new(),
+            references: vec![rust_reference],
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+
+    let languages = search_document_languages(&store, source_scope).await;
+
+    assert_eq!(
+        languages.get(&("reference".to_owned(), "src/lib.rs".to_owned())),
+        Some(&"rust".to_owned())
+    );
+}
+
 async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store
@@ -82,6 +188,47 @@ async fn registered_store() -> SqliteGraphStore {
         .expect("repository should persist");
 
     store
+}
+
+async fn mark_scope_active(store: &SqliteGraphStore, source_scope: &str) {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection.execute(
+                "
+                UPDATE code_repositories
+                SET last_indexed_scope_id = ?1
+                WHERE repository_id = 'repo'
+                ",
+                [source_scope],
+            )?;
+
+            Ok(())
+        })
+        .await
+        .expect("active scope should update");
+}
+
+async fn mark_scope_retained(store: &SqliteGraphStore, source_scope: &str) {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection.execute(
+                "
+                INSERT INTO code_repository_scopes (
+                    source_scope, repository_id, resolved_commit_sha, tree_hash,
+                    path_filters_json, language_filters_json, indexed_file_count,
+                    symbol_count, reference_count, chunk_count, stale, degraded_reason
+                )
+                VALUES (?1, 'repo', 'commit', 'tree', '[]', '[]', 0, 0, 0, 0, 0, NULL)
+                ",
+                params![source_scope],
+            )?;
+
+            Ok(())
+        })
+        .await
+        .expect("retained scope should insert");
 }
 
 fn file(
