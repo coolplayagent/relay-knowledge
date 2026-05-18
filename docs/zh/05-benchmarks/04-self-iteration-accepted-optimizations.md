@@ -10,6 +10,12 @@
 - `Adopted optimization notes`: Codex 输出中提取的优化说明，用作下一轮 prompt 的上下文。
 ## 渐进式记忆
 自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 候选优化说明：manual-batch-edge-language-map-20260518
+- 目标：在保护 foundational、competitive、semantic/vector、research judge 与 stability 下限的前提下，降低多仓 full-scope `repo register` 到 `repo index` 的 SQLite 写入与 finalize 前批处理成本，优先改善 relay-teams、LevelDB、Spring/Kubernetes 等大仓 cold indexing wall time。
+- 算法与架构：checkpointed batch 写入 reference/import search document 时，先从当前 `CodeIndexBatch.files` 构造 path -> language_id 映射；只有发现 edge path 不在本批文件集合中时，才按缺失 path 逐条回查 `code_repository_files` 作为兼容兜底。reference 与 import 共用同一映射，避免每个 batch 对整个 source scope 重复扫描文件表。
+- 不变量：不改变 SQLite schema、FTS document 字段语义、candidate limit、query ranking、call rebuild/finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；正常 parser/indexer 仍要求 edge 事实归属于同批文件，兜底只保护 legacy 或异常 batch。
+- 预期影响：大仓每批不再为 reference/import 各执行一次全 scope file-language lookup，减少批处理 SQLite 读放大；edge search row 的 `language_id` 与既有测试保障保持一致，language-filtered edge query coverage 不应退化。
+- 已知风险：如果未来引入跨批 edge records 且缺失 path 数量很大，兜底会退化为逐 path 查询；该路径表示 batch 事实与文件事实不一致，应由后续 worker/batch contract 测试收敛，而不会影响正常 full-scope indexing 热路径。
 ## 候选优化说明：manual-runtime-dist-scope-and-callsite-test-demotion-20260518
 - 目标：修复 recent `research_judge` gate 指出的 relay-teams JavaScript runtime 零召回与 LevelDB `KeyMayMatch` production caller 排名退化，同时保护 foundational、competitive、semantic/vector、stability、provider/env 与 judge 配置下限。
 - 算法与架构：source preset 继续排除 dependency/cache/vendor/build/out/target、二进制媒体、map/jsonl 和锁文件；只允许源码语言文件进入 `dist/{js,javascript,ts,typescript,src,source,sources}/{app,client,core,runtime,server}` runtime 子树，并排除 `.min.`、assets、vendor 和非源码扩展。Caller/callee 排序在已有 bounded FTS candidate、方向过滤、最终 Rust scoring 内，对无 test intent 的 test/benchmark call site 加小额 penalty，让 production call site 不被 resolved test edge 的置信度差压低。
@@ -702,162 +708,12 @@ ize-options-chunk", -            "db-impl-source", -            "db/db_impl.cc",
 Adopted optimization notes:
 
 d, +            &path, +            "target", +        )); +    } + +    files.push(file( +        "target-file", +        "src/target.rs", +        "rust", +        CodeParseStatus::Parsed, +        None, +    )); +    symbols.push(symbol( +        "target-symbol", +        "target-file", +        "src/target.rs", +        "target", +    )); + +    CodeIndexSnapshot { +        repository_id: "repo".to_owned(), +        source_scope: TEST_SOURCE_SCOPE.to_owned(), +        base_resolved_commit_sha: None, +        resolved_commit_sha: "commit".to_owned(), +        tree_hash: "tree".to_owned(), +        path_filters: Vec::new(), +        language_filters: Vec::new(), +        full_replace: true, +        changed_path_count: files.len(), +        skipped_unchanged_count: 0, +        deleted_paths: Vec::new(), +        tombstones: Vec::new(), +        files, +        symbols, +        references: Vec::new(), +        imports: Vec::new(), +        calls: Vec::new(), +        chunks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379
-## 20260516T174317Z
+## 20260516 HTTP test stability entries
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T174317Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
+- runs: `20260516T174317Z`, `20260516T181003Z`, `20260516T181727Z`, `20260516T184629Z`, `20260516T185001Z`, `20260516T190530Z`, `20260516T190848Z`, `20260516T191712Z`, `20260516T192508Z`, `20260516T193653Z`, `20260516T194305Z`, `20260516T195734Z`
 - changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: score_component:score 0.35->1.0; score_component:accuracy 0.0->1.0; score_component:stability 0.8->1.0; metric:cargo_build_release_ms 35317.0->33204; gate:cargo_test failed->passed Running tests/relay_knowledge/main.rs (target/debug/deps/relay_knowledge-1a9ddc0d040472be)
-- known degradations: metric:cargo_clippy_ms 180.0->8302; metric:cargo_test_ms 6222.0->7199
-- latency metrics: cargo_build_release_ms=33204ms; cargo_fmt_check_ms=684ms; cargo_clippy_ms=8302ms; cargo_test_ms=7199ms; relay_teams_index_ms=69263ms; relay_teams_query_p50_ms=94ms; relay_teams_query_p95_ms=311ms; leveldb_cpp_index_ms=15213ms
-
-Adopted optimization notes:
-
-nks: Vec::new(), +        diagnostics: Vec::new(), +    } +} + fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot { let mut files = Vec::new(); let mut diagnostics = Vec::new(); tokens used 159,379 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 4d43f645ad38d7d5cae8a7ba9cf06826f9bf2f94..faaf3f2f6db33cc2bfd36072400145272e3b9a36 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -181,14 +181,13 @@ let _ = shutdown_waiter.await; })); -    let stream = connect_with_retry(&bind).await; +    let mut stream = connect_with_retry(&bind).await; let request = b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n"; stream -        .writable() +        .write_all(request) .await -        .expect("stream should become writable"); -    stream.try_write(request).expect("request should write"); -    tokio::time::timeout(Duration::from_secs(1), handler_started.notified()) +        .expect("request should write completely"); +    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676
-## 20260516T181003Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181003Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 5062.0->4796; metric:relay_teams_index_ms 66544.0->59467
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=461ms; cargo_clippy_ms=4796ms; cargo_test_ms=3737ms; relay_teams_index_ms=59467ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=416ms; leveldb_cpp_index_ms=18635ms
-
-Adopted optimization notes:
-
-ed.notified()) .await .expect("handler should start before shutdown"); let _ = shutdown.send(()); tokens used 89,676 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index faaf3f2f6db33cc2bfd36072400145272e3b9a36..2eaf575b4b928b3821fd010e11be8a9ab2e5bfb0 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -155,7 +155,13 @@ #[tokio::test] async fn serve_router_enforces_graceful_shutdown_timeout() { -    let bind = format!("127.0.0.1:{}", unused_port()); +    let listener = tokio::net::TcpListener::bind("127.0.0.1:0") +        .await +        .expect("listener should bind"); +    let bind = listener +        .local_addr() +        .expect("listener should expose local address") +        .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), Duration::from_secs(5), @@ -177,7 +183,7 @@ }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); -    let server = tokio::spawn(serve_router(router, config, async { +    let server = tokio::spawn(serve_listener(listener, router, config, async { let _ = shutdown_waiter.await; })); tokens used 40,692
-## 20260516T181727Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T181727Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:relay_teams_index_ms 68328.0->64783
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=98ms; cargo_fmt_check_ms=468ms; cargo_clippy_ms=4959ms; cargo_test_ms=3852ms; relay_teams_index_ms=64783ms; relay_teams_query_p50_ms=129ms; relay_teams_query_p95_ms=396ms; leveldb_cpp_index_ms=18642ms
-
-Adopted optimization notes:
-
-d = handler_started.clone(); +    let (handler_started, handler_started_waiter) = tokio::sync::oneshot::channel(); +    let route_handler_started = Arc::new(std::sync::Mutex::new(Some(handler_started))); let router = Router::new().route( "/hold", get(move || { let handler_started = route_handler_started.clone(); async move { -                handler_started.notify_one(); +                let sender = handler_started +                    .lock() +                    .expect("handler signal mutex should not be poisoned") +                    .take(); +                if let Some(sender) = sender { +                    let _ = sender.send(()); +                } std::future::pending::<&'static str>().await } }), @@ -193,9 +199,10 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), handler_started.notified()) +    tokio::time::timeout(Duration::from_secs(5), handler_started_waiter) .await -        .expect("handler should start before shutdown"); +        .expect("handler should start before shutdown") +        .expect("handler should signal startup"); let _ = shutdown.send(()); let error = server tokens used 74,688
-## 20260516T184629Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T184629Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 4853.0->150; metric:relay_teams_query_p95_ms 425.0->387.0
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=124ms; cargo_fmt_check_ms=474ms; cargo_clippy_ms=150ms; cargo_test_ms=3728ms; relay_teams_index_ms=65389ms; relay_teams_query_p50_ms=114ms; relay_teams_query_p95_ms=387ms; leveldb_cpp_index_ms=18566ms
-
-Adopted optimization notes:
-
-or = server tokens used 74,688 - diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index 67fa5d215cacb0745ff6bb5ab4eb14e2849720a2..1d01c78ec52234080d47421338373deeacba72f6 --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -176,16 +176,14 @@ "/hold", get(move || { let handler_started = route_handler_started.clone(); -            async move { -                let sender = handler_started -                    .lock() -                    .expect("handler signal mutex should not be poisoned") -                    .take(); -                if let Some(sender) = sender { -                    let _ = sender.send(()); -                } -                std::future::pending::<&'static str>().await +            let sender = handler_started +                .lock() +                .expect("handler signal mutex should not be poisoned") +                .take(); +            if let Some(sender) = sender { +                let _ = sender.send(()); } +            async move { std::future::pending::<&'static str>().await } }), ); let (shutdown, shutdown_waiter) = tokio::sync::oneshot::channel(); tokens used 111,325
-## 20260516T185001Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T185001Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:relay_teams_index_ms 65389.0->59772
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=126ms; cargo_fmt_check_ms=458ms; cargo_clippy_ms=140ms; cargo_test_ms=3723ms; relay_teams_index_ms=59772ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=399ms; leveldb_cpp_index_ms=18655ms
-
-Adopted optimization notes:
-
-rvice { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready(&mut self, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + #[tokio::test] async fn serve_router_with_qos_rejects_excess_connections() { let bind = format!("127.0.0.1:{}", unused_port()); tokens used 54,376
-## 20260516T190530Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190530Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:relay_teams_index_ms 66815.0->61194
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=102ms; cargo_fmt_check_ms=462ms; cargo_clippy_ms=4966ms; cargo_test_ms=3697ms; relay_teams_index_ms=61194ms; relay_teams_query_p50_ms=118ms; relay_teams_query_p95_ms=400ms; leveldb_cpp_index_ms=18419ms
-
-Adopted optimization notes:
-
-- diff --git a/src/relay_knowledge/net/http_tests.rs b/src/relay_knowledge/net/http_tests.rs index b3b54e3545dbf196e0c0c4c67df8ab49e6b25664..d74058c99352706b77d9eef80e6e7ea72b4534cb --- a/src/relay_knowledge/net/http_tests.rs +++ b/src/relay_knowledge/net/http_tests.rs @@ -153,7 +153,7 @@ server.await.expect("server task should finish"); } -#[tokio::test] +#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_router_enforces_graceful_shutdown_timeout() { let listener = tokio::net::TcpListener::bind("127.0.0.1:0") .await @@ -164,7 +164,7 @@ .to_string(); let config = HttpConfig::new( HttpBindAddress::parse(&bind).expect("bind should parse"), -        Duration::from_secs(5), +        Duration::from_secs(30), Duration::from_millis(10), 1024, HttpProxyConfig::new(None, Vec::new(), true).expect("proxy should build"), @@ -189,7 +189,7 @@ .write_all(request) .await .expect("request should write completely"); -    tokio::time::timeout(Duration::from_secs(5), request_started_waiter) +    tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") .expect("request should signal startup"); tokens used 47,024
-## 20260516T190848Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T190848Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 4966.0->141; metric:relay_teams_index_ms 61194.0->58024
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=119ms; cargo_fmt_check_ms=467ms; cargo_clippy_ms=141ms; cargo_test_ms=3704ms; relay_teams_index_ms=58024ms; relay_teams_query_p50_ms=120ms; relay_teams_query_p95_ms=410ms; leveldb_cpp_index_ms=18599ms
-
-Adopted optimization notes:
-
-    mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +    } -    fn poll_ready( -        &mut self, +    fn poll_flush( +        mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_flush(context) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        mut self: std::pin::Pin<&mut Self>, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) } } tokens used 55,876
-## 20260516T191712Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T191712Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_test_ms 3786.0->3638; metric:relay_teams_index_ms 64279.0->60821
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=121ms; cargo_fmt_check_ms=464ms; cargo_clippy_ms=148ms; cargo_test_ms=3638ms; relay_teams_index_ms=60821ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=397ms; leveldb_cpp_index_ms=18755ms
-
-Adopted optimization notes:
-
-(())) } } -impl AsyncWrite for RequestReadStream { +impl AsyncWrite for InMemoryRequestStream { fn poll_write( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, buffer: &[u8], ) -> std::task::Poll<std::io::Result<usize>> { -        std::pin::Pin::new(&mut self.inner).poll_write(context, buffer) +        std::task::Poll::Ready(Ok(buffer.len())) } fn poll_flush( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_flush(context) +        std::task::Poll::Ready(Ok(())) } fn poll_shutdown( -        mut self: std::pin::Pin<&mut Self>, -        context: &mut std::task::Context<'_>, +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, ) -> std::task::Poll<std::io::Result<()>> { -        std::pin::Pin::new(&mut self.inner).poll_shutdown(context) +        std::task::Poll::Ready(Ok(())) } } tokens used 121,229
-## 20260516T192508Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T192508Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 4996.0->157
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=125ms; cargo_fmt_check_ms=469ms; cargo_clippy_ms=157ms; cargo_test_ms=3746ms; relay_teams_index_ms=61167ms; relay_teams_query_p50_ms=121ms; relay_teams_query_p95_ms=406ms; leveldb_cpp_index_ms=18565ms
-
-Adopted optimization notes:
-
-       _context: &mut std::task::Context<'_>, -        buffer: &mut ReadBuf<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        let remaining = &self.request[self.offset..]; -        if remaining.is_empty() { -            return std::task::Poll::Pending; -        } - -        let readable = remaining.len().min(buffer.remaining()); -        buffer.put_slice(&remaining[..readable]); -        self.offset += readable; -        std::task::Poll::Ready(Ok(())) -    } -} - -impl AsyncWrite for InMemoryRequestStream { -    fn poll_write( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -        buffer: &[u8], -    ) -> std::task::Poll<std::io::Result<usize>> { -        std::task::Poll::Ready(Ok(buffer.len())) -    } - -    fn poll_flush( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) -    } - -    fn poll_shutdown( -        self: std::pin::Pin<&mut Self>, -        _context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<std::io::Result<()>> { -        std::task::Poll::Ready(Ok(())) } } tokens used 55,066
-## 20260516T193653Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T193653Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 5881.0->4904; metric:relay_teams_index_ms 64393.0->60586
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=100ms; cargo_fmt_check_ms=466ms; cargo_clippy_ms=4904ms; cargo_test_ms=3775ms; relay_teams_index_ms=60586ms; relay_teams_query_p50_ms=116ms; relay_teams_query_p95_ms=392ms; leveldb_cpp_index_ms=18624ms
-
-Adopted optimization notes:
-
-Self::Service { +        RequestStartedService { +            inner, +            request_started: self.request_started.clone(), +        } +    } +} + +#[derive(Clone)] +struct RequestStartedService<S> { +    inner: S, +    request_started: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>, +} + +impl<S> Service<Request> for RequestStartedService<S> +where +    S: Service<Request> + Send, +    S::Future: Send + 'static, +{ +    type Response = S::Response; +    type Error = S::Error; +    type Future = S::Future; + +    fn poll_ready( +        &mut self, +        context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<Result<(), Self::Error>> { +        self.inner.poll_ready(context) +    } + +    fn call(&mut self, request: Request) -> Self::Future { +        let sender = self +            .request_started +            .lock() +            .expect("request signal mutex should not be poisoned") +            .take(); +        if let Some(sender) = sender { +            let _ = sender.send(()); +        } +        self.inner.call(request) +    } +} + struct InMemoryRequestListener { stream: Option<DuplexStream>, address: std::net::SocketAddr, tokens used 74,917
-## 20260516T194305Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T194305Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:cargo_clippy_ms 5938.0->4841
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=95ms; cargo_fmt_check_ms=456ms; cargo_clippy_ms=4841ms; cargo_test_ms=3721ms; relay_teams_index_ms=63352ms; relay_teams_query_p50_ms=130ms; relay_teams_query_p95_ms=408ms; leveldb_cpp_index_ms=18786ms
-
-Adopted optimization notes:
-
-    stream +        .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n") +        .await +        .expect("request should write completely"); tokio::time::timeout(Duration::from_secs(10), request_started_waiter) .await .expect("request should start before shutdown") @@ -245,39 +250,6 @@ let _ = sender.send(()); } self.inner.call(request) -    } -} - -struct InMemoryRequestListener { -    stream: Option<DuplexStream>, -    address: std::net::SocketAddr, -} - -impl InMemoryRequestListener { -    fn new(stream: DuplexStream) -> Self { -        Self { -            stream: Some(stream), -            address: "127.0.0.1:8791" -                .parse() -                .expect("loopback test address should parse"), -        } -    } -} - -impl axum::serve::Listener for InMemoryRequestListener { -    type Io = DuplexStream; -    type Addr = std::net::SocketAddr; - -    async fn accept(&mut self) -> (Self::Io, Self::Addr) { -        if let Some(stream) = self.stream.take() { -            return (stream, self.address); -        } - -        std::future::pending().await -    } - -    fn local_addr(&self) -> std::io::Result<Self::Addr> { -        Ok(self.address) } } tokens used 73,628
-## 20260516T195734Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260516T195734Z.patch`
-- score: 1.0 (accuracy=1.0, performance=1.0, stability=1.0)
-- cases: 26/26 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/net/http_tests.rs`
-- key improvements: metric:relay_teams_index_ms 59991.0->57595
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=96ms; cargo_fmt_check_ms=465ms; cargo_clippy_ms=4821ms; cargo_test_ms=3711ms; relay_teams_index_ms=57595ms; relay_teams_query_p50_ms=122ms; relay_teams_query_p95_ms=403ms; leveldb_cpp_index_ms=18905ms
-
-Adopted optimization notes:
-
-m { +    fn poll_write( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +        buffer: &[u8], +    ) -> std::task::Poll<std::io::Result<usize>> { +        std::task::Poll::Ready(Ok(buffer.len())) +    } -    fn poll_ready( -        &mut self, -        context: &mut std::task::Context<'_>, -    ) -> std::task::Poll<Result<(), Self::Error>> { -        self.inner.poll_ready(context) +    fn poll_flush( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } -    fn call(&mut self, request: Request) -> Self::Future { -        let sender = self -            .request_started -            .lock() -            .expect("request signal mutex should not be poisoned") -            .take(); -        if let Some(sender) = sender { -            let _ = sender.send(()); -        } -        self.inner.call(request) +    fn poll_shutdown( +        self: std::pin::Pin<&mut Self>, +        _context: &mut std::task::Context<'_>, +    ) -> std::task::Poll<std::io::Result<()>> { +        std::task::Poll::Ready(Ok(())) } } tokens used 57,392
+- summary: 多轮围绕 HTTP graceful shutdown/QoS 测试的 listener 绑定、请求启动信号、in-memory stream 和 timeout 同步边界做稳定性修复，目标是恢复 cargo test stability gate；原始 patch 仍保留在对应 `.git/relay-knowledge-self-iteration/patches/<run>.patch` 长期记忆中。
+- invariants: 不改变生产 HTTP/QoS runtime、SQLite、code retrieval、semantic/vector、provider/env、judge、安装发布或 CLI/API 行为；只修正测试同步条件。
 ## 20260517T030641Z
 
 - patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches/20260517T030641Z.patch`
@@ -1036,4 +892,17 @@ te/retrieval/derived.rs index 2bd9886479fa589a8ce06c8a9160360e3c1dd16d..45ab7b45
 Adopted optimization notes:
 
     let mut production_call = +        code_query_call("ambiguous-production-call", "table-file", "table/table.cc"); +    production_call.caller_name = Some("InternalGet".to_owned()); +    production_call.callee_name = "KeyMayMatch".to_owned(); +    production_call.target_hint = Some("KeyMayMatch".to_owned()); +    production_call.confidence_basis_points = 5_000; +    production_call.confidence_tier = "ambiguous".to_owned(); + +    let store = store_with_case_intent_snapshot(code_query_snapshot( +        vec![ +            code_query_file("filter-test-file", "table/filter_block_test.cc", "cpp"), +            code_query_file("table-file", "table/table.cc", "cpp"), +        ], +        Vec::new(), +        vec![test_call, production_call], +    )) +    .await; + +    let hits = store +        .search_code(code_search_request("KeyMayMatch", CodeQueryKind::Callers)) +        .await +        .expect("caller query should succeed"); + +    assert_eq!(hits[0].path, "table/table.cc"); +    assert!(hits[0].score > hits[1].score); +} + +#[tokio::test] async fn callee_search_applies_direction_before_candidate_limit() { let mut files = Vec::new(); let mut calls = Vec::new(); tokens used 185,291
+## 20260518T041031Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T041031Z.patch`
+- score: 0.942578 (foundational=1.0, competitive=0.938406, accuracy=0.969203, semantic_vector=1.0, research_judge=0.87, performance=0.877659, stability=1.0)
+- cases: 45/45 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch.rs`
+- key improvements: score_component:score 0.908297->0.942578; score_component:performance 0.737121->0.877659; score_component:research_judge 0.81->0.87; metric:cargo_build_release_ms 48370.0->40362; metric:cargo_fmt_check_ms 1066.0->641; metric:cargo_clippy_ms 268.0->167; metric:cargo_test_ms 7302.0->6218; metric:relay_teams_index_ms 107180.0->67478
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=40362ms; cargo_fmt_check_ms=641ms; cargo_clippy_ms=167ms; cargo_test_ms=6218ms; relay_teams_index_ms=67478ms; relay_teams_register_index_ms=67566ms; relay_teams_query_p50_ms=238ms; relay_teams_query_p95_ms=475ms
+
+Adopted optimization notes:
+
+?; -    let rows = statement.query_map(params![source_scope], |row| { -        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)) -    })?; +    for path in missing_paths { +        if let Some(language_id) = statement +            .query_row(params![batch.source_scope.as_str(), path.as_str()], |row| { +                row.get(0) +            }) +            .optional()? +        { +            languages.insert(path, language_id); +        } +    } + +    Ok(languages) +} -    rows.collect::<Result<BTreeMap<_, _>, _>>() -        .map_err(StorageError::from) +fn edge_paths_missing_from_batch( +    batch: &CodeIndexBatch, +    languages: &BTreeMap<String, String>, +) -> Vec<String> { +    let mut missing_paths = Vec::<String>::new(); +    for path in batch +        .references +        .iter() +        .map(|reference| reference.path.as_str()) +        .chain(batch.imports.iter().map(|import| import.path.as_str())) +    { +        if !languages.contains_key(path) +            && !missing_paths.iter().any(|known| known.as_str() == path) +        { +            missing_paths.push(path.to_owned()); +        } +    } + +    missing_paths } fn insert_diagnostics( tokens used 343,083
 

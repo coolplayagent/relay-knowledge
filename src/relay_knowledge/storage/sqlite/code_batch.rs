@@ -3,7 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::{
     domain::{CodeIndexBatch, CodeIndexCheckpoint, CodeIndexProgressSummary, CodeIndexSession},
@@ -55,8 +55,9 @@ pub(super) fn apply_batch(
     }
     insert_files(&transaction, &batch)?;
     insert_symbols(&transaction, &batch)?;
-    insert_references(&transaction, &batch)?;
-    insert_imports(&transaction, &batch)?;
+    let file_languages_by_path = edge_file_languages_by_path(&transaction, &batch)?;
+    insert_references(&transaction, &batch, &file_languages_by_path)?;
+    insert_imports(&transaction, &batch, &file_languages_by_path)?;
     insert_chunks(&transaction, &batch)?;
     insert_diagnostics(&transaction, &batch)?;
     update_checkpoint_after_batch(&transaction, &batch)?;
@@ -236,8 +237,8 @@ fn insert_symbols(
 fn insert_references(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
+    file_languages_by_path: &BTreeMap<String, String>,
 ) -> Result<(), StorageError> {
-    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_references (
@@ -293,8 +294,8 @@ fn insert_references(
 fn insert_imports(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
+    file_languages_by_path: &BTreeMap<String, String>,
 ) -> Result<(), StorageError> {
-    let file_languages_by_path = file_languages_by_path(transaction, &batch.source_scope)?;
     let mut statement = transaction.prepare(
         "
         INSERT INTO code_repository_imports (
@@ -386,23 +387,64 @@ fn insert_chunks(
     Ok(())
 }
 
-fn file_languages_by_path(
+fn edge_file_languages_by_path(
     transaction: &Transaction<'_>,
-    source_scope: &str,
+    batch: &CodeIndexBatch,
 ) -> Result<BTreeMap<String, String>, StorageError> {
+    if batch.references.is_empty() && batch.imports.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut languages = batch
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.language_id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let missing_paths = edge_paths_missing_from_batch(batch, &languages);
+    if missing_paths.is_empty() {
+        return Ok(languages);
+    }
+
     let mut statement = transaction.prepare(
         "
-        SELECT path, language_id
+        SELECT language_id
         FROM code_repository_files
-        WHERE source_scope = ?1
+        WHERE source_scope = ?1 AND path = ?2
         ",
     )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+    for path in missing_paths {
+        if let Some(language_id) = statement
+            .query_row(params![batch.source_scope.as_str(), path.as_str()], |row| {
+                row.get(0)
+            })
+            .optional()?
+        {
+            languages.insert(path, language_id);
+        }
+    }
 
-    rows.collect::<Result<BTreeMap<_, _>, _>>()
-        .map_err(StorageError::from)
+    Ok(languages)
+}
+
+fn edge_paths_missing_from_batch(
+    batch: &CodeIndexBatch,
+    languages: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut missing_paths = Vec::<String>::new();
+    for path in batch
+        .references
+        .iter()
+        .map(|reference| reference.path.as_str())
+        .chain(batch.imports.iter().map(|import| import.path.as_str()))
+    {
+        if !languages.contains_key(path)
+            && !missing_paths.iter().any(|known| known.as_str() == path)
+        {
+            missing_paths.push(path.to_owned());
+        }
+    }
+
+    missing_paths
 }
 
 fn insert_diagnostics(
