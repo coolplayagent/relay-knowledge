@@ -92,15 +92,26 @@ fn ranges_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u
 
 fn symbol_kinds_overlap(left: &str, right: &str) -> bool {
     left == right
+        || (function_like_symbol_kind(left) && function_like_symbol_kind(right))
+        || (type_like_symbol_kind(left) && type_like_symbol_kind(right))
         || matches!(
             (left, right),
             ("function", "function_declaration")
                 | ("function_declaration", "function")
                 | ("macro", "function")
                 | ("function", "macro")
-                | ("type", "class")
-                | ("class", "type")
         )
+}
+
+fn function_like_symbol_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "constructor" | "function" | "function_declaration" | "method"
+    )
+}
+
+fn type_like_symbol_kind(kind: &str) -> bool {
+    matches!(kind, "class" | "interface" | "type")
 }
 
 fn symbol_preferred_over_existing(
@@ -108,7 +119,10 @@ fn symbol_preferred_over_existing(
     existing: &RepositoryCodeSymbolRecord,
 ) -> bool {
     matches!(symbol.kind.as_str(), "function" | "macro")
-        && !matches!(existing.kind.as_str(), "function" | "macro")
+        && !matches!(
+            existing.kind.as_str(),
+            "constructor" | "function" | "macro" | "method"
+        )
 }
 
 pub(super) fn upsert_reference(

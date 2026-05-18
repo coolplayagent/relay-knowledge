@@ -3,7 +3,10 @@
     "cases/file_background_targets.json",
     "cases/repository_opencode_targets.json",
     "cases/repository_index_performance_targets.json",
-    "cases/repository_multilang_targets.json"
+    "cases/repository_multilang_targets.json",
+    "cases/repository_relationship_regression_targets.json",
+    "cases/repository_relationship_challenge_system_targets.json",
+    "cases/repository_relationship_challenge_application_targets.json"
   ],
   "repositories": {
     "relay_teams": {
@@ -67,6 +70,30 @@
     "spring_framework_java": {
       "path": "/opt/workspace/spring-framework",
       "alias": "spring-framework-java-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 180000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    },
+    "rustfs_rust": {
+      "path": "/opt/workspace/rustfs",
+      "alias": "rustfs-rust-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 180000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    },
+    "codex_python": {
+      "path": "/opt/workspace/codex",
+      "alias": "codex-python-self-iteration",
       "ref": "HEAD",
       "profile": "exhaustive",
       "scope": "all",

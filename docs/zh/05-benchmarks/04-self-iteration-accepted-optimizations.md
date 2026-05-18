@@ -1,30 +1,21 @@
 # 自迭代采纳优化记录
-本文档由自迭代 harness 在候选通过质量门禁并被采纳时追加，用于把本轮采用的优化思路传递给后续 Codex 迭代。人工维护的总结可以继续补充在对应条目下。
-## 记录格式
-- `patch`/`score`/`cases`/`changed paths`: 本轮候选补丁、采纳分数、通过 case 数和主要文件。
-- `key improvements`/`known degradations`/`latency metrics`/`Adopted optimization notes`: 改善、退化、耗时与优化说明。
-## 渐进式记忆
-自迭代 harness 还会在 `.git/relay-knowledge-self-iteration/memory/` 写入不进入版本控制的渐进式记忆。`memory/index.jsonl` 只保存有界索引，`memory/summaries/<id>.md` 保存短摘要，`memory/details/<id>.md` 保存完整评分、gate、case、metric、patch 和 report 引用。后续 Codex 运行应先读取 prompt 中的 memory index，再按相关性读取 summary，只有当前 gate、metric、case、路径或算法目标需要时才打开 detail 或 patch，避免一次性加载全部历史报告。
+## 记录格式与记忆
+每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
 ## 候选优化说明：manual-single-scope-parser-worker-set-20260519
-- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，降低多仓 full-scope `repo register` 冷索引中的 parser worker 固定成本；每个 git blob fetch group 现在只创建一组有界 scoped worker，按 stride 分配文件并在合并后按原始 index 恢复顺序，而不是为每个小 chunk 重复创建一批短生命周期线程。
-- 不变量：不改变 SQLite schema、事实表内容、search document、candidate limit、ranking/scoring、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；`CodeIndexBatch.files/symbols/references/imports/chunks/diagnostics` 的提交顺序仍与 git tree path 顺序一致，解析错误和 worker panic 仍映射为 `CodeIndexError`。
-- 预期影响：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring Framework 等大仓在默认 256 文件 batch 下减少 thread spawn/join 开销，特别是小文件密集仓库的 register-to-index wall time 应改善或保持中性；检索质量、semantic/vector source coverage 和 query latency 不应因图事实不变而退化。
-- 已知风险：stride 分配可能让一个 worker拿到多个较大文件而产生轻微负载不均；fetch group 仍受文件数、字节数与 row budget 限制，合并排序保持确定性，现有 full-index plan order 测试覆盖顺序不变。
+- 目标/算法/架构/不变量：保护核心目标下限，降低多仓 full-scope `repo register` 冷索引中的 parser worker 固定成本；每个 git blob fetch group 只创建一组有界 scoped worker，按 stride 分配并按原始 index 合并，不改变 schema、事实、search document、candidate limit、ranking、filters、CLI/API、provider/env、judge、网络/QoS、安装发布或 harness 行为。
+- 预期影响/风险：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring 等大仓减少 thread spawn/join 开销；stride 分配可能轻微负载不均，但受文件数、字节数与 row budget 限制，合并排序保持确定性。
 ## 候选优化说明：manual-exported-constructed-value-definition-20260518
-- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，补齐 JavaScript/TypeScript 大仓中导出运行时对象的 definition 召回；parser 仅把 `export const name = Owner.factory(...)` 这类 member-call 构造值和 `export const name = new Type(...)` 记录为 `constant` symbol，使 `protocol`、`route` 等公开协议/服务对象进入既有 symbol FTS 与 definition 查询路径。
-- 不变量：不改变 SQLite schema、FTS 表结构、candidate limit、ranking 权重、import/call/reference finalize、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS、安装发布或 self-iteration harness；非导出局部常量、普通标识符函数调用、对象/数组字面量和超长构造块仍不进入 symbol 表。
-- 预期影响：Opencode TypeScript `packages/llm/src/protocols/openai-chat.ts` 中 `export const protocol = Protocol.make(...)` 可被 path/language-filtered definition 查询命中，类似 relay-teams 或大型 TS/JS 仓库的公开协议、route、transport、layer 对象召回更稳定；索引写入仅增加短导出构造值的 symbol/chunk，register-to-index wall time 应接近中性。
-- 已知风险：少量导出工厂结果会以 `constant` kind 参与 definition/hybrid 排名，可能改变同名导出值附近的排序；实现要求 export ancestor、member call 或 `new` expression、合法 JS 标识符和 64 行长度上界，以避免把大型配置对象或普通局部变量变成宽泛噪声。
+- 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，把短小导出 member-call 或 `new` 构造值记录为 `constant` symbol，不改变 schema、FTS、ranking、finalize、CLI/API、provider/env、judge、网络/QoS、安装发布或 harness 行为。
+- 预期影响/风险：Opencode 和大型 JS/TS 仓库公开协议、route、transport、layer 对象的 definition 召回更稳定；少量导出工厂结果可能参与同名排序，但受 export ancestor、构造表达式、标识符和 64 行上界限制。
 ## 候选优化说明：manual-typescript-import-identity-and-dynamic-import-20260518
-- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，修复 JavaScript/TypeScript 大仓中同一行重复 import、`import.meta` 和动态 `import(...)` 造成的 import fact 身份噪声；import stable id 纳入 AST byte range，parser 输出按 import_id 去重，并仅把直接字符串参数的动态 import 规范化为 `import "specifier"`。
-- 不变量：不改变 SQLite schema、事实字段、FTS 文档字段、candidate limit、ranking、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；静态 import 语义、Go/Python/Java/C/C++ import 提取与 TypeScript 相对路径解析仍走既有路径。
-- 预期影响：Opencode、relay-teams 前端代码和其他 import-heavy JS/TS 仓库在 checkpointed register/index 时不再因同一行 import 主键冲突失败，直接字符串动态 import 可参与既有 import resolution 与 import search；`import.meta`、裸 `import` token、变量拼接和非字符串动态 specifier 不再进入 import facts。
-- 已知风险：新索引中的 import_id 字符串从 line-based 变为 byte+line-based，旧索引记录 ID 不逐字复用；动态 import 只覆盖直接字符串参数，避免为运行时路径做错误猜测。
+- 目标/算法/架构/不变量：保护核心目标下限，给 JS/TS import stable id 纳入 AST byte range，按 import_id 去重，并只把直接字符串动态 import 规范化为 `import "specifier"`；schema、事实字段、FTS、candidate limit、ranking、CLI/API、provider/env、judge、网络/QoS 与安装发布不变。
+- 预期影响/风险：Opencode、relay-teams 等 import-heavy 仓库不再因同一行 import 主键冲突失败，直接字符串动态 import 可检索；旧 import_id 不逐字复用，非字符串动态 specifier 不推断。
 ## 候选优化说明：manual-windowed-compound-identifier-fts-recall-20260518
-- 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，提升长自然语言 code query 对 CamelCase/PascalCase/snake_case 复合标识符的候选召回；在既有 whole-query compact/snake FTS alternative 之外，为安全 ASCII 查询词生成最多 24 个相邻 2 到 4 词窗口的 compact 与 snake_case exact token 分支。
-- 不变量：不改变 SQLite schema、索引写入、FTS 文档内容、事实表、candidate limit、Rust 后置 scoring/dedupe、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；扩展只发生在 query MATCH 表达式构造阶段，并受 ASCII、part 长度、总标识符长度和固定 alternatives 上限约束。
-- 预期影响：relay-teams、opencode、Linux、LevelDB、Kubernetes 与 Spring Framework 中较长 hybrid、caller、callee、reference、import 与 definition 查询更容易召回嵌入源码 chunk 或 edge 文档中的复合标识符子短语，例如 `CachedIntrospectionResults`、`localPropertyHandler` 和 `NotWritablePropertyException`。
-- 已知风险：额外 OR 分支会让少量同名 compact/snake token 进入 bounded FTS candidate window，并可能增加单次查询的 FTS MATCH 解析成本；风险由最多 24 个 alternatives、既有 candidate limit、typed row filter、ScoreQuery、path/language filter、dedupe/truncate 和单测覆盖控制。
+- 目标/算法/架构/不变量：保护核心目标下限，为安全 ASCII 查询词生成最多 24 个相邻 2 到 4 词窗口的 compact 与 snake_case exact FTS 分支；schema、索引写入、FTS 文档、事实表、candidate limit、scoring、CLI/API、provider/env、judge、网络/QoS 与安装发布不变。
+- 预期影响/风险：长 hybrid/caller/callee/reference/import/definition 查询更容易召回复合标识符子短语；额外 OR 分支可能增加候选和 MATCH 成本，但受 alternatives 上限、candidate limit、typed filter、ScoreQuery 和 dedupe/truncate 控制。
+## 候选优化说明：manual-relationship-challenge-continuous-scoring-20260519
+- 目标/算法/架构/不变量：把多语言 relationship workload 扩展为 regression/challenge 双层评估；challenge cases 去掉 path filter、降低 limit/max_rank，并用 `expected_all`、`expected_sequence`、`min_score` 与 ranked forbidden penalty 产生连续分数，不改变 Rust runtime、schema、索引事实、CLI/API、provider/env、judge、HTTP/QoS 或安装发布行为。
+- 预期影响/风险：RustFS、Kubernetes、Linux、LevelDB、Spring、Codex Python、relay-teams JS 和 opencode TS 的关系 case 即使通过也保留排序、覆盖率和延迟优化空间；`budget_relative_v1` 对旧历史先按预算兼容，后续同策略 run 才启用相对进步信号。
 ## 候选优化说明：manual-identifier-singular-plural-query-scoring-20260518
 - 目标/算法/架构：保护 foundational、competitive、semantic/vector、research judge 与 stability 下限，在 code query Rust 后置评分中把安全 ASCII 标识符词项的单复数形态归一为等价匹配，例如 `range`/`ranges`、`policy`/`policies`，作用于 `ScoreQuery` identifier-token scoring 与 symbol-name bonus。
 - 不变量：不改变 SQLite schema、FTS 文档、candidate limit、索引写入、path/language filter、CLI/API JSON、semantic/vector provider/env、embedding 设置、research judge 配置、网络/HTTP/QoS 或安装发布行为；归一化只在已召回候选内评分，不扩大查询窗口。

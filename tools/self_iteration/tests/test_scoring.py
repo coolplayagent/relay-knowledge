@@ -13,6 +13,7 @@ from scoring import (
     GateObservation,
     JUDGE_WEIGHTS,
     MetricObservation,
+    PERFORMANCE_STRATEGY,
     score_evaluation,
 )
 
@@ -146,6 +147,83 @@ class ScoringTests(unittest.TestCase):
                     "score": 0.714286,
                 }
             ],
+        )
+
+    def test_relative_performance_does_not_saturate_below_budget(self) -> None:
+        flat = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases(),
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.9,
+                "performance_strategy": PERFORMANCE_STRATEGY,
+                "metrics": [{"name": "query_p95_ms", "value": 100.0}],
+            },
+        )
+        faster = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=full_objective_cases(),
+                metrics=[MetricObservation("query_p95_ms", 50.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.9,
+                "performance_strategy": PERFORMANCE_STRATEGY,
+                "metrics": [{"name": "query_p95_ms", "value": 100.0}],
+            },
+        )
+
+        self.assertAlmostEqual(flat.performance, 0.9)
+        self.assertAlmostEqual(faster.performance, 0.95)
+        self.assertLess(flat.performance, 1.0)
+        self.assertEqual(flat.to_dict()["performance_strategy"], PERFORMANCE_STRATEGY)
+
+    def test_case_score_override_improvements_are_reported(self) -> None:
+        score = score_evaluation(
+            EvaluationObservation(
+                gates=[GateObservation("build", True)],
+                cases=[
+                    CaseObservation(
+                        "challenge",
+                        "repo",
+                        True,
+                        rank=1,
+                        score_override=0.8,
+                    ),
+                    passing_case("competitive", objective="competitive_capability"),
+                    passing_case(
+                        "semantic",
+                        objective="semantic_vector",
+                        repository="semantic_vector",
+                    ),
+                ],
+                metrics=[MetricObservation("query_p95_ms", 100.0, budget=200.0)],
+            ),
+            previous_run={
+                "score": 0.5,
+                "cases": [
+                    {
+                        "case_id": "challenge",
+                        "repository": "repo",
+                        "passed": True,
+                        "rank": 1,
+                        "max_rank": 1,
+                        "false_positive_count": 0,
+                        "score_override": 0.6,
+                    }
+                ],
+            },
+        )
+
+        self.assertTrue(
+            any(
+                improvement["kind"] == "case"
+                and improvement["case_id"] == "challenge"
+                and improvement["reason"] == "score_improved"
+                for improvement in score.improvements
+            )
         )
 
     def test_policy_rejects_previous_score_regression(self) -> None:

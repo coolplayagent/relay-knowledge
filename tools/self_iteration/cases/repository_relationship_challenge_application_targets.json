@@ -1,0 +1,576 @@
+{
+  "query_cases": [
+    {
+      "id": "spring_java_inheritance_extended_bean_info_challenge",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "ExtendedBeanInfo implements BeanInfo property descriptors",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "implements BeanInfo"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "getPropertyDescriptors"
+        }
+      ]
+    },
+    {
+      "id": "spring_java_dependency_object_utils_challenge",
+      "repository": "spring_framework_java",
+      "kind": "imports",
+      "query": "org.springframework.util.ObjectUtils",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "org.springframework.util.ObjectUtils"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "ObjectUtils"
+        }
+      ]
+    },
+    {
+      "id": "spring_java_call_chain_candidate_write_method_challenge",
+      "repository": "spring_framework_java",
+      "kind": "callers",
+      "query": "isCandidateWriteMethod",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "findCandidateWriteMethods"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "isCandidateWriteMethod"
+        }
+      ]
+    },
+    {
+      "id": "spring_java_execution_flow_bean_wrapper_property_handler_challenge",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "CachedIntrospectionResults local property handler not writable property exception",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "getLocalPropertyHandler"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "setPropertyValue"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "CachedIntrospectionResults"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "getLocalPropertyHandler"
+        },
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "setPropertyValue"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_inheritance_rpc_error_hierarchy_challenge",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "JsonRpcError AppServerRpcError ServerBusyError RetryLimitExceededError inheritance",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/errors.py",
+          "excerpt_contains": "class ServerBusyError(AppServerRpcError)"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "sdk/python/src/codex_app_server/errors.py"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/errors.py",
+          "excerpt_contains": "RetryLimitExceededError"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_dependency_retry_on_overload_challenge",
+      "repository": "codex_python",
+      "kind": "imports",
+      "query": ".retry retry_on_overload",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "retry_on_overload"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "retry_on_overload"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_call_chain_retry_on_overload_challenge",
+      "repository": "codex_python",
+      "kind": "callers",
+      "query": "retry_on_overload",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "request_with_retry_on_overload"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "retry_on_overload"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_execution_flow_app_server_client_stdio_challenge",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "AppServerClient start initialize request read message stdio app-server",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "args.extend"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "initialize"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "AppServerClient"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "start"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "initialize"
+        },
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "request"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_inheritance_role_capability_workflow_challenge",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "normalizeRoleOption normalizeModelCapabilities role input modality capability matrix",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "excerpt_contains": "normalizeModelCapabilities"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/core/state.js"
+        },
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "excerpt_contains": "normalizeRoleOption"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_dependency_event_router_challenge",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "./eventRouter.js",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "./eventRouter.js"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/core/stream.js"
+        },
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "eventRouter"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_call_chain_release_active_stream_handle_challenge",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "releaseActiveStreamHandle",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "attachRunStream"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/core/stream.js"
+        },
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "releaseActiveStreamHandle"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_execution_flow_background_multiplex_stream_challenge",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "background stream discovery reconcile multiplex run event source reconnect",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "openRunStreamConnection"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/core/stream.js"
+        },
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "reconcileBackgroundRunStream"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "reconcileBackgroundRunStream"
+        },
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "openRunStreamConnection"
+        },
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "attachRunStream"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_inheritance_agent_service_context_challenge",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "Service extends Context.Service Agent Interface schema generate",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "extends Context.Service"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts"
+        },
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "generateObject"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_dependency_cache_policy_schema_options_challenge",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "./schema/options",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/llm/src/cache-policy.ts",
+          "excerpt_contains": "./schema/options"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/llm/src/cache-policy.ts"
+        },
+        {
+          "path": "packages/llm/src/cache-policy.ts",
+          "excerpt_contains": "CachePolicy"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_call_chain_generate_object_agent_service_challenge",
+      "repository": "opencode_typescript",
+      "kind": "callers",
+      "query": "generateObject",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "calls generateObject"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/opencode/src/agent/agent.ts"
+        },
+        {
+          "path": "packages/opencode/src/agent/agent.ts",
+          "excerpt_contains": "generateObject"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_execution_flow_openai_chat_protocol_challenge",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "OpenAI Chat protocol SSE tool calls lifecycle finish events route transport",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "ToolStream.empty"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts"
+        },
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "streamText"
+        }
+      ],
+      "expected_sequence": [
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "OpenAI"
+        },
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "streamText"
+        },
+        {
+          "path": "packages/llm/src/protocols/openai-chat.ts",
+          "excerpt_contains": "ToolStream.empty"
+        }
+      ]
+    }
+  ]
+}
