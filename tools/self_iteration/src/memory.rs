@@ -15,6 +15,9 @@ pub fn write_run_memory(paths: &history::HistoryPaths, record: &Value) -> Result
     if let Some(regression) = regression_memory(record) {
         items.push(regression);
     }
+    if let Some(cluster) = repeated_rejection_cluster_memory(paths, record) {
+        items.push(cluster);
+    }
     let mut index = load_memory_index(paths);
     for item in items {
         let index_item = write_memory_item(paths, &item)?;
@@ -68,11 +71,7 @@ pub fn rejection_recovery_memory_review(paths: &history::HistoryPaths, limit: us
         return "No scored self-iteration run yet; no rejection recovery memory review required."
             .to_owned();
     };
-    if latest
-        .get("accepted")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if history::adopted(&latest) {
         return "Latest scored run was accepted; no rejection recovery memory review required."
             .to_owned();
     }
@@ -133,12 +132,14 @@ pub fn historical_patch_memory_index(paths: &history::HistoryPaths, limit: usize
         let changed_paths = patch_changed_paths(patch_path, run);
         let status = run
             .map(|run| {
-                if run
-                    .get("accepted")
+                if history::adopted(run) {
+                    "committed"
+                } else if run
+                    .get("score_accepted")
                     .and_then(Value::as_bool)
                     .unwrap_or(false)
                 {
-                    "accepted"
+                    "would_accept"
                 } else {
                     "rejected"
                 }
@@ -283,6 +284,51 @@ fn regression_memory(record: &Value) -> Option<Value> {
     ))
 }
 
+fn repeated_rejection_cluster_memory(
+    paths: &history::HistoryPaths,
+    record: &Value,
+) -> Option<Value> {
+    if history::adopted(record) {
+        return None;
+    }
+    let reason = primary_reject_reason(record)?;
+    let mut run_ids = vec![string_field(record, "run_id")];
+    let runs = history::load_runs(paths).unwrap_or_default();
+    for previous in runs.iter().rev() {
+        if history::adopted(previous) {
+            break;
+        }
+        if primary_reject_reason(previous).as_deref() != Some(reason.as_str()) {
+            break;
+        }
+        run_ids.push(string_field(previous, "run_id"));
+    }
+    if run_ids.len() < 2 {
+        return None;
+    }
+    let summary = format!(
+        "Run {} extends a consecutive rejection cluster for reason `{}` across {} run(s): {}. Changed paths: {}. Latest improvements: {}. Latest degradations: {}. Future iterations should choose a different strategy or directly address this cluster before retrying related files.",
+        string_field(record, "run_id"),
+        reason,
+        run_ids.len(),
+        run_ids.join(", "),
+        compact_paths(record, 5),
+        top_change_summary(record, "improvements", 5),
+        top_change_summary(record, "degradations", 5)
+    );
+    Some(memory_payload(
+        record,
+        "repeated_rejection_cluster",
+        &format!(
+            "{} repeated rejection cluster: {}",
+            string_field(record, "run_id"),
+            compact_prompt_text(&reason, 90)
+        ),
+        &summary,
+        Some(&reason),
+    ))
+}
+
 fn memory_payload(
     record: &Value,
     kind: &str,
@@ -404,18 +450,75 @@ fn write_memory_index(paths: &history::HistoryPaths, items: &[Value]) -> Result<
 
 fn sorted_memory_items(paths: &history::HistoryPaths) -> Vec<Value> {
     let mut items = load_memory_index(paths);
+    items.retain(|item| {
+        !item
+            .get("run_id")
+            .and_then(Value::as_str)
+            .is_some_and(|run_id| run_id.starts_with("manual-evaluate"))
+    });
     items.sort_by(|left, right| {
         string_field(right, "created_at").cmp(&string_field(left, "created_at"))
     });
     items
 }
 
+fn primary_reject_reason(record: &Value) -> Option<String> {
+    string_array(record, "reject_reasons")
+        .into_iter()
+        .find(|reason| !reason.trim().is_empty())
+}
+
+fn protected_floor_summary(record: &Value) -> String {
+    format!(
+        "foundational={}, competitive={}, semantic_vector={}, stability={}",
+        field_string(record, "foundational_capability"),
+        field_string(record, "competitive_capability"),
+        field_string(record, "semantic_vector"),
+        field_string(record, "stability")
+    )
+}
+
+fn compact_paths(record: &Value, limit: usize) -> String {
+    let paths = changed_paths(record);
+    if paths.is_empty() {
+        return "none recorded".to_owned();
+    }
+    let omitted = paths.len().saturating_sub(limit);
+    let mut selected = paths.into_iter().take(limit).collect::<Vec<_>>();
+    if omitted > 0 {
+        selected.push(format!("+{omitted} more"));
+    }
+    selected.join(", ")
+}
+
+fn top_change_summary(record: &Value, field: &str, limit: usize) -> String {
+    let changes = compact_score_changes(value_array(record, field), limit);
+    if changes.is_empty() {
+        "none recorded".to_owned()
+    } else {
+        changes.join("; ")
+    }
+}
+
+fn score_delta_summary(record: &Value) -> String {
+    value_array(record, "improvements")
+        .iter()
+        .chain(value_array(record, "degradations"))
+        .find(|change| {
+            change.get("kind").and_then(Value::as_str) == Some("score_component")
+                && change.get("name").and_then(Value::as_str) == Some("score")
+        })
+        .and_then(|change| {
+            Some(format!(
+                "{:+.6}",
+                change.get("current")?.as_f64()? - change.get("previous")?.as_f64()?
+            ))
+        })
+        .unwrap_or_else(|| "within epsilon or unavailable".to_owned())
+}
+
 fn primary_kind(record: &Value) -> String {
-    if record
-        .get("accepted")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if history::adopted(record) {
         "accepted_optimization".to_owned()
     } else if !failed_gate_names(record).is_empty() {
         "quality_gate_failure".to_owned()
@@ -442,30 +545,39 @@ fn primary_summary(kind: &str, record: &Value) -> String {
     let run_id = string_field(record, "run_id");
     if kind == "accepted_optimization" {
         format!(
-            "Accepted run {} scored {}. Changed paths: {}. Key improvements: {}.",
+            "Accepted run {} scored {}. Protected floors: {}. Changed paths: {}. Key improvements: {}. Known degradations: {}.",
             run_id,
             record
                 .get("score")
                 .map(Value::to_string)
                 .unwrap_or_default(),
-            changed_paths(record).join(", "),
-            compact_score_changes(value_array(record, "improvements"), 4).join("; ")
+            protected_floor_summary(record),
+            compact_paths(record, 6),
+            top_change_summary(record, "improvements", 6),
+            top_change_summary(record, "degradations", 4)
         )
     } else if kind == "quality_gate_failure" {
         format!(
-            "Rejected run {} failed quality gates {}. Inspect detail before retrying related changes.",
+            "Rejected run {} failed quality gates {}. Changed paths: {}. Top improvements: {}. Top degradations: {}. Inspect detail before retrying related changes.",
             run_id,
-            failed_gate_names(record).join(", ")
+            failed_gate_names(record).join(", "),
+            compact_paths(record, 6),
+            top_change_summary(record, "improvements", 4),
+            top_change_summary(record, "degradations", 6)
         )
     } else {
         format!(
-            "Rejected run {} scored {}. Reasons: {}.",
+            "Rejected run {} scored {}. Score delta: {}. Reasons: {}. Changed paths: {}. Top improvements: {}. Top degradations: {}.",
             run_id,
             record
                 .get("score")
                 .map(Value::to_string)
                 .unwrap_or_default(),
-            string_array(record, "reject_reasons").join("; ")
+            score_delta_summary(record),
+            string_array(record, "reject_reasons").join("; "),
+            compact_paths(record, 6),
+            top_change_summary(record, "improvements", 6),
+            top_change_summary(record, "degradations", 6)
         )
     }
 }
@@ -545,7 +657,8 @@ fn related_paths(record: &Value) -> Vec<String> {
 
 fn score_impact(record: &Value) -> Value {
     serde_json::json!({
-        "accepted": record.get("accepted").and_then(Value::as_bool).unwrap_or(false),
+        "accepted": history::adopted(record),
+        "score_accepted": record.get("score_accepted").cloned().unwrap_or(Value::Null),
         "score": record.get("score").cloned().unwrap_or(Value::Null),
         "foundational_capability": record.get("foundational_capability").cloned().unwrap_or(Value::Null),
         "competitive_capability": record.get("competitive_capability").cloned().unwrap_or(Value::Null),
@@ -561,11 +674,7 @@ fn score_impact(record: &Value) -> Value {
 fn run_tags(record: &Value, kind: &str) -> Vec<String> {
     let mut tags = BTreeSet::from([
         safe_tag(kind),
-        if record
-            .get("accepted")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+        if history::adopted(record) {
             "accepted".to_owned()
         } else {
             "rejected".to_owned()
@@ -695,4 +804,96 @@ fn safe_tag(value: &str) -> String {
         .chars()
         .take(80)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    #[test]
+    fn rejected_summary_includes_changes_and_score_delta() {
+        let record = rejected_record("current", "2");
+
+        let summary = primary_summary("rejected_attempt", &record);
+
+        assert!(summary.contains("Score delta: -0.010000"));
+        assert!(summary.contains("Changed paths: src/query.rs"));
+        assert!(summary.contains("Top improvements: metric:relay_teams_query_p95_ms"));
+        assert!(summary.contains("Top degradations: score_component:score"));
+    }
+
+    #[test]
+    fn accepted_summary_lists_protected_floors() {
+        let record = json!({
+            "run_id": "accepted",
+            "accepted": true,
+            "score": 0.8,
+            "foundational_capability": 1.0,
+            "competitive_capability": 0.8,
+            "semantic_vector": 0.0,
+            "stability": 1.0,
+            "improvements": [{"kind": "score_component", "name": "score", "previous": 0.7, "current": 0.8}],
+            "degradations": [],
+            "optimization_plan": {"changed_paths": ["src/query.rs"]},
+        });
+
+        let summary = primary_summary("accepted_optimization", &record);
+
+        assert!(summary.contains("Protected floors: foundational=1.0"));
+        assert!(summary.contains("Key improvements: score_component:score"));
+        assert!(summary.contains("Known degradations: none recorded"));
+    }
+
+    #[test]
+    fn repeated_rejection_cluster_memory_is_recorded() {
+        let workspace = temp_workspace("memory-cluster");
+        let paths = history::HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        let previous = rejected_record("previous", "1");
+        history::append_run(&paths, &previous).expect("previous run");
+        let current = rejected_record("current", "2");
+
+        write_run_memory(&paths, &current).expect("memory");
+        let index = fs::read_to_string(&paths.memory_index).expect("index");
+
+        assert!(index.contains("repeated_rejection_cluster"));
+        assert!(index.contains("current-repeated_rejection_cluster"));
+    }
+
+    fn rejected_record(run_id: &str, timestamp: &str) -> Value {
+        json!({
+            "run_id": run_id,
+            "timestamp": timestamp,
+            "accepted": false,
+            "score": 0.79,
+            "foundational_capability": 1.0,
+            "competitive_capability": 0.8,
+            "semantic_vector": 0.0,
+            "stability": 1.0,
+            "reject_reasons": ["candidate did not improve score or tracked objectives beyond epsilon"],
+            "improvements": [{"kind": "metric", "name": "relay_teams_query_p95_ms", "previous": 8000.0, "current": 7000.0}],
+            "degradations": [{"kind": "score_component", "name": "score", "previous": 0.8, "current": 0.79}],
+            "optimization_plan": {"changed_paths": ["src/query.rs"]},
+            "patch": {"path": "/tmp/current.patch"},
+            "report": "/tmp/current.json",
+            "gates": [],
+        })
+    }
+
+    fn temp_workspace(prefix: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("{prefix}-{unique}"));
+        fs::create_dir_all(workspace.join(".git")).expect("workspace");
+        workspace
+    }
 }

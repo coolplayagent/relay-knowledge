@@ -51,7 +51,7 @@ Each iteration:
 4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, a normal-repository subset, and one lightweight repository-set guard. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
-7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.
+7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`; `accepted` means a git commit was created.
 8. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md` before committing.
 9. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
 10. Restores the iteration start commit when the candidate is rejected.
@@ -65,8 +65,8 @@ algorithm, architecture, invariants, expected case/metric impact, and known
 risks before evaluation. The harness adds a
 `self_iteration_algorithm_documentation` gate to reject code, test, benchmark,
 or harness-policy changes that do not carry those notes. The prompt uses the
-v2 run history and patch paths as bounded context when reasoning about the next
-candidate.
+v2 run history, a synthesized history digest, and patch paths as bounded context
+when reasoning about the next candidate.
 
 The v2 Rust harness keeps `runs-v2.jsonl`, `reports-v2/`, and `patches-v2/`
 separate from earlier run/report/patch formats, which may remain in existing
@@ -74,9 +74,14 @@ worktrees as historical artifacts. Progressive long-term memory is preserved und
 `.git/relay-knowledge-self-iteration/memory/` tree: each scored run writes
 `memory/index.jsonl`, `memory/summaries/`, and `memory/details/`, and the next
 generation prompt receives a rejection-recovery memory review, a bounded memory
-index, and a bounded historical patch index. Codex should open the referenced
-summary, detail, or patch files only when they match the current gate, metric,
-case, path, or algorithm objective.
+index, a synthesized profile-specific history digest, and a bounded historical
+patch index. Rejected memories include changed paths, score deltas, local
+improvements, degradations, and repeated rejection clusters so Codex can avoid
+retrying small local edits that already failed the acceptance baseline. Codex
+should open the referenced summary, detail, or patch files only when they match
+the current gate, metric, case, path, or algorithm objective. The direct history
+synthesis has a hard prompt budget cap, so long-running iteration does not
+expand linearly into the LLM context.
 
 The default profile is `fast`. It runs product and harness `fmt --check`, then a
 product debug build plus harness `cargo check`, and evaluates with
@@ -107,9 +112,9 @@ evaluation store; query subprocesses run concurrently after writer boundaries.
 Set `--jobs N` or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to override the global
 limit.
 
-The prompt includes bounded run history, progressive memory, and patch indexes
-so repeated rejections stay tied to recent evidence instead of retrying the same
-shape of patch.
+The prompt includes bounded run history, a direct synthesis of accepted and
+rejected patterns, progressive memory, and patch indexes so repeated rejections
+stay tied to recent evidence instead of retrying the same shape of patch.
 
 ## Scoring and acceptance
 
@@ -223,12 +228,20 @@ failures, or protected objective regressions.
 - `ratio_epsilon = 0.005` for score components such as foundational_capability, competitive_capability, semantic_vector, performance, and stability
 - `metric_epsilon = max(25ms, previous_metric * 0.03)` for raw timing metrics
 
-This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. Foundational, competitive, semantic_vector, research_judge, performance, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, research_judge, performance, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
+This avoids rejecting a real case/rank improvement because a timing metric moved inside normal noise, and it avoids accepting a candidate that only wins through noise while silently regressing a protected objective. When local metric improvements do not beat the latest profile baseline, the reject reasons now include that diagnostic and the score delta. Foundational, competitive, semantic_vector, research_judge, performance, case, gate, and metric regressions are recorded as degradation feedback for the next Codex prompt. Positive score, research_judge, performance, case, gate, and metric improvements are also recorded and passed to the next Codex prompt so later iterations know what to preserve. Accepted optimization plans are also stored in each run record as `optimization_plan` and passed to the next prompt under `Recent adopted optimization plans to build on`.
 
 The `chart` command writes:
 
 - `.git/relay-knowledge-self-iteration/score-v2.csv`
 - `.git/relay-knowledge-self-iteration/score-v2.svg`
+
+The CSV is a scored-run history, not a patch-directory inventory. It includes
+the run mode, patch path, `score_accepted`, and `committed` fields so manual
+evaluations and loop iterations can be separated. Manual `evaluate` runs use
+unique `manual-evaluate-*` patch/report names and may be marked
+`score_accepted=true`, but they are never `accepted=true` unless a git commit
+was created. In the SVG, green points are accepted commits, amber points are
+manual evaluations that would pass scoring, and red points are rejected runs.
 
 ## Evaluation data
 

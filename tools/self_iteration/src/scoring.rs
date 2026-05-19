@@ -422,6 +422,16 @@ fn reject_reasons(
     {
         return reasons;
     }
+    let metric_improvement_count = improvements
+        .iter()
+        .filter(|item| item.get("kind").and_then(Value::as_str) == Some("metric"))
+        .count();
+    if metric_improvement_count > 0 {
+        reasons.push(format!(
+            "local metric improvements ({metric_improvement_count}) did not beat latest baseline score delta {:+.6}",
+            current.score - previous_number(previous, "score")
+        ));
+    }
     reasons.push("candidate did not improve score or tracked objectives beyond epsilon".to_owned());
     reasons
 }

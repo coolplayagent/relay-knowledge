@@ -5,6 +5,7 @@ mod config;
 mod evaluator;
 mod git_ops;
 mod history;
+mod history_synthesis;
 mod memory;
 mod scoring;
 
@@ -86,17 +87,10 @@ fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, Strin
 }
 
 fn run_evaluate(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
-    let patch = git_ops::capture_patch(&config.workspace, paths, "manual-evaluate", "HEAD")?;
-    let evaluation = evaluate_candidate_for_patch(config, paths, "manual-evaluate", &patch)?;
-    let record = persist_scored_run(
-        config,
-        paths,
-        "manual-evaluate",
-        &patch,
-        None,
-        &evaluation,
-        None,
-    )?;
+    let run_id = new_manual_evaluate_run_id();
+    let patch = git_ops::capture_patch(&config.workspace, paths, &run_id, "HEAD")?;
+    let evaluation = evaluate_candidate_for_patch(config, paths, &run_id, &patch)?;
+    let record = persist_scored_run(config, paths, &run_id, &patch, None, &evaluation, None)?;
     print_score(&record);
     Ok(if record["score"].as_f64().unwrap_or(0.0) > 0.0 {
         0
@@ -118,7 +112,7 @@ fn run_generation_iteration(
         println!("[self-iterate] using current working tree as candidate");
         None
     } else {
-        let prompt = codex::build_prompt(paths, &config.workspace, &run_id);
+        let prompt = codex::build_prompt(paths, &config.workspace, &run_id, &config.profile);
         let result = codex::run_codex(config, &prompt);
         println!(
             "[self-iterate] codex exit={} duration_ms={}",
@@ -213,6 +207,7 @@ fn run_generation_iteration(
         evaluation: &evaluation,
         commit: commit.as_deref(),
         score: &score,
+        previous_run: previous_run.as_ref(),
     })?;
     if record["accepted"].as_bool().unwrap_or(false) {
         println!(
@@ -300,6 +295,7 @@ fn persist_scored_run(
         evaluation,
         commit,
         score: &score,
+        previous_run: previous.as_ref(),
     })
 }
 
@@ -312,18 +308,31 @@ struct PersistInput<'a> {
     evaluation: &'a evaluator::EvaluationRun,
     commit: Option<&'a str>,
     score: &'a scoring::ScoreBreakdown,
+    previous_run: Option<&'a serde_json::Value>,
 }
 
 fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::Value, String> {
     let timestamp = unix_timestamp_string();
     let patch = patch_metadata(input.patch);
     let optimization_plan = optimization_plan(input.patch, input.score, input.codex);
+    let comparison_baseline =
+        comparison_baseline(input.paths, &input.config.profile, input.previous_run)?;
     let report = serde_json::json!({
         "run_id": input.run_id,
         "profile": input.config.profile,
         "workspace": input.config.workspace.display().to_string(),
         "patch": patch,
         "optimization_plan": optimization_plan,
+        "comparison_baseline": comparison_baseline,
+        "score_accepted": input.score.accepted,
+        "committed": input.commit.is_some(),
+        "adoption_status": if input.commit.is_some() {
+            "committed"
+        } else if input.score.accepted {
+            "would_accept"
+        } else {
+            "rejected"
+        },
         "codex": input.codex.map(codex::CodexResult::serializable),
         "evaluation": input.evaluation.report,
         "score": input.score,
@@ -344,8 +353,11 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     if let Some(object) = record.as_object_mut() {
         object.insert("patch".to_owned(), patch);
         object.insert("optimization_plan".to_owned(), optimization_plan);
+        object.insert("comparison_baseline".to_owned(), comparison_baseline);
     }
-    memory::write_run_memory(input.paths, &record)?;
+    if !history::is_evaluate_run(&record) {
+        memory::write_run_memory(input.paths, &record)?;
+    }
     history::append_run(input.paths, &record)?;
     history::export_history(input.paths)?;
     Ok(record)
@@ -376,6 +388,23 @@ fn optimization_plan(
         "reject_reasons": score.reject_reasons,
         "codex_notes": codex_notes,
     })
+}
+
+fn comparison_baseline(
+    paths: &history::HistoryPaths,
+    profile: &str,
+    previous_run: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let best_accepted = history::best_accepted_run_for_profile(paths, profile)?;
+    Ok(serde_json::json!({
+        "comparison_kind": "latest_scored_profile_run",
+        "profile": profile,
+        "latest_run_id": previous_run.and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
+        "latest_score": previous_run.and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
+        "latest_accepted": previous_run.map(history::adopted),
+        "best_accepted_run_id": best_accepted.as_ref().and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
+        "best_accepted_score": best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
+    }))
 }
 
 fn write_adopted_optimization_document(
@@ -471,8 +500,14 @@ fn compact_changes(changes: &[serde_json::Value]) -> String {
 }
 
 fn print_score(record: &serde_json::Value) {
+    let score_accepted = record
+        .get("score_accepted")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or_else(|| record["accepted"].as_bool().unwrap_or(false));
     let status = if record["accepted"].as_bool().unwrap_or(false) {
         "accepted"
+    } else if score_accepted {
+        "would_accept"
     } else {
         "rejected"
     };
@@ -503,6 +538,33 @@ fn print_score(record: &serde_json::Value) {
         .unwrap_or_default();
     if !reasons.is_empty() {
         println!("[self-iterate] reasons: {}", reasons.join("; "));
+    } else if status == "would_accept" {
+        println!(
+            "[self-iterate] reasons: score passed, but this mode does not create an accepted git commit"
+        );
+    }
+    if let Some(baseline) = record.get("comparison_baseline") {
+        let latest = baseline
+            .get("latest_run_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("none");
+        let latest_score = baseline
+            .get("latest_score")
+            .and_then(serde_json::Value::as_f64)
+            .map(|score| format!("{score:.6}"))
+            .unwrap_or_else(|| "n/a".to_owned());
+        let best = baseline
+            .get("best_accepted_run_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("none");
+        let best_score = baseline
+            .get("best_accepted_score")
+            .and_then(serde_json::Value::as_f64)
+            .map(|score| format!("{score:.6}"))
+            .unwrap_or_else(|| "n/a".to_owned());
+        println!(
+            "[self-iterate] comparison baseline latest={latest} score={latest_score}; best_accepted={best} score={best_score}"
+        );
     }
     println!(
         "[self-iterate] report: {}",
@@ -521,9 +583,30 @@ fn new_run_id() -> String {
     format!("run-{}", unix_timestamp_string())
 }
 
+fn new_manual_evaluate_run_id() -> String {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().to_string())
+        .unwrap_or_else(|_| "0".to_owned());
+    format!("manual-evaluate-{suffix}")
+}
+
 fn unix_timestamp_string() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_evaluate_run_id_uses_unique_patch_namespace() {
+        let run_id = new_manual_evaluate_run_id();
+
+        assert!(run_id.starts_with("manual-evaluate-"));
+        assert!(run_id.len() > "manual-evaluate-".len());
+    }
 }

@@ -995,3 +995,6 @@ Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
+## run-history-synthesis candidate
+- candidate: Rust v2 harness 新增按 profile 汇总且有硬字符上限的历史综合摘要、连续拒绝簇记忆和比较基线诊断；下一轮 Codex 可直接看到 latest scored baseline、best accepted、重复拒绝原因、退化热点，以及“局部 metric 改善但总分未赢”的 rejected 尝试，不再只收到 patch/detail 路径索引。
+- algorithm/architecture/impact/risk: 新增独立 `history_synthesis` prompt 输入；memory summary 写入 score delta、top improvements/degradations、changed paths 和 protected floors；record/report 写入 `comparison_baseline`；手动 evaluate 使用唯一 patch/report 名，CSV 写入 mode/patch/score_accepted/committed，SVG 用绿色表示已提交采纳、琥珀色表示评分会通过的手动评估；`accepted=true` 只表示已创建 git commit；评分门禁、rejected patch 恢复、accepted commit 基线、protected objective regression、epsilon、Pareto 和 bug-fix-priority 规则保持原样。

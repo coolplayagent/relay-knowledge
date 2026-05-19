@@ -79,7 +79,9 @@ pub fn load_runs(paths: &HistoryPaths) -> Result<Vec<Value>, String> {
 
 pub fn previous_scored_run(paths: &HistoryPaths) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
-    Ok(latest_scored_run(runs.into_iter()))
+    Ok(latest_scored_run(
+        runs.into_iter().filter(|run| !is_evaluate_run(run)),
+    ))
 }
 
 pub fn previous_scored_run_for_profile(
@@ -87,9 +89,9 @@ pub fn previous_scored_run_for_profile(
     profile: &str,
 ) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
-    Ok(latest_scored_run(
-        runs.into_iter().filter(|run| run_profile(run) == profile),
-    ))
+    Ok(latest_scored_run(runs.into_iter().filter(|run| {
+        run_profile(run) == profile && !is_evaluate_run(run)
+    })))
 }
 
 fn latest_scored_run<I>(runs: I) -> Option<Value>
@@ -109,15 +111,14 @@ fn run_profile(run: &Value) -> &str {
     run.get("profile").and_then(Value::as_str).unwrap_or("full")
 }
 
-pub fn best_accepted_run(paths: &HistoryPaths) -> Result<Option<Value>, String> {
+pub fn best_accepted_run_for_profile(
+    paths: &HistoryPaths,
+    profile: &str,
+) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
     Ok(runs
         .into_iter()
-        .filter(|run| {
-            run.get("accepted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        })
+        .filter(|run| run_profile(run) == profile && adopted(run))
         .max_by(|left, right| {
             let left_score = left.get("score").and_then(Value::as_f64).unwrap_or(0.0);
             let right_score = right.get("score").and_then(Value::as_f64).unwrap_or(0.0);
@@ -162,11 +163,15 @@ pub fn make_run_record(
     score: &ScoreBreakdown,
     observation: &EvaluationObservation,
 ) -> Value {
+    let committed = commit.is_some();
     serde_json::json!({
         "run_id": run_id,
         "timestamp": timestamp,
         "profile": profile,
-        "accepted": score.accepted,
+        "accepted": committed,
+        "score_accepted": score.accepted,
+        "committed": committed,
+        "adoption_status": adoption_status(committed, score.accepted),
         "score": rounded(score.score),
         "foundational_capability": rounded(score.foundational_capability),
         "competitive_capability": rounded(score.competitive_capability),
@@ -197,16 +202,19 @@ pub fn export_history(paths: &HistoryPaths) -> Result<(PathBuf, PathBuf), String
 
 fn write_csv(path: &Path, runs: &[Value]) -> Result<(), String> {
     let mut content = String::from(
-        "run_id,timestamp,accepted,score,foundational_capability,competitive_capability,accuracy,semantic_vector,research_judge,performance,stability,commit,reject_reasons\n",
+        "run_id,timestamp,profile,mode,accepted,score_accepted,committed,adoption_status,score,foundational_capability,competitive_capability,accuracy,semantic_vector,research_judge,performance,stability,commit,patch_path,patch_sha256,patch_bytes,report,reject_reasons\n",
     );
     for run in runs {
         content.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             csv(run, "run_id"),
             csv(run, "timestamp"),
-            run.get("accepted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            csv(run, "profile"),
+            escape_csv(&run_mode(run)),
+            adopted(run),
+            score_accepted(run),
+            committed(run),
+            escape_csv(&adoption_status_for_run(run)),
             number(run, "score"),
             number(run, "foundational_capability"),
             number(run, "competitive_capability"),
@@ -216,6 +224,10 @@ fn write_csv(path: &Path, runs: &[Value]) -> Result<(), String> {
             number(run, "performance"),
             number(run, "stability"),
             csv(run, "commit"),
+            escape_csv(&patch_string(run, "path")),
+            escape_csv(&patch_string(run, "sha256")),
+            patch_number(run, "bytes"),
+            csv(run, "report"),
             escape_csv(&reject_reasons(run))
         ));
     }
@@ -228,15 +240,15 @@ fn write_svg(path: &Path, runs: &[Value]) -> Result<(), String> {
         .filter_map(|run| Some((run, run.get("score")?.as_f64()?)))
         .collect::<Vec<_>>();
     let svg = if scored.is_empty() {
-        empty_svg(760, 280, "No self-iteration v2 scores yet")
+        empty_svg(820, 320, "No self-iteration v2 scores yet")
     } else {
-        score_svg(760, 280, &scored)
+        score_svg(820, 320, &scored)
     };
     fs::write(path, svg).map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn score_svg(width: u32, height: u32, scored: &[(&Value, f64)]) -> String {
-    let pad = 36.0;
+    let pad = 48.0;
     let min = scored
         .iter()
         .map(|(_, score)| *score)
@@ -255,16 +267,20 @@ fn score_svg(width: u32, height: u32, scored: &[(&Value, f64)]) -> String {
         .iter()
         .zip(points.iter())
         .map(|((run, _), (x, y))| {
-            let color = if run
-                .get("accepted")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                "#16a34a"
-            } else {
-                "#dc2626"
-            };
-            format!(r#"<circle cx="{x:.1}" cy="{y:.1}" r="4" fill="{color}" />"#)
+            let style = chart_style(run);
+            let title = xml_escape(&format!(
+                "{} score={:.6} {}",
+                run.get("run_id").and_then(Value::as_str).unwrap_or(""),
+                run.get("score").and_then(Value::as_f64).unwrap_or(0.0),
+                style.label
+            ));
+            format!(
+                r#"<circle cx="{x:.1}" cy="{y:.1}" r="{radius:.1}" fill="{color}" stroke="{stroke}" stroke-width="{stroke_width}"><title>{title}</title></circle>"#,
+                radius = style.radius,
+                color = style.color,
+                stroke = style.stroke,
+                stroke_width = style.stroke_width
+            )
         })
         .collect::<Vec<_>>()
         .join("\n  ");
@@ -272,6 +288,9 @@ fn score_svg(width: u32, height: u32, scored: &[(&Value, f64)]) -> String {
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect width="100%" height="100%" fill="#ffffff"/>
   <text x="{pad}" y="24" font-family="monospace" font-size="16" fill="#111827">relay-knowledge self-iteration v2 score</text>
+  <circle cx="{legend_x}" cy="42" r="5" fill="#16a34a" stroke="#14532d" stroke-width="1.5"/><text x="{legend_text_x}" y="46" font-family="monospace" font-size="11" fill="#374151">accepted commit</text>
+  <circle cx="{legend2_x}" cy="42" r="4" fill="#f59e0b" stroke="#92400e" stroke-width="1"/><text x="{legend2_text_x}" y="46" font-family="monospace" font-size="11" fill="#374151">would accept evaluation</text>
+  <circle cx="{legend3_x}" cy="42" r="3.5" fill="#dc2626" stroke="#7f1d1d" stroke-width="1"/><text x="{legend3_text_x}" y="46" font-family="monospace" font-size="11" fill="#374151">rejected</text>
   <line x1="{pad}" y1="{bottom}" x2="{right}" y2="{bottom}" stroke="#d1d5db"/>
   <line x1="{pad}" y1="{pad}" x2="{pad}" y2="{bottom}" stroke="#d1d5db"/>
   <text x="4" y="{top_label}" font-family="monospace" font-size="11" fill="#6b7280">{max:.3}</text>
@@ -284,7 +303,49 @@ fn score_svg(width: u32, height: u32, scored: &[(&Value, f64)]) -> String {
         right = width as f64 - pad,
         top_label = pad + 4.0,
         bottom_label = height as f64 - pad + 4.0,
+        legend_x = pad,
+        legend_text_x = pad + 10.0,
+        legend2_x = pad + 160.0,
+        legend2_text_x = pad + 170.0,
+        legend3_x = pad + 380.0,
+        legend3_text_x = pad + 390.0,
     )
+}
+
+struct ChartStyle {
+    color: &'static str,
+    stroke: &'static str,
+    stroke_width: &'static str,
+    radius: f64,
+    label: &'static str,
+}
+
+fn chart_style(run: &Value) -> ChartStyle {
+    if adopted(run) {
+        return ChartStyle {
+            color: "#16a34a",
+            stroke: "#14532d",
+            stroke_width: "1.5",
+            radius: 5.0,
+            label: "accepted commit",
+        };
+    }
+    if score_accepted(run) {
+        return ChartStyle {
+            color: "#f59e0b",
+            stroke: "#92400e",
+            stroke_width: "1",
+            radius: 4.0,
+            label: "would accept evaluation",
+        };
+    }
+    ChartStyle {
+        color: "#dc2626",
+        stroke: "#7f1d1d",
+        stroke_width: "1",
+        radius: 3.5,
+        label: "rejected",
+    }
 }
 
 fn scaled_points(
@@ -339,6 +400,84 @@ fn reject_reasons(run: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn committed(run: &Value) -> bool {
+    run.get("committed")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            run.get("commit")
+                .and_then(Value::as_str)
+                .is_some_and(|commit| !commit.trim().is_empty())
+        })
+}
+
+pub fn adopted(run: &Value) -> bool {
+    committed(run)
+}
+
+fn score_accepted(run: &Value) -> bool {
+    run.get("score_accepted")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            run.get("accepted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+}
+
+fn run_mode(run: &Value) -> String {
+    if is_evaluate_run(run) {
+        "evaluate".to_owned()
+    } else {
+        "loop".to_owned()
+    }
+}
+
+pub fn is_evaluate_run(run: &Value) -> bool {
+    run.get("run_id")
+        .and_then(Value::as_str)
+        .is_some_and(|run_id| run_id.starts_with("manual-evaluate"))
+}
+
+fn adoption_status(committed: bool, score_accepted: bool) -> &'static str {
+    if committed {
+        "committed"
+    } else if score_accepted {
+        "would_accept"
+    } else {
+        "rejected"
+    }
+}
+
+fn adoption_status_for_run(run: &Value) -> String {
+    run.get("adoption_status")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| adoption_status(committed(run), score_accepted(run)).to_owned())
+}
+
+fn patch_string(run: &Value, name: &str) -> String {
+    run.get("patch")
+        .and_then(|patch| patch.get(name))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn patch_number(run: &Value, name: &str) -> u64 {
+    run.get("patch")
+        .and_then(|patch| patch.get(name))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn rounded(value: f64) -> f64 {
     (value * 1_000_000.0).round() / 1_000_000.0
 }
@@ -363,5 +502,160 @@ fn escape_csv(value: &str) -> String {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
         value.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn export_history_separates_score_acceptance_from_adoption() {
+        let workspace = temp_workspace("history-export");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        let runs = [
+            json!({
+                "run_id": "run-1",
+                "timestamp": "1",
+                "profile": "fast",
+                "accepted": true,
+                "score_accepted": true,
+                "committed": true,
+                "adoption_status": "committed",
+                "score": 0.8,
+                "foundational_capability": 1.0,
+                "competitive_capability": 0.8,
+                "accuracy": 0.9,
+                "semantic_vector": 0.0,
+                "performance": 0.8,
+                "stability": 1.0,
+                "commit": "abc1234",
+                "patch": {"path": "/tmp/run-1.patch", "sha256": "sha", "bytes": 42},
+                "report": "/tmp/run-1.json",
+                "reject_reasons": []
+            }),
+            json!({
+                "run_id": "manual-evaluate-2",
+                "timestamp": "2",
+                "profile": "fast",
+                "accepted": false,
+                "score_accepted": true,
+                "committed": false,
+                "adoption_status": "would_accept",
+                "score": 0.81,
+                "foundational_capability": 1.0,
+                "competitive_capability": 0.8,
+                "accuracy": 0.9,
+                "semantic_vector": 0.0,
+                "performance": 0.81,
+                "stability": 1.0,
+                "commit": null,
+                "patch": {"path": "/tmp/manual-evaluate-2.patch", "sha256": "sha2", "bytes": 43},
+                "report": "/tmp/manual-evaluate-2.json",
+                "reject_reasons": []
+            }),
+            json!({
+                "run_id": "run-3",
+                "timestamp": "3",
+                "profile": "fast",
+                "accepted": false,
+                "score": 0.79,
+                "foundational_capability": 1.0,
+                "competitive_capability": 0.8,
+                "accuracy": 0.9,
+                "semantic_vector": 0.0,
+                "performance": 0.79,
+                "stability": 1.0,
+                "commit": null,
+                "patch": {"path": "/tmp/run-3.patch", "sha256": "sha3", "bytes": 44},
+                "report": "/tmp/run-3.json",
+                "reject_reasons": ["candidate did not improve score"]
+            }),
+        ];
+        fs::write(
+            &paths.runs_jsonl,
+            runs.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("runs");
+
+        export_history(&paths).expect("export");
+        let csv = fs::read_to_string(&paths.score_csv).expect("csv");
+        let svg = fs::read_to_string(&paths.score_svg).expect("svg");
+
+        assert!(csv.contains("mode,accepted,score_accepted,committed,adoption_status"));
+        assert!(csv.contains("run-1,1,fast,loop,true,true,true,committed"));
+        assert!(csv.contains("manual-evaluate-2,2,fast,evaluate,false,true,false,would_accept"));
+        assert!(csv.contains("/tmp/manual-evaluate-2.patch"));
+        assert!(svg.contains("accepted commit"));
+        assert!(svg.contains("would accept evaluation"));
+        assert!(svg.contains("#16a34a"));
+        assert!(svg.contains("#f59e0b"));
+        assert!(svg.contains("#dc2626"));
+    }
+
+    #[test]
+    fn automated_baseline_ignores_manual_evaluations() {
+        let workspace = temp_workspace("history-baseline");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        let runs = [
+            json!({
+                "run_id": "run-1",
+                "timestamp": "1",
+                "profile": "fast",
+                "accepted": true,
+                "score_accepted": true,
+                "committed": true,
+                "score": 0.8,
+                "commit": "abc1234"
+            }),
+            json!({
+                "run_id": "manual-evaluate-2",
+                "timestamp": "2",
+                "profile": "fast",
+                "accepted": false,
+                "score_accepted": true,
+                "committed": false,
+                "score": 0.99
+            }),
+        ];
+        fs::write(
+            &paths.runs_jsonl,
+            runs.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("runs");
+
+        let previous = previous_scored_run_for_profile(&paths, "fast")
+            .expect("history")
+            .expect("previous run");
+
+        assert_eq!(
+            previous.get("run_id").and_then(Value::as_str),
+            Some("run-1")
+        );
+    }
+
+    fn temp_workspace(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("{prefix}-{unique}"));
+        fs::create_dir_all(workspace.join(".git")).expect("workspace");
+        workspace
     }
 }

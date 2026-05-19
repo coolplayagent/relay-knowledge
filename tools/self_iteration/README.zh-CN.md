@@ -51,7 +51,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 4. 按 profile 运行质量门禁和评估。默认 `fast` 只跑格式检查、产品 debug build、harness `cargo check`、普通仓库子集和一个轻量 repository-set 护栏；`full`/`exhaustive` 会恢复产品和独立 harness 的 release build、产品 `clippy -> test` 与 harness `clippy -> test` 两条 rail，并运行完整仓库评估、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports-v2/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs-v2.jsonl`。
-7. 将 v2 图表写入 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `.git/relay-knowledge-self-iteration/score-v2.svg`。
+7. 将 v2 图表写入 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `.git/relay-knowledge-self-iteration/score-v2.svg`；`accepted` 只表示已经创建 git commit。
 8. 采纳候选前，将本轮采用的优化思路、变更文件、指标改善和已知退化追加到 `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`。
 9. 只有当上一轮改进采纳策略接受候选时，才把候选净改动和采纳记录 squash 成一个 commit。
 10. 候选被拒绝时，恢复到本轮开始的 commit。
@@ -60,9 +60,9 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 
 实现类候选必须在评估前更新
 `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`，写清算法、架构、不变量、预期 case/metric 影响和已知风险。harness 会追加
-`self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 会把 v2 run history 和 patch 路径作为有界上下文，避免一次性读取全部历史产物。
+`self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 会把 v2 run history、历史综合摘要和 patch 路径作为有界上下文，避免一次性读取全部历史产物。
 
-v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
+v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引、按 profile 汇总的历史综合摘要和受限历史 patch 索引。被拒记忆会记录变更路径、score delta、局部改善、退化和连续拒绝簇，帮助 Codex 避免重复尝试已经输给采纳基线的小改动。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。直接注入 prompt 的历史综合摘要带硬字符上限，长期迭代不会随历史长度线性填满 LLM 上下文。
 
 默认 profile 是 `fast`。它只跑产品与 harness 的 `fmt --check`，再跑产品 debug build 和 harness `cargo check`，用 `target/debug/relay-knowledge` 执行评估；默认不跑产品 release build、全量 clippy、全量 test、本地文件 fixture、semantic/vector fixture 或 research judge。`fast` 评估 `relay_teams`、`leveldb_cpp`、`temporal_samples_go` 和 `temporal_sdk_go`，每个普通仓库默认取前 6 条 query case，并保留 `temporal_go_workspace` repo-set 的 1 条跨仓门槛 case。它复用 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` 作为评估 home，减少重复注册和索引成本。评分历史按 profile 隔离，fast 只和 fast 历史比较，不会把 full/exhaustive 的 semantic/vector 或 judge 分数当作 fast 回归。可用 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`、`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`、`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace` 和 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2` 调整默认子集。需要完整旧门禁和完整 workload 时显式传 `--profile full`；长周期大仓扩展仍使用 `--profile exhaustive`。
 
@@ -136,12 +136,14 @@ and (
 - `ratio_epsilon = 0.005`，用于 foundational_capability、competitive_capability、semantic_vector、performance、stability 等分数组件
 - `metric_epsilon = max(25ms, previous_metric * 0.03)`，用于原始耗时指标
 
-这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。foundational、competitive、semantic_vector、research_judge、performance、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、research_judge、performance、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
+这可以避免真实 case/rank 改善因为某个耗时指标在正常噪声范围内波动而被拒绝，也能避免只靠噪声获胜、同时悄悄回退受保护目标的候选被采纳。当局部 metric 改善仍未超过当前 profile 的 latest baseline 时，拒绝原因会额外记录该诊断和 score delta。foundational、competitive、semantic_vector、research_judge、performance、case、gate 和 metric 的退化会被记录为下一轮 Codex prompt 的 degradation feedback。正向的 score、research_judge、performance、case、gate 和 metric 改善也会被记录并传给下一轮 Codex prompt，方便后续迭代知道哪些成果需要保持。被采纳的优化方案还会进入 run history 的 `optimization_plan` 字段，并在下一轮 prompt 的 `Recent adopted optimization plans to build on` 段落中作为设计参考。
 
 `chart` 命令会写入：
 
 - `.git/relay-knowledge-self-iteration/score-v2.csv`
 - `.git/relay-knowledge-self-iteration/score-v2.svg`
+
+CSV 是 scored-run history，不是 patch 目录清单；它包含 run mode、patch path、`score_accepted` 和 `committed` 字段，方便区分手动评估和 loop 迭代。手动 `evaluate` run 会使用唯一的 `manual-evaluate-*` patch/report 名称，可以记录 `score_accepted=true`，但除非创建了 git commit，否则绝不会是 `accepted=true`。SVG 中绿色点表示已提交的 accepted run，琥珀色点表示评分会通过的手动评估，红色点表示 rejected run。
 
 ## 评估数据
 
