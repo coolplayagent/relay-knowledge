@@ -21,6 +21,9 @@ const EXECUTION_FLOW_TERMS: &[&str] = &[
 const INLINE_CONSTRUCT_TERMS: &[&str] = &[
     "arrow", "callback", "closure", "handler", "inline", "lambda", "nested",
 ];
+const COMPACT_HIGH_COVERAGE_MAX_NONBLANK_LINES: usize = 20;
+const COMPACT_HIGH_COVERAGE_MIN_BASE_SCORE: f64 = 6.0;
+const COMPACT_HIGH_COVERAGE_MIN_MATCHED_TERMS: usize = 4;
 
 pub(super) fn caller_context_density_bonus(
     base_score: f64,
@@ -153,6 +156,46 @@ pub(super) fn inline_construct_chunk_bonus(
 
     let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
     ((coverage * 1.25) + inline_construct_density(content)).min(2.2)
+}
+
+pub(super) fn compact_high_coverage_chunk_bonus(
+    base_score: f64,
+    query: &str,
+    content: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score < COMPACT_HIGH_COVERAGE_MIN_BASE_SCORE
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || (path_looks_like_test_or_benchmark(path) && !query_mentions_test_or_benchmark(query))
+    {
+        return 0.0;
+    }
+
+    let query_terms = meaningful_terms(query);
+    if query_terms.len() < COMPACT_HIGH_COVERAGE_MIN_MATCHED_TERMS {
+        return 0.0;
+    }
+    let content_terms = meaningful_terms(content);
+    let matched_terms = matched_query_terms(&query_terms, &content_terms);
+    let required_matches = COMPACT_HIGH_COVERAGE_MIN_MATCHED_TERMS
+        .max(query_terms.len().saturating_mul(3).div_ceil(4));
+    if matched_terms.len() < required_matches {
+        return 0.0;
+    }
+
+    let nonblank_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(COMPACT_HIGH_COVERAGE_MAX_NONBLANK_LINES + 1)
+        .count();
+    if nonblank_lines == 0 || nonblank_lines > COMPACT_HIGH_COVERAGE_MAX_NONBLANK_LINES {
+        return 0.0;
+    }
+
+    let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
+    (0.35 + (coverage * 0.4)).min(0.75)
 }
 
 fn query_execution_flow_intent(query: &str) -> bool {
@@ -543,6 +586,55 @@ mod tests {
         );
 
         assert!(bonus > 0.0, "benchmark lambda should be eligible");
+    }
+
+    #[test]
+    fn compact_high_coverage_bonus_prefers_concise_usage_chunks() {
+        let hybrid = request(
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+            CodeQueryKind::Hybrid,
+        );
+        let compact = compact_high_coverage_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "func main() {\n\
+            c, err := client.Dial(envconfig.MustLoadDefaultClientOptions())\n\
+            if err != nil { panic(err) }\n\
+            w := worker.New(c, \"hello-world\", worker.Options{})\n\
+            w.RegisterWorkflow(helloworld.Workflow)\n\
+            err = w.Run(worker.InterruptCh())\n\
+            if err != nil { panic(err) }\n\
+            }",
+            "helloworld/worker/main.go",
+            &hybrid,
+        );
+        let long = compact_high_coverage_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            &(0..25)
+                .map(|_| "client.Dial envconfig MustLoadDefaultClientOptions workflow client")
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "starter/main.go",
+            &hybrid,
+        );
+        let definition = request("client.Dial workflow client", CodeQueryKind::Definition);
+
+        assert!(
+            compact > 0.0,
+            "compact chunk should receive a bounded bonus"
+        );
+        assert_eq!(long, 0.0);
+        assert_eq!(
+            compact_high_coverage_chunk_bonus(
+                8.0,
+                &definition.query,
+                "client.Dial workflow client",
+                "src/client.go",
+                &definition,
+            ),
+            0.0
+        );
     }
 
     fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {

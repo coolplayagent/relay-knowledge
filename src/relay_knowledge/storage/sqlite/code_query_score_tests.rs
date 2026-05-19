@@ -28,3 +28,32 @@ fn score_query_ignores_single_letter_path_extension_noise() {
     assert_eq!(query.score(["debugfs helper"]), 0.0);
     assert_eq!(query.score(["h"]), 0.0);
 }
+
+#[test]
+fn symbol_bonus_matches_scoped_query_subphrase() {
+    let selector =
+        crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+        selector,
+        CodeQueryKind::Hybrid,
+        10,
+        crate::domain::FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let bonus = symbol_query_bonus(
+        &request.query,
+        "Dial",
+        "client.Dial",
+        "func Dial(options Options) (Client, error)",
+        "repo://sdk/client::Dial",
+        &request,
+    );
+
+    assert!(
+        bonus >= 3.0,
+        "scoped query subphrase should match provider definition: {bonus}",
+    );
+}

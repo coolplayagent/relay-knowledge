@@ -435,10 +435,10 @@ fn class_member_display_name(name: &str, qualified_name: &str) -> Option<String>
 }
 
 fn scoped_query_terms(query: &str) -> Option<Vec<String>> {
-    if !(query.contains("::") || query.contains('.')) {
-        return None;
-    }
-    let terms = scoped_terms(query);
+    let scoped_token = query
+        .split_whitespace()
+        .find(|token| token.contains("::") || token.contains('.'))?;
+    let terms = scoped_terms(scoped_token);
     (terms.len() >= 2).then_some(terms)
 }
 

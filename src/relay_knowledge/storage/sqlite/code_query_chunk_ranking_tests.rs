@@ -179,6 +179,72 @@ async fn hybrid_chunks_rank_execution_flow_context_above_local_tool_helpers() {
     assert!(hits[0].excerpt.contains("ToolStream.empty"));
 }
 
+#[tokio::test]
+async fn hybrid_chunks_prefer_compact_high_coverage_usage() {
+    let path = "samples/workflow/main.go";
+    let compact = "func main() {\n\
+\tc, err := client.Dial(envconfig.MustLoadDefaultClientOptions())\n\
+\tif err != nil { panic(err) }\n\
+\tw := worker.New(c, \"hello-world\", worker.Options{})\n\
+\tw.RegisterWorkflow(helloworld.Workflow)\n\
+\terr = w.Run(worker.InterruptCh())\n\
+}";
+    let verbose = (0..24)
+        .map(|_| "client.Dial envconfig MustLoadDefaultClientOptions workflow client")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("workflow-file", path, "go")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "verbose-chunk",
+                "workflow-file",
+                path,
+                &verbose,
+                range(1, 24),
+                None,
+            ),
+            chunk(
+                "compact-chunk",
+                "workflow-file",
+                path,
+                compact,
+                range(40, 47),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].line_range.start, 40);
+    assert!(hits[0].score > hits[1].score);
+}
+
 fn lexical_hit_score(hits: &[CodeRetrievalHit], line_start: u32) -> Option<f64> {
     hits.iter()
         .find(|hit| {
