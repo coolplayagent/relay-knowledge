@@ -1,0 +1,236 @@
+{
+  "repositories": {
+    "temporal_samples_go": {
+      "path": "/opt/workspace/temporal-samples-go",
+      "alias": "temporal-samples-go-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 90000,
+      "query_p50_budget_ms": 400,
+      "query_p95_budget_ms": 800
+    },
+    "temporal_sdk_go": {
+      "path": "/opt/workspace/temporal-sdk-go",
+      "alias": "temporal-sdk-go-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 120000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900
+    },
+    "otel_collector_contrib": {
+      "path": "/opt/workspace/opentelemetry-collector-contrib",
+      "alias": "otel-collector-contrib-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 300000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    },
+    "otel_collector": {
+      "path": "/opt/workspace/opentelemetry-collector",
+      "alias": "otel-collector-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 180000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    }
+  },
+  "repository_sets": {
+    "temporal_go_workspace": {
+      "alias": "temporal-go-workspace-self-iteration",
+      "description": "Temporal samples and SDK cross-repository Go retrieval workload.",
+      "refresh_budget_ms": 45000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900,
+      "members": [
+        {
+          "repository": "temporal_samples_go",
+          "priority": 10
+        },
+        {
+          "repository": "temporal_sdk_go",
+          "priority": 0
+        }
+      ]
+    },
+    "otel_collector_workspace": {
+      "alias": "otel-collector-workspace-self-iteration",
+      "description": "OpenTelemetry collector contrib and core cross-repository Go retrieval workload.",
+      "refresh_budget_ms": 90000,
+      "query_p50_budget_ms": 700,
+      "query_p95_budget_ms": 1400,
+      "members": [
+        {
+          "repository": "otel_collector_contrib",
+          "priority": 10
+        },
+        {
+          "repository": "otel_collector",
+          "priority": 0
+        }
+      ]
+    }
+  },
+  "repository_set_query_cases": [
+    {
+      "id": "temporal_go_repo_set_client_dial_usage_and_definition",
+      "repository_set": "temporal_go_workspace",
+      "kind": "hybrid",
+      "query": "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "repository_alias": "temporal-samples-go-self-iteration",
+          "path": "helloworld/worker/main.go",
+          "excerpt_contains": "client.Dial"
+        }
+      ],
+      "case_group": "multi_repository",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "repository_alias": "temporal-samples-go-self-iteration",
+          "path": "helloworld/worker/main.go",
+          "excerpt_contains": "client.Dial"
+        },
+        {
+          "repository_alias": "temporal-sdk-go-self-iteration",
+          "path": "client/client.go",
+          "excerpt_contains": "func Dial"
+        }
+      ]
+    },
+    {
+      "id": "temporal_go_repo_set_worker_registration_flow",
+      "repository_set": "temporal_go_workspace",
+      "kind": "hybrid",
+      "query": "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "repository_alias": "temporal-samples-go-self-iteration",
+          "path": "helloworld/worker/main.go",
+          "excerpt_contains": "RegisterWorkflow"
+        }
+      ],
+      "case_group": "multi_repository",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "repository_alias": "temporal-samples-go-self-iteration",
+          "path": "helloworld/worker/main.go",
+          "excerpt_contains": "RegisterActivity"
+        },
+        {
+          "repository_alias": "temporal-sdk-go-self-iteration",
+          "path": "worker/worker.go",
+          "excerpt_contains": "func New"
+        },
+        {
+          "repository_alias": "temporal-sdk-go-self-iteration",
+          "path": "worker/worker.go",
+          "excerpt_contains": "func InterruptCh"
+        }
+      ]
+    },
+    {
+      "id": "otel_go_repo_set_filelog_component_type",
+      "repository_set": "otel_collector_workspace",
+      "kind": "hybrid",
+      "query": "filelog receiver component Type MustNewType file_log",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "repository_alias": "otel-collector-contrib-self-iteration",
+          "path": "receiver/filelogreceiver/filelog.go",
+          "excerpt_contains": "component.Type"
+        }
+      ],
+      "case_group": "multi_repository",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "repository_alias": "otel-collector-contrib-self-iteration",
+          "path": "receiver/filelogreceiver/filelog.go",
+          "excerpt_contains": "metadata.Type"
+        },
+        {
+          "repository_alias": "otel-collector-self-iteration",
+          "path": "component/identifiable.go",
+          "excerpt_contains": "func MustNewType"
+        }
+      ]
+    },
+    {
+      "id": "otel_go_repo_set_receiver_factory_create_logs",
+      "repository_set": "otel_collector_workspace",
+      "kind": "hybrid",
+      "query": "receiver.NewFactory CreateLogs file_log factory logs receiver",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "repository_alias": "otel-collector-contrib-self-iteration",
+          "path": "receiver/filelogreceiver/filelog.go",
+          "excerpt_contains": "NewFactory"
+        }
+      ],
+      "case_group": "multi_repository",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "repository_alias": "otel-collector-contrib-self-iteration",
+          "path": "receiver/filelogreceiver/filelog.go",
+          "excerpt_contains": "adapter.NewFactory"
+        },
+        {
+          "repository_alias": "otel-collector-self-iteration",
+          "path": "receiver/receiver.go",
+          "excerpt_contains": "func NewFactory"
+        },
+        {
+          "repository_alias": "otel-collector-self-iteration",
+          "path": "receiver/receiver.go",
+          "excerpt_contains": "CreateLogs"
+        }
+      ]
+    }
+  ]
+}

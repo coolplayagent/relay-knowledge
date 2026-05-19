@@ -203,6 +203,12 @@ def hit_matches_any(hit: dict[str, Any], patterns: list[dict[str, Any]]) -> bool
 
 
 def hit_matches(hit: dict[str, Any], pattern: dict[str, Any]) -> bool:
+    if "repository_alias" in pattern and hit.get("repository_alias") != pattern["repository_alias"]:
+        return False
+    if "repository_id" in pattern and hit.get("repository_id") != pattern["repository_id"]:
+        return False
+    if "source_scope" in pattern and hit.get("source_scope") != pattern["source_scope"]:
+        return False
     if "path" in pattern and hit.get("path") != pattern["path"]:
         return False
     if "relative_path" in pattern and hit.get("relative_path") != pattern["relative_path"]:

@@ -238,6 +238,15 @@ enumerating cases.
   and add `expected_all` or `expected_sequence` scoring so passed inheritance,
   implementation, dependency, alias, inline, caller-chain, and execution-flow
   cases still leave ranking and coverage improvement room.
+- Multi-repository repository-set targets in
+  `cases/repository_multi_repository_targets.json` register each member as a
+  normal full-scope repository first, create an explicit `repo-set`, refresh the
+  cross-repository overlay, and run `repo-set query`. The scorer flattens
+  `results[*].member` and `results[*].hit` so cases can require specific
+  `repository_alias`, `source_scope`, path, line, and excerpt evidence without
+  pretending that repository-set hits are single-repository facts. The default
+  profile covers Temporal `samples-go` to `sdk-go` usage and OpenTelemetry
+  `opentelemetry-collector-contrib` to `opentelemetry-collector` usage.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
   and add combined `register_index_budget_ms` budgets. The evaluator records
@@ -251,9 +260,25 @@ enumerating cases.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering symbols, functions, syscall-style macros, exported symbols, includes, references, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
 - `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.
+- `/opt/workspace/temporal-samples-go` and `/opt/workspace/temporal-sdk-go`
+  full `scope=all` Go indexing plus a default-profile repository-set workload
+  for Temporal worker/client API usage across sample and SDK repositories.
+- `/opt/workspace/opentelemetry-collector-contrib` and
+  `/opt/workspace/opentelemetry-collector` full `scope=all` Go indexing plus a
+  default-profile repository-set workload for receiver factory and component
+  type usage across contrib and core repositories.
 - `/opt/workspace/kubernetes` full `scope=all` Go indexing in the `exhaustive` profile for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
 - `/opt/workspace/spring-framework` full `scope=all` Java indexing in the `exhaustive` profile for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
 - `/opt/workspace/rustfs` full `scope=all` Rust indexing in the `exhaustive` profile for trait implementation, function-local imports, authentication caller chains, and startup execution flow.
 - `/opt/workspace/codex` full `scope=all` Python indexing in the `exhaustive` profile for exception inheritance, relative imports, retry caller chains, and app-server stdio execution flow.
+
+Prepare the default-profile multi-repository fixtures with:
+
+```bash
+git clone --depth 1 https://github.com/temporalio/samples-go.git /opt/workspace/temporal-samples-go
+git clone --depth 1 https://github.com/temporalio/sdk-go.git /opt/workspace/temporal-sdk-go
+git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector-contrib.git /opt/workspace/opentelemetry-collector-contrib
+git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector
+```
 
 All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux, Kubernetes, or Spring Framework full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

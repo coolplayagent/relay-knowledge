@@ -124,6 +124,26 @@ def evaluate_candidate(
         case_observations.extend(repo_report["cases"])
         metrics.extend(repo_report["metrics"])
 
+    repository_sets = cases_config.get("repository_sets", {})
+    for set_name, set_config in repository_sets.items():
+        if set_config.get("profile") == "exhaustive" and config.profile != "exhaustive":
+            continue
+        set_report = evaluate_repository_set(
+            binary=binary,
+            workspace=config.workspace,
+            env=env,
+            set_name=set_name,
+            set_config=set_config,
+            repositories=repositories,
+            all_cases=cases_config.get("repository_set_query_cases", []),
+            timeout=config.command_timeout_seconds,
+        )
+        repo_reports.append(set_report)
+        commands.extend(set_report["commands"])
+        gates.extend(result.gate() for result in set_report["commands"])
+        case_observations.extend(set_report["cases"])
+        metrics.extend(set_report["metrics"])
+
     file_report = evaluate_file_fixtures(
         binary=binary,
         workspace=config.workspace,
@@ -289,6 +309,138 @@ def evaluate_repository(
         )
 
     return serializable_repo_report(repo_name, commands, case_observations, metrics, index_json, scope)
+
+
+def evaluate_repository_set(
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    set_name: str,
+    set_config: dict[str, Any],
+    repositories: dict[str, Any],
+    all_cases: list[dict[str, Any]],
+    timeout: int,
+) -> dict[str, Any]:
+    set_alias = set_config.get("alias", set_name)
+    set_cases = [case for case in all_cases if case.get("repository_set") == set_name]
+    commands: list[CommandResult] = []
+    case_observations: list[CaseObservation] = []
+    metrics: list[MetricObservation] = []
+
+    members = set_config.get("members", [])
+    if not members:
+        missing = CommandResult(
+            name=f"{set_name}_repository_set_members",
+            command=["validate", "repository_set_members", set_name],
+            exit_code=1,
+            duration_ms=0,
+            stdout="",
+            stderr=f"repository set '{set_name}' has no members",
+        )
+        commands.append(missing)
+        return serializable_repo_report(set_name, commands, case_observations, metrics, {}, "repository_set")
+
+    create = run_command(
+        f"{set_name}_repo_set_create",
+        repo_set_create_command(binary, set_alias, set_config),
+        workspace,
+        env,
+        timeout,
+    )
+    commands.append(create)
+    if not create.passed:
+        return serializable_repo_report(set_name, commands, case_observations, metrics, {}, "repository_set")
+
+    for member in members:
+        repo_name = str(member.get("repository", "")).strip()
+        repo_config = repositories.get(repo_name)
+        if not repo_config:
+            missing = CommandResult(
+                name=f"{set_name}_{repo_name or 'member'}_repo_set_member_config",
+                command=["validate", "repository_set_member", repo_name],
+                exit_code=1,
+                duration_ms=0,
+                stdout="",
+                stderr=f"repository set '{set_name}' references unknown repository '{repo_name}'",
+            )
+            commands.append(missing)
+            return serializable_repo_report(set_name, commands, case_observations, metrics, {}, "repository_set")
+        add = run_command(
+            f"{set_name}_{repo_name}_repo_set_add",
+            repo_set_add_command(binary, set_alias, member, repo_name, repo_config),
+            workspace,
+            env,
+            timeout,
+        )
+        commands.append(add)
+        if not add.passed:
+            return serializable_repo_report(set_name, commands, case_observations, metrics, {}, "repository_set")
+
+    refresh = run_command(
+        f"{set_name}_repo_set_refresh",
+        [str(binary), "repo-set", "refresh", set_alias, "--format", "json"],
+        workspace,
+        env,
+        timeout,
+    )
+    commands.append(refresh)
+    metrics.append(
+        MetricObservation(
+            name=f"{set_name}_refresh_ms",
+            value=refresh.duration_ms,
+            budget=float(set_config.get("refresh_budget_ms", 0)) or None,
+            key=True,
+        )
+    )
+    if not refresh.passed:
+        return serializable_repo_report(
+            set_name,
+            commands,
+            case_observations,
+            metrics,
+            parse_json_output(refresh.stdout) if refresh.stdout else {},
+            "repository_set",
+        )
+
+    query_durations: list[int] = []
+    for case in set_cases:
+        query = run_command(
+            f"{set_name}_{case['id']}",
+            repo_set_query_command(binary, set_alias, case),
+            workspace,
+            env,
+            timeout,
+        )
+        commands.append(query)
+        query_durations.append(query.duration_ms)
+        case_observations.append(score_repository_set_query_case(set_name, case, query))
+
+    if query_durations:
+        metrics.append(
+            MetricObservation(
+                name=f"{set_name}_query_p50_ms",
+                value=float(median(query_durations)),
+                budget=float(set_config.get("query_p50_budget_ms", 0)) or None,
+                key=False,
+            )
+        )
+        metrics.append(
+            MetricObservation(
+                name=f"{set_name}_query_p95_ms",
+                value=float(percentile(query_durations, 95)),
+                budget=float(set_config.get("query_p95_budget_ms", 0)) or None,
+                key=True,
+            )
+        )
+
+    return serializable_repo_report(
+        set_name,
+        commands,
+        case_observations,
+        metrics,
+        parse_json_output(refresh.stdout) if refresh.stdout else {},
+        "repository_set",
+    )
 
 
 def evaluate_semantic_vector_suite(
@@ -739,6 +891,75 @@ def query_command(
     return command
 
 
+def repo_set_create_command(
+    binary: Path,
+    set_alias: str,
+    set_config: dict[str, Any],
+) -> list[str]:
+    command = [str(binary), "repo-set", "create", set_alias]
+    description = str(set_config.get("description", "")).strip()
+    if description:
+        command.extend(["--description", description])
+    command.extend(["--format", "json"])
+    return command
+
+
+def repo_set_add_command(
+    binary: Path,
+    set_alias: str,
+    member: dict[str, Any],
+    repo_name: str,
+    repo_config: dict[str, Any],
+) -> list[str]:
+    repository_alias = str(member.get("alias") or repo_config.get("alias") or repo_name)
+    ref_selector = str(member.get("ref") or repo_config.get("ref") or "HEAD")
+    priority = int(member.get("priority", 0))
+    command = [
+        str(binary),
+        "repo-set",
+        "add",
+        set_alias,
+        repository_alias,
+        "--ref",
+        ref_selector,
+        "--priority",
+        str(priority),
+    ]
+    for path_filter in member.get("path_filters", []):
+        command.extend(["--path", path_filter])
+    for language_filter in member.get("language_filters", []):
+        command.extend(["--language", language_filter])
+    command.extend(["--format", "json"])
+    return command
+
+
+def repo_set_query_command(
+    binary: Path,
+    set_alias: str,
+    case: dict[str, Any],
+) -> list[str]:
+    command = [
+        str(binary),
+        "repo-set",
+        "query",
+        set_alias,
+        "--query",
+        case["query"],
+        "--kind",
+        case["kind"],
+        "--freshness",
+        case.get("freshness", "wait-until-fresh"),
+        "--limit",
+        str(case.get("limit", 10)),
+    ]
+    for path_filter in case.get("path_filters", []):
+        command.extend(["--path", path_filter])
+    for language_filter in case.get("language_filters", []):
+        command.extend(["--language", language_filter])
+    command.extend(["--format", "json"])
+    return command
+
+
 def score_query_case(repo_name: str, case: dict[str, Any], result: CommandResult) -> CaseObservation:
     objective = repository_case_objective(case)
     if not result.passed:
@@ -778,6 +999,59 @@ def score_query_case(repo_name: str, case: dict[str, Any], result: CommandResult
         objective=objective,
         score_override=assessment.score,
     )
+
+
+def score_repository_set_query_case(
+    set_name: str,
+    case: dict[str, Any],
+    result: CommandResult,
+) -> CaseObservation:
+    objective = repository_case_objective(case)
+    if not result.passed:
+        return CaseObservation(
+            case_id=case["id"],
+            repository=set_name,
+            passed=False,
+            message=last_output_line(result.stdout, result.stderr),
+            objective=objective,
+        )
+    payload = parse_json_output(result.stdout)
+    hits = normalize_repository_set_hits(payload.get("results", []))
+    expected = case.get("expected", [])
+    forbidden = case.get("forbidden", [])
+    max_rank = int(case.get("max_rank", 1))
+    assessment = assess_ranked_hits(case, hits, expected, forbidden)
+    return CaseObservation(
+        case_id=case["id"],
+        repository=set_name,
+        passed=not assessment.failures,
+        rank=assessment.rank,
+        max_rank=max_rank,
+        false_positive_count=assessment.false_positive_count,
+        message=f"results={len(hits)} rank={assessment.rank} {assessment.details}".strip(),
+        objective=objective,
+        score_override=assessment.score,
+    )
+
+
+def normalize_repository_set_hits(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    hits: list[dict[str, Any]] = []
+    for result in results:
+        member = result.get("member", {})
+        hit = result.get("hit", {})
+        if not isinstance(member, dict) or not isinstance(hit, dict):
+            continue
+        flattened = dict(hit)
+        flattened["repository_alias"] = member.get("repository_alias")
+        flattened["member_repository_alias"] = member.get("repository_alias")
+        flattened["repository_id"] = member.get("repository_id") or hit.get("repository_id")
+        flattened["source_scope"] = member.get("source_scope") or hit.get("scope_id")
+        flattened["resolved_commit_sha"] = member.get("resolved_commit_sha")
+        flattened["member_priority"] = member.get("priority")
+        flattened["overlay_evidence"] = result.get("overlay_evidence", [])
+        flattened["repository_set_score"] = result.get("score")
+        hits.append(flattened)
+    return hits
 
 
 def repository_case_objective(case: dict[str, Any]) -> str:

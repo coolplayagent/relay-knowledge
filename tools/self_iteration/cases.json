@@ -15,7 +15,8 @@
     "cases/repository_relationship_challenge_system_targets.json",
     "cases/repository_relationship_challenge_application_targets.json",
     "cases/repository_relationship_extended_challenge_system_targets.json",
-    "cases/repository_relationship_extended_challenge_application_targets.json"
+    "cases/repository_relationship_extended_challenge_application_targets.json",
+    "cases/repository_multi_repository_targets.json"
   ],
   "repositories": {
     "relay_teams": {
