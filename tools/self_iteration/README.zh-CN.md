@@ -167,6 +167,14 @@ and (
   阈值，作为稳定回归护栏；challenge cases 去掉 path filter、降低 limit 与
   max rank，并用 `expected_all` 或 `expected_sequence` 让继承、实现、依赖、
   别名、内联、调用链和执行流 case 即使通过也继续保留排序和覆盖率改进空间。
+- 多仓库 repository-set targets 位于
+  `cases/repository_multi_repository_targets.json`。评估器会先把每个成员作为普通
+  `scope=all` 仓库注册和索引，再创建显式 `repo-set`、刷新跨仓 overlay，并运行
+  `repo-set query`。打分前会把 `results[*].member` 与 `results[*].hit`
+  展平，让 case 能要求具体的 `repository_alias`、`source_scope`、路径、行号和
+  excerpt 证据，而不会把 repository-set 命中伪装成单仓事实。默认 profile 覆盖
+  Temporal `samples-go` 到 `sdk-go`，以及 OpenTelemetry
+  `opentelemetry-collector-contrib` 到 `opentelemetry-collector` 的真实跨仓引用。
 - 仓库注册后索引性能 targets：`cases/repository_index_performance_targets.json` 收紧 `index_budget_ms`，并新增 `register_index_budget_ms` 组合预算。评估器会同时记录 `*_index_ms` 与 `*_register_index_ms`，让自迭代优先优化 `repo register` 后 cold index 的批处理、解析吞吐、SQLite 写入、finalize 和增量复用路径。
 - 内置 `semantic_vector_suite`：在自迭代专用 source scope 中写入小型 evidence，刷新 semantic/vector 索引，并验证 query 命中的 `retriever_sources` 覆盖 semantic/vector、`backend_statuses` 可用以及相关内容排序。启用 `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` 或 `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` 时，评估器会直接继承运行时环境变量并先执行 `provider probe`；不在 cases 或命令行中保存 provider URL、API key、模型名或维度。
 - `research_judge_suite`：只在 judge 环境配置存在时运行，把候选 diff、确定性评估摘要、选定的 02/03/04 文档片段、竞争力特性目标和实现护栏交给 LLM 或 coding-agent judge，输出 `research_judge` objective。该 suite 不替代确定性 gate，只负责研究性质和开放式质量判断。
@@ -175,9 +183,25 @@ and (
 - `/opt/workspace/linux`：`exhaustive` profile 下 `scope=all` 全仓索引，覆盖 symbol、函数、syscall 风格宏、导出符号、include、references、callers、callees、mmap flow、epoll/eventfd 等大仓检索场景。
 - `/opt/workspace/linux`：`exhaustive` profile 下通过 `linux_full` 目标重复测量完整仓库初始索引时间，用于长周期基线。
 - `/opt/workspace/leveldb`：`scope=all` 全仓 C/C++ 索引与查询，覆盖类方法、自由函数、头文件、table cache、recovery、callers、hybrid lookup 和 filters。
+- `/opt/workspace/temporal-samples-go` 与 `/opt/workspace/temporal-sdk-go`：
+  默认 profile 下 `scope=all` 全仓 Go 索引，并通过 repository set 覆盖样例仓库到
+  SDK 仓库的 worker/client API 使用关系。
+- `/opt/workspace/opentelemetry-collector-contrib` 与
+  `/opt/workspace/opentelemetry-collector`：默认 profile 下 `scope=all` 全仓 Go
+  索引，并通过 repository set 覆盖 contrib 与 core 仓库之间的 receiver factory
+  和 component type 使用关系。
 - `/opt/workspace/kubernetes`：`exhaustive` profile 下 `scope=all` 全仓 Go 索引与查询，覆盖 command constructor、kubelet flow、API types、clientset/generic client、authorizer、informer imports、callers、hybrid lookup 和 filters。
 - `/opt/workspace/spring-framework`：`exhaustive` profile 下 `scope=all` 全仓 Java 索引与查询，覆盖 context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。
 - `/opt/workspace/rustfs`：`exhaustive` profile 下 `scope=all` 全仓 Rust 索引与查询，覆盖 trait implementation、函数内 import、认证调用链和启动执行流。
 - `/opt/workspace/codex`：`exhaustive` profile 下 `scope=all` 全仓 Python 索引与查询，覆盖异常继承、relative import、retry 调用链和 app-server stdio 执行流。
+
+默认 profile 的多仓库 fixture 可用以下命令准备：
+
+```bash
+git clone --depth 1 https://github.com/temporalio/samples-go.git /opt/workspace/temporal-samples-go
+git clone --depth 1 https://github.com/temporalio/sdk-go.git /opt/workspace/temporal-sdk-go
+git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector-contrib.git /opt/workspace/opentelemetry-collector-contrib
+git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector
+```
 
 所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要运行 Linux、Kubernetes 或 Spring Framework 长周期全量初始索引 gate 时使用 `--profile exhaustive`；这些 gate 有意不放在默认 profile，避免单 CPU 自迭代 worker 在收集可操作检索反馈前就拒绝每个候选。

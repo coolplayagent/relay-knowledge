@@ -11,7 +11,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from evaluator import (
     CommandResult,
     load_cases,
+    repo_set_add_command,
+    repo_set_create_command,
+    repo_set_query_command,
     repository_case_objective,
+    score_repository_set_query_case,
     score_query_case,
     score_semantic_vector_case,
     semantic_vector_env_check,
@@ -68,6 +72,12 @@ class EvaluatorTests(unittest.TestCase):
                         "file_fixtures": {"background": {"files": []}},
                         "file_query_cases": [{"id": "file-target"}],
                         "query_cases": [{"id": "repo-target"}],
+                        "repository_sets": {
+                            "workspace": {
+                                "members": [{"repository": "relay_teams"}],
+                            }
+                        },
+                        "repository_set_query_cases": [{"id": "set-target"}],
                     }
                 ),
                 encoding="utf-8",
@@ -86,6 +96,13 @@ class EvaluatorTests(unittest.TestCase):
                         "file_fixtures": {"base": {"files": []}},
                         "file_query_cases": [{"id": "file-base"}],
                         "query_cases": [{"id": "repo-base"}],
+                        "repository_sets": {
+                            "workspace": {
+                                "alias": "workspace-self-iteration",
+                                "query_p95_budget_ms": 1000,
+                            }
+                        },
+                        "repository_set_query_cases": [{"id": "set-base"}],
                     }
                 ),
                 encoding="utf-8",
@@ -102,9 +119,102 @@ class EvaluatorTests(unittest.TestCase):
             [case["id"] for case in config["query_cases"]],
             ["repo-base", "repo-target"],
         )
+        self.assertEqual(
+            [case["id"] for case in config["repository_set_query_cases"]],
+            ["set-base", "set-target"],
+        )
         self.assertEqual(config["repositories"]["relay_teams"]["path"], "/repo")
         self.assertEqual(config["repositories"]["relay_teams"]["index_budget_ms"], 90000)
         self.assertEqual(config["repositories"]["relay_teams"]["register_index_budget_ms"], 46000)
+        self.assertEqual(config["repository_sets"]["workspace"]["alias"], "workspace-self-iteration")
+        self.assertEqual(config["repository_sets"]["workspace"]["query_p95_budget_ms"], 1000)
+        self.assertEqual(
+            config["repository_sets"]["workspace"]["members"],
+            [{"repository": "relay_teams"}],
+        )
+
+    def test_repo_set_command_builders_use_existing_cli_contract(self) -> None:
+        binary = Path("relay-knowledge")
+
+        self.assertEqual(
+            repo_set_create_command(
+                binary,
+                "workspace",
+                {"description": "multi repo workspace"},
+            ),
+            [
+                "relay-knowledge",
+                "repo-set",
+                "create",
+                "workspace",
+                "--description",
+                "multi repo workspace",
+                "--format",
+                "json",
+            ],
+        )
+        self.assertEqual(
+            repo_set_add_command(
+                binary,
+                "workspace",
+                {
+                    "repository": "app",
+                    "priority": 7,
+                    "path_filters": ["src"],
+                    "language_filters": ["go"],
+                },
+                "app",
+                {"alias": "app-self-iteration", "ref": "HEAD"},
+            ),
+            [
+                "relay-knowledge",
+                "repo-set",
+                "add",
+                "workspace",
+                "app-self-iteration",
+                "--ref",
+                "HEAD",
+                "--priority",
+                "7",
+                "--path",
+                "src",
+                "--language",
+                "go",
+                "--format",
+                "json",
+            ],
+        )
+        self.assertEqual(
+            repo_set_query_command(
+                binary,
+                "workspace",
+                {
+                    "query": "client.Dial",
+                    "kind": "hybrid",
+                    "freshness": "wait-until-fresh",
+                    "limit": 12,
+                    "language_filters": ["go"],
+                },
+            ),
+            [
+                "relay-knowledge",
+                "repo-set",
+                "query",
+                "workspace",
+                "--query",
+                "client.Dial",
+                "--kind",
+                "hybrid",
+                "--freshness",
+                "wait-until-fresh",
+                "--limit",
+                "12",
+                "--language",
+                "go",
+                "--format",
+                "json",
+            ],
+        )
 
     def test_semantic_vector_profile_reads_external_runtime_env(self) -> None:
         profile = semantic_vector_runtime_profile(
@@ -277,6 +387,84 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(observation.false_positive_count, 1)
         self.assertAlmostEqual(observation.score(), 0.3)
         self.assertIn("forbidden_penalty=0.200", observation.message)
+
+    def test_repository_set_case_scores_nested_member_hits(self) -> None:
+        case = {
+            "id": "multi_repo",
+            "kind": "hybrid",
+            "query": "client.Dial",
+            "max_rank": 1,
+            "min_score": 0.45,
+            "expected": [
+                {
+                    "repository_alias": "app-self-iteration",
+                    "path": "cmd/worker/main.go",
+                    "excerpt_contains": "client.Dial",
+                }
+            ],
+            "expected_all": [
+                {
+                    "repository_alias": "app-self-iteration",
+                    "path": "cmd/worker/main.go",
+                    "excerpt_contains": "client.Dial",
+                },
+                {
+                    "repository_alias": "sdk-self-iteration",
+                    "path": "client/client.go",
+                    "excerpt_contains": "func Dial",
+                },
+            ],
+            "require_expected_all": False,
+        }
+        result = command_result(
+            {
+                "results": [
+                    {
+                        "member": {
+                            "repository_id": "repo-app",
+                            "repository_alias": "app-self-iteration",
+                            "source_scope": "scope-app",
+                            "resolved_commit_sha": "commit-app",
+                            "priority": 10,
+                        },
+                        "hit": {
+                            "repository_id": "repo-app",
+                            "scope_id": "scope-app",
+                            "path": "cmd/worker/main.go",
+                            "line_range": {"start": 10, "end": 14},
+                            "excerpt": "c, err := client.Dial(options)",
+                        },
+                        "overlay_evidence": [],
+                        "score": 3.0,
+                    },
+                    {
+                        "member": {
+                            "repository_id": "repo-sdk",
+                            "repository_alias": "sdk-self-iteration",
+                            "source_scope": "scope-sdk",
+                            "resolved_commit_sha": "commit-sdk",
+                            "priority": 0,
+                        },
+                        "hit": {
+                            "repository_id": "repo-sdk",
+                            "scope_id": "scope-sdk",
+                            "path": "client/client.go",
+                            "line_range": {"start": 1597, "end": 1600},
+                            "excerpt": "func Dial(options Options) (Client, error)",
+                        },
+                        "overlay_evidence": [],
+                        "score": 2.0,
+                    },
+                ]
+            }
+        )
+
+        observation = score_repository_set_query_case("workspace", case, result)
+
+        self.assertTrue(observation.passed)
+        self.assertEqual(observation.repository, "workspace")
+        self.assertEqual(observation.rank, 1)
+        self.assertIn("expected_all=2/2", observation.message)
 
 
 def command_result(payload: dict[str, object]) -> CommandResult:
