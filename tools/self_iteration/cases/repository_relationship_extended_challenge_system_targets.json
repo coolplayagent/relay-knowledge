@@ -1,0 +1,388 @@
+{
+  "query_cases": [
+    {
+      "id": "rustfs_rust_implementation_api_error_into_s3_error_challenge",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "ApiError implements From ApiError for S3Error conversion",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/error.rs",
+          "excerpt_contains": "impl From<ApiError> for S3Error"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/error.rs"
+        },
+        {
+          "path": "rustfs/src/error.rs",
+          "excerpt_contains": "S3Error"
+        }
+      ]
+    },
+    {
+      "id": "rustfs_rust_alias_iam_error_import_challenge",
+      "repository": "rustfs_rust",
+      "kind": "imports",
+      "query": "rustfs_iam::error::Error as IamError",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "rustfs_iam::error::Error as IamError"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/auth.rs"
+        },
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "IamError"
+        }
+      ]
+    },
+    {
+      "id": "rustfs_rust_inline_keystone_roles_any_closure_challenge",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "keystone_roles roles.iter any admin reseller_admin closure",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "rust"
+      ],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": ".any(|role|"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "rustfs/src/auth.rs"
+        },
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "reseller_admin"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_implementation_cpu_checkpoint_interface_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "CPUManagerCheckpoint implements checkpointmanager.Checkpoint var _",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/kubelet/cm/cpumanager/state/checkpoint.go",
+          "excerpt_contains": "var _ checkpointmanager.Checkpoint = &CPUManagerCheckpoint{}"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/kubelet/cm/cpumanager/state/checkpoint.go"
+        },
+        {
+          "path": "pkg/kubelet/cm/cpumanager/state/checkpoint.go",
+          "excerpt_contains": "CPUManagerCheckpoint"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_alias_metav1_import_objectmeta_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "metav1 k8s.io/apimachinery/pkg/apis/meta/v1 ObjectMeta",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/apis/storage/util/helpers.go",
+          "excerpt_contains": "import metav1 \"k8s.io/apimachinery/pkg/apis/meta/v1\""
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/apis/storage/util/helpers.go"
+        },
+        {
+          "path": "pkg/apis/storage/util/helpers.go",
+          "excerpt_contains": "metav1.ObjectMeta"
+        }
+      ]
+    },
+    {
+      "id": "kubernetes_go_inline_ttl_addfunc_event_handler_challenge",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "ResourceEventHandlerFuncs AddFunc inline addNode UpdateFunc",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "go"
+      ],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "AddFunc: func(obj interface{})"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go"
+        },
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "ttlc.addNode"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_implementation_special_mapping_vmops_callbacks_challenge",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "special_mapping_vmops vm_operations_struct fault close mremap callbacks",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": ".fault = special_mapping_fault"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/mmap.c"
+        },
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "special_mapping_vmops"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_alias_vma_expand_up_macro_challenge",
+      "repository": "linux_sample",
+      "kind": "references",
+      "query": "vma_expand_up macro alias expand_upwards",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "#define vma_expand_up(vma,addr) expand_upwards(vma, addr)"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/mmap.c"
+        },
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "vma_expand_up"
+        }
+      ]
+    },
+    {
+      "id": "linux_c_inline_round_hint_to_min_do_mmap_challenge",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "round_hint_to_min static inline do_mmap mmap_min_addr",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "static inline unsigned long round_hint_to_min"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "mm/mmap.c"
+        },
+        {
+          "path": "mm/mmap.c",
+          "excerpt_contains": "round_hint_to_min(addr)"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_implementation_dbimpl_db_interface_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "DBImpl public DB interface override Put Delete Write Get",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "c"
+      ],
+      "expected": [
+        {
+          "path": "db/db_impl.h",
+          "excerpt_contains": "class DBImpl : public DB"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "db/db_impl.h"
+        },
+        {
+          "path": "db/db_impl.h",
+          "excerpt_contains": "Status Put"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_alias_version_builder_fileset_typedef_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "references",
+      "query": "FileSet typedef BySmallestKey LevelState added_files",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "typedef std::set<FileMetaData*, BySmallestKey> FileSet"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "db/version_set.cc"
+        },
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "FileSet* added_files"
+        }
+      ]
+    },
+    {
+      "id": "leveldb_cpp_inline_zstd_compress_lambda_challenge",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "ZstdCompress lambda port::Zstd_Compress FLAGS_zstd_compression_level",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "cpp"
+      ],
+      "expected": [
+        {
+          "path": "benchmarks/db_bench.cc",
+          "excerpt_contains": "[](const char* input, size_t length, std::string* output)"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "benchmarks/db_bench.cc"
+        },
+        {
+          "path": "benchmarks/db_bench.cc",
+          "excerpt_contains": "FLAGS_zstd_compression_level"
+        }
+      ]
+    }
+  ]
+}

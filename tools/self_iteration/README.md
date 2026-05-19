@@ -230,12 +230,14 @@ enumerating cases.
   `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
   functions, methods, classes, exported values, macros, includes/imports,
   callback or trait relationships, and execution flows. Relationship targets
-  stay split into regression and challenge groups. Regression cases keep path
-  filters and broader rank thresholds as stable guardrails. Challenge cases
-  remove path filters, lower limits and max ranks, and add `expected_all` or
-  `expected_sequence` scoring so passed Rust, Go, C, C++, Java, Python,
-  JavaScript, and TypeScript inheritance, dependency, caller-chain, and
-  execution-flow cases still leave ranking and coverage improvement room.
+  stay split into regression and challenge groups, with extended relationship
+  files adding explicit implementation, alias, and inline callback/closure
+  scenarios for Rust, Go, C, C++, Java, Python, JavaScript, and TypeScript.
+  Regression cases keep path filters and broader rank thresholds as stable
+  guardrails. Challenge cases remove path filters, lower limits and max ranks,
+  and add `expected_all` or `expected_sequence` scoring so passed inheritance,
+  implementation, dependency, alias, inline, caller-chain, and execution-flow
+  cases still leave ranking and coverage improvement room.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
   and add combined `register_index_budget_ms` budgets. The evaluator records
