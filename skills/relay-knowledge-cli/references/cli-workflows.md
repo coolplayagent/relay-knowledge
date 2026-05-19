@@ -26,6 +26,14 @@ the runtime cache directory.
 
 ## Safe Agent Defaults
 
+- Resolve the executable before running workflow commands with the active
+  shell's executable lookup command: `command -v relay-knowledge` on POSIX,
+  `Get-Command relay-knowledge` in PowerShell, or `where.exe relay-knowledge`
+  in cmd.exe. Then run `relay-knowledge version --format json`.
+  Use only published installs on `PATH`: a verified GitHub Release archive, or
+  `cargo install relay-knowledge` from crates.io when Cargo is the selected
+  published package channel. Do not use source-checkout build artifacts or
+  source builds as the installation path for this published skill.
 - Prefer `--format json` for commands whose output will be parsed.
 - Inspect `relay-knowledge help --format json` and command-specific help before
   exposing or automating a command.
@@ -37,6 +45,18 @@ the runtime cache directory.
 - Keep runtime state in the platform directories managed by relay-knowledge.
   Do not redirect databases, logs, or caches into arbitrary repository folders
   unless the user explicitly asks for an isolated test home.
+- For isolated smoke tests, set `RELAY_KNOWLEDGE_HOME` to a temporary absolute
+  directory, set `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local` and
+  `RELAY_KNOWLEDGE_VECTOR_BACKEND=local`, and remove the temporary home after
+  capturing the result. Use `mktemp -d` on POSIX, `Join-Path $env:TEMP` plus
+  `New-Item -ItemType Directory` in PowerShell, or `%TEMP%` plus `mkdir` in
+  cmd.exe.
+- If the agent runtime invokes commands through separate shell/tool calls,
+  include the isolated environment variables inline on every command. Do not
+  assume `export` from one tool call persists into the next one.
+- Wrap live diagnostics in a short command timeout when the shell supports one.
+  Treat a timeout as diagnostic evidence and continue with narrower commands
+  instead of waiting indefinitely.
 
 ## Code Repository Index Query Flow
 
@@ -143,6 +163,18 @@ relay-knowledge setup doctor --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
 relay-knowledge audit query --limit 50 --format json
+```
+
+If a failing command prints a text error even though `--format json` was used,
+treat the text as the authoritative failure message and then run the diagnostic
+sequence above.
+
+On Unix-like shells, use bounded diagnostics:
+
+```bash
+timeout 20s relay-knowledge health --format json
+timeout 20s relay-knowledge service doctor --format json
+timeout 20s relay-knowledge audit query --limit 50 --format json
 ```
 
 For provider setup:

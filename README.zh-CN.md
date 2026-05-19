@@ -53,6 +53,12 @@ clawhub publish skills/relay-knowledge-cli \
 
 这条 skill-over-CLI 路径与 MCP/ACP 协议接入是分离的。
 
+OpenCode 用户也可以直接从源码 checkout 加载仓库 skill。OpenCode 会自动发现
+`.opencode/skills/relay-knowledge-cli`，因此从仓库根目录或任意子目录运行
+`opencode debug skill` 时都应能看到 `relay-knowledge-cli`，之后再让 agent
+使用 `$relay-knowledge-cli`。这个 OpenCode adapter 会把 agent 指向
+`skills/relay-knowledge-cli` 下的规范发布版 skill。
+
 ## 当前能力
 
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。

@@ -66,6 +66,13 @@ clawhub publish skills/relay-knowledge-cli \
 
 This skill-over-CLI path is separate from MCP/ACP protocol access.
 
+OpenCode users can load the repository skill directly from this checkout.
+OpenCode auto-discovers `.opencode/skills/relay-knowledge-cli`, so
+`opencode debug skill` from the repository root or a nested repository
+directory should list `relay-knowledge-cli` before an agent is asked to use
+`$relay-knowledge-cli`. The OpenCode adapter points agents at the canonical
+published skill under `skills/relay-knowledge-cli`.
+
 ## What Works Today
 
 - Hybrid GraphRAG context packs with BM25, local semantic signatures,
