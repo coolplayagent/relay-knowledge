@@ -58,6 +58,7 @@ pub(super) struct ImportRow {
     pub(super) module: String,
     pub(super) matched_symbol_name: Option<String>,
     pub(super) target_symbol_names: Option<String>,
+    pub(super) same_file_query_usage_count: usize,
     pub(super) line_range: RepositoryCodeRange,
     pub(super) target_hint: Option<String>,
     pub(super) resolution_state: String,

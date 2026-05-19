@@ -3,7 +3,8 @@ use crate::{
     domain::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
-        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -60,6 +61,99 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
         .expect("import query should succeed");
 
     assert_eq!(hits[0].path, openai_path);
+}
+
+#[tokio::test]
+async fn symbol_import_queries_rank_dense_same_file_alias_usage() {
+    let script_path = "packages/llm/script/setup-recording-env.ts";
+    let anthropic_path = "packages/llm/src/protocols/anthropic-messages.ts";
+    let openai_path = "packages/llm/src/protocols/openai-chat.ts";
+    let responses_path = "packages/llm/src/protocols/openai-responses.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("script-file", script_path, "typescript"),
+            file("anthropic-file", anthropic_path, "typescript"),
+            file("openai-file", openai_path, "typescript"),
+            file("responses-file", responses_path, "typescript"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![
+            import(
+                "script-provider-shared",
+                "script-file",
+                script_path,
+                "import * as ProviderShared from \"../src/protocols/shared\"",
+            ),
+            import(
+                "anthropic-provider-shared",
+                "anthropic-file",
+                anthropic_path,
+                "import { JsonObject, optionalArray, optionalNull, ProviderShared } from \"./shared\"",
+            ),
+            import(
+                "openai-provider-shared",
+                "openai-file",
+                openai_path,
+                "import { isRecord, JsonObject, optionalArray, optionalNull, ProviderShared } from \"./shared\"",
+            ),
+            import(
+                "responses-provider-shared",
+                "responses-file",
+                responses_path,
+                "import { JsonObject, optionalArray, optionalNull, ProviderShared } from \"./shared\"",
+            ),
+        ],
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "script-chunk",
+                "script-file",
+                script_path,
+                &repeated_provider_shared_usage(3),
+            ),
+            chunk(
+                "anthropic-chunk",
+                "anthropic-file",
+                anthropic_path,
+                &repeated_provider_shared_usage(13),
+            ),
+            chunk(
+                "openai-chunk",
+                "openai-file",
+                openai_path,
+                &repeated_provider_shared_usage(16),
+            ),
+            chunk(
+                "responses-chunk",
+                "responses-file",
+                responses_path,
+                &repeated_provider_shared_usage(16),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("ProviderShared", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, openai_path);
+    assert!(hits.iter().any(|hit| hit.path == responses_path));
 }
 
 #[tokio::test]
@@ -230,6 +324,27 @@ fn import(import_id: &str, file_id: &str, path: &str, module: &str) -> CodeImpor
         confidence_tier: "ambiguous".to_owned(),
         line_range: range(1, 1),
     }
+}
+
+fn chunk(chunk_id: &str, file_id: &str, path: &str, content: &str) -> RepositoryCodeChunkRecord {
+    RepositoryCodeChunkRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        chunk_id: chunk_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        content: content.to_owned(),
+        byte_range: range(0, content.len() as u32),
+        line_range: range(1, 20),
+        symbol_snapshot_id: None,
+    }
+}
+
+fn repeated_provider_shared_usage(count: usize) -> String {
+    (0..count)
+        .map(|index| format!("const value{index} = ProviderShared.encodeJson(input{index});\n"))
+        .collect()
 }
 
 fn range(start: u32, end: u32) -> RepositoryCodeRange {

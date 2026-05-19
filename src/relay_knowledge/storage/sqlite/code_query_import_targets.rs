@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::{
-    domain::{CodeRepositoryStatus, CodeRetrievalRequest, RepositoryCodeRange},
+    domain::{CodeQueryKind, CodeRepositoryStatus, CodeRetrievalRequest, RepositoryCodeRange},
     storage::StorageError,
 };
 
@@ -56,6 +56,74 @@ pub(super) fn attach_import_target_symbols(
     }
 
     Ok(())
+}
+
+pub(super) fn attach_import_query_usage_context(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    rows: &mut [ImportRow],
+) -> Result<(), StorageError> {
+    if request.code_query_kind != CodeQueryKind::Imports
+        || !target_symbol_import_query(&request.query)
+    {
+        return Ok(());
+    }
+    let query_terms = query_identifier_terms(&request.query)
+        .into_iter()
+        .filter(|term| term.len() >= 3)
+        .collect::<Vec<_>>();
+    if query_terms.is_empty() || rows.is_empty() {
+        return Ok(());
+    }
+
+    let paths = rows
+        .iter()
+        .map(|row| row.path.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut usage_by_path = BTreeMap::<String, usize>::new();
+    for path_chunk in paths.chunks(SQLITE_BIND_BATCH_SIZE - 1) {
+        for (path, content) in import_context_chunks(connection, status, path_chunk)? {
+            let usage = usage_by_path.entry(path).or_default();
+            *usage = usage.saturating_add(identifier_occurrences(&content, &query_terms));
+        }
+    }
+
+    for row in rows {
+        let usage = usage_by_path.get(&row.path).copied().unwrap_or_default();
+        let import_line_usage = identifier_occurrences(&row.module, &query_terms);
+        row.same_file_query_usage_count = usage.saturating_sub(import_line_usage);
+    }
+
+    Ok(())
+}
+
+fn import_context_chunks(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    paths: &[&str],
+) -> Result<Vec<(String, String)>, StorageError> {
+    let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
+    values.extend(paths.iter().map(|path| Value::Text((*path).to_owned())));
+    let placeholders = placeholders(paths.len());
+    let sql = format!(
+        "
+        SELECT path, content
+        FROM code_repository_chunks
+        WHERE source_scope = ?
+          AND path IN ({placeholders})
+        ORDER BY path ASC, line_start ASC, chunk_id ASC
+        "
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
 }
 
 fn import_target_symbols(
@@ -178,6 +246,7 @@ fn search_imports_by_target_hint_chunk(
             module: row.get(3)?,
             matched_symbol_name,
             target_symbol_names: None,
+            same_file_query_usage_count: 0,
             line_range: RepositoryCodeRange {
                 start: row.get(4)?,
                 end: row.get(5)?,
@@ -326,6 +395,38 @@ fn query_identifier_terms(query: &str) -> Vec<String> {
         .filter(|term| !term.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn identifier_occurrences(content: &str, terms: &[String]) -> usize {
+    terms
+        .iter()
+        .map(|term| identifier_occurrences_for_term(content, term))
+        .sum()
+}
+
+fn identifier_occurrences_for_term(content: &str, term: &str) -> usize {
+    let content = content.to_ascii_lowercase();
+    let term = term.to_ascii_lowercase();
+    content
+        .match_indices(&term)
+        .filter(|(index, _)| {
+            identifier_match_has_boundaries(content.as_bytes(), *index, term.len())
+        })
+        .count()
+}
+
+fn identifier_match_has_boundaries(content: &[u8], start: usize, len: usize) -> bool {
+    let before = start
+        .checked_sub(1)
+        .and_then(|index| content.get(index))
+        .copied();
+    let after = content.get(start + len).copied();
+
+    !before.is_some_and(is_identifier_byte) && !after.is_some_and(is_identifier_byte)
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn query_contains_file_extension(query: &str) -> bool {
