@@ -135,7 +135,7 @@ pub(super) fn set_by_alias(
             "
             SELECT set_id, alias, description, default_ref_policy_json, created_at_ms, updated_at_ms
             FROM code_repository_sets
-            WHERE alias = ?1 OR set_id = ?1
+            WHERE alias = ?1
             ",
             params![alias],
             set_from_row,

@@ -676,7 +676,10 @@ fn code_api_error(error: CodeIndexError) -> ApiError {
 }
 
 fn storage_api_error(error: StorageError) -> ApiError {
-    ApiError::storage_unavailable(error.to_string())
+    match error {
+        StorageError::InvalidInput(message) => ApiError::invalid_argument(message),
+        other => ApiError::storage_unavailable(other.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -854,7 +857,7 @@ mod tests {
         );
         assert_eq!(
             storage_api_error(StorageError::InvalidInput("bad storage".to_owned())).error_kind,
-            ErrorKind::StorageUnavailable
+            ErrorKind::InvalidArgument
         );
     }
 

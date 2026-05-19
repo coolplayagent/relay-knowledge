@@ -106,6 +106,8 @@ RepositorySetMember {
 
 `source_scope` 必须指向已经存在的单仓 `repository_snapshot`。如果成员仓库的 ref 解析到尚未索引的 snapshot，多仓查询应报告缺失或 stale，而不是自动扩大到旧 snapshot。同一 repository 再次加入同一个 set 时会替换原成员指针，避免 `HEAD` 等移动 ref 同时 fan-out 到旧 snapshot 和新 snapshot。
 
+面向用户的 repository-set 操作只按 alias 解析。`set_id` 是暴露给存储、响应和 overlay 行的稳定标识，但不得与 alias 共用查询路径；即使某个 alias 恰好等于另一个 set 的 `set_id`，也不能读取或修改另一个 set。
+
 ## 4. 图模型
 
 多仓库图不是把多个仓库合成一个节点空间，而是增加一个 workspace overlay。

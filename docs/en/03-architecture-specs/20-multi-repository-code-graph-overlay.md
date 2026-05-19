@@ -106,6 +106,8 @@ RepositorySetMember {
 
 `source_scope` must point to an existing single-repository `repository_snapshot`. If a member ref resolves to a snapshot that has not been indexed, multi-repository queries report missing or stale state instead of silently falling back to an old snapshot. Re-adding the same repository to a set replaces the previous member pointer so a moving ref such as `HEAD` does not fan out to both old and new snapshots.
 
+User-facing repository-set operations resolve by alias only. `set_id` is an exposed stable identifier for storage, responses, and overlay rows, but it must not share the alias lookup path; an alias that happens to equal another set's `set_id` must not read or mutate the other set.
+
 ## 4. Graph Model
 
 The multi-repository graph adds a workspace overlay rather than merging repositories into one node space.

@@ -240,6 +240,35 @@ async fn repository_set_overlay_refresh_classifies_resolved_ambiguous_and_unreso
 }
 
 #[tokio::test]
+async fn repository_set_alias_lookup_does_not_match_existing_set_ids() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let (first, colliding) = store
+        .run(|connection| {
+            let first = code_set::create_set(connection, set_seed("workspace", 10))?;
+            let colliding = code_set::create_set(connection, set_seed(first.set_id.as_str(), 20))?;
+            Ok((first, colliding))
+        })
+        .await
+        .expect("sets should create");
+
+    let first_status = store
+        .run(|connection| code_set::set_status(connection, "workspace"))
+        .await
+        .expect("status should query")
+        .expect("first set should exist");
+    let colliding_alias = first.set_id.clone();
+    let colliding_status = store
+        .run(move |connection| code_set::set_status(connection, colliding_alias.as_str()))
+        .await
+        .expect("status should query")
+        .expect("colliding alias should exist");
+
+    assert_eq!(first_status.repository_set.set_id, first.set_id);
+    assert_eq!(colliding_status.repository_set.set_id, colliding.set_id);
+    assert_eq!(colliding_status.repository_set.alias, first.set_id);
+}
+
+#[tokio::test]
 async fn repository_set_overlay_refresh_rejects_empty_sets() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let error = store
