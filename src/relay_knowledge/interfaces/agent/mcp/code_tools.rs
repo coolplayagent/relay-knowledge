@@ -90,7 +90,7 @@ async fn code_repository_set_query_tool(
     };
     let repository_set = match server
         .scope_authorizer
-        .authorize_scope(
+        .authorize_repository_set_scope(
             &server.service,
             &server.agent.access_policy,
             Some(args.repository_set),

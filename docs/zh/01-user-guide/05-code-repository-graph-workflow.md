@@ -113,7 +113,7 @@ relay-knowledge repo-set query workspace \
   --format json
 ```
 
-每条结果都包含 member repository alias、repository id、resolved commit、tree hash 和原始 `source_scope`。查询里的 `--path` 和 `--language` 只会收窄成员保存的 scope，不会扩大 scope，也不会切到仓库最新注册默认值。同名路径或同名符号不会跨仓去重；去重键包含 repository、scope、path、line range 和 excerpt。`--freshness wait-until-fresh` 会要求所有成员 snapshot fresh、`HEAD` 等移动 ref 仍解析到成员保存的 commit，且 overlay 不落后；否则返回明确错误。MCP 使用独立的 `relay_code_repository_set_query` 工具，并要求 set alias 或每个成员 scope 已被策略允许。
+每条结果都包含 member repository alias、repository id、resolved commit、tree hash 和原始 `source_scope`。查询里的 `--path` 和 `--language` 只会收窄成员保存的 scope，不会扩大 scope，也不会切到仓库最新注册默认值。同名路径或同名符号不会跨仓去重；去重键包含 repository、scope、path、line range 和 excerpt。`--freshness wait-until-fresh` 会要求所有成员 snapshot fresh、`HEAD` 等移动 ref 仍解析到成员保存的 commit，且 overlay 不落后；否则返回明确错误。MCP 使用独立的 `relay_code_repository_set_query` 工具，每次调用都会重新校验当前成员，会在审计条目中记录 set alias，并要求 set alias 或每个成员 scope 已被策略允许。
 
 ## 5.5 增量更新
 

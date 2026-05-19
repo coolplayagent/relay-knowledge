@@ -586,7 +586,7 @@ fn code_repository_set_add_request(
         string_field(payload, "ref")?,
         optional_string_array_field(payload, "path_filters")?,
         optional_string_array_field(payload, "language_filters")?,
-        i32_field(payload, "priority").unwrap_or(0),
+        optional_i32_field(payload, "priority")?.unwrap_or(0),
     )
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
@@ -667,6 +667,14 @@ fn i32_field(payload: &Value, field: &'static str) -> Result<i32, WebError> {
         .and_then(Value::as_i64)
         .and_then(|value| i32::try_from(value).ok())
         .ok_or_else(|| WebError::bad_request(format!("{field} must be an integer")))
+}
+
+fn optional_i32_field(payload: &Value, field: &'static str) -> Result<Option<i32>, WebError> {
+    if payload.get(field).is_none() {
+        return Ok(None);
+    }
+
+    i32_field(payload, field).map(Some)
 }
 
 fn bool_field(payload: &Value, field: &'static str) -> bool {

@@ -284,7 +284,7 @@ repo-set refresh <set>
 - 每个 result 的 repository metadata 和 source scope。
 - overlay freshness、cross edge evidence、truncation 和 degraded reason。
 
-MCP 和 Web 入口应使用相同 selector，不允许用普通 `source_scope` 字符串暗中表示多仓集合。MCP 只有在 repository set alias 被显式允许，或每个成员 repository scope 已被静态/运行时策略允许时，才可以在运行时提升该 set alias。
+MCP 和 Web 入口应使用相同 selector，不允许用普通 `source_scope` 字符串暗中表示多仓集合。MCP 只有在 repository set alias 被显式允许且没有与已注册 repository alias 冲突，或当前每个成员 repository scope 已被静态/运行时策略允许时，才可以在运行时提升该 set alias。Repository-set 授权需要在每次 MCP 调用时重新校验，不能写入 repository alias 运行时缓存；MCP 审计也要为 repository-set query response 记录 set alias。
 
 ## 11. 实施阶段
 

@@ -177,6 +177,7 @@ fn audit_source_scope(structured: &Value) -> Option<String> {
     structured["source_scope"]
         .as_str()
         .or_else(|| structured["request"]["repository"]["repository"].as_str())
+        .or_else(|| structured["request"]["set_alias"].as_str())
         .map(str::to_owned)
 }
 
@@ -192,7 +193,7 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
 mod tests {
     use serde_json::json;
 
-    use super::audit_graph_version;
+    use super::{audit_graph_version, audit_source_scope};
 
     #[test]
     fn audit_graph_version_reads_common_response_shapes() {
@@ -206,5 +207,13 @@ mod tests {
             9
         );
         assert_eq!(audit_graph_version(&json!({"error_kind": "timeout"})), 0);
+    }
+
+    #[test]
+    fn audit_source_scope_reads_repository_set_query_response() {
+        assert_eq!(
+            audit_source_scope(&json!({"request": {"set_alias": "workspace"}})).as_deref(),
+            Some("workspace")
+        );
     }
 }

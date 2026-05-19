@@ -113,7 +113,7 @@ relay-knowledge repo-set query workspace \
   --format json
 ```
 
-Each result carries the member repository alias, repository id, resolved commit, tree hash, and original `source_scope`. Query `--path` and `--language` filters narrow the stored member scope; they do not widen it or switch to the repository's latest registration defaults. Same-named paths or symbols are not deduplicated across repositories; the dedupe key includes repository, scope, path, line range, and excerpt. `--freshness wait-until-fresh` requires every member snapshot to be fresh, moving refs such as `HEAD` to still resolve to the stored commit, and the overlay to be current. MCP uses the separate `relay_code_repository_set_query` tool and requires the set alias or every member scope to be allowed by policy.
+Each result carries the member repository alias, repository id, resolved commit, tree hash, and original `source_scope`. Query `--path` and `--language` filters narrow the stored member scope; they do not widen it or switch to the repository's latest registration defaults. Same-named paths or symbols are not deduplicated across repositories; the dedupe key includes repository, scope, path, line range, and excerpt. `--freshness wait-until-fresh` requires every member snapshot to be fresh, moving refs such as `HEAD` to still resolve to the stored commit, and the overlay to be current. MCP uses the separate `relay_code_repository_set_query` tool, revalidates current set members for each call, records the set alias in audit entries, and requires the set alias or every member scope to be allowed by policy.
 
 ## 5.5 Incremental Updates
 

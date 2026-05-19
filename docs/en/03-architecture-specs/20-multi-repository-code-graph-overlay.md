@@ -284,7 +284,7 @@ Responses include:
 - Each result's repository metadata and source scope.
 - Overlay freshness, cross-edge evidence, truncation, and degraded reason.
 
-MCP and Web use the same selector. A plain `source_scope` string must not silently represent a multi-repository set. MCP may promote a repository set at runtime only when the set alias is explicitly allowed or every member repository scope is already allowed by the static or runtime policy.
+MCP and Web use the same selector. A plain `source_scope` string must not silently represent a multi-repository set. MCP may promote a repository set at runtime only when the set alias is explicitly allowed without colliding with a registered repository alias, or every current member repository scope is already allowed by the static or runtime policy. Repository-set authorization is revalidated on every MCP call instead of being stored in the repository alias runtime cache, and MCP audit records the set alias for repository-set query responses.
 
 ## 11. Implementation Phases
 
