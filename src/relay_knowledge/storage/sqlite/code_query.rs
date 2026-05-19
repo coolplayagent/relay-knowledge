@@ -949,6 +949,10 @@ fn search_chunks(
 mod tests;
 
 #[cfg(test)]
+#[path = "code_query_score_tests.rs"]
+mod score_tests;
+
+#[cfg(test)]
 #[path = "code_query_call_ranking_tests.rs"]
 mod call_ranking_tests;
 

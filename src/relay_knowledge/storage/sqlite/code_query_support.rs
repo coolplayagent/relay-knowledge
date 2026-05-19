@@ -43,11 +43,7 @@ impl ScoreField {
 
 impl ScoreQuery {
     pub(super) fn new(query: &str) -> Self {
-        let tokens = query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .filter(|token| !token.is_empty())
-            .collect();
+        let tokens = score_query_tokens(query);
 
         Self { tokens }
     }
@@ -74,6 +70,83 @@ impl ScoreQuery {
         }
 
         score
+    }
+}
+
+const MIN_DECOMPOSED_SCORE_TERM_LEN: usize = 2;
+
+fn score_query_tokens(query: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for raw_token in query.split_whitespace().map(str::trim) {
+        if raw_token.is_empty() {
+            continue;
+        }
+        push_score_query_token(&mut tokens, raw_token.to_ascii_lowercase());
+        if !raw_score_token_allows_decomposition(raw_token) {
+            continue;
+        }
+        for term in raw_token
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .filter(|term| term.len() >= MIN_DECOMPOSED_SCORE_TERM_LEN)
+        {
+            push_score_query_token(&mut tokens, term.to_ascii_lowercase());
+        }
+    }
+
+    tokens
+}
+
+fn raw_score_token_allows_decomposition(token: &str) -> bool {
+    !(token.contains('/') || token.contains('\\') || token_has_path_like_extension(token))
+}
+
+fn token_has_path_like_extension(token: &str) -> bool {
+    let token = token.trim_matches(|character: char| {
+        !(character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.'))
+    });
+    let Some((stem, extension)) = token.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty() && file_extension_is_path_like(extension)
+}
+
+fn file_extension_is_path_like(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "c" | "cc"
+            | "cpp"
+            | "cs"
+            | "go"
+            | "gradle"
+            | "h"
+            | "hh"
+            | "hpp"
+            | "hxx"
+            | "java"
+            | "js"
+            | "json"
+            | "jsx"
+            | "kt"
+            | "md"
+            | "php"
+            | "py"
+            | "rb"
+            | "rs"
+            | "scala"
+            | "sh"
+            | "swift"
+            | "ts"
+            | "tsx"
+            | "txt"
+            | "xml"
+            | "yaml"
+            | "yml"
+    )
+}
+
+fn push_score_query_token(tokens: &mut Vec<String>, token: String) {
+    if !token.is_empty() && !tokens.contains(&token) {
+        tokens.push(token);
     }
 }
 

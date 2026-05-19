@@ -1,6 +1,12 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779203601-qualified-score-query-tokenization
+- 算法：`ScoreQuery` 在保留原 whitespace token 的同时，为非路径型 query token 追加以非标识符字符切分出的去重子词，并忽略单字符拆分噪声，使 `client.Dial`、`receiver.NewFactory` 与 `rustfs_iam::error::Error` 这类 qualified/scoped 查询能在最终后置评分中命中真实 symbol、import、call、path 与 chunk 字段；`linux/debugfs.h` 等 slash/file-extension 查询保留原始 token 评分，避免拆分成宽泛目录词。
+- 架构：变更限定在 SQLite code retrieval 的通用 scorer 与独立单测模块；不改变 parser、graph fact schema、FTS MATCH 构造、candidate limit、索引写入、repo-set overlay、semantic/vector provider、env/paths/net 边界、安装发布或 self-iteration harness。
+- 不变量：原始 token 仍参与精确/substring 评分，snake/camel 标识符等价逻辑、scoped identity bonus、path/language filter、freshness/version metadata、dedupe/truncate 与零分过滤保持不变；slash、backslash 和 known file-extension token 不拆分，避免 `*.h` 等路径查询引入宽泛噪声。
+- 预期影响：提升多仓库 Go/TypeScript/Rust/C/C++ 代码检索中 qualified function、import alias、package member 与 header path 查询的排序稳定性，尤其让 repo-set expected-all 中 SDK/core 定义和关系查询目标从已召回候选中获得更合理分数，同时不牺牲 foundational、semantic/vector 与 stability protected floors。
+- 风险：qualified 查询会额外给其子词命中的候选加分，少数只匹配通用包名的结果可能上移；风险受去重、两字符下限、现有 FTS bounded candidates、layer-specific bonuses 和 top-k 截断控制，未加入仓库、路径、case、模型或 provider 特殊分支。
 ## 候选优化说明：manual-c-composite-initializer-symbols-20260519
 - 算法/架构：C parser manual extraction 在顶层 `declaration` 中保留既有函数声明抽取，同时把有界行数内、带 `initializer_list` 或 macro/call initializer、且类型为 `struct`/`union`/`enum` 或声明符为数组的全局数据声明记录为 `constant` symbol；生成的 symbol 继续走现有 signature、chunk、FTS、call/reference、SQLite 写入与查询排序路径。
 - 不变量：typedef、函数指针变量、函数声明、函数定义、局部声明、标量 macro 初始化、超过 80 行的大型表、schema、candidate limit、ranking 权重、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布和 self-iteration harness 均不变。
@@ -872,9 +878,7 @@ Adopted optimization notes:
 - known degradations: metric:cargo_build_release_ms 35797.0->40477; metric:opencode_typescript_index_ms 21864.0->22737; metric:opencode_typescript_register_index_ms 22078.0->22950; metric:semantic_vector_refresh_ms 329.0->397; metric:semantic_vector_query_p50_ms 381.0->426.0
 - latency metrics: cargo_build_release_ms=40477ms; cargo_fmt_check_ms=776ms; cargo_clippy_ms=205ms; cargo_test_ms=8583ms; relay_teams_index_ms=31602ms; relay_teams_register_index_ms=31701ms; relay_teams_query_p50_ms=214ms; relay_teams_query_p95_ms=656ms
 
-Adopted optimization notes:
-
-ymbol_cache +        .as_deref() +        .expect("symbol cache should be initialized after load")) } fn load_symbol_keys( @@ -937,23 +961,25 @@ #[test] fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() { -        let symbols = vec![ +        let symbols = [ symbol("outer", 10, 100), symbol("same_start_outer", 20, 80), symbol("same_start_inner", 20, 40), symbol("after_call", 60, 70), ]; +        let symbol_refs = symbols.iter().collect::<Vec<_>>(); -        let caller = caller_for_line(Some(&symbols), 30).expect("caller should match"); +        let caller = caller_for_line(Some(&symbol_refs), 30).expect("caller should match"); assert_eq!(caller.name, "same_start_inner"); } #[test] fn caller_lookup_ignores_symbols_that_start_after_call_line() { -        let symbols = vec![symbol("before", 1, 5), symbol("after", 20, 30)]; +        let symbols = [symbol("before", 1, 5), symbol("after", 20, 30)]; +        let symbol_refs = symbols.iter().collect::<Vec<_>>(); -        assert!(caller_for_line(Some(&symbols), 10).is_none()); +        assert!(caller_for_line(Some(&symbol_refs), 10).is_none()); } fn symbol(name: &str, start: u32, end: u32) -> SymbolKey { tokens used 229,319
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 
 ## 20260518T221448Z
 
@@ -894,9 +898,7 @@ ymbol_cache +        .as_deref() +        .expect("symbol cache should be initia
 - known degradations: metric:relay_teams_query_p50_ms 214.5->305.0; metric:relay_teams_query_p95_ms 656.0->877.0; metric:leveldb_cpp_index_ms 1556.0->2355; metric:leveldb_cpp_register_index_ms 1757.0->2625; metric:leveldb_cpp_query_p50_ms 226.5->296.0
 - latency metrics: cargo_build_release_ms=31903ms; cargo_fmt_check_ms=615ms; cargo_clippy_ms=152ms; cargo_test_ms=5490ms; relay_teams_index_ms=29858ms; relay_teams_register_index_ms=29927ms; relay_teams_query_p50_ms=305ms; relay_teams_query_p95_ms=877ms
 
-Adopted optimization notes:
-
-/llm/example/tutorial.ts", +                &hybrid, +                false, +            ), +            0.0 +        ); +        assert_eq!( +            call_site_example_path_penalty( +                0.0, +                "packages/llm/example/tutorial.ts", +                &callers, +                false, +            ), +            0.0 +        ); +    } + +    #[test] fn call_site_source_path_bonus_demotes_adapter_surfaces_without_adapter_intent() { let callers = retrieval_request(CodeQueryKind::Callers); let callees = retrieval_request(CodeQueryKind::Callees); @@ -407,6 +546,14 @@ } #[test] +    fn query_mentions_example_or_sample_detects_explicit_intent() { +        assert!(!query_mentions_example_or_sample("generateObject")); +        assert!(query_mentions_example_or_sample("generateObject tutorial")); +        assert!(query_mentions_example_or_sample("sample-controller worker")); +        assert!(query_mentions_example_or_sample("QuickstartDemo")); +    } + +    #[test] fn declaration_surface_path_bonus_prefers_non_test_headers() { let hybrid = retrieval_request(CodeQueryKind::Hybrid); let definition = retrieval_request(CodeQueryKind::Definition); tokens used 359,557
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 ## 20260518T224034Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T224034Z.patch`
@@ -907,9 +909,7 @@ Adopted optimization notes:
 - known degradations: metric:cargo_build_release_ms 34431.0->35486; metric:leveldb_cpp_index_ms 1601.0->1668; metric:leveldb_cpp_register_index_ms 1802.0->1864; metric:semantic_vector_provider_probe_ms 1879.0->2045; metric:semantic_vector_query_p95_ms 422.0->450.0
 - latency metrics: cargo_build_release_ms=35486ms; cargo_fmt_check_ms=794ms; cargo_clippy_ms=187ms; cargo_test_ms=9054ms; relay_teams_index_ms=33163ms; relay_teams_register_index_ms=33246ms; relay_teams_query_p50_ms=216ms; relay_teams_query_p95_ms=645ms
 
-Adopted optimization notes:
-
-plements" +            | "inherit" +            | "inheritance" +            | "inherited" +            | "inherits" +            | "override" +            | "overrides" +            | "overriding" +            | "subclass" +            | "subclasses" +    ) +} + +fn content_has_type_relationship_declaration(content: &str) -> bool { +    content.lines().map(str::trim).any(|line| { +        if line.starts_with("//") || line.starts_with('*') { +            return false; +        } +        let type_declaration = line +            .split(|character: char| character.is_whitespace() || matches!(character, '{' | '(')) +            .filter(|word| !word.is_empty()) +            .take(4) +            .any(|word| matches!(word, "class" | "struct" | "interface")); +        type_declaration +            && (line.contains(" : ") +                || line.contains(": public ") +                || line.contains(": protected ") +                || line.contains(": private ") +                || line.contains(" extends ") +                || line.contains(" implements ")) +    }) +} + fn declaration_line_is_prototype(line: &str) -> bool { line.ends_with(';') && line.contains('(') tokens used 312,483
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 ## 20260518T225420Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T225420Z.patch`
@@ -920,9 +920,7 @@ plements" +            | "inherit" +            | "inheritance" +            | "
 - known degradations: metric:relay_teams_query_p50_ms 216.0->289.5; metric:relay_teams_query_p95_ms 645.0->921.0; metric:leveldb_cpp_index_ms 1668.0->2373; metric:leveldb_cpp_register_index_ms 1864.0->2641; metric:leveldb_cpp_query_p50_ms 224.0->296.0; metric:leveldb_cpp_query_p95_ms 421.0->572.0; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 771.0->917.0
 - latency metrics: cargo_build_release_ms=32014ms; cargo_fmt_check_ms=636ms; cargo_clippy_ms=164ms; cargo_test_ms=5519ms; relay_teams_index_ms=27826ms; relay_teams_register_index_ms=27897ms; relay_teams_query_p50_ms=290ms; relay_teams_query_p95_ms=921ms
 
-Adopted optimization notes:
-
-ile_id = format!("noise-file-{index}"); -        let path = format!("noise/callee_{index}.py"); -        files.push(code_query_file(&file_id, &path, "python")); -        let mut call = code_query_call(&format!("aa-noise-call-{index:04}"), &file_id, &path); -        call.caller_name = Some("NoiseCaller".to_owned()); -        call.callee_name = "TargetThing".to_owned(); -        calls.push(call); -    } -    files.push(code_query_file("target-file", "src/service.py", "python")); -    let mut target = code_query_call("zz-target-call", "target-file", "src/service.py"); -    target.caller_name = Some("TargetThing".to_owned()); -    target.callee_name = "TargetCallee".to_owned(); -    calls.push(target); -    let store = -        store_with_case_intent_snapshot(code_query_snapshot(files, Vec::new(), calls)).await; - -    let hits = store -        .search_code(code_search_request("TargetThing", CodeQueryKind::Callees)) -        .await -        .expect("callee query should succeed"); - -    assert_eq!(hits[0].path, "src/service.py"); -    assert!(hits[0].excerpt.contains("TargetCallee")); -} - #[test] fn symbol_excerpt_adds_class_owner_for_member_context() { assert_eq!( tokens used 274,559
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 ## 20260518T234349Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T234349Z.patch`
@@ -933,9 +931,7 @@ ile_id = format!("noise-file-{index}"); -        let path = format!("noise/calle
 - known degradations: metric:cargo_build_release_ms 34395.0->40182; metric:relay_teams_query_p95_ms 778.0->940.0; metric:leveldb_cpp_index_ms 1703.0->2386; metric:leveldb_cpp_register_index_ms 1909.0->2656; metric:semantic_vector_refresh_ms 323.0->419; metric:semantic_vector_query_p95_ms 440.0->470.0; case:opencode_ts_imports_provider_shared {'passed': True, 'rank': 5, 'false_positive_count': 0, 'score': 0.2}->{'passed': True, 'rank': 6, 'false_positive_count': 0, 'score': 0.166667} rank_worsened
 - latency metrics: cargo_build_release_ms=40182ms; cargo_fmt_check_ms=825ms; cargo_clippy_ms=188ms; cargo_test_ms=9294ms; relay_teams_index_ms=34841ms; relay_teams_register_index_ms=34938ms; relay_teams_query_p50_ms=299ms; relay_teams_query_p95_ms=940ms
 
-Adopted optimization notes:
-
-e_basis_points: 2_500, +        confidence_tier: "ambiguous".to_owned(), +        byte_range: range(0, 8), +        line_range: range(1, 1), +    } +} + fn session_for_scope(source_scope: &str, total_path_count: usize) -> CodeIndexSession { CodeIndexSession { repository_id: "repo".to_owned(), @@ -189,3 +315,28 @@ .await .expect("query should succeed") } + +async fn reference_target( +    store: &SqliteGraphStore, +    source_scope: &str, +    reference_id: &str, +) -> Option<String> { +    let source_scope = source_scope.to_owned(); +    let reference_id = reference_id.to_owned(); +    store +        .run(move |connection| { +            connection +                .query_row( +                    " +                    SELECT target_symbol_snapshot_id +                    FROM code_repository_references +                    WHERE source_scope = ?1 AND reference_id = ?2 +                    ", +                    (&source_scope, &reference_id), +                    |row| row.get::<_, Option<String>>(0), +                ) +                .map_err(crate::storage::StorageError::from) +        }) +        .await +        .expect("reference target should load") +} tokens used 269,610
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 
 ## 20260519T000705Z candidate
 
@@ -955,9 +951,7 @@ e_basis_points: 2_500, +        confidence_tier: "ambiguous".to_owned(), +      
 - known degradations: metric:cargo_build_release_ms 41318.0->43276; metric:cargo_test_ms 9413.0->9711; metric:opencode_typescript_index_ms 18658.0->29266; metric:opencode_typescript_register_index_ms 18872.0->29473; metric:opencode_typescript_query_p95_ms 1589.0->1733.0; metric:local_documents_file_index_ms 449.0->492; metric:local_documents_file_query_p50_ms 458.5->499.5; metric:local_documents_file_query_p95_ms 468.0->621.0
 - latency metrics: cargo_build_release_ms=43276ms; cargo_fmt_check_ms=862ms; cargo_clippy_ms=197ms; cargo_test_ms=9711ms; relay_teams_index_ms=33912ms; relay_teams_register_index_ms=34012ms; relay_teams_query_p50_ms=218ms; relay_teams_query_p95_ms=665ms
 
-Adopted optimization notes:
-
-over", path.replace('/', "::")), +        file_id: file_id.to_owned(), +        path: path.to_owned(), +        language_id: "cpp".to_owned(), +        name: "Recover".to_owned(), +        qualified_name: "Recover".to_owned(), +        kind: kind.to_owned(), +        signature: signature.to_owned(), +        doc_comment: None, +        byte_range: RepositoryCodeRange { +            start: line_range.start, +            end: line_range.end, +        }, +        line_range, +    } +} + +fn range(start: u32, end: u32) -> RepositoryCodeRange { +    RepositoryCodeRange { start, end } +} + +async fn store_with_snapshot(snapshot: CodeIndexSnapshot) -> SqliteGraphStore { +    let store = SqliteGraphStore::open_in_memory().expect("store should open"); +    let registration = +        CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new()) +            .expect("registration should validate"); +    store +        .upsert_code_repository(registration) +        .await +        .expect("repository should persist"); +    store +        .apply_code_index_snapshot(snapshot) +        .await +        .expect("snapshot should apply"); + +    store +} tokens used 183,783
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 
 ## 20260519T-function-flow candidate
 
@@ -985,9 +979,7 @@ over", path.replace('/', "::")), +        file_id: file_id.to_owned(), +        
 - known degradations: none recorded
 - latency metrics: cargo_build_release_ms=44839ms; cargo_fmt_check_ms=947ms; cargo_clippy_ms=215ms; cargo_test_ms=10089ms; relay_teams_index_ms=59395ms; relay_teams_register_index_ms=59499ms; relay_teams_query_p50_ms=641ms; relay_teams_query_p95_ms=2898ms
 
-Adopted optimization notes:
-
-unks +            .iter() +            .any(|chunk| chunk.symbol_snapshot_id == Some(symbol.symbol_snapshot_id.clone())), +        "{name} should create a retrievable symbol chunk", +    ); +} + +fn assert_missing_symbols<const N: usize>(snapshot: &CodeIndexSnapshot, names: [&str; N]) { +    for name in names { +        assert!( +            !snapshot.symbols.iter().any(|symbol| symbol.name == name), +            "{name} should not be indexed as an exported object value", +        ); +    } +} + +fn large_object_body() -> String { +    (0..70) +        .map(|index| format!("  item{index}: buildItem({index}),\n")) +        .collect::<String>() +} + +fn parse_source_snapshot(path: &str, source: &[u8]) -> CodeIndexSnapshot { +    let registration = +        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new()) +            .expect("registration should validate"); +    let mut build = SnapshotBuild::new( +        &registration, +        "commit".to_owned(), +        "tree".to_owned(), +        true, +        1, +        0, +    ); + +    parse_indexed_file(&mut build, path, source).expect("file should parse"); + +    build.finish() +} tokens used 222,047
+Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 
 ## 20260519T-rust-self-iteration-harness candidate
 
