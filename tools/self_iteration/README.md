@@ -47,7 +47,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs product build, fmt, clippy, tests, and standalone `tools/self_iteration` Rust harness build/fmt/clippy/test gates sequentially; after those gates pass, repository evaluation, per-repository query cases, repository-set cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
+4. Runs quality gates in dependency stages: product and standalone harness `fmt --check` run in parallel, both release builds run in parallel, then product `clippy -> test` and harness `clippy -> test` run as two parallel rails; after those gates pass, repository evaluation, per-repository query cases, repository-set cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.
@@ -78,12 +78,13 @@ summary, detail, or patch files only when they match the current gate, metric,
 case, path, or algorithm objective.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
-auto`. A global bounded command limiter prevents repository indexing and query
-subprocesses from growing without control, while repository register/index and
-repository-set create/add/refresh writer commands are serialized against the
-shared evaluation store; query subprocesses still run concurrently after writer
-boundaries. Set `--jobs N` or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to
-override the global limit.
+auto`. `auto` uses the local machine aggressively: the global command limiter
+and query pool default to the available CPU count, and repository jobs default
+to half of that count. Repository register/index and repository-set
+create/add/refresh writer commands are still serialized against the shared
+evaluation store; query subprocesses run concurrently after writer boundaries.
+Set `--jobs N` or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to override the global
+limit.
 
 The prompt includes bounded run history, progressive memory, and patch indexes
 so repeated rejections stay tied to recent evidence instead of retrying the same

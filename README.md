@@ -184,6 +184,9 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
+The self-iteration harness runs its own product and harness quality checks in
+parallel dependency stages and defaults `--jobs auto` to the local CPU count.
+
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.

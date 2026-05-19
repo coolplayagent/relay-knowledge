@@ -1,14 +1,29 @@
-fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)> {
+fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     if profile == "smoke" {
         return vec![
-            (
-                "cargo_fmt_check",
-                vec!["cargo", "fmt", "--all", "--", "--check"],
-                120,
-            ),
-            (
+            QualityGateStage::Parallel(vec![
+                quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
+                quality_gate(
+                    "self_iteration_cargo_fmt_check",
+                    [
+                        "cargo",
+                        "fmt",
+                        "--manifest-path",
+                        "tools/self_iteration/Cargo.toml",
+                        "--",
+                        "--check",
+                    ],
+                    120,
+                ),
+            ]),
+        ];
+    }
+    vec![
+        QualityGateStage::Parallel(vec![
+            quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
+            quality_gate(
                 "self_iteration_cargo_fmt_check",
-                vec![
+                [
                     "cargo",
                     "fmt",
                     "--manifest-path",
@@ -18,106 +33,85 @@ fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)>
                 ],
                 120,
             ),
-        ]
-        .into_iter()
-        .map(|(name, command, timeout)| {
-            (
-                name,
-                command.into_iter().map(ToOwned::to_owned).collect(),
-                timeout,
-            )
-        })
-        .collect();
-    }
-    vec![
-        (
-            "cargo_build_release",
-            vec!["cargo", "build", "--release"],
-            1200,
-        ),
-        (
-            "self_iteration_cargo_build_release",
+        ]),
+        QualityGateStage::Parallel(vec![
+            quality_gate("cargo_build_release", ["cargo", "build", "--release"], 1200),
+            quality_gate(
+                "self_iteration_cargo_build_release",
+                [
+                    "cargo",
+                    "build",
+                    "--release",
+                    "--manifest-path",
+                    "tools/self_iteration/Cargo.toml",
+                    "--bin",
+                    "relay-knowledge-self-iterate",
+                ],
+                300,
+            ),
+        ]),
+        QualityGateStage::Rails(vec![
             vec![
-                "cargo",
-                "build",
-                "--release",
-                "--manifest-path",
-                "tools/self_iteration/Cargo.toml",
-                "--bin",
-                "relay-knowledge-self-iterate",
+                quality_gate(
+                    "cargo_clippy",
+                    [
+                        "cargo",
+                        "clippy",
+                        "--all-targets",
+                        "--all-features",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ],
+                    1200,
+                ),
+                quality_gate(
+                    "cargo_test",
+                    ["cargo", "test", "--all-targets", "--all-features"],
+                    1200,
+                ),
             ],
-            300,
-        ),
-        (
-            "cargo_fmt_check",
-            vec!["cargo", "fmt", "--all", "--", "--check"],
-            120,
-        ),
-        (
-            "self_iteration_cargo_fmt_check",
             vec![
-                "cargo",
-                "fmt",
-                "--manifest-path",
-                "tools/self_iteration/Cargo.toml",
-                "--",
-                "--check",
+                quality_gate(
+                    "self_iteration_cargo_clippy",
+                    [
+                        "cargo",
+                        "clippy",
+                        "--manifest-path",
+                        "tools/self_iteration/Cargo.toml",
+                        "--all-targets",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ],
+                    300,
+                ),
+                quality_gate(
+                    "self_iteration_cargo_test",
+                    [
+                        "cargo",
+                        "test",
+                        "--manifest-path",
+                        "tools/self_iteration/Cargo.toml",
+                        "--all-targets",
+                    ],
+                    300,
+                ),
             ],
-            120,
-        ),
-        (
-            "cargo_clippy",
-            vec![
-                "cargo",
-                "clippy",
-                "--all-targets",
-                "--all-features",
-                "--",
-                "-D",
-                "warnings",
-            ],
-            1200,
-        ),
-        (
-            "self_iteration_cargo_clippy",
-            vec![
-                "cargo",
-                "clippy",
-                "--manifest-path",
-                "tools/self_iteration/Cargo.toml",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ],
-            300,
-        ),
-        (
-            "cargo_test",
-            vec!["cargo", "test", "--all-targets", "--all-features"],
-            1200,
-        ),
-        (
-            "self_iteration_cargo_test",
-            vec![
-                "cargo",
-                "test",
-                "--manifest-path",
-                "tools/self_iteration/Cargo.toml",
-                "--all-targets",
-            ],
-            300,
-        ),
+        ]),
     ]
-    .into_iter()
-    .map(|(name, command, timeout)| {
-        (
-            name,
-            command.into_iter().map(ToOwned::to_owned).collect(),
-            timeout,
-        )
-    })
-    .collect()
+}
+
+fn quality_gate<const N: usize>(
+    name: &'static str,
+    command: [&'static str; N],
+    timeout_seconds: u64,
+) -> QualityGate {
+    QualityGate {
+        name,
+        command: command.into_iter().map(ToOwned::to_owned).collect(),
+        timeout_seconds,
+    }
 }
 
 fn quality_budget_ms(name: &str) -> Option<f64> {

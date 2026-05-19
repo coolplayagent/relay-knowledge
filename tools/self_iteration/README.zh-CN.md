@@ -47,7 +47,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches-v2/`。
-4. 顺序运行产品 build、fmt、clippy、tests，以及独立 `tools/self_iteration` Rust harness 的 build/fmt/clippy/test 质量门禁；门禁通过后，以自动限流的多线程调度并发运行仓库评估、仓库内查询 case、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
+4. 按依赖阶段运行质量门禁：产品和独立 harness 的 `fmt --check` 并行执行，两个 release build 并行执行，然后产品 `clippy -> test` 与 harness `clippy -> test` 作为两条 rail 并行执行；门禁通过后，以自动限流的多线程调度并发运行仓库评估、仓库内查询 case、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports-v2/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs-v2.jsonl`。
 7. 将 v2 图表写入 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `.git/relay-knowledge-self-iteration/score-v2.svg`。
@@ -63,7 +63,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 
 v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
 
-并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。全局 command 执行通过有界 limiter 控制，避免仓库索引和查询子进程无限增长；仓库 register/index 以及 repository-set create/add/refresh 这类共享评估库写命令会串行化，写边界之后的查询子进程仍可并发运行。可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
+并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。`auto` 会更积极地使用本机：全局 command limiter 和 query pool 默认等于可用 CPU 数，repository jobs 默认等于可用 CPU 数的一半。仓库 register/index 以及 repository-set create/add/refresh 这类共享评估库写命令仍会串行化，写边界之后的查询子进程可并发运行。可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
 
 ## 评分和采纳
 

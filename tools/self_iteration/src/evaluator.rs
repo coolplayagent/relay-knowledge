@@ -59,6 +59,19 @@ struct EvalRuntime {
 }
 
 #[derive(Debug, Clone)]
+struct QualityGate {
+    name: &'static str,
+    command: Vec<String>,
+    timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone)]
+enum QualityGateStage {
+    Parallel(Vec<QualityGate>),
+    Rails(Vec<Vec<QualityGate>>),
+}
+
+#[derive(Debug, Clone)]
 struct Limiter {
     inner: Arc<(Mutex<usize>, Condvar)>,
 }
@@ -121,34 +134,25 @@ pub fn evaluate_candidate(
     let mut metrics = Vec::new();
     let mut repo_reports = Vec::new();
 
-    for (name, command, timeout) in quality_gate_commands(&config.profile) {
-        let result = run_limited(
-            &limiter,
-            CommandSpec::new(name, command, &config.workspace, None, timeout),
-        );
-        metrics.push(MetricObservation {
-            name: format!("{}_ms", result.name),
-            value: result.duration_ms as f64,
-            budget: quality_budget_ms(&result.name),
-            lower_is_better: true,
-            key: result.name == "cargo_build_release",
+    if !run_quality_gate_stages(
+        &config.profile,
+        &config.workspace,
+        &limiter,
+        &mut commands,
+        &mut gates,
+        &mut metrics,
+    ) {
+        return finish(FinishInput {
+            config,
+            generated_diff,
+            gates,
+            cases,
+            metrics,
+            commands,
+            repo_reports,
+            run_home,
+            job_plan,
         });
-        gates.push(GateObservation::from_command(&result));
-        let passed = result.passed();
-        commands.push(result);
-        if !passed {
-            return finish(FinishInput {
-                config,
-                generated_diff,
-                gates,
-                cases,
-                metrics,
-                commands,
-                repo_reports,
-                run_home,
-                job_plan,
-            });
-        }
     }
     if config.profile == "smoke" {
         return finish(FinishInput {
@@ -881,6 +885,118 @@ fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
         observation,
         report,
     })
+}
+
+fn run_quality_gate_stages(
+    profile: &str,
+    workspace: &Path,
+    limiter: &Limiter,
+    commands: &mut Vec<CommandResult>,
+    gates: &mut Vec<GateObservation>,
+    metrics: &mut Vec<MetricObservation>,
+) -> bool {
+    for stage in quality_gate_stages(profile) {
+        let mut stage_passed = true;
+        for result in run_quality_gate_stage(stage, workspace, limiter) {
+            metrics.push(MetricObservation {
+                name: format!("{}_ms", result.name),
+                value: result.duration_ms as f64,
+                budget: quality_budget_ms(&result.name),
+                lower_is_better: true,
+                key: result.name == "cargo_build_release",
+            });
+            gates.push(GateObservation::from_command(&result));
+            stage_passed &= result.passed();
+            commands.push(result);
+        }
+        if !stage_passed {
+            return false;
+        }
+    }
+    true
+}
+
+fn run_quality_gate_stage(
+    stage: QualityGateStage,
+    workspace: &Path,
+    limiter: &Limiter,
+) -> Vec<CommandResult> {
+    match stage {
+        QualityGateStage::Parallel(gates) => run_parallel_quality_gates(gates, workspace, limiter),
+        QualityGateStage::Rails(rails) => run_quality_gate_rails(rails, workspace, limiter),
+    }
+}
+
+fn run_parallel_quality_gates(
+    gates: Vec<QualityGate>,
+    workspace: &Path,
+    limiter: &Limiter,
+) -> Vec<CommandResult> {
+    let jobs = gates.len();
+    let workspace = workspace.to_path_buf();
+    let limiter = limiter.clone();
+    let mut indexed_results = parallel_map(
+        gates.into_iter().enumerate().collect(),
+        jobs,
+        move |(index, gate)| {
+            let result = run_limited(
+                &limiter,
+                CommandSpec::new(
+                    gate.name,
+                    gate.command,
+                    &workspace,
+                    None,
+                    gate.timeout_seconds,
+                ),
+            );
+            (index, result)
+        },
+    );
+    indexed_results.sort_by_key(|(index, _)| *index);
+    indexed_results
+        .into_iter()
+        .map(|(_, result)| result)
+        .collect()
+}
+
+fn run_quality_gate_rails(
+    rails: Vec<Vec<QualityGate>>,
+    workspace: &Path,
+    limiter: &Limiter,
+) -> Vec<CommandResult> {
+    let jobs = rails.len();
+    let workspace = workspace.to_path_buf();
+    let limiter = limiter.clone();
+    let mut indexed_rails = parallel_map(
+        rails.into_iter().enumerate().collect(),
+        jobs,
+        move |(rail_index, rail)| {
+            let mut rail_results = Vec::new();
+            for gate in rail {
+                let result = run_limited(
+                    &limiter,
+                    CommandSpec::new(
+                        gate.name,
+                        gate.command,
+                        &workspace,
+                        None,
+                        gate.timeout_seconds,
+                    ),
+                );
+                let passed = result.passed();
+                rail_results.push(result);
+                if !passed {
+                    break;
+                }
+            }
+            (rail_index, rail_results)
+        },
+    );
+    indexed_rails.sort_by_key(|(rail_index, _)| *rail_index);
+    indexed_rails
+        .into_iter()
+        .flat_map(|(_, results)| results)
+        .collect()
 }
 
 fn run_limited(limiter: &Limiter, spec: CommandSpec) -> CommandResult {
