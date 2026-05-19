@@ -50,6 +50,22 @@ relay-knowledge --version
 relay-knowledge service doctor
 ```
 
+Each GitHub Release also includes
+`relay-knowledge-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
+that teaches LLM agents to use the `relay-knowledge` CLI for local graph and
+code-repository workflows. The release workflow can publish the same
+`skills/relay-knowledge-cli` directory to ClawHub when `CLAWHUB_TOKEN` is
+configured:
+
+```bash
+clawhub publish skills/relay-knowledge-cli \
+  --slug relay-knowledge-cli \
+  --name "Relay Knowledge CLI" \
+  --version <version>
+```
+
+This skill-over-CLI path is separate from MCP/ACP protocol access.
+
 ## What Works Today
 
 - Hybrid GraphRAG context packs with BM25, local semantic signatures,

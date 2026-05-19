@@ -91,6 +91,19 @@ jobs:
       - name: Package crate
         run: cargo package
 
+      - name: Validate CLI skill bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f skills/relay-knowledge-cli/SKILL.md
+          test -f skills/relay-knowledge-cli/agents/openai.yaml
+          test -f skills/relay-knowledge-cli/references/cli-workflows.md
+          grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'relay-knowledge version check --format json' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'repo query' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'Do not use this skill for MCP' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'default_prompt: "Use \$relay-knowledge-cli' skills/relay-knowledge-cli/agents/openai.yaml
+
       - name: Publish dry run
         run: cargo publish --dry-run
 
@@ -207,6 +220,41 @@ jobs:
           path: dist/${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
 
+  skill:
+    name: Package CLI skill
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate CLI skill version inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          if [[ "$manifest_version" != "${{ needs.verify.outputs.version }}" ]]; then
+            echo "Skill release version must follow Cargo.toml: $manifest_version != ${{ needs.verify.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Create skill archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="${BIN_NAME}-cli-skill-${{ needs.verify.outputs.tag }}"
+          mkdir -p "dist/$package"
+          cp -R skills/relay-knowledge-cli/. "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Upload skill archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.BIN_NAME }}-cli-skill-${{ needs.verify.outputs.tag }}
+          path: dist/${{ env.BIN_NAME }}-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz
+          if-no-files-found: error
+
   publish-crate:
     name: Publish crate
     if: github.event_name == 'push' && needs.verify.outputs.publish_crate == 'true'
@@ -259,10 +307,11 @@ jobs:
 
   release:
     name: Publish GitHub release
-    if: always() && github.event_name == 'push' && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.publish-crate.result == 'success' || needs.publish-crate.result == 'skipped')
+    if: always() && github.event_name == 'push' && needs.verify.result == 'success' && needs.build.result == 'success' && needs.skill.result == 'success' && (needs.publish-crate.result == 'success' || needs.publish-crate.result == 'skipped')
     needs:
       - verify
       - build
+      - skill
       - publish-crate
     runs-on: ubuntu-latest
     permissions:
@@ -300,6 +349,16 @@ jobs:
 
           ```bash
           cargo install relay-knowledge
+          ```
+
+          ## CLI Skill
+
+          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. It is intentionally separate from MCP protocol access.
+
+          Registry maintainers can publish the same skill directory with:
+
+          ```bash
+          clawhub publish skills/relay-knowledge-cli --slug relay-knowledge-cli --name "Relay Knowledge CLI" --version ${{ needs.verify.outputs.version }}
           ```
 
           ## Verification
@@ -355,3 +414,60 @@ jobs:
             --notes-file release-notes.md \
             "${prerelease_args[@]}" \
             dist/*
+
+  publish-skill:
+    name: Publish ClawHub skill
+    if: github.event_name == 'push'
+    needs:
+      - verify
+      - release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check ClawHub token
+        id: clawhub-token
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLAWHUB_TOKEN:-}" ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "CLAWHUB_TOKEN is not configured; skipping ClawHub publish."
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.clawhub-token.outputs.publish == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install ClawHub CLI
+        if: steps.clawhub-token.outputs.publish == 'true'
+        run: npm install -g clawhub
+
+      - name: Publish skill
+        if: steps.clawhub-token.outputs.publish == 'true'
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags="latest"
+          if [[ "${{ needs.verify.outputs.prerelease }}" == "true" ]]; then
+            tags="prerelease"
+          fi
+
+          clawhub --no-input login --token "$CLAWHUB_TOKEN"
+          clawhub publish skills/relay-knowledge-cli \
+            --slug relay-knowledge-cli \
+            --name "Relay Knowledge CLI" \
+            --version "${{ needs.verify.outputs.version }}" \
+            --changelog "relay-knowledge ${{ needs.verify.outputs.tag }}" \
+            --tags "$tags"
