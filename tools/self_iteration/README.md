@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | English
 
-This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It is intentionally outside the Rust crate and stores all runtime state under `.git/relay-knowledge-self-iteration/`.
+This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; `self-iterate.sh` builds and runs the Rust binary directly.
 
 ## Start
 
@@ -15,8 +15,11 @@ From the repository root:
 The launcher defaults to:
 
 ```bash
-python3 tools/self_iteration/self_iterate.py loop --yolo
+cargo build --release --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+tools/self_iteration/target/release/relay-knowledge-self-iterate loop --workspace . --yolo
 ```
+
+`self-iterate.sh` remains the stable entrypoint. It automatically builds the standalone Rust binary when the release binary is missing or the harness sources changed, then executes it directly.
 
 Useful variants:
 
@@ -43,11 +46,11 @@ Each iteration:
 
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
-3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches/`.
-4. Runs build, lint, tests, repository retrieval evaluations, the semantic/vector fixture, the external embedding provider probe when external backends are enabled, the research judge when configured, and the self-iteration documentation gate.
-5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
-6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
-7. Writes progressive memory entries under `.git/relay-knowledge-self-iteration/memory/`.
+3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
+4. Runs product build, fmt, clippy, tests, and standalone `tools/self_iteration` Rust harness build/fmt/clippy/test gates sequentially; after those gates pass, repository evaluation, per-repository query cases, repository-set cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
+5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
+6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
+7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.
 8. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md` before committing.
 9. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
 10. Restores the iteration start commit when the candidate is rejected.
@@ -60,34 +63,35 @@ Implementation candidates must update
 algorithm, architecture, invariants, expected case/metric impact, and known
 risks before evaluation. The harness adds a
 `self_iteration_algorithm_documentation` gate to reject code, test, benchmark,
-or harness-policy changes that do not carry those notes. The prompt also treats
-`.git/relay-knowledge-self-iteration/patches/` as long-term memory: it lists a
-bounded patch index and instructs Codex to read only relevant historical patch
-files in small ranges when reasoning about the next candidate.
+or harness-policy changes that do not carry those notes. The prompt uses the
+v2 run history and patch paths as bounded context when reasoning about the next
+candidate.
 
-The progressive memory store is the first context entry point for future runs:
+The v2 Rust harness keeps `runs-v2.jsonl`, `reports-v2/`, and `patches-v2/`
+separate from earlier run/report/patch formats, which may remain in existing
+worktrees as historical artifacts. Progressive long-term memory is preserved under the shared
+`.git/relay-knowledge-self-iteration/memory/` tree: each scored run writes
+`memory/index.jsonl`, `memory/summaries/`, and `memory/details/`, and the next
+generation prompt receives a rejection-recovery memory review, a bounded memory
+index, and a bounded historical patch index. Codex should open the referenced
+summary, detail, or patch files only when they match the current gate, metric,
+case, path, or algorithm objective.
 
-- `memory/index.jsonl` is a compact machine-readable index of accepted
-  optimizations, rejected attempts, quality-gate failures, and observed
-  foundational, competitive, semantic/vector, or performance regressions.
-- `memory/summaries/<id>.md` contains the short record Codex should read first.
-- `memory/details/<id>.md` contains the full score, gate, case, metric, patch,
-  and report references for follow-up inspection.
-- `memory/artifacts/<id>/` is reserved for optional extracted artifacts such as
-  trimmed report snippets or judge output.
+Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
+auto`. A global bounded command limiter prevents repository indexing and query
+subprocesses from growing without control, while repository register/index and
+repository-set create/add/refresh writer commands are serialized against the
+shared evaluation store; query subprocesses still run concurrently after writer
+boundaries. Set `--jobs N` or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to
+override the global limit.
 
-The prompt includes only a bounded memory index. Codex should load matching
-summary files first, then open detail or patch files only when the summary is
-relevant to the current gate, metric, case, path, or algorithm objective.
-When the latest scored run was rejected, the next prompt enters rejected
-recovery mode and explicitly asks Codex to inspect the summary files for the
-most recent three to five self-iteration memory entries before making another
-candidate. This keeps repeated rejections tied to recent evidence instead of
-retrying the same shape of patch.
+The prompt includes bounded run history, progressive memory, and patch indexes
+so repeated rejections stay tied to recent evidence instead of retrying the same
+shape of patch.
 
 ## Scoring and acceptance
 
-When the research judge is not configured, the score is:
+When the research judge is disabled or skipped, the score is:
 
 ```text
 foundational_capability * 0.22
@@ -97,7 +101,7 @@ foundational_capability * 0.22
 + stability * 0.25
 ```
 
-When the research judge is configured, `research_judge` becomes a protected
+When the research judge is enabled, `research_judge` becomes a protected
 objective and the weights switch to:
 
 ```text
@@ -131,7 +135,9 @@ freshness/version evidence, and same-change documentation updates.
   CLI alias that uses the default opencode command unless a custom command is
   also set
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`, `RELAY_KNOWLEDGE_JUDGE_API_KEY`,
-  `RELAY_KNOWLEDGE_JUDGE_MODEL`
+  `RELAY_KNOWLEDGE_JUDGE_MODEL`; the standalone harness posts the request with
+  `curl`, and the API key is read from the environment rather than persisted in
+  reports
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`, with aliases
   `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` and
   `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`; when unset, the default is
@@ -160,7 +166,7 @@ instead of silently appearing complete, and `accuracy` averages only the
 foundational and competitive objectives that are actually present. Metric
 budget misses are reported in `metric_budget_failures`.
 
-`performance` uses `budget_relative_v1`. If no compatible previous run exists,
+`performance` uses `budget_relative_v2`. If no compatible previous run exists,
 metrics use their budget-normalized score. Once the previous run also used this
 strategy, each metric blends budget fit with relative progress against the
 previous value, so a latency metric that is merely under budget no longer stays
@@ -199,8 +205,8 @@ This avoids rejecting a real case/rank improvement because a timing metric moved
 
 The `chart` command writes:
 
-- `.git/relay-knowledge-self-iteration/score.csv`
-- `.git/relay-knowledge-self-iteration/score.svg`
+- `.git/relay-knowledge-self-iteration/score-v2.csv`
+- `.git/relay-knowledge-self-iteration/score-v2.svg`
 
 ## Evaluation data
 
@@ -255,7 +261,7 @@ enumerating cases.
   indexing wall time after `repo register`, including batching, parser
   throughput, SQLite writes, finalize work, and incremental reuse.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
-- `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
+- `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can be disabled with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`. Unsupported backend names fail the judge gate, and an explicit CLI judge command selects the CLI backend unless `RELAY_KNOWLEDGE_JUDGE_BACKEND` explicitly requests HTTP. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for symbols, references, overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering symbols, functions, syscall-style macros, exported symbols, includes, references, callers, callees, mmap flow, and epoll/eventfd retrieval.

@@ -155,7 +155,8 @@ Use the repository scripts by responsibility:
 ```
 
 For unattended code and semantic/vector retrieval optimization experiments, the
-independent self-iteration loop can be started with:
+independent Rust self-iteration harness under `tools/self_iteration` can be
+started directly through the stable launcher:
 
 ```bash
 ./self-iterate.sh
@@ -163,11 +164,14 @@ independent self-iteration loop can be started with:
 ./self-iterate.sh chart
 ```
 
-It stores run history, reports, patches, and score curves under
+The launcher auto-builds the harness binary when needed. It stores v2 run
+history, progressive memory, reports, patches, and score curves under
 `.git/relay-knowledge-self-iteration/` and only commits candidates that improve
-the configured score. The semantic/vector fixture inherits the same
-`RELAY_KNOWLEDGE_*` embedding environment as normal runtime commands and does
-not persist secrets in benchmark cases.
+the configured score. The research judge supports OpenAI-compatible HTTP or an
+open coding-agent CLI, defaulting to `opencode` when no backend is configured.
+The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding
+environment as normal runtime commands and does not persist secrets in
+benchmark cases.
 
 The underlying quality gates are:
 
