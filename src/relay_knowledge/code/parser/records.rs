@@ -58,16 +58,17 @@ pub(super) fn records_from_captures(
 
 pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCodeSymbolRecord) {
     if let Some(existing) = output.symbols.iter_mut().find(|existing| {
-        existing.name == symbol.name
-            && existing.path == symbol.path
-            && existing.line_range.start == symbol.line_range.start
-            && symbol_kinds_overlap(&existing.kind, &symbol.kind)
-            && ranges_overlap(
-                existing.byte_range.start,
-                existing.byte_range.end,
-                symbol.byte_range.start,
-                symbol.byte_range.end,
-            )
+        existing.symbol_snapshot_id == symbol.symbol_snapshot_id
+            || (existing.name == symbol.name
+                && existing.path == symbol.path
+                && existing.line_range.start == symbol.line_range.start
+                && symbol_kinds_overlap(&existing.kind, &symbol.kind)
+                && ranges_overlap(
+                    existing.byte_range.start,
+                    existing.byte_range.end,
+                    symbol.byte_range.start,
+                    symbol.byte_range.end,
+                ))
     }) {
         let existing_width = existing
             .byte_range

@@ -50,7 +50,7 @@ relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo index core --ref <commit-sha> --format json
 ```
 
-全量索引通过 Git 读取 clean tree，tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
+全量索引通过 Git 从 clean tree 读取普通 blob，tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的单个仓库索引 worker 消费任务。同一仓库已有 queued/running task 时，重复索引请求会复用当前任务，不会并行启动多个 full rebuild。
 

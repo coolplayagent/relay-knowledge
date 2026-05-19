@@ -1,4 +1,4 @@
-use crate::domain::CodeRepositoryRegistration;
+use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange, RepositoryCodeSymbolRecord};
 
 use super::*;
 
@@ -96,6 +96,20 @@ impl IAMAuth { fn new() -> Self { IAMAuth } }
             .iter()
             .any(|symbol| symbol.name == "get_secret_key")
     );
+}
+
+#[test]
+fn duplicate_symbol_snapshot_identity_keeps_single_symbol_record() {
+    let mut output = FileParseOutput {
+        symbols: Vec::new(),
+        references: Vec::new(),
+    };
+
+    records::upsert_symbol(&mut output, duplicate_identity_symbol("class"));
+    records::upsert_symbol(&mut output, duplicate_identity_symbol("module"));
+
+    assert_eq!(output.symbols.len(), 1);
+    assert_eq!(output.symbols[0].symbol_snapshot_id, "symbol:Session");
 }
 
 #[test]
@@ -200,4 +214,25 @@ fn snapshot_build() -> SnapshotBuild {
         1,
         0,
     )
+}
+
+fn duplicate_identity_symbol(kind: &str) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        symbol_snapshot_id: "symbol:Session".to_owned(),
+        canonical_symbol_id: "src::Session".to_owned(),
+        file_id: "file:Session".to_owned(),
+        path: "src/Session.swift".to_owned(),
+        language_id: "swift".to_owned(),
+        name: "Session".to_owned(),
+        qualified_name: "src::Session".to_owned(),
+        kind: kind.to_owned(),
+        signature: "class Session".to_owned(),
+        doc_comment: None,
+        byte_range: RepositoryCodeRange::new("byte_range", 0, 14)
+            .expect("byte range should validate"),
+        line_range: RepositoryCodeRange::new("line_range", 1, 1)
+            .expect("line range should validate"),
+    }
 }

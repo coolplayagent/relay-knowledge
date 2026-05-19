@@ -1,0 +1,75 @@
+{
+  "repositories": {
+    "okhttp_kotlin": {
+      "path": "/opt/workspace/okhttp",
+      "alias": "okhttp-kotlin-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 120000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900
+    }
+  },
+  "query_cases": [
+    {
+      "id": "okhttp_kotlin_symbol_ok_http_client",
+      "repository": "okhttp_kotlin",
+      "kind": "symbol",
+      "query": "OkHttpClient",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt"],
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt", "excerpt_contains": "open class OkHttpClient"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "okhttp_kotlin_definition_new_call",
+      "repository": "okhttp_kotlin",
+      "kind": "definition",
+      "query": "newCall",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt"],
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt", "excerpt_contains": "override fun newCall(request: Request): Call"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "okhttp_kotlin_references_real_call",
+      "repository": "okhttp_kotlin",
+      "kind": "references",
+      "query": "RealCall",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt", "excerpt_contains": "RealCall(this, request, forWebSocket = false)"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "okhttp_kotlin_imports_okio_sink",
+      "repository": "okhttp_kotlin",
+      "kind": "imports",
+      "query": "okio.Sink",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt", "excerpt_contains": "import okio.Sink"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "okhttp_kotlin_hybrid_client_dispatcher_pool",
+      "repository": "okhttp_kotlin",
+      "kind": "hybrid",
+      "query": "OkHttpClient newCall request dispatcher connection pool interceptors",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt"],
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "okhttp/src/commonJvmAndroid/kotlin/okhttp3/OkHttpClient.kt", "excerpt_contains": "dispatcher"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

@@ -50,7 +50,7 @@ Indexing an immutable commit is better for reproducible experiments:
 relay-knowledge repo index core --ref <commit-sha> --format json
 ```
 
-Full indexing reads a clean tree through Git and parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter. Unsupported, invalid UTF-8, binary, oversized, or parser-failed files degrade to text-only or failed diagnostics without failing the whole batch.
+Full indexing reads ordinary blobs from a clean tree through Git and parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter. Gitlink submodules are skipped in the parent snapshot and should be registered as separate repositories when their contents need code graph coverage. Unsupported, invalid UTF-8, binary, oversized, or parser-failed files degrade to text-only or failed diagnostics without failing the whole batch.
 
 When the requested full scope is not already fresh, `repo index` queues a durable background task and returns JSON with `task.state=queued` plus the target scope metadata instead of blocking on the entire cold parse. The CLI starts a bounded single-shot `repo index-worker` for that task; `relay-knowledge service run` also drains the same queue with one repository index worker. Running the same index request while a task is queued or running reuses the active task rather than starting parallel rebuilds for the same repository.
 

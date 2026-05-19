@@ -197,6 +197,30 @@ fn tracked_entries_include_blob_sizes_for_batch_planning() {
 }
 
 #[test]
+fn tracked_entries_skip_gitlink_submodules() {
+    let repo = TempGitRepo::create("tracked-entry-gitlinks");
+    repo.write("src/lib.rs", "fn alpha() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "base"]);
+    let commit = repo.git_text(["rev-parse", "HEAD"]);
+    repo.git([
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        "160000",
+        commit.as_str(),
+        "vendor/module",
+    ]);
+    repo.git(["commit", "-m", "add gitlink"]);
+    let head = repo.git_text(["rev-parse", "HEAD"]);
+
+    let entries = tracked_entries(&repo.path, &head).expect("entries should load");
+
+    assert!(entries.iter().any(|entry| entry.path == "src/lib.rs"));
+    assert!(!entries.iter().any(|entry| entry.path == "vendor/module"));
+}
+
+#[test]
 fn full_index_plan_stops_batch_before_next_blob_exceeds_byte_budget() {
     let repo = TempGitRepo::create("byte-budget-fetch");
     repo.write("src/a.rs", "fn a() {}\n");

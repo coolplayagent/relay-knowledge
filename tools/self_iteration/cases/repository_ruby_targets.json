@@ -1,0 +1,76 @@
+{
+  "repositories": {
+    "rails_ruby": {
+      "path": "/opt/workspace/rails",
+      "alias": "rails-ruby-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 240000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "rails_ruby_symbol_action_controller_base",
+      "repository": "rails_ruby",
+      "kind": "symbol",
+      "query": "Base",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["actionpack/lib/action_controller/base.rb"],
+      "language_filters": ["ruby"],
+      "expected": [{"path": "actionpack/lib/action_controller/base.rb", "excerpt_contains": "class Base < Metal"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rails_ruby_definition_without_modules",
+      "repository": "rails_ruby",
+      "kind": "definition",
+      "query": "without_modules",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["actionpack/lib/action_controller/base.rb"],
+      "language_filters": ["ruby"],
+      "expected": [{"path": "actionpack/lib/action_controller/base.rb", "excerpt_contains": "def self.without_modules"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rails_ruby_references_const_get",
+      "repository": "rails_ruby",
+      "kind": "references",
+      "query": "const_get",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "actionpack/lib/action_controller/base.rb", "excerpt_contains": "ActionController.const_get(m)"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rails_ruby_imports_params_wrapper",
+      "repository": "rails_ruby",
+      "kind": "imports",
+      "query": "action_controller/metal/params_wrapper",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "actionpack/lib/action_controller/base.rb", "excerpt_contains": "require \"action_controller/metal/params_wrapper\""}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rails_ruby_hybrid_action_controller_modules",
+      "repository": "rails_ruby",
+      "kind": "hybrid",
+      "query": "ActionController base modules rendering redirects params wrapper controller",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["actionpack/lib/action_controller/base.rb"],
+      "language_filters": ["ruby"],
+      "expected": [{"path": "actionpack/lib/action_controller/base.rb", "excerpt_contains": "MODULES ="}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

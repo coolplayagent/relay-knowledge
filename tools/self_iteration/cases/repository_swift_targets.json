@@ -1,0 +1,75 @@
+{
+  "repositories": {
+    "alamofire_swift": {
+      "path": "/opt/workspace/alamofire",
+      "alias": "alamofire-swift-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "profile": "exhaustive",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 90000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900
+    }
+  },
+  "query_cases": [
+    {
+      "id": "alamofire_swift_symbol_session",
+      "repository": "alamofire_swift",
+      "kind": "symbol",
+      "query": "Session",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["Source/Core/Session.swift"],
+      "language_filters": ["swift"],
+      "expected": [{"path": "Source/Core/Session.swift", "excerpt_contains": "open class Session"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "alamofire_swift_definition_request",
+      "repository": "alamofire_swift",
+      "kind": "definition",
+      "query": "request",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["Source/Core/Session.swift"],
+      "language_filters": ["swift"],
+      "expected": [{"path": "Source/Core/Session.swift", "excerpt_contains": "open func request(_ convertible: any URLConvertible"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "alamofire_swift_references_session_delegate",
+      "repository": "alamofire_swift",
+      "kind": "references",
+      "query": "SessionDelegate",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "Source/Core/Session.swift", "excerpt_contains": "public let delegate: SessionDelegate"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "alamofire_swift_imports_foundation",
+      "repository": "alamofire_swift",
+      "kind": "imports",
+      "query": "Foundation",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "Source/Core/Session.swift", "excerpt_contains": "import Foundation"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "alamofire_swift_hybrid_session_root_queue",
+      "repository": "alamofire_swift",
+      "kind": "hybrid",
+      "query": "Alamofire session request interceptor root queue url session delegate",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["Source/Core/Session.swift"],
+      "language_filters": ["swift"],
+      "expected": [{"path": "Source/Core/Session.swift", "excerpt_contains": "rootQueue"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}
