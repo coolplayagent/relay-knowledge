@@ -987,8 +987,8 @@ unks +            .iter() +            .any(|chunk| chunk.symbol_snapshot_id == 
 ## 20260519T-rust-self-iteration-harness candidate
 
 - candidate: 将 Python 自迭代器主路径迁移为 `tools/self_iteration` 下的独立 Rust harness，并保持 `./self-iterate.sh` 可直接使用。
-- algorithm: 用 Rust 子进程执行器、全局有界 limiter、仓库级并发和仓库内 query 并发替代 Python 顺序 evaluator；质量门禁仍按 build/fmt/clippy/test 顺序失败即停，评估通过后再并发执行仓库、本地文件、semantic/vector 和 research judge 工作负载；同时保留渐进式历史记忆索引和默认 `opencode` 的开放 coding-agent judge。
+- algorithm: 用 Rust 子进程执行器、全局有界 limiter、仓库级并发和仓库内 query 并发替代 Python 顺序 evaluator；质量门禁仍按 build/fmt/clippy/test 顺序失败即停，评估通过后再并发执行仓库、本地文件、semantic/vector 和 research judge 工作负载；同时保留渐进式历史记忆索引、默认 `opencode` 的开放 coding-agent judge、gate 修复优先级和 pipe-safe stdin 处理。
 - architecture: Rust harness 拥有独立 `Cargo.toml`、`src/`、lockfile 和 target 目录，不进入产品 crate 的 `src/relay_knowledge` 模块树；`self-iterate.sh` 只负责按需构建并执行该独立 binary。
 - invariants: 保留 `loop|once|evaluate|chart` 入口和常用参数语义；旧 Python run/report/patch 文件保留为历史资料，v2 状态写入 `runs-v2.jsonl`、`reports-v2/`、`patches-v2/` 和 `score-v2.*`，共享 `memory/index.jsonl`、summary/detail 和 patch 索引用于渐进式加载；候选文档 gate、受保护目标、epsilon-Pareto 采纳和 no-fixture-special-casing 约束继续存在。
-- expected impact: 降低评估阶段 wall time，尤其是多仓库索引后 query case 和 fixture case 的等待时间；同时让 harness 可以独立于产品 crate 演进、测试和发布。
+- expected impact: 降低评估阶段 wall time，尤其是多仓库索引后 query case 和 fixture case 的等待时间；同时让 harness 可以独立于产品 crate 演进、测试和发布，并避免自定义 Codex/judge 子进程在大 prompt 或早期输出下管道互锁。
 - risks: v2 状态格式不兼容旧 Python history；默认多进程并发会提高瞬时 CPU/I/O 压力，因此通过 `--jobs`、`--repo-jobs`、`--query-jobs` 和 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS` 提供显式限流。

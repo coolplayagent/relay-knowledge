@@ -450,6 +450,21 @@ fn changes(
             improved,
         );
     }
+    for gate in &observation.gates {
+        let Some(previous_passed) = previous_gate_passed(previous, &gate.name) else {
+            continue;
+        };
+        if gate.passed != previous_passed
+            && ((improved && gate.passed) || (!improved && !gate.passed))
+        {
+            changes.push(serde_json::json!({
+                "kind": "gate",
+                "name": gate.name,
+                "previous": previous_passed,
+                "current": gate.passed
+            }));
+        }
+    }
     for case in &observation.cases {
         let previous_passed = previous_case_passed(previous, &case.case_id);
         if case.passed != previous_passed
@@ -778,9 +793,12 @@ fn metric_budget_failures(metrics: &[MetricObservation]) -> Vec<Value> {
 }
 
 fn bug_fix_priority_improved(improvements: &[Value]) -> bool {
-    improvements
-        .iter()
-        .any(|item| item.get("kind").and_then(Value::as_str) == Some("case"))
+    improvements.iter().any(|item| {
+        matches!(
+            item.get("kind").and_then(Value::as_str),
+            Some("case" | "gate")
+        )
+    })
 }
 
 fn objective_scores(cases: &[CaseObservation], objective: &str, aliases: &[&str]) -> Vec<f64> {
@@ -806,6 +824,18 @@ fn previous_case_passed(run: &Value, case_id: &str) -> bool {
         .and_then(|case| case.get("passed"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+fn previous_gate_passed(run: &Value, gate_name: &str) -> Option<bool> {
+    run.get("gates")
+        .and_then(Value::as_array)
+        .and_then(|gates| {
+            gates
+                .iter()
+                .find(|gate| gate.get("name").and_then(Value::as_str) == Some(gate_name))
+        })
+        .and_then(|gate| gate.get("passed"))
+        .and_then(Value::as_bool)
 }
 
 fn previous_metrics(run: &Value) -> BTreeMap<String, f64> {
@@ -892,5 +922,41 @@ mod tests {
 
         assert!(!score.accepted);
         assert!(score.reject_reasons[0].contains("quality gates failed"));
+    }
+
+    #[test]
+    fn fixed_gate_gets_bug_fix_priority() {
+        let previous = serde_json::json!({
+            "score": 0.9,
+            "foundational_capability": 0.0,
+            "competitive_capability": 0.0,
+            "semantic_vector": 0.0,
+            "performance": 1.0,
+            "stability": 1.0,
+            "gates": [
+                {"name": "cargo_test", "passed": false}
+            ],
+            "cases": [],
+            "metrics": []
+        });
+        let observation = EvaluationObservation {
+            gates: vec![GateObservation {
+                name: "cargo_test".to_owned(),
+                passed: true,
+                duration_ms: 1,
+                message: "ok".to_owned(),
+            }],
+            cases: Vec::new(),
+            metrics: Vec::new(),
+            generated_diff: true,
+        };
+
+        let score = score_evaluation(&observation, Some(&previous));
+
+        assert!(score.accepted);
+        assert!(score.improvements.iter().any(|item| {
+            item.get("kind").and_then(serde_json::Value::as_str) == Some("gate")
+                && item.get("name").and_then(serde_json::Value::as_str) == Some("cargo_test")
+        }));
     }
 }

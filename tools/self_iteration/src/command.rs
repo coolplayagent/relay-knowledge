@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread::JoinHandle,
@@ -99,27 +99,27 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
         Ok(child) => child,
         Err(error) => return failed_result(spec, 1, started, &error.to_string()),
     };
-    if let Some(stdin) = &spec.stdin {
-        if let Some(mut handle) = child.stdin.take() {
-            use std::io::Write;
-            if let Err(error) = handle.write_all(stdin.as_bytes()) {
-                return failed_result(spec, 1, started, &error.to_string());
-            }
-        }
-    }
     let stdout_reader = child.stdout.take().map(read_pipe);
     let stderr_reader = child.stderr.take().map(read_pipe);
+    let stdin_writer = spec.stdin.as_ref().and_then(|stdin| {
+        child
+            .stdin
+            .take()
+            .map(|handle| write_pipe(handle, stdin.clone()))
+    });
     let timeout = Duration::from_secs(spec.timeout_seconds);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                let mut stderr = join_reader(stderr_reader);
+                append_stdin_error(&mut stderr, stdin_writer);
                 return CommandResult {
                     name: spec.name.clone(),
                     command: spec.command.clone(),
                     exit_code: status.code().unwrap_or(1),
                     duration_ms: started.elapsed().as_millis() as u64,
                     stdout: join_reader(stdout_reader),
-                    stderr: join_reader(stderr_reader),
+                    stderr,
                 };
             }
             Ok(None) if started.elapsed() >= timeout => {
@@ -127,6 +127,7 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
                 let _ = child.wait();
                 let stdout = join_reader(stdout_reader);
                 let mut stderr = join_reader(stderr_reader);
+                append_stdin_error(&mut stderr, stdin_writer);
                 stderr.push_str(&format!("\ntimeout after {}s", spec.timeout_seconds));
                 return CommandResult {
                     name: spec.name.clone(),
@@ -154,10 +155,37 @@ where
     })
 }
 
+fn write_pipe<W>(mut writer: W, input: String) -> JoinHandle<Result<(), String>>
+where
+    W: Write + Send + 'static,
+{
+    std::thread::spawn(move || {
+        writer
+            .write_all(input.as_bytes())
+            .map_err(|error| error.to_string())
+    })
+}
+
 fn join_reader(reader: Option<JoinHandle<String>>) -> String {
     reader
         .and_then(|handle| handle.join().ok())
         .unwrap_or_default()
+}
+
+fn append_stdin_error(stderr: &mut String, writer: Option<JoinHandle<Result<(), String>>>) {
+    let Some(writer) = writer else {
+        return;
+    };
+    let error = match writer.join() {
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => error,
+        Err(_) => "stdin writer thread panicked".to_owned(),
+    };
+    if !stderr.is_empty() {
+        stderr.push('\n');
+    }
+    stderr.push_str("stdin write failed: ");
+    stderr.push_str(&error);
 }
 
 pub fn last_output_line(stdout: &str, stderr: &str) -> String {
@@ -200,5 +228,28 @@ mod tests {
     #[test]
     fn prefers_stderr_last_line() {
         assert_eq!(last_output_line("ok\n", "warn\nerr\n"), "err");
+    }
+
+    #[test]
+    fn reads_child_output_while_writing_stdin() {
+        let input = "x".repeat(200_000);
+        let result = run_command(
+            &CommandSpec::new(
+                "pipe_pressure",
+                vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    "head -c 200000 /dev/zero; wc -c 1>&2".to_owned(),
+                ],
+                &std::env::current_dir().expect("current dir"),
+                None,
+                5,
+            )
+            .with_stdin(input),
+        );
+
+        assert!(result.passed(), "{}", result.gate_message());
+        assert_eq!(result.stdout.len(), 200_000);
+        assert_eq!(result.stderr.trim(), "200000");
     }
 }
