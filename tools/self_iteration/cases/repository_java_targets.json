@@ -1,0 +1,149 @@
+{
+  "query_cases": [
+    {
+      "id": "spring_java_symbol_cached_introspection_results",
+      "repository": "spring_framework_java",
+      "kind": "symbol",
+      "query": "CachedIntrospectionResults",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": [
+        "spring-beans/src/main/java/org/springframework/beans/CachedIntrospectionResults.java"
+      ],
+      "language_filters": ["java"],
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/CachedIntrospectionResults.java",
+          "line_start": 76
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_definition_extended_bean_info",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "ExtendedBeanInfo",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "line_start": 81
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_definition_candidate_write_method",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "isCandidateWriteMethod",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "line_start": 148
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_definition_nested_simple_property_descriptor",
+      "repository": "spring_framework_java",
+      "kind": "definition",
+      "query": "SimplePropertyDescriptor",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 3,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "line_start": 265
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_references_object_utils",
+      "repository": "spring_framework_java",
+      "kind": "references",
+      "query": "ObjectUtils",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "ObjectUtils.nullSafeEquals"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_callers_candidate_write_method",
+      "repository": "spring_framework_java",
+      "kind": "callers",
+      "query": "isCandidateWriteMethod",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "findCandidateWriteMethods"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_callees_get_local_property_handler",
+      "repository": "spring_framework_java",
+      "kind": "callees",
+      "query": "getLocalPropertyHandler",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "getCachedIntrospectionResults"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_imports_object_utils",
+      "repository": "spring_framework_java",
+      "kind": "imports",
+      "query": "org.springframework.util.ObjectUtils",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/ExtendedBeanInfo.java",
+          "excerpt_contains": "org.springframework.util.ObjectUtils"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "spring_java_hybrid_cached_introspection_property_handler",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "CachedIntrospectionResults local property handler not writable property exception",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "spring-beans/src/main/java/org/springframework/beans/BeanWrapperImpl.java",
+          "excerpt_contains": "getLocalPropertyHandler"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

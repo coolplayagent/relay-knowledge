@@ -1,0 +1,124 @@
+{
+  "query_cases": [
+    {
+      "id": "rustfs_rust_symbol_iam_auth",
+      "repository": "rustfs_rust",
+      "kind": "symbol",
+      "query": "IAMAuth",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["rustfs/src/auth.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "line_start": 99
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_definition_get_secret_key",
+      "repository": "rustfs_rust",
+      "kind": "definition",
+      "query": "get_secret_key",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["rustfs/src/auth.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "line_start": 130
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_references_check_claims_from_token",
+      "repository": "rustfs_rust",
+      "kind": "references",
+      "query": "check_claims_from_token",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_claims_from_token(session_token"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_callers_check_claims_from_token",
+      "repository": "rustfs_rust",
+      "kind": "callers",
+      "query": "check_claims_from_token",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["rustfs/src/auth.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_key_valid"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_callees_check_key_valid",
+      "repository": "rustfs_rust",
+      "kind": "callees",
+      "query": "check_key_valid",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["rustfs/src/auth.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "check_claims_from_token"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_imports_auth_keystone",
+      "repository": "rustfs_rust",
+      "kind": "imports",
+      "query": "crate::auth_keystone",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["rustfs/src/auth.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/auth.rs",
+          "excerpt_contains": "crate::auth_keystone"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rustfs_rust_hybrid_main_startup_observability",
+      "repository": "rustfs_rust",
+      "kind": "hybrid",
+      "query": "main startup tokio runtime audit server shutdown observability",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["rustfs/src/main.rs"],
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "rustfs/src/main.rs",
+          "excerpt_contains": "async_main"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

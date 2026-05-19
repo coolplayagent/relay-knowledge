@@ -1,0 +1,165 @@
+{
+  "query_cases": [
+    {
+      "id": "relay_teams_python_symbol_connector_service",
+      "repository": "relay_teams",
+      "kind": "symbol",
+      "query": "ConnectorService",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["src/relay_teams/connector/service.py"],
+      "language_filters": ["python"],
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 150
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_definition_connector_service",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "ConnectorService",
+      "limit": 20,
+      "max_rank": 2,
+      "path_filters": ["src/relay_teams/connector/service.py"],
+      "language_filters": ["python"],
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "line_start": 150
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_references_w3_connector_request",
+      "repository": "relay_teams",
+      "kind": "references",
+      "query": "W3ConnectorSaveRequest",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "request: W3ConnectorSaveRequest"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_callers_list_accounts_async",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "list_accounts_async",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "list_connectors"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_callees_list_connectors",
+      "repository": "relay_teams",
+      "kind": "callees",
+      "query": "list_connectors",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "list_accounts_async"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_imports_connector_models",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "relay_teams.connector.models",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "ConnectorListResponse"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_python_hybrid_connector_inventory",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "connector inventory github feishu discord w3 runtime tool status list",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "src/relay_teams/connector/service.py",
+          "excerpt_contains": "ConnectorListResponse"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "codex_python_symbol_app_server_error",
+      "repository": "codex_python",
+      "kind": "symbol",
+      "query": "AppServerError",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["sdk/python/src/codex_app_server/errors.py"],
+      "language_filters": ["python"],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/errors.py",
+          "line_start": 6
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "codex_python_definition_retry_on_overload",
+      "repository": "codex_python",
+      "kind": "definition",
+      "query": "retry_on_overload",
+      "limit": 20,
+      "max_rank": 2,
+      "path_filters": ["sdk/python/src/codex_app_server/retry.py"],
+      "language_filters": ["python"],
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/retry.py",
+          "line_start": 12
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "codex_python_references_retry_on_overload",
+      "repository": "codex_python",
+      "kind": "references",
+      "query": "retry_on_overload",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "sdk/python/src/codex_app_server/client.py",
+          "excerpt_contains": "return retry_on_overload"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}
