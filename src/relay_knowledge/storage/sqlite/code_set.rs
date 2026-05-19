@@ -407,7 +407,8 @@ fn imports_for_members(
     for member in members {
         let mut statement = connection.prepare(
             "
-            SELECT repository_id, source_scope, import_id, path, module, target_hint
+            SELECT repository_id, source_scope, import_id, path, module, target_hint,
+                   line_start, line_end
             FROM code_repository_imports
             WHERE source_scope = ?1
             ORDER BY path ASC, import_id ASC
@@ -421,6 +422,8 @@ fn imports_for_members(
                 path: row.get(3)?,
                 module: row.get(4)?,
                 target_hint: row.get(5)?,
+                line_start: row.get(6)?,
+                line_end: row.get(7)?,
             })
         })?;
         imports.extend(rows.collect::<Result<Vec<_>, _>>()?);
@@ -565,6 +568,8 @@ fn edge_for_import(
         "module": import.module,
         "target_hint": import.target_hint,
         "from_path": import.path,
+        "from_line_start": import.line_start,
+        "from_line_end": import.line_end,
         "candidate_count": candidates.len(),
         "candidate_record_ids": candidates.iter().take(10).map(|candidate| candidate.record_id.as_str()).collect::<Vec<_>>(),
     })
@@ -733,6 +738,8 @@ struct ImportRecord {
     path: String,
     module: String,
     target_hint: Option<String>,
+    line_start: u32,
+    line_end: u32,
 }
 
 #[derive(Debug, Clone)]

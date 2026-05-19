@@ -596,6 +596,24 @@ async fn web_operation_endpoint_maps_bad_payloads_to_http_errors() {
         "priority must be an integer"
     );
 
+    let bad_repo_set_async = execute_json(
+        service.clone(),
+        json!({
+            "snapshot": {
+                "name": "Refresh repository set",
+                "command": "relay-knowledge repo-set refresh workspace --async",
+                "payload": {
+                    "operation": "code.repo_set.refresh",
+                    "set_alias": "workspace",
+                    "async": "true"
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(bad_repo_set_async["error"], "async must be a boolean");
+
     let bad_worker = execute_json(
         service,
         json!({

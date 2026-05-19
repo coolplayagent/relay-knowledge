@@ -356,7 +356,7 @@ async fn dispatch_operation(
         }
         "code.repo_set.refresh" => {
             let set_alias = string_field(payload, "set_alias")?.to_owned();
-            let response = if bool_field(payload, "async") {
+            let response = if optional_bool_field(payload, "async")?.unwrap_or(false) {
                 service
                     .start_code_repository_set_refresh(set_alias, context)
                     .await?
@@ -677,8 +677,16 @@ fn optional_i32_field(payload: &Value, field: &'static str) -> Result<Option<i32
     i32_field(payload, field).map(Some)
 }
 
-fn bool_field(payload: &Value, field: &'static str) -> bool {
-    payload.get(field).and_then(Value::as_bool).unwrap_or(false)
+fn optional_bool_field(payload: &Value, field: &'static str) -> Result<Option<bool>, WebError> {
+    if payload.get(field).is_none() {
+        return Ok(None);
+    }
+
+    payload
+        .get(field)
+        .and_then(Value::as_bool)
+        .map(Some)
+        .ok_or_else(|| WebError::bad_request(format!("{field} must be a boolean")))
 }
 
 fn parse_freshness(value: &str) -> Result<FreshnessPolicy, WebError> {

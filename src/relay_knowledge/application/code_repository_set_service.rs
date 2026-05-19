@@ -523,14 +523,26 @@ fn overlay_evidence_for_hit(
 ) -> Vec<crate::domain::CodeRepositoryCrossEdge> {
     edges
         .iter()
-        .filter(|edge| {
-            (edge.from_source_scope == hit.scope_id
-                && evidence_path(edge.evidence_json.as_str()).as_deref() == Some(hit.path.as_str()))
-                || edge_targets_hit(edge, hit)
-        })
+        .filter(|edge| edge_originates_from_hit(edge, hit) || edge_targets_hit(edge, hit))
         .take(5)
         .cloned()
         .collect()
+}
+
+fn edge_originates_from_hit(
+    edge: &crate::domain::CodeRepositoryCrossEdge,
+    hit: &CodeRetrievalHit,
+) -> bool {
+    if edge.from_source_scope != hit.scope_id
+        || edge.from_record_kind != "module_reference"
+        || hit.edge_kind.as_deref() != Some("import")
+    {
+        return false;
+    }
+
+    evidence_origin(edge.evidence_json.as_str()).is_some_and(|(path, line_start, line_end)| {
+        path == hit.path && line_start == hit.line_range.start && line_end == hit.line_range.end
+    })
 }
 
 fn edge_targets_hit(edge: &crate::domain::CodeRepositoryCrossEdge, hit: &CodeRetrievalHit) -> bool {
@@ -551,14 +563,24 @@ fn edge_targets_hit(edge: &crate::domain::CodeRepositoryCrossEdge, hit: &CodeRet
     }
 }
 
-fn evidence_path(evidence_json: &str) -> Option<String> {
+fn evidence_origin(evidence_json: &str) -> Option<(String, u32, u32)> {
     serde_json::from_str::<serde_json::Value>(evidence_json)
         .ok()
         .and_then(|value| {
-            value
+            let path = value
                 .get("from_path")
                 .and_then(|path| path.as_str())
-                .map(str::to_owned)
+                .map(str::to_owned)?;
+            let line_start = value
+                .get("from_line_start")
+                .and_then(|line| line.as_u64())
+                .and_then(|line| u32::try_from(line).ok())?;
+            let line_end = value
+                .get("from_line_end")
+                .and_then(|line| line.as_u64())
+                .and_then(|line| u32::try_from(line).ok())?;
+
+            Some((path, line_start, line_end))
         })
 }
 
@@ -737,7 +759,7 @@ mod tests {
             "edge-out",
             "scope-app",
             Some("scope-service"),
-            r#"{"from_path":"src/client.rs"}"#,
+            r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
             6_000,
         );
         let unrelated = edge(
@@ -759,7 +781,14 @@ mod tests {
             &[inbound.clone(), outbound.clone(), unrelated, wrong_target],
             &base_hit,
         );
-        assert_eq!(evidence, vec![inbound, outbound]);
+        assert_eq!(evidence, vec![inbound]);
+        let mut import_hit = hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, false);
+        import_hit.symbol_snapshot_id = None;
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+        import_hit.edge_kind = Some("import".to_owned());
+        let outbound_evidence =
+            overlay_evidence_for_hit(std::slice::from_ref(&outbound), &import_hit);
+        assert_eq!(outbound_evidence, vec![outbound]);
         assert!(repository_set_score(&base_hit, &member, &evidence) > base_hit.score);
         assert!(
             repository_set_score(
@@ -799,8 +828,8 @@ mod tests {
             merged_filters(&["src".to_owned()], &["src".to_owned(), "tests".to_owned()]),
             ["src".to_owned(), "tests".to_owned()]
         );
-        assert!(evidence_path("not-json").is_none());
-        assert!(evidence_path("{}").is_none());
+        assert!(evidence_origin("not-json").is_none());
+        assert!(evidence_origin("{}").is_none());
     }
 
     #[test]

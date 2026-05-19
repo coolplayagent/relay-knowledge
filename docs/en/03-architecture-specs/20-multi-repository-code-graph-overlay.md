@@ -237,7 +237,7 @@ Single-repository queries must not use multi-repository ranking signals. Multi-r
 
 Multi-repository reranking must not globally deduplicate by path or symbol name. The dedupe key includes at least `repository_id`, `source_scope`, path, line range, and excerpt. `src/lib.rs`, `init`, or `main` in different repositories are different fact instances.
 
-When a cross-repository edge is `ambiguous`, `unresolved`, or `inferred`, responses expose resolution state and confidence. Such edges must not be promoted into single-repository `resolved` calls or references.
+When a cross-repository edge is `ambiguous`, `unresolved`, or `inferred`, responses expose resolution state and confidence. Such edges must not be promoted into single-repository `resolved` calls or references. Multi-repository responses attach overlay edge evidence only to the target hit or to the exact import-origin hit with matching path and line range; ordinary symbols or chunks in the same file must not receive the import edge bonus.
 
 ## 8. Cross-Repository Resolution
 
