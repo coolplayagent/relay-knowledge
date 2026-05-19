@@ -1,0 +1,388 @@
+{
+  "query_cases": [
+    {
+      "id": "spring_java_implementation_spring_objenesis_interface_challenge",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "SpringObjenesis implements Objenesis newInstance isWorthTrying",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/objenesis/SpringObjenesis.java",
+          "excerpt_contains": "implements Objenesis"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/objenesis/SpringObjenesis.java"
+        },
+        {
+          "path": "spring-core/src/main/java/org/springframework/objenesis/SpringObjenesis.java",
+          "excerpt_contains": "newInstance"
+        }
+      ]
+    },
+    {
+      "id": "spring_java_alias_simple_alias_registry_canonical_name_challenge",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "SimpleAliasRegistry aliasMap registerAlias canonical name alias",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/core/SimpleAliasRegistry.java",
+          "excerpt_contains": "private final Map<String, String> aliasMap"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/core/SimpleAliasRegistry.java"
+        },
+        {
+          "path": "spring-core/src/main/java/org/springframework/core/SimpleAliasRegistry.java",
+          "excerpt_contains": "registerAlias"
+        }
+      ]
+    },
+    {
+      "id": "spring_java_inline_reflectionutils_method_filter_lambda_challenge",
+      "repository": "spring_framework_java",
+      "kind": "hybrid",
+      "query": "ReflectionUtils USER_DECLARED_METHODS MethodFilter lambda isBridge isSynthetic",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "java"
+      ],
+      "expected": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/util/ReflectionUtils.java",
+          "excerpt_contains": "method -> !method.isBridge()"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "spring-core/src/main/java/org/springframework/util/ReflectionUtils.java"
+        },
+        {
+          "path": "spring-core/src/main/java/org/springframework/util/ReflectionUtils.java",
+          "excerpt_contains": "USER_DECLARED_METHODS"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_implementation_proxy_handler_quiet_handler_challenge",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "_TargetHandler _ProxyHandler implement _QuietHandler BaseHTTPRequestHandler do_GET",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "codex-rs/windows-sandbox-rs/sandbox_smoketests.py",
+          "excerpt_contains": "class _TargetHandler(_QuietHandler):"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "codex-rs/windows-sandbox-rs/sandbox_smoketests.py"
+        },
+        {
+          "path": "codex-rs/windows-sandbox-rs/sandbox_smoketests.py",
+          "excerpt_contains": "_QuietHandler"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_alias_openai_import_fallback_challenge",
+      "repository": "codex_python",
+      "kind": "imports",
+      "query": "import openai as _openai AsyncOpenAI fallback",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "codex-rs/skills/src/assets/samples/imagegen/scripts/image_gen.py",
+          "excerpt_contains": "import openai as _openai"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "codex-rs/skills/src/assets/samples/imagegen/scripts/image_gen.py"
+        },
+        {
+          "path": "codex-rs/skills/src/assets/samples/imagegen/scripts/image_gen.py",
+          "excerpt_contains": "_openai"
+        }
+      ]
+    },
+    {
+      "id": "codex_python_inline_recv_json_nested_async_helper_challenge",
+      "repository": "codex_python",
+      "kind": "hybrid",
+      "query": "_handle_connection nested async recv_json send_event websocket",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "python"
+      ],
+      "expected": [
+        {
+          "path": "scripts/mock_responses_websocket_server.py",
+          "excerpt_contains": "async def recv_json"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "scripts/mock_responses_websocket_server.py"
+        },
+        {
+          "path": "scripts/mock_responses_websocket_server.py",
+          "excerpt_contains": "send_event"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_implementation_voice_worklet_processor_challenge",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "RelayTeamsVoiceInputProcessor extends AudioWorkletProcessor process port onmessage",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/components/voiceInputWorklet.js",
+          "excerpt_contains": "extends AudioWorkletProcessor"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/components/voiceInputWorklet.js"
+        },
+        {
+          "path": "frontend/dist/js/components/voiceInputWorklet.js",
+          "excerpt_contains": "process(inputs)"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_alias_new_session_draft_markup_import_challenge",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "renderNewSessionDraftView as renderNewSessionDraftMarkup",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/components/newSessionDraft.js",
+          "excerpt_contains": "renderNewSessionDraftView as renderNewSessionDraftMarkup"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/components/newSessionDraft.js"
+        },
+        {
+          "path": "frontend/dist/js/components/newSessionDraft.js",
+          "excerpt_contains": "newSessionDraftView"
+        }
+      ]
+    },
+    {
+      "id": "relay_teams_js_inline_bootstrap_prompt_input_handler_challenge",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "setupEventBindings promptInput addEventListener input arrow callback handlePromptComposerInput",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "javascript"
+      ],
+      "expected": [
+        {
+          "path": "frontend/dist/js/app/bootstrap.js",
+          "excerpt_contains": "els.promptInput.addEventListener(\"input\", () =>"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "frontend/dist/js/app/bootstrap.js"
+        },
+        {
+          "path": "frontend/dist/js/app/bootstrap.js",
+          "excerpt_contains": "handlePromptComposerInput"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_implementation_data_migration_service_challenge",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "DataMigration Service extends Context.Service Interface Layer effect",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/data-migration.ts",
+          "excerpt_contains": "extends Context.Service<Service, Interface>()"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/opencode/src/data-migration.ts"
+        },
+        {
+          "path": "packages/opencode/src/data-migration.ts",
+          "excerpt_contains": "@opencode/DataMigration"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_alias_instance_dispose_run_disposers_challenge",
+      "repository": "opencode_typescript",
+      "kind": "imports",
+      "query": "disposeInstance as runDisposers instance registry",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/project/instance-store.ts",
+          "excerpt_contains": "disposeInstance as runDisposers"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.45,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/opencode/src/project/instance-store.ts"
+        },
+        {
+          "path": "packages/opencode/src/project/instance-store.ts",
+          "excerpt_contains": "runDisposers"
+        }
+      ]
+    },
+    {
+      "id": "opencode_ts_inline_project_database_use_callback_challenge",
+      "repository": "opencode_typescript",
+      "kind": "hybrid",
+      "query": "Project db helper Database.use inline callback Effect.sync",
+      "objective": "competitive_capability",
+      "limit": 5,
+      "max_rank": 3,
+      "language_filters": [
+        "typescript"
+      ],
+      "expected": [
+        {
+          "path": "packages/opencode/src/project/project.ts",
+          "excerpt_contains": "Effect.sync(() => Database.use(fn))"
+        }
+      ],
+      "case_group": "relationship_challenge",
+      "min_score": 0.4,
+      "require_expected_all": false,
+      "require_expected_sequence": false,
+      "forbidden_rank_penalty": 0.08,
+      "expected_all": [
+        {
+          "path": "packages/opencode/src/project/project.ts"
+        },
+        {
+          "path": "packages/opencode/src/project/project.ts",
+          "excerpt_contains": "const db = <T>"
+        }
+      ]
+    }
+  ]
+}
