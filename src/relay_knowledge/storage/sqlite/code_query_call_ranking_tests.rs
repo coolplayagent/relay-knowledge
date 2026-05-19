@@ -127,6 +127,85 @@ async fn callees_apply_direction_before_candidate_limit() {
     assert!(hits[0].excerpt.contains("TargetCallee"));
 }
 
+#[tokio::test]
+async fn callers_rank_target_named_surface_above_generic_transport_wrappers() {
+    let redactor_path = "packages/http-recorder/src/redactor.ts";
+    let executor_path = "packages/llm/src/route/executor.ts";
+    let redactor_symbol = symbol("redactor-url-symbol", "redactor-file", redactor_path, "url");
+    let executor_symbol = symbol(
+        "request-details-symbol",
+        "executor-file",
+        executor_path,
+        "requestDetails",
+    );
+    let redactor_chunk = chunk(
+        "redactor-url-chunk",
+        "redactor-file",
+        redactor_path,
+        "export const url = () => ({\n  request: (snapshot) => ({ ...snapshot, url: redactUrl(snapshot.url) }),\n})",
+        Some("redactor-url-symbol"),
+        range(45, 52),
+    );
+    let executor_chunk = chunk(
+        "request-details-chunk",
+        "executor-file",
+        executor_path,
+        "const requestDetails = (request) =>\n  new HttpRequestDetails({\n    url: redactUrl(request.url),\n  })",
+        Some("request-details-symbol"),
+        range(145, 154),
+    );
+    let mut redactor_call = call("redactor-redact-url-call", "redactor-file", redactor_path);
+    redactor_call.caller_symbol_snapshot_id = Some("redactor-url-symbol".to_owned());
+    redactor_call.caller_name = Some("url".to_owned());
+    redactor_call.callee_name = "redactUrl".to_owned();
+    redactor_call.target_hint = Some("redactUrl".to_owned());
+    redactor_call.confidence_basis_points = 8_000;
+    redactor_call.confidence_tier = "inferred".to_owned();
+    redactor_call.line_range = range(50, 50);
+    let mut executor_call = call("executor-redact-url-call", "executor-file", executor_path);
+    executor_call.caller_symbol_snapshot_id = Some("request-details-symbol".to_owned());
+    executor_call.caller_name = Some("requestDetails".to_owned());
+    executor_call.callee_name = "redactUrl".to_owned();
+    executor_call.target_hint = Some("redactUrl".to_owned());
+    executor_call.confidence_basis_points = 8_000;
+    executor_call.confidence_tier = "inferred".to_owned();
+    executor_call.line_range = range(152, 152);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("redactor-file", redactor_path, "typescript"),
+            file("executor-file", executor_path, "typescript"),
+        ],
+        symbols: vec![redactor_symbol, executor_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![executor_call, redactor_call],
+        chunks: vec![executor_chunk, redactor_chunk],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("redactUrl", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, redactor_path);
+    assert!(hits[0].excerpt.contains("redactUrl(snapshot.url"));
+}
+
 #[test]
 fn callee_member_context_bonus_requires_member_call_shape() {
     let callees = request("OwnerTarget", CodeQueryKind::Callees);

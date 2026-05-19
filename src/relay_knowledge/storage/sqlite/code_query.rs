@@ -4,6 +4,8 @@ use rusqlite::{Connection, params_from_iter};
 
 #[path = "code_query_call_counts.rs"]
 mod code_query_call_counts;
+#[path = "code_query_flow_scoring.rs"]
+mod code_query_flow_scoring;
 #[path = "code_query_identifiers.rs"]
 mod code_query_identifiers;
 #[path = "code_query_import_scoring.rs"]
@@ -39,6 +41,7 @@ pub(super) use super::code_query_hits::{
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
+use code_query_flow_scoring::{caller_context_density_bonus, execution_flow_chunk_bonus};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_line_priority, import_surface_bonus,
     import_target_symbol_bonus, query_looks_like_import_path,
@@ -543,6 +546,15 @@ fn search_calls(
                     request,
                 )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
+                + caller_context_density_bonus(
+                    base_score,
+                    query,
+                    row.caller_name.as_deref(),
+                    &row.callee_name,
+                    &row.path,
+                    row.caller_excerpt.as_deref(),
+                    request,
+                )
                 + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score + source_path_bonus + test_path_penalty + example_path_penalty;
@@ -830,6 +842,14 @@ fn search_chunks(
                 + declaration_bonus
                 + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
                 + symbol_bonus;
+            let score = score
+                + execution_flow_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                );
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
