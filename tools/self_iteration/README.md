@@ -224,9 +224,10 @@ enumerating cases.
 - Multi-language repository retrieval targets are split by language under
   `cases/repository_*_targets.json` so each language can evolve independently.
   The default profile covers relay-teams Python/JavaScript, opencode
-  TypeScript/TSX, and LevelDB C++; Linux C, Kubernetes Go, Spring Framework
-  Java, RustFS Rust, and Codex Python remain behind repository-level
-  `profile=exhaustive`. The language files define real `symbol`, `definition`,
+  TypeScript/TSX, and LevelDB C++; Linux C, Kubernetes Go,
+  Spring Framework Java, RustFS Rust, Codex Python, nvm Bash, dotnet/runtime C#,
+  OkHttp Kotlin, Laravel PHP, Rails Ruby, Scala 3, and Alamofire Swift remain behind
+  repository-level `profile=exhaustive`. The language files define real `symbol`, `definition`,
   `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
   functions, methods, classes, exported values, macros, includes/imports,
   callback or trait relationships, and execution flows. Relationship targets
@@ -271,6 +272,13 @@ enumerating cases.
 - `/opt/workspace/spring-framework` full `scope=all` Java indexing in the `exhaustive` profile for context, bean factory, WebMVC servlet/handler mapping, imports, and filtered lookup.
 - `/opt/workspace/rustfs` full `scope=all` Rust indexing in the `exhaustive` profile for trait implementation, function-local imports, authentication caller chains, and startup execution flow.
 - `/opt/workspace/codex` full `scope=all` Python indexing in the `exhaustive` profile for exception inheritance, relative imports, retry caller chains, and app-server stdio execution flow.
+- `/opt/workspace/nvm` full `scope=all` Bash indexing in the `exhaustive` profile for shell functions, command references, installer source hooks, and artifact download flows.
+- `/opt/workspace/dotnet-runtime` full `scope=all` C# indexing in the `exhaustive` profile for core library classes, methods, using directives, and array-pool buffer flows.
+- `/opt/workspace/okhttp` full `scope=all` Kotlin indexing in the `exhaustive` profile for client classes, method definitions, Okio imports, and request dispatch flows.
+- `/opt/workspace/laravel-framework` full `scope=all` PHP indexing in the `exhaustive` profile for application classes, constructor calls, namespace uses, and service-provider bootstrapping.
+- `/opt/workspace/rails` full `scope=all` Ruby indexing in the `exhaustive` profile for controller classes, singleton methods, require targets, and module composition.
+- `/opt/workspace/scala3` full `scope=all` Scala indexing in the `exhaustive` profile for compiler context classes, inline methods, imports, and phase/mode flows.
+- `/opt/workspace/alamofire` full `scope=all` Swift indexing in the `exhaustive` profile for session classes, request methods, imports, and queue/delegate flows.
 
 Prepare the default-profile multi-repository fixtures with:
 
@@ -281,4 +289,16 @@ git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector-co
 git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector
 ```
 
-All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle Linux, Kubernetes, or Spring Framework full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.
+Prepare the added tree-sitter language fixtures with:
+
+```bash
+git clone --depth 1 https://github.com/nvm-sh/nvm.git /opt/workspace/nvm
+git clone --depth 1 https://github.com/dotnet/runtime.git /opt/workspace/dotnet-runtime
+git clone --depth 1 https://github.com/square/okhttp.git /opt/workspace/okhttp
+git clone --depth 1 https://github.com/laravel/framework.git /opt/workspace/laravel-framework
+git clone --depth 1 https://github.com/rails/rails.git /opt/workspace/rails
+git clone --depth 1 https://github.com/scala/scala3.git /opt/workspace/scala3
+git clone --depth 1 https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire
+```
+
+All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

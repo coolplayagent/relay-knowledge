@@ -1,0 +1,75 @@
+{
+  "repositories": {
+    "laravel_php": {
+      "path": "/opt/workspace/laravel-framework",
+      "alias": "laravel-php-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 120000,
+      "query_p50_budget_ms": 450,
+      "query_p95_budget_ms": 900
+    }
+  },
+  "query_cases": [
+    {
+      "id": "laravel_php_symbol_application",
+      "repository": "laravel_php",
+      "kind": "symbol",
+      "query": "Application",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["src/Illuminate/Foundation/Application.php"],
+      "language_filters": ["php"],
+      "expected": [{"path": "src/Illuminate/Foundation/Application.php", "excerpt_contains": "class Application extends Container"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "laravel_php_definition_application_construct",
+      "repository": "laravel_php",
+      "kind": "definition",
+      "query": "__construct",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["src/Illuminate/Foundation/Application.php"],
+      "language_filters": ["php"],
+      "expected": [{"path": "src/Illuminate/Foundation/Application.php", "excerpt_contains": "public function __construct($basePath = null)"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "laravel_php_references_set_base_path",
+      "repository": "laravel_php",
+      "kind": "references",
+      "query": "setBasePath",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "src/Illuminate/Foundation/Application.php", "excerpt_contains": "$this->setBasePath($basePath);"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "laravel_php_imports_container",
+      "repository": "laravel_php",
+      "kind": "imports",
+      "query": "Illuminate\\Container\\Container",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "src/Illuminate/Foundation/Application.php", "excerpt_contains": "use Illuminate\\Container\\Container;"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "laravel_php_hybrid_application_services",
+      "repository": "laravel_php",
+      "kind": "hybrid",
+      "query": "Laravel application service providers deferred services bootstrap path",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["src/Illuminate/Foundation/Application.php"],
+      "language_filters": ["php"],
+      "expected": [{"path": "src/Illuminate/Foundation/Application.php", "excerpt_contains": "deferredServices"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

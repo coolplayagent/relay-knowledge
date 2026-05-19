@@ -1,0 +1,76 @@
+{
+  "repositories": {
+    "nvm_bash": {
+      "path": "/opt/workspace/nvm",
+      "alias": "nvm-bash-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 45000,
+      "query_p50_budget_ms": 250,
+      "query_p95_budget_ms": 500
+    }
+  },
+  "query_cases": [
+    {
+      "id": "nvm_bash_symbol_nvm_download",
+      "repository": "nvm_bash",
+      "kind": "symbol",
+      "query": "nvm_download",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["nvm.sh"],
+      "language_filters": ["bash"],
+      "expected": [{"path": "nvm.sh", "excerpt_contains": "nvm_download()"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "nvm_bash_definition_nvm_install_binary",
+      "repository": "nvm_bash",
+      "kind": "definition",
+      "query": "nvm_install_binary",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["nvm.sh"],
+      "language_filters": ["bash"],
+      "expected": [{"path": "nvm.sh", "excerpt_contains": "nvm_install_binary()"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "nvm_bash_references_nvm_download_artifact",
+      "repository": "nvm_bash",
+      "kind": "references",
+      "query": "nvm_download_artifact",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "nvm.sh", "excerpt_contains": "nvm_download_artifact"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "nvm_bash_imports_profile_sources_nvm",
+      "repository": "nvm_bash",
+      "kind": "imports",
+      "query": "nvm.sh",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "install.sh", "excerpt_contains": "nvm_install_dir)/nvm.sh"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "nvm_bash_hybrid_binary_download_artifact",
+      "repository": "nvm_bash",
+      "kind": "hybrid",
+      "query": "binary download artifact mirror checksum compression tarball install source",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["nvm.sh"],
+      "language_filters": ["bash"],
+      "expected": [{"path": "nvm.sh", "excerpt_contains": "nvm_download_artifact"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

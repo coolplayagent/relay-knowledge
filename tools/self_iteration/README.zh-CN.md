@@ -156,8 +156,10 @@ and (
 - 多语言代码仓库检索 targets：语言 case 已按
   `cases/repository_*_targets.json` 拆分，让每种语言能独立扩展。默认
   profile 覆盖 relay-teams Python/JavaScript、opencode TypeScript/TSX 和
-  LevelDB C++；Linux C、Kubernetes Go、Spring Framework Java、RustFS Rust
-  和 Codex Python 继续由 repository 级 `profile=exhaustive` 控制。语言
+  LevelDB C++；Linux C、Kubernetes Go、Spring Framework
+  Java、RustFS Rust、Codex Python、nvm Bash、dotnet/runtime C#、OkHttp Kotlin、
+  Laravel PHP、Rails Ruby、Scala 3 和 Alamofire Swift 继续由 repository 级
+  `profile=exhaustive` 控制。语言
   case 覆盖真实 `symbol`、`definition`、`references`、`callers`、
   `callees`、`imports`、`hybrid` 场景，包括函数、方法、类、导出值、宏、
   include/import、callback/trait 关系和执行流。relationship targets 仍拆成
@@ -194,6 +196,13 @@ and (
 - `/opt/workspace/spring-framework`：`exhaustive` profile 下 `scope=all` 全仓 Java 索引与查询，覆盖 context、bean factory、webmvc servlet/handler mapping、imports 和 filtered lookup。
 - `/opt/workspace/rustfs`：`exhaustive` profile 下 `scope=all` 全仓 Rust 索引与查询，覆盖 trait implementation、函数内 import、认证调用链和启动执行流。
 - `/opt/workspace/codex`：`exhaustive` profile 下 `scope=all` 全仓 Python 索引与查询，覆盖异常继承、relative import、retry 调用链和 app-server stdio 执行流。
+- `/opt/workspace/nvm`：`exhaustive` profile 下 `scope=all` 全仓 Bash 索引与查询，覆盖 shell 函数、命令引用、installer source hook 和 artifact download flow。
+- `/opt/workspace/dotnet-runtime`：`exhaustive` profile 下 `scope=all` 全仓 C# 索引与查询，覆盖 core library class、method、using directive 和 array-pool buffer flow。
+- `/opt/workspace/okhttp`：`exhaustive` profile 下 `scope=all` 全仓 Kotlin 索引与查询，覆盖 client class、method definition、Okio import 和 request dispatch flow。
+- `/opt/workspace/laravel-framework`：`exhaustive` profile 下 `scope=all` 全仓 PHP 索引与查询，覆盖 application class、constructor call、namespace use 和 service-provider bootstrapping。
+- `/opt/workspace/rails`：`exhaustive` profile 下 `scope=all` 全仓 Ruby 索引与查询，覆盖 controller class、singleton method、require target 和 module composition。
+- `/opt/workspace/scala3`：`exhaustive` profile 下 `scope=all` 全仓 Scala 索引与查询，覆盖 compiler context class、inline method、import 和 phase/mode flow。
+- `/opt/workspace/alamofire`：`exhaustive` profile 下 `scope=all` 全仓 Swift 索引与查询，覆盖 session class、request method、import 和 queue/delegate flow。
 
 默认 profile 的多仓库 fixture 可用以下命令准备：
 
@@ -204,4 +213,16 @@ git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector-co
 git clone --depth 1 https://github.com/open-telemetry/opentelemetry-collector.git /opt/workspace/opentelemetry-collector
 ```
 
-所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要运行 Linux、Kubernetes 或 Spring Framework 长周期全量初始索引 gate 时使用 `--profile exhaustive`；这些 gate 有意不放在默认 profile，避免单 CPU 自迭代 worker 在收集可操作检索反馈前就拒绝每个候选。
+新增 tree-sitter 语言 fixture 可用以下命令准备：
+
+```bash
+git clone --depth 1 https://github.com/nvm-sh/nvm.git /opt/workspace/nvm
+git clone --depth 1 https://github.com/dotnet/runtime.git /opt/workspace/dotnet-runtime
+git clone --depth 1 https://github.com/square/okhttp.git /opt/workspace/okhttp
+git clone --depth 1 https://github.com/laravel/framework.git /opt/workspace/laravel-framework
+git clone --depth 1 https://github.com/rails/rails.git /opt/workspace/rails
+git clone --depth 1 https://github.com/scala/scala3.git /opt/workspace/scala3
+git clone --depth 1 https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire
+```
+
+所有 repository target 都必须使用 `scope=all`。评估器会拒绝非全量 scope，并且 full-scope 注册不会向 `repo register` 传递 path 或 language filter；case 级 filter 只用于验证查询端过滤能力。使用 `--profile smoke` 可验证启动器而不运行仓库评估。需要运行长周期全量初始索引 gate 时使用 `--profile exhaustive`；这些 gate 有意不放在默认 profile，避免单 CPU 自迭代 worker 在收集可操作检索反馈前就拒绝每个候选。

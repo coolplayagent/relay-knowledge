@@ -1,0 +1,75 @@
+{
+  "repositories": {
+    "dotnet_runtime_csharp": {
+      "path": "/opt/workspace/dotnet-runtime",
+      "alias": "dotnet-runtime-csharp-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 300000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "dotnet_csharp_symbol_array_pool",
+      "repository": "dotnet_runtime_csharp",
+      "kind": "symbol",
+      "query": "ArrayPool",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs"],
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs", "excerpt_contains": "public abstract class ArrayPool<T>"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "dotnet_csharp_definition_array_pool_rent",
+      "repository": "dotnet_runtime_csharp",
+      "kind": "definition",
+      "query": "Rent",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs"],
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs", "excerpt_contains": "public abstract T[] Rent"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "dotnet_csharp_references_array_pool_rent",
+      "repository": "dotnet_runtime_csharp",
+      "kind": "references",
+      "query": "Rent",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "src/libraries/System.Net.Http.WinHttpHandler/src/System/Net/Http/WinHttpResponseParser.cs", "excerpt_contains": "ArrayPool<char>.Shared.Rent(bufferLength)"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "dotnet_csharp_imports_system_buffers",
+      "repository": "dotnet_runtime_csharp",
+      "kind": "imports",
+      "query": "System.Buffers",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "src/libraries/System.Net.Http.WinHttpHandler/src/System/Net/Http/WinHttpResponseParser.cs", "excerpt_contains": "using System.Buffers;"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "dotnet_csharp_hybrid_array_pool_shared_buffers",
+      "repository": "dotnet_runtime_csharp",
+      "kind": "hybrid",
+      "query": "array pool shared rent return buffer memory pressure garbage collector",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs"],
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/libraries/System.Private.CoreLib/src/System/Buffers/ArrayPool.cs", "excerpt_contains": "memory pressure"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

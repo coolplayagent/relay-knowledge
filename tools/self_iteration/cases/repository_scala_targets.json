@@ -1,0 +1,75 @@
+{
+  "repositories": {
+    "scala3_scala": {
+      "path": "/opt/workspace/scala3",
+      "alias": "scala3-scala-self-iteration",
+      "ref": "HEAD",
+      "profile": "exhaustive",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 240000,
+      "query_p50_budget_ms": 650,
+      "query_p95_budget_ms": 1200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "scala3_scala_symbol_context",
+      "repository": "scala3_scala",
+      "kind": "symbol",
+      "query": "Context",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["compiler/src/dotty/tools/dotc/core/Contexts.scala"],
+      "language_filters": ["scala"],
+      "expected": [{"path": "compiler/src/dotty/tools/dotc/core/Contexts.scala", "excerpt_contains": "abstract class Context"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "scala3_scala_definition_with_mode",
+      "repository": "scala3_scala",
+      "kind": "definition",
+      "query": "withMode",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["compiler/src/dotty/tools/dotc/core/Contexts.scala"],
+      "language_filters": ["scala"],
+      "expected": [{"path": "compiler/src/dotty/tools/dotc/core/Contexts.scala", "excerpt_contains": "inline def withMode"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "scala3_scala_references_with_mode_bits",
+      "repository": "scala3_scala",
+      "kind": "references",
+      "query": "withModeBits",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "compiler/src/dotty/tools/dotc/core/Contexts.scala", "excerpt_contains": "withModeBits(ctx.mode | mode)(op)"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "scala3_scala_imports_contexts",
+      "repository": "scala3_scala",
+      "kind": "imports",
+      "query": "dotty.tools.dotc.core.Contexts.*",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [{"path": "compiler/src/dotty/tools/backend/ScalaPrimitives.scala", "excerpt_contains": "import dotty.tools.dotc.core.Contexts.*"}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "scala3_scala_hybrid_context_phase_mode",
+      "repository": "scala3_scala",
+      "kind": "hybrid",
+      "query": "context phase mode compiler callback store fresh period settings",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["compiler/src/dotty/tools/dotc/core/Contexts.scala"],
+      "language_filters": ["scala"],
+      "expected": [{"path": "compiler/src/dotty/tools/dotc/core/Contexts.scala", "excerpt_contains": "compilerCallbackLoc"}],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

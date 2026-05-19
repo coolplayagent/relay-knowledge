@@ -23,6 +23,9 @@ pub(super) fn tracked_entries(
             continue;
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
+        if fields.get(1) != Some(&"blob") {
+            continue;
+        }
         let byte_count = fields
             .get(3)
             .and_then(|value| value.parse::<usize>().ok())
