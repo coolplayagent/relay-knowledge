@@ -76,6 +76,30 @@ pub(super) fn search_code(
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let status = required_repository(connection, &request.repository)?;
+    search_code_with_status(connection, &status, &request)
+}
+
+pub(super) fn search_code_scope(
+    connection: &mut Connection,
+    source_scope: &str,
+    request: CodeRetrievalRequest,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    let status =
+        super::code_status::repository_scope_status_by_source_scope(connection, source_scope)?
+            .ok_or_else(|| {
+                StorageError::InvalidInput(format!(
+                    "code repository source scope '{source_scope}' is not indexed"
+                ))
+            })?;
+
+    search_code_with_status(connection, &status, &request)
+}
+
+fn search_code_with_status(
+    connection: &mut Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     if request.code_query_kind == CodeQueryKind::Impact {
         return Err(StorageError::InvalidInput(
             "impact query kind requires repo impact with base/head refs".to_owned(),
@@ -86,28 +110,28 @@ pub(super) fn search_code(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
     ) {
-        hits.extend(search_symbols(connection, &status, &request)?);
+        hits.extend(search_symbols(connection, status, request)?);
     }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::References
     ) {
-        hits.extend(search_references(connection, &status, &request)?);
+        hits.extend(search_references(connection, status, request)?);
     }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Callers | CodeQueryKind::Callees
     ) {
-        hits.extend(search_calls(connection, &status, &request)?);
+        hits.extend(search_calls(connection, status, request)?);
     }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Imports
     ) {
-        hits.extend(search_imports(connection, &status, &request)?);
+        hits.extend(search_imports(connection, status, request)?);
     }
     if matches!(request.code_query_kind, CodeQueryKind::Hybrid) {
-        hits.extend(search_chunks(connection, &status, &request)?);
+        hits.extend(search_chunks(connection, status, request)?);
     }
     dedupe_sort_truncate(&mut hits, request.limit);
 

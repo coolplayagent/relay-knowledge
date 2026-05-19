@@ -14,6 +14,8 @@ mod knowledge_cli;
 mod ops_cli;
 #[path = "repo_cli.rs"]
 mod repo_cli;
+#[path = "repo_set_cli.rs"]
+mod repo_set_cli;
 #[path = "setup_cli.rs"]
 mod setup_cli;
 #[path = "version_cli.rs"]
@@ -172,6 +174,8 @@ fn option_consumes_value(option: &str) -> bool {
             | "--base"
             | "--head"
             | "--query"
+            | "--description"
+            | "--priority"
             | "--mcp"
             | "--state"
             | "--by"
@@ -189,6 +193,7 @@ fn is_command_word(token: &str) -> bool {
             | "ingest"
             | "query"
             | "repo"
+            | "repo-set"
             | "files"
             | "graph"
             | "index"
@@ -267,6 +272,7 @@ pub enum CliAction {
     },
     ProviderProbe,
     Repo(repo_cli::RepoCommand),
+    RepoSet(repo_set_cli::RepoSetCommand),
     Health,
     ServiceStatus,
     ServicePlan {
@@ -664,6 +670,9 @@ pub async fn run_with_service(
             )
         }
         CliAction::Repo(command) => repo_cli::run_repo(service, command, context, format).await,
+        CliAction::RepoSet(command) => {
+            repo_set_cli::run_repo_set(service, command, context, format).await
+        }
         CliAction::Health => {
             let response = service
                 .health(context)
@@ -735,6 +744,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "query" => knowledge_cli::parse_query(&tokens[1..]),
         "files" => files_cli::parse_files(&tokens[1..]),
         "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
+        "repo-set" => repo_set_cli::parse_repo_set(&tokens[1..]).map(CliAction::RepoSet),
         "graph" => knowledge_cli::parse_graph(&tokens[1..]),
         "index" => knowledge_cli::parse_index(&tokens[1..]),
         "worker" => ops_cli::parse_worker(&tokens[1..]),
@@ -824,6 +834,13 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
         std::time::Duration::from_secs(5),
         code_index_shutdown_receiver,
     ));
+    let (repo_set_refresh_shutdown, repo_set_refresh_shutdown_receiver) =
+        tokio::sync::watch::channel(false);
+    let repo_set_refresh_task = tokio::spawn(run_code_repository_set_refresh_loop(
+        service.clone(),
+        std::time::Duration::from_secs(5),
+        repo_set_refresh_shutdown_receiver,
+    ));
     if web_enabled {
         let network_config = runtime.network.current();
         ensure_web_remote_bind_allowed(
@@ -865,6 +882,8 @@ async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<Stri
     }
     let _ = code_index_shutdown.send(true);
     let _ = code_index_task.await;
+    let _ = repo_set_refresh_shutdown.send(true);
+    let _ = repo_set_refresh_task.await;
     runtime.observability.shutdown();
 
     Ok(String::new())
@@ -881,6 +900,33 @@ async fn run_code_index_loop(
         }
         let context = RequestContext::for_interface(InterfaceKind::Cli);
         if let Ok(Some(_)) = service.run_code_index_task_once(None, context).await {
+            continue;
+        }
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+            _ = tokio::time::sleep(interval) => {}
+        }
+    }
+}
+
+async fn run_code_repository_set_refresh_loop(
+    service: RelayKnowledgeService,
+    interval: std::time::Duration,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+        let context = RequestContext::for_interface(InterfaceKind::Cli);
+        if let Ok(Some(_)) = service
+            .run_code_repository_set_refresh_task_once(None, context)
+            .await
+        {
             continue;
         }
         tokio::select! {
@@ -938,6 +984,10 @@ mod cli_naming_tests;
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(test)]
+#[path = "cli_service_tests.rs"]
+mod cli_service_tests;
 
 #[cfg(test)]
 #[path = "cli_version_tests.rs"]

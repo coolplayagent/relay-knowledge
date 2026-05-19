@@ -17,6 +17,16 @@
 - 多仓库结果能说明每个命中来自哪个 repository、commit、tree hash 和 scope。
 - 跨仓库关系作为可解释、可降级的 overlay edge，而不是伪装成单仓 resolved edge。
 
+## 实现状态
+
+当前实现提供三阶段的初始产品化路径：
+
+- `repo-set create/add/remove/query/status/refresh` 和共享 API/Web/MCP 入口使用显式 repository set selector。
+- SQLite 持久化 `code_repository_sets`、`code_repository_set_members`、`code_repository_cross_edges`、overlay status 和 overlay refresh task；基础代码事实表不为 repository set 复制行。
+- 多仓查询在应用层 fan-out 到每个成员持久化的 `source_scope`，按成员 priority、freshness 和 overlay confidence 合并排序；请求级 path/language filter 只收窄成员 scope，不会通过当前仓库注册默认值重新解析或扩大 scope。去重键包含 repository、scope、path、line range 和 excerpt。
+- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。本地、相对或已在成员仓库内解析的 import 只留在成员仓库内，不会通过跨仓 symbol-name 或 basename fallback 解析。
+- scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试、dead-letter 状态和常驻 `service run` overlay refresh worker。
+
 ## 2. 当前基线
 
 现有实现已经具备多仓库能力的底座：
@@ -94,7 +104,9 @@ RepositorySetMember {
 }
 ```
 
-`source_scope` 必须指向已经存在的单仓 `repository_snapshot`。如果成员仓库的 ref 解析到尚未索引的 snapshot，多仓查询应报告缺失或 stale，而不是自动扩大到旧 snapshot。
+`source_scope` 必须指向已经存在的单仓 `repository_snapshot`。如果成员仓库的 ref 解析到尚未索引的 snapshot，多仓查询应报告缺失或 stale，而不是自动扩大到旧 snapshot。同一 repository 再次加入同一个 set 时会替换原成员指针，避免 `HEAD` 等移动 ref 同时 fan-out 到旧 snapshot 和新 snapshot。
+
+面向用户的 repository-set 操作只按 alias 解析。`set_id` 是暴露给存储、响应和 overlay 行的稳定标识，但不得与 alias 共用查询路径；即使某个 alias 恰好等于另一个 set 的 `set_id`，也不能读取或修改另一个 set。
 
 ## 4. 图模型
 
@@ -148,6 +160,8 @@ code_repository_set_members
   priority INTEGER NOT NULL
   PRIMARY KEY (set_id, repository_id, source_scope)
 ```
+
+存储主键保留历史 scope 身份，但写入路径把 `(set_id, repository_id)` 视为当前活动成员指针；插入替换成员前会删除同仓库旧成员行。
 
 跨仓库派生边单独存储：
 
@@ -211,6 +225,8 @@ set alias
 
 实现上可以先用应用层 fan-out 到现有 `search_code` 能力，再做 merge/rerank。只有在候选窗口和 observability 足够清晰后，才考虑 SQL `source_scope IN (...)` 优化路径。无论采用哪种执行方式，都必须保留每个候选的原始 `source_scope`。
 
+Repository-set 查询必须直接搜索成员保存的 `source_scope`。查询时传入的 path 和 language filter 作为额外收窄条件应用在这个 scope 上；它们不得和成员 selector 合并成 OR 语义，也不得让查询改按仓库当前注册默认值解析。
+
 ## 7. 排序与精度约束
 
 单仓查询不得引入多仓库排序信号。多仓库 query 可以增加以下信号：
@@ -223,7 +239,7 @@ set alias
 
 多仓库重排不得按路径或符号名全局去重。去重 key 至少包含 `repository_id`、`source_scope`、path、line range 和 excerpt。两个仓库中的 `src/lib.rs`、`init` 或 `main` 是不同事实实例。
 
-当跨仓库边为 `ambiguous`、`unresolved` 或 `inferred` 时，结果必须暴露 resolution state 和 confidence，不得把它提升为单仓 `resolved` 调用或引用。
+当跨仓库边为 `ambiguous`、`unresolved` 或 `inferred` 时，结果必须暴露 resolution state 和 confidence，不得把它提升为单仓 `resolved` 调用或引用。多仓响应只能把 overlay edge evidence 附加到目标命中，或 path 与 line range 都匹配的 import-origin 命中；同一文件里的普通 symbol 或 chunk 不得获得 import edge bonus。
 
 ## 8. 跨仓库解析
 
@@ -246,6 +262,7 @@ repository set members
 
 - 如果任一成员 `source_scope` 缺失，set 为 incomplete。
 - 如果任一成员 snapshot stale，set 为 stale。
+- 对 `HEAD` 或分支名这类移动成员 ref，status 会通过仓库 worktree 重新解析；如果当前 ref 指向的 commit 已不同于成员保存的 snapshot，成员和 set 都应保持 stale，直到刷新成员指针。
 - 如果成员 snapshot fresh 但 cross edge overlay 落后，set 可返回基础多仓查询结果，但必须标记 overlay stale。
 
 单仓 scope retention 不能删除仍被 repository set member 引用的 scope。删除 repository set 时，可以解除这些引用；之后单仓 retention 才能按原规则清理旧 scope。
@@ -257,6 +274,7 @@ repository set members
 ```text
 repo-set create <alias>
 repo-set add <set> <repo-alias> --ref <ref> [--path <filter>] [--language <id>]
+repo-set remove <set> <repo-alias>
 repo-set query <set> --query <text> --kind <kind> --limit <n>
 repo-set status <set>
 repo-set refresh <set>
@@ -269,7 +287,7 @@ repo-set refresh <set>
 - 每个 result 的 repository metadata 和 source scope。
 - overlay freshness、cross edge evidence、truncation 和 degraded reason。
 
-MCP 和 Web 入口应使用相同 selector，不允许用普通 `source_scope` 字符串暗中表示多仓集合。
+MCP 和 Web 入口应使用相同 selector，不允许用普通 `source_scope` 字符串暗中表示多仓集合。MCP 只有在 repository set alias 被显式允许且没有与已注册 repository alias 冲突，或当前每个成员 repository scope 已被静态/运行时策略允许时，才可以在运行时提升该 set alias。Repository-set 授权需要在每次 MCP 调用时重新校验，不能写入 repository alias 运行时缓存；MCP 审计也要为 repository-set query response 记录 set alias。
 
 ## 11. 实施阶段
 

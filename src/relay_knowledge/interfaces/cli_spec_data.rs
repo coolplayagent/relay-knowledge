@@ -1,4 +1,4 @@
-use super::{CliCommandSpec, CommandEffect, arg, command_syntax, opt};
+use super::{CliCommandSpec, CommandEffect, arg, cli_spec_repo_set, command_syntax, opt};
 
 pub(super) fn command_specs() -> Vec<CliCommandSpec> {
     vec![
@@ -110,6 +110,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         repo_impact(),
         repo_status(),
         repo_report(),
+        cli_spec_repo_set::repo_set(),
         command!(
             &["graph", "inspect"],
             "relay-knowledge graph inspect",

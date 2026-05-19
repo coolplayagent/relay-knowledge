@@ -56,6 +56,8 @@ macro_rules! command {
 
 #[path = "cli_spec_data.rs"]
 mod cli_spec_data;
+#[path = "cli_spec_repo_set.rs"]
+mod cli_spec_repo_set;
 
 const CLI_SPEC_SCHEMA_VERSION: u16 = 2;
 

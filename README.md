@@ -76,8 +76,9 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
   events, source spans, confidence, graph versions, and accepted/proposed
   grounding status.
 - Code repository registration, tree-sitter indexing, full and incremental
-  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
-  impact analysis.
+  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, impact
+  analysis, and thin multi-repository `repo-set` overlay queries without
+  copying base facts.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
   locate, or other external search software: explicitly scan authorized roots
   and use SQLite/FTS5 to quickly find files by name, path, extension, and
@@ -138,6 +139,7 @@ Key specs:
 - [Book 3, Chapter 13: Code Retrieval Ranking and Impact Analysis](docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
 - [Book 3, Chapter 15: Resident Agent Graph Access Protocol](docs/en/03-architecture-specs/15-resident-agent-graph-access-protocol.md)
 - [Book 3, Chapter 19: Installation, Release, and Upgrade](docs/en/03-architecture-specs/19-installation-release-and-upgrade.md)
+- [Book 3, Chapter 20: Multi-Repository Code Graph Overlay](docs/en/03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 
 ## Development
 
@@ -181,7 +183,7 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
-Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. Full repository indexing uses resource-bounded SQLite batches with durable checkpoints and a finalize phase for cross-batch references, includes, and call edges, so large scopes expose `indexing` progress without replacing the previous fresh scope until finalization succeeds. A cold full `repo index` queues a durable code-index task and returns a `task` handle immediately; the CLI starts a bounded single-shot worker, while `service run` drains the same queue with one repository index worker. `repo status` reports `active_task`, checkpoint counters, and scope retention; successful background tasks retain the active scope, the two latest completed scopes, and unfinished task scopes while pruning older repository scopes. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
+Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. Full repository indexing uses resource-bounded SQLite batches with durable checkpoints and a finalize phase for cross-batch references, includes, and call edges, so large scopes expose `indexing` progress without replacing the previous fresh scope until finalization succeeds. A cold full `repo index` queues a durable code-index task and returns a `task` handle immediately; the CLI starts a bounded single-shot worker, while `service run` drains the same queue with one repository index worker and one repository-set overlay refresh worker. `repo status` reports `active_task`, checkpoint counters, and scope retention; successful background tasks retain the active scope, the two latest completed scopes, and unfinished task scopes while pruning older repository scopes. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
 Code graph v1 responses distinguish stable `canonical_symbol_id` values from snapshot-bound `symbol_snapshot_id` values. Reference, call, and import hits expose `target_hint`, `resolution_state`, confidence basis points, and confidence tier so unresolved or ambiguous edges are visible instead of being reported as certain calls.
 Code repository lexical retrieval uses a SQLite FTS candidate table for symbols, references, calls, imports, and chunks. Effective path filters are applied inside the FTS candidate window before bounded scoring, graph-edge candidates are ordered by BM25 before truncation, fuzzy symbol recall can match any query term while typed graph edge queries keep their narrower semantics, and Rust scoring recognizes snake_case/CamelCase identifier parts, multi-part symbol names, call-direction context, and declaration-shaped API chunks. Call excerpts use a `source_scope + symbol_snapshot_id` chunk lookup and line containment so high fan-out caller/callee queries do not multiply one call edge across unrelated chunks.
 Hybrid retrieval uses SQLite-backed BM25, local semantic token signatures, local hashed-vector ANN, configurable external semantic/vector backend metadata, graph evidence fallback, schema-guided path traversal, temporal event retrieval, community summaries, and code graph documents. It fuses candidates with reciprocal-rank fusion, applies a deterministic local rerank before final truncation, and returns a context pack with retriever sources, ranking and rerank explanations, entities, source spans, structured graph facts, direct graph path evidence, code artifacts, backend availability, freshness, truncation, and budget metadata. The BM25 read model indexes generated lexical aliases for entity labels and code symbols without returning those aliases as canonical labels.
@@ -201,6 +203,10 @@ relay-knowledge repo register /path/to/repo --alias core --path src --language r
 relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo-set create workspace --format json
+relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set remove workspace core --format json
+relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json

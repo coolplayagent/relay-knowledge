@@ -66,6 +66,8 @@ The Web Operations panel covers typed command/request preview and same-origin ex
 
 The displayed command is a CLI-equivalent preview, not a simulated frontend result. The real result comes from the unified API response returned by `/api/web/operations/execute`. On error, copy operation, command, error kind, and metadata from result JSON, then reproduce with the same CLI arguments.
 
+Operation payload validation follows the shared API contract. For example, `code.repo_set.add` defaults a missing `priority` to `0`, but a present malformed or out-of-range `priority` is rejected as a bad request instead of silently changing member ranking. `code.repo_set.refresh` defaults a missing `async` flag to synchronous execution, but a present non-boolean value is rejected instead of running an expensive overlay rebuild in the request path.
+
 ## 6.5 Same-Port Local Service
 
 Start a local Web/API/MCP service:

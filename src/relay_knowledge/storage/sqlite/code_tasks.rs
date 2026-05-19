@@ -350,6 +350,9 @@ fn retention_summary(
     for scope in unfinished_task_scopes(connection, repository_id)? {
         retained.insert(scope);
     }
+    for scope in repository_set_member_scopes(connection, repository_id)? {
+        retained.insert(scope);
+    }
     let prunable = all_scopes
         .iter()
         .filter(|scope| !retained.contains(*scope))
@@ -433,6 +436,24 @@ fn unfinished_task_scopes(
         SELECT source_scope
         FROM code_repository_index_tasks
         WHERE repository_id = ?1 AND state IN ('queued', 'running', 'retrying')
+        ",
+    )?;
+    let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn repository_set_member_scopes(
+    connection: &Connection,
+    repository_id: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT DISTINCT source_scope
+        FROM code_repository_set_members
+        WHERE repository_id = ?1
+        ORDER BY source_scope ASC
         ",
     )?;
     let rows = statement.query_map(params![repository_id], |row| row.get::<_, String>(0))?;
