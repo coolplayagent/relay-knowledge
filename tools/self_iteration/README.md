@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | English
 
-This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It is intentionally outside the Rust crate and stores all runtime state under `.git/relay-knowledge-self-iteration/`.
+This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`.
 
 ## Start
 
@@ -15,8 +15,11 @@ From the repository root:
 The launcher defaults to:
 
 ```bash
-python3 tools/self_iteration/self_iterate.py loop --yolo
+cargo build --release --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+tools/self_iteration/target/release/relay-knowledge-self-iterate loop --workspace . --yolo
 ```
+
+`self-iterate.sh` remains the stable entrypoint. It automatically builds the standalone Rust binary when the release binary is missing or the harness sources changed, then executes it directly.
 
 Useful variants:
 
@@ -43,11 +46,11 @@ Each iteration:
 
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
-3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches/`.
-4. Runs build, lint, tests, repository retrieval evaluations, the semantic/vector fixture, the external embedding provider probe when external backends are enabled, the research judge when configured, and the self-iteration documentation gate.
-5. Records a report under `.git/relay-knowledge-self-iteration/reports/`.
-6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs.jsonl`.
-7. Writes progressive memory entries under `.git/relay-knowledge-self-iteration/memory/`.
+3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
+4. Runs build, fmt, clippy, and tests sequentially; after those gates pass, repository evaluation, per-repository query cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
+5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
+6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
+7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.
 8. Appends the accepted optimization approach, changed files, metric improvements, and known degradations to `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md` before committing.
 9. Commits the candidate net change and accepted-optimization record as one squash commit only when the previous-run improvement policy accepts it.
 10. Restores the iteration start commit when the candidate is rejected.
@@ -60,30 +63,24 @@ Implementation candidates must update
 algorithm, architecture, invariants, expected case/metric impact, and known
 risks before evaluation. The harness adds a
 `self_iteration_algorithm_documentation` gate to reject code, test, benchmark,
-or harness-policy changes that do not carry those notes. The prompt also treats
-`.git/relay-knowledge-self-iteration/patches/` as long-term memory: it lists a
-bounded patch index and instructs Codex to read only relevant historical patch
-files in small ranges when reasoning about the next candidate.
+or harness-policy changes that do not carry those notes. The prompt uses the
+v2 run history and patch paths as bounded context when reasoning about the next
+candidate.
 
-The progressive memory store is the first context entry point for future runs:
+The v2 Rust harness does not read the old Python `runs.jsonl`, `reports/`, or
+`patches/` formats. Those files remain as historical artifacts. The v2 prompt
+uses `runs-v2.jsonl` for the best accepted record and recent rejected attempts;
+more granular long-term memory can be added on top of the v2 state format later.
 
-- `memory/index.jsonl` is a compact machine-readable index of accepted
-  optimizations, rejected attempts, quality-gate failures, and observed
-  foundational, competitive, semantic/vector, or performance regressions.
-- `memory/summaries/<id>.md` contains the short record Codex should read first.
-- `memory/details/<id>.md` contains the full score, gate, case, metric, patch,
-  and report references for follow-up inspection.
-- `memory/artifacts/<id>/` is reserved for optional extracted artifacts such as
-  trimmed report snippets or judge output.
+Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
+auto`. A global bounded command limiter prevents repository indexing and query
+subprocesses from growing without control; set `--jobs N` or
+`RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to override the global limit.
 
-The prompt includes only a bounded memory index. Codex should load matching
-summary files first, then open detail or patch files only when the summary is
-relevant to the current gate, metric, case, path, or algorithm objective.
-When the latest scored run was rejected, the next prompt enters rejected
-recovery mode and explicitly asks Codex to inspect the summary files for the
-most recent three to five self-iteration memory entries before making another
-candidate. This keeps repeated rejections tied to recent evidence instead of
-retrying the same shape of patch.
+The prompt includes bounded v2 history context. Codex should load matching
+report or patch files only when the run record is relevant to the current gate,
+metric, case, path, or algorithm objective. This keeps repeated rejections tied
+to recent evidence instead of retrying the same shape of patch.
 
 ## Scoring and acceptance
 
@@ -160,7 +157,7 @@ instead of silently appearing complete, and `accuracy` averages only the
 foundational and competitive objectives that are actually present. Metric
 budget misses are reported in `metric_budget_failures`.
 
-`performance` uses `budget_relative_v1`. If no compatible previous run exists,
+`performance` uses `budget_relative_v2`. If no compatible previous run exists,
 metrics use their budget-normalized score. Once the previous run also used this
 strategy, each metric blends budget fit with relative progress against the
 previous value, so a latency metric that is merely under budget no longer stays
