@@ -28,7 +28,7 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
 target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-`service run` runs the startup index reconciler before accepting resident adapter requests when possible. Without MCP or Web enabled, the command still waits as a foreground service for a shutdown signal.
+`service run` runs the startup index reconciler before accepting resident adapter requests when possible, then drains the durable code-index queue and repository-set overlay refresh queue with bounded resident workers. Without MCP or Web enabled, the command still waits as a foreground service for a shutdown signal.
 
 ## 9.2 Service Run in Web
 

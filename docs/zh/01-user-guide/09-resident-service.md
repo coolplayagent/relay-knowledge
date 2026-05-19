@@ -28,7 +28,7 @@ RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs \
 target/release/relay-knowledge service run --web --mcp streamable-http
 ```
 
-`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
+`service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务，然后用有界常驻 worker 消费持久化 code-index 队列和 repository-set overlay refresh 队列。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
 ## 9.2 Web 中的 Service Run
 

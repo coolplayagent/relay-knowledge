@@ -24,8 +24,8 @@
 - `repo-set create/add/query/status/refresh` 和共享 API/Web/MCP 入口使用显式 repository set selector。
 - SQLite 持久化 `code_repository_sets`、`code_repository_set_members`、`code_repository_cross_edges`、overlay status 和 overlay refresh task；基础代码事实表不为 repository set 复制行。
 - 多仓查询在应用层 fan-out 到每个成员持久化的 `source_scope`，按成员 priority、freshness 和 overlay confidence 合并排序；请求级 path/language filter 只收窄成员 scope，不会通过当前仓库注册默认值重新解析或扩大 scope。去重键包含 repository、scope、path、line range 和 excerpt。
-- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。
-- scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试和 dead-letter 状态。
+- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。本地或相对 import 只留在成员仓库内，不会通过跨仓 basename fallback 解析。
+- scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试、dead-letter 状态和常驻 `service run` overlay refresh worker。
 
 ## 2. 当前基线
 

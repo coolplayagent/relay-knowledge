@@ -121,6 +121,72 @@ async fn repository_set_readding_repository_replaces_previous_member_snapshot() 
 }
 
 #[tokio::test]
+async fn repository_set_member_replacement_invalidates_stale_overlay_edges() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let (set_id, visible_edges) = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(
+                connection,
+                "repo-a",
+                "app",
+                "scope-a-new",
+                "tree-new",
+                false,
+            )?;
+            insert_repository_scope(connection, "repo-b", "svc", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-service",
+                "service::serve",
+            )?;
+            insert_symbol(
+                connection,
+                "repo-b",
+                "scope-b",
+                "serve-symbol",
+                "serve",
+                "service::serve",
+            )?;
+            let set = code_set::create_set(connection, set_seed("workspace", 10))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "svc", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 20)?;
+            assert_eq!(
+                code_set::cross_edges_for_set(connection, &set.set_id)?.len(),
+                1
+            );
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a-new", 0),
+            )?;
+            insert_cross_edge(connection, &set.set_id, "scope-a", "scope-b")?;
+            let visible_edges = code_set::cross_edges_for_set(connection, &set.set_id)?;
+            Ok((set.set_id, visible_edges))
+        })
+        .await
+        .expect("fixture should refresh and replace");
+
+    assert!(visible_edges.is_empty());
+    let status = store
+        .run(move |connection| code_set::set_status(connection, "workspace"))
+        .await
+        .expect("status should query")
+        .expect("set should exist");
+    assert_eq!(status.repository_set.set_id, set_id);
+    assert_eq!(status.overlay.state, "missing");
+    assert!(status.overlay.stale);
+}
+
+#[tokio::test]
 async fn repository_set_overlay_refresh_classifies_resolved_ambiguous_and_unresolved_edges() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let summary = store
@@ -237,6 +303,47 @@ async fn repository_set_overlay_refresh_classifies_resolved_ambiguous_and_unreso
         .expect("set should exist");
     assert_eq!(stale.overlay.state, "overlay_stale");
     assert!(stale.overlay.stale);
+}
+
+#[tokio::test]
+async fn repository_set_overlay_refresh_ignores_local_import_basename_matches() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let summary = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "svc", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-local",
+                "crate::db::Pool",
+            )?;
+            insert_symbol(
+                connection,
+                "repo-b",
+                "scope-b",
+                "pool-symbol",
+                "Pool",
+                "service::Pool",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 20))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "svc", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 30)
+        })
+        .await
+        .expect("overlay should refresh");
+
+    assert_eq!(summary.edge_count, 1);
+    assert_eq!(summary.resolved_edge_count, 0);
+    assert_eq!(summary.unresolved_edge_count, 1);
 }
 
 #[tokio::test]
@@ -427,6 +534,29 @@ fn insert_symbol(
             name,
             qualified_name,
         ],
+    )?;
+    Ok(())
+}
+
+fn insert_cross_edge(
+    connection: &mut rusqlite::Connection,
+    set_id: &str,
+    from_source_scope: &str,
+    to_source_scope: &str,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "
+        INSERT INTO code_repository_cross_edges (
+            edge_id, set_id, from_source_scope, from_repository_id, from_record_kind,
+            from_record_id, to_source_scope, to_repository_id, to_record_kind, to_record_id,
+            edge_kind, resolution_state, confidence_basis_points, confidence_tier,
+            evidence_json, created_at_ms
+        )
+        VALUES ('stale-edge', ?1, ?2, 'repo-a', 'module_reference',
+                'import-service', ?3, 'repo-b', 'code_symbol_snapshot', 'serve-symbol',
+                'imports', 'resolved', 10000, 'explicit', '{}', 40)
+        ",
+        params![set_id, from_source_scope, to_source_scope],
     )?;
     Ok(())
 }

@@ -88,6 +88,14 @@ pub(super) fn add_member(
         params![set_id, seed.repository_id],
     )?;
     transaction.execute(
+        "DELETE FROM code_repository_cross_edges WHERE set_id = ?1",
+        params![set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_set_overlay_status WHERE set_id = ?1",
+        params![set_id],
+    )?;
+    transaction.execute(
         "
         INSERT INTO code_repository_set_members (
             set_id, repository_id, repository_alias, ref_selector, resolved_commit_sha,
@@ -294,8 +302,14 @@ pub(super) fn cross_edges_for_set(
                from_record_id, to_source_scope, to_repository_id, to_record_kind, to_record_id,
                edge_kind, resolution_state, confidence_basis_points, confidence_tier,
                evidence_json, created_at_ms
-        FROM code_repository_cross_edges
-        WHERE set_id = ?1
+        FROM code_repository_cross_edges edge
+        WHERE edge.set_id = ?1
+          AND EXISTS (
+              SELECT 1
+              FROM code_repository_set_members member
+              WHERE member.set_id = edge.set_id
+                AND member.source_scope = edge.from_source_scope
+          )
         ORDER BY from_source_scope ASC, from_record_id ASC, edge_id ASC
         ",
     )?;
@@ -487,6 +501,9 @@ fn exports_for_members(
 }
 
 fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Vec<ExportTarget> {
+    if is_local_or_relative_module(&import.module) {
+        return Vec::new();
+    }
     let module = normalize_module_key(&import.module);
     let hint = import
         .target_hint
@@ -526,6 +543,16 @@ fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Vec<Expo
     });
 
     candidates
+}
+
+fn is_local_or_relative_module(module: &str) -> bool {
+    let module = module.trim();
+    module.starts_with("./")
+        || module.starts_with("../")
+        || module.starts_with('.')
+        || module.starts_with("crate::")
+        || module.starts_with("self::")
+        || module.starts_with("super::")
 }
 
 fn target_match_score(target: &ExportTarget, module: &str, hint: &str, last: &str) -> Option<u8> {

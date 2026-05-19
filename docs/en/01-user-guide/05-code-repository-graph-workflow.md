@@ -100,7 +100,7 @@ relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
 relay-knowledge repo-set refresh workspace --format json
 ```
 
-`repo-set add` requires the target ref and path/language filters to have a matching single-repository indexed scope. If none exists, it fails instead of falling back to an older scope. Adding the same repository to the same set again replaces the previous member snapshot. `repo-set refresh` rebuilds only cross-repository import/module overlay edges; it does not copy base facts into `code_repository_files`, `code_repository_symbols`, or `code_repository_chunks`.
+`repo-set add` requires the target ref and path/language filters to have a matching single-repository indexed scope. If none exists, it fails instead of falling back to an older scope. Adding the same repository to the same set again replaces the previous member snapshot and invalidates the previous overlay edges. `repo-set refresh` rebuilds only cross-repository import/module overlay edges; it does not copy base facts into `code_repository_files`, `code_repository_symbols`, or `code_repository_chunks`. Async repository-set refreshes queued by CLI, Web, or MCP are drained by the resident `service run` repository-set overlay refresh worker.
 
 Set queries fan out to each member’s real `source_scope`, then merge and rerank:
 
