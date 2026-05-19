@@ -75,6 +75,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 17: Background Service, Recovery, and Self-Healing](03-architecture-specs/17-background-service-recovery-and-self-healing.md)
 - [Chapter 18: Observability, Diagnostics, and SLO](03-architecture-specs/18-observability-diagnostics-and-slo.md)
 - [Chapter 19: Installation, Release, and Upgrade](03-architecture-specs/19-installation-release-and-upgrade.md)
+- [Chapter 20: Multi-Repository Code Graph Overlay](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 
 ## Book 4: Research
 

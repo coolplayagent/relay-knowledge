@@ -62,6 +62,7 @@
 - [第 17 章 后台服务、恢复与自愈](03-architecture-specs/17-background-service-recovery-and-self-healing.md)
 - [第 18 章 可观测性、诊断与 SLO](03-architecture-specs/18-observability-diagnostics-and-slo.md)
 - [第 19 章 安装、发布与升级](03-architecture-specs/19-installation-release-and-upgrade.md)
+- [第 20 章 多仓库代码图谱薄覆盖层](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 
 ## 第四卷：研究资料
 
