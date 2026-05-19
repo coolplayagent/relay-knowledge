@@ -4,6 +4,8 @@ use super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
 
+const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
+
 pub(super) fn manual_definitions(
     content: &str,
     node: Node<'_>,
@@ -21,7 +23,9 @@ pub(super) fn manual_definitions(
             if is_typedef_declaration(content, node) {
                 Vec::new()
             } else {
-                function_declaration_symbols(content, node)
+                let mut symbols = function_declaration_symbols(content, node);
+                symbols.extend(top_level_data_symbols(content, node));
+                symbols
             }
         }
         "preproc_def" | "preproc_function_def" => node
@@ -36,6 +40,73 @@ pub(super) fn manual_definitions(
         }
         _ => Vec::new(),
     }
+}
+
+fn top_level_data_symbols(
+    content: &str,
+    declaration: Node<'_>,
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    let range = syntax_range(declaration);
+    if range.line_end.saturating_sub(range.line_start) > MAX_TOP_LEVEL_DATA_SYMBOL_LINES {
+        return Vec::new();
+    }
+    let composite_type = declaration_has_composite_type(content, declaration);
+    let mut cursor = declaration.walk();
+
+    declaration
+        .children_by_field_name("declarator", &mut cursor)
+        .filter_map(|declarator| {
+            initialized_data_declarator_name(content, declarator, composite_type)
+        })
+        .map(|name| (name, "constant", range.clone()))
+        .collect()
+}
+
+fn initialized_data_declarator_name(
+    content: &str,
+    declarator: Node<'_>,
+    composite_type: bool,
+) -> Option<String> {
+    if declarator.kind() != "init_declarator" {
+        return None;
+    }
+    let value = declarator.child_by_field_name("value")?;
+    if !matches!(value.kind(), "initializer_list" | "call_expression") {
+        return None;
+    }
+    let inner = declarator.child_by_field_name("declarator")?;
+    if !composite_type && !contains_node_kind(inner, "array_declarator") {
+        return None;
+    }
+    if contains_node_kind(inner, "function_declarator") {
+        return None;
+    }
+
+    declarator_name(content, inner).filter(|name| data_symbol_name(name))
+}
+
+fn declaration_has_composite_type(content: &str, declaration: Node<'_>) -> bool {
+    declaration
+        .child_by_field_name("type")
+        .is_some_and(|type_node| {
+            matches!(
+                type_node.kind(),
+                "struct_specifier" | "union_specifier" | "enum_specifier"
+            ) || {
+                let type_text = node_text(content, type_node);
+                type_text.starts_with("struct ")
+                    || type_text.starts_with("union ")
+                    || type_text.starts_with("enum ")
+            }
+        })
+}
+
+fn data_symbol_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
 
 fn decorated_cpp_class_symbol(
