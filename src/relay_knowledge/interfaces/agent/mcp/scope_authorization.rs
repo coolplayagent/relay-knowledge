@@ -15,7 +15,7 @@ pub(super) struct RuntimeScopeAuthorizer {
 }
 
 impl RuntimeScopeAuthorizer {
-    /// Authorizes static scopes first, then promotes registered repository aliases on demand.
+    /// Authorizes static scopes first, then promotes runtime-proven code scopes.
     pub(super) async fn authorize_scope(
         &self,
         service: &RelayKnowledgeService,
@@ -34,7 +34,13 @@ impl RuntimeScopeAuthorizer {
         {
             return Ok(Some(scope));
         }
-        if self.code_scope_alias_is_registered(service, &scope).await {
+        if self
+            .code_repository_alias_is_registered(service, &scope)
+            .await
+            || self
+                .repository_set_alias_members_are_authorized(service, policy, &scope)
+                .await
+        {
             self.remember_runtime_scope(scope.clone()).await;
             return Ok(Some(scope));
         }
@@ -50,7 +56,7 @@ impl RuntimeScopeAuthorizer {
         self.allowed_scopes.write().await.insert(scope);
     }
 
-    async fn code_scope_alias_is_registered(
+    async fn code_repository_alias_is_registered(
         &self,
         service: &RelayKnowledgeService,
         scope: &str,
@@ -59,10 +65,47 @@ impl RuntimeScopeAuthorizer {
             .code_repository_is_registered(scope.to_owned())
             .await
             .unwrap_or(false)
-            || service
-                .code_repository_set_is_registered(scope.to_owned())
+    }
+
+    async fn repository_set_alias_members_are_authorized(
+        &self,
+        service: &RelayKnowledgeService,
+        policy: &AgentAccessPolicy,
+        scope: &str,
+    ) -> bool {
+        let Ok(Some(members)) = service
+            .code_repository_set_member_scopes(scope.to_owned())
+            .await
+        else {
+            return false;
+        };
+        if members.is_empty() {
+            return false;
+        }
+        for (repository_alias, source_scope) in members {
+            if !self
+                .member_scope_is_authorized(policy, &repository_alias, &source_scope)
                 .await
-                .unwrap_or(false)
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    async fn member_scope_is_authorized(
+        &self,
+        policy: &AgentAccessPolicy,
+        repository_alias: &str,
+        source_scope: &str,
+    ) -> bool {
+        policy
+            .allowed_scopes
+            .iter()
+            .any(|allowed| allowed == repository_alias || allowed == source_scope)
+            || self.runtime_allowed(repository_alias).await
+            || self.runtime_allowed(source_scope).await
     }
 }
 
@@ -70,7 +113,7 @@ fn mcp_scope_not_authorized(scope: &str) -> AgentAdapterError {
     AgentAdapterError::new(
         AgentAdapterErrorKind::PermissionDenied,
         format!(
-            "source_scope '{scope}' is not authorized for this MCP policy; register it as a code repository or repository-set alias during runtime or add RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES={scope}"
+            "source_scope '{scope}' is not authorized for this MCP policy; register a code repository alias during runtime, add RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES={scope}, or allow every repository-set member before using a repository-set alias"
         ),
     )
 }

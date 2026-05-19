@@ -100,7 +100,7 @@ relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
 relay-knowledge repo-set refresh workspace --format json
 ```
 
-`repo-set add` requires the target ref and path/language filters to have a matching single-repository indexed scope. If none exists, it fails instead of falling back to an older scope. `repo-set refresh` rebuilds only cross-repository import/module overlay edges; it does not copy base facts into `code_repository_files`, `code_repository_symbols`, or `code_repository_chunks`.
+`repo-set add` requires the target ref and path/language filters to have a matching single-repository indexed scope. If none exists, it fails instead of falling back to an older scope. Adding the same repository to the same set again replaces the previous member snapshot. `repo-set refresh` rebuilds only cross-repository import/module overlay edges; it does not copy base facts into `code_repository_files`, `code_repository_symbols`, or `code_repository_chunks`.
 
 Set queries fan out to each member’s real `source_scope`, then merge and rerank:
 
@@ -113,7 +113,7 @@ relay-knowledge repo-set query workspace \
   --format json
 ```
 
-Each result carries the member repository alias, repository id, resolved commit, tree hash, and original `source_scope`. Same-named paths or symbols are not deduplicated across repositories; the dedupe key includes repository, scope, path, line range, and excerpt. `--freshness wait-until-fresh` requires every member snapshot to be fresh and the overlay to be current. MCP uses the separate `relay_code_repository_set_query` tool and does not represent a repository set as a raw `source_scope`.
+Each result carries the member repository alias, repository id, resolved commit, tree hash, and original `source_scope`. Query `--path` and `--language` filters narrow the stored member scope; they do not widen it or switch to the repository's latest registration defaults. Same-named paths or symbols are not deduplicated across repositories; the dedupe key includes repository, scope, path, line range, and excerpt. `--freshness wait-until-fresh` requires every member snapshot to be fresh, moving refs such as `HEAD` to still resolve to the stored commit, and the overlay to be current. MCP uses the separate `relay_code_repository_set_query` tool and requires the set alias or every member scope to be allowed by policy.
 
 ## 5.5 Incremental Updates
 

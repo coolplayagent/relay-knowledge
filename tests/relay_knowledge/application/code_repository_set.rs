@@ -199,19 +199,187 @@ pub fn serve() -> u32 {
     );
 }
 
-async fn register_and_index(service: &RelayKnowledgeService, repo: &FixtureRepo, alias: &str) {
+#[tokio::test]
+async fn repository_set_query_uses_persisted_member_scope_after_default_filter_change() {
+    let repo = FixtureRepo::create("repo-set-persisted-scope");
+    repo.write(
+        "src/api/public.rs",
+        r#"
+pub fn shared_target() -> u32 {
+    1
+}
+"#,
+    );
+    repo.write(
+        "src/internal/hidden.rs",
+        r#"
+pub fn hidden_target() -> u32 {
+    2
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_with_filters_and_index(&service, &repo, "app", vec!["src/api"]).await;
     service
-        .register_code_repository(
-            CodeRepositoryRegisterRequest {
-                root_path: repo.path.display().to_string(),
-                alias: alias.to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
-            },
-            context(&format!("register-{alias}")),
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            context("persisted-scope-set-create"),
         )
         .await
-        .expect("repository should register");
+        .expect("set should create");
+    add_member(&service, "workspace", "app", 0).await;
+    register_repository(&service, &repo, "app", vec!["src/internal"]).await;
+
+    let response = service
+        .query_code_repository_set(
+            CodeRepositorySetQueryRequest::new(
+                "workspace",
+                "shared_target",
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("query request should validate"),
+            context("persisted-scope-query"),
+        )
+        .await
+        .expect("set query should use stored member scope");
+
+    assert!(!response.results.is_empty());
+    assert!(response.results.iter().all(|result| {
+        result.member.path_filters == vec!["src/api".to_owned()]
+            && result.hit.path.starts_with("src/api/")
+    }));
+}
+
+#[tokio::test]
+async fn repository_set_query_path_filters_narrow_member_scope() {
+    let repo = FixtureRepo::create("repo-set-query-filter");
+    repo.write(
+        "src/api/public.rs",
+        r#"
+pub fn shared_target() -> u32 {
+    1
+}
+"#,
+    );
+    repo.write(
+        "src/internal/hidden.rs",
+        r#"
+pub fn shared_target() -> u32 {
+    2
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_with_filters_and_index(&service, &repo, "app", vec!["src"]).await;
+    service
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            context("narrow-set-create"),
+        )
+        .await
+        .expect("set should create");
+    add_member(&service, "workspace", "app", 0).await;
+
+    let response = service
+        .query_code_repository_set(
+            CodeRepositorySetQueryRequest::new(
+                "workspace",
+                "shared_target",
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+                vec!["src/api".to_owned()],
+                Vec::new(),
+            )
+            .expect("query request should validate"),
+            context("narrow-query"),
+        )
+        .await
+        .expect("set query should narrow paths");
+
+    assert!(!response.results.is_empty());
+    assert!(
+        response
+            .results
+            .iter()
+            .all(|result| result.hit.path.starts_with("src/api/"))
+    );
+}
+
+#[tokio::test]
+async fn repository_set_status_marks_moving_member_stale_when_ref_advances() {
+    let repo = FixtureRepo::create("repo-set-moving-ref");
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn original() -> u32 {
+    1
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    register_and_index(&service, &repo, "app").await;
+    service
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            context("moving-set-create"),
+        )
+        .await
+        .expect("set should create");
+    add_member(&service, "workspace", "app", 0).await;
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn original() -> u32 {
+    2
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "advance"]);
+
+    let response = service
+        .code_repository_set_status("workspace".to_owned(), context("moving-status"))
+        .await
+        .expect("status should load");
+
+    assert_eq!(response.status.freshness_state, "stale");
+    assert!(response.status.members[0].stale);
+    assert!(
+        response.status.members[0]
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("now resolves"))
+    );
+}
+
+async fn register_and_index(service: &RelayKnowledgeService, repo: &FixtureRepo, alias: &str) {
+    register_with_filters_and_index(service, repo, alias, vec!["src"]).await;
+}
+
+async fn register_with_filters_and_index(
+    service: &RelayKnowledgeService,
+    repo: &FixtureRepo,
+    alias: &str,
+    path_filters: Vec<&str>,
+) {
+    register_repository(service, repo, alias, path_filters).await;
     service
         .index_code_repository(
             CodeIndexRequest {
@@ -223,6 +391,26 @@ async fn register_and_index(service: &RelayKnowledgeService, repo: &FixtureRepo,
         )
         .await
         .expect("repository should index");
+}
+
+async fn register_repository(
+    service: &RelayKnowledgeService,
+    repo: &FixtureRepo,
+    alias: &str,
+    path_filters: Vec<&str>,
+) {
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: alias.to_owned(),
+                path_filters: path_filters.into_iter().map(str::to_owned).collect(),
+                language_filters: vec!["rust".to_owned()],
+            },
+            context(&format!("register-{alias}")),
+        )
+        .await
+        .expect("repository should register");
 }
 
 async fn add_member(

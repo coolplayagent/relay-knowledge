@@ -16,7 +16,7 @@ use crate::{
         CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, StorageError,
     },
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use super::RelayKnowledgeService;
 
@@ -163,8 +163,8 @@ impl RelayKnowledgeService {
             let selector = CodeRepositorySelector::new(
                 member.repository_alias.clone(),
                 member.resolved_commit_sha.clone(),
-                merged_filters(&member.path_filters, &request.path_filters),
-                merged_filters(&member.language_filters, &request.language_filters),
+                request.path_filters.clone(),
+                request.language_filters.clone(),
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
             let search_request = CodeRetrievalRequest::new(
@@ -176,7 +176,7 @@ impl RelayKnowledgeService {
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
             let hits = store
-                .search_code(search_request)
+                .search_code_scope(member.source_scope.clone(), search_request)
                 .await
                 .map_err(storage_api_error)?;
             for hit in hits {
@@ -336,16 +336,23 @@ impl RelayKnowledgeService {
         }
     }
 
-    /// Checks whether a repository set selector exists.
-    pub(crate) async fn code_repository_set_is_registered(
+    pub(crate) async fn code_repository_set_member_scopes(
         &self,
         set_alias: String,
-    ) -> Result<bool, ApiError> {
+    ) -> Result<Option<Vec<(String, String)>>, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         store
-            .code_repository_set(set_alias)
+            .code_repository_set_status(set_alias)
             .await
-            .map(|set| set.is_some())
+            .map(|status| {
+                status.map(|status| {
+                    status
+                        .members
+                        .into_iter()
+                        .map(|member| (member.member.repository_alias, member.member.source_scope))
+                        .collect()
+                })
+            })
             .map_err(storage_api_error)
     }
 }
@@ -354,7 +361,7 @@ async fn required_set_status(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     set_alias: &str,
 ) -> Result<CodeRepositorySetStatus, ApiError> {
-    store
+    let mut status = store
         .code_repository_set_status(set_alias.to_owned())
         .await
         .map_err(storage_api_error)?
@@ -362,7 +369,101 @@ async fn required_set_status(
             ApiError::invalid_argument(format!(
                 "code repository set '{set_alias}' is not registered"
             ))
-        })
+        })?;
+    refresh_moving_member_freshness(store, &mut status).await?;
+    refresh_repository_set_freshness(&mut status);
+
+    Ok(status)
+}
+
+async fn refresh_moving_member_freshness(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &mut CodeRepositorySetStatus,
+) -> Result<(), ApiError> {
+    for index in 0..status.members.len() {
+        let member = status.members[index].member.clone();
+        let Some(reason) = moving_member_stale_reason(store, &member).await? else {
+            continue;
+        };
+        status.members[index].stale = true;
+        status.members[index].freshness_state = "stale".to_owned();
+        status.members[index].degraded_reason = Some(reason);
+    }
+
+    Ok(())
+}
+
+async fn moving_member_stale_reason(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    member: &crate::domain::CodeRepositorySetMember,
+) -> Result<Option<String>, ApiError> {
+    if !member_ref_tracks_repository(&member.ref_selector, &member.resolved_commit_sha) {
+        return Ok(None);
+    }
+    let repository = store
+        .code_repository_status(member.repository_id.clone())
+        .await
+        .map_err(storage_api_error)?
+        .ok_or_else(|| {
+            ApiError::invalid_argument(format!(
+                "code repository '{}' is not registered",
+                member.repository_alias
+            ))
+        })?;
+    let root_path = PathBuf::from(repository.root_path);
+    let ref_selector = member.ref_selector.clone();
+    let resolved =
+        tokio::task::spawn_blocking(move || resolve_repository_snapshot(root_path, &ref_selector))
+            .await
+            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+
+    match resolved {
+        Ok((current_commit, _)) if current_commit == member.resolved_commit_sha => Ok(None),
+        Ok((current_commit, _)) => Ok(Some(format!(
+            "repository set member '{}' ref '{}' now resolves to {}, not stored snapshot {}",
+            member.repository_alias,
+            member.ref_selector,
+            current_commit,
+            member.resolved_commit_sha
+        ))),
+        Err(error) => Ok(Some(format!(
+            "repository set member '{}' ref '{}' could not be resolved: {error}",
+            member.repository_alias, member.ref_selector
+        ))),
+    }
+}
+
+fn member_ref_tracks_repository(ref_selector: &str, resolved_commit_sha: &str) -> bool {
+    let ref_selector = ref_selector.trim();
+    !(ref_selector == resolved_commit_sha
+        || (is_git_oid_prefix(ref_selector) && resolved_commit_sha.starts_with(ref_selector)))
+}
+
+fn is_git_oid_prefix(value: &str) -> bool {
+    (7..=64).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn refresh_repository_set_freshness(status: &mut CodeRepositorySetStatus) {
+    let member_stale = status.members.iter().any(|member| member.stale);
+    if member_stale && !status.overlay.stale {
+        status.overlay.stale = true;
+        status.overlay.state = "overlay_stale".to_owned();
+    }
+    status.freshness_state = if status.members.is_empty() {
+        "incomplete"
+    } else if member_stale {
+        "stale"
+    } else if status.overlay.stale {
+        "overlay_stale"
+    } else {
+        "fresh"
+    }
+    .to_owned();
+    status.degraded_reason = status
+        .members
+        .iter()
+        .find_map(|member| member.degraded_reason.clone())
+        .or_else(|| status.overlay.degraded_reason.clone());
 }
 
 fn unfresh_set_error_for_wait_policy(
@@ -423,13 +524,31 @@ fn overlay_evidence_for_hit(
     edges
         .iter()
         .filter(|edge| {
-            edge.from_source_scope == hit.scope_id
-                && evidence_path(edge.evidence_json.as_str()).as_deref() == Some(hit.path.as_str())
-                || edge.to_source_scope.as_deref() == Some(hit.scope_id.as_str())
+            (edge.from_source_scope == hit.scope_id
+                && evidence_path(edge.evidence_json.as_str()).as_deref() == Some(hit.path.as_str()))
+                || edge_targets_hit(edge, hit)
         })
         .take(5)
         .cloned()
         .collect()
+}
+
+fn edge_targets_hit(edge: &crate::domain::CodeRepositoryCrossEdge, hit: &CodeRetrievalHit) -> bool {
+    if edge.to_source_scope.as_deref() != Some(hit.scope_id.as_str()) {
+        return false;
+    }
+
+    match edge.to_record_kind.as_str() {
+        "code_symbol_snapshot" => edge
+            .to_record_id
+            .as_deref()
+            .is_some_and(|target| hit.symbol_snapshot_id.as_deref() == Some(target)),
+        "code_file" => edge
+            .to_record_id
+            .as_deref()
+            .is_some_and(|target| hit.file_id.as_deref() == Some(target)),
+        _ => false,
+    }
 }
 
 fn evidence_path(evidence_json: &str) -> Option<String> {
@@ -628,8 +747,18 @@ mod tests {
             r#"{"from_path":"src/other.rs"}"#,
             10_000,
         );
-        let evidence =
-            overlay_evidence_for_hit(&[inbound.clone(), outbound.clone(), unrelated], &base_hit);
+        let mut wrong_target = edge(
+            "edge-wrong",
+            "scope-service",
+            Some("scope-app"),
+            "{}",
+            8_000,
+        );
+        wrong_target.to_record_id = Some("symbol-other".to_owned());
+        let evidence = overlay_evidence_for_hit(
+            &[inbound.clone(), outbound.clone(), unrelated, wrong_target],
+            &base_hit,
+        );
         assert_eq!(evidence, vec![inbound, outbound]);
         assert!(repository_set_score(&base_hit, &member, &evidence) > base_hit.score);
         assert!(

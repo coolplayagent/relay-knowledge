@@ -264,6 +264,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>>;
 
+    fn search_code_scope(
+        &self,
+        source_scope: String,
+        _request: CodeRetrievalRequest,
+    ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code search for source scope '{source_scope}' is unavailable"
+            )))
+        })
+    }
+
     fn analyze_code_impact(
         &self,
         request: CodeImpactRequest,

@@ -78,23 +78,25 @@ pub(super) fn add_member(
         )));
     }
 
-    connection.execute(
+    let set_id = set.set_id.clone();
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "
+        DELETE FROM code_repository_set_members
+        WHERE set_id = ?1 AND repository_id = ?2
+        ",
+        params![set_id, seed.repository_id],
+    )?;
+    transaction.execute(
         "
         INSERT INTO code_repository_set_members (
             set_id, repository_id, repository_alias, ref_selector, resolved_commit_sha,
             source_scope, path_filters_json, language_filters_json, priority
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-        ON CONFLICT(set_id, repository_id, source_scope) DO UPDATE SET
-            repository_alias = excluded.repository_alias,
-            ref_selector = excluded.ref_selector,
-            resolved_commit_sha = excluded.resolved_commit_sha,
-            path_filters_json = excluded.path_filters_json,
-            language_filters_json = excluded.language_filters_json,
-            priority = excluded.priority
         ",
         params![
-            set.set_id,
+            set_id,
             seed.repository_id,
             seed.repository_alias,
             seed.ref_selector,
@@ -105,14 +107,15 @@ pub(super) fn add_member(
             seed.priority,
         ],
     )?;
-    connection.execute(
+    transaction.execute(
         "
         UPDATE code_repository_sets
         SET updated_at_ms = strftime('%s','now') * 1000
         WHERE set_id = ?1
         ",
-        params![set.set_id],
+        params![set_id],
     )?;
+    transaction.commit()?;
 
     member_by_key(
         connection,

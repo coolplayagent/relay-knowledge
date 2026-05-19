@@ -260,6 +260,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run(move |connection| code_query::search_code(connection, request))
     }
 
+    fn search_code_scope(
+        &self,
+        source_scope: String,
+        request: CodeRetrievalRequest,
+    ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
+        self.run(move |connection| {
+            code_query::search_code_scope(connection, &source_scope, request)
+        })
+    }
+
     fn analyze_code_impact(
         &self,
         request: CodeImpactRequest,

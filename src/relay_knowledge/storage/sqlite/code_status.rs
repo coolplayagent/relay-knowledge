@@ -159,6 +159,46 @@ pub(super) fn repository_scope_status(
     Ok(None)
 }
 
+pub(super) fn repository_scope_status_by_source_scope(
+    connection: &mut Connection,
+    source_scope: &str,
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT r.repository_id, r.alias, r.root_path, scope.source_scope,
+                   scope.resolved_commit_sha, scope.tree_hash, scope.indexed_file_count,
+                   scope.symbol_count, scope.reference_count, scope.chunk_count, scope.stale,
+                   scope.degraded_reason, scope.path_filters_json, scope.language_filters_json
+            FROM code_repository_scopes scope
+            JOIN code_repositories r ON r.repository_id = scope.repository_id
+            WHERE scope.source_scope = ?1
+            ",
+            params![source_scope],
+            |row| {
+                Ok(CodeRepositoryStatus {
+                    repository_id: row.get(0)?,
+                    alias: row.get(1)?,
+                    root_path: row.get(2)?,
+                    path_filters: parse_json_list(row.get::<_, String>(12)?)?,
+                    language_filters: parse_json_list(row.get::<_, String>(13)?)?,
+                    last_indexed_scope_id: Some(row.get(3)?),
+                    last_indexed_commit: Some(row.get(4)?),
+                    tree_hash: Some(row.get(5)?),
+                    state: "fresh".to_owned(),
+                    indexed_file_count: row.get(6)?,
+                    symbol_count: row.get(7)?,
+                    reference_count: row.get(8)?,
+                    chunk_count: row.get(9)?,
+                    stale: row.get::<_, i64>(10)? != 0,
+                    degraded_reason: row.get(11)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 fn repository_status_by_column(
     connection: &mut Connection,
     repository: &str,

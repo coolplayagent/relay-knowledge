@@ -87,6 +87,40 @@ async fn repository_set_members_validate_real_indexed_scopes_and_report_missing_
 }
 
 #[tokio::test]
+async fn repository_set_readding_repository_replaces_previous_member_snapshot() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let status = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(
+                connection,
+                "repo-a",
+                "app",
+                "scope-a-new",
+                "tree-a-new",
+                false,
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 10))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a-new", 9),
+            )?;
+            code_set::set_status(connection, "workspace")
+        })
+        .await
+        .expect("status should query")
+        .expect("set should exist");
+
+    assert_eq!(status.members.len(), 1);
+    assert_eq!(status.members[0].member.source_scope, "scope-a-new");
+    assert_eq!(status.members[0].member.priority, 9);
+}
+
+#[tokio::test]
 async fn repository_set_overlay_refresh_classifies_resolved_ambiguous_and_unresolved_edges() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let summary = store
@@ -258,7 +292,7 @@ fn insert_repository_scope(
 ) -> Result<(), crate::storage::StorageError> {
     connection.execute(
         "
-        INSERT INTO code_repositories (
+        INSERT OR IGNORE INTO code_repositories (
             repository_id, alias, root_path, path_filters_json, language_filters_json,
             last_indexed_scope_id, last_indexed_commit, tree_hash, state,
             indexed_file_count, symbol_count, reference_count, chunk_count, stale,

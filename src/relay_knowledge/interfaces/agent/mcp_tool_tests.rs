@@ -18,7 +18,10 @@ use super::*;
 use crate::{
     api::{AuditQueryApiRequest, CodeRepositoryRegisterRequest, IngestEvidence, IngestRequest},
     application::{RelayKnowledgeService, RuntimeConfiguration},
-    domain::{CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, FreshnessPolicy},
+    domain::{
+        CodeIndexMode, CodeIndexRequest, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
+        CodeRepositorySetCreateRequest, FreshnessPolicy,
+    },
     env::{EnvironmentConfig, PlatformKind},
     interfaces::agent::AgentAuditStatus,
     storage::SqliteGraphStore,
@@ -159,6 +162,68 @@ pub fn runtime_scope_policy() -> bool {
             .iter()
             .any(|event| event.operation == "relay_retrieve_context"
                 && event.source_scope.as_deref() == Some("fixture"))
+    );
+}
+
+#[tokio::test]
+async fn repository_set_tool_requires_set_or_member_scope_authorization() {
+    let repo = FixtureRepo::create("mcp-repo-set-authorization");
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn workspace_symbol() -> u32 {
+    1
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let (denied_server, denied_service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "other")]).await;
+    create_fixture_repository_set(&denied_service, &repo).await;
+    let mut denied_router = denied_server.router();
+
+    let denied = tool_call(
+        &mut denied_router,
+        "repo-set-denied",
+        "relay_code_repository_set_query",
+        json!({
+            "repository_set": "workspace",
+            "query": "workspace_symbol",
+            "kind": "definition",
+            "limit": 5
+        }),
+    )
+    .await;
+
+    assert_eq!(denied["result"]["isError"], true);
+    assert_eq!(
+        denied["result"]["structuredContent"]["error_kind"],
+        "permission_denied"
+    );
+
+    let (allowed_server, allowed_service) =
+        server_and_service([("RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES", "fixture")]).await;
+    create_fixture_repository_set(&allowed_service, &repo).await;
+    let mut allowed_router = allowed_server.router();
+
+    let allowed = tool_call(
+        &mut allowed_router,
+        "repo-set-allowed",
+        "relay_code_repository_set_query",
+        json!({
+            "repository_set": "workspace",
+            "query": "workspace_symbol",
+            "kind": "definition",
+            "limit": 5
+        }),
+    )
+    .await;
+
+    assert_eq!(allowed["result"]["isError"], false);
+    assert_eq!(
+        allowed["result"]["structuredContent"]["results"][0]["hit"]["path"],
+        "src/lib.rs"
     );
 }
 
@@ -472,6 +537,33 @@ async fn register_and_index_fixture(
         )
         .await
         .expect("repository should index");
+}
+
+async fn create_fixture_repository_set(service: &RelayKnowledgeService, repo: &FixtureRepo) {
+    register_and_index_fixture(service, repo, "HEAD", CodeIndexMode::Full).await;
+    service
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-set", "trace-set"),
+        )
+        .await
+        .expect("repository set should create");
+    service
+        .add_code_repository_set_member(
+            CodeRepositorySetAddMemberRequest::new(
+                "workspace",
+                "fixture",
+                "HEAD",
+                Vec::new(),
+                Vec::new(),
+                0,
+            )
+            .expect("member request should validate"),
+            RequestContext::with_ids(InterfaceKind::Cli, "req-set-member", "trace-set-member"),
+        )
+        .await
+        .expect("repository set member should add");
 }
 
 async fn server_with_env<const N: usize>(pairs: [(&str, &str); N]) -> McpServer {
