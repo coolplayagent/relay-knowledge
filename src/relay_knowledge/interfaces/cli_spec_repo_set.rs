@@ -1,0 +1,93 @@
+use super::{CliCommandSpec, CommandEffect, command_syntax, opt};
+
+pub(super) fn repo_set() -> CliCommandSpec {
+    command!(
+        &["repo-set"],
+        "relay-knowledge repo-set create|add|query|status|refresh ...",
+        "Manage and query thin multi-repository code graph overlays.",
+        "code.repo_set",
+        CommandEffect::WritesIndexes,
+        &[],
+        &[
+            opt(
+                "--query",
+                Some("text"),
+                false,
+                false,
+                "Query text for repo-set query.",
+                None,
+                &[],
+            ),
+            opt(
+                "--kind",
+                Some("kind"),
+                false,
+                false,
+                "Code query kind.",
+                Some("hybrid"),
+                &[
+                    "hybrid",
+                    "symbol",
+                    "definition",
+                    "references",
+                    "callers",
+                    "callees",
+                    "imports",
+                ],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed member ref for repo-set add.",
+                None,
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("filter"),
+                false,
+                true,
+                "Path filter for member or query.",
+                None,
+                &[],
+            ),
+            opt(
+                "--language",
+                Some("id"),
+                false,
+                true,
+                "Language filter for member or query.",
+                None,
+                &[],
+            ),
+            opt(
+                "--priority",
+                Some("n"),
+                false,
+                false,
+                "Member ranking priority.",
+                Some("0"),
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Freshness policy for repo-set query.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+        ],
+        &[
+            "relay-knowledge repo-set create workspace --format json",
+            "relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json",
+            "relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json",
+        ],
+        &[
+            "Repository sets store member snapshot pointers and overlay edges; they never copy code fact rows.",
+        ],
+    )
+}

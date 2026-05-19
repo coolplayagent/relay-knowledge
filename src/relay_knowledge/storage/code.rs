@@ -2,9 +2,11 @@
 
 use crate::domain::{
     CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession,
-    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
-    CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-    CodeRetrievalRequest, CodeScopeRetentionSummary,
+    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryCrossEdge,
+    CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
+    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus,
+    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+    CodeScopeRetentionSummary,
 };
 
 use super::{StorageError, StorageFuture};
@@ -72,6 +74,70 @@ pub struct CodeScopeRetentionRequest {
     pub repository_id: String,
     pub active_scope: String,
     pub retain_recent_successful_scopes: usize,
+}
+
+/// New repository set metadata to persist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetSeed {
+    pub alias: String,
+    pub description: Option<String>,
+    pub default_ref_policy_json: String,
+    pub now_ms: u64,
+}
+
+/// New or replaced repository-set member pointer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetMemberSeed {
+    pub set_alias: String,
+    pub repository_id: String,
+    pub repository_alias: String,
+    pub ref_selector: String,
+    pub resolved_commit_sha: String,
+    pub source_scope: String,
+    pub path_filters: Vec<String>,
+    pub language_filters: Vec<String>,
+    pub priority: i32,
+}
+
+/// Repository-set overlay refresh task to persist or deduplicate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetRefreshTaskSeed {
+    pub set_id: String,
+    pub set_alias: String,
+    pub input_fingerprint: String,
+    pub now_ms: u64,
+}
+
+/// Lease acquisition request for one repository-set overlay task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetRefreshTaskClaimRequest {
+    pub task_id: Option<String>,
+    pub lease_owner: String,
+    pub lease_duration_ms: u64,
+    pub max_attempts: u32,
+    pub now_ms: u64,
+}
+
+/// Completion report guarded by task lease and attempt token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetRefreshTaskCompletion {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub now_ms: u64,
+}
+
+/// Failure report for retry and dead-letter handling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRepositorySetRefreshTaskFailure {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub error_kind: String,
+    pub error_message: String,
+    pub retry_backoff_ms: u64,
+    pub max_attempts: u32,
+    pub now_ms: u64,
 }
 
 /// Persisted code repository graph and retrieval contract.
@@ -216,6 +282,101 @@ pub trait CodeRepositoryStore: Send + Sync {
             Err(StorageError::InvalidInput(format!(
                 "code repository report for '{repository}' is unavailable"
             )))
+        })
+    }
+
+    fn create_code_repository_set(
+        &self,
+        _seed: CodeRepositorySetSeed,
+    ) -> StorageFuture<'_, CodeRepositorySet> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn add_code_repository_set_member(
+        &self,
+        _seed: CodeRepositorySetMemberSeed,
+    ) -> StorageFuture<'_, CodeRepositorySetMember> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set member storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn code_repository_set(
+        &self,
+        _set_alias: String,
+    ) -> StorageFuture<'_, Option<CodeRepositorySet>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn code_repository_set_status(
+        &self,
+        _set_alias: String,
+    ) -> StorageFuture<'_, Option<CodeRepositorySetStatus>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn refresh_code_repository_set_overlay(
+        &self,
+        _set_alias: String,
+        _now_ms: u64,
+    ) -> StorageFuture<'_, CodeRepositorySetRefreshSummary> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set overlay refresh is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn code_repository_set_cross_edges(
+        &self,
+        _set_id: String,
+    ) -> StorageFuture<'_, Vec<CodeRepositoryCrossEdge>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn queue_code_repository_set_refresh_task(
+        &self,
+        _task: CodeRepositorySetRefreshTaskSeed,
+    ) -> StorageFuture<'_, CodeRepositorySetRefreshTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set refresh task storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn claim_code_repository_set_refresh_task(
+        &self,
+        _request: CodeRepositorySetRefreshTaskClaimRequest,
+    ) -> StorageFuture<'_, Option<CodeRepositorySetRefreshTaskRecord>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn complete_code_repository_set_refresh_task(
+        &self,
+        _request: CodeRepositorySetRefreshTaskCompletion,
+    ) -> StorageFuture<'_, CodeRepositorySetRefreshTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set refresh task storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn fail_code_repository_set_refresh_task(
+        &self,
+        _request: CodeRepositorySetRefreshTaskFailure,
+    ) -> StorageFuture<'_, CodeRepositorySetRefreshTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set refresh task storage is unavailable".to_owned(),
+            ))
         })
     }
 }

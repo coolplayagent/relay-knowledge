@@ -10,7 +10,10 @@ use crate::{
     storage::StorageError,
 };
 
-use super::{code_status, count_code_rows, delete_path_indexes, delete_scope_index};
+use super::{
+    code_cleanup::{count_code_rows, delete_path_indexes, delete_scope_index},
+    code_status,
+};
 
 #[path = "code_batch/finalize.rs"]
 mod finalize;

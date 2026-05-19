@@ -31,7 +31,9 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy, IndexKind, ProposalState, WorkerKind,
+        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
+        CodeRepositorySetQueryRequest, CodeRetrievalRequest, FreshnessPolicy, IndexKind,
+        ProposalState, WorkerKind,
     },
 };
 
@@ -328,6 +330,43 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo_set.create" => {
+            let response = service
+                .create_code_repository_set(code_repository_set_create_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo_set.add" => {
+            let response = service
+                .add_code_repository_set_member(code_repository_set_add_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo_set.query" => {
+            let response = service
+                .query_code_repository_set(code_repository_set_query_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo_set.status" => {
+            let response = service
+                .code_repository_set_status(string_field(payload, "set_alias")?.to_owned(), context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
+        "code.repo_set.refresh" => {
+            let set_alias = string_field(payload, "set_alias")?.to_owned();
+            let response = if bool_field(payload, "async") {
+                service
+                    .start_code_repository_set_refresh(set_alias, context)
+                    .await?
+            } else {
+                service
+                    .refresh_code_repository_set(set_alias, context)
+                    .await?
+            };
+            Ok((response.metadata.clone(), json!(response)))
+        }
         other => Err(WebError::bad_request(format!(
             "unsupported web operation '{other}'"
         ))),
@@ -527,6 +566,46 @@ fn code_selector(payload: &Value) -> Result<CodeRepositorySelector, WebError> {
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
+fn code_repository_set_create_request(
+    payload: &Value,
+) -> Result<CodeRepositorySetCreateRequest, WebError> {
+    CodeRepositorySetCreateRequest::new(
+        string_field(payload, "set_alias")?,
+        optional_string_field(payload, "description"),
+        optional_string_field(payload, "default_ref_policy_json"),
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+fn code_repository_set_add_request(
+    payload: &Value,
+) -> Result<CodeRepositorySetAddMemberRequest, WebError> {
+    CodeRepositorySetAddMemberRequest::new(
+        string_field(payload, "set_alias")?,
+        string_field(payload, "repository_alias")?,
+        string_field(payload, "ref")?,
+        optional_string_array_field(payload, "path_filters")?,
+        optional_string_array_field(payload, "language_filters")?,
+        i32_field(payload, "priority").unwrap_or(0),
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+fn code_repository_set_query_request(
+    payload: &Value,
+) -> Result<CodeRepositorySetQueryRequest, WebError> {
+    CodeRepositorySetQueryRequest::new(
+        string_field(payload, "set_alias")?,
+        string_field(payload, "query")?,
+        parse_code_query_kind(string_field(payload, "kind")?)?,
+        usize_field(payload, "limit")?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        optional_string_array_field(payload, "path_filters")?,
+        optional_string_array_field(payload, "language_filters")?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
 fn string_field<'a>(payload: &'a Value, field: &'static str) -> Result<&'a str, WebError> {
     payload
         .get(field)
@@ -580,6 +659,18 @@ fn usize_field(payload: &Value, field: &'static str) -> Result<usize, WebError> 
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value > 0)
         .ok_or_else(|| WebError::bad_request(format!("{field} must be a positive integer")))
+}
+
+fn i32_field(payload: &Value, field: &'static str) -> Result<i32, WebError> {
+    payload
+        .get(field)
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| WebError::bad_request(format!("{field} must be an integer")))
+}
+
+fn bool_field(payload: &Value, field: &'static str) -> bool {
+    payload.get(field).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn parse_freshness(value: &str) -> Result<FreshnessPolicy, WebError> {

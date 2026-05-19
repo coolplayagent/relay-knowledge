@@ -42,7 +42,7 @@ relay-knowledge service doctor
 
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
 - 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
-- 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索和影响分析。
+- 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询。
 - 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
@@ -74,6 +74,7 @@ relay-knowledge service doctor
 - [第三卷第 13 章：代码检索排序与影响分析](docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
 - [第三卷第 15 章：常驻 Agent 图访问协议](docs/zh/03-architecture-specs/15-resident-agent-graph-access-protocol.md)
 - [第三卷第 19 章：安装、发布与升级](docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md)
+- [第三卷第 20 章：多仓库代码图谱薄覆盖层](docs/zh/03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 
 ## 开发
 
@@ -140,6 +141,9 @@ relay-knowledge repo register /path/to/repo --alias core --path src --language r
 relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo-set create workspace --format json
+relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json

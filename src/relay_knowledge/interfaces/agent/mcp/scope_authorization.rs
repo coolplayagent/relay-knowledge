@@ -34,7 +34,7 @@ impl RuntimeScopeAuthorizer {
         {
             return Ok(Some(scope));
         }
-        if self.repository_alias_is_registered(service, &scope).await {
+        if self.code_scope_alias_is_registered(service, &scope).await {
             self.remember_runtime_scope(scope.clone()).await;
             return Ok(Some(scope));
         }
@@ -50,7 +50,7 @@ impl RuntimeScopeAuthorizer {
         self.allowed_scopes.write().await.insert(scope);
     }
 
-    async fn repository_alias_is_registered(
+    async fn code_scope_alias_is_registered(
         &self,
         service: &RelayKnowledgeService,
         scope: &str,
@@ -59,6 +59,10 @@ impl RuntimeScopeAuthorizer {
             .code_repository_is_registered(scope.to_owned())
             .await
             .unwrap_or(false)
+            || service
+                .code_repository_set_is_registered(scope.to_owned())
+                .await
+                .unwrap_or(false)
     }
 }
 
@@ -66,7 +70,7 @@ fn mcp_scope_not_authorized(scope: &str) -> AgentAdapterError {
     AgentAdapterError::new(
         AgentAdapterErrorKind::PermissionDenied,
         format!(
-            "source_scope '{scope}' is not authorized for this MCP policy; register it as a code repository alias during runtime or add RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES={scope}"
+            "source_scope '{scope}' is not authorized for this MCP policy; register it as a code repository or repository-set alias during runtime or add RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES={scope}"
         ),
     )
 }

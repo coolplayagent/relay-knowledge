@@ -89,6 +89,32 @@ Branches, tags, and `HEAD` first resolve to commit/tree. Multiple branches with 
 
 Symbol hits also include `canonical_symbol_id` for expressing logical symbol identity across snapshots. Reference, call, and import hits return `edge_kind`, `edge_resolution_state`, `edge_target_hint`, `edge_confidence_basis_points`, and `edge_confidence_tier`. Uniquely unresolved targets are marked `unresolved` or `ambiguous` instead of being written as certain calls.
 
+### Multi-Repository Repository Set Queries
+
+Multi-repository query uses an explicit `repo-set` overlay. Index each member repository as a real single-repository snapshot first, then create a set and point members at those snapshots:
+
+```bash
+relay-knowledge repo-set create workspace --format json
+relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
+relay-knowledge repo-set refresh workspace --format json
+```
+
+`repo-set add` requires the target ref and path/language filters to have a matching single-repository indexed scope. If none exists, it fails instead of falling back to an older scope. `repo-set refresh` rebuilds only cross-repository import/module overlay edges; it does not copy base facts into `code_repository_files`, `code_repository_symbols`, or `code_repository_chunks`.
+
+Set queries fan out to each member’s real `source_scope`, then merge and rerank:
+
+```bash
+relay-knowledge repo-set query workspace \
+  --query retry_policy \
+  --kind definition \
+  --freshness allow-stale \
+  --limit 20 \
+  --format json
+```
+
+Each result carries the member repository alias, repository id, resolved commit, tree hash, and original `source_scope`. Same-named paths or symbols are not deduplicated across repositories; the dedupe key includes repository, scope, path, line range, and excerpt. `--freshness wait-until-fresh` requires every member snapshot to be fresh and the overlay to be current. MCP uses the separate `relay_code_repository_set_query` tool and does not represent a repository set as a raw `source_scope`.
+
 ## 5.5 Incremental Updates
 
 Index changes between two refs:

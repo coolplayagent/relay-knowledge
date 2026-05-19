@@ -17,6 +17,16 @@
 - 多仓库结果能说明每个命中来自哪个 repository、commit、tree hash 和 scope。
 - 跨仓库关系作为可解释、可降级的 overlay edge，而不是伪装成单仓 resolved edge。
 
+## 实现状态
+
+当前实现提供三阶段的初始产品化路径：
+
+- `repo-set create/add/query/status/refresh` 和共享 API/Web/MCP 入口使用显式 repository set selector。
+- SQLite 持久化 `code_repository_sets`、`code_repository_set_members`、`code_repository_cross_edges`、overlay status 和 overlay refresh task；基础代码事实表不为 repository set 复制行。
+- 多仓查询在应用层 fan-out 到现有单仓 `search_code`，按成员 priority、freshness 和 overlay confidence 合并排序；去重键包含 repository、scope、path、line range 和 excerpt。
+- `repo-set refresh` 构建 import/module 层面的跨仓 overlay edges，支持 resolved、ambiguous 和 unresolved 状态，并暴露 evidence JSON。
+- scope retention 会保留仍被 repository set member 引用的单仓 snapshot；后台 overlay refresh task 使用持久租约、重试和 dead-letter 状态。
+
 ## 2. 当前基线
 
 现有实现已经具备多仓库能力的底座：

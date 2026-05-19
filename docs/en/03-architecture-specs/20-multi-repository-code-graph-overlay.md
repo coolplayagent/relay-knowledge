@@ -17,6 +17,16 @@ This design preserves four constraints:
 - Every multi-repository result explains its repository, commit, tree hash, and scope.
 - Cross-repository relationships are explainable overlay edges, not single-repository resolved edges.
 
+## Implementation Status
+
+The current implementation provides the initial product path across all three phases:
+
+- `repo-set create/add/query/status/refresh` and the shared API/Web/MCP entry points use an explicit repository set selector.
+- SQLite persists `code_repository_sets`, `code_repository_set_members`, `code_repository_cross_edges`, overlay status, and overlay refresh tasks. Repository sets do not copy rows into base code fact tables.
+- Multi-repository query fans out at the application layer to existing single-repository `search_code`, then merges by member priority, freshness, and overlay confidence. Deduplication includes repository, scope, path, line range, and excerpt.
+- `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON.
+- Scope retention preserves single-repository snapshots referenced by repository set members. Background overlay refresh tasks use durable leases, retries, and dead-letter state.
+
 ## 2. Current Baseline
 
 The current implementation already has the foundation:
