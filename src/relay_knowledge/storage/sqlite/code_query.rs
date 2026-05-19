@@ -53,7 +53,8 @@ use code_query_line_ranges::{
 use code_query_path_ranking::{
     call_site_example_path_penalty, call_site_source_path_bonus, call_site_test_path_penalty,
     callee_member_context_bonus, declaration_surface_path_bonus, import_test_path_penalty,
-    query_mentions_example_or_sample, query_mentions_test_or_benchmark, symbol_test_path_penalty,
+    query_mentions_example_or_sample, query_mentions_test_or_benchmark,
+    symbol_declaration_surface_path_bonus, symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 use code_query_support::*;
@@ -200,6 +201,7 @@ fn search_symbols(
                 let score = score
                     + 2.0
                     + symbol_kind_bonus(&row.kind, request)
+                    + symbol_declaration_surface_path_bonus(score, &row.kind, &row.path, request)
                     + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
                 let line_range = symbol_result_line_range(&row);
                 let excerpt = symbol_excerpt(
@@ -866,6 +868,10 @@ mod call_ranking_tests;
 #[cfg(test)]
 #[path = "code_query_chunk_ranking_tests.rs"]
 mod chunk_ranking_tests;
+
+#[cfg(test)]
+#[path = "code_query_symbol_ranking_tests.rs"]
+mod symbol_ranking_tests;
 
 #[cfg(test)]
 #[path = "code_query_excerpt_tests.rs"]

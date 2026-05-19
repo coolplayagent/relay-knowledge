@@ -138,6 +138,27 @@ pub(super) fn declaration_surface_path_bonus(
     }
 }
 
+pub(super) fn symbol_declaration_surface_path_bonus(
+    base_score: f64,
+    kind: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || kind != "function_declaration"
+        || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    if file_name_has_header_extension(file_name) {
+        0.55
+    } else {
+        0.0
+    }
+}
+
 pub(super) fn import_test_path_penalty(
     base_score: f64,
     path: &str,
@@ -625,6 +646,53 @@ mod tests {
         );
         assert_eq!(
             declaration_surface_path_bonus(2.0, "db/db_impl.h", &definition),
+            0.0
+        );
+    }
+
+    #[test]
+    fn symbol_declaration_surface_path_bonus_prefers_header_declarations() {
+        let hybrid = retrieval_request(CodeQueryKind::Hybrid);
+        let definition = retrieval_request(CodeQueryKind::Definition);
+
+        assert_eq!(
+            symbol_declaration_surface_path_bonus(
+                4.0,
+                "function_declaration",
+                "db/db_impl.h",
+                &hybrid,
+            ),
+            0.55
+        );
+        assert_eq!(
+            symbol_declaration_surface_path_bonus(4.0, "method", "db/db_impl.h", &hybrid),
+            0.0
+        );
+        assert_eq!(
+            symbol_declaration_surface_path_bonus(
+                4.0,
+                "function_declaration",
+                "db/db_impl.cc",
+                &hybrid,
+            ),
+            0.0
+        );
+        assert_eq!(
+            symbol_declaration_surface_path_bonus(
+                4.0,
+                "function_declaration",
+                "db/db_impl_test.h",
+                &hybrid,
+            ),
+            0.0
+        );
+        assert_eq!(
+            symbol_declaration_surface_path_bonus(
+                4.0,
+                "function_declaration",
+                "db/db_impl.h",
+                &definition,
+            ),
             0.0
         );
     }
