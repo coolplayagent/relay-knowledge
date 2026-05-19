@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-c-composite-initializer-symbols-20260519
+- 算法/架构：C parser manual extraction 在顶层 `declaration` 中保留既有函数声明抽取，同时把有界行数内、带 `initializer_list` 或 macro/call initializer、且类型为 `struct`/`union`/`enum` 或声明符为数组的全局数据声明记录为 `constant` symbol；生成的 symbol 继续走现有 signature、chunk、FTS、call/reference、SQLite 写入与查询排序路径。
+- 不变量：typedef、函数指针变量、函数声明、函数定义、局部声明、标量 macro 初始化、超过 80 行的大型表、schema、candidate limit、ranking 权重、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布和 self-iteration harness 均不变。
+- 预期影响：Linux 与 C/C++ 头源混合仓库中的 callback table、sysfs/bin_attribute、vm_operations、file_operations 等顶层初始化表获得稳定源跨度和 lexical chunk，改善 `special_mapping_vmops`、`page_idle_bitmap_attr`、read/write/fault callback 关系与 execution-flow hybrid 查询的召回和 judge 对代码图完整性的评价。
+- 已知风险：少量短小顶层复合初始化表会新增 constant symbol/chunk 并增加 FTS 行；风险受顶层作用域、复合类型/数组、初始化形态、80 行上界、既有 dedupe/truncate 与 bounded candidate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-call-search-symbol-signature-fts-20260519
 - 算法/架构：checkpoint finalize、snapshot apply 与旧库 backfill 写入 `call` FTS 文档时，在既有 caller/callee/target/path 字段后追加已索引 caller 与 callee symbol signature；`callers`/`callees` 后置评分同步把对应端的 signature 作为现有 `ScoreQuery` 字段，不新增 SQL schema、candidate limit 或评分权重。
 - 不变量：call edge 事实、reference/import resolution、candidate limit、dedupe/truncate、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布与 self-iteration harness 均不变；没有 caller/callee symbol 的 call 继续使用原有字段。

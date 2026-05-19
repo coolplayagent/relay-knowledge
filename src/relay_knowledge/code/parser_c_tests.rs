@@ -178,6 +178,48 @@ class LEVELDB_EXPORT FilterPolicy {
 }
 
 #[test]
+fn c_top_level_composite_initializers_are_retrievable_constant_symbols() {
+    let snapshot = parse_source_snapshot(
+        "mm/page_idle.c",
+        br#"
+static int scalar_flag = IS_ENABLED(CONFIG_PAGE_IDLE);
+
+static const struct vm_operations_struct special_mapping_vmops = {
+    .close = special_mapping_close,
+    .fault = special_mapping_fault,
+    .mremap = special_mapping_mremap,
+};
+
+static const struct bin_attribute page_idle_bitmap_attr =
+        __BIN_ATTR(bitmap, 0600, page_idle_bitmap_read, page_idle_bitmap_write, 0);
+"#,
+    );
+
+    for name in ["special_mapping_vmops", "page_idle_bitmap_attr"] {
+        let symbol = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == name)
+            .unwrap_or_else(|| panic!("{name} should be indexed as retrievable data"));
+        assert_eq!(symbol.kind, "constant");
+    }
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "scalar_flag"),
+        "scalar macro initializers should not create broad top-level data noise"
+    );
+    assert!(snapshot.chunks.iter().any(|chunk| {
+        chunk.content.contains("special_mapping_vmops")
+            && chunk.content.contains(".fault = special_mapping_fault")
+    }));
+    assert!(snapshot.chunks.iter().any(|chunk| {
+        chunk.content.contains("page_idle_bitmap_attr") && chunk.content.contains("__BIN_ATTR")
+    }));
+}
+
+#[test]
 fn c_function_pointer_declarations_are_not_function_symbols() {
     let snapshot = parse_source_snapshot(
         "include/linux/callbacks.h",
