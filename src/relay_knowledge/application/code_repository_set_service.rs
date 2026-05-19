@@ -537,3 +537,300 @@ fn code_api_error(error: CodeIndexError) -> ApiError {
 fn storage_api_error(error: StorageError) -> ApiError {
     ApiError::storage_unavailable(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        api::ErrorKind,
+        domain::{
+            CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetMember,
+            CodeRepositorySetOverlayStatus, CodeRetrievalLayer, RepositoryCodeRange,
+        },
+        storage::SqliteGraphStore,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn helper_policy_reports_wait_until_fresh_blockers() {
+        let request = CodeRepositorySetQueryRequest::new(
+            "workspace",
+            "serve",
+            crate::domain::CodeQueryKind::Definition,
+            5,
+            FreshnessPolicy::WaitUntilFresh,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("request should validate");
+        let empty = status_with_members(Vec::new(), overlay(true));
+        assert!(
+            unfresh_set_error_for_wait_policy(&request, &empty)
+                .expect("empty set should block")
+                .message
+                .contains("has no members")
+        );
+
+        let mut stale_member = member_status("app", "scope-app", 0);
+        stale_member.stale = true;
+        let stale_status = status_with_members(vec![stale_member], overlay(false));
+        assert!(
+            unfresh_set_error_for_wait_policy(&request, &stale_status)
+                .expect("stale member should block")
+                .message
+                .contains("member 'app'")
+        );
+
+        let overlay_status =
+            status_with_members(vec![member_status("app", "scope-app", 0)], overlay(true));
+        assert!(
+            unfresh_set_error_for_wait_policy(&request, &overlay_status)
+                .expect("stale overlay should block")
+                .message
+                .contains("overlay is stale")
+        );
+
+        let allow_stale = CodeRepositorySetQueryRequest::new(
+            "workspace",
+            "serve",
+            crate::domain::CodeQueryKind::Definition,
+            5,
+            FreshnessPolicy::AllowStale,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("request should validate");
+        assert!(unfresh_set_error_for_wait_policy(&allow_stale, &overlay_status).is_none());
+    }
+
+    #[test]
+    fn helper_ranking_dedupes_and_attaches_overlay_evidence() {
+        let member = member_status("app", "scope-app", 7);
+        let base_hit = hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, false);
+        let inbound = edge(
+            "edge-in",
+            "scope-service",
+            Some("scope-app"),
+            r#"{"from_path":"src/service.rs"}"#,
+            9_000,
+        );
+        let outbound = edge(
+            "edge-out",
+            "scope-app",
+            Some("scope-service"),
+            r#"{"from_path":"src/client.rs"}"#,
+            6_000,
+        );
+        let unrelated = edge(
+            "edge-other",
+            "scope-other",
+            Some("scope-service"),
+            r#"{"from_path":"src/other.rs"}"#,
+            10_000,
+        );
+        let evidence =
+            overlay_evidence_for_hit(&[inbound.clone(), outbound.clone(), unrelated], &base_hit);
+        assert_eq!(evidence, vec![inbound, outbound]);
+        assert!(repository_set_score(&base_hit, &member, &evidence) > base_hit.score);
+        assert!(
+            repository_set_score(
+                &hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, true),
+                &member,
+                &[]
+            ) < base_hit.score
+        );
+
+        let mut results = vec![
+            CodeRepositorySetQueryHit {
+                member: member.member.clone(),
+                hit: hit("repo-a", "scope-app", "src/client.rs", 1, 0.50, false),
+                overlay_evidence: Vec::new(),
+                score: 0.50,
+            },
+            CodeRepositorySetQueryHit {
+                member: member.member.clone(),
+                hit: hit("repo-a", "scope-app", "src/client.rs", 1, 0.90, false),
+                overlay_evidence: evidence,
+                score: 0.90,
+            },
+            CodeRepositorySetQueryHit {
+                member: member.member.clone(),
+                hit: hit("repo-a", "scope-app", "src/client.rs", 2, 0.80, false),
+                overlay_evidence: Vec::new(),
+                score: 0.80,
+            },
+        ];
+        assert!(dedupe_sort_truncate(&mut results, 1));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, 0.90);
+
+        assert_eq!(per_member_candidate_limit(1), 6);
+        assert_eq!(per_member_candidate_limit(20), 50);
+        assert_eq!(
+            merged_filters(&["src".to_owned()], &["src".to_owned(), "tests".to_owned()]),
+            ["src".to_owned(), "tests".to_owned()]
+        );
+        assert!(evidence_path("not-json").is_none());
+        assert!(evidence_path("{}").is_none());
+    }
+
+    #[test]
+    fn helper_fingerprint_and_error_mapping_are_stable() {
+        let status = status_with_members(
+            vec![
+                member_status("app", "scope-app", 1),
+                member_status("svc", "scope-svc", 0),
+            ],
+            overlay(false),
+        );
+        let fingerprint = repository_set_refresh_fingerprint(&status);
+        assert!(fingerprint.contains("set-workspace"));
+        assert!(fingerprint.contains("repo-app:scope-app:commit-scope-app:tree-scope-app:false"));
+        assert_eq!(
+            code_api_error(CodeIndexError::InvalidInput("bad ref".to_owned())).error_kind,
+            ErrorKind::InvalidArgument
+        );
+        assert_eq!(
+            code_api_error(CodeIndexError::Io(std::io::Error::other("disk"))).error_kind,
+            ErrorKind::StorageUnavailable
+        );
+        assert_eq!(
+            storage_api_error(StorageError::InvalidInput("bad storage".to_owned())).error_kind,
+            ErrorKind::StorageUnavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn helper_required_status_reports_missing_sets() {
+        let store: Arc<dyn crate::storage::KnowledgeStore> =
+            Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+        let error = required_set_status(&store, "missing")
+            .await
+            .expect_err("missing set should fail");
+
+        assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+        assert!(error.message.contains("is not registered"));
+    }
+
+    fn status_with_members(
+        members: Vec<CodeRepositorySetMemberStatus>,
+        overlay: CodeRepositorySetOverlayStatus,
+    ) -> CodeRepositorySetStatus {
+        CodeRepositorySetStatus {
+            repository_set: CodeRepositorySet {
+                set_id: "set-workspace".to_owned(),
+                alias: "workspace".to_owned(),
+                description: None,
+                default_ref_policy_json: "{\"default_ref\":\"HEAD\"}".to_owned(),
+                created_at_ms: 1,
+                updated_at_ms: 1,
+            },
+            members,
+            overlay,
+            freshness_state: "fresh".to_owned(),
+            degraded_reason: None,
+        }
+    }
+
+    fn member_status(
+        repository_alias: &str,
+        source_scope: &str,
+        priority: i32,
+    ) -> CodeRepositorySetMemberStatus {
+        CodeRepositorySetMemberStatus {
+            member: CodeRepositorySetMember {
+                set_id: "set-workspace".to_owned(),
+                repository_id: format!("repo-{repository_alias}"),
+                repository_alias: repository_alias.to_owned(),
+                ref_selector: "HEAD".to_owned(),
+                resolved_commit_sha: format!("commit-{source_scope}"),
+                source_scope: source_scope.to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: vec!["rust".to_owned()],
+                priority,
+            },
+            tree_hash: format!("tree-{source_scope}"),
+            freshness_state: "fresh".to_owned(),
+            stale: false,
+            indexed_file_count: 1,
+            symbol_count: 1,
+            reference_count: 0,
+            chunk_count: 1,
+            degraded_reason: None,
+        }
+    }
+
+    fn overlay(stale: bool) -> CodeRepositorySetOverlayStatus {
+        CodeRepositorySetOverlayStatus {
+            state: if stale { "overlay_stale" } else { "fresh" }.to_owned(),
+            stale,
+            edge_count: usize::from(!stale),
+            refreshed_at_ms: (!stale).then_some(10),
+            degraded_reason: None,
+        }
+    }
+
+    fn hit(
+        repository_id: &str,
+        scope_id: &str,
+        path: &str,
+        line: u32,
+        score: f64,
+        stale: bool,
+    ) -> CodeRetrievalHit {
+        CodeRetrievalHit {
+            repository_id: repository_id.to_owned(),
+            scope_id: scope_id.to_owned(),
+            resolved_commit_sha: format!("commit-{scope_id}"),
+            tree_hash: format!("tree-{scope_id}"),
+            path: path.to_owned(),
+            language_id: "rust".to_owned(),
+            byte_range: RepositoryCodeRange { start: 0, end: 10 },
+            line_range: RepositoryCodeRange {
+                start: line,
+                end: line,
+            },
+            symbol_snapshot_id: Some(format!("symbol-{line}")),
+            canonical_symbol_id: None,
+            file_id: Some("file-1".to_owned()),
+            retrieval_layers: vec![CodeRetrievalLayer::Symbol],
+            index_versions: vec!["code:1".to_owned()],
+            stale,
+            degraded_reason: None,
+            edge_kind: None,
+            edge_resolution_state: None,
+            edge_target_hint: None,
+            edge_confidence_basis_points: None,
+            edge_confidence_tier: None,
+            score,
+            excerpt: format!("excerpt {line}"),
+        }
+    }
+
+    fn edge(
+        edge_id: &str,
+        from_scope: &str,
+        to_scope: Option<&str>,
+        evidence_json: &str,
+        confidence: u16,
+    ) -> CodeRepositoryCrossEdge {
+        CodeRepositoryCrossEdge {
+            edge_id: edge_id.to_owned(),
+            set_id: "set-workspace".to_owned(),
+            from_source_scope: from_scope.to_owned(),
+            from_repository_id: "repo-from".to_owned(),
+            from_record_kind: "module_reference".to_owned(),
+            from_record_id: "import-1".to_owned(),
+            to_source_scope: to_scope.map(str::to_owned),
+            to_repository_id: to_scope.map(|_| "repo-to".to_owned()),
+            to_record_kind: "code_symbol_snapshot".to_owned(),
+            to_record_id: to_scope.map(|_| "symbol-1".to_owned()),
+            edge_kind: "imports".to_owned(),
+            resolution_state: "resolved".to_owned(),
+            confidence_basis_points: confidence,
+            confidence_tier: "explicit".to_owned(),
+            evidence_json: evidence_json.to_owned(),
+            created_at_ms: 10,
+        }
+    }
+}

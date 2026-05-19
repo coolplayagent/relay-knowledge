@@ -86,6 +86,14 @@ mod code_metadata_tests;
 #[path = "code_tasks_tests.rs"]
 mod code_tasks_tests;
 
+#[cfg(test)]
+#[path = "code_set_tasks_tests.rs"]
+mod code_set_tasks_tests;
+
+#[cfg(test)]
+#[path = "code_set_tests.rs"]
+mod code_set_tests;
+
 use crate::{
     domain::{
         CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint,

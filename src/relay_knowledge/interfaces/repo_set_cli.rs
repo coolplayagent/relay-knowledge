@@ -402,3 +402,7 @@ fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
         other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
     }
 }
+
+#[cfg(test)]
+#[path = "repo_set_cli_tests.rs"]
+mod tests;
