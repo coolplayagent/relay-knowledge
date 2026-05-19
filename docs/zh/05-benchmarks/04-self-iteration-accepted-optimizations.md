@@ -1,6 +1,12 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-js-ts-exported-object-value-symbols-20260519
+- 算法：JS/TS parser manual extraction 在既有 exported constructed value 规则上，增加对短小 `export const name = {...}` 与 `export const name = [...]` 公共值的 `constant` symbol 抽取，并 unwrap bounded `as`/`satisfies`/parenthesized 表达式后判断实际值形态。
+- 架构：变更限定在 tree-sitter 解析后的 manual symbol extraction 层，复用现有 export ancestor、identifier validation、symbol upsert、signature/chunk 生成与 64 行上界；不改变 SQLite schema、FTS candidate、ranking/scoring、finalize、CLI/API、semantic/vector provider/env、research judge、网络/QoS、安装发布或 self-iteration harness 行为。
+- 不变量：非导出局部对象、普通函数调用结果、动态属性、超过行数上界的大对象继续不入图；函数值、member-call/new 构造值、现有 JS tree-sitter tags、imports/calls/references、path/language filters 和 freshness/version evidence 保持原行为。
+- 预期影响：relay-teams JS、opencode TS/TSX 等大仓中公开 state/config/protocol/route surface 会获得稳定 symbol 与 symbol chunk，改善 `state`、公开对象定义、背景流/协议配置相关 hybrid 查询的召回和研究评审对代码图完整性的评价。
+- 已知风险：少量短小导出对象/数组会增加 symbol/chunk 数并参与近同名排序；风险受 export-only、合法标识符、表达式形态、64 行上界、既有 FTS bounded candidates 和 dedupe/truncate 控制，未引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-typescript-imported-reference-finalize-20260519
 - 算法：checkpoint finalize 在完成 TypeScript/TSX named import 解析后，利用已解析的 import `target_hint` 与目标文件符号表，把同文件中仍为 unresolved/ambiguous 的同名 reference/call 绑定到唯一导入符号；随后再重建 reference search document 与 call graph/search document，确保检索使用最终 resolved edge。
 - 架构：变更位于 SQLite checkpoint finalize 的跨文件解析层，新增独立 imported-reference 模块复用既有 symbol cache、TypeScript import parser 与 path normalization；不改变 parser capture、SQLite schema、FTS candidate limit、query scoring/ranking、CLI/API JSON、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布或 self-iteration harness 行为。
@@ -959,3 +965,17 @@ over", path.replace('/', "::")), +        file_id: file_id.to_owned(), +        
 - architecture: the change stays in SQLite code-query ranking; it does not alter parser extraction, graph facts, schema, FTS candidate selection, CLI/API fields, env/paths/net boundaries, semantic/vector settings, or the self-iteration harness.
 - invariants: path-like import queries, hybrid queries, target-symbol excerpts, import confidence, filters, dedupe, and zero-score filtering keep existing behavior; single-use aliases and namespace-only import lines receive no binding-context bonus.
 - expected impact: promotes implementation files that actually use namespace or named imports such as `ProviderShared` over equally matching setup, route, or utility import surfaces.
+## 20260519T050321Z
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch`
+- score: 0.885665 (foundational=0.867521, competitive=0.840893, accuracy=0.854207, semantic_vector=1.0, research_judge=0.85, performance=0.788231, stability=1.0)
+- cases: 98/104 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_exported_value_tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_build_release_ms=44839ms; cargo_fmt_check_ms=947ms; cargo_clippy_ms=215ms; cargo_test_ms=10089ms; relay_teams_index_ms=59395ms; relay_teams_register_index_ms=59499ms; relay_teams_query_p50_ms=641ms; relay_teams_query_p95_ms=2898ms
+
+Adopted optimization notes:
+
+unks +            .iter() +            .any(|chunk| chunk.symbol_snapshot_id == Some(symbol.symbol_snapshot_id.clone())), +        "{name} should create a retrievable symbol chunk", +    ); +} + +fn assert_missing_symbols<const N: usize>(snapshot: &CodeIndexSnapshot, names: [&str; N]) { +    for name in names { +        assert!( +            !snapshot.symbols.iter().any(|symbol| symbol.name == name), +            "{name} should not be indexed as an exported object value", +        ); +    } +} + +fn large_object_body() -> String { +    (0..70) +        .map(|index| format!("  item{index}: buildItem({index}),\n")) +        .collect::<String>() +} + +fn parse_source_snapshot(path: &str, source: &[u8]) -> CodeIndexSnapshot { +    let registration = +        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new()) +            .expect("registration should validate"); +    let mut build = SnapshotBuild::new( +        &registration, +        "commit".to_owned(), +        "tree".to_owned(), +        true, +        1, +        0, +    ); + +    parse_indexed_file(&mut build, path, source).expect("file should parse"); + +    build.finish() +} tokens used 222,047
+

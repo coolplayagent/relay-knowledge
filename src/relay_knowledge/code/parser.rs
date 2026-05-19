@@ -290,6 +290,10 @@ struct FileParseOutput {
 mod tests;
 
 #[cfg(test)]
+#[path = "parser_exported_value_tests.rs"]
+mod exported_value_tests;
+
+#[cfg(test)]
 #[path = "parser_identity_tests.rs"]
 mod identity_tests;
 
