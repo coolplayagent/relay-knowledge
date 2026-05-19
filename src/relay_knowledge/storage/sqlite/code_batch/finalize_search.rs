@@ -46,11 +46,19 @@ pub(super) fn rebuild_call_search_documents(
         SELECT call.source_scope, 'call', call.call_id, call.path,
                coalesce(file.language_id, ''),
                coalesce(caller_name, '') || ' ' || callee_name || ' ' ||
-               coalesce(target_hint, '') || ' ' || call.path
+               coalesce(target_hint, '') || ' ' ||
+               coalesce(caller.signature, '') || ' ' ||
+               coalesce(callee.signature, '') || ' ' || call.path
         FROM code_repository_calls call
         LEFT JOIN code_repository_files file
           ON file.source_scope = call.source_scope
          AND file.path = call.path
+        LEFT JOIN code_repository_symbols caller
+          ON caller.source_scope = call.source_scope
+         AND caller.symbol_snapshot_id = call.caller_symbol_snapshot_id
+        LEFT JOIN code_repository_symbols callee
+          ON callee.source_scope = call.source_scope
+         AND callee.symbol_snapshot_id = call.callee_symbol_snapshot_id
         WHERE call.source_scope = ?1
         ",
         params![source_scope],

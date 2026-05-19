@@ -7,7 +7,7 @@ use super::{
     records::{reference_record, symbol_record, upsert_reference, upsert_symbol},
 };
 
-const MAX_EXPORTED_CONSTRUCTED_VALUE_LINES: usize = 64;
+const MAX_EXPORTED_VALUE_LINES: usize = 64;
 
 pub(super) fn collect_manual_nodes(
     context: &FileParseContext<'_>,
@@ -79,8 +79,7 @@ pub(super) fn manual_definitions(
     {
         return vec![definition];
     }
-    if let Some(definition) =
-        javascript_like_exported_constructed_value_definition(content, language_id, node)
+    if let Some(definition) = javascript_like_exported_value_definition(content, language_id, node)
     {
         return vec![definition];
     }
@@ -164,7 +163,7 @@ fn javascript_like_function_node(node: Node<'_>) -> bool {
     )
 }
 
-fn javascript_like_exported_constructed_value_definition(
+fn javascript_like_exported_value_definition(
     content: &str,
     language_id: &str,
     node: Node<'_>,
@@ -176,7 +175,7 @@ fn javascript_like_exported_constructed_value_definition(
         return None;
     }
     let value = node.child_by_field_name("value")?;
-    if !javascript_like_constructed_value(value) {
+    if !javascript_like_retrievable_exported_value(value) {
         return None;
     }
     let name = named_property_text(content, node.child_by_field_name("name")?)?;
@@ -184,21 +183,48 @@ fn javascript_like_exported_constructed_value_definition(
         return None;
     }
     let range = syntax_range(node);
-    if range.line_end.saturating_sub(range.line_start) > MAX_EXPORTED_CONSTRUCTED_VALUE_LINES {
+    if range.line_end.saturating_sub(range.line_start) > MAX_EXPORTED_VALUE_LINES {
         return None;
     }
 
     Some((name, "constant", range))
 }
 
-fn javascript_like_constructed_value(value: Node<'_>) -> bool {
+fn javascript_like_retrievable_exported_value(value: Node<'_>) -> bool {
+    let value = unwrap_javascript_like_expression(value);
     if value.kind() == "new_expression" {
         return true;
     }
-    value.kind() == "call_expression"
+    if value.kind() == "call_expression"
         && value
             .child_by_field_name("function")
             .is_some_and(|function| function.kind() == "member_expression")
+    {
+        return true;
+    }
+
+    matches!(value.kind(), "object" | "array")
+}
+
+fn unwrap_javascript_like_expression(mut node: Node<'_>) -> Node<'_> {
+    for _ in 0..4 {
+        if matches!(
+            node.kind(),
+            "as_expression" | "satisfies_expression" | "parenthesized_expression"
+        ) {
+            if let Some(inner) = node
+                .child_by_field_name("value")
+                .or_else(|| node.child_by_field_name("left"))
+                .or_else(|| node.named_child(0))
+            {
+                node = inner;
+                continue;
+            }
+        }
+        break;
+    }
+
+    node
 }
 
 fn has_export_statement_ancestor(mut node: Node<'_>) -> bool {

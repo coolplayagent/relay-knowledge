@@ -5,8 +5,9 @@ use rusqlite::params;
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
-        CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeReferenceRecord,
+        CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
+        CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
@@ -77,6 +78,74 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         languages.get(&("import".to_owned(), "py/app.py".to_owned())),
         Some(&"python".to_owned())
     );
+}
+
+#[tokio::test]
+async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_queries() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:call-signature-search";
+    let session = session_for_scope(source_scope);
+    let path = "table/table.cc";
+    let file = file(source_scope, "table-file", path, "cpp");
+    let mut caller = symbol(
+        source_scope,
+        "internal-get-symbol",
+        "table-file",
+        path,
+        "InternalGet",
+        "Status Table::InternalGet(const ReadOptions& options) {",
+    );
+    caller.line_range = RepositoryCodeRange { start: 20, end: 44 };
+    let mut call_reference = reference(
+        source_scope,
+        "read-block-reference",
+        "table-file",
+        path,
+        "ReadBlock",
+    );
+    call_reference.line_range = RepositoryCodeRange { start: 30, end: 30 };
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 64,
+            files: vec![file],
+            symbols: vec![caller],
+            references: vec![call_reference],
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "Table",
+        selector,
+        CodeQueryKind::Callees,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("callee search should succeed");
+
+    assert_eq!(hits[0].path, path);
+    assert!(hits[0].excerpt.contains("ReadBlock"));
 }
 
 #[tokio::test]
@@ -272,6 +341,32 @@ fn reference(
         confidence_basis_points: 2_500,
         confidence_tier: "ambiguous".to_owned(),
         byte_range: RepositoryCodeRange { start: 0, end: 6 },
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+    }
+}
+
+fn symbol(
+    source_scope: &str,
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+    signature: &str,
+) -> RepositoryCodeSymbolRecord {
+    RepositoryCodeSymbolRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        symbol_snapshot_id: symbol_snapshot_id.to_owned(),
+        canonical_symbol_id: format!("repo://repo/{}::{name}", path.replace('/', "::")),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "cpp".to_owned(),
+        name: name.to_owned(),
+        qualified_name: format!("{}::{name}", path.replace('/', "::")),
+        kind: "function".to_owned(),
+        signature: signature.to_owned(),
+        doc_comment: None,
+        byte_range: RepositoryCodeRange { start: 0, end: 64 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
     }
 }

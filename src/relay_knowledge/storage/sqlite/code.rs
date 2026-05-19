@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 #[path = "code_query.rs"]
 mod code_query;
@@ -38,6 +38,10 @@ mod code_search;
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
+
+#[cfg(test)]
+#[path = "code_incremental_search_tests.rs"]
+mod code_incremental_search_tests;
 
 #[cfg(test)]
 #[path = "code_batch_finalize_tests.rs"]
@@ -88,6 +92,8 @@ use crate::{
 use super::SqliteGraphStore;
 use code_cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index};
 pub(super) use code_search::SearchDocumentInserter;
+
+const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
 use code_search::insert_search_document;
 use code_status::{canonical_filter_values, canonical_path_filters, parse_json_list};
 
@@ -651,6 +657,8 @@ fn insert_imports_calls_chunks_diagnostics(
         .iter()
         .map(|file| (file.path.as_str(), file.language_id.as_str()))
         .collect::<BTreeMap<_, _>>();
+    let symbol_signatures_by_snapshot_id =
+        call_symbol_signatures_by_snapshot_id(transaction, snapshot)?;
     for import in &snapshot.imports {
         transaction.execute(
             "
@@ -693,6 +701,18 @@ fn insert_imports_calls_chunks_diagnostics(
         )?;
     }
     for call in &snapshot.calls {
+        let caller_symbol =
+            call.caller_symbol_snapshot_id
+                .as_deref()
+                .and_then(|symbol_snapshot_id| {
+                    symbol_signatures_by_snapshot_id.get(symbol_snapshot_id)
+                });
+        let callee_symbol =
+            call.callee_symbol_snapshot_id
+                .as_deref()
+                .and_then(|symbol_snapshot_id| {
+                    symbol_signatures_by_snapshot_id.get(symbol_snapshot_id)
+                });
         transaction.execute(
             "
             INSERT INTO code_repository_calls (
@@ -734,6 +754,8 @@ fn insert_imports_calls_chunks_diagnostics(
                 call.caller_name.as_deref().unwrap_or_default(),
                 call.callee_name.as_str(),
                 call.target_hint.as_deref().unwrap_or_default(),
+                caller_symbol.map_or("", String::as_str),
+                callee_symbol.map_or("", String::as_str),
                 call.path.as_str(),
             ],
         )?;
@@ -811,6 +833,68 @@ fn insert_imports_calls_chunks_diagnostics(
     }
 
     Ok(())
+}
+
+fn call_symbol_signatures_by_snapshot_id(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CodeIndexSnapshot,
+) -> Result<BTreeMap<String, String>, StorageError> {
+    let mut requested_symbol_ids = BTreeSet::new();
+    for call in &snapshot.calls {
+        if let Some(symbol_snapshot_id) = call.caller_symbol_snapshot_id.as_deref() {
+            requested_symbol_ids.insert(symbol_snapshot_id);
+        }
+        if let Some(symbol_snapshot_id) = call.callee_symbol_snapshot_id.as_deref() {
+            requested_symbol_ids.insert(symbol_snapshot_id);
+        }
+    }
+    if requested_symbol_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut signatures = snapshot
+        .symbols
+        .iter()
+        .filter(|symbol| requested_symbol_ids.contains(symbol.symbol_snapshot_id.as_str()))
+        .map(|symbol| (symbol.symbol_snapshot_id.clone(), symbol.signature.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let missing_symbol_ids = requested_symbol_ids
+        .into_iter()
+        .filter(|symbol_snapshot_id| !signatures.contains_key(*symbol_snapshot_id))
+        .collect::<Vec<_>>();
+    if missing_symbol_ids.is_empty() {
+        return Ok(signatures);
+    }
+
+    for symbol_id_chunk in missing_symbol_ids.chunks(MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT)
+    {
+        let placeholders = std::iter::repeat_n("?", symbol_id_chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(symbol_id_chunk.len() + 1);
+        values.push(Value::Text(snapshot.source_scope.clone()));
+        values.extend(
+            symbol_id_chunk
+                .iter()
+                .map(|symbol_snapshot_id| Value::Text((*symbol_snapshot_id).to_owned())),
+        );
+        let mut statement = transaction.prepare(&format!(
+            "
+            SELECT symbol_snapshot_id, signature
+            FROM code_repository_symbols
+            WHERE source_scope = ? AND symbol_snapshot_id IN ({placeholders})
+            "
+        ))?;
+        let rows = statement.query_map(params_from_iter(values), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (symbol_snapshot_id, signature) = row?;
+            signatures.insert(symbol_snapshot_id, signature);
+        }
+    }
+
+    Ok(signatures)
 }
 
 fn update_repository_after_snapshot(
