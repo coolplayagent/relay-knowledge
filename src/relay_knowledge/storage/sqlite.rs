@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 mod code;
@@ -34,6 +35,8 @@ use crate::{
 };
 use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
 
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// SQLite implementation of graph facts, mutation log, and index metadata.
 #[derive(Debug, Clone)]
 pub struct SqliteGraphStore {
@@ -49,6 +52,7 @@ impl SqliteGraphStore {
         }
 
         let connection = Connection::open(&path)?;
+        configure_connection(&connection)?;
         schema_migration::prepare_existing_database(&connection)?;
         initialize_schema(&connection)?;
 
@@ -60,6 +64,7 @@ impl SqliteGraphStore {
     /// Opens an in-memory database for isolated tests.
     pub fn open_in_memory() -> Result<Self, StorageError> {
         let connection = Connection::open_in_memory()?;
+        configure_connection(&connection)?;
         initialize_schema(&connection)?;
 
         Ok(Self {
@@ -83,6 +88,12 @@ impl SqliteGraphStore {
             .await?
         })
     }
+}
+
+fn configure_connection(connection: &Connection) -> Result<(), StorageError> {
+    connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+
+    Ok(())
 }
 
 fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {

@@ -1,6 +1,8 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779223761-bounded-sqlite-schema-maintenance
+- 算法/架构/不变量/预期影响/风险：为持久化 SQLite 连接设置 30s bounded busy timeout，并把 call FTS signature 兼容升级从每次 open 扫描 `code_repository_calls`、FTS 和 caller/callee signature 改为 `code_repository_schema_migrations` 一次性 marker；首次升级在 `BEGIN IMMEDIATE` 内重查 marker、重建 call search 文档并记录版本，后续 open 只做主键检查。变更限定在 SQLite storage 初始化和 code schema 维护边界，仍由既有 blocking worker/Mutex 隔离，不改变 parser、graph facts、FTS 文档格式、ranking、candidate limit、repo-set overlay、semantic/vector、env/paths/net、CLI/API、安装发布或 harness。旧库无 symbol link columns 时继续 legacy backfill，事务失败回滚且不写半个 marker；预期解除 cached-home register/repo-set create 重扫超时和并发 query `database is locked` 风险。风险是 marker 写入后不再昂贵校验手工篡改的旧 call FTS 内容，且首次升级仍会取得一次写锁，受 30s timeout、事务内重查和后续新索引始终写 signature 控制。
 ## 候选优化说明：run-1779205289-inline-construct-hybrid-chunk-ranking
 - 算法：Hybrid chunk 后置评分在 query 明确包含 inline/lambda/closure/callback/handler/nested 等意图时，识别 JS/TS arrow、Java/C++ lambda、Rust closure、Go function literal、Python nested def 与 C static inline 等源码形态，并要求已有正分候选覆盖至少三个规范化查询词后才给有界 bonus。
 - 架构：变更限定在 SQLite code retrieval 的 bounded Rust scoring 层和单测；复用既有 FTS candidate、path/language filter、chunk/symbol schema、dedupe/truncate、freshness/version、CLI/API、semantic/vector provider、env/paths/net、安装发布与 self-iteration harness 边界。
@@ -995,3 +997,18 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - invariants: 保留 `loop|once|evaluate|chart` 入口和常用参数语义；早期 run/report/patch 文件可作为历史资料留在既有工作树，v2 状态写入 `runs-v2.jsonl`、`reports-v2/`、`patches-v2/` 和 `score-v2.*`，共享 `memory/index.jsonl`、summary/detail 和 patch 索引用于渐进式加载；候选文档 gate、受保护目标、epsilon-Pareto 采纳和 no-fixture-special-casing 约束继续存在。
 - expected impact: 降低评估阶段 wall time，尤其是多仓库索引后 query case 和 fixture case 的等待时间；同时让 harness 可以独立于产品 crate 演进、测试和发布，并避免自定义 Codex/judge 子进程在大 prompt 或早期输出下管道互锁。
 - risks: v2 状态格式不兼容早期 run history；默认多进程并发会提高瞬时 CPU/I/O 压力，因此通过 `--jobs`、`--repo-jobs`、`--query-jobs` 和 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS` 提供显式限流。
+
+## run-1779223761
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779223761.patch`
+- score: 0.765603 (foundational=1.000000, competitive=0.700000, accuracy=0.850000, semantic_vector=0.000000, research_judge=n/a, performance=0.786685, stability=1.000000)
+- cases: 12/13 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite.rs`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
+- key improvements: score_component:performance 0.76505->0.7866848369779352; metric:temporal_samples_go_index_ms 3771.0->1838.0; metric:temporal_samples_go_register_index_ms 5549.0->3553.0; metric:leveldb_cpp_index_ms 7611.0->1837.0; metric:leveldb_cpp_register_index_ms 9369.0->3573.0; metric:leveldb_cpp_query_p50_ms 6172.0->4195.0; metric:leveldb_cpp_query_p95_ms 8646.0->7606.0
+- known degradations: metric:relay_teams_index_ms 2563.0->6153.0; metric:relay_teams_register_index_ms 4319.0->7929.0; metric:relay_teams_query_p50_ms 4416.0->6413.0; metric:relay_teams_query_p95_ms 6938.0->9020.0
+- latency metrics: cargo_fmt_check_ms=1815ms; self_iteration_cargo_fmt_check_ms=242ms; cargo_build_debug_ms=20951ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=2258ms; temporal_sdk_go_register_index_ms=4075ms; temporal_samples_go_index_ms=1838ms; temporal_samples_go_register_index_ms=3553ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+

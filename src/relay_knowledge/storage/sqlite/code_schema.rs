@@ -2,9 +2,16 @@ use rusqlite::Connection;
 
 use crate::storage::StorageError;
 
+const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
+
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
+        CREATE TABLE IF NOT EXISTS code_repository_schema_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS code_repositories (
             repository_id TEXT PRIMARY KEY,
             alias TEXT NOT NULL UNIQUE,
@@ -502,49 +509,36 @@ fn rebuild_call_search_documents_after_signature_upgrade(
     connection: &Connection,
 ) -> Result<(), StorageError> {
     if !call_search_supports_symbol_signatures(connection)?
-        || !call_search_documents_need_signature_rebuild(connection)?
+        || code_schema_migration_applied(connection, CALL_SEARCH_SIGNATURE_MIGRATION)?
     {
         return Ok(());
     }
 
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = rebuild_call_search_documents_with_migration_marker(connection);
+    match result {
+        Ok(()) => connection
+            .execute_batch("COMMIT")
+            .map_err(StorageError::from),
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn rebuild_call_search_documents_with_migration_marker(
+    connection: &Connection,
+) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, CALL_SEARCH_SIGNATURE_MIGRATION)? {
+        return Ok(());
+    }
     connection.execute(
         "DELETE FROM code_repository_search WHERE document_kind = 'call'",
         [],
     )?;
-    insert_search_calls(connection)
-}
-
-fn call_search_documents_need_signature_rebuild(
-    connection: &Connection,
-) -> Result<bool, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT EXISTS (
-                SELECT 1
-                FROM code_repository_calls call
-                LEFT JOIN code_repository_search search
-                  ON search.source_scope = call.source_scope
-                 AND search.document_kind = 'call'
-                 AND search.record_id = call.call_id
-                LEFT JOIN code_repository_symbols caller
-                  ON caller.source_scope = call.source_scope
-                 AND caller.symbol_snapshot_id = call.caller_symbol_snapshot_id
-                LEFT JOIN code_repository_symbols callee
-                  ON callee.source_scope = call.source_scope
-                 AND callee.symbol_snapshot_id = call.callee_symbol_snapshot_id
-                WHERE search.rowid IS NULL
-                   OR (coalesce(caller.signature, '') <> ''
-                       AND instr(search.content, caller.signature) = 0)
-                   OR (coalesce(callee.signature, '') <> ''
-                       AND instr(search.content, callee.signature) = 0)
-                LIMIT 1
-            )
-            ",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StorageError::from)
+    insert_search_calls(connection)?;
+    mark_code_schema_migration(connection, CALL_SEARCH_SIGNATURE_MIGRATION)
 }
 
 fn call_search_supports_symbol_signatures(connection: &Connection) -> Result<bool, StorageError> {
@@ -665,6 +659,37 @@ fn backfill_edge_search_language_ids(connection: &Connection) -> Result<(), Stor
     Ok(())
 }
 
+fn code_schema_migration_applied(
+    connection: &Connection,
+    name: &str,
+) -> Result<bool, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT EXISTS (
+                SELECT 1
+                FROM code_repository_schema_migrations
+                WHERE name = ?1
+            )
+            ",
+            [name],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StorageError::from)
+}
+
+fn mark_code_schema_migration(connection: &Connection, name: &str) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        INSERT OR REPLACE INTO code_repository_schema_migrations (name, applied_at_ms)
+        VALUES (?1, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+        ",
+        [name],
+    )?;
+
+    Ok(())
+}
+
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
@@ -689,7 +714,9 @@ fn table_has_columns(
 mod tests {
     use rusqlite::Connection;
 
-    use super::initialize_code_schema;
+    use super::{
+        CALL_SEARCH_SIGNATURE_MIGRATION, code_schema_migration_applied, initialize_code_schema,
+    };
 
     #[test]
     fn backfills_legacy_call_search_without_symbol_link_columns() {
@@ -747,6 +774,8 @@ mod tests {
         connection
             .execute_batch(
                 "
+                DELETE FROM code_repository_schema_migrations
+                WHERE name = 'call-search-symbol-signatures-v1';
                 INSERT INTO code_repositories (
                     repository_id, alias, root_path, path_filters_json, language_filters_json,
                     last_indexed_scope_id, last_indexed_commit, tree_hash, state,
@@ -813,5 +842,80 @@ mod tests {
 
         assert_eq!(call_rows, 1);
         assert!(content.contains("Status Table::ReadBlock"));
+        assert!(
+            code_schema_migration_applied(&connection, CALL_SEARCH_SIGNATURE_MIGRATION)
+                .expect("migration marker should load")
+        );
+    }
+
+    #[test]
+    fn skips_call_search_rebuild_after_signature_migration_marker() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        initialize_code_schema(&connection).expect("code schema should initialize");
+        connection
+            .execute_batch(
+                "
+                INSERT OR REPLACE INTO code_repository_schema_migrations (name, applied_at_ms)
+                VALUES ('call-search-symbol-signatures-v1', 1);
+                INSERT INTO code_repositories (
+                    repository_id, alias, root_path, path_filters_json, language_filters_json,
+                    last_indexed_scope_id, last_indexed_commit, tree_hash, state,
+                    indexed_file_count, symbol_count, reference_count, chunk_count,
+                    stale, degraded_reason
+                )
+                VALUES (
+                    'repo', 'fixture', '/tmp/repo', '[]', '[]', NULL, NULL, NULL, 'fresh',
+                    0, 0, 0, 0, 0, NULL
+                );
+                INSERT INTO code_repository_files (
+                    repository_id, source_scope, file_id, path, language_id, blob_hash,
+                    byte_len, line_count, parse_status, degraded_reason
+                )
+                VALUES ('repo', 'scope', 'table-file', 'src/table.rs', 'rust', 'hash', 20, 1, 'parsed', NULL);
+                INSERT INTO code_repository_symbols (
+                    repository_id, source_scope, symbol_snapshot_id, canonical_symbol_id,
+                    file_id, path, language_id, name, qualified_name, kind, signature,
+                    doc_comment, byte_start, byte_end, line_start, line_end
+                )
+                VALUES (
+                    'repo', 'scope', 'read-block-symbol',
+                    'repo://repo/src::table.rs::ReadBlock', 'table-file', 'src/table.rs',
+                    'rust', 'ReadBlock', 'Table::ReadBlock', 'function',
+                    'Status Table::ReadBlock(BlockContents* contents)', NULL, 0, 20, 1, 1
+                );
+                INSERT INTO code_repository_calls (
+                    repository_id, source_scope, call_id, file_id, path,
+                    caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id,
+                    callee_name, target_hint, resolution_state, confidence_basis_points,
+                    confidence_tier, line_start, line_end
+                )
+                VALUES (
+                    'repo', 'scope', 'call-1', 'table-file', 'src/table.rs',
+                    NULL, 'InternalGet', 'read-block-symbol', 'ReadBlock', 'ReadBlock',
+                    'resolved', 8000, 'inferred', 1, 1
+                );
+                INSERT INTO code_repository_search (
+                    source_scope, document_kind, record_id, path, language_id, content
+                )
+                VALUES ('scope', 'call', 'call-1', 'src/table.rs', 'rust', 'already migrated sentinel');
+                ",
+            )
+            .expect("marked schema should initialize");
+
+        initialize_code_schema(&connection).expect("marked schema should skip call search rebuild");
+
+        let content: String = connection
+            .query_row(
+                "
+                SELECT content
+                FROM code_repository_search
+                WHERE document_kind = 'call' AND record_id = 'call-1'
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("call search row should load");
+
+        assert_eq!(content, "already migrated sentinel");
     }
 }
