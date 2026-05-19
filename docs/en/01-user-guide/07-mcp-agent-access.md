@@ -44,7 +44,9 @@ RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS
 
 Default policy requires explicit allowed scopes. Without `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES`, graph tools reject unspecified scopes unless `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` is set or the requested scope is already a code repository alias registered in the current runtime.
 
-Registered repository aliases are added to a process-local dynamic allow-list on first MCP access. Unknown scopes are still rejected and return a remediation hint such as `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>`. Remote binds are rejected by default; non-localhost listening requires `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`.
+Registered repository aliases are added to a process-local dynamic allow-list on first MCP access. Repository-set aliases are not cached this way: `relay_code_repository_set_query` revalidates the current set members on each call. A repository-set alias is allowed only when the set alias is explicitly allowed and does not collide with a registered repository alias, or when every current member repository alias or member `source_scope` is already allowed by static policy or runtime repository authorization.
+
+Unknown scopes are still rejected and return a remediation hint such as `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>`. Remote binds are rejected by default; non-localhost listening requires `RELAY_KNOWLEDGE_MCP_ALLOW_REMOTE_CLIENTS=true`.
 
 Before allowing remote clients, verify HTTP bind, origin allow-list, scope allow-list, QoS budgets, and audit policy. Do not make remote bind plus unspecified scope the default configuration.
 
@@ -69,6 +71,7 @@ Current MCP tool surface:
 - Service status.
 - Index status.
 - Authorized code graph query.
+- Authorized repository-set code graph query.
 - Authorized code impact analysis.
 
 Current MCP resource surface:
@@ -90,7 +93,7 @@ Resources and prompts provide read-only diagnostics, context, and invocation tem
 
 MCP does not expose index refresh or repository indexing. Repository indexing must be triggered explicitly through `relay-knowledge repo index` or `relay-knowledge repo update`; derived index refresh must be triggered through CLI/Web operational workflows.
 
-Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
+Agent requests are recorded as bounded in-process audit events with runtime identity, scope, freshness, QoS decision, budget, truncation, result count, and status. Repository-set query audit entries record the `request.set_alias` value as the scope so multi-repository reads remain visible in the audit trail. See [Chapter 10](10-workers-proposals-audit.md) for persistent audit sink configuration.
 
 ## 7.6 Metrics Endpoint
 

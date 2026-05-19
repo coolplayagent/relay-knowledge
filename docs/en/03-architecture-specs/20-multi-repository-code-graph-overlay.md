@@ -17,6 +17,16 @@ This design preserves four constraints:
 - Every multi-repository result explains its repository, commit, tree hash, and scope.
 - Cross-repository relationships are explainable overlay edges, not single-repository resolved edges.
 
+## Implementation Status
+
+The current implementation provides the initial product path across all three phases:
+
+- `repo-set create/add/query/status/refresh` and the shared API/Web/MCP entry points use an explicit repository set selector.
+- SQLite persists `code_repository_sets`, `code_repository_set_members`, `code_repository_cross_edges`, overlay status, and overlay refresh tasks. Repository sets do not copy rows into base code fact tables.
+- Multi-repository query fans out at the application layer to each member's persisted `source_scope`, then merges by member priority, freshness, and overlay confidence. Request path/language filters narrow the member scope instead of widening or re-resolving it through current repository defaults. Deduplication includes repository, scope, path, line range, and excerpt.
+- `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON.
+- Scope retention preserves single-repository snapshots referenced by repository set members. Background overlay refresh tasks use durable leases, retries, and dead-letter state.
+
 ## 2. Current Baseline
 
 The current implementation already has the foundation:
@@ -94,7 +104,7 @@ RepositorySetMember {
 }
 ```
 
-`source_scope` must point to an existing single-repository `repository_snapshot`. If a member ref resolves to a snapshot that has not been indexed, multi-repository queries report missing or stale state instead of silently falling back to an old snapshot.
+`source_scope` must point to an existing single-repository `repository_snapshot`. If a member ref resolves to a snapshot that has not been indexed, multi-repository queries report missing or stale state instead of silently falling back to an old snapshot. Re-adding the same repository to a set replaces the previous member pointer so a moving ref such as `HEAD` does not fan out to both old and new snapshots.
 
 ## 4. Graph Model
 
@@ -148,6 +158,8 @@ code_repository_set_members
   priority INTEGER NOT NULL
   PRIMARY KEY (set_id, repository_id, source_scope)
 ```
+
+The storage primary key keeps historical scope identity explicit, but the write path treats `(set_id, repository_id)` as the active member pointer and deletes the previous row before inserting a replacement member.
 
 Derived cross-repository edges are stored separately:
 
@@ -211,6 +223,8 @@ set alias
 
 The first implementation should fan out at the application layer to existing `search_code` behavior, then merge and rerank. A SQL `source_scope IN (...)` optimization can come later after candidate windows and observability are well understood. Either way, every candidate must retain its original `source_scope`.
 
+Repository-set queries must search the member's stored `source_scope` directly. Query-time path and language filters are applied as additional narrowing predicates against that stored scope; they are not merged into the member selector as OR alternatives, and they must not cause the query to resolve against the repository's current registration defaults.
+
 ## 7. Ranking and Precision Constraints
 
 Single-repository queries must not use multi-repository ranking signals. Multi-repository queries may add:
@@ -246,6 +260,7 @@ The first version only needs import/module evidence with clear matches. Without 
 
 - If any member `source_scope` is missing, the set is incomplete.
 - If any member snapshot is stale, the set is stale.
+- For moving member refs such as `HEAD` or branch names, status re-resolves the ref through the repository worktree. If it points at a different commit than the stored member snapshot, the member and set are stale until the member pointer is refreshed.
 - If member snapshots are fresh but cross-edge overlay is behind, basic multi-repository results can be returned with overlay-stale metadata.
 
 Single-repository scope retention must not prune scopes still referenced by repository set members. Deleting a repository set removes those references; normal single-repository retention can then clean old scopes.
@@ -269,7 +284,7 @@ Responses include:
 - Each result's repository metadata and source scope.
 - Overlay freshness, cross-edge evidence, truncation, and degraded reason.
 
-MCP and Web use the same selector. A plain `source_scope` string must not silently represent a multi-repository set.
+MCP and Web use the same selector. A plain `source_scope` string must not silently represent a multi-repository set. MCP may promote a repository set at runtime only when the set alias is explicitly allowed without colliding with a registered repository alias, or every current member repository scope is already allowed by the static or runtime policy. Repository-set authorization is revalidated on every MCP call instead of being stored in the repository alias runtime cache, and MCP audit records the set alias for repository-set query responses.
 
 ## 11. Implementation Phases
 

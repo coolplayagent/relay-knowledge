@@ -573,6 +573,29 @@ async fn web_operation_endpoint_maps_bad_payloads_to_http_errors() {
         "code repository 'missing' is not registered"
     );
 
+    let bad_repo_set_priority = execute_json(
+        service.clone(),
+        json!({
+            "snapshot": {
+                "name": "Add repository set member",
+                "command": "relay-knowledge repo-set add workspace core --ref HEAD --priority invalid",
+                "payload": {
+                    "operation": "code.repo_set.add",
+                    "set_alias": "workspace",
+                    "repository_alias": "core",
+                    "ref": "HEAD",
+                    "priority": "invalid"
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        bad_repo_set_priority["error"],
+        "priority must be an integer"
+    );
+
     let bad_worker = execute_json(
         service,
         json!({

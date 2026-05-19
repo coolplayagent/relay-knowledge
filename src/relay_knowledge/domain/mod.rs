@@ -2,6 +2,7 @@
 
 mod code;
 mod code_repository;
+mod code_repository_set;
 mod entity;
 mod error;
 mod graph_version;
@@ -29,6 +30,13 @@ pub use code_repository::{
     CodeScopeRetentionSummary, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
     RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     code_snapshot_scope_id,
+};
+pub use code_repository_set::{
+    CodeRepositoryCrossEdge, CodeRepositorySet, CodeRepositorySetAddMemberRequest,
+    CodeRepositorySetCreateRequest, CodeRepositorySetMember, CodeRepositorySetMemberStatus,
+    CodeRepositorySetOverlayStatus, CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest,
+    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord,
+    CodeRepositorySetRefreshTaskState, CodeRepositorySetStatus,
 };
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;

@@ -76,8 +76,9 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
   events, source spans, confidence, graph versions, and accepted/proposed
   grounding status.
 - Code repository registration, tree-sitter indexing, full and incremental
-  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, and
-  impact analysis.
+  refresh, worktree overlay indexing, symbol/reference/chunk retrieval, impact
+  analysis, and thin multi-repository `repo-set` overlay queries without
+  copying base facts.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
   locate, or other external search software: explicitly scan authorized roots
   and use SQLite/FTS5 to quickly find files by name, path, extension, and
@@ -138,6 +139,7 @@ Key specs:
 - [Book 3, Chapter 13: Code Retrieval Ranking and Impact Analysis](docs/en/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
 - [Book 3, Chapter 15: Resident Agent Graph Access Protocol](docs/en/03-architecture-specs/15-resident-agent-graph-access-protocol.md)
 - [Book 3, Chapter 19: Installation, Release, and Upgrade](docs/en/03-architecture-specs/19-installation-release-and-upgrade.md)
+- [Book 3, Chapter 20: Multi-Repository Code Graph Overlay](docs/en/03-architecture-specs/20-multi-repository-code-graph-overlay.md)
 
 ## Development
 
@@ -201,6 +203,9 @@ relay-knowledge repo register /path/to/repo --alias core --path src --language r
 relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo-set create workspace --format json
+relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 relay-knowledge graph inspect --format json

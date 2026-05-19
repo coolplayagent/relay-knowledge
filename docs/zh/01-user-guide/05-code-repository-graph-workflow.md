@@ -89,6 +89,32 @@ branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个
 
 符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。
 
+### 多仓库 Repository Set 查询
+
+多仓库查询使用显式 `repo-set` 覆盖层。先把每个成员仓库索引成真实单仓 snapshot，再创建集合并把成员指向这些 snapshot:
+
+```bash
+relay-knowledge repo-set create workspace --format json
+relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
+relay-knowledge repo-set refresh workspace --format json
+```
+
+`repo-set add` 要求目标 ref 和 path/language filter 已经有匹配的单仓索引 scope；如果不存在，会失败而不是回退到旧 scope。同一 repository 再次加入同一个 set 时会替换原成员 snapshot。`repo-set refresh` 只重建跨仓 import/module overlay edges，不复制 `code_repository_files`、`code_repository_symbols` 或 `code_repository_chunks` 基础事实。
+
+查询集合时会 fan-out 到成员的真实 `source_scope`，然后合并排序:
+
+```bash
+relay-knowledge repo-set query workspace \
+  --query retry_policy \
+  --kind definition \
+  --freshness allow-stale \
+  --limit 20 \
+  --format json
+```
+
+每条结果都包含 member repository alias、repository id、resolved commit、tree hash 和原始 `source_scope`。查询里的 `--path` 和 `--language` 只会收窄成员保存的 scope，不会扩大 scope，也不会切到仓库最新注册默认值。同名路径或同名符号不会跨仓去重；去重键包含 repository、scope、path、line range 和 excerpt。`--freshness wait-until-fresh` 会要求所有成员 snapshot fresh、`HEAD` 等移动 ref 仍解析到成员保存的 commit，且 overlay 不落后；否则返回明确错误。MCP 使用独立的 `relay_code_repository_set_query` 工具，每次调用都会重新校验当前成员，会在审计条目中记录 set alias，并要求 set alias 或每个成员 scope 已被策略允许。
+
 ## 5.5 增量更新
 
 索引两个 ref 之间的变化:
