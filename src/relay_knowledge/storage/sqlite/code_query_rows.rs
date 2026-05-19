@@ -48,6 +48,8 @@ pub(super) struct CallRow {
     pub(super) confidence_tier: String,
     pub(super) caller_canonical_symbol_id: Option<String>,
     pub(super) callee_canonical_symbol_id: Option<String>,
+    pub(super) caller_signature: Option<String>,
+    pub(super) callee_signature: Option<String>,
     pub(super) caller_excerpt: Option<String>,
 }
 

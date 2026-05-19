@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-call-search-symbol-signature-fts-20260519
+- 算法/架构：checkpoint finalize、snapshot apply 与旧库 backfill 写入 `call` FTS 文档时，在既有 caller/callee/target/path 字段后追加已索引 caller 与 callee symbol signature；`callers`/`callees` 后置评分同步把对应端的 signature 作为现有 `ScoreQuery` 字段，不新增 SQL schema、candidate limit 或评分权重。
+- 不变量：call edge 事实、reference/import resolution、candidate limit、dedupe/truncate、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布与 self-iteration harness 均不变；没有 caller/callee symbol 的 call 继续使用原有字段。
+- 预期影响：C/C++、Java、Go、TypeScript 等大仓中，`Table::InternalGet`、`pkg.Type.method` 这类 scoped callee/caller 查询可通过函数签名中的 owner-qualified surface 召回已有 call edge，改善代码图查询零结果与研究 judge 对 source-span evidence 的评价。
+- 已知风险：call FTS 文档会多写短签名字段，register-to-index 的 FTS 写入体积略增；风险受已有 signature 512 字节上界、bounded candidate limit、direction prefilter 与后置评分控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
 ## 候选优化说明：manual-js-ts-exported-object-value-symbols-20260519
 - 算法：JS/TS parser manual extraction 在既有 exported constructed value 规则上，增加对短小 `export const name = {...}` 与 `export const name = [...]` 公共值的 `constant` symbol 抽取，并 unwrap bounded `as`/`satisfies`/parenthesized 表达式后判断实际值形态。
 - 架构：变更限定在 tree-sitter 解析后的 manual symbol extraction 层，复用现有 export ancestor、identifier validation、symbol upsert、signature/chunk 生成与 64 行上界；不改变 SQLite schema、FTS candidate、ranking/scoring、finalize、CLI/API、semantic/vector provider/env、research judge、网络/QoS、安装发布或 self-iteration harness 行为。
@@ -978,4 +983,3 @@ over", path.replace('/', "::")), +        file_id: file_id.to_owned(), +        
 Adopted optimization notes:
 
 unks +            .iter() +            .any(|chunk| chunk.symbol_snapshot_id == Some(symbol.symbol_snapshot_id.clone())), +        "{name} should create a retrievable symbol chunk", +    ); +} + +fn assert_missing_symbols<const N: usize>(snapshot: &CodeIndexSnapshot, names: [&str; N]) { +    for name in names { +        assert!( +            !snapshot.symbols.iter().any(|symbol| symbol.name == name), +            "{name} should not be indexed as an exported object value", +        ); +    } +} + +fn large_object_body() -> String { +    (0..70) +        .map(|index| format!("  item{index}: buildItem({index}),\n")) +        .collect::<String>() +} + +fn parse_source_snapshot(path: &str, source: &[u8]) -> CodeIndexSnapshot { +    let registration = +        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new()) +            .expect("registration should validate"); +    let mut build = SnapshotBuild::new( +        &registration, +        "commit".to_owned(), +        "tree".to_owned(), +        true, +        1, +        0, +    ); + +    parse_indexed_file(&mut build, path, source).expect("file should parse"); + +    build.finish() +} tokens used 222,047
-

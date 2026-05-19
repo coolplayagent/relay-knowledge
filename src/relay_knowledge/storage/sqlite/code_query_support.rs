@@ -624,7 +624,7 @@ pub(super) fn candidate_condition(fields: &[&str], query: &str) -> (String, Vec<
     (groups.join(" OR "), values)
 }
 
-fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
+pub(super) fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String> {
     let mut patterns = Vec::new();
     for token in fts_query_terms(query) {
         let token = escape_sql_like(&token.to_lowercase());
@@ -818,74 +818,6 @@ pub(super) fn fts_values_for_limited_with_language(
     values.push(Value::Integer(limit as i64));
 
     values
-}
-
-pub(super) fn fts_values_for_limited_with_language_and_call_direction(
-    source_scope: &str,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-    fts_query: &str,
-    fts_limit: usize,
-    limit: usize,
-) -> Vec<Value> {
-    let mut values = vec![
-        Value::Text(source_scope.to_owned()),
-        Value::Text(fts_query.to_owned()),
-        Value::Text(source_scope.to_owned()),
-    ];
-    push_path_filter_values(&mut values, &status.path_filters);
-    push_path_filter_values(&mut values, &request.repository.path_filters);
-    push_language_filter_values(&mut values, &status.language_filters);
-    push_language_filter_values(&mut values, &request.repository.language_filters);
-    push_call_direction_filter_values(&mut values, request);
-    values.push(Value::Integer(fts_limit as i64));
-    values.push(Value::Integer(limit as i64));
-
-    values
-}
-
-pub(super) fn call_direction_fts_filter_sql(request: &CodeRetrievalRequest) -> String {
-    let Some(column) = call_direction_filter_column(request.code_query_kind) else {
-        return String::new();
-    };
-    let patterns = candidate_patterns(&request.query, 8);
-    if patterns.is_empty() {
-        return String::new();
-    }
-    let clauses = patterns
-        .iter()
-        .map(|_| format!("{column} LIKE ? ESCAPE '\\'"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-
-    format!(
-        "AND EXISTS (
-            SELECT 1
-            FROM code_repository_calls call_filter
-            WHERE call_filter.source_scope = code_repository_search.source_scope
-              AND call_filter.call_id = code_repository_search.record_id
-              AND ({clauses})
-        )"
-    )
-}
-
-fn push_call_direction_filter_values(values: &mut Vec<Value>, request: &CodeRetrievalRequest) {
-    if call_direction_filter_column(request.code_query_kind).is_none() {
-        return;
-    }
-    values.extend(
-        candidate_patterns(&request.query, 8)
-            .into_iter()
-            .map(Value::Text),
-    );
-}
-
-fn call_direction_filter_column(kind: CodeQueryKind) -> Option<&'static str> {
-    match kind {
-        CodeQueryKind::Callers => Some("lower(call_filter.callee_name)"),
-        CodeQueryKind::Callees => Some("lower(coalesce(call_filter.caller_name, ''))"),
-        _ => None,
-    }
 }
 
 pub(super) fn fts_path_and_language_filter_sql(

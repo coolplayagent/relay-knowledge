@@ -4,6 +4,8 @@ use rusqlite::{Connection, params_from_iter};
 
 #[path = "code_query_call_counts.rs"]
 mod code_query_call_counts;
+#[path = "code_query_call_direction.rs"]
+mod code_query_call_direction;
 #[path = "code_query_flow_scoring.rs"]
 mod code_query_flow_scoring;
 #[path = "code_query_identifiers.rs"]
@@ -41,6 +43,9 @@ pub(super) use super::code_query_hits::{
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
+use code_query_call_direction::{
+    call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
+};
 use code_query_flow_scoring::{caller_context_density_bonus, execution_flow_chunk_bonus};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
@@ -390,6 +395,7 @@ fn search_calls(
                c.target_hint, c.resolution_state,
                c.confidence_basis_points, c.confidence_tier,
                caller.canonical_symbol_id, callee.canonical_symbol_id,
+               caller.signature, callee.signature,
                caller_chunk.content
         FROM code_repository_calls c
         INNER JOIN code_repository_files f
@@ -455,7 +461,9 @@ fn search_calls(
                 confidence_tier: row.get(15)?,
                 caller_canonical_symbol_id: row.get(16)?,
                 callee_canonical_symbol_id: row.get(17)?,
-                caller_excerpt: row.get(18)?,
+                caller_signature: row.get(18)?,
+                callee_signature: row.get(19)?,
+                caller_excerpt: row.get(20)?,
             })
         },
     )?;
@@ -491,11 +499,20 @@ fn search_calls(
                 .unwrap_or_default();
             let (base_score, scoped_identity_bonus) = match request.code_query_kind {
                 CodeQueryKind::Callees => (
-                    score_query.score([caller_name, caller_canonical_id]),
+                    score_query.score([
+                        caller_name,
+                        caller_canonical_id,
+                        row.caller_signature.as_deref().unwrap_or_default(),
+                    ]),
                     scoped_identity_query_bonus(query, [caller_canonical_id]),
                 ),
                 CodeQueryKind::Callers => (
-                    score_query.score([row.callee_name.as_str(), target_hint, callee_canonical_id]),
+                    score_query.score([
+                        row.callee_name.as_str(),
+                        target_hint,
+                        callee_canonical_id,
+                        row.callee_signature.as_deref().unwrap_or_default(),
+                    ]),
                     scoped_identity_query_bonus(query, [target_hint, callee_canonical_id]),
                 ),
                 _ => (
@@ -505,6 +522,8 @@ fn search_calls(
                         target_hint,
                         caller_canonical_id,
                         callee_canonical_id,
+                        row.caller_signature.as_deref().unwrap_or_default(),
+                        row.callee_signature.as_deref().unwrap_or_default(),
                     ]),
                     scoped_identity_query_bonus(
                         query,
