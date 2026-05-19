@@ -20,9 +20,71 @@ relay-knowledge help --format json
 relay-knowledge help repo query --format json
 ```
 
+Resolve the executable before the first operation by looking for the published
+`relay-knowledge` binary on `PATH`. Use the command form that matches the
+active shell:
+
+```bash
+command -v relay-knowledge
+relay-knowledge version --format json
+```
+
+```powershell
+Get-Command relay-knowledge
+relay-knowledge version --format json
+```
+
+```cmd
+where.exe relay-knowledge
+relay-knowledge version --format json
+```
+
+Do not use source-checkout build artifacts or source builds as an installation
+path. This skill is intended to operate published installs only. If the binary
+is missing, install it from a published channel first: prefer a verified GitHub
+Release archive, or use `cargo install relay-knowledge` from crates.io when
+Cargo is the selected published package channel.
+
 Do not start or configure MCP from this skill. If a task asks for MCP,
 Streamable HTTP, resources, prompts, sessions, or protocol tools, use the
 project MCP documentation or a separate MCP skill instead.
+
+When the user asks for a test, smoke check, or reproduction that should not
+touch existing runtime state, set an explicit temporary `RELAY_KNOWLEDGE_HOME`
+and clean it up after the scenario. Prefer local deterministic retrieval
+backends for isolated tests so smoke checks do not depend on external embedding
+services.
+
+POSIX shells:
+
+```bash
+export RELAY_KNOWLEDGE_HOME="$(mktemp -d /tmp/relay-knowledge-skill.XXXXXX)"
+export RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local
+export RELAY_KNOWLEDGE_VECTOR_BACKEND=local
+```
+
+PowerShell:
+
+```powershell
+$env:RELAY_KNOWLEDGE_HOME = Join-Path $env:TEMP ("relay-knowledge-skill-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $env:RELAY_KNOWLEDGE_HOME | Out-Null
+$env:RELAY_KNOWLEDGE_SEMANTIC_BACKEND = "local"
+$env:RELAY_KNOWLEDGE_VECTOR_BACKEND = "local"
+```
+
+cmd.exe:
+
+```cmd
+set "RELAY_KNOWLEDGE_HOME=%TEMP%\relay-knowledge-skill-%RANDOM%-%RANDOM%"
+mkdir "%RELAY_KNOWLEDGE_HOME%"
+set "RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local"
+set "RELAY_KNOWLEDGE_VECTOR_BACKEND=local"
+```
+
+If each command runs in a fresh shell or tool call, pass these environment
+variables inline on every `relay-knowledge` invocation rather than relying on a
+previous `export` to persist. Remove the temporary directory after capturing
+the test result.
 
 ## Readiness
 
@@ -35,6 +97,18 @@ relay-knowledge version
 relay-knowledge setup doctor --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
+```
+
+On Windows, use `Get-Command relay-knowledge` in PowerShell or
+`where.exe relay-knowledge` in cmd.exe before running the same diagnostics.
+
+Run live diagnostics with a command timeout when the host shell supports one,
+and report timeout as a diagnostic finding instead of waiting indefinitely:
+
+```bash
+timeout 20s relay-knowledge health --format json
+timeout 20s relay-knowledge service doctor --format json
+timeout 20s relay-knowledge audit query --limit 50 --format json
 ```
 
 For online install or upgrades, prefer the official release path first and
@@ -113,8 +187,9 @@ relay-knowledge graph inspect --format json
 
 ## Troubleshooting
 
-If a command fails, read its JSON error and avoid guessing hidden state. Run
-diagnostics in this order:
+If a command fails, prefer its JSON error when present; otherwise read the
+stderr or text error exactly and avoid guessing hidden state. Run diagnostics
+in this order:
 
 ```bash
 relay-knowledge status --format json
