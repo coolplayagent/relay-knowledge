@@ -27,6 +27,18 @@ relay-knowledge service doctor --format json
 
 `service status` 和 `service doctor` 当前复用统一 API 输出，报告 service mode、后台更新状态、service definition path、agent protocol status 和 refresh queue diagnostics。
 
+版本检查:
+
+```bash
+relay-knowledge version
+relay-knowledge version check --format json
+```
+
+`version` 只打印当前二进制版本，不加载 runtime configuration，也不联网。`version check`
+通过 `net::http` 按配置查询 GitHub Releases 和 crates.io，结果缓存到 runtime cache
+目录；普通交互式 text/markdown CLI 命令只会在发现稳定新版时向 stderr 输出短提示，且会先输出主命令
+stdout，不会自动替换二进制。
+
 ## 3.2 Provider 诊断
 
 ```bash
@@ -93,12 +105,13 @@ relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge setup doctor
 relay-knowledge setup profile local|agent-readonly|service|external-embedding
 relay-knowledge version
+relay-knowledge version check
 ```
 
 冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。
 
 ## 3.5 读写影响
 
-状态、健康、帮助、setup doctor/profile、provider probe、report 和 audit query 是诊断入口，不应修改图谱事实。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。
+状态、健康、帮助、setup doctor/profile、provider probe、version check、report 和 audit query 是诊断入口，不应修改图谱事实。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。
 
 自动化调用方应优先读取 `help --format json` 中的 operation 和 read/write 说明，再决定是否在 CI、agent 或 Web 操作面中开放命令。

@@ -10,6 +10,7 @@ mod operations;
 mod runtime;
 mod service;
 mod status;
+mod update;
 mod worker_proposals;
 
 pub use file_index::DEFAULT_FILE_QUERY_LIMIT;
@@ -18,3 +19,7 @@ pub use runtime::{
     RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,
 };
 pub use service::{AgentDurableAuditInput, RelayKnowledgeService};
+pub use update::{
+    UpdateRuntimeConfig, UpdateRuntimeConfigError, UpdateSource, VersionCheckResponse,
+    update_notice,
+};

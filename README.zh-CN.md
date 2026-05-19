@@ -158,6 +158,7 @@ relay-knowledge service definition write --format json
 relay-knowledge service operator pause
 relay-knowledge setup doctor --format json
 relay-knowledge setup profile agent-readonly --format json
+relay-knowledge version check --format json
 RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=docs relay-knowledge service run --web --mcp streamable-http
 relay-knowledge query --help
 relay-knowledge query -- --help

@@ -74,6 +74,7 @@ Normal local use does not require environment variables. Defaults are:
 - Local SQLite storage and deterministic semantic/vector read models are enabled.
 - Network and QoS budgets use conservative defaults.
 - MCP writes, remote listening, and silent updates are disabled by default.
+- Interactive text CLI commands check for newer stable versions on a 24-hour cache interval and only print a notice; they do not install or replace binaries.
 
 `status --format json` shows current configuration and status. For an isolated one-off experiment, set a temporary `RELAY_KNOWLEDGE_HOME`:
 
@@ -108,3 +109,10 @@ All path overrides must be absolute paths and must not contain `..`. Path resolu
 Resident service and MCP Streamable HTTP use `net::http` and `net::qos` for network capabilities. Normal local use should not require network budget changes; use [Chapter 12](12-advanced-configuration.md) when enabling remote listening, increasing body limits, or reproducing proxy issues.
 
 Proxy and certificate verification settings inherit `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, and `SSL_VERIFY`. These variables are read only at the environment boundary; business modules do not read the process environment directly.
+
+Version notices use the same network boundary and proxy/TLS policy. Set
+`RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED=false` to disable notices,
+`RELAY_KNOWLEDGE_UPDATE_SOURCES=github,crates.io` to choose sources,
+`RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS` to tune the cache interval, and
+`RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO=owner/name` to point at a forked release
+source.
