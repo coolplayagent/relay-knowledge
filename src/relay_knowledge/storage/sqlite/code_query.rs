@@ -46,7 +46,9 @@ use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
 use code_query_call_direction::{
     call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
 };
-use code_query_flow_scoring::{caller_context_density_bonus, execution_flow_chunk_bonus};
+use code_query_flow_scoring::{
+    caller_context_density_bonus, execution_flow_chunk_bonus, inline_construct_chunk_bonus,
+};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
     import_same_file_usage_bonus, import_surface_bonus, import_target_directory_bonus,
@@ -911,6 +913,13 @@ fn search_chunks(
                 + symbol_bonus;
             let score = score
                 + execution_flow_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                )
+                + inline_construct_chunk_bonus(
                     score,
                     &request.query,
                     &row.content,

@@ -1,6 +1,12 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779205289-inline-construct-hybrid-chunk-ranking
+- 算法：Hybrid chunk 后置评分在 query 明确包含 inline/lambda/closure/callback/handler/nested 等意图时，识别 JS/TS arrow、Java/C++ lambda、Rust closure、Go function literal、Python nested def 与 C static inline 等源码形态，并要求已有正分候选覆盖至少三个规范化查询词后才给有界 bonus。
+- 架构：变更限定在 SQLite code retrieval 的 bounded Rust scoring 层和单测；复用既有 FTS candidate、path/language filter、chunk/symbol schema、dedupe/truncate、freshness/version、CLI/API、semantic/vector provider、env/paths/net、安装发布与 self-iteration harness 边界。
+- 不变量：不扩大 FTS MATCH、candidate limit、索引事实、parser 抽取或仓库集 overlay；测试路径仍在 query 无显式 test 意图时不获 bonus，benchmark 源码可在强内容覆盖时参与排序，普通 Hybrid、imports、callers/callees、definition/symbol 与 semantic/vector 检索保持原候选集合。
+- 预期影响：改善多语言大仓中 inline callback/lambda/closure/nested helper 查询的排序稳定性，覆盖 Spring Java lambda、Kubernetes Go handler literal、Rust closure、Codex Python nested async、relay-teams JS arrow callback、opencode TS callback 与 LevelDB/C inline function 等 workload 类别。
+- 风险：含相同查询词且也包含 inline 语法的邻近源码块可能小幅上移；风险受显式 query intent、三词覆盖、正 base score、test-path guard、bounded candidates 与 2.2 分上限控制，未加入仓库、路径、case、provider、模型或 fixture 特殊分支。
 ## 候选优化说明：run-1779203601-qualified-score-query-tokenization
 - 算法：`ScoreQuery` 在保留原 whitespace token 的同时，为非路径型 query token 追加以非标识符字符切分出的去重子词，并忽略单字符拆分噪声，使 `client.Dial`、`receiver.NewFactory` 与 `rustfs_iam::error::Error` 这类 qualified/scoped 查询能在最终后置评分中命中真实 symbol、import、call、path 与 chunk 字段；`linux/debugfs.h` 等 slash/file-extension 查询保留原始 token 评分，避免拆分成宽泛目录词。
 - 架构：变更限定在 SQLite code retrieval 的通用 scorer 与独立单测模块；不改变 parser、graph fact schema、FTS MATCH 构造、candidate limit、索引写入、repo-set overlay、semantic/vector provider、env/paths/net 边界、安装发布或 self-iteration harness。

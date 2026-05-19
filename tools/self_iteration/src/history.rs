@@ -79,15 +79,34 @@ pub fn load_runs(paths: &HistoryPaths) -> Result<Vec<Value>, String> {
 
 pub fn previous_scored_run(paths: &HistoryPaths) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
-    Ok(runs
-        .into_iter()
-        .filter(|run| run.get("score").is_some())
+    Ok(latest_scored_run(runs.into_iter()))
+}
+
+pub fn previous_scored_run_for_profile(
+    paths: &HistoryPaths,
+    profile: &str,
+) -> Result<Option<Value>, String> {
+    let runs = load_runs(paths)?;
+    Ok(latest_scored_run(
+        runs.into_iter().filter(|run| run_profile(run) == profile),
+    ))
+}
+
+fn latest_scored_run<I>(runs: I) -> Option<Value>
+where
+    I: Iterator<Item = Value>,
+{
+    runs.filter(|run| run.get("score").is_some())
         .max_by_key(|run| {
             run.get("timestamp")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned()
-        }))
+        })
+}
+
+fn run_profile(run: &Value) -> &str {
+    run.get("profile").and_then(Value::as_str).unwrap_or("full")
 }
 
 pub fn best_accepted_run(paths: &HistoryPaths) -> Result<Option<Value>, String> {
@@ -137,6 +156,7 @@ pub fn append_run(paths: &HistoryPaths, record: &Value) -> Result<(), String> {
 pub fn make_run_record(
     run_id: &str,
     timestamp: &str,
+    profile: &str,
     report_path: &Path,
     commit: Option<&str>,
     score: &ScoreBreakdown,
@@ -145,6 +165,7 @@ pub fn make_run_record(
     serde_json::json!({
         "run_id": run_id,
         "timestamp": timestamp,
+        "profile": profile,
         "accepted": score.accepted,
         "score": rounded(score.score),
         "foundational_capability": rounded(score.foundational_capability),

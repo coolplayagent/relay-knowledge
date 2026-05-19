@@ -15,11 +15,11 @@
 启动脚本默认等价于：
 
 ```bash
-cargo build --release --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
-tools/self_iteration/target/release/relay-knowledge-self-iterate loop --workspace . --yolo
+cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace . --yolo --profile fast
 ```
 
-`self-iterate.sh` 是稳定入口。它会在 release binary 不存在或 Rust harness 源码更新后自动构建 `tools/self_iteration` 下的独立 binary，然后直接执行；调用者不需要手动进入该目录或安装 binary 到 `PATH`。
+`self-iterate.sh` 是稳定入口。它默认构建 debug harness，避免每次本地自迭代先做 release build；需要 release harness 时设置 `RELAY_KNOWLEDGE_SELF_ITERATION_RELEASE=1`。调用者不需要手动进入该目录或安装 binary 到 `PATH`。
 
 常用变体：
 
@@ -27,6 +27,7 @@ tools/self_iteration/target/release/relay-knowledge-self-iterate loop --workspac
 ./self-iterate.sh once
 ./self-iterate.sh --max-iterations 3
 ./self-iterate.sh chart
+./self-iterate.sh once --profile full
 ./self-iterate.sh once --profile smoke --dry-run-codex
 ```
 
@@ -47,7 +48,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches-v2/`。
-4. 按依赖阶段运行质量门禁：产品和独立 harness 的 `fmt --check` 并行执行，两个 release build 并行执行，然后产品 `clippy -> test` 与 harness `clippy -> test` 作为两条 rail 并行执行；门禁通过后，以自动限流的多线程调度并发运行仓库评估、仓库内查询 case、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
+4. 按 profile 运行质量门禁和评估。默认 `fast` 只跑格式检查、产品 debug build、harness `cargo check`、普通仓库子集和一个轻量 repository-set 护栏；`full`/`exhaustive` 会恢复产品和独立 harness 的 release build、产品 `clippy -> test` 与 harness `clippy -> test` 两条 rail，并运行完整仓库评估、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports-v2/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs-v2.jsonl`。
 7. 将 v2 图表写入 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `.git/relay-knowledge-self-iteration/score-v2.svg`。
@@ -62,6 +63,8 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 `self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 会把 v2 run history 和 patch 路径作为有界上下文，避免一次性读取全部历史产物。
 
 v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
+
+默认 profile 是 `fast`。它只跑产品与 harness 的 `fmt --check`，再跑产品 debug build 和 harness `cargo check`，用 `target/debug/relay-knowledge` 执行评估；默认不跑产品 release build、全量 clippy、全量 test、本地文件 fixture、semantic/vector fixture 或 research judge。`fast` 评估 `relay_teams`、`leveldb_cpp`、`temporal_samples_go` 和 `temporal_sdk_go`，每个普通仓库默认取前 6 条 query case，并保留 `temporal_go_workspace` repo-set 的 1 条跨仓门槛 case。它复用 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` 作为评估 home，减少重复注册和索引成本。评分历史按 profile 隔离，fast 只和 fast 历史比较，不会把 full/exhaustive 的 semantic/vector 或 judge 分数当作 fast 回归。可用 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`、`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`、`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace` 和 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2` 调整默认子集。需要完整旧门禁和完整 workload 时显式传 `--profile full`；长周期大仓扩展仍使用 `--profile exhaustive`。
 
 并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。`auto` 会更积极地使用本机：全局 command limiter 和 query pool 默认等于可用 CPU 数，repository jobs 默认等于可用 CPU 数的一半。仓库 register/index 以及 repository-set create/add/refresh 这类共享评估库写命令仍会串行化，写边界之后的查询子进程可并发运行。可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
 

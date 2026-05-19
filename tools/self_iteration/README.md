@@ -15,11 +15,11 @@ From the repository root:
 The launcher defaults to:
 
 ```bash
-cargo build --release --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
-tools/self_iteration/target/release/relay-knowledge-self-iterate loop --workspace . --yolo
+cargo build --manifest-path tools/self_iteration/Cargo.toml --bin relay-knowledge-self-iterate
+tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace . --yolo --profile fast
 ```
 
-`self-iterate.sh` remains the stable entrypoint. It automatically builds the standalone Rust binary when the release binary is missing or the harness sources changed, then executes it directly.
+`self-iterate.sh` remains the stable entrypoint. It builds the standalone Rust harness in debug mode by default so local iterations do not begin with a release build. Set `RELAY_KNOWLEDGE_SELF_ITERATION_RELEASE=1` when the harness itself should run from `target/release`.
 
 Useful variants:
 
@@ -27,6 +27,7 @@ Useful variants:
 ./self-iterate.sh once
 ./self-iterate.sh --max-iterations 3
 ./self-iterate.sh chart
+./self-iterate.sh once --profile full
 ./self-iterate.sh once --profile smoke --dry-run-codex
 ```
 
@@ -47,7 +48,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs quality gates in dependency stages: product and standalone harness `fmt --check` run in parallel, both release builds run in parallel, then product `clippy -> test` and harness `clippy -> test` run as two parallel rails; after those gates pass, repository evaluation, per-repository query cases, repository-set cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
+4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, a normal-repository subset, and one lightweight repository-set guard. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.
@@ -76,6 +77,26 @@ generation prompt receives a rejection-recovery memory review, a bounded memory
 index, and a bounded historical patch index. Codex should open the referenced
 summary, detail, or patch files only when they match the current gate, metric,
 case, path, or algorithm objective.
+
+The default profile is `fast`. It runs product and harness `fmt --check`, then a
+product debug build plus harness `cargo check`, and evaluates with
+`target/debug/relay-knowledge`. It does not run the product release build, full
+clippy, full test suite, local-file fixtures, semantic/vector fixtures, or
+research judge by default. `fast` evaluates `relay_teams`, `leveldb_cpp`,
+`temporal_samples_go`, and `temporal_sdk_go`, takes the first 6 normal query
+cases per repository, and keeps 1 cross-repository threshold case from the
+`temporal_go_workspace` repo-set. It reuses
+`.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
+repeated registration and indexing cost. Score history is isolated by profile,
+so `fast` compares only against previous `fast` runs and does not treat
+full/exhaustive semantic/vector or judge scores as fast regressions. Override
+the subset with
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
+`--profile full` for the previous full gates and workload; long-running
+large-repository checks still use `--profile exhaustive`.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. `auto` uses the local machine aggressively: the global command limiter

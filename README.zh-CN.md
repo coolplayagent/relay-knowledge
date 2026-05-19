@@ -115,7 +115,7 @@ harness 可以通过稳定启动脚本直接运行：
 ./self-iterate.sh chart
 ```
 
-启动脚本会在需要时自动构建 harness binary。v2 运行历史、渐进式记忆、报告、patch 和评分曲线保存在
+启动脚本会在需要时自动构建 debug harness binary，默认 `fast` profile 不跑产品 release build、全量 clippy、全量 test、文件 fixture、semantic/vector fixture 或 research judge，并保留一个轻量 repo-set 跨仓门槛护栏；需要完整门禁和 workload 时使用 `./self-iterate.sh once --profile full`。v2 运行历史、渐进式记忆、报告、patch 和评分曲线保存在
 `.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。research judge 支持 OpenAI-compatible HTTP 或开放 coding-agent CLI；未配置 backend 时默认使用 `opencode`。semantic/vector fixture 会继承普通运行时使用的
 `RELAY_KNOWLEDGE_*` embedding 环境变量，不会把 provider URL、API key、模型名或维度写入 benchmark cases。
 
@@ -130,7 +130,7 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
-自迭代 harness 自身的产品与 harness 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
+自迭代 harness 默认只执行轻量 fast 门禁；完整 profile 的产品与 harness 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
 
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
 

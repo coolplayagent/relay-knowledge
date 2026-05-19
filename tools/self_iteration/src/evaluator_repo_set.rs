@@ -23,7 +23,14 @@ fn evaluate_repository_sets(
         {
             continue;
         }
-        let set_cases = cases_by_set.get(&set_name).cloned().unwrap_or_default();
+        if !repository_set_in_profile(profile, &set_name) {
+            continue;
+        }
+        let set_cases = cases_by_set
+            .get(&set_name)
+            .cloned()
+            .map(|cases| limit_repository_set_cases_for_profile(profile, cases))
+            .unwrap_or_default();
         if set_cases.is_empty() {
             continue;
         }

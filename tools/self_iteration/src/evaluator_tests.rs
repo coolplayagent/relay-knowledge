@@ -63,6 +63,37 @@ mod tests {
     }
 
     #[test]
+    fn fast_profile_skips_full_quality_gates_and_slow_suites() {
+        let stages = quality_gate_stages("fast");
+
+        assert_eq!(stages.len(), 3);
+        let gate_names = stages
+            .iter()
+            .flat_map(|stage| match stage {
+                QualityGateStage::Parallel(gates) => gates
+                    .iter()
+                    .map(|gate| gate.name)
+                    .collect::<Vec<_>>(),
+                QualityGateStage::Rails(rails) => rails
+                    .iter()
+                    .flat_map(|rail| rail.iter().map(|gate| gate.name))
+                    .collect::<Vec<_>>(),
+            })
+            .collect::<Vec<_>>();
+        assert!(gate_names.contains(&"cargo_build_debug"));
+        assert!(gate_names.contains(&"self_iteration_cargo_check"));
+        assert!(!gate_names.contains(&"cargo_build_release"));
+        assert!(!gate_names.contains(&"cargo_clippy"));
+        assert!(!gate_names.contains(&"cargo_test"));
+        assert!(!profile_runs_slow_suites("fast"));
+        assert!(profile_runs_repository_sets("fast"));
+        assert_eq!(
+            skipped_suites_for_profile("fast"),
+            vec!["file_fixtures", "semantic_vector", "research_judge"]
+        );
+    }
+
+    #[test]
     fn judge_uses_openai_compatible_http_when_configured() {
         let env = BTreeMap::from([
             (

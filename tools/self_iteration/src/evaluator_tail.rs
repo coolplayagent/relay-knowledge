@@ -18,6 +18,41 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
             ]),
         ];
     }
+    if profile == "fast" {
+        return vec![
+            QualityGateStage::Parallel(vec![
+                quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
+                quality_gate(
+                    "self_iteration_cargo_fmt_check",
+                    [
+                        "cargo",
+                        "fmt",
+                        "--manifest-path",
+                        "tools/self_iteration/Cargo.toml",
+                        "--",
+                        "--check",
+                    ],
+                    120,
+                ),
+            ]),
+            QualityGateStage::Parallel(vec![quality_gate(
+                "cargo_build_debug",
+                ["cargo", "build", "--bin", "relay-knowledge"],
+                600,
+            )]),
+            QualityGateStage::Parallel(vec![quality_gate(
+                "self_iteration_cargo_check",
+                [
+                    "cargo",
+                    "check",
+                    "--manifest-path",
+                    "tools/self_iteration/Cargo.toml",
+                    "--all-targets",
+                ],
+                180,
+            )]),
+        ];
+    }
     vec![
         QualityGateStage::Parallel(vec![
             quality_gate("cargo_fmt_check", ["cargo", "fmt", "--all", "--", "--check"], 120),
@@ -116,6 +151,8 @@ fn quality_gate<const N: usize>(
 
 fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
+        "cargo_build_debug" => Some(90_000.0),
+        "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),
         "cargo_fmt_check" => Some(20_000.0),
@@ -126,6 +163,140 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
         "self_iteration_cargo_test" => Some(60_000.0),
         _ => None,
     }
+}
+
+fn evaluation_home(config: &Config, paths: &HistoryPaths, run_id: &str) -> (PathBuf, bool) {
+    if config.profile == "fast" {
+        return (
+            paths.root.join("cache-v2").join("fast-evaluation-home"),
+            true,
+        );
+    }
+    (paths.work.join(run_id).join("home"), false)
+}
+
+fn relay_knowledge_binary(config: &Config) -> PathBuf {
+    config
+        .workspace
+        .join("target")
+        .join(if config.profile == "fast" {
+            "debug"
+        } else {
+            "release"
+        })
+        .join("relay-knowledge")
+}
+
+fn repository_in_profile(profile: &str, repo_name: &str, repo_config: &Value) -> bool {
+    if repo_config.get("profile").and_then(Value::as_str) == Some("exhaustive")
+        && profile != "exhaustive"
+    {
+        return false;
+    }
+    profile != "fast" || fast_repository_names().iter().any(|name| name == repo_name)
+}
+
+fn limit_cases_for_profile(profile: &str, cases: Vec<Value>) -> Vec<Value> {
+    let Some(limit) = fast_case_limit(profile) else {
+        return cases;
+    };
+    cases.into_iter().take(limit).collect()
+}
+
+fn profile_runs_slow_suites(profile: &str) -> bool {
+    matches!(profile, "full" | "exhaustive")
+}
+
+fn profile_runs_repository_sets(profile: &str) -> bool {
+    matches!(profile, "fast" | "full" | "exhaustive")
+}
+
+fn repository_set_in_profile(profile: &str, set_name: &str) -> bool {
+    profile != "fast" || fast_repository_set_names().iter().any(|name| name == set_name)
+}
+
+fn limit_repository_set_cases_for_profile(profile: &str, cases: Vec<Value>) -> Vec<Value> {
+    if profile != "fast" {
+        return cases;
+    }
+    cases
+        .into_iter()
+        .take(fast_repository_set_case_limit())
+        .collect()
+}
+
+fn skipped_suites_for_profile(profile: &str) -> Vec<&'static str> {
+    if profile_runs_slow_suites(profile) {
+        Vec::new()
+    } else if profile == "smoke" {
+        vec![
+            "repository_evaluation",
+            "repository_sets",
+            "file_fixtures",
+            "semantic_vector",
+            "research_judge",
+        ]
+    } else {
+        vec![
+            "file_fixtures",
+            "semantic_vector",
+            "research_judge",
+        ]
+    }
+}
+fn fast_case_limit(profile: &str) -> Option<usize> {
+    (profile == "fast").then(|| {
+        std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(6)
+        })
+}
+
+fn fast_repository_set_case_limit() -> usize {
+    std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
+}
+
+fn fast_repository_names() -> Vec<String> {
+    std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(|| {
+            vec![
+                "relay_teams".to_owned(),
+                "leveldb_cpp".to_owned(),
+                "temporal_samples_go".to_owned(),
+                "temporal_sdk_go".to_owned(),
+            ]
+        })
+}
+
+fn fast_repository_set_names() -> Vec<String> {
+    std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(|| vec!["temporal_go_workspace".to_owned()])
 }
 
 fn register_command(binary: &Path, path: &Path, alias: &str) -> Vec<String> {

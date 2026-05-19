@@ -92,7 +92,7 @@ impl Config {
             codex_path: None,
             codex_timeout_seconds: 3600,
             command_timeout_seconds: 900,
-            profile: "full".to_owned(),
+            profile: "fast".to_owned(),
             max_iterations: None,
             stop_after_accepted: None,
             sleep_seconds: 5,
@@ -228,7 +228,7 @@ impl Parser {
 }
 
 fn profile(value: String) -> Result<String, String> {
-    if matches!(value.as_str(), "full" | "smoke" | "exhaustive") {
+    if matches!(value.as_str(), "fast" | "full" | "smoke" | "exhaustive") {
         Ok(value)
     } else {
         Err(format!("invalid profile: {value}"))
@@ -289,6 +289,7 @@ mod tests {
     fn auto_jobs_use_available_machine_capacity() {
         let config = Config::parse(vec!["evaluate".to_owned()]).expect("config should parse");
 
+        assert_eq!(config.profile, "fast");
         let plan = JobPlan::from_inputs(&config, 32, None);
 
         assert_eq!(plan.global, 32);

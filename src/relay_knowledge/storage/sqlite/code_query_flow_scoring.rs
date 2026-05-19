@@ -18,6 +18,10 @@ const EXECUTION_FLOW_TERMS: &[&str] = &[
     "worker",
 ];
 
+const INLINE_CONSTRUCT_TERMS: &[&str] = &[
+    "arrow", "callback", "closure", "handler", "inline", "lambda", "nested",
+];
+
 pub(super) fn caller_context_density_bonus(
     base_score: f64,
     query: &str,
@@ -121,6 +125,36 @@ pub(super) fn execution_flow_chunk_bonus(
     ((coverage * 1.8) + (ordered * 0.9) + action_density).min(3.0)
 }
 
+pub(super) fn inline_construct_chunk_bonus(
+    base_score: f64,
+    query: &str,
+    content: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || !query_inline_construct_intent(query)
+        || (path_looks_like_test(path) && !query_mentions_test_or_benchmark(query))
+        || !content_has_inline_construct(content)
+    {
+        return 0.0;
+    }
+
+    let query_terms = meaningful_terms(query);
+    if query_terms.len() < 3 {
+        return 0.0;
+    }
+    let content_terms = meaningful_terms(content);
+    let matched_terms = matched_query_terms(&query_terms, &content_terms);
+    if matched_terms.len() < 3 {
+        return 0.0;
+    }
+
+    let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
+    ((coverage * 1.25) + inline_construct_density(content)).min(2.2)
+}
+
 fn query_execution_flow_intent(query: &str) -> bool {
     let terms = meaningful_terms(query);
     let intent_terms = terms
@@ -128,6 +162,12 @@ fn query_execution_flow_intent(query: &str) -> bool {
         .filter(|term| EXECUTION_FLOW_TERMS.contains(&term.as_str()))
         .count();
     intent_terms >= 2 || (intent_terms >= 1 && terms.len() >= 6)
+}
+
+fn query_inline_construct_intent(query: &str) -> bool {
+    meaningful_terms(query)
+        .iter()
+        .any(|term| INLINE_CONSTRUCT_TERMS.contains(&term.as_str()))
 }
 
 fn matched_query_terms(query_terms: &[String], content_terms: &[String]) -> Vec<String> {
@@ -185,12 +225,70 @@ fn flow_action_density(content: &str) -> f64 {
     (action_lines as f64 * 0.12).min(0.75)
 }
 
+fn content_has_inline_construct(content: &str) -> bool {
+    content.lines().any(line_contains_inline_construct)
+}
+
+fn inline_construct_density(content: &str) -> f64 {
+    let construct_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| line_contains_inline_construct(line))
+        .take(6)
+        .count();
+
+    (construct_lines as f64 * 0.3).min(0.9)
+}
+
+fn line_contains_inline_construct(line: &str) -> bool {
+    let line = line.trim();
+    line.contains("=>")
+        || line.contains(" -> ")
+        || line.contains("[](")
+        || line.contains("](")
+        || line.contains(": func(")
+        || line.contains(": func (")
+        || line.contains("function(")
+        || line.contains("function (")
+        || line.contains("lambda ")
+        || line.contains("lambda:")
+        || line.contains("static inline")
+        || line.starts_with("async def ")
+        || line.starts_with("def ")
+        || line.contains(".addEventListener(")
+        || line_contains_pipe_closure(line)
+}
+
+fn line_contains_pipe_closure(line: &str) -> bool {
+    if !(line.contains("(|")
+        || line.contains("= |")
+        || line.contains(": |")
+        || line.contains(", |")
+        || line.contains("return |"))
+    {
+        return false;
+    }
+    line.matches('|').take(3).count() >= 2
+}
+
 fn path_looks_like_test_or_benchmark(path: &str) -> bool {
     path.to_ascii_lowercase().split('/').any(|segment| {
         matches!(
             segment,
             "test" | "tests" | "__tests__" | "testing" | "bench" | "benchmark" | "benchmarks"
         ) || segment.ends_with("_test")
+            || segment.ends_with(".test.ts")
+            || segment.ends_with(".test.tsx")
+            || segment.ends_with(".spec.ts")
+            || segment.ends_with(".spec.tsx")
+    })
+}
+
+fn path_looks_like_test(path: &str) -> bool {
+    path.to_ascii_lowercase().split('/').any(|segment| {
+        matches!(segment, "test" | "tests" | "__tests__" | "testing")
+            || segment.ends_with("_test")
             || segment.ends_with(".test.ts")
             || segment.ends_with(".test.tsx")
             || segment.ends_with(".spec.ts")
@@ -344,6 +442,107 @@ mod tests {
             ),
             0.0
         );
+    }
+
+    #[test]
+    fn inline_construct_bonus_prefers_callback_shapes() {
+        let hybrid = request(
+            "Project db helper Database.use inline callback Effect.sync",
+            CodeQueryKind::Hybrid,
+        );
+        let inline = inline_construct_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "const db = <T>(fn: Fn<T>) => Effect.sync(() => Database.use(fn))",
+            "packages/opencode/src/project/project.ts",
+            &hybrid,
+        );
+        let named = inline_construct_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "function db(fn) { return Effect.sync(Database.use(fn)) }",
+            "packages/opencode/src/project/project.ts",
+            &hybrid,
+        );
+
+        assert!(inline > named, "inline={inline} named={named}");
+        assert_eq!(named, 0.0);
+    }
+
+    #[test]
+    fn inline_construct_bonus_detects_cross_language_forms() {
+        for (query, content) in [
+            (
+                "ReflectionUtils USER_DECLARED_METHODS MethodFilter lambda isBridge isSynthetic",
+                "MethodFilter USER_DECLARED_METHODS = method -> !method.isBridge() && !method.isSynthetic()",
+            ),
+            (
+                "ResourceEventHandlerFuncs AddFunc inline addNode UpdateFunc",
+                "ResourceEventHandlerFuncs{AddFunc: func(obj interface{}) { ttlc.addNode(obj) }}",
+            ),
+            (
+                "keystone_roles roles.iter any admin reseller_admin closure",
+                "keystone_roles.iter().any(|role| role == \"admin\" || role == \"reseller_admin\")",
+            ),
+            (
+                "_handle_connection nested async recv_json send_event websocket",
+                "async def recv_json():\n    await websocket.recv()\nasync def send_event(): pass",
+            ),
+            (
+                "round_hint_to_min static inline do_mmap mmap_min_addr",
+                "static inline unsigned long round_hint_to_min(unsigned long addr) { return mmap_min_addr; }",
+            ),
+            (
+                "setupEventBindings promptInput addEventListener input arrow callback handlePromptComposerInput",
+                "promptInput.addEventListener(\"input\", () => handlePromptComposerInput())",
+            ),
+        ] {
+            let request = request(query, CodeQueryKind::Hybrid);
+            let bonus = inline_construct_chunk_bonus(
+                8.0,
+                &request.query,
+                content,
+                "src/inline-source.rs",
+                &request,
+            );
+            assert!(bonus > 0.0, "missing inline bonus for {content}");
+        }
+    }
+
+    #[test]
+    fn inline_construct_bonus_ignores_tests_without_test_intent() {
+        let hybrid = request(
+            "Project db helper Database.use inline callback Effect.sync",
+            CodeQueryKind::Hybrid,
+        );
+
+        assert_eq!(
+            inline_construct_chunk_bonus(
+                8.0,
+                &hybrid.query,
+                "const db = <T>(fn: Fn<T>) => Effect.sync(() => Database.use(fn))",
+                "packages/opencode/src/project/project.test.ts",
+                &hybrid,
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn inline_construct_bonus_allows_benchmark_implementation_sources() {
+        let hybrid = request(
+            "ZstdCompress lambda port::Zstd_Compress FLAGS_zstd_compression_level",
+            CodeQueryKind::Hybrid,
+        );
+        let bonus = inline_construct_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "auto ZstdCompress = [](const char* input, size_t length) { return port::Zstd_Compress(input, length, FLAGS_zstd_compression_level); };",
+            "benchmarks/db_bench.cc",
+            &hybrid,
+        );
+
+        assert!(bonus > 0.0, "benchmark lambda should be eligible");
     }
 
     fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {

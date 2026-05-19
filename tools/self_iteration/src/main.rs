@@ -185,7 +185,7 @@ fn run_generation_iteration(
     println!("[self-iterate] candidate patch: {}", patch.path.display());
     let mut evaluation = evaluate_candidate_for_patch(config, paths, &run_id, &patch)?;
     apply_candidate_documentation_gate(&mut evaluation, &patch);
-    let previous_run = history::previous_scored_run(paths)?;
+    let previous_run = history::previous_scored_run_for_profile(paths, &config.profile)?;
     let score = scoring::score_evaluation(&evaluation.observation, previous_run.as_ref());
     let commit = if score.accepted {
         write_adopted_optimization_document(
@@ -289,7 +289,7 @@ fn persist_scored_run(
     evaluation: &evaluator::EvaluationRun,
     commit: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let previous = history::previous_scored_run(paths)?;
+    let previous = history::previous_scored_run_for_profile(paths, &config.profile)?;
     let score = scoring::score_evaluation(&evaluation.observation, previous.as_ref());
     persist_scored_run_with_score(PersistInput {
         config,
@@ -320,6 +320,7 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     let optimization_plan = optimization_plan(input.patch, input.score, input.codex);
     let report = serde_json::json!({
         "run_id": input.run_id,
+        "profile": input.config.profile,
         "workspace": input.config.workspace.display().to_string(),
         "patch": patch,
         "optimization_plan": optimization_plan,
@@ -333,6 +334,7 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     let record = history::make_run_record(
         input.run_id,
         &timestamp,
+        &input.config.profile,
         &report_path,
         input.commit,
         input.score,
