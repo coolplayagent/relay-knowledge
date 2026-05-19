@@ -303,6 +303,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run(move |connection| code_set::add_member(connection, seed))
     }
 
+    fn remove_code_repository_set_member(
+        &self,
+        set_alias: String,
+        repository_alias: String,
+    ) -> StorageFuture<'_, crate::domain::CodeRepositorySetMember> {
+        self.run(move |connection| {
+            code_set::remove_member(connection, &set_alias, &repository_alias)
+        })
+    }
+
     fn code_repository_set(
         &self,
         set_alias: String,

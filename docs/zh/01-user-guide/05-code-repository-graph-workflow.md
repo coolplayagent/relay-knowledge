@@ -98,9 +98,10 @@ relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
 relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
 relay-knowledge repo-set refresh workspace --format json
+relay-knowledge repo-set remove workspace sdk --format json
 ```
 
-`repo-set add` 要求目标 ref 和 path/language filter 已经有匹配的单仓索引 scope；如果不存在，会失败而不是回退到旧 scope。同一 repository 再次加入同一个 set 时会替换原成员 snapshot，并废弃上一版 overlay edges。`repo-set refresh` 只重建跨仓 import/module overlay edges，不复制 `code_repository_files`、`code_repository_symbols` 或 `code_repository_chunks` 基础事实。CLI、Web 或 MCP 排入的异步 repository-set refresh 会由常驻 `service run` 中的 repository-set overlay refresh worker 消费。
+`repo-set add` 要求目标 ref 和 path/language filter 已经有匹配的单仓索引 scope；如果不存在，会失败而不是回退到旧 scope。同一 repository 再次加入同一个 set 时会替换原成员 snapshot，并废弃上一版 overlay edges。`repo-set remove` 会删除成员指针、废弃 overlay，并让普通 code-scope retention 在没有其它引用时回收该 snapshot。`repo-set refresh` 只重建跨仓 import/module overlay edges，不复制 `code_repository_files`、`code_repository_symbols` 或 `code_repository_chunks` 基础事实。CLI、Web 或 MCP 排入的异步 repository-set refresh 会由常驻 `service run` 中的 repository-set overlay refresh worker 消费。
 
 查询集合时会 fan-out 到成员的真实 `source_scope`，然后合并排序:
 

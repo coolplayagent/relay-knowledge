@@ -75,6 +75,25 @@ impl CodeRepositorySetAddMemberRequest {
     }
 }
 
+/// Request to remove one repository snapshot from a repository set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositorySetRemoveMemberRequest {
+    pub set_alias: String,
+    pub repository_alias: String,
+}
+
+impl CodeRepositorySetRemoveMemberRequest {
+    pub fn new(
+        set_alias: impl Into<String>,
+        repository_alias: impl Into<String>,
+    ) -> Result<Self, DomainError> {
+        Ok(Self {
+            set_alias: required_text("set_alias", set_alias)?,
+            repository_alias: required_text("repository_alias", repository_alias)?,
+        })
+    }
+}
+
 /// Persisted repository-set membership pointing at a real repository snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositorySetMember {
@@ -325,6 +344,11 @@ mod tests {
         assert_eq!(add.path_filters, ["src"]);
         assert_eq!(add.language_filters, ["rust"]);
 
+        let remove = CodeRepositorySetRemoveMemberRequest::new(" workspace ", " core ")
+            .expect("remove request should validate");
+        assert_eq!(remove.set_alias, "workspace");
+        assert_eq!(remove.repository_alias, "core");
+
         let query = CodeRepositorySetQueryRequest::new(
             "workspace",
             "RetryPolicy",
@@ -388,6 +412,12 @@ mod tests {
             .expect_err("oversized limit should fail")
             .to_string()
             .contains("50 or less")
+        );
+        assert!(
+            CodeRepositorySetRemoveMemberRequest::new("workspace", " ")
+                .expect_err("blank repository alias should fail")
+                .to_string()
+                .contains("repository_alias")
         );
     }
 

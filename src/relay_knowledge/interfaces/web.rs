@@ -32,8 +32,8 @@ use crate::{
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryRequest, CodeRetrievalRequest, FreshnessPolicy, IndexKind,
-        ProposalState, WorkerKind,
+        CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
+        FreshnessPolicy, IndexKind, ProposalState, WorkerKind,
     },
 };
 
@@ -342,6 +342,15 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo_set.remove" => {
+            let response = service
+                .remove_code_repository_set_member(
+                    code_repository_set_remove_request(payload)?,
+                    context,
+                )
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "code.repo_set.query" => {
             let response = service
                 .query_code_repository_set(code_repository_set_query_request(payload)?, context)
@@ -587,6 +596,16 @@ fn code_repository_set_add_request(
         optional_string_array_field(payload, "path_filters")?,
         optional_string_array_field(payload, "language_filters")?,
         optional_i32_field(payload, "priority")?.unwrap_or(0),
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+fn code_repository_set_remove_request(
+    payload: &Value,
+) -> Result<CodeRepositorySetRemoveMemberRequest, WebError> {
+    CodeRepositorySetRemoveMemberRequest::new(
+        string_field(payload, "set_alias")?,
+        string_field(payload, "repository_alias")?,
     )
     .map_err(|error| WebError::bad_request(error.to_string()))
 }

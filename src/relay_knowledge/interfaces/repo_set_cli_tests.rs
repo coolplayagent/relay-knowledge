@@ -56,6 +56,18 @@ fn parses_repo_set_commands_and_validation_errors() {
     );
     assert_eq!(
         parse_repo_set(&[
+            "remove".to_owned(),
+            "workspace".to_owned(),
+            "core".to_owned(),
+        ])
+        .expect("remove should parse"),
+        RepoSetCommand::Remove {
+            set_alias: "workspace".to_owned(),
+            repository_alias: "core".to_owned(),
+        }
+    );
+    assert_eq!(
+        parse_repo_set(&[
             "query".to_owned(),
             "workspace".to_owned(),
             "--query".to_owned(),
@@ -143,6 +155,11 @@ fn parses_repo_set_commands_and_validation_errors() {
         parse_repo_set(&["add".to_owned(), "workspace".to_owned(), "core".to_owned()])
             .expect_err("missing ref should fail"),
         CliError::MissingValue("--ref")
+    );
+    assert_eq!(
+        parse_repo_set(&["remove".to_owned(), "workspace".to_owned()])
+            .expect_err("missing remove alias should fail"),
+        CliError::MissingValue("<repo-alias>")
     );
     assert_eq!(
         parse_repo_set(&[
@@ -355,6 +372,28 @@ pub fn serve() -> u32 {
     .await
     .expect("refresh worker should run");
     assert_eq!(json_value(&completed)["state"], "succeeded");
+
+    let removed = run_repo_set(
+        &service,
+        RepoSetCommand::Remove {
+            set_alias: "workspace".to_owned(),
+            repository_alias: "app".to_owned(),
+        },
+        context("remove-app"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("set remove should run");
+    let removed = json_value(&removed);
+    assert_eq!(removed["member"]["repository_alias"], "app");
+    assert_eq!(
+        removed["status"]["members"]
+            .as_array()
+            .expect("members should be an array")
+            .len(),
+        1
+    );
+    assert_eq!(removed["status"]["overlay"]["state"], "missing");
 
     run_repo_set(
         &service,

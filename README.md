@@ -205,6 +205,7 @@ relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set remove workspace core --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact core --base main --head HEAD --format json
 relay-knowledge repo status core --format json

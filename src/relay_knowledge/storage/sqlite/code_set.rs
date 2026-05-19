@@ -134,6 +134,51 @@ pub(super) fn add_member(
     .ok_or_else(|| StorageError::InvalidInput("repository set member was not persisted".to_owned()))
 }
 
+pub(super) fn remove_member(
+    connection: &mut Connection,
+    set_alias: &str,
+    repository_alias: &str,
+) -> Result<CodeRepositorySetMember, StorageError> {
+    let set = set_by_alias(connection, set_alias)?.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "code repository set '{set_alias}' is not registered"
+        ))
+    })?;
+    let removed = member_by_alias(connection, &set.set_id, repository_alias)?.ok_or_else(|| {
+        StorageError::InvalidInput(format!(
+            "repository set '{}' member '{}' is not registered",
+            set.alias, repository_alias
+        ))
+    })?;
+    let transaction = connection.transaction()?;
+    transaction.execute(
+        "
+        DELETE FROM code_repository_set_members
+        WHERE set_id = ?1 AND repository_alias = ?2
+        ",
+        params![set.set_id, repository_alias],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_cross_edges WHERE set_id = ?1",
+        params![set.set_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_set_overlay_status WHERE set_id = ?1",
+        params![set.set_id],
+    )?;
+    transaction.execute(
+        "
+        UPDATE code_repository_sets
+        SET updated_at_ms = strftime('%s','now') * 1000
+        WHERE set_id = ?1
+        ",
+        params![set.set_id],
+    )?;
+    transaction.commit()?;
+
+    Ok(removed)
+}
+
 pub(super) fn set_by_alias(
     connection: &mut Connection,
     alias: &str,
@@ -205,13 +250,14 @@ pub(super) fn refresh_overlay(
     let exports = exports_for_members(connection, &status.members)?;
     let mut edges = Vec::new();
     for import in imports {
-        let candidates = matching_exports(&import, &exports);
-        edges.push(edge_for_import(
-            &status.repository_set.set_id,
-            &import,
-            &candidates,
-            now_ms,
-        ));
+        if let Some(candidates) = matching_exports(&import, &exports) {
+            edges.push(edge_for_import(
+                &status.repository_set.set_id,
+                &import,
+                &candidates,
+                now_ms,
+            ));
+        }
     }
 
     let transaction = connection.transaction()?;
@@ -340,6 +386,26 @@ fn member_by_key(
         .map_err(StorageError::from)
 }
 
+fn member_by_alias(
+    connection: &mut Connection,
+    set_id: &str,
+    repository_alias: &str,
+) -> Result<Option<CodeRepositorySetMember>, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT set_id, repository_id, repository_alias, ref_selector, resolved_commit_sha,
+                   source_scope, path_filters_json, language_filters_json, priority
+            FROM code_repository_set_members
+            WHERE set_id = ?1 AND repository_alias = ?2
+            ",
+            params![set_id, repository_alias],
+            member_from_row,
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 fn member_statuses(
     connection: &mut Connection,
     set_id: &str,
@@ -422,7 +488,7 @@ fn imports_for_members(
         let mut statement = connection.prepare(
             "
             SELECT repository_id, source_scope, import_id, path, module, target_hint,
-                   line_start, line_end
+                   resolution_state, line_start, line_end
             FROM code_repository_imports
             WHERE source_scope = ?1
             ORDER BY path ASC, import_id ASC
@@ -436,8 +502,9 @@ fn imports_for_members(
                 path: row.get(3)?,
                 module: row.get(4)?,
                 target_hint: row.get(5)?,
-                line_start: row.get(6)?,
-                line_end: row.get(7)?,
+                resolution_state: row.get(6)?,
+                line_start: row.get(7)?,
+                line_end: row.get(8)?,
             })
         })?;
         imports.extend(rows.collect::<Result<Vec<_>, _>>()?);
@@ -500,30 +567,20 @@ fn exports_for_members(
     Ok(exports)
 }
 
-fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Vec<ExportTarget> {
-    if is_local_or_relative_module(&import.module) {
-        return Vec::new();
+fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Option<Vec<ExportTarget>> {
+    if import.resolution_state != "unresolved" || is_local_or_relative_module(&import.module) {
+        return None;
     }
     let module = normalize_module_key(&import.module);
-    let hint = import
-        .target_hint
-        .as_deref()
-        .map(normalize_module_key)
-        .unwrap_or_default();
-    let last = module
-        .rsplit('.')
-        .next()
-        .unwrap_or(module.as_str())
-        .to_owned();
     let mut scored_candidates = exports
         .iter()
         .filter(|target| target.source_scope != import.source_scope)
         .filter_map(|target| {
-            target_match_score(target, &module, &hint, &last).map(|score| (score, target.clone()))
+            target_match_score(target, &module).map(|score| (score, target.clone()))
         })
         .collect::<Vec<_>>();
     let Some(best_score) = scored_candidates.iter().map(|(score, _)| *score).max() else {
-        return Vec::new();
+        return Some(Vec::new());
     };
     let mut candidates = scored_candidates
         .drain(..)
@@ -542,7 +599,7 @@ fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Vec<Expo
             && left.record_id == right.record_id
     });
 
-    candidates
+    Some(candidates)
 }
 
 fn is_local_or_relative_module(module: &str) -> bool {
@@ -555,22 +612,16 @@ fn is_local_or_relative_module(module: &str) -> bool {
         || module.starts_with("super::")
 }
 
-fn target_match_score(target: &ExportTarget, module: &str, hint: &str, last: &str) -> Option<u8> {
-    target
-        .keys
-        .iter()
-        .filter_map(|key| {
-            if !hint.is_empty() && key == hint {
-                Some(5)
-            } else if key == module {
-                Some(4)
-            } else if !last.is_empty() && key.rsplit('.').next() == Some(last) {
-                Some(1)
-            } else {
-                None
-            }
-        })
-        .max()
+fn target_match_score(target: &ExportTarget, module: &str) -> Option<u8> {
+    if target.keys.contains(module) {
+        return Some(4);
+    }
+    let (parent, imported_name) = module.rsplit_once('.')?;
+    (!parent.is_empty()
+        && !imported_name.is_empty()
+        && target.keys.contains(parent)
+        && target.keys.contains(imported_name))
+    .then_some(3)
 }
 
 fn edge_for_import(
@@ -765,6 +816,7 @@ struct ImportRecord {
     path: String,
     module: String,
     target_hint: Option<String>,
+    resolution_state: String,
     line_start: u32,
     line_end: u32,
 }

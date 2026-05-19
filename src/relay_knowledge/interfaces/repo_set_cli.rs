@@ -3,7 +3,7 @@ use crate::{
     application::RelayKnowledgeService,
     domain::{
         CodeQueryKind, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryRequest, FreshnessPolicy,
+        CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, FreshnessPolicy,
     },
 };
 
@@ -23,6 +23,10 @@ pub enum RepoSetCommand {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
         priority: i32,
+    },
+    Remove {
+        set_alias: String,
+        repository_alias: String,
     },
     Query {
         set_alias: String,
@@ -49,6 +53,7 @@ pub fn parse_repo_set(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
     match tokens.first().map(String::as_str) {
         Some("create") => parse_create(&tokens[1..]),
         Some("add") => parse_add(&tokens[1..]),
+        Some("remove") => parse_remove(&tokens[1..]),
         Some("query") => parse_query(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
         Some("refresh") => parse_refresh(&tokens[1..]),
@@ -104,6 +109,24 @@ pub async fn run_repo_set(
 
             render_response(
                 "code.repo_set.add",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoSetCommand::Remove {
+            set_alias,
+            repository_alias,
+        } => {
+            let request = CodeRepositorySetRemoveMemberRequest::new(set_alias, repository_alias)
+                .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            let response = service
+                .remove_code_repository_set_member(request, context)
+                .await
+                .map_err(|error| CliError::ApiFailed(error.message))?;
+
+            render_response(
+                "code.repo_set.remove",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -251,6 +274,23 @@ fn parse_add(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
         path_filters,
         language_filters,
         priority,
+    })
+}
+
+fn parse_remove(tokens: &[String]) -> Result<RepoSetCommand, CliError> {
+    let set_alias = positional(tokens, "<set>")?;
+    let repository_alias = tokens
+        .get(1)
+        .filter(|value| !value.starts_with('-'))
+        .cloned()
+        .ok_or(CliError::MissingValue("<repo-alias>"))?;
+    if let Some(extra) = tokens.get(2) {
+        return Err(CliError::UnexpectedArgument(extra.clone()));
+    }
+
+    Ok(RepoSetCommand::Remove {
+        set_alias,
+        repository_alias,
     })
 }
 

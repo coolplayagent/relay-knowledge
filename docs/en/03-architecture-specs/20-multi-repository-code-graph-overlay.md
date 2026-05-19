@@ -21,10 +21,10 @@ This design preserves four constraints:
 
 The current implementation provides the initial product path across all three phases:
 
-- `repo-set create/add/query/status/refresh` and the shared API/Web/MCP entry points use an explicit repository set selector.
+- `repo-set create/add/remove/query/status/refresh` and the shared API/Web/MCP entry points use an explicit repository set selector.
 - SQLite persists `code_repository_sets`, `code_repository_set_members`, `code_repository_cross_edges`, overlay status, and overlay refresh tasks. Repository sets do not copy rows into base code fact tables.
 - Multi-repository query fans out at the application layer to each member's persisted `source_scope`, then merges by member priority, freshness, and overlay confidence. Request path/language filters narrow the member scope instead of widening or re-resolving it through current repository defaults. Deduplication includes repository, scope, path, line range, and excerpt.
-- `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON. Local or relative imports stay inside their member repository and are not resolved through cross-repository basename fallback.
+- `repo-set refresh` builds import/module-level cross-repository overlay edges with resolved, ambiguous, and unresolved states plus evidence JSON. Local, relative, or already resolved member imports stay inside their member repository and are not resolved through cross-repository symbol-name or basename fallback.
 - Scope retention preserves single-repository snapshots referenced by repository set members. Background overlay refresh tasks use durable leases, retries, dead-letter state, and the resident `service run` overlay refresh worker.
 
 ## 2. Current Baseline
@@ -274,6 +274,7 @@ New APIs keep single-repository APIs compatible and add explicit multi-repositor
 ```text
 repo-set create <alias>
 repo-set add <set> <repo-alias> --ref <ref> [--path <filter>] [--language <id>]
+repo-set remove <set> <repo-alias>
 repo-set query <set> --query <text> --kind <kind> --limit <n>
 repo-set status <set>
 repo-set refresh <set>

@@ -357,7 +357,7 @@ impl RelayKnowledgeService {
     }
 }
 
-async fn required_set_status(
+pub(super) async fn required_set_status(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     set_alias: &str,
 ) -> Result<CodeRepositorySetStatus, ApiError> {
@@ -675,7 +675,7 @@ fn code_api_error(error: CodeIndexError) -> ApiError {
     }
 }
 
-fn storage_api_error(error: StorageError) -> ApiError {
+pub(super) fn storage_api_error(error: StorageError) -> ApiError {
     match error {
         StorageError::InvalidInput(message) => ApiError::invalid_argument(message),
         other => ApiError::storage_unavailable(other.to_string()),

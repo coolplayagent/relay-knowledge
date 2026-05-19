@@ -9,14 +9,15 @@ use crate::{
         CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositorySet,
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest, CodeRepositorySetMember,
         CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest, CodeRepositorySetRefreshSummary,
-        CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
-        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
-        CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
-        ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
-        IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
-        ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
-        RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorStatus, WorkerKind, WorkerStatus, WorkerTaskRecord,
+        CodeRepositorySetRefreshTaskRecord, CodeRepositorySetRemoveMemberRequest,
+        CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
+        CodeRetrievalRequest, CodeScopeRetentionSummary, CommitReceipt, ConfidenceScore,
+        EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan, ExtractionDiagnostic,
+        FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange, IndexKind, IndexStatus,
+        LayoutRegion, ProposalConflictRecord, ProposalRecord, ProposalState, RerankDiagnostics,
+        RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
+        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
+        WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -761,6 +762,15 @@ pub struct CodeRepositorySetCreateResponse {
 pub struct CodeRepositorySetAddResponse {
     pub metadata: ApiMetadata,
     pub request: CodeRepositorySetAddMemberRequest,
+    pub member: CodeRepositorySetMember,
+    pub status: CodeRepositorySetStatus,
+}
+
+/// Repository-set member removal response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositorySetRemoveResponse {
+    pub metadata: ApiMetadata,
+    pub request: CodeRepositorySetRemoveMemberRequest,
     pub member: CodeRepositorySetMember,
     pub status: CodeRepositorySetStatus,
 }

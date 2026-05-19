@@ -319,6 +319,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn remove_code_repository_set_member(
+        &self,
+        _set_alias: String,
+        _repository_alias: String,
+    ) -> StorageFuture<'_, CodeRepositorySetMember> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "repository set member storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
     fn code_repository_set(
         &self,
         _set_alias: String,

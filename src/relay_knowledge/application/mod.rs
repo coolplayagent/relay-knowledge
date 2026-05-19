@@ -1,5 +1,6 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
+mod code_repository_set_lifecycle;
 mod code_repository_set_service;
 mod code_service;
 mod file_index;

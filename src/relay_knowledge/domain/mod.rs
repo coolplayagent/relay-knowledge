@@ -36,7 +36,8 @@ pub use code_repository_set::{
     CodeRepositorySetCreateRequest, CodeRepositorySetMember, CodeRepositorySetMemberStatus,
     CodeRepositorySetOverlayStatus, CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest,
     CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord,
-    CodeRepositorySetRefreshTaskState, CodeRepositorySetStatus,
+    CodeRepositorySetRefreshTaskState, CodeRepositorySetRemoveMemberRequest,
+    CodeRepositorySetStatus,
 };
 pub use entity::KnowledgeEntity;
 pub use error::DomainError;

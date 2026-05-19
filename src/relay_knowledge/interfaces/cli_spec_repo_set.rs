@@ -3,7 +3,7 @@ use super::{CliCommandSpec, CommandEffect, command_syntax, opt};
 pub(super) fn repo_set() -> CliCommandSpec {
     command!(
         &["repo-set"],
-        "relay-knowledge repo-set create|add|query|status|refresh ...",
+        "relay-knowledge repo-set create|add|remove|query|status|refresh ...",
         "Manage and query thin multi-repository code graph overlays.",
         "code.repo_set",
         CommandEffect::WritesIndexes,
@@ -84,6 +84,7 @@ pub(super) fn repo_set() -> CliCommandSpec {
         &[
             "relay-knowledge repo-set create workspace --format json",
             "relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json",
+            "relay-knowledge repo-set remove workspace core --format json",
             "relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json",
         ],
         &[

@@ -187,6 +187,52 @@ async fn repository_set_member_replacement_invalidates_stale_overlay_edges() {
 }
 
 #[tokio::test]
+async fn repository_set_member_removal_releases_scope_and_invalidates_overlay() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let (removed, status) = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "svc", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-service",
+                "service::serve",
+            )?;
+            insert_symbol(
+                connection,
+                "repo-b",
+                "scope-b",
+                "serve-symbol",
+                "serve",
+                "service::serve",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 10))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "svc", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 20)?;
+            let removed = code_set::remove_member(connection, "workspace", "app")?;
+            let status = code_set::set_status(connection, "workspace")?.expect("set should exist");
+            Ok((removed, status))
+        })
+        .await
+        .expect("member should remove");
+
+    assert_eq!(removed.repository_alias, "app");
+    assert_eq!(status.members.len(), 1);
+    assert_eq!(status.members[0].member.repository_alias, "svc");
+    assert_eq!(status.overlay.state, "missing");
+    assert!(status.overlay.stale);
+}
+
+#[tokio::test]
 async fn repository_set_overlay_refresh_classifies_resolved_ambiguous_and_unresolved_edges() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let summary = store
@@ -326,6 +372,88 @@ async fn repository_set_overlay_refresh_ignores_local_import_basename_matches() 
                 "pool-symbol",
                 "Pool",
                 "service::Pool",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 20))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "svc", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 30)
+        })
+        .await
+        .expect("overlay should refresh");
+
+    assert_eq!(summary.edge_count, 0);
+    assert_eq!(summary.resolved_edge_count, 0);
+    assert_eq!(summary.unresolved_edge_count, 0);
+}
+
+#[tokio::test]
+async fn repository_set_overlay_refresh_skips_locally_resolved_imports() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let summary = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "svc", "scope-b", "tree-b", false)?;
+            insert_import_with_state(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-local-resolved",
+                "app.RetryPolicy",
+                "resolved",
+            )?;
+            insert_symbol(
+                connection,
+                "repo-b",
+                "scope-b",
+                "retry-symbol",
+                "RetryPolicy",
+                "app::RetryPolicy",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 20))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "svc", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 30)
+        })
+        .await
+        .expect("overlay should refresh");
+
+    assert_eq!(summary.edge_count, 0);
+    assert_eq!(summary.resolved_edge_count, 0);
+}
+
+#[tokio::test]
+async fn repository_set_overlay_refresh_requires_full_module_match_for_external_imports() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let summary = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "svc", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-external",
+                "java.time.Duration",
+            )?;
+            insert_symbol(
+                connection,
+                "repo-b",
+                "scope-b",
+                "duration-symbol",
+                "Duration",
+                "service::Duration",
             )?;
             code_set::create_set(connection, set_seed("workspace", 20))?;
             code_set::add_member(
@@ -488,13 +616,31 @@ fn insert_import(
     import_id: &str,
     module: &str,
 ) -> Result<(), crate::storage::StorageError> {
+    insert_import_with_state(
+        connection,
+        repository_id,
+        source_scope,
+        import_id,
+        module,
+        "unresolved",
+    )
+}
+
+fn insert_import_with_state(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    source_scope: &str,
+    import_id: &str,
+    module: &str,
+    resolution_state: &str,
+) -> Result<(), crate::storage::StorageError> {
     connection.execute(
         "
         INSERT INTO code_repository_imports (
             repository_id, source_scope, import_id, file_id, path, module, target_hint,
             resolution_state, confidence_basis_points, confidence_tier, line_start, line_end
         )
-        VALUES (?1, ?2, ?3, ?4, 'src/client.rs', ?5, ?5, 'unresolved', 10000, 'extracted', 1, 1)
+        VALUES (?1, ?2, ?3, ?4, 'src/client.rs', ?5, ?5, ?6, 10000, 'extracted', 1, 1)
         ",
         params![
             repository_id,
@@ -502,6 +648,7 @@ fn insert_import(
             import_id,
             format!("file-{source_scope}"),
             module,
+            resolution_state,
         ],
     )?;
     Ok(())
