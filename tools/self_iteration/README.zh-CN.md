@@ -47,7 +47,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 1. 检查工作树是否干净，除非传入 `--use-current-candidate`。
 2. 提示本地 Codex 做一个聚焦的代码检索改进。
 3. 将候选补丁保存到 `.git/relay-knowledge-self-iteration/patches-v2/`。
-4. 顺序运行 build、fmt、clippy、tests 等质量门禁；门禁通过后，以自动限流的多线程调度并发运行仓库评估、仓库内查询 case、本地文件 fixture、semantic/vector fixture 和 research judge。
+4. 顺序运行产品 build、fmt、clippy、tests，以及独立 `tools/self_iteration` Rust harness 的 build/fmt/clippy/test 质量门禁；门禁通过后，以自动限流的多线程调度并发运行仓库评估、仓库内查询 case、repository-set case、本地文件 fixture、semantic/vector fixture 和 research judge。
 5. 将报告写入 `.git/relay-knowledge-self-iteration/reports-v2/`。
 6. 将评分历史追加到 `.git/relay-knowledge-self-iteration/runs-v2.jsonl`。
 7. 将 v2 图表写入 `.git/relay-knowledge-self-iteration/score-v2.csv` 和 `.git/relay-knowledge-self-iteration/score-v2.svg`。

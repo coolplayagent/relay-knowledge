@@ -1,13 +1,33 @@
 fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)> {
     if profile == "smoke" {
-        return vec![(
-            "cargo_fmt_check",
-            vec!["cargo", "fmt", "--all", "--", "--check"]
-                .into_iter()
-                .map(ToOwned::to_owned)
-                .collect(),
-            120,
-        )];
+        return vec![
+            (
+                "cargo_fmt_check",
+                vec!["cargo", "fmt", "--all", "--", "--check"],
+                120,
+            ),
+            (
+                "self_iteration_cargo_fmt_check",
+                vec![
+                    "cargo",
+                    "fmt",
+                    "--manifest-path",
+                    "tools/self_iteration/Cargo.toml",
+                    "--",
+                    "--check",
+                ],
+                120,
+            ),
+        ]
+        .into_iter()
+        .map(|(name, command, timeout)| {
+            (
+                name,
+                command.into_iter().map(ToOwned::to_owned).collect(),
+                timeout,
+            )
+        })
+        .collect();
     }
     vec![
         (
@@ -16,8 +36,33 @@ fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)>
             1200,
         ),
         (
+            "self_iteration_cargo_build_release",
+            vec![
+                "cargo",
+                "build",
+                "--release",
+                "--manifest-path",
+                "tools/self_iteration/Cargo.toml",
+                "--bin",
+                "relay-knowledge-self-iterate",
+            ],
+            300,
+        ),
+        (
             "cargo_fmt_check",
             vec!["cargo", "fmt", "--all", "--", "--check"],
+            120,
+        ),
+        (
+            "self_iteration_cargo_fmt_check",
+            vec![
+                "cargo",
+                "fmt",
+                "--manifest-path",
+                "tools/self_iteration/Cargo.toml",
+                "--",
+                "--check",
+            ],
             120,
         ),
         (
@@ -34,9 +79,34 @@ fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)>
             1200,
         ),
         (
+            "self_iteration_cargo_clippy",
+            vec![
+                "cargo",
+                "clippy",
+                "--manifest-path",
+                "tools/self_iteration/Cargo.toml",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            300,
+        ),
+        (
             "cargo_test",
             vec!["cargo", "test", "--all-targets", "--all-features"],
             1200,
+        ),
+        (
+            "self_iteration_cargo_test",
+            vec![
+                "cargo",
+                "test",
+                "--manifest-path",
+                "tools/self_iteration/Cargo.toml",
+                "--all-targets",
+            ],
+            300,
         ),
     ]
     .into_iter()
@@ -53,9 +123,13 @@ fn quality_gate_commands(profile: &str) -> Vec<(&'static str, Vec<String>, u64)>
 fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_release" => Some(180_000.0),
+        "self_iteration_cargo_build_release" => Some(60_000.0),
         "cargo_fmt_check" => Some(20_000.0),
+        "self_iteration_cargo_fmt_check" => Some(20_000.0),
         "cargo_clippy" => Some(180_000.0),
+        "self_iteration_cargo_clippy" => Some(60_000.0),
         "cargo_test" => Some(240_000.0),
+        "self_iteration_cargo_test" => Some(60_000.0),
         _ => None,
     }
 }
@@ -295,14 +369,16 @@ fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> 
     let forbidden = score_array_field(case, "forbidden");
     let max_rank = number_or(case, "max_rank", 1) as usize;
     let assessment = assess_ranked_hits(case, hits, expected, forbidden);
-    let mut passed = assessment.failures.is_empty();
+    let mut failures = assessment.failures.clone();
+    failures.extend(payload_constraint_failures(case, &payload, hits.len()));
+    let mut passed = failures.is_empty();
     let mut rank = assessment.rank;
     if case
         .get("expect_empty")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        passed = hits.is_empty();
+        passed = hits.is_empty() && failures.is_empty();
         rank = passed.then_some(0);
     }
     CaseObservation {
@@ -313,13 +389,64 @@ fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> 
         max_rank,
         false_positive_count: assessment.false_positive_count,
         message: format!(
-            "results={} rank={rank:?} {}",
+            "results={} rank={rank:?} {} {}",
             hits.len(),
-            assessment.details
+            assessment.details,
+            failures.join("; ")
         ),
         objective,
         score_override: Some(if passed { assessment.score } else { 0.0 }),
     }
+}
+
+fn payload_constraint_failures(case: &Value, payload: &Value, results_len: usize) -> Vec<String> {
+    let mut failures = Vec::new();
+    if let Some(max_results) = case.get("max_results").and_then(Value::as_u64) {
+        if results_len > max_results as usize {
+            failures.push(format!("results={results_len} max_results={max_results}"));
+        }
+    }
+    if let Some(expected) = case.get("truncated").and_then(Value::as_bool) {
+        let actual = payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if actual != expected {
+            failures.push(format!("truncated={actual} expected={expected}"));
+        }
+    }
+    if case.get("degraded_reason").is_some() {
+        let actual = payload.get("degraded_reason").and_then(Value::as_str);
+        match case.get("degraded_reason").expect("checked above") {
+            Value::Null if actual.is_some() => {
+                failures.push(format!("degraded_reason={}", actual.unwrap_or_default()));
+            }
+            Value::Bool(false) if actual.is_some() => {
+                failures.push(format!("degraded_reason={}", actual.unwrap_or_default()));
+            }
+            Value::String(expected) if actual != Some(expected.as_str()) => {
+                failures.push(format!(
+                    "degraded_reason={} expected={expected}",
+                    actual.unwrap_or("missing")
+                ));
+            }
+            _ => {}
+        }
+    }
+    if let Some(expected) = case
+        .get("degraded_reason_contains")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        let actual = payload
+            .get("degraded_reason")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !actual.contains(expected) {
+            failures.push(format!("degraded_reason={actual} missing={expected}"));
+        }
+    }
+    failures
 }
 
 fn evaluate_background_file_case(
@@ -754,6 +881,59 @@ mod tests {
         assert!(!command.join(" ").contains("token"));
         assert!(body.contains("judge-model"));
         assert!(body.contains("judge prompt"));
+    }
+
+    #[test]
+    fn judge_backend_http_env_selects_http_runner() {
+        let env = BTreeMap::from([
+            (
+                "RELAY_KNOWLEDGE_JUDGE_BACKEND".to_owned(),
+                "http".to_owned(),
+            ),
+            (
+                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
+                "http://localhost:11434".to_owned(),
+            ),
+            ("RELAY_KNOWLEDGE_JUDGE_API_KEY".to_owned(), "token".to_owned()),
+            (
+                "RELAY_KNOWLEDGE_JUDGE_MODEL".to_owned(),
+                "judge-model".to_owned(),
+            ),
+        ]);
+        let settings = judge_settings(&env);
+        assert_eq!(settings.backend, JudgeBackend::Http);
+        assert_eq!(settings_summary(&settings)["backend"], "http");
+    }
+
+    #[test]
+    fn file_case_enforces_payload_constraints() {
+        let case = serde_json::json!({
+            "id": "file_constraints",
+            "max_results": 1,
+            "truncated": true,
+            "degraded_reason_contains": "budget",
+            "expected": [{"relative_path": "a.md"}]
+        });
+        let result = CommandResult {
+            name: "files_query".to_owned(),
+            command: vec!["relay-knowledge".to_owned()],
+            exit_code: 0,
+            duration_ms: 1,
+            stdout: serde_json::json!({
+                "results": [{"relative_path": "a.md"}, {"relative_path": "b.md"}],
+                "truncated": false,
+                "degraded_reason": "stale"
+            })
+            .to_string(),
+            stderr: String::new(),
+        };
+
+        let observation = score_file_case("fixture", &case, &result);
+
+        assert!(!observation.passed);
+        assert!(observation.message.contains("max_results=1"));
+        assert!(observation.message.contains("truncated=false expected=true"));
+        assert!(observation.message.contains("missing=budget"));
     }
 
     #[test]

@@ -47,7 +47,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs build, fmt, clippy, and tests sequentially; after those gates pass, repository evaluation, per-repository query cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
+4. Runs product build, fmt, clippy, tests, and standalone `tools/self_iteration` Rust harness build/fmt/clippy/test gates sequentially; after those gates pass, repository evaluation, per-repository query cases, repository-set cases, local-file fixtures, semantic/vector fixtures, and the research judge run through bounded multi-threaded scheduling.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`.

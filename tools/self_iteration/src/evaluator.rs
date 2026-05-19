@@ -186,14 +186,18 @@ pub fn evaluate_candidate(
 
     let query_cases = array_field(cases_config, "query_cases");
     let grouped_cases = objects_by_repository(query_cases);
-    let repositories = object_field(cases_config, "repositories")
+    let repository_configs = object_field(cases_config, "repositories")
         .map(|object| {
             object
                 .iter()
                 .map(|(name, config)| (name.clone(), config.clone()))
-                .collect::<Vec<_>>()
+                .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
+    let repositories = repository_configs
+        .iter()
+        .map(|(name, config)| (name.clone(), config.clone()))
+        .collect::<Vec<_>>();
     let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
     let repo_results = parallel_map(repositories, repo_jobs, {
         let grouped_cases = grouped_cases.clone();
@@ -215,6 +219,16 @@ pub fn evaluate_candidate(
     });
     for report in repo_results.into_iter().flatten() {
         let report = report?;
+        commands.extend(report.commands.clone());
+        gates.extend(report.commands.iter().map(GateObservation::from_command));
+        cases.extend(report.cases.clone());
+        metrics.extend(report.metrics.clone());
+        repo_reports.push(report);
+    }
+
+    for report in
+        evaluate_repository_sets(&runtime, cases_config, &repository_configs, &config.profile)?
+    {
         commands.extend(report.commands.clone());
         gates.extend(report.commands.iter().map(GateObservation::from_command));
         cases.extend(report.cases.clone());
@@ -890,4 +904,5 @@ where
     }
 }
 
+include!("evaluator_repo_set.rs");
 include!("evaluator_tail.rs");
