@@ -124,6 +124,61 @@ async fn hybrid_chunks_rank_attached_symbol_identity() {
     );
 }
 
+#[tokio::test]
+async fn hybrid_chunks_rank_execution_flow_context_above_local_tool_helpers() {
+    let path = "packages/llm/src/protocols/openai-chat.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("protocol-file", path, "typescript")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "local-tool-helper",
+                "protocol-file",
+                path,
+                "const lowerToolCall = (part) => ({ type: \"function\", function: part.name })",
+                range(160, 166),
+                None,
+            ),
+            chunk(
+                "protocol-flow",
+                "protocol-file",
+                path,
+                "OpenAI Chat protocol route uses SSE transport events.\nconst step = () => ToolStream.empty<number>()\nLifecycle.finish(lifecycle, events)",
+                range(374, 392),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "OpenAI Chat protocol SSE tool calls lifecycle finish events route transport",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].line_range.start, 374);
+    assert!(hits[0].excerpt.contains("ToolStream.empty"));
+}
+
 fn lexical_hit_score(hits: &[CodeRetrievalHit], line_start: u32) -> Option<f64> {
     hits.iter()
         .find(|hit| {
