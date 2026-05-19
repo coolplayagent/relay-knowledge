@@ -2,7 +2,7 @@
 
 中文 | [English](README.md)
 
-本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量，以及图谱 semantic/vector 检索质量。它有意作为 `tools/self_iteration` 下的独立 Rust harness 演进，不放入产品 crate 的 `src/` 模块树；所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。
+本目录包含一个独立的 Codex 驱动优化循环，用于改进代码仓库检索质量，以及图谱 semantic/vector 检索质量。它有意作为 `tools/self_iteration` 下的独立 Rust harness 演进，不放入产品 crate 的 `src/` 模块树；所有运行状态都存放在 `.git/relay-knowledge-self-iteration/` 下。旧的 tracked Python harness 已在功能对齐后清理，`self-iterate.sh` 会直接构建并运行 Rust binary。
 
 ## 启动
 
@@ -61,7 +61,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`，写清算法、架构、不变量、预期 case/metric 影响和已知风险。harness 会追加
 `self_iteration_algorithm_documentation` gate，拒绝没有携带这些说明的代码、测试、benchmark 或 harness 策略变更。prompt 会把 v2 run history 和 patch 路径作为有界上下文，避免一次性读取全部历史产物。
 
-v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与旧 Python run/report/patch 格式隔离；旧文件会保留在原位置作为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
+v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
 
 并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。全局 command 执行通过有界 limiter 控制，避免仓库索引和查询子进程无限增长；可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
 

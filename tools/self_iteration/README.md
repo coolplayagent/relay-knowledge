@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | English
 
-This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`.
+This directory contains an independent Codex-driven optimization loop for code repository retrieval quality and graph semantic/vector retrieval quality. It now evolves as a standalone Rust harness under `tools/self_iteration`, outside the product crate `src/` tree, and stores runtime state under `.git/relay-knowledge-self-iteration/`. The old tracked Python harness has been removed after feature parity checks; `self-iterate.sh` builds and runs the Rust binary directly.
 
 ## Start
 
@@ -68,8 +68,8 @@ v2 run history and patch paths as bounded context when reasoning about the next
 candidate.
 
 The v2 Rust harness keeps `runs-v2.jsonl`, `reports-v2/`, and `patches-v2/`
-separate from the old Python run/report/patch formats, which remain historical
-artifacts. Progressive long-term memory is preserved under the shared
+separate from earlier run/report/patch formats, which may remain in existing
+worktrees as historical artifacts. Progressive long-term memory is preserved under the shared
 `.git/relay-knowledge-self-iteration/memory/` tree: each scored run writes
 `memory/index.jsonl`, `memory/summaries/`, and `memory/details/`, and the next
 generation prompt receives a rejection-recovery memory review, a bounded memory
