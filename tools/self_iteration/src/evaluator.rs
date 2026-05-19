@@ -54,6 +54,7 @@ struct EvalRuntime {
     env: BTreeMap<String, String>,
     timeout: u64,
     limiter: Limiter,
+    writer_lock: Arc<Mutex<()>>,
     query_jobs: usize,
 }
 
@@ -181,6 +182,7 @@ pub fn evaluate_candidate(
         env: env.clone(),
         timeout: config.command_timeout_seconds,
         limiter: limiter.clone(),
+        writer_lock: Arc::new(Mutex::new(())),
         query_jobs: job_plan.queries,
     };
 
@@ -348,8 +350,8 @@ fn evaluate_repository(
             Value::Null,
         ));
     }
-    let register = run_limited(
-        &runtime.limiter,
+    let register = run_writer_limited(
+        runtime,
         CommandSpec::new(
             format!("{repo_name}_register"),
             register_command(&runtime.binary, &path, alias),
@@ -369,8 +371,8 @@ fn evaluate_repository(
             Value::Null,
         ));
     }
-    let index = run_limited(
-        &runtime.limiter,
+    let index = run_writer_limited(
+        runtime,
         CommandSpec::new(
             format!("{repo_name}_index"),
             vec![
@@ -596,7 +598,7 @@ fn evaluate_semantic_vector_suite(
             .and_then(Value::as_bool)
             .unwrap_or(true)
         {
-            let probe = run_limited(
+            let mut probe = run_limited(
                 &runtime.limiter,
                 CommandSpec::new(
                     "semantic_vector_provider_probe",
@@ -612,6 +614,7 @@ fn evaluate_semantic_vector_suite(
                     runtime.timeout,
                 ),
             );
+            let probe_passed = validate_provider_probe(&mut probe);
             metrics.push(MetricObservation {
                 name: "semantic_vector_provider_probe_ms".to_owned(),
                 value: probe.duration_ms as f64,
@@ -620,6 +623,16 @@ fn evaluate_semantic_vector_suite(
                 key: true,
             });
             commands.push(probe);
+            if !probe_passed {
+                return Ok(repo_report(
+                    "semantic_vector",
+                    scope.to_owned(),
+                    commands,
+                    cases,
+                    metrics,
+                    runtime_profile,
+                ));
+            }
         }
     }
     for (index, evidence) in array_field(suite, "evidence").iter().enumerate() {
@@ -872,6 +885,15 @@ fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
 
 fn run_limited(limiter: &Limiter, spec: CommandSpec) -> CommandResult {
     let _permit = limiter.acquire();
+    run_command(&spec)
+}
+
+fn run_writer_limited(runtime: &EvalRuntime, spec: CommandSpec) -> CommandResult {
+    let _permit = runtime.limiter.acquire();
+    let _writer = runtime
+        .writer_lock
+        .lock()
+        .expect("writer lock should not be poisoned");
     run_command(&spec)
 }
 

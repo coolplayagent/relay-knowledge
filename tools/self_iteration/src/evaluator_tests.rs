@@ -154,6 +154,49 @@ mod tests {
     }
 
     #[test]
+    fn provider_probe_ok_false_fails_gate() {
+        let mut result = CommandResult {
+            name: "semantic_vector_provider_probe".to_owned(),
+            command: vec!["relay-knowledge".to_owned()],
+            exit_code: 0,
+            duration_ms: 1,
+            stdout: serde_json::json!({"ok": false, "error_code": "auth_failed"}).to_string(),
+            stderr: String::new(),
+        };
+
+        assert!(!validate_provider_probe(&mut result));
+        assert_eq!(result.exit_code, 1);
+        assert_eq!(result.stderr, "auth_failed");
+    }
+
+    #[test]
+    fn judge_prompt_truncates_diff_on_char_boundary_and_includes_targets() {
+        let suite = serde_json::json!({
+            "max_diff_chars": 1,
+            "max_doc_chars": 1,
+            "competitive_feature_targets": ["repo-set"],
+            "implementation_guardrails": ["no fixture special casing"],
+            "rubric": {"retrieval": 0.5}
+        });
+
+        let prompt = build_judge_prompt(JudgePromptInput {
+            workspace: std::path::Path::new("."),
+            suite: &suite,
+            generated_diff: true,
+            candidate_diff: "汉字",
+            gates: &[],
+            cases: &[],
+            metrics: &[],
+            repo_reports: &[],
+        });
+
+        assert!(prompt.contains("汉\n...diff truncated..."));
+        assert!(prompt.contains("competitive_feature_targets"));
+        assert!(prompt.contains("repo-set"));
+        assert!(prompt.contains("implementation_guardrails"));
+    }
+
+    #[test]
     fn percentile_selects_expected_rank() {
         assert_eq!(percentile(&[10, 20, 30, 40], 50), 20);
         assert_eq!(percentile(&[10, 20, 30, 40], 95), 30);

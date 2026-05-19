@@ -63,7 +63,7 @@ codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-ac
 
 v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/report/patch 格式隔离；既有工作树中的旧文件可保留为历史资料。渐进式长期记忆保留在共享的 `.git/relay-knowledge-self-iteration/memory/` 树下：每次评分都会写入 `memory/index.jsonl`、`memory/summaries/` 和 `memory/details/`，下一轮生成 prompt 会收到拒绝恢复记忆、受限记忆索引和受限历史 patch 索引。Codex 只应在条目匹配当前 gate、metric、case、path 或算法目标时打开对应 summary、detail 或 patch 文件。
 
-并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。全局 command 执行通过有界 limiter 控制，避免仓库索引和查询子进程无限增长；可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
+并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。全局 command 执行通过有界 limiter 控制，避免仓库索引和查询子进程无限增长；仓库 register/index 以及 repository-set create/add/refresh 这类共享评估库写命令会串行化，写边界之后的查询子进程仍可并发运行。可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
 
 ## 评分和采纳
 

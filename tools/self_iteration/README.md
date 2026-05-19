@@ -79,8 +79,11 @@ case, path, or algorithm objective.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. A global bounded command limiter prevents repository indexing and query
-subprocesses from growing without control; set `--jobs N` or
-`RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to override the global limit.
+subprocesses from growing without control, while repository register/index and
+repository-set create/add/refresh writer commands are serialized against the
+shared evaluation store; query subprocesses still run concurrently after writer
+boundaries. Set `--jobs N` or `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to
+override the global limit.
 
 The prompt includes bounded run history, progressive memory, and patch indexes
 so repeated rejections stay tied to recent evidence instead of retrying the same

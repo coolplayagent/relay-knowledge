@@ -62,8 +62,8 @@ fn evaluate_repository_set(
     let mut commands = Vec::new();
     let mut cases = Vec::new();
     let mut metrics = Vec::new();
-    let create = run_limited(
-        &runtime.limiter,
+    let create = run_writer_limited(
+        runtime,
         CommandSpec::new(
             format!("{set_name}_repo_set_create"),
             repo_set_create_command(&runtime.binary, set_alias, set_config),
@@ -104,8 +104,8 @@ fn evaluate_repository_set(
         let ref_selector = string_field(member, "ref")
             .or_else(|| string_field(repo_config, "ref"))
             .unwrap_or("HEAD");
-        let add = run_limited(
-            &runtime.limiter,
+        let add = run_writer_limited(
+            runtime,
             CommandSpec::new(
                 format!("{set_name}_{member_repository}_repo_set_add"),
                 repo_set_add_command(
@@ -133,8 +133,8 @@ fn evaluate_repository_set(
             ));
         }
     }
-    let refresh = run_limited(
-        &runtime.limiter,
+    let refresh = run_writer_limited(
+        runtime,
         CommandSpec::new(
             format!("{set_name}_repo_set_refresh"),
             repo_set_refresh_command(&runtime.binary, set_alias),

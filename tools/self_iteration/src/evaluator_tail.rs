@@ -604,6 +604,28 @@ fn semantic_vector_env_check(profile: &Value) -> CommandResult {
     }
 }
 
+fn validate_provider_probe(result: &mut CommandResult) -> bool {
+    if !result.passed() {
+        return false;
+    }
+    let Some(payload) = parse_json_output_value(&result.stdout) else {
+        result.exit_code = 1;
+        result.stderr = "provider probe returned invalid JSON".to_owned();
+        return false;
+    };
+    if payload.get("ok").and_then(Value::as_bool).unwrap_or(true) {
+        return true;
+    }
+    result.exit_code = 1;
+    result.stderr = payload
+        .get("error")
+        .or_else(|| payload.get("error_code"))
+        .and_then(Value::as_str)
+        .unwrap_or("provider probe reported ok=false")
+        .to_owned();
+    false
+}
+
 fn semantic_vector_ingest_command(binary: &Path, scope: &str, evidence: &Value) -> Vec<String> {
     let mut command = vec![
         binary.display().to_string(),

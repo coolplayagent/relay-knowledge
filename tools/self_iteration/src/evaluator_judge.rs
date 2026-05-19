@@ -152,12 +152,12 @@ fn build_judge_prompt(input: JudgePromptInput<'_>) -> String {
     let max_doc_chars = number_or(input.suite, "max_doc_chars", 3000) as usize;
     let max_diff_chars = number_or(input.suite, "max_diff_chars", 30000) as usize;
     let mut diff = input.candidate_diff.trim().to_owned();
-    if diff.len() > max_diff_chars {
-        diff.truncate(max_diff_chars);
+    if diff.chars().count() > max_diff_chars {
+        diff = diff.chars().take(max_diff_chars).collect();
         diff.push_str("\n...diff truncated...");
     }
     format!(
-        "You are the relay-knowledge research judge.\nReturn only one strict JSON object with passed, confidence, overall_score, scores, summary, evidence, risks, recommended_cases.\n\nDeterministic summary:\n{}\n\nCandidate diff:\n```diff\n{}\n```\n\nReference document excerpts:\n{}",
+        "You are the relay-knowledge research judge.\nReturn only one strict JSON object with passed, confidence, overall_score, scores, summary, evidence, risks, recommended_cases.\n\nDeterministic summary:\n{}\n\nJudge suite requirements:\n{}\n\nCandidate diff:\n```diff\n{}\n```\n\nReference document excerpts:\n{}",
         deterministic_summary(
             input.gates,
             input.cases,
@@ -165,9 +165,22 @@ fn build_judge_prompt(input: JudgePromptInput<'_>) -> String {
             input.repo_reports,
             input.generated_diff
         ),
+        judge_suite_requirements(input.suite),
         diff,
         document_excerpts(input.workspace, input.suite, max_doc_chars)
     )
+}
+
+fn judge_suite_requirements(suite: &Value) -> String {
+    serde_json::json!({
+        "competitive_feature_targets": suite.get("competitive_feature_targets").cloned().unwrap_or(Value::Null),
+        "implementation_guardrails": suite.get("implementation_guardrails").cloned().unwrap_or(Value::Null),
+        "rubric": suite.get("rubric").cloned().unwrap_or(Value::Null),
+        "min_score": suite.get("min_score").cloned().unwrap_or(Value::Null),
+        "min_confidence": suite.get("min_confidence").cloned().unwrap_or(Value::Null),
+        "min_anti_fixture_special_casing": suite.get("min_anti_fixture_special_casing").cloned().unwrap_or(Value::Null),
+    })
+    .to_string()
 }
 
 fn deterministic_summary(
