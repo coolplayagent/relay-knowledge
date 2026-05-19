@@ -19,6 +19,7 @@
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
 - Release archive attestation 使用生成的 `checksums.txt` 作为 subject manifest，使 GitHub artifact attestation 覆盖用户本地校验的同一批 archive digest。
 - CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
+- GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`。配置 `CLAWHUB_TOKEN` 时，release workflow 还可以用 `clawhub publish` 把同一目录发布到 ClawHub。该 skill-over-CLI 产物与 MCP 协议打包分离。
 
 ## 3. 安装体验
 
@@ -51,6 +52,7 @@ preflight doctor
 ## 6. 验收标准
 
 - Release artifact、checksum、版本号和文档能互相对应。
+- GitHub Release 将 CLI skill archive 纳入 `checksums.txt`；启用 ClawHub 发布时使用同一个 crate 版本。
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
 - uninstall 清理二进制和服务定义，但保留或按用户确认处理 runtime data。

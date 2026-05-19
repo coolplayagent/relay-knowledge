@@ -115,3 +115,12 @@ relay-knowledge version check
 状态、健康、帮助、setup doctor/profile、provider probe、version check、report 和 audit query 是诊断入口，不应修改图谱事实。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。
 
 自动化调用方应优先读取 `help --format json` 中的 operation 和 read/write 说明，再决定是否在 CI、agent 或 Web 操作面中开放命令。
+
+## 3.6 Skill-over-CLI
+
+仓库随附 `skills/relay-knowledge-cli`，这是一个兼容 ClawHub 的 skill，用于让
+LLM agent 通过本地 CLI 调用 relay-knowledge，并解析 JSON 输出。它覆盖安装检查、
+`version check`、setup/health 诊断、知识图谱 ingest/query，以及代码仓库注册、索引、查询、增量更新、影响分析和报告工作流。
+
+该 skill 不配置 MCP、不调用 MCP 工具，也不管理 ACP session。协议级 agent 接入请使用
+MCP/ACP 对应章节。
