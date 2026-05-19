@@ -5,6 +5,7 @@ mod config;
 mod evaluator;
 mod git_ops;
 mod history;
+mod memory;
 mod scoring;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -315,10 +316,13 @@ struct PersistInput<'a> {
 
 fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::Value, String> {
     let timestamp = unix_timestamp_string();
+    let patch = patch_metadata(input.patch);
+    let optimization_plan = optimization_plan(input.patch, input.score, input.codex);
     let report = serde_json::json!({
         "run_id": input.run_id,
         "workspace": input.config.workspace.display().to_string(),
-        "patch": patch_metadata(input.patch),
+        "patch": patch,
+        "optimization_plan": optimization_plan,
         "codex": input.codex.map(codex::CodexResult::serializable),
         "evaluation": input.evaluation.report,
         "score": input.score,
@@ -334,6 +338,12 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
         input.score,
         &input.evaluation.observation,
     );
+    let mut record = record;
+    if let Some(object) = record.as_object_mut() {
+        object.insert("patch".to_owned(), patch);
+        object.insert("optimization_plan".to_owned(), optimization_plan);
+    }
+    memory::write_run_memory(input.paths, &record)?;
     history::append_run(input.paths, &record)?;
     history::export_history(input.paths)?;
     Ok(record)
@@ -346,6 +356,23 @@ fn patch_metadata(patch: &PatchSnapshot) -> serde_json::Value {
         "bytes": patch.diff.len(),
         "has_diff": patch.has_diff(),
         "base_ref": patch.base_ref,
+    })
+}
+
+fn optimization_plan(
+    patch: &PatchSnapshot,
+    score: &scoring::ScoreBreakdown,
+    codex: Option<&codex::CodexResult>,
+) -> serde_json::Value {
+    let codex_notes = codex.map(|result| {
+        memory::compact_prompt_text(&format!("{}\n{}", result.stdout, result.stderr), 1200)
+    });
+    serde_json::json!({
+        "changed_paths": git_ops::changed_paths_from_diff(&patch.diff),
+        "key_improvements": memory::compact_score_changes(&score.improvements, 8),
+        "known_degradations": memory::compact_score_changes(&score.degradations, 8),
+        "reject_reasons": score.reject_reasons,
+        "codex_notes": codex_notes,
     })
 }
 

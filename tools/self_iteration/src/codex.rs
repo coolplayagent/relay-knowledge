@@ -6,6 +6,9 @@ use crate::{
     command::{CommandResult, CommandSpec, run_command},
     config::Config,
     history::{HistoryPaths, best_accepted_run, load_runs},
+    memory::{
+        historical_patch_memory_index, progressive_memory_index, rejection_recovery_memory_review,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +104,9 @@ pub fn build_prompt(paths: &HistoryPaths, workspace: &Path, run_id: &str) -> Str
         })
         .unwrap_or_else(|| "No accepted v2 historical run yet.".to_owned());
     let rejected = recent_rejections(paths);
+    let recovery_memory = rejection_recovery_memory_review(paths, 5);
+    let progressive_memory = progressive_memory_index(paths, 12);
+    let patch_memory = historical_patch_memory_index(paths, 12);
     format!(
         r#"You are running inside relay-knowledge self-iteration run {run_id}.
 
@@ -119,6 +125,15 @@ Workspace: {workspace}
 Historical context: {best_summary}
 Recent rejected v2 attempts:
 {rejected}
+
+Rejected recovery memory:
+{recovery_memory}
+
+Progressive memory index:
+{progressive_memory}
+
+Historical patch memory index:
+{patch_memory}
 
 Make one concrete candidate code change now.
 "#,

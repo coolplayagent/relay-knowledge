@@ -770,18 +770,7 @@ fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport
     let prompt_file = input.run_home.join("judge-prompt.txt");
     fs::write(&prompt_file, &prompt)
         .map_err(|error| format!("failed to write {}: {error}", prompt_file.display()))?;
-    let command = judge_cli_command(&settings.command, input.workspace, &prompt_file, &prompt)?;
-    let result = run_limited(
-        input.limiter,
-        CommandSpec::new(
-            "research_judge",
-            command.0,
-            input.workspace,
-            Some(input.env.clone()),
-            settings.timeout_seconds,
-        )
-        .with_stdin(command.1.unwrap_or_default()),
-    );
+    let result = run_judge_backend(&input, &settings, &prompt_file, &prompt)?;
     let outcome = if result.passed() {
         judge_outcome(
             &format!("{}\n{}", result.stdout, result.stderr),

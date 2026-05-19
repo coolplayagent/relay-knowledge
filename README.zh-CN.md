@@ -113,8 +113,8 @@ harness 可以通过稳定启动脚本直接运行：
 ./self-iterate.sh chart
 ```
 
-启动脚本会在需要时自动构建 harness binary。v2 运行历史、报告、patch 和评分曲线保存在
-`.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。semantic/vector fixture 会继承普通运行时使用的
+启动脚本会在需要时自动构建 harness binary。v2 运行历史、渐进式记忆、报告、patch 和评分曲线保存在
+`.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。research judge 支持 OpenAI-compatible HTTP 或开放 coding-agent CLI；未配置 backend 时默认使用 `opencode`。semantic/vector fixture 会继承普通运行时使用的
 `RELAY_KNOWLEDGE_*` embedding 环境变量，不会把 provider URL、API key、模型名或维度写入 benchmark cases。
 
 底层质量门禁：

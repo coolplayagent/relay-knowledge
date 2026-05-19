@@ -165,11 +165,13 @@ started directly through the stable launcher:
 ```
 
 The launcher auto-builds the harness binary when needed. It stores v2 run
-history, reports, patches, and score curves under
+history, progressive memory, reports, patches, and score curves under
 `.git/relay-knowledge-self-iteration/` and only commits candidates that improve
-the configured score. The semantic/vector fixture inherits the same
-`RELAY_KNOWLEDGE_*` embedding environment as normal runtime commands and does
-not persist secrets in benchmark cases.
+the configured score. The research judge supports OpenAI-compatible HTTP or an
+open coding-agent CLI, defaulting to `opencode` when no backend is configured.
+The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding
+environment as normal runtime commands and does not persist secrets in
+benchmark cases.
 
 The underlying quality gates are:
 

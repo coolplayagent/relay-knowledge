@@ -67,24 +67,28 @@ or harness-policy changes that do not carry those notes. The prompt uses the
 v2 run history and patch paths as bounded context when reasoning about the next
 candidate.
 
-The v2 Rust harness does not read the old Python `runs.jsonl`, `reports/`, or
-`patches/` formats. Those files remain as historical artifacts. The v2 prompt
-uses `runs-v2.jsonl` for the best accepted record and recent rejected attempts;
-more granular long-term memory can be added on top of the v2 state format later.
+The v2 Rust harness keeps `runs-v2.jsonl`, `reports-v2/`, and `patches-v2/`
+separate from the old Python run/report/patch formats, which remain historical
+artifacts. Progressive long-term memory is preserved under the shared
+`.git/relay-knowledge-self-iteration/memory/` tree: each scored run writes
+`memory/index.jsonl`, `memory/summaries/`, and `memory/details/`, and the next
+generation prompt receives a rejection-recovery memory review, a bounded memory
+index, and a bounded historical patch index. Codex should open the referenced
+summary, detail, or patch files only when they match the current gate, metric,
+case, path, or algorithm objective.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. A global bounded command limiter prevents repository indexing and query
 subprocesses from growing without control; set `--jobs N` or
 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` to override the global limit.
 
-The prompt includes bounded v2 history context. Codex should load matching
-report or patch files only when the run record is relevant to the current gate,
-metric, case, path, or algorithm objective. This keeps repeated rejections tied
-to recent evidence instead of retrying the same shape of patch.
+The prompt includes bounded run history, progressive memory, and patch indexes
+so repeated rejections stay tied to recent evidence instead of retrying the same
+shape of patch.
 
 ## Scoring and acceptance
 
-When the research judge is not configured, the score is:
+When the research judge is disabled or skipped, the score is:
 
 ```text
 foundational_capability * 0.22
@@ -94,7 +98,7 @@ foundational_capability * 0.22
 + stability * 0.25
 ```
 
-When the research judge is configured, `research_judge` becomes a protected
+When the research judge is enabled, `research_judge` becomes a protected
 objective and the weights switch to:
 
 ```text
@@ -128,7 +132,9 @@ freshness/version evidence, and same-change documentation updates.
   CLI alias that uses the default opencode command unless a custom command is
   also set
 - HTTP: `RELAY_KNOWLEDGE_JUDGE_BASE_URL`, `RELAY_KNOWLEDGE_JUDGE_API_KEY`,
-  `RELAY_KNOWLEDGE_JUDGE_MODEL`
+  `RELAY_KNOWLEDGE_JUDGE_MODEL`; the standalone harness posts the request with
+  `curl`, and the API key is read from the environment rather than persisted in
+  reports
 - CLI: `RELAY_KNOWLEDGE_JUDGE_COMMAND`, with aliases
   `RELAY_KNOWLEDGE_JUDGE_AGENT_COMMAND` and
   `RELAY_KNOWLEDGE_JUDGE_CLI_COMMAND`; when unset, the default is
@@ -196,8 +202,8 @@ This avoids rejecting a real case/rank improvement because a timing metric moved
 
 The `chart` command writes:
 
-- `.git/relay-knowledge-self-iteration/score.csv`
-- `.git/relay-knowledge-self-iteration/score.svg`
+- `.git/relay-knowledge-self-iteration/score-v2.csv`
+- `.git/relay-knowledge-self-iteration/score-v2.svg`
 
 ## Evaluation data
 
@@ -251,7 +257,7 @@ enumerating cases.
   indexing wall time after `repo register`, including batching, parser
   throughput, SQLite writes, finalize work, and incremental reuse.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
-- `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
+- `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can be disabled with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for symbols, references, overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering symbols, functions, syscall-style macros, exported symbols, includes, references, callers, callees, mmap flow, and epoll/eventfd retrieval.
