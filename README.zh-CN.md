@@ -38,6 +38,21 @@ relay-knowledge --version
 relay-knowledge service doctor
 ```
 
+每个 GitHub Release 还会包含
+`relay-knowledge-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
+的 skill，用于引导 LLM agent 通过 `relay-knowledge` CLI 使用本地图谱和代码仓库工作流。配置
+`CLAWHUB_TOKEN` 后，release workflow 可以把同一个
+`skills/relay-knowledge-cli` 目录发布到 ClawHub：
+
+```bash
+clawhub publish skills/relay-knowledge-cli \
+  --slug relay-knowledge-cli \
+  --name "Relay Knowledge CLI" \
+  --version <version>
+```
+
+这条 skill-over-CLI 路径与 MCP/ACP 协议接入是分离的。
+
 ## 当前能力
 
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。

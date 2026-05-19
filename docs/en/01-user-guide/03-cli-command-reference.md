@@ -118,3 +118,14 @@ Cold full `repo index` requests return a durable task handle immediately and sta
 Status, health, help, setup doctor/profile, provider probe, version check, report, and audit query are diagnostic entry points and should not mutate graph facts. `version check` may only refresh the version-check cache under the runtime cache directory. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.
 
 Automated callers should read operation and read/write metadata from `help --format json` before exposing a command in CI, agents, or the Web operation surface.
+
+## 3.6 Skill-over-CLI
+
+The repository ships `skills/relay-knowledge-cli`, a ClawHub-compatible skill
+for LLM agents that should operate relay-knowledge by invoking the local CLI and
+parsing JSON output. It covers installation checks, `version check`, setup and
+health diagnostics, knowledge graph ingestion/query, and code repository
+registration, indexing, query, update, impact, and report workflows.
+
+The skill intentionally does not configure MCP, call MCP tools, or manage ACP
+sessions. Use the MCP/ACP chapters for protocol-level agent access.
