@@ -7,6 +7,7 @@ use crate::command::CommandResult;
 
 const SCORE_EPSILON: f64 = 0.0005;
 const RATIO_EPSILON: f64 = 0.005;
+const CASE_SCORE_EPSILON: f64 = 0.005;
 const METRIC_RELATIVE_EPSILON: f64 = 0.03;
 const METRIC_ABSOLUTE_EPSILON: f64 = 25.0;
 
@@ -367,6 +368,14 @@ struct ScoreComponents {
     stability: f64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PreviousCase {
+    passed: bool,
+    rank: Option<usize>,
+    false_positive_count: usize,
+    score: f64,
+}
+
 fn reject_reasons(
     observation: &EvaluationObservation,
     current: ScoreComponents,
@@ -468,19 +477,21 @@ fn changes(
         }
     }
     for case in &observation.cases {
-        let Some(previous_passed) = previous_case_passed(previous, &case.case_id) else {
+        let Some(previous_case) = previous_case(previous, &case.case_id) else {
             continue;
         };
-        if case.passed != previous_passed
+        if case.passed != previous_case.passed
             && ((improved && case.passed) || (!improved && !case.passed))
         {
             changes.push(serde_json::json!({
                 "kind": "case",
                 "name": case.case_id,
-                "previous": previous_passed,
+                "previous": previous_case.passed,
                 "current": case.passed
             }));
+            continue;
         }
+        push_case_quality_changes(&mut changes, case, previous_case, improved);
     }
     let previous_metrics = previous_metrics(previous);
     for metric in &observation.metrics {
@@ -817,16 +828,99 @@ fn previous_number(run: &Value, name: &str) -> f64 {
     run.get(name).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-fn previous_case_passed(run: &Value, case_id: &str) -> Option<bool> {
-    run.get("cases")
+fn push_case_quality_changes(
+    changes: &mut Vec<Value>,
+    case: &CaseObservation,
+    previous: PreviousCase,
+    improved: bool,
+) {
+    let current_score = case.score();
+    let score_delta = current_score - previous.score;
+    if (improved && score_delta > CASE_SCORE_EPSILON)
+        || (!improved && score_delta < -CASE_SCORE_EPSILON)
+    {
+        changes.push(serde_json::json!({
+            "kind": "case_score",
+            "name": case.case_id,
+            "previous": previous.score,
+            "current": current_score
+        }));
+    }
+    let rank_better = optional_rank_better(case.rank, previous.rank);
+    if (improved && rank_better == Some(true)) || (!improved && rank_better == Some(false)) {
+        changes.push(serde_json::json!({
+            "kind": "case_rank",
+            "name": case.case_id,
+            "previous": previous.rank,
+            "current": case.rank
+        }));
+    }
+    if case.false_positive_count != previous.false_positive_count
+        && ((improved && case.false_positive_count < previous.false_positive_count)
+            || (!improved && case.false_positive_count > previous.false_positive_count))
+    {
+        changes.push(serde_json::json!({
+            "kind": "case_false_positive_count",
+            "name": case.case_id,
+            "previous": previous.false_positive_count,
+            "current": case.false_positive_count
+        }));
+    }
+}
+
+fn optional_rank_better(current: Option<usize>, previous: Option<usize>) -> Option<bool> {
+    match (current, previous) {
+        (Some(current), Some(previous)) if current != previous => Some(current < previous),
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        _ => None,
+    }
+}
+
+fn previous_case(run: &Value, case_id: &str) -> Option<PreviousCase> {
+    let case = run
+        .get("cases")
         .and_then(Value::as_array)
         .and_then(|cases| {
             cases
                 .iter()
                 .find(|case| case.get("case_id").and_then(Value::as_str) == Some(case_id))
-        })
-        .and_then(|case| case.get("passed"))
-        .and_then(Value::as_bool)
+        })?;
+    let passed = case.get("passed").and_then(Value::as_bool)?;
+    let rank = case
+        .get("rank")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize);
+    let false_positive_count = case
+        .get("false_positive_count")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_default();
+    Some(PreviousCase {
+        passed,
+        rank,
+        false_positive_count,
+        score: previous_case_score(case, passed, rank, false_positive_count),
+    })
+}
+
+fn previous_case_score(
+    case: &Value,
+    passed: bool,
+    rank: Option<usize>,
+    false_positive_count: usize,
+) -> f64 {
+    if !passed {
+        return 0.0;
+    }
+    if let Some(score) = case.get("score_override").and_then(Value::as_f64) {
+        return clamp(score);
+    }
+    let rank_score = match rank {
+        Some(rank) if rank > 0 => 1.0 / rank as f64,
+        _ => 1.0,
+    };
+    (rank_score - (false_positive_count as f64 * 0.1).min(0.5)).max(0.0)
 }
 
 fn previous_gate_passed(run: &Value, gate_name: &str) -> Option<bool> {

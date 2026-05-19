@@ -759,6 +759,15 @@ fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport
         });
         return Ok(report);
     }
+    if let Some(error) = &settings.configuration_error {
+        report.gates.push(GateObservation {
+            name: "research_judge".to_owned(),
+            passed: false,
+            duration_ms: 0,
+            message: format!("judge misconfigured: {error}"),
+        });
+        return Ok(report);
+    }
     if !settings.missing.is_empty() {
         report.gates.push(GateObservation {
             name: "research_judge".to_owned(),

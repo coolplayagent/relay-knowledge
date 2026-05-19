@@ -306,7 +306,10 @@ fn score_repository_set_case(
     if !result.passed() {
         return failed_case(case, set_name, &objective, result);
     }
-    let payload = parse_json_output(&result.stdout);
+    let payload = match parse_json_case_output(case, set_name, &objective, result) {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
     let hits = flatten_repository_set_hits(&payload);
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");

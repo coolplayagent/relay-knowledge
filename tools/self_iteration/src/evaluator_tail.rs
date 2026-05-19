@@ -179,7 +179,10 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
     if !result.passed() {
         return failed_case(case, repo_name, &objective, result);
     }
-    let payload = parse_json_output(&result.stdout);
+    let payload = match parse_json_case_output(case, repo_name, &objective, result) {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
     let hits = score_array_field(&payload, "results");
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
@@ -363,7 +366,10 @@ fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> 
     if !result.passed() {
         return failed_case(case, fixture_name, &objective, result);
     }
-    let payload = parse_json_output(&result.stdout);
+    let payload = match parse_json_case_output(case, fixture_name, &objective, result) {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
     let hits = score_array_field(&payload, "results");
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
@@ -634,7 +640,11 @@ fn score_semantic_vector_case(case: &Value, result: &CommandResult) -> CaseObser
     if !result.passed() {
         return failed_case(case, "semantic_vector", "semantic_vector", result);
     }
-    let payload = parse_json_output(&result.stdout);
+    let payload = match parse_json_case_output(case, "semantic_vector", "semantic_vector", result)
+    {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
     let hits = score_array_field(&payload, "results");
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
@@ -750,13 +760,35 @@ fn missing_required_backends(case: &Value, payload: &Value) -> Vec<String> {
 include!("evaluator_judge.rs");
 
 fn parse_json_output(stdout: &str) -> Value {
+    parse_json_output_value(stdout).unwrap_or(Value::Null)
+}
+
+fn parse_json_output_value(stdout: &str) -> Option<Value> {
     stdout
         .lines()
         .rev()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .find_map(|line| serde_json::from_str(line).ok())
-        .unwrap_or(Value::Null)
+}
+
+fn parse_json_case_output(
+    case: &Value,
+    repository: &str,
+    objective: &str,
+    result: &CommandResult,
+) -> Result<Value, Box<CaseObservation>> {
+    parse_json_output_value(&result.stdout).ok_or_else(|| Box::new(CaseObservation {
+        case_id: string_or(case, "id", "case").to_owned(),
+        repository: repository.to_owned(),
+        passed: false,
+        rank: None,
+        max_rank: number_or(case, "max_rank", 1) as usize,
+        false_positive_count: 0,
+        message: "invalid JSON output from --format json command".to_owned(),
+        objective: objective.to_owned(),
+        score_override: Some(0.0),
+    }))
 }
 
 fn push_latency_metrics(
@@ -837,108 +869,4 @@ fn serializable_repo_report(report: &RepoReport) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn shell_split_keeps_quoted_argument() {
-        assert_eq!(
-            shell_split("tool run \"hello world\" --file {prompt_file}").expect("split"),
-            vec!["tool", "run", "hello world", "--file", "{prompt_file}"]
-        );
-    }
-
-    #[test]
-    fn judge_defaults_to_opencode_cli_agent() {
-        let settings = judge_settings(&BTreeMap::new());
-        assert!(settings.enabled);
-        assert_eq!(settings.backend, JudgeBackend::Cli);
-        assert!(settings.command.starts_with("opencode run "));
-        assert!(settings.missing.is_empty());
-    }
-
-    #[test]
-    fn judge_uses_openai_compatible_http_when_configured() {
-        let env = BTreeMap::from([
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
-                "http://localhost:11434/v1".to_owned(),
-            ),
-            ("RELAY_KNOWLEDGE_JUDGE_API_KEY".to_owned(), "token".to_owned()),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_MODEL".to_owned(),
-                "judge-model".to_owned(),
-            ),
-        ]);
-        let settings = judge_settings(&env);
-        assert_eq!(settings.backend, JudgeBackend::Http);
-        assert!(settings.missing.is_empty());
-        assert_eq!(
-            normalize_judge_chat_url(&settings.http_base_url),
-            "http://localhost:11434/v1/chat/completions"
-        );
-        let (command, body) = judge_http_command(&settings, "judge prompt").expect("http command");
-        assert!(!command.join(" ").contains("token"));
-        assert!(body.contains("judge-model"));
-        assert!(body.contains("judge prompt"));
-    }
-
-    #[test]
-    fn judge_backend_http_env_selects_http_runner() {
-        let env = BTreeMap::from([
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BACKEND".to_owned(),
-                "http".to_owned(),
-            ),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_BASE_URL".to_owned(),
-                "http://localhost:11434".to_owned(),
-            ),
-            ("RELAY_KNOWLEDGE_JUDGE_API_KEY".to_owned(), "token".to_owned()),
-            (
-                "RELAY_KNOWLEDGE_JUDGE_MODEL".to_owned(),
-                "judge-model".to_owned(),
-            ),
-        ]);
-        let settings = judge_settings(&env);
-        assert_eq!(settings.backend, JudgeBackend::Http);
-        assert_eq!(settings_summary(&settings)["backend"], "http");
-    }
-
-    #[test]
-    fn file_case_enforces_payload_constraints() {
-        let case = serde_json::json!({
-            "id": "file_constraints",
-            "max_results": 1,
-            "truncated": true,
-            "degraded_reason_contains": "budget",
-            "expected": [{"relative_path": "a.md"}]
-        });
-        let result = CommandResult {
-            name: "files_query".to_owned(),
-            command: vec!["relay-knowledge".to_owned()],
-            exit_code: 0,
-            duration_ms: 1,
-            stdout: serde_json::json!({
-                "results": [{"relative_path": "a.md"}, {"relative_path": "b.md"}],
-                "truncated": false,
-                "degraded_reason": "stale"
-            })
-            .to_string(),
-            stderr: String::new(),
-        };
-
-        let observation = score_file_case("fixture", &case, &result);
-
-        assert!(!observation.passed);
-        assert!(observation.message.contains("max_results=1"));
-        assert!(observation.message.contains("truncated=false expected=true"));
-        assert!(observation.message.contains("missing=budget"));
-    }
-
-    #[test]
-    fn percentile_selects_expected_rank() {
-        assert_eq!(percentile(&[10, 20, 30, 40], 50), 20);
-        assert_eq!(percentile(&[10, 20, 30, 40], 95), 30);
-    }
-}
+include!("evaluator_tests.rs");
