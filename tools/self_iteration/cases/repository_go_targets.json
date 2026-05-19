@@ -1,0 +1,124 @@
+{
+  "query_cases": [
+    {
+      "id": "kubernetes_go_symbol_ttl_controller",
+      "repository": "kubernetes_go_sample",
+      "kind": "symbol",
+      "query": "Controller",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "line_start": 56
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_definition_new_ttl_controller",
+      "repository": "kubernetes_go_sample",
+      "kind": "definition",
+      "query": "NewTTLController",
+      "limit": 20,
+      "max_rank": 2,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "line_start": 81
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_references_process_item",
+      "repository": "kubernetes_go_sample",
+      "kind": "references",
+      "query": "processItem",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "ttlc.processItem(ctx)"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_callers_process_item_worker",
+      "repository": "kubernetes_go_sample",
+      "kind": "callers",
+      "query": "processItem",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "worker"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_callees_run_worker",
+      "repository": "kubernetes_go_sample",
+      "kind": "callees",
+      "query": "Run",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "ttlc.worker"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_imports_client_go_kubernetes",
+      "repository": "kubernetes_go_sample",
+      "kind": "imports",
+      "query": "k8s.io/client-go/kubernetes",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "k8s.io/client-go/kubernetes"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "kubernetes_go_hybrid_ttl_queue_patch",
+      "repository": "kubernetes_go_sample",
+      "kind": "hybrid",
+      "query": "TTL controller enqueueNode processItem updateNodeIfNeeded patch node annotation",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["pkg/controller/ttl/ttl_controller.go"],
+      "language_filters": ["go"],
+      "expected": [
+        {
+          "path": "pkg/controller/ttl/ttl_controller.go",
+          "excerpt_contains": "updateNodeIfNeeded"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

@@ -1,9 +1,15 @@
 {
   "include_files": [
     "cases/file_background_targets.json",
-    "cases/repository_opencode_targets.json",
+    "cases/repository_python_targets.json",
+    "cases/repository_javascript_targets.json",
+    "cases/repository_typescript_targets.json",
+    "cases/repository_c_targets.json",
+    "cases/repository_cpp_targets.json",
+    "cases/repository_go_targets.json",
+    "cases/repository_java_targets.json",
+    "cases/repository_rust_targets.json",
     "cases/repository_index_performance_targets.json",
-    "cases/repository_multilang_targets.json",
     "cases/repository_relationship_regression_targets.json",
     "cases/repository_relationship_challenge_system_targets.json",
     "cases/repository_relationship_challenge_application_targets.json"
