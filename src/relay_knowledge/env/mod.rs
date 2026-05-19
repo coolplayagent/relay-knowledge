@@ -85,6 +85,11 @@ pub const RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS: &str =
 pub const RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT: &str =
     "RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT";
 pub const RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS: &str = "RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS";
+pub const RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED: &str = "RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED";
+pub const RELAY_KNOWLEDGE_UPDATE_SOURCES: &str = "RELAY_KNOWLEDGE_UPDATE_SOURCES";
+pub const RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS: &str =
+    "RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS";
+pub const RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO: &str = "RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO";
 pub const RELAY_OTEL_ENDPOINT: &str = "RELAY_OTEL_ENDPOINT";
 pub const RELAY_OTEL_TRACES: &str = "RELAY_OTEL_TRACES";
 pub const RELAY_OTEL_METRICS: &str = "RELAY_OTEL_METRICS";
@@ -242,6 +247,15 @@ pub struct FileIndexEnvOverrides {
     pub query_timeout_ms: Option<u64>,
 }
 
+/// Release update-check settings read from relay-specific environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdateEnvOverrides {
+    pub enabled: Option<bool>,
+    pub sources: Option<String>,
+    pub check_interval_ms: Option<u64>,
+    pub github_repo: Option<String>,
+}
+
 /// Telemetry exporter settings read from relay-specific environment variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TelemetryEnvOverrides {
@@ -262,6 +276,7 @@ pub struct EnvironmentConfig {
     pub retrieval: RetrievalEnvOverrides,
     pub workers: WorkerEnvOverrides,
     pub file_index: FileIndexEnvOverrides,
+    pub updates: UpdateEnvOverrides,
     pub telemetry: TelemetryEnvOverrides,
 }
 
@@ -445,6 +460,20 @@ impl EnvironmentConfig {
                     RELAY_KNOWLEDGE_FILE_INDEX_MAX_FILES_PER_ROOT,
                 )?,
                 query_timeout_ms: positive_u64_var(&values, RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS)?,
+            },
+            updates: {
+                let enabled = bool_var(&values, RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED)?;
+                let check_interval_ms = if enabled == Some(false) {
+                    None
+                } else {
+                    positive_u64_var(&values, RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS)?
+                };
+                UpdateEnvOverrides {
+                    enabled,
+                    sources: string_var(&values, RELAY_KNOWLEDGE_UPDATE_SOURCES)?,
+                    check_interval_ms,
+                    github_repo: string_var(&values, RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO)?,
+                }
             },
             telemetry: TelemetryEnvOverrides {
                 otel_endpoint: string_var(&values, RELAY_OTEL_ENDPOINT)?,
@@ -722,6 +751,13 @@ mod tests {
                 (RELAY_KNOWLEDGE_EMBEDDING_DIMENSION, "1536"),
                 (RELAY_KNOWLEDGE_FILE_INDEX_SCAN_TIMEOUT_MS, "120000"),
                 (RELAY_KNOWLEDGE_FILE_QUERY_TIMEOUT_MS, "600"),
+                (RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED, "true"),
+                (RELAY_KNOWLEDGE_UPDATE_SOURCES, "github,crates.io"),
+                (RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS, "86400000"),
+                (
+                    RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO,
+                    "coolplayagent/relay-knowledge",
+                ),
                 (RELAY_OTEL_ENDPOINT, "http://collector.internal:4318"),
                 (RELAY_OTEL_TRACES, "true"),
                 (RELAY_OTEL_METRICS, "false"),
@@ -775,6 +811,13 @@ mod tests {
         assert_eq!(config.retrieval.embedding_dimension, Some(1536));
         assert_eq!(config.file_index.scan_timeout_ms, Some(120000));
         assert_eq!(config.file_index.query_timeout_ms, Some(600));
+        assert_eq!(config.updates.enabled, Some(true));
+        assert_eq!(config.updates.sources, Some("github,crates.io".to_owned()));
+        assert_eq!(config.updates.check_interval_ms, Some(86_400_000));
+        assert_eq!(
+            config.updates.github_repo,
+            Some("coolplayagent/relay-knowledge".to_owned())
+        );
         assert_eq!(
             config.telemetry.otel_endpoint,
             Some("http://collector.internal:4318".to_owned())
@@ -824,6 +867,21 @@ mod tests {
 
         assert_eq!(error.variable, RELAY_KNOWLEDGE_HTTP_REQUEST_TIMEOUT_MS);
         assert_eq!(error.kind, EnvErrorKind::ZeroValue);
+    }
+
+    #[test]
+    fn disabled_update_checks_ignore_invalid_interval_override() {
+        let config = EnvironmentConfig::from_pairs(
+            PlatformKind::Unix,
+            [
+                (RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED, "false"),
+                (RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS, "0"),
+            ],
+        )
+        .expect("disabled update checks should ignore unused interval settings");
+
+        assert_eq!(config.updates.enabled, Some(false));
+        assert_eq!(config.updates.check_interval_ms, None);
     }
 
     #[test]

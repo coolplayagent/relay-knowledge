@@ -16,6 +16,8 @@ mod ops_cli;
 mod repo_cli;
 #[path = "setup_cli.rs"]
 mod setup_cli;
+#[path = "version_cli.rs"]
+mod version_cli;
 
 use std::{error::Error, fmt};
 
@@ -28,7 +30,6 @@ use crate::{
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
     interfaces::{agent::mcp::McpServer, web},
     net::qos::QosRuntime,
-    project::PROJECT_NAME,
 };
 
 use cli_render::{render_project_status, render_response, serialize_line};
@@ -284,6 +285,7 @@ pub enum CliAction {
         profile: setup_cli::SetupProfile,
     },
     Version,
+    VersionCheck,
     Help {
         path: Vec<String>,
     },
@@ -486,11 +488,50 @@ where
     S: Into<String>,
 {
     let command = CliCommand::parse(args)?;
+    run_command(command).await
+}
+
+/// Rendered stdout/stderr for the process entry point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliProcessOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Runs the CLI command and renders only the command result.
+pub async fn run_process<I, S>(
+    args: I,
+    _interactive_text_output: bool,
+) -> Result<CliProcessOutput, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let command = CliCommand::parse(args)?;
+    let stdout = run_command(command).await?;
+
+    Ok(CliProcessOutput {
+        stdout,
+        stderr: String::new(),
+    })
+}
+
+/// Renders best-effort process-only notices after primary command output is emitted.
+pub async fn process_update_notice<I, S>(args: I, interactive_text_output: bool) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let command = CliCommand::parse(args).ok()?;
+    version_cli::update_notice_for_process(&command, interactive_text_output).await
+}
+
+async fn run_command(command: CliCommand) -> Result<String, CliError> {
     if let CliAction::Help { path } = &command.action {
         return cli_spec::render_help(path, command.format);
     }
     if command.action == CliAction::Version {
-        return render_version(command.format);
+        return version_cli::render_version(command.format);
     }
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
         return run_service(mcp, web).await;
@@ -649,6 +690,7 @@ pub async fn run_with_service(
                 format,
             )
         }
+        CliAction::VersionCheck => version_cli::run_version_check(service, format).await,
         CliAction::ServiceRun { .. } => Err(CliError::ServiceRunFailed(
             "service run requires process runtime".to_owned(),
         )),
@@ -673,19 +715,7 @@ pub async fn run_with_service(
         | CliAction::SetupProfile { .. } => Err(CliError::ApiFailed(
             "operational command was not handled by the service adapter".to_owned(),
         )),
-        CliAction::Version => render_version(command.format),
-    }
-}
-
-fn render_version(format: OutputFormat) -> Result<String, CliError> {
-    match format {
-        OutputFormat::Text => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
-        OutputFormat::Json => serialize_line(&serde_json::json!({
-            "project_name": PROJECT_NAME,
-            "version": env!("CARGO_PKG_VERSION"),
-        })),
-        OutputFormat::Markdown => Ok(format!("{} {}\n", PROJECT_NAME, env!("CARGO_PKG_VERSION"))),
-        OutputFormat::StreamingJson => Err(CliError::UnsupportedVersionFormat(format)),
+        CliAction::Version => version_cli::render_version(command.format),
     }
 }
 
@@ -715,6 +745,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "service" => ops_cli::parse_service(&tokens[1..]),
         "setup" => setup_cli::parse_setup(&tokens[1..]),
         "version" if tokens.len() == 1 => Ok(CliAction::Version),
+        "version" if tokens == ["version", "check"] => Ok(CliAction::VersionCheck),
         "help" => Ok(CliAction::Help {
             path: help_path(tokens[1..].to_vec()),
         }),
@@ -907,3 +938,7 @@ mod cli_naming_tests;
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(test)]
+#[path = "cli_version_tests.rs"]
+mod cli_version_tests;

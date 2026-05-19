@@ -74,6 +74,7 @@ RELAY_KNOWLEDGE_HTTP_BIND=127.0.0.1:8791 \
 - SQLite 本地存储和本地 deterministic semantic/vector read models 自动启用。
 - 网络和 QoS 使用保守默认值。
 - MCP 写入、远程监听和后台 silent updates 默认关闭。
+- 交互式文本 CLI 会按 24 小时缓存周期检查稳定新版本并只输出提示；不会自动安装或替换二进制。
 
 `status --format json` 会显示当前配置和状态。需要隔离一次性实验时，只设置一个临时 `RELAY_KNOWLEDGE_HOME`:
 
@@ -108,3 +109,9 @@ relay-knowledge service doctor --format json
 常驻服务和 MCP Streamable HTTP 使用 `net::http` 和 `net::qos` 统一处理网络能力。日常本地使用不需要调整网络预算；需要远程监听、调大请求体或复现代理问题时，再查 [第 12 章](12-advanced-configuration.md)。
 
 代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。这些变量只在环境边界读取，业务模块不直接访问进程环境。
+
+版本提示使用同一网络边界和代理/TLS 策略。可用
+`RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED=false` 关闭提示，用
+`RELAY_KNOWLEDGE_UPDATE_SOURCES=github,crates.io` 配置检测源，用
+`RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS` 调整缓存周期，用
+`RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO=owner/name` 指向自托管 fork 的 release 源。

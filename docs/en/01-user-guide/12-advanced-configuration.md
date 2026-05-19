@@ -98,6 +98,22 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 
 Proxy and certificate verification settings inherit `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, and `SSL_VERIFY`. Business modules do not read process environment directly.
 
+Version notices also use `net::http` and cache results under the runtime cache:
+
+```text
+RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED
+RELAY_KNOWLEDGE_UPDATE_SOURCES
+RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS
+RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO
+```
+
+By default, stable-version checks are enabled against both GitHub Releases and
+crates.io with a 24-hour cache interval. Disabling this capability only stops
+notices; `relay-knowledge version` still prints the local binary version. Release
+metadata response bodies are capped by `RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES`.
+When update checks are disabled, source, repository, and interval overrides are
+ignored so a notice-only setting cannot block runtime loading.
+
 Non-loopback HTTP binds should also configure MCP remote-client policy and origin/scope restrictions. QoS budget is admission control, not authentication; it limits connections, in-flight requests, queue depth, timeouts, and overload behavior.
 
 ## 12.5 MCP Policy

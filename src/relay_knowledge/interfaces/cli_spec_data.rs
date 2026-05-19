@@ -275,6 +275,20 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
             &["Does not load runtime configuration."],
         ),
         command!(
+            @formats &["text", "json", "markdown"],
+            &["version", "check"],
+            "relay-knowledge version check [--format text|json|markdown]",
+            "Check configured release sources for a newer stable version.",
+            "version.check",
+            CommandEffect::ReadOnly,
+            &[],
+            &[],
+            &["relay-knowledge version check --format json"],
+            &[
+                "Reads GitHub Releases and crates.io through the network boundary and caches diagnostics under the runtime cache directory."
+            ],
+        ),
+        command!(
             &["help"],
             "relay-knowledge help [command...] [--format text|json]",
             "Print human or machine-readable CLI metadata.",

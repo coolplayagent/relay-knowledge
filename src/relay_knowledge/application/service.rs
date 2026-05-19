@@ -50,6 +50,7 @@ use super::{
     ingest::mutation_batch_from_request,
     multimodal::extraction_ingest_request,
     status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
+    update::{VersionCheckResponse, check_for_updates},
 };
 
 #[cfg(test)]
@@ -128,6 +129,17 @@ impl RelayKnowledgeService {
     /// Returns the model provider configuration service rooted in runtime paths.
     pub fn model_provider_config(&self) -> ModelProviderConfigService {
         ModelProviderConfigService::new(self.runtime.paths.clone())
+    }
+
+    /// Checks configured release sources without opening graph storage.
+    pub async fn check_for_updates(&self, force_refresh: bool) -> VersionCheckResponse {
+        check_for_updates(
+            &self.runtime.paths,
+            &self.runtime.network,
+            &self.runtime.updates,
+            force_refresh,
+        )
+        .await
     }
 
     /// Persists a redacted agent protocol audit event through the durable sink.

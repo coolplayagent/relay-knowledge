@@ -98,6 +98,19 @@ RELAY_KNOWLEDGE_QOS_MAX_QUEUE_DEPTH
 
 代理和证书验证继承 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 和 `SSL_VERIFY`。业务模块不直接读取进程环境。
 
+版本提示也使用 `net::http`，并将结果缓存到 runtime cache:
+
+```text
+RELAY_KNOWLEDGE_UPDATE_CHECK_ENABLED
+RELAY_KNOWLEDGE_UPDATE_SOURCES
+RELAY_KNOWLEDGE_UPDATE_CHECK_INTERVAL_MS
+RELAY_KNOWLEDGE_UPDATE_GITHUB_REPO
+```
+
+默认启用 GitHub Releases 与 crates.io 双源稳定版本检查，缓存周期为 24 小时。关闭该能力只会停止提示，不影响
+`relay-knowledge version` 打印本地版本。release metadata 响应体受
+`RELAY_KNOWLEDGE_HTTP_MAX_BODY_BYTES` 限制；关闭更新检查时，检测源、仓库和间隔覆盖值都会被忽略，避免仅用于提示的坏配置阻塞 runtime loading。
+
 非 loopback HTTP bind 应同时配置 MCP remote-client policy 和 origin/scope 限制。QoS budget 是 admission control，不是安全认证；它用于限制连接数、in-flight 请求、队列深度、超时和 overload 行为。
 
 ## 12.5 MCP Policy

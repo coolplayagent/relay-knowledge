@@ -27,6 +27,21 @@ relay-knowledge service doctor --format json
 
 `service status` and `service doctor` currently share the same unified API output, covering service mode, background update state, service definition path, agent protocol status, and refresh queue diagnostics.
 
+Version checks:
+
+```bash
+relay-knowledge version
+relay-knowledge version check --format json
+```
+
+`version` prints only the current binary version. It does not load runtime
+configuration or use the network. `version check` queries GitHub Releases and
+crates.io through `net::http` according to runtime configuration and caches the
+result under the runtime cache directory. Ordinary interactive text/markdown CLI
+commands only print a short stderr notice when a newer stable version is found;
+the primary command stdout is emitted first, and they never replace the binary
+automatically.
+
 ## 3.2 Provider Diagnostics
 
 ```bash
@@ -93,12 +108,13 @@ relay-knowledge service run [--web] [--mcp streamable-http]
 relay-knowledge setup doctor
 relay-knowledge setup profile local|agent-readonly|service|external-embedding
 relay-knowledge version
+relay-knowledge version check
 ```
 
 Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running.
 
 ## 3.5 Read and Write Impact
 
-Status, health, help, setup doctor/profile, provider probe, report, and audit query are diagnostic entry points and should not mutate graph facts. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.
+Status, health, help, setup doctor/profile, provider probe, version check, report, and audit query are diagnostic entry points and should not mutate graph facts. `version check` may only refresh the version-check cache under the runtime cache directory. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.
 
 Automated callers should read operation and read/write metadata from `help --format json` before exposing a command in CI, agents, or the Web operation surface.

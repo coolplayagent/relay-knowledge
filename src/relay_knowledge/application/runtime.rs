@@ -27,6 +27,8 @@ use crate::{
     },
 };
 
+use super::update::{UpdateRuntimeConfig, UpdateRuntimeConfigError};
+
 /// Resolved foundation configuration shared by all interfaces.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfiguration {
@@ -37,6 +39,7 @@ pub struct RuntimeConfiguration {
     pub retrieval: ReadModelBackendConfig,
     pub workers: WorkerRuntimeConfig,
     pub file_index: FileIndexRuntimeConfig,
+    pub updates: UpdateRuntimeConfig,
 }
 
 impl RuntimeConfiguration {
@@ -64,6 +67,8 @@ impl RuntimeConfiguration {
             .map_err(RuntimeConfigurationError::Workers)?;
         let file_index = FileIndexRuntimeConfig::from_environment(environment)
             .map_err(RuntimeConfigurationError::FileIndex)?;
+        let updates = UpdateRuntimeConfig::from_environment(&environment.updates)
+            .map_err(RuntimeConfigurationError::Updates)?;
 
         Ok(Self {
             paths: RuntimePaths::resolve(&environment.platform, &environment.paths)
@@ -74,6 +79,7 @@ impl RuntimeConfiguration {
             retrieval,
             workers,
             file_index,
+            updates,
         })
     }
 }
@@ -403,6 +409,7 @@ pub enum RuntimeConfigurationError {
     Retrieval(RetrievalRuntimeConfigError),
     Workers(WorkerRuntimeConfigError),
     FileIndex(FileIndexRuntimeConfigError),
+    Updates(UpdateRuntimeConfigError),
 }
 
 impl fmt::Display for RuntimeConfigurationError {
@@ -416,6 +423,7 @@ impl fmt::Display for RuntimeConfigurationError {
             Self::Retrieval(error) => write!(formatter, "{error}"),
             Self::Workers(error) => write!(formatter, "{error}"),
             Self::FileIndex(error) => write!(formatter, "{error}"),
+            Self::Updates(error) => write!(formatter, "{error}"),
         }
     }
 }

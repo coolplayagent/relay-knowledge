@@ -18,6 +18,7 @@
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
 - Release archive attestation 使用生成的 `checksums.txt` 作为 subject manifest，使 GitHub artifact attestation 覆盖用户本地校验的同一批 archive digest。
+- CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
 
 ## 3. 安装体验
 
@@ -45,9 +46,12 @@ preflight doctor
 
 失败时回滚二进制和 service definition；数据 migration 必须有 checkpoint 或 forward-only 说明。
 
+`relay-knowledge version check` 是只读诊断入口，输出当前版本、最新稳定版本、来源、release URL 和诊断信息。实际升级仍必须由用户、installer 或包管理器显式执行，并继续遵守 preflight、checkpoint、service restart 和 post-upgrade doctor 流程。
+
 ## 6. 验收标准
 
 - Release artifact、checksum、版本号和文档能互相对应。
+- CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。
 - uninstall 清理二进制和服务定义，但保留或按用户确认处理 runtime data。
 

@@ -13,7 +13,10 @@ use std::{
 
 use crate::{
     env::{PathEnvOverrides, PlatformEnvironment, PlatformKind},
-    project::{MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME, MODEL_PROFILES_FILE_NAME},
+    project::{
+        MODEL_CATALOG_CACHE_FILE_NAME, MODEL_FALLBACK_FILE_NAME, MODEL_PROFILES_FILE_NAME,
+        VERSION_CHECK_CACHE_FILE_NAME,
+    },
 };
 
 pub use crate::project::APP_DIR_NAME;
@@ -108,6 +111,11 @@ impl RuntimePaths {
     /// Returns the cached public model catalog file.
     pub fn model_catalog_cache_file(&self) -> PathBuf {
         self.cache_dir.join(MODEL_CATALOG_CACHE_FILE_NAME)
+    }
+
+    /// Returns the cached version-check result.
+    pub fn version_check_cache_file(&self) -> PathBuf {
+        self.cache_dir.join(VERSION_CHECK_CACHE_FILE_NAME)
     }
 }
 

@@ -18,6 +18,12 @@ pub const MODEL_FALLBACK_FILE_NAME: &str = "model-fallback.json";
 /// Model catalog cache filename stored under the cache directory.
 pub const MODEL_CATALOG_CACHE_FILE_NAME: &str = "model-catalog-cache.json";
 
+/// Version-check cache filename stored under the cache directory.
+pub const VERSION_CHECK_CACHE_FILE_NAME: &str = "version-check-cache.json";
+
+/// Default GitHub repository queried for release metadata.
+pub const GITHUB_REPOSITORY_FULL_NAME: &str = "coolplayagent/relay-knowledge";
+
 /// Windows service definition filename for installed background operation.
 pub const WINDOWS_SERVICE_DEFINITION_FILE_NAME: &str = "relay-knowledge-service.xml";
 
