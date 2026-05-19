@@ -1,0 +1,130 @@
+{
+  "query_cases": [
+    {
+      "id": "relay_teams_js_symbol_state",
+      "repository": "relay_teams",
+      "kind": "symbol",
+      "query": "state",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["frontend/dist/js/core/state.js"],
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "line_start": 3
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rt_js_definition_attach_run_stream",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "attachRunStream",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "line_start": 451
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rt_js_definition_normalize_role_id",
+      "repository": "relay_teams",
+      "kind": "definition",
+      "query": "normalizeRoleId",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "line_start": 288
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_js_references_normalize_role_id",
+      "repository": "relay_teams",
+      "kind": "references",
+      "query": "normalizeRoleId",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/state.js",
+          "excerpt_contains": "normalizeRoleId(state.coordinatorRoleId)"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rt_js_callers_release_active_stream_handle",
+      "repository": "relay_teams",
+      "kind": "callers",
+      "query": "releaseActiveStreamHandle",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "attachRunStream"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_js_callees_attach_run_stream",
+      "repository": "relay_teams",
+      "kind": "callees",
+      "query": "attachRunStream",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "releaseActiveStreamHandle"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "relay_teams_js_imports_event_router",
+      "repository": "relay_teams",
+      "kind": "imports",
+      "query": "./eventRouter.js",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "routeEvent"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "rt_js_hybrid_background_stream_resume",
+      "repository": "relay_teams",
+      "kind": "hybrid",
+      "query": "background stream reconnect last event attach run session",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "frontend/dist/js/core/stream.js",
+          "excerpt_contains": "backgroundStreams"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

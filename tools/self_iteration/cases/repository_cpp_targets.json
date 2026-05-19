@@ -1,0 +1,133 @@
+{
+  "query_cases": [
+    {
+      "id": "leveldb_cpp_symbol_filter_policy",
+      "repository": "leveldb_cpp",
+      "kind": "symbol",
+      "query": "FilterPolicy",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["include/leveldb/filter_policy.h"],
+      "language_filters": ["cpp"],
+      "expected": [
+        {
+          "path": "include/leveldb/filter_policy.h",
+          "line_start": 27
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_definition_lru_cache_insert",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "LRUCache::Insert",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "path_filters": ["util/cache.cc"],
+      "language_filters": ["cpp"],
+      "expected": [
+        {
+          "path": "util/cache.cc",
+          "line_start": 267
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_definition_filter_block_generate_filter",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "FilterBlockBuilder::GenerateFilter",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "expected": [
+        {
+          "path": "table/filter_block.cc",
+          "line_start": 51
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_references_filter_block_generate_filter",
+      "repository": "leveldb_cpp",
+      "kind": "references",
+      "query": "GenerateFilter",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "table/filter_block.cc",
+          "excerpt_contains": "GenerateFilter();"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_callers_filter_policy_key_may_match",
+      "repository": "leveldb_cpp",
+      "kind": "callers",
+      "query": "KeyMayMatch",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "table/table.cc",
+          "excerpt_contains": "filter->KeyMayMatch"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_callees_table_internal_get",
+      "repository": "leveldb_cpp",
+      "kind": "callees",
+      "query": "Table::InternalGet",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "table/table.cc",
+          "excerpt_contains": "ReadBlock"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_imports_filter_policy_header",
+      "repository": "leveldb_cpp",
+      "kind": "imports",
+      "query": "leveldb/filter_policy.h",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "table/filter_block.cc",
+          "excerpt_contains": "leveldb/filter_policy.h"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_hybrid_version_set_builder_apply",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "VersionSet Builder Apply deleted files compact pointers levels",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "db/version_set.cc",
+          "excerpt_contains": "Builder"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

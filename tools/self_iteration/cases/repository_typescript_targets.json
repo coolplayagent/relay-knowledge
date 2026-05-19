@@ -14,6 +14,33 @@
   },
   "query_cases": [
     {
+      "id": "opencode_ts_symbol_instance_context",
+      "repository": "opencode_typescript",
+      "kind": "symbol",
+      "query": "InstanceContext",
+      "limit": 20,
+      "path_filters": ["packages/opencode/src/project/instance-context.ts"],
+      "language_filters": ["typescript"],
+      "max_rank": 3,
+      "expected": [{"path": "packages/opencode/src/project/instance-context.ts", "line_start": 5}],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "opencode_ts_references_instance_context",
+      "repository": "opencode_typescript",
+      "kind": "references",
+      "query": "InstanceContext",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "packages/opencode/src/session/session.ts",
+          "excerpt_contains": "InstanceContext"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
       "id": "opencode_ts_definition_generate_object",
       "repository": "opencode_typescript",
       "kind": "definition",

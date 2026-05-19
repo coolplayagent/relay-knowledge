@@ -1,0 +1,137 @@
+{
+  "query_cases": [
+    {
+      "id": "linux_c_symbol_page_idle_bitmap_read",
+      "repository": "linux_sample",
+      "kind": "symbol",
+      "query": "page_idle_bitmap_read",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["mm/page_idle.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "line_start": 118
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_definition_page_idle_bitmap_read",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "page_idle_bitmap_read",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 2,
+      "path_filters": ["mm/page_idle.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "line_start": 118
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_definition_bitmap_chunk_bits_macro",
+      "repository": "linux_sample",
+      "kind": "definition",
+      "query": "BITMAP_CHUNK_BITS",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 3,
+      "path_filters": ["mm/page_idle.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "line_start": 19
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_references_bitmap_chunk_bits",
+      "repository": "linux_sample",
+      "kind": "references",
+      "query": "BITMAP_CHUNK_BITS",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "bit = pfn % BITMAP_CHUNK_BITS"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_callers_page_idle_clear_refs_one",
+      "repository": "linux_sample",
+      "kind": "callers",
+      "query": "page_idle_clear_pte_refs_one",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_clear_pte_refs"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_callees_page_idle_bitmap_read",
+      "repository": "linux_sample",
+      "kind": "callees",
+      "query": "page_idle_bitmap_read",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "page_idle_clear_pte_refs"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_imports_linux_mm_header",
+      "repository": "linux_sample",
+      "kind": "imports",
+      "query": "linux/mm.h",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["mm/page_idle.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "mm/page_idle.c",
+          "excerpt_contains": "linux/mm.h"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_hybrid_percpu_populate_depopulate",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "percpu chunk populate depopulate map pages flush",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "expected": [
+        {
+          "path": "mm/percpu-vm.c",
+          "excerpt_contains": "pcpu_populate_chunk"
+        }
+      ],
+      "case_group": "language_kind_matrix"
+    }
+  ]
+}

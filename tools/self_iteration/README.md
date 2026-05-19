@@ -221,20 +221,21 @@ enumerating cases.
   candidate pruning, background indexing, and diagnostics targets. A subprocess
   timeout is applied to each file query so a candidate cannot hang the
   evaluator.
-- Multi-language repository retrieval targets cover relay-teams Python and
-  JavaScript, opencode TypeScript/TSX, LevelDB C++, and Linux C in the default
-  profile; Kubernetes Go, Spring Framework Java, RustFS Rust, and Codex Python
-  remain in the exhaustive profile. Relationship targets are split into
-  regression and challenge groups. Regression cases keep path filters and
-  broader rank thresholds as stable guardrails. Challenge cases remove path
-  filters, lower limits and max ranks, and add `expected_all` or
+- Multi-language repository retrieval targets are split by language under
+  `cases/repository_*_targets.json` so each language can evolve independently.
+  The default profile covers relay-teams Python/JavaScript, opencode
+  TypeScript/TSX, and LevelDB C++; Linux C, Kubernetes Go, Spring Framework
+  Java, RustFS Rust, and Codex Python remain behind repository-level
+  `profile=exhaustive`. The language files define real `symbol`, `definition`,
+  `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
+  functions, methods, classes, exported values, macros, includes/imports,
+  callback or trait relationships, and execution flows. Relationship targets
+  stay split into regression and challenge groups. Regression cases keep path
+  filters and broader rank thresholds as stable guardrails. Challenge cases
+  remove path filters, lower limits and max ranks, and add `expected_all` or
   `expected_sequence` scoring so passed Rust, Go, C, C++, Java, Python,
   JavaScript, and TypeScript inheritance, dependency, caller-chain, and
-  execution-flow cases still leave ranking and coverage improvement room. The
-  cases intentionally include nested classes, exported functions, callback/trait
-  relationships, caller/callee lookup, relative and tsconfig-alias imports,
-  hybrid concept queries, and path/language filters to drive parser, identity,
-  edge-finalize, FTS/BM25, and ranking-fusion improvements.
+  execution-flow cases still leave ranking and coverage improvement room.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
   and add combined `register_index_budget_ms` budgets. The evaluator records
@@ -244,8 +245,8 @@ enumerating cases.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `research_judge_suite` runs only when judge environment configuration is present. It sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
-- `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
-- `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering functions, syscall-style macros, exported symbols, includes, callers, callees, mmap flow, and epoll/eventfd retrieval.
+- `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for symbols, references, overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
+- `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering symbols, functions, syscall-style macros, exported symbols, includes, references, callers, callees, mmap flow, and epoll/eventfd retrieval.
 - `/opt/workspace/linux` repeated full-repository initial indexing measurement in the `exhaustive` profile through the `linux_full` target.
 - `/opt/workspace/leveldb` full `scope=all` C/C++ indexing and queries for class methods, free functions, headers, table cache, recovery, callers, hybrid lookup, and filters.
 - `/opt/workspace/kubernetes` full `scope=all` Go indexing in the `exhaustive` profile for command constructors, kubelet flow, API types, clientset/generic clients, authorizers, informer imports, callers, hybrid lookup, and filters.
