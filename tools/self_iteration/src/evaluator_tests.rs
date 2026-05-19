@@ -19,6 +19,50 @@ mod tests {
     }
 
     #[test]
+    fn full_profile_quality_gates_run_in_dependency_stages() {
+        let stages = quality_gate_stages("full");
+
+        assert_eq!(stages.len(), 3);
+        match &stages[0] {
+            QualityGateStage::Parallel(gates) => {
+                assert_eq!(
+                    gates.iter().map(|gate| gate.name).collect::<Vec<_>>(),
+                    vec!["cargo_fmt_check", "self_iteration_cargo_fmt_check"]
+                );
+            }
+            QualityGateStage::Rails(_) => panic!("fmt gates should be parallel"),
+        }
+        match &stages[1] {
+            QualityGateStage::Parallel(gates) => {
+                assert_eq!(
+                    gates.iter().map(|gate| gate.name).collect::<Vec<_>>(),
+                    vec![
+                        "cargo_build_release",
+                        "self_iteration_cargo_build_release"
+                    ]
+                );
+            }
+            QualityGateStage::Rails(_) => panic!("build gates should be parallel"),
+        }
+        match &stages[2] {
+            QualityGateStage::Rails(rails) => {
+                let rail_names = rails
+                    .iter()
+                    .map(|rail| rail.iter().map(|gate| gate.name).collect::<Vec<_>>())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rail_names,
+                    vec![
+                        vec!["cargo_clippy", "cargo_test"],
+                        vec!["self_iteration_cargo_clippy", "self_iteration_cargo_test"]
+                    ]
+                );
+            }
+            QualityGateStage::Parallel(_) => panic!("clippy/test gates should use rails"),
+        }
+    }
+
+    #[test]
     fn judge_uses_openai_compatible_http_when_configured() {
         let env = BTreeMap::from([
             (

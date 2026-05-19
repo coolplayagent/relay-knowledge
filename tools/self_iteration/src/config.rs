@@ -176,11 +176,16 @@ impl JobPlan {
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0);
-        let global_default = env_jobs.unwrap_or_else(|| cores.clamp(2, 8));
+        Self::from_inputs(config, cores, env_jobs)
+    }
+
+    fn from_inputs(config: &Config, cores: usize, env_jobs: Option<usize>) -> Self {
+        let cores = cores.max(1);
+        let global_default = env_jobs.unwrap_or(cores);
         Self {
             global: config.jobs.resolve(global_default),
-            repositories: config.repo_jobs.resolve((cores / 2).clamp(1, 4)),
-            queries: config.query_jobs.resolve(cores.clamp(2, 12)),
+            repositories: config.repo_jobs.resolve((cores / 2).max(1)),
+            queries: config.query_jobs.resolve(cores),
         }
     }
 }
@@ -278,5 +283,27 @@ mod tests {
         assert_eq!(config.profile, "smoke");
         assert_eq!(config.jobs, Jobs::Fixed(2));
         assert_eq!(config.repo_jobs, Jobs::Fixed(1));
+    }
+
+    #[test]
+    fn auto_jobs_use_available_machine_capacity() {
+        let config = Config::parse(vec!["evaluate".to_owned()]).expect("config should parse");
+
+        let plan = JobPlan::from_inputs(&config, 32, None);
+
+        assert_eq!(plan.global, 32);
+        assert_eq!(plan.repositories, 16);
+        assert_eq!(plan.queries, 32);
+    }
+
+    #[test]
+    fn job_env_override_only_replaces_global_limit() {
+        let config = Config::parse(vec!["evaluate".to_owned()]).expect("config should parse");
+
+        let plan = JobPlan::from_inputs(&config, 32, Some(6));
+
+        assert_eq!(plan.global, 6);
+        assert_eq!(plan.repositories, 16);
+        assert_eq!(plan.queries, 32);
     }
 }

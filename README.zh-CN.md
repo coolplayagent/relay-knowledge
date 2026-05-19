@@ -128,6 +128,8 @@ cargo test --test benchmarks --all-features -- --nocapture
 cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
+自迭代 harness 自身的产品与 harness 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
+
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
 
 存储契约包含 v1 代码图数据面：tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；不支持或降级的文件会回退为文本代码块。代码仓库 full index 使用受资源预算约束的 SQLite 批次和持久 checkpoint；大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle；CLI 会启动有界单次 worker，`service run` 则用同一队列上的单个仓库索引 worker 消费任务。`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照；已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
