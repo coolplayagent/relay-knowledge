@@ -46,6 +46,60 @@ pub(super) fn import_target_symbol_bonus(query: &str, matched_symbol_name: Optio
     }
 }
 
+pub(super) fn import_same_file_usage_bonus(
+    base_score: f64,
+    usage_count: usize,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || usage_count <= 1 {
+        return 0.0;
+    }
+
+    ((usage_count - 1) as f64 * IMPORT_USAGE_BONUS_PER_REFERENCE).min(MAX_IMPORT_USAGE_BONUS)
+}
+
+pub(super) fn import_target_directory_bonus(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let Some(target_parent) = target_hint.and_then(parent_dir) else {
+        return 0.0;
+    };
+    if parent_dir(path).is_some_and(|parent| parent == target_parent)
+        && path != target_hint.unwrap_or_default()
+    {
+        0.4
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn import_binding_context_bonus(
+    base_score: f64,
+    query: &str,
+    module: &str,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let Some(binding_count) = named_import_binding_count_for_query(module, query) else {
+        return 0.0;
+    };
+    if binding_count <= 1 {
+        return 0.0;
+    }
+
+    ((binding_count - 1) as f64 * IMPORT_BINDING_CONTEXT_BONUS_PER_BINDING)
+        .min(MAX_IMPORT_BINDING_CONTEXT_BONUS)
+}
+
 pub(super) fn hybrid_import_sparse_query_penalty(
     base_score: f64,
     query: &str,
@@ -89,6 +143,10 @@ const HYBRID_SPARSE_IMPORT_PENALTY_PER_TERM: f64 = 4.0;
 const MAX_HYBRID_SPARSE_IMPORT_PENALTY: f64 = 16.0;
 const MIN_SPARSE_IMPORT_BASE_SCORE: f64 = 0.5;
 const MIN_IMPORT_COVERAGE_TERM_LEN: usize = 3;
+const IMPORT_USAGE_BONUS_PER_REFERENCE: f64 = 0.05;
+const MAX_IMPORT_USAGE_BONUS: f64 = 0.4;
+const IMPORT_BINDING_CONTEXT_BONUS_PER_BINDING: f64 = 0.25;
+const MAX_IMPORT_BINDING_CONTEXT_BONUS: f64 = 1.0;
 
 fn normalized_query_terms(query: &str) -> Vec<String> {
     let mut terms = query_terms(query)
@@ -169,6 +227,48 @@ fn file_extension_is_path_like(extension: &str) -> bool {
             | "yaml"
             | "yml"
     )
+}
+
+fn parent_dir(path: &str) -> Option<&str> {
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .filter(|parent| !parent.is_empty())
+}
+
+fn named_import_binding_count_for_query(module: &str, query: &str) -> Option<usize> {
+    let (start, end) = named_import_bounds(module)?;
+    let query_terms = query_terms(query);
+    let mut binding_count = 0;
+    let mut query_is_bound = false;
+    for binding in module[start + 1..end].split(',') {
+        let binding = binding.trim().trim_start_matches("type ").trim();
+        if binding.is_empty() {
+            continue;
+        }
+        binding_count += 1;
+        if import_binding_matches_query(binding, &query_terms) {
+            query_is_bound = true;
+        }
+    }
+
+    query_is_bound.then_some(binding_count)
+}
+
+fn named_import_bounds(module: &str) -> Option<(usize, usize)> {
+    let start = module.find('{')?;
+    let end = module[start + 1..].find('}')? + start + 1;
+    (end > start).then_some((start, end))
+}
+
+fn import_binding_matches_query(binding: &str, query_terms: &[String]) -> bool {
+    let binding_name = binding
+        .split_whitespace()
+        .last()
+        .unwrap_or(binding)
+        .trim_matches(|character: char| !(character.is_ascii_alphanumeric() || character == '_'));
+    query_terms
+        .iter()
+        .any(|term| identifier_terms_equivalent(binding_name, term))
 }
 
 fn query_terms(query: &str) -> Vec<String> {

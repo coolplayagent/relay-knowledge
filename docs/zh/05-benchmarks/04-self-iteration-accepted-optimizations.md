@@ -951,3 +951,11 @@ over", path.replace('/', "::")), +        file_id: file_id.to_owned(), +        
 - invariants: definition, callee, and call-chain behavior keep existing ranking signals; zero-score rows still filter out; execution-flow bonuses apply only to hybrid queries with explicit flow intent, and caller bonuses apply only to `callers` queries.
 - expected impact: promotes `redactUrl` callers that live on the redaction surface, and promotes chunks that explain protocol/stream/lifecycle flows over local helper definitions, improving function-related self-iteration scores without fixture-specific paths or case IDs.
 - risks: repositories with intentionally generic file names receive no target-surface caller boost; very broad flow queries may still need graph-edge completeness when expected text is absent from the indexed path.
+
+## 20260519T-import-usage candidate
+
+- candidate: same-file import alias usage ranking for symbol-like import queries.
+- algorithm: for bounded `imports` query candidates with non-path symbol queries, batch-read same-file chunks and combine capped alias-use, same-target-directory, and named-binding context bonuses.
+- architecture: the change stays in SQLite code-query ranking; it does not alter parser extraction, graph facts, schema, FTS candidate selection, CLI/API fields, env/paths/net boundaries, semantic/vector settings, or the self-iteration harness.
+- invariants: path-like import queries, hybrid queries, target-symbol excerpts, import confidence, filters, dedupe, and zero-score filtering keep existing behavior; single-use aliases and namespace-only import lines receive no binding-context bonus.
+- expected impact: promotes implementation files that actually use namespace or named imports such as `ProviderShared` over equally matching setup, route, or utility import surfaces.

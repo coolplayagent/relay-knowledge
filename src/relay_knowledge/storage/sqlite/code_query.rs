@@ -43,12 +43,16 @@ pub(super) use super::code_query_scope::{language_filter_allows, path_filter_all
 use code_query_call_counts::{caller_target_call_counts, caller_target_call_key};
 use code_query_flow_scoring::{caller_context_density_bonus, execution_flow_chunk_bonus};
 use code_query_import_scoring::{
-    hybrid_import_sparse_query_penalty, import_line_priority, import_surface_bonus,
+    hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
+    import_same_file_usage_bonus, import_surface_bonus, import_target_directory_bonus,
     import_target_symbol_bonus, query_looks_like_import_path,
 };
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
-use code_query_import_targets::{attach_import_target_symbols, search_imports_by_target_symbols};
+use code_query_import_targets::{
+    attach_import_query_usage_context, attach_import_target_symbols,
+    search_imports_by_target_symbols,
+};
 use code_query_line_ranges::{
     SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, call_result_line_range,
     optional_line_range_with_symbol_context, symbol_result_line_range,
@@ -652,6 +656,7 @@ fn search_imports(
                 module: row.get(3)?,
                 matched_symbol_name: None,
                 target_symbol_names: None,
+                same_file_query_usage_count: 0,
                 line_range: RepositoryCodeRange {
                     start: row.get(4)?,
                     end: row.get(5)?,
@@ -672,6 +677,7 @@ fn search_imports(
     rows.extend(search_imports_by_target_symbols(
         connection, status, request,
     )?);
+    attach_import_query_usage_context(connection, status, request, &mut rows)?;
     if request.code_query_kind == CodeQueryKind::Imports
         && query_looks_like_import_path(&request.query)
     {
@@ -699,6 +705,24 @@ fn search_imports(
                     row.matched_symbol_name.as_deref(),
                 );
             let score = base_score
+                + import_same_file_usage_bonus(
+                    base_score,
+                    row.same_file_query_usage_count,
+                    request.code_query_kind,
+                )
+                + import_target_directory_bonus(
+                    base_score,
+                    &request.query,
+                    &row.path,
+                    row.target_hint.as_deref(),
+                    request.code_query_kind,
+                )
+                + import_binding_context_bonus(
+                    base_score,
+                    &request.query,
+                    &row.module,
+                    request.code_query_kind,
+                )
                 + import_line_priority(base_score, row.line_range.start, &request.query)
                 + hybrid_import_sparse_query_penalty(
                     base_score,
