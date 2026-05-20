@@ -30,6 +30,7 @@ pub(super) struct ReferenceRow {
     pub(super) confidence_basis_points: u16,
     pub(super) confidence_tier: String,
     pub(super) target_canonical_symbol_id: Option<String>,
+    pub(super) source_excerpt: Option<String>,
 }
 
 pub(super) struct CallRow {

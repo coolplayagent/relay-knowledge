@@ -659,46 +659,6 @@ fn callee_identifier_part_count(callee_name: &str) -> f64 {
     part_count as f64
 }
 
-pub(super) fn call_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &str) -> String {
-    let summary = format!("{caller} calls {callee}");
-    let Some(site) = caller_excerpt
-        .map(str::trim)
-        .filter(|excerpt| !excerpt.is_empty())
-        .map(|excerpt| call_site_excerpt(excerpt, callee))
-    else {
-        return summary;
-    };
-
-    if site.is_empty() || site == summary {
-        summary
-    } else {
-        format!("{summary}: {site}")
-    }
-}
-
-fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String {
-    let matching_line = caller_excerpt
-        .lines()
-        .find(|line| line_looks_like_call_to(line, callee))
-        .or_else(|| caller_excerpt.lines().find(|line| line.contains(callee)));
-    matching_line
-        .map(compact_excerpt_line)
-        .filter(|line| !line.is_empty())
-        .unwrap_or_else(|| compact_excerpt_line(caller_excerpt))
-}
-
-fn line_looks_like_call_to(line: &str, callee: &str) -> bool {
-    let Some((_, suffix)) = line.split_once(callee) else {
-        return false;
-    };
-    let suffix = suffix.trim_start();
-    suffix.starts_with('(') || (suffix.starts_with('<') && suffix.contains('('))
-}
-
-fn compact_excerpt_line(line: &str) -> String {
-    line.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))

@@ -9,8 +9,9 @@ use crate::{
 };
 
 use super::{
-    HitParts, code_query_rows::ReferenceRow, code_query_support::*, dedupe_sort_truncate,
-    hit_from_parts, prepare_code_search_statement, required_scope, selected_row,
+    HitParts, code_query_excerpts::reference_excerpt, code_query_rows::ReferenceRow,
+    code_query_support::*, dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement,
+    required_scope, selected_row,
 };
 
 struct ReferenceIdentityRows {
@@ -145,7 +146,20 @@ fn reference_rows_sql(predicate_sql: &str) -> String {
         SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
                r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
                r.line_start, r.line_end, r.target_hint, r.resolution_state,
-               r.confidence_basis_points, r.confidence_tier, s.canonical_symbol_id
+               r.confidence_basis_points, r.confidence_tier, s.canonical_symbol_id,
+               (
+                   SELECT chunk.content
+                   FROM code_repository_chunks chunk
+                   WHERE chunk.source_scope = r.source_scope
+                     AND chunk.path = r.path
+                     AND chunk.line_start <= r.line_start
+                     AND chunk.line_end >= r.line_start
+                   ORDER BY
+                     (chunk.line_end - chunk.line_start) ASC,
+                     chunk.line_start DESC,
+                     chunk.chunk_id ASC
+                   LIMIT 1
+               ) AS source_excerpt
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.source_scope = r.source_scope AND f.path = r.path
@@ -181,6 +195,7 @@ fn row_to_reference(row: &Row<'_>) -> rusqlite::Result<ReferenceRow> {
         confidence_basis_points: row.get(12)?,
         confidence_tier: row.get(13)?,
         target_canonical_symbol_id: row.get(14)?,
+        source_excerpt: row.get(15)?,
     })
 }
 
@@ -223,7 +238,11 @@ fn reference_rows_to_hits(
                         file_id: Some(row.file_id),
                         retrieval_layers: vec![CodeRetrievalLayer::Reference],
                         score: score + 1.5,
-                        excerpt: format!("{} reference to {}", row.kind, row.name),
+                        excerpt: reference_excerpt(
+                            row.source_excerpt.as_deref(),
+                            &row.kind,
+                            &row.name,
+                        ),
                         degraded_reason: None,
                         edge_kind: Some(row.kind),
                         edge_resolution_state: Some(row.resolution_state),

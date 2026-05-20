@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779318672-reference-call-source-excerpts
+- 算法/架构：Reference retrieval 在有界 reference row 计划中用同 scope/path 且覆盖 reference line 的最窄 chunk 补充 source excerpt，并让 call/reference excerpt 选择具备标识符边界的真实源码行，避免把 `rk_dispatch_read` 这类 caller 名后缀误判为 `read` 调用点；变更限定在 SQLite code retrieval excerpt 投影与独立 excerpt helper。
+- 不变量：不改变 parser facts、schema、FTS 文档、candidate limit、identity fast path、call/reference scoring、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 字段、安装发布或 self-iteration harness；无仓库名、路径名、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：C/C++、TS/JS 等关系查询返回解释更贴近真实调用/引用行，预期改善 function-like macro reference、function-pointer/member call callee sequence 与多仓 debugging 可读性；风险是少数此前依赖 generic excerpt 的结果文本变化，受 bounded chunk lookup、identifier-boundary matching、原 score/dedupe/top-k 和 generic fallback 约束。
 ## 候选优化说明：run-1779317832-reference-identity-fast-path
 - 算法：为 `references` 检索增加 source-scope 内的 identity-first 计划；当 query 是单一符号或 `Owner.Symbol`/`Owner::Symbol` scoped identity 时，先通过 `code_repository_references(source_scope, name, kind, path)` 的既有索引读取有界候选，并用 resolved target hint/canonical symbol id 校验 scoped owner，再在 direct 结果具体且未饱和时跳过 FTS，否则与原 FTS 候选合并。
 - 架构/不变量：变更限定在 SQLite code reference retrieval 模块化、bounded read-plan helper 和 focused tests；不改变 parser、schema、FTS 文档写入、candidate 上限、reference/call/import/symbol 事实、repo-set overlay、semantic/vector read model、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query 或 fixture 特殊分支。
@@ -980,6 +984,20 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=1997ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=1210ms; leveldb_cpp_index_ms=5063ms; leveldb_cpp_register_index_ms=5124ms; leveldb_cpp_query_p50_ms=224ms; leveldb_cpp_query_p95_ms=427ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779318672
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779318672.patch`
+- score: 0.858679 (foundational=0.947917, competitive=0.557692, accuracy=0.752804, semantic_vector=1.000000, research_judge=n/a, performance=0.819138, stability=1.000000)
+- cases: 32/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_calls.rs`, `src/relay_knowledge/storage/sqlite/code_query_excerpt_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_excerpts.rs`, `src/relay_knowledge/storage/sqlite/code_query_reference_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_references.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: score_component:score 0.844527->0.858678875724243; score_component:competitive_capability 0.519231->0.5576923076923077; score_component:performance 0.787526->0.8191383409181586; case:c_syntax_references_function_like_macro_usage false->true; case_rank:c_syntax_callees_dispatch_sequence null->1; metric:self_iteration_cargo_check_ms 1210.0->141.0; metric:temporal_sdk_go_index_ms 43913.0->1368.0; metric:temporal_sdk_go_register_index_ms 44116.0->2134.0
+- known degradations: metric:self_iteration_cargo_fmt_check_ms 323.0->363.0; metric:relay_teams_query_p95_ms 1711.0->1834.0; metric:c_syntax_fixture_query_p50_ms 505.0->1108.0; metric:c_syntax_fixture_query_p95_ms 566.0->1292.0; metric:cpp_syntax_fixture_query_p50_ms 484.0->1191.0; metric:cpp_syntax_fixture_query_p95_ms 546.0->1352.0; metric:leveldb_cpp_query_p50_ms 224.0->1130.0; metric:leveldb_cpp_query_p95_ms 427.0->1268.0
+- latency metrics: cargo_fmt_check_ms=2030ms; self_iteration_cargo_fmt_check_ms=363ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=141ms; temporal_sdk_go_index_ms=1368ms; temporal_sdk_go_register_index_ms=2134ms; relay_teams_index_ms=1571ms; relay_teams_register_index_ms=2317ms
 
 Adopted optimization notes:
 

@@ -8,6 +8,8 @@ mod code_query_call_counts;
 mod code_query_call_direction;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
+#[path = "code_query_excerpts.rs"]
+mod code_query_excerpts;
 #[path = "code_query_flow_scoring.rs"]
 mod code_query_flow_scoring;
 #[path = "code_query_identifiers.rs"]

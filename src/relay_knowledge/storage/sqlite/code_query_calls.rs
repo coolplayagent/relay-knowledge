@@ -14,6 +14,7 @@ use super::{
     code_query_call_direction::{
         call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
     },
+    code_query_excerpts::call_excerpt,
     code_query_flow_scoring::caller_context_density_bonus,
     code_query_line_ranges::{call_result_line_range, optional_line_range_with_symbol_context},
     code_query_path_ranking::{

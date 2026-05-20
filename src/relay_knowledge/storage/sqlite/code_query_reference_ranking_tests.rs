@@ -1,8 +1,9 @@
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+        RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
     storage::code::CodeRepositoryStore,
@@ -47,7 +48,13 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
         )],
         imports: Vec::new(),
         calls: Vec::new(),
-        chunks: Vec::new(),
+        chunks: vec![chunk(
+            "caller-chunk",
+            "caller-file",
+            caller_path,
+            "function run() {\n  return RuntimeOwner.TargetThing();\n}",
+            range(38, 42),
+        )],
         diagnostics: Vec::new(),
     })
     .await;
@@ -61,7 +68,7 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
         .expect("reference query should succeed");
 
     assert_eq!(hits[0].path, caller_path);
-    assert!(hits[0].excerpt.contains("TargetThing"));
+    assert!(hits[0].excerpt.contains("RuntimeOwner.TargetThing()"));
 }
 
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
@@ -133,6 +140,27 @@ fn reference(
         confidence_tier: "inferred".to_owned(),
         byte_range: range(40, 40),
         line_range: range(40, 40),
+    }
+}
+
+fn chunk(
+    chunk_id: &str,
+    file_id: &str,
+    path: &str,
+    content: &str,
+    line_range: RepositoryCodeRange,
+) -> RepositoryCodeChunkRecord {
+    RepositoryCodeChunkRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        chunk_id: chunk_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "typescript".to_owned(),
+        content: content.to_owned(),
+        byte_range: line_range.clone(),
+        line_range,
+        symbol_snapshot_id: None,
     }
 }
 
