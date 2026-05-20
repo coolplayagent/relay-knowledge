@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     command::{CommandResult, CommandSpec, run_command},
-    config::Config,
-    history::{HistoryPaths, adopted, best_accepted_run_for_profile, is_evaluate_run, load_runs},
+    config::{CategorySet, Config},
+    history::{HistoryPaths, adopted, best_accepted_run_for_workload, is_evaluate_run, load_runs},
     history_synthesis::synthesize_history,
     memory::{
         historical_patch_memory_index, progressive_memory_index, rejection_recovery_memory_review,
@@ -92,8 +92,17 @@ pub fn build_codex_command(config: &Config) -> Vec<String> {
     command
 }
 
-pub fn build_prompt(paths: &HistoryPaths, workspace: &Path, run_id: &str, profile: &str) -> String {
-    let best = best_accepted_run_for_profile(paths, profile).ok().flatten();
+pub fn build_prompt(
+    paths: &HistoryPaths,
+    workspace: &Path,
+    run_id: &str,
+    profile: &str,
+    categories: Option<&CategorySet>,
+) -> String {
+    let category_focus_key = categories.map(CategorySet::focus_key);
+    let best = best_accepted_run_for_workload(paths, profile, category_focus_key.as_deref())
+        .ok()
+        .flatten();
     let best_summary = best
         .as_ref()
         .map(|run| {
@@ -109,6 +118,9 @@ pub fn build_prompt(paths: &HistoryPaths, workspace: &Path, run_id: &str, profil
     let progressive_memory = progressive_memory_index(paths, 12);
     let patch_memory = historical_patch_memory_index(paths, 12);
     let history_synthesis = synthesize_history(paths, profile);
+    let category_focus = categories
+        .map(|items| items.labels().join(", "))
+        .unwrap_or_else(|| "profile default workload".to_owned());
     format!(
         r#"You are running inside relay-knowledge self-iteration run {run_id}.
 
@@ -124,6 +136,8 @@ Constraints:
 - Do not create commits yourself; the harness owns accepted commits.
 
 Workspace: {workspace}
+Evaluation profile: {profile}
+Evaluation category focus: {category_focus}
 Historical context: {best_summary}
 Historical synthesis:
 {history_synthesis}
@@ -262,7 +276,7 @@ mod tests {
         )
         .expect("runs");
 
-        let prompt = build_prompt(&paths, &workspace, "run-test", "fast");
+        let prompt = build_prompt(&paths, &workspace, "run-test", "fast", None);
 
         assert!(prompt.contains("Historical synthesis:"));
         assert!(prompt.contains("Latest scored baseline: rejected"));

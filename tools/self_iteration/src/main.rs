@@ -112,7 +112,13 @@ fn run_generation_iteration(
         println!("[self-iterate] using current working tree as candidate");
         None
     } else {
-        let prompt = codex::build_prompt(paths, &config.workspace, &run_id, &config.profile);
+        let prompt = codex::build_prompt(
+            paths,
+            &config.workspace,
+            &run_id,
+            &config.profile,
+            config.categories.as_ref(),
+        );
         let result = codex::run_codex(config, &prompt);
         println!(
             "[self-iterate] codex exit={} duration_ms={}",
@@ -179,7 +185,12 @@ fn run_generation_iteration(
     println!("[self-iterate] candidate patch: {}", patch.path.display());
     let mut evaluation = evaluate_candidate_for_patch(config, paths, &run_id, &patch)?;
     apply_candidate_documentation_gate(&mut evaluation, &patch);
-    let previous_run = history::previous_scored_run_for_profile(paths, &config.profile)?;
+    let category_focus = config.category_focus_key();
+    let previous_run = history::previous_scored_run_for_workload(
+        paths,
+        &config.profile,
+        category_focus.as_deref(),
+    )?;
     let score = scoring::score_evaluation(&evaluation.observation, previous_run.as_ref());
     let commit = if score.accepted {
         write_adopted_optimization_document(
@@ -284,7 +295,12 @@ fn persist_scored_run(
     evaluation: &evaluator::EvaluationRun,
     commit: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let previous = history::previous_scored_run_for_profile(paths, &config.profile)?;
+    let category_focus = config.category_focus_key();
+    let previous = history::previous_scored_run_for_workload(
+        paths,
+        &config.profile,
+        category_focus.as_deref(),
+    )?;
     let score = scoring::score_evaluation(&evaluation.observation, previous.as_ref());
     persist_scored_run_with_score(PersistInput {
         config,
@@ -315,11 +331,20 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     let timestamp = unix_timestamp_string();
     let patch = patch_metadata(input.patch);
     let optimization_plan = optimization_plan(input.patch, input.score, input.codex);
-    let comparison_baseline =
-        comparison_baseline(input.paths, &input.config.profile, input.previous_run)?;
+    let category_focus = input.config.category_focus_key();
+    let selected_categories = input.config.selected_category_labels();
+    let selected_categories_report = selected_categories_value(&selected_categories);
+    let comparison_baseline = comparison_baseline(
+        input.paths,
+        &input.config.profile,
+        category_focus.as_deref(),
+        input.previous_run,
+    )?;
     let report = serde_json::json!({
         "run_id": input.run_id,
         "profile": input.config.profile,
+        "category_focus": category_focus.as_deref(),
+        "selected_categories": selected_categories_report,
         "workspace": input.config.workspace.display().to_string(),
         "patch": patch,
         "optimization_plan": optimization_plan,
@@ -340,15 +365,17 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
         "improvements": input.score.improvements,
     });
     let report_path = history::write_report(input.paths, input.run_id, &report)?;
-    let record = history::make_run_record(
-        input.run_id,
-        &timestamp,
-        &input.config.profile,
-        &report_path,
-        input.commit,
-        input.score,
-        &input.evaluation.observation,
-    );
+    let record = history::make_run_record(history::RunRecordInput {
+        run_id: input.run_id,
+        timestamp: &timestamp,
+        profile: &input.config.profile,
+        category_focus: category_focus.as_deref(),
+        selected_categories: &selected_categories,
+        report_path: &report_path,
+        commit: input.commit,
+        score: input.score,
+        observation: &input.evaluation.observation,
+    });
     let mut record = record;
     if let Some(object) = record.as_object_mut() {
         object.insert("patch".to_owned(), patch);
@@ -361,6 +388,14 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     history::append_run(input.paths, &record)?;
     history::export_history(input.paths)?;
     Ok(record)
+}
+
+fn selected_categories_value(selected_categories: &[&str]) -> serde_json::Value {
+    if selected_categories.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!(selected_categories)
+    }
 }
 
 fn patch_metadata(patch: &PatchSnapshot) -> serde_json::Value {
@@ -393,12 +428,14 @@ fn optimization_plan(
 fn comparison_baseline(
     paths: &history::HistoryPaths,
     profile: &str,
+    category_focus: Option<&str>,
     previous_run: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let best_accepted = history::best_accepted_run_for_profile(paths, profile)?;
+    let best_accepted = history::best_accepted_run_for_workload(paths, profile, category_focus)?;
     Ok(serde_json::json!({
-        "comparison_kind": "latest_scored_profile_run",
+        "comparison_kind": "latest_scored_workload_run",
         "profile": profile,
+        "category_focus": category_focus,
         "latest_run_id": previous_run.and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
         "latest_score": previous_run.and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
         "latest_accepted": previous_run.map(history::adopted),

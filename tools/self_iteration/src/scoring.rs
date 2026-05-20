@@ -35,6 +35,8 @@ pub struct CaseObservation {
     pub case_id: String,
     pub repository: String,
     pub passed: bool,
+    #[serde(default)]
+    pub guardrail: bool,
     pub rank: Option<usize>,
     pub max_rank: usize,
     pub false_positive_count: usize,

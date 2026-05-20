@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -15,7 +15,7 @@ use crate::{
         string_vec,
     },
     command::{CommandResult, CommandSpec, inherited_env, run_command},
-    config::{Config, JobPlan},
+    config::{CategorySet, Config, EvaluationCategory, JobPlan},
     history::HistoryPaths,
     scoring::{
         CaseObservation, EvaluationObservation, GateObservation, MetricObservation,
@@ -144,6 +144,7 @@ pub fn evaluate_candidate(
     let mut cases = Vec::new();
     let mut metrics = Vec::new();
     let mut repo_reports = Vec::new();
+    let selection = WorkloadSelection::new(config);
 
     if !run_quality_gate_stages(
         &config.profile,
@@ -164,6 +165,7 @@ pub fn evaluate_candidate(
             run_home,
             cached_home,
             job_plan,
+            selection,
             started: evaluation_started,
         });
     }
@@ -179,6 +181,7 @@ pub fn evaluate_candidate(
             run_home,
             cached_home,
             job_plan,
+            selection,
             started: evaluation_started,
         });
     }
@@ -211,63 +214,92 @@ pub fn evaluate_candidate(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    let repositories = repository_configs
-        .iter()
-        .filter_map(|(name, repo_config)| {
-            if !repository_in_profile(&config.profile, name, repo_config) {
-                return None;
+    let required_repo_set_members = if selection.runs_repository_sets(&config.profile) {
+        selected_repository_set_member_names(
+            cases_config,
+            &config.profile,
+            config.categories.as_ref(),
+        )
+    } else {
+        BTreeSet::new()
+    };
+    if selection.runs_repository_workload(&config.profile) {
+        let repositories = repository_configs
+            .iter()
+            .filter_map(|(name, repo_config)| {
+                let needed_for_repo_set = required_repo_set_members.contains(name.as_str());
+                if !needed_for_repo_set
+                    && !repository_in_profile(&config.profile, name, repo_config)
+                {
+                    return None;
+                }
+                let repo_cases = grouped_cases
+                    .get(name)
+                    .cloned()
+                    .map(|cases| {
+                        select_repository_cases_for_profile(
+                            &config.profile,
+                            config.categories.as_ref(),
+                            cases,
+                        )
+                    })
+                    .unwrap_or_default();
+                if repo_cases.is_empty() && !needed_for_repo_set {
+                    return None;
+                }
+                Some((name.clone(), repo_config.clone(), repo_cases))
+            })
+            .collect::<Vec<_>>();
+        let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
+        let repository_case_count = repositories
+            .iter()
+            .map(|(_, _, repo_cases)| repo_cases.len())
+            .sum::<usize>();
+        eprintln!(
+            "[self-iterate] repository workload start repositories={} query_cases={} repo_jobs={} query_jobs={}",
+            repositories.len(),
+            repository_case_count,
+            repo_jobs,
+            runtime.query_jobs
+        );
+        let repo_results = parallel_map(repositories, repo_jobs, {
+            let runtime = runtime.clone();
+            move |(repo_name, repo_config, repo_cases)| {
+                evaluate_repository(&runtime, &repo_name, &repo_config, repo_cases)
             }
-            let repo_cases = grouped_cases
-                .get(name)
-                .cloned()
-                .map(|cases| limit_cases_for_profile(&config.profile, cases))
-                .unwrap_or_default();
-            Some((name.clone(), repo_config.clone(), repo_cases))
-        })
-        .collect::<Vec<_>>();
-    let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
-    let repository_case_count = repositories
-        .iter()
-        .map(|(_, _, repo_cases)| repo_cases.len())
-        .sum::<usize>();
-    eprintln!(
-        "[self-iterate] repository workload start repositories={} query_cases={} repo_jobs={} query_jobs={}",
-        repositories.len(),
-        repository_case_count,
-        repo_jobs,
-        runtime.query_jobs
-    );
-    let repo_results = parallel_map(repositories, repo_jobs, {
-        let runtime = runtime.clone();
-        move |(repo_name, repo_config, repo_cases)| {
-            evaluate_repository(&runtime, &repo_name, &repo_config, repo_cases)
+        });
+        for report in repo_results {
+            let report = report?;
+            commands.extend(report.commands.clone());
+            gates.extend(report.commands.iter().map(GateObservation::from_command));
+            gates.extend(report.gates.clone());
+            cases.extend(report.cases.clone());
+            metrics.extend(report.metrics.clone());
+            repo_reports.push(report);
         }
-    });
-    for report in repo_results {
-        let report = report?;
-        commands.extend(report.commands.clone());
-        gates.extend(report.commands.iter().map(GateObservation::from_command));
-        cases.extend(report.cases.clone());
-        metrics.extend(report.metrics.clone());
-        repo_reports.push(report);
+        eprintln!(
+            "[self-iterate] repository workload done reports={} commands={} cases={}",
+            repo_reports.len(),
+            commands.len(),
+            cases.len()
+        );
     }
-    eprintln!(
-        "[self-iterate] repository workload done reports={} commands={} cases={}",
-        repo_reports.len(),
-        commands.len(),
-        cases.len()
-    );
 
-    if profile_runs_repository_sets(&config.profile) {
+    if selection.runs_repository_sets(&config.profile) {
         eprintln!(
             "[self-iterate] repository-set workload start profile={}",
             config.profile
         );
-        for report in
-            evaluate_repository_sets(&runtime, cases_config, &repository_configs, &config.profile)?
-        {
+        for report in evaluate_repository_sets(
+            &runtime,
+            cases_config,
+            &repository_configs,
+            &config.profile,
+            config.categories.as_ref(),
+        )? {
             commands.extend(report.commands.clone());
             gates.extend(report.commands.iter().map(GateObservation::from_command));
+            gates.extend(report.gates.clone());
             cases.extend(report.cases.clone());
             metrics.extend(report.metrics.clone());
             repo_reports.push(report);
@@ -280,7 +312,7 @@ pub fn evaluate_candidate(
         );
     }
 
-    if profile_runs_slow_suites(&config.profile) {
+    if selection.runs_file_fixtures(&config.profile) {
         eprintln!("[self-iterate] file fixture workload start");
         let file_report = evaluate_file_fixtures(&runtime, &run_home, cases_config)?;
         commands.extend(file_report.commands.clone());
@@ -300,15 +332,23 @@ pub fn evaluate_candidate(
         );
     }
 
-    if profile_runs_slow_suites(&config.profile) {
+    if selection.runs_semantic_vector(&config.profile) {
         if let Some(suite) = cases_config
             .get("semantic_vector_suite")
             .and_then(Value::as_object)
         {
             eprintln!("[self-iterate] semantic/vector workload start");
-            let report = evaluate_semantic_vector_suite(&runtime, &Value::Object(suite.clone()))?;
+            let report = evaluate_semantic_vector_suite(
+                &runtime,
+                &semantic_vector_suite_for_selection(
+                    &Value::Object(suite.clone()),
+                    &config.profile,
+                    config.categories.as_ref(),
+                ),
+            )?;
             commands.extend(report.commands.clone());
             gates.extend(report.commands.iter().map(GateObservation::from_command));
+            gates.extend(report.gates.clone());
             cases.extend(report.cases.clone());
             metrics.extend(report.metrics.clone());
             repo_reports.push(report);
@@ -321,7 +361,7 @@ pub fn evaluate_candidate(
         }
     }
 
-    if profile_runs_slow_suites(&config.profile) {
+    if selection.runs_research_judge(&config.profile) {
         if let Some(suite) = cases_config
             .get("research_judge_suite")
             .and_then(Value::as_object)
@@ -364,6 +404,7 @@ pub fn evaluate_candidate(
         run_home,
         cached_home,
         job_plan,
+        selection,
         started: evaluation_started,
     })
 }
@@ -380,6 +421,7 @@ fn evaluate_repository(
     let scope = string_or(repo_config, "scope", "all").to_owned();
     let mut commands = Vec::new();
     let mut cases = Vec::new();
+    let mut guardrail_gates = Vec::new();
     let mut metrics = Vec::new();
     eprintln!(
         "[self-iterate] repository start name={} alias={} path={} scope={} query_cases={}",
@@ -507,17 +549,22 @@ fn evaluate_repository(
                     runtime.timeout,
                 ),
             );
+            let duration_ms = query.duration_ms;
             let observation = score_query_case(&repo_name, &case, &query);
-            (query, observation)
+            let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
+            (query, observation, guardrail_gate)
         }
     });
     let query_durations = query_results
         .iter()
-        .map(|(command, _)| command.duration_ms)
+        .map(|(command, _, _)| command.duration_ms)
         .collect::<Vec<_>>();
-    for (command, observation) in query_results {
+    for (command, observation, guardrail_gate) in query_results {
         commands.push(command);
         cases.push(observation);
+        if let Some(gate) = guardrail_gate {
+            guardrail_gates.push(gate);
+        }
     }
     push_latency_metrics(
         &mut metrics,
@@ -525,9 +572,9 @@ fn evaluate_repository(
         &format!("{repo_name}_query"),
         &query_durations,
     );
-    Ok(repo_report(
-        repo_name, scope, commands, cases, metrics, index_json,
-    ))
+    let mut report = repo_report(repo_name, scope, commands, cases, metrics, index_json);
+    report.gates = guardrail_gates;
+    Ok(report)
 }
 
 fn evaluate_file_fixtures(
@@ -658,6 +705,7 @@ fn evaluate_semantic_vector_suite(
     let scope = string_or(suite, "source_scope", "self-iteration-semantic-vector");
     let mut commands = Vec::new();
     let mut cases = Vec::new();
+    let mut guardrail_gates = Vec::new();
     let mut metrics = Vec::new();
     let runtime_profile = semantic_vector_runtime_profile(&runtime.env);
     if runtime_profile["external_requested"]
@@ -799,28 +847,35 @@ fn evaluate_semantic_vector_suite(
                         runtime.timeout,
                     ),
                 );
+                let duration_ms = query.duration_ms;
                 let observation = score_semantic_vector_case(&case, &query);
-                (query, observation)
+                let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
+                (query, observation, guardrail_gate)
             }
         },
     );
     let durations = results
         .iter()
-        .map(|(command, _)| command.duration_ms)
+        .map(|(command, _, _)| command.duration_ms)
         .collect::<Vec<_>>();
-    for (command, observation) in results {
+    for (command, observation, guardrail_gate) in results {
         commands.push(command);
         cases.push(observation);
+        if let Some(gate) = guardrail_gate {
+            guardrail_gates.push(gate);
+        }
     }
     push_latency_metrics(&mut metrics, suite, "semantic_vector_query", &durations);
-    Ok(repo_report(
+    let mut report = repo_report(
         "semantic_vector",
         scope.to_owned(),
         commands,
         cases,
         metrics,
         runtime_profile,
-    ))
+    );
+    report.gates = guardrail_gates;
+    Ok(report)
 }
 
 struct FinishInput<'a> {
@@ -834,6 +889,7 @@ struct FinishInput<'a> {
     run_home: PathBuf,
     cached_home: bool,
     job_plan: JobPlan,
+    selection: WorkloadSelection,
     started: Instant,
 }
 
@@ -863,10 +919,11 @@ fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
     );
     let report = serde_json::json!({
         "profile": input.config.profile,
+        "selected_categories": input.selection.selected_categories_report(),
         "generated_diff": input.generated_diff,
         "evaluation_home": input.run_home.display().to_string(),
         "cached_home": input.cached_home,
-        "skipped_suites": skipped_suites_for_profile(&input.config.profile),
+        "skipped_suites": input.selection.skipped_suites(&input.config.profile),
         "parallelism": {
             "requested_jobs": input.config.jobs.label(),
             "requested_repo_jobs": input.config.repo_jobs.label(),

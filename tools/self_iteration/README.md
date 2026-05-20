@@ -28,6 +28,8 @@ Useful variants:
 ./self-iterate.sh --max-iterations 3
 ./self-iterate.sh chart
 ./self-iterate.sh once --profile full
+./self-iterate.sh once --profile fast --categories semantic_vector
+./self-iterate.sh once --profile fast --categories semantic_vector,competitive
 ./self-iterate.sh once --profile smoke --dry-run-codex
 ```
 
@@ -58,7 +60,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, a normal-repository subset, and one lightweight repository-set guard. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
+4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`; `accepted` means a git commit was created.
@@ -96,22 +98,36 @@ expand linearly into the LLM context.
 The default profile is `fast`. It runs product and harness `fmt --check`, then a
 product debug build plus harness `cargo check`, and evaluates with
 `target/debug/relay-knowledge`. It does not run the product release build, full
-clippy, full test suite, local-file fixtures, semantic/vector fixtures, or
-research judge by default. `fast` evaluates `relay_teams`, `leveldb_cpp`,
-`temporal_samples_go`, and `temporal_sdk_go`, takes the first 6 normal query
-cases per repository, and keeps 1 cross-repository threshold case from the
-`temporal_go_workspace` repo-set. It reuses
+clippy, full test suite, local-file fixtures, or research judge by default.
+`fast` evaluates `relay_teams`, `leveldb_cpp`, `temporal_samples_go`, and
+`temporal_sdk_go`, takes the first 8 normal query cases per repository while
+always preserving explicit guardrail cases, keeps 2 cross-repository threshold
+cases from the `temporal_go_workspace` repo-set, and runs the semantic/vector
+guardrail query. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
-repeated registration and indexing cost. Score history is isolated by profile,
-so `fast` compares only against previous `fast` runs and does not treat
-full/exhaustive semantic/vector or judge scores as fast regressions. Override
-the subset with
+repeated registration and indexing cost. Score history is isolated by profile
+and category focus, so `fast --categories semantic_vector` compares only
+against matching semantic/vector-focused fast runs and does not treat
+full/exhaustive judge scores as fast regressions. Override the subset with
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
 `--profile full` for the previous full gates and workload; long-running
 large-repository checks still use `--profile exhaustive`.
+
+Use `--categories` to focus an iteration on a specific score family without
+dropping bottom-line protection. Supported categories are `foundational`,
+`competitive`, `semantic_vector`, `file_fixtures`, `repository_sets`,
+`research_judge`, `performance`, and `all`. A focused run evaluates explicit
+`guardrail=true` cases plus the selected category cases; guardrail case failures
+are emitted as quality gates and reject the candidate even when the focused
+score improves. For example, `--categories semantic_vector` runs the full
+semantic/vector suite plus repository and repo-set guardrails, while
+`--categories competitive` runs competitive repository cases plus the same
+guardrails. `--categories performance` keeps the performance-bearing repository,
+repo-set, semantic/vector, and file-fixture measurement workloads instead of
+collapsing to guardrails only.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. `auto` uses the local machine aggressively: the global command limiter

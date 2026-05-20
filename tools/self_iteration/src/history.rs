@@ -84,13 +84,16 @@ pub fn previous_scored_run(paths: &HistoryPaths) -> Result<Option<Value>, String
     ))
 }
 
-pub fn previous_scored_run_for_profile(
+pub fn previous_scored_run_for_workload(
     paths: &HistoryPaths,
     profile: &str,
+    category_focus: Option<&str>,
 ) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
     Ok(latest_scored_run(runs.into_iter().filter(|run| {
-        run_profile(run) == profile && !is_evaluate_run(run)
+        run_profile(run) == profile
+            && run_category_focus(run) == category_focus
+            && !is_evaluate_run(run)
     })))
 }
 
@@ -111,14 +114,21 @@ fn run_profile(run: &Value) -> &str {
     run.get("profile").and_then(Value::as_str).unwrap_or("full")
 }
 
-pub fn best_accepted_run_for_profile(
+fn run_category_focus(run: &Value) -> Option<&str> {
+    run.get("category_focus").and_then(Value::as_str)
+}
+
+pub fn best_accepted_run_for_workload(
     paths: &HistoryPaths,
     profile: &str,
+    category_focus: Option<&str>,
 ) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
     Ok(runs
         .into_iter()
-        .filter(|run| run_profile(run) == profile && adopted(run))
+        .filter(|run| {
+            run_profile(run) == profile && run_category_focus(run) == category_focus && adopted(run)
+        })
         .max_by(|left, right| {
             let left_score = left.get("score").and_then(Value::as_f64).unwrap_or(0.0);
             let right_score = right.get("score").and_then(Value::as_f64).unwrap_or(0.0);
@@ -154,41 +164,52 @@ pub fn append_run(paths: &HistoryPaths, record: &Value) -> Result<(), String> {
     .map_err(|error| format!("failed to append {}: {error}", paths.runs_jsonl.display()))
 }
 
-pub fn make_run_record(
-    run_id: &str,
-    timestamp: &str,
-    profile: &str,
-    report_path: &Path,
-    commit: Option<&str>,
-    score: &ScoreBreakdown,
-    observation: &EvaluationObservation,
-) -> Value {
-    let committed = commit.is_some();
+pub struct RunRecordInput<'a> {
+    pub run_id: &'a str,
+    pub timestamp: &'a str,
+    pub profile: &'a str,
+    pub category_focus: Option<&'a str>,
+    pub selected_categories: &'a [&'a str],
+    pub report_path: &'a Path,
+    pub commit: Option<&'a str>,
+    pub score: &'a ScoreBreakdown,
+    pub observation: &'a EvaluationObservation,
+}
+
+pub fn make_run_record(input: RunRecordInput<'_>) -> Value {
+    let committed = input.commit.is_some();
+    let selected_categories = if input.selected_categories.is_empty() {
+        Value::Null
+    } else {
+        serde_json::json!(input.selected_categories)
+    };
     serde_json::json!({
-        "run_id": run_id,
-        "timestamp": timestamp,
-        "profile": profile,
+        "run_id": input.run_id,
+        "timestamp": input.timestamp,
+        "profile": input.profile,
+        "category_focus": input.category_focus,
+        "selected_categories": selected_categories,
         "accepted": committed,
-        "score_accepted": score.accepted,
+        "score_accepted": input.score.accepted,
         "committed": committed,
-        "adoption_status": adoption_status(committed, score.accepted),
-        "score": rounded(score.score),
-        "foundational_capability": rounded(score.foundational_capability),
-        "competitive_capability": rounded(score.competitive_capability),
-        "accuracy": rounded(score.accuracy),
-        "semantic_vector": rounded(score.semantic_vector),
-        "research_judge": score.research_judge.map(rounded),
-        "performance": rounded(score.performance),
-        "stability": rounded(score.stability),
-        "reject_reasons": score.reject_reasons,
-        "degradations": score.degradations,
-        "improvements": score.improvements,
-        "metric_budget_failures": score.metric_budget_failures,
-        "report": report_path.display().to_string(),
-        "commit": commit,
-        "gates": observation.gates,
-        "cases": observation.cases,
-        "metrics": observation.metrics,
+        "adoption_status": adoption_status(committed, input.score.accepted),
+        "score": rounded(input.score.score),
+        "foundational_capability": rounded(input.score.foundational_capability),
+        "competitive_capability": rounded(input.score.competitive_capability),
+        "accuracy": rounded(input.score.accuracy),
+        "semantic_vector": rounded(input.score.semantic_vector),
+        "research_judge": input.score.research_judge.map(rounded),
+        "performance": rounded(input.score.performance),
+        "stability": rounded(input.score.stability),
+        "reject_reasons": input.score.reject_reasons,
+        "degradations": input.score.degradations,
+        "improvements": input.score.improvements,
+        "metric_budget_failures": input.score.metric_budget_failures,
+        "report": input.report_path.display().to_string(),
+        "commit": input.commit,
+        "gates": input.observation.gates,
+        "cases": input.observation.cases,
+        "metrics": input.observation.metrics,
     })
 }
 
@@ -639,13 +660,81 @@ mod tests {
         )
         .expect("runs");
 
-        let previous = previous_scored_run_for_profile(&paths, "fast")
+        let previous = previous_scored_run_for_workload(&paths, "fast", None)
             .expect("history")
             .expect("previous run");
 
         assert_eq!(
             previous.get("run_id").and_then(Value::as_str),
             Some("run-1")
+        );
+    }
+
+    #[test]
+    fn workload_baseline_matches_category_focus() {
+        let workspace = temp_workspace("history-workload-baseline");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        let runs = [
+            json!({
+                "run_id": "run-default",
+                "timestamp": "1",
+                "profile": "fast",
+                "accepted": true,
+                "score": 0.8
+            }),
+            json!({
+                "run_id": "run-semantic",
+                "timestamp": "2",
+                "profile": "fast",
+                "category_focus": "semantic_vector",
+                "selected_categories": ["semantic_vector"],
+                "accepted": true,
+                "score": 0.9
+            }),
+            json!({
+                "run_id": "run-competitive",
+                "timestamp": "3",
+                "profile": "fast",
+                "category_focus": "competitive",
+                "selected_categories": ["competitive"],
+                "accepted": true,
+                "score": 0.95
+            }),
+            json!({
+                "run_id": "manual-evaluate-semantic",
+                "timestamp": "4",
+                "profile": "fast",
+                "category_focus": "semantic_vector",
+                "selected_categories": ["semantic_vector"],
+                "accepted": false,
+                "score": 0.99
+            }),
+        ];
+        fs::write(
+            &paths.runs_jsonl,
+            runs.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("runs");
+
+        let default_previous = previous_scored_run_for_workload(&paths, "fast", None)
+            .expect("history")
+            .expect("default previous run");
+        let semantic_previous =
+            previous_scored_run_for_workload(&paths, "fast", Some("semantic_vector"))
+                .expect("history")
+                .expect("semantic previous run");
+
+        assert_eq!(
+            default_previous.get("run_id").and_then(Value::as_str),
+            Some("run-default")
+        );
+        assert_eq!(
+            semantic_previous.get("run_id").and_then(Value::as_str),
+            Some("run-semantic")
         );
     }
 

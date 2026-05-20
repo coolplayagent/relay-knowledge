@@ -88,6 +88,7 @@
       "kind": "hybrid",
       "query": "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
       "objective": "competitive_capability",
+      "guardrail": true,
       "limit": 10,
       "max_rank": 5,
       "language_filters": [

@@ -187,6 +187,93 @@ fn relay_knowledge_binary(config: &Config) -> PathBuf {
         .join("relay-knowledge")
 }
 
+#[derive(Debug, Clone)]
+struct WorkloadSelection {
+    categories: Option<CategorySet>,
+}
+
+impl WorkloadSelection {
+    fn new(config: &Config) -> Self {
+        Self {
+            categories: config.categories.clone(),
+        }
+    }
+
+    fn focused(&self) -> bool {
+        self.categories.is_some()
+    }
+
+    fn contains(&self, category: EvaluationCategory) -> bool {
+        self.categories
+            .as_ref()
+            .is_some_and(|categories| categories.contains(category))
+    }
+
+    fn selected_categories_report(&self) -> Value {
+        self.categories
+            .as_ref()
+            .map(|categories| {
+                Value::Array(
+                    categories
+                        .labels()
+                        .into_iter()
+                        .map(|label| Value::String(label.to_owned()))
+                        .collect(),
+                )
+            })
+            .unwrap_or(Value::Null)
+    }
+
+    fn runs_repository_workload(&self, profile: &str) -> bool {
+        profile != "smoke"
+    }
+
+    fn runs_repository_sets(&self, profile: &str) -> bool {
+        if profile == "smoke" {
+            return false;
+        }
+        self.focused() || profile_runs_repository_sets(profile)
+    }
+
+    fn runs_file_fixtures(&self, profile: &str) -> bool {
+        self.contains(EvaluationCategory::FileFixtures)
+            || self.contains(EvaluationCategory::Performance)
+            || (!self.focused() && profile_runs_slow_suites(profile))
+    }
+
+    fn runs_semantic_vector(&self, profile: &str) -> bool {
+        if profile == "smoke" {
+            return false;
+        }
+        self.focused() || profile == "fast" || profile_runs_slow_suites(profile)
+    }
+
+    fn runs_research_judge(&self, profile: &str) -> bool {
+        self.contains(EvaluationCategory::ResearchJudge)
+            || (!self.focused() && profile_runs_slow_suites(profile))
+    }
+
+    fn skipped_suites(&self, profile: &str) -> Vec<&'static str> {
+        let mut skipped = Vec::new();
+        if !self.runs_repository_workload(profile) {
+            skipped.push("repository_evaluation");
+        }
+        if !self.runs_repository_sets(profile) {
+            skipped.push("repository_sets");
+        }
+        if !self.runs_file_fixtures(profile) {
+            skipped.push("file_fixtures");
+        }
+        if !self.runs_semantic_vector(profile) {
+            skipped.push("semantic_vector");
+        }
+        if !self.runs_research_judge(profile) {
+            skipped.push("research_judge");
+        }
+        skipped
+    }
+}
+
 fn repository_in_profile(profile: &str, repo_name: &str, repo_config: &Value) -> bool {
     if repo_config.get("profile").and_then(Value::as_str) == Some("exhaustive")
         && profile != "exhaustive"
@@ -196,11 +283,73 @@ fn repository_in_profile(profile: &str, repo_name: &str, repo_config: &Value) ->
     profile != "fast" || fast_repository_names().iter().any(|name| name == repo_name)
 }
 
+fn select_repository_cases_for_profile(
+    profile: &str,
+    categories: Option<&CategorySet>,
+    cases: Vec<Value>,
+) -> Vec<Value> {
+    let filtered = if let Some(categories) = categories {
+        cases
+            .into_iter()
+            .filter(|case| focused_repository_case(categories, case))
+            .collect()
+    } else {
+        cases
+    };
+    limit_cases_for_profile(profile, filtered)
+}
+
+fn semantic_vector_suite_for_selection(
+    suite: &Value,
+    profile: &str,
+    categories: Option<&CategorySet>,
+) -> Value {
+    let all_cases = array_field(suite, "query_cases").to_vec();
+    let selected_cases = if categories
+        .map(|items| {
+            items.contains(EvaluationCategory::SemanticVector)
+                || items.contains(EvaluationCategory::Performance)
+        })
+        .unwrap_or_else(|| profile_runs_slow_suites(profile))
+    {
+        all_cases
+    } else {
+        semantic_vector_guardrail_cases(all_cases)
+    };
+    let mut scoped = suite.clone();
+    if let Some(object) = scoped.as_object_mut() {
+        object.insert("query_cases".to_owned(), Value::Array(selected_cases));
+    }
+    scoped
+}
+
+fn semantic_vector_guardrail_cases(cases: Vec<Value>) -> Vec<Value> {
+    let guardrails = cases
+        .iter()
+        .filter(|case| is_guardrail_case(case))
+        .cloned()
+        .collect::<Vec<_>>();
+    if guardrails.is_empty() {
+        cases.into_iter().take(1).collect()
+    } else {
+        guardrails
+    }
+}
+
+fn focused_repository_case(categories: &CategorySet, case: &Value) -> bool {
+    is_guardrail_case(case)
+        || categories.contains(EvaluationCategory::Performance)
+        || (categories.contains(EvaluationCategory::Foundational)
+            && repository_case_objective(case) == "foundational_capability")
+        || (categories.contains(EvaluationCategory::Competitive)
+            && repository_case_objective(case) == "competitive_capability")
+}
+
 fn limit_cases_for_profile(profile: &str, cases: Vec<Value>) -> Vec<Value> {
     let Some(limit) = fast_case_limit(profile) else {
         return cases;
     };
-    cases.into_iter().take(limit).collect()
+    limit_preserving_guardrails(cases, limit)
 }
 
 fn profile_runs_slow_suites(profile: &str) -> bool {
@@ -219,38 +368,59 @@ fn limit_repository_set_cases_for_profile(profile: &str, cases: Vec<Value>) -> V
     if profile != "fast" {
         return cases;
     }
-    cases
-        .into_iter()
-        .take(fast_repository_set_case_limit())
-        .collect()
+    limit_preserving_guardrails(cases, fast_repository_set_case_limit())
 }
 
-fn skipped_suites_for_profile(profile: &str) -> Vec<&'static str> {
-    if profile_runs_slow_suites(profile) {
-        Vec::new()
-    } else if profile == "smoke" {
-        vec![
-            "repository_evaluation",
-            "repository_sets",
-            "file_fixtures",
-            "semantic_vector",
-            "research_judge",
-        ]
-    } else {
-        vec![
-            "file_fixtures",
-            "semantic_vector",
-            "research_judge",
-        ]
+fn limit_preserving_guardrails(cases: Vec<Value>, limit: usize) -> Vec<Value> {
+    let mut selected = Vec::new();
+    let mut selected_ids = BTreeSet::new();
+    for case in cases.iter().filter(|case| is_guardrail_case(case)) {
+        if selected_ids.insert(case_identity(case)) {
+            selected.push(case.clone());
+        }
     }
+    for case in cases
+        .into_iter()
+        .filter(|case| !is_guardrail_case(case))
+        .take(limit)
+    {
+        if selected_ids.insert(case_identity(&case)) {
+            selected.push(case);
+        }
+    }
+    selected
 }
+
+fn is_guardrail_case(case: &Value) -> bool {
+    case
+        .get("guardrail")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn case_identity(case: &Value) -> String {
+    string_or(case, "id", "case").to_owned()
+}
+
+fn guardrail_gate_from_case(
+    observation: &CaseObservation,
+    duration_ms: u64,
+) -> Option<GateObservation> {
+    observation.guardrail.then(|| GateObservation {
+        name: format!("guardrail_case_{}", observation.case_id),
+        passed: observation.passed,
+        duration_ms,
+        message: observation.message.clone(),
+    })
+}
+
 fn fast_case_limit(profile: &str) -> Option<usize> {
     (profile == "fast").then(|| {
         std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
-            .unwrap_or(6)
+            .unwrap_or(8)
         })
 }
 
@@ -259,7 +429,7 @@ fn fast_repository_set_case_limit() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
-        .unwrap_or(1)
+        .unwrap_or(2)
 }
 
 fn fast_repository_names() -> Vec<String> {
@@ -377,6 +547,7 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
         case_id: string_or(case, "id", "case").to_owned(),
         repository: repo_name.to_owned(),
         passed,
+        guardrail: is_guardrail_case(case),
         rank,
         max_rank: number_or(case, "max_rank", 1) as usize,
         false_positive_count: assessment.false_positive_count,
@@ -424,6 +595,7 @@ fn failed_case(
         case_id: string_or(case, "id", "case").to_owned(),
         repository: repository.to_owned(),
         passed: false,
+        guardrail: is_guardrail_case(case),
         rank: None,
         max_rank: number_or(case, "max_rank", 1) as usize,
         false_positive_count: 0,
@@ -556,6 +728,7 @@ fn score_file_case(fixture_name: &str, case: &Value, result: &CommandResult) -> 
         case_id: string_or(case, "id", "case").to_owned(),
         repository: fixture_name.to_owned(),
         passed,
+        guardrail: is_guardrail_case(case),
         rank,
         max_rank,
         false_positive_count: assessment.false_positive_count,
@@ -888,6 +1061,7 @@ fn score_semantic_vector_case(case: &Value, result: &CommandResult) -> CaseObser
         case_id: string_or(case, "id", "case").to_owned(),
         repository: "semantic_vector".to_owned(),
         passed,
+        guardrail: is_guardrail_case(case),
         rank: final_rank,
         max_rank,
         false_positive_count: false_positives,
@@ -993,6 +1167,7 @@ fn parse_json_case_output(
         case_id: string_or(case, "id", "case").to_owned(),
         repository: repository.to_owned(),
         passed: false,
+        guardrail: is_guardrail_case(case),
         rank: None,
         max_rank: number_or(case, "max_rank", 1) as usize,
         false_positive_count: 0,
