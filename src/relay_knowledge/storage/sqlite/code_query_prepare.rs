@@ -10,44 +10,34 @@ const CODE_SEARCH_OPERATION_RETRY_DELAYS_MS: [u64; 4] = [10, 30, 90, 270];
 pub(super) fn retry_code_search_operation<T>(
     mut operation: impl FnMut() -> Result<T, StorageError>,
 ) -> Result<T, StorageError> {
-    for attempt in 0..=CODE_SEARCH_OPERATION_RETRY_DELAYS_MS.len() {
+    for delay_ms in CODE_SEARCH_OPERATION_RETRY_DELAYS_MS {
         match operation() {
             Ok(value) => return Ok(value),
-            Err(error)
-                if attempt < CODE_SEARCH_OPERATION_RETRY_DELAYS_MS.len()
-                    && code_search_storage_error_is_retryable(&error) =>
-            {
-                thread::sleep(Duration::from_millis(
-                    CODE_SEARCH_OPERATION_RETRY_DELAYS_MS[attempt],
-                ));
+            Err(error) if code_search_storage_error_is_retryable(&error) => {
+                thread::sleep(Duration::from_millis(delay_ms));
             }
             Err(error) => return Err(error),
         }
     }
 
-    unreachable!("bounded code search operation retry loop always returns")
+    operation()
 }
 
 pub(super) fn prepare_code_search_statement<'connection>(
     connection: &'connection Connection,
     sql: &str,
 ) -> Result<Statement<'connection>, StorageError> {
-    for attempt in 0..=CODE_SEARCH_PREPARE_RETRY_DELAYS_MS.len() {
+    for delay_ms in CODE_SEARCH_PREPARE_RETRY_DELAYS_MS {
         match connection.prepare(sql) {
             Ok(statement) => return Ok(statement),
-            Err(error)
-                if attempt < CODE_SEARCH_PREPARE_RETRY_DELAYS_MS.len()
-                    && code_search_prepare_error_is_retryable(&error) =>
-            {
-                thread::sleep(Duration::from_millis(
-                    CODE_SEARCH_PREPARE_RETRY_DELAYS_MS[attempt],
-                ));
+            Err(error) if code_search_prepare_error_is_retryable(&error) => {
+                thread::sleep(Duration::from_millis(delay_ms));
             }
             Err(error) => return Err(StorageError::from(error)),
         }
     }
 
-    unreachable!("bounded code search prepare retry loop always returns")
+    connection.prepare(sql).map_err(StorageError::from)
 }
 
 fn code_search_prepare_error_is_retryable(error: &rusqlite::Error) -> bool {

@@ -1,4 +1,6 @@
-use super::*;
+use super::code_query_path_ranking::{
+    CallSiteQueryIntent, callee_member_context_bonus, caller_result_assignment_bonus,
+};
 use crate::{
     domain::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
