@@ -143,6 +143,10 @@ impl CategorySet {
             .map(EvaluationCategory::label)
             .collect()
     }
+
+    pub fn focus_key(&self) -> String {
+        self.labels().join(",")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +175,17 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn selected_category_labels(&self) -> Vec<&'static str> {
+        self.categories
+            .as_ref()
+            .map(CategorySet::labels)
+            .unwrap_or_default()
+    }
+
+    pub fn category_focus_key(&self) -> Option<String> {
+        self.categories.as_ref().map(CategorySet::focus_key)
+    }
+
     pub fn parse(args: Vec<String>) -> Result<Self, String> {
         let mut parser = Parser::new(args);
         let mode = parser.take_mode().unwrap_or(Mode::Loop);
@@ -398,6 +413,10 @@ mod tests {
             .labels();
 
         assert_eq!(labels, vec!["competitive", "semantic_vector"]);
+        assert_eq!(
+            config.category_focus_key().as_deref(),
+            Some("competitive,semantic_vector")
+        );
     }
 
     #[test]

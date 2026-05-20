@@ -214,11 +214,23 @@ pub fn evaluate_candidate(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
+    let required_repo_set_members = if selection.runs_repository_sets(&config.profile) {
+        selected_repository_set_member_names(
+            cases_config,
+            &config.profile,
+            config.categories.as_ref(),
+        )
+    } else {
+        BTreeSet::new()
+    };
     if selection.runs_repository_workload(&config.profile) {
         let repositories = repository_configs
             .iter()
             .filter_map(|(name, repo_config)| {
-                if !repository_in_profile(&config.profile, name, repo_config) {
+                let needed_for_repo_set = required_repo_set_members.contains(name.as_str());
+                if !needed_for_repo_set
+                    && !repository_in_profile(&config.profile, name, repo_config)
+                {
                     return None;
                 }
                 let repo_cases = grouped_cases
@@ -232,6 +244,9 @@ pub fn evaluate_candidate(
                         )
                     })
                     .unwrap_or_default();
+                if repo_cases.is_empty() && !needed_for_repo_set {
+                    return None;
+                }
                 Some((name.clone(), repo_config.clone(), repo_cases))
             })
             .collect::<Vec<_>>();

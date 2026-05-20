@@ -237,6 +237,7 @@ impl WorkloadSelection {
 
     fn runs_file_fixtures(&self, profile: &str) -> bool {
         self.contains(EvaluationCategory::FileFixtures)
+            || self.contains(EvaluationCategory::Performance)
             || (!self.focused() && profile_runs_slow_suites(profile))
     }
 
@@ -305,7 +306,10 @@ fn semantic_vector_suite_for_selection(
 ) -> Value {
     let all_cases = array_field(suite, "query_cases").to_vec();
     let selected_cases = if categories
-        .map(|items| items.contains(EvaluationCategory::SemanticVector))
+        .map(|items| {
+            items.contains(EvaluationCategory::SemanticVector)
+                || items.contains(EvaluationCategory::Performance)
+        })
         .unwrap_or_else(|| profile_runs_slow_suites(profile))
     {
         all_cases
@@ -334,6 +338,7 @@ fn semantic_vector_guardrail_cases(cases: Vec<Value>) -> Vec<Value> {
 
 fn focused_repository_case(categories: &CategorySet, case: &Value) -> bool {
     is_guardrail_case(case)
+        || categories.contains(EvaluationCategory::Performance)
         || (categories.contains(EvaluationCategory::Foundational)
             && repository_case_objective(case) == "foundational_capability")
         || (categories.contains(EvaluationCategory::Competitive)

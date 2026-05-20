@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     command::{CommandResult, CommandSpec, run_command},
     config::{CategorySet, Config},
-    history::{HistoryPaths, adopted, best_accepted_run_for_profile, is_evaluate_run, load_runs},
+    history::{HistoryPaths, adopted, best_accepted_run_for_workload, is_evaluate_run, load_runs},
     history_synthesis::synthesize_history,
     memory::{
         historical_patch_memory_index, progressive_memory_index, rejection_recovery_memory_review,
@@ -99,7 +99,10 @@ pub fn build_prompt(
     profile: &str,
     categories: Option<&CategorySet>,
 ) -> String {
-    let best = best_accepted_run_for_profile(paths, profile).ok().flatten();
+    let category_focus_key = categories.map(CategorySet::focus_key);
+    let best = best_accepted_run_for_workload(paths, profile, category_focus_key.as_deref())
+        .ok()
+        .flatten();
     let best_summary = best
         .as_ref()
         .map(|run| {

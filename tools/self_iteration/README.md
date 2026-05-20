@@ -105,8 +105,9 @@ always preserving explicit guardrail cases, keeps 2 cross-repository threshold
 cases from the `temporal_go_workspace` repo-set, and runs the semantic/vector
 guardrail query. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
-repeated registration and indexing cost. Score history is isolated by profile,
-so `fast` compares only against previous `fast` runs and does not treat
+repeated registration and indexing cost. Score history is isolated by profile
+and category focus, so `fast --categories semantic_vector` compares only
+against matching semantic/vector-focused fast runs and does not treat
 full/exhaustive judge scores as fast regressions. Override the subset with
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
@@ -124,7 +125,9 @@ are emitted as quality gates and reject the candidate even when the focused
 score improves. For example, `--categories semantic_vector` runs the full
 semantic/vector suite plus repository and repo-set guardrails, while
 `--categories competitive` runs competitive repository cases plus the same
-guardrails.
+guardrails. `--categories performance` keeps the performance-bearing repository,
+repo-set, semantic/vector, and file-fixture measurement workloads instead of
+collapsing to guardrails only.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. `auto` uses the local machine aggressively: the global command limiter

@@ -19,12 +19,7 @@ fn evaluate_repository_sets(
     ));
     let mut reports = Vec::new();
     for (set_name, set_config) in set_configs {
-        if set_config.get("profile").and_then(Value::as_str) == Some("exhaustive")
-            && profile != "exhaustive"
-        {
-            continue;
-        }
-        if !repository_set_in_profile(profile, &set_name) {
+        if !repository_set_config_in_profile(profile, &set_name, &set_config) {
             continue;
         }
         let set_cases = cases_by_set
@@ -46,6 +41,54 @@ fn evaluate_repository_sets(
     Ok(reports)
 }
 
+fn selected_repository_set_member_names(
+    cases_config: &Value,
+    profile: &str,
+    categories: Option<&CategorySet>,
+) -> BTreeSet<String> {
+    let set_configs = object_field(cases_config, "repository_sets")
+        .map(|object| {
+            object
+                .iter()
+                .map(|(name, config)| (name.clone(), config.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let cases_by_set = repository_set_cases_by_name(array_field(
+        cases_config,
+        "repository_set_query_cases",
+    ));
+    let mut members = BTreeSet::new();
+    for (set_name, set_config) in set_configs {
+        if !repository_set_config_in_profile(profile, &set_name, &set_config) {
+            continue;
+        }
+        let set_cases = cases_by_set
+            .get(&set_name)
+            .cloned()
+            .map(|cases| select_repository_set_cases_for_profile(profile, categories, cases))
+            .unwrap_or_default();
+        if set_cases.is_empty() {
+            continue;
+        }
+        for member in array_field(&set_config, "members") {
+            if let Some(repository) = string_field(member, "repository") {
+                members.insert(repository.to_owned());
+            }
+        }
+    }
+    members
+}
+
+fn repository_set_config_in_profile(profile: &str, set_name: &str, set_config: &Value) -> bool {
+    if set_config.get("profile").and_then(Value::as_str) == Some("exhaustive")
+        && profile != "exhaustive"
+    {
+        return false;
+    }
+    repository_set_in_profile(profile, set_name)
+}
+
 fn repository_set_cases_by_name(cases: &[Value]) -> BTreeMap<String, Vec<Value>> {
     let mut grouped: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for case in cases {
@@ -65,7 +108,9 @@ fn select_repository_set_cases_for_profile(
     cases: Vec<Value>,
 ) -> Vec<Value> {
     let filtered = if let Some(categories) = categories {
-        if categories.contains(EvaluationCategory::RepositorySets) {
+        if categories.contains(EvaluationCategory::RepositorySets)
+            || categories.contains(EvaluationCategory::Performance)
+        {
             cases
         } else {
             cases.into_iter().filter(is_guardrail_case).collect()
