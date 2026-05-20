@@ -112,7 +112,13 @@ fn run_generation_iteration(
         println!("[self-iterate] using current working tree as candidate");
         None
     } else {
-        let prompt = codex::build_prompt(paths, &config.workspace, &run_id, &config.profile);
+        let prompt = codex::build_prompt(
+            paths,
+            &config.workspace,
+            &run_id,
+            &config.profile,
+            config.categories.as_ref(),
+        );
         let result = codex::run_codex(config, &prompt);
         println!(
             "[self-iterate] codex exit={} duration_ms={}",

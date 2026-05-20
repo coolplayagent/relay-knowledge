@@ -1005,3 +1005,11 @@ Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
+## self-iteration dynamic category guardrails candidate
+
+- candidate: 自迭代 Rust harness 增加 `--categories` 聚焦参数，并把显式 `guardrail=true` case 转成硬质量 gate。
+- algorithm: 聚焦运行按 `foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`research_judge`、`performance` 或 `all` 选择主攻 workload；无论聚焦哪个类别，repository、repo-set 和 semantic/vector 底线 case 都会保留，guardrail case 失败会作为 `guardrail_case_*` gate 拒绝候选。
+- architecture: 类别解析集中在 self-iteration config，workload 选择集中在 evaluator selection helper；`self-iterate.sh` 继续透传参数，case 文件只用声明式 `guardrail` 字段，不需要脚本侧维护硬编码 case id。
+- invariants: 未传 `--categories` 时仍使用 profile 默认语义；fast 默认扩展到每仓 8 条普通 case、2 条 repo-set case，并增加 1 条 semantic/vector guardrail；full/exhaustive 默认仍运行完整慢 suite；smoke 仍只做 launcher/format 类轻量验证。
+- expected impact: 允许先用 `--categories semantic_vector` 等方式集中拉高低分项，同时防止基础 repository、跨仓和 semantic/vector 底线能力被优化过程打坏；默认 fast 也获得更多 case 信号，不再长期停留在已满分的小集合。
+- risks: 同一 profile 下不同 category focus 的历史分数仍共享比较基线，后续如出现跨 workload 分数不可比，可再把 history key 扩展为 profile + category focus。

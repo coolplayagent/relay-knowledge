@@ -3,6 +3,7 @@ fn evaluate_repository_sets(
     cases_config: &Value,
     repositories: &BTreeMap<String, Value>,
     profile: &str,
+    categories: Option<&CategorySet>,
 ) -> Result<Vec<RepoReport>, String> {
     let set_configs = object_field(cases_config, "repository_sets")
         .map(|object| {
@@ -29,7 +30,7 @@ fn evaluate_repository_sets(
         let set_cases = cases_by_set
             .get(&set_name)
             .cloned()
-            .map(|cases| limit_repository_set_cases_for_profile(profile, cases))
+            .map(|cases| select_repository_set_cases_for_profile(profile, categories, cases))
             .unwrap_or_default();
         if set_cases.is_empty() {
             continue;
@@ -58,6 +59,23 @@ fn repository_set_cases_by_name(cases: &[Value]) -> BTreeMap<String, Vec<Value>>
     grouped
 }
 
+fn select_repository_set_cases_for_profile(
+    profile: &str,
+    categories: Option<&CategorySet>,
+    cases: Vec<Value>,
+) -> Vec<Value> {
+    let filtered = if let Some(categories) = categories {
+        if categories.contains(EvaluationCategory::RepositorySets) {
+            cases
+        } else {
+            cases.into_iter().filter(is_guardrail_case).collect()
+        }
+    } else {
+        cases
+    };
+    limit_repository_set_cases_for_profile(profile, filtered)
+}
+
 fn evaluate_repository_set(
     runtime: &EvalRuntime,
     set_name: &str,
@@ -68,6 +86,7 @@ fn evaluate_repository_set(
     let set_alias = string_or(set_config, "alias", set_name);
     let mut commands = Vec::new();
     let mut cases = Vec::new();
+    let mut guardrail_gates = Vec::new();
     let mut metrics = Vec::new();
     eprintln!(
         "[self-iterate] repository-set start name={} alias={} members={} query_cases={}",
@@ -192,17 +211,22 @@ fn evaluate_repository_set(
                     runtime.timeout,
                 ),
             );
+            let duration_ms = query.duration_ms;
             let observation = score_repository_set_case(&set_name, &case, &query);
-            (query, observation)
+            let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
+            (query, observation, guardrail_gate)
         }
     });
     let query_durations = query_results
         .iter()
-        .map(|(command, _)| command.duration_ms)
+        .map(|(command, _, _)| command.duration_ms)
         .collect::<Vec<_>>();
-    for (command, observation) in query_results {
+    for (command, observation, guardrail_gate) in query_results {
         commands.push(command);
         cases.push(observation);
+        if let Some(gate) = guardrail_gate {
+            guardrail_gates.push(gate);
+        }
     }
     push_latency_metrics(
         &mut metrics,
@@ -210,14 +234,16 @@ fn evaluate_repository_set(
         &format!("{set_name}_repo_set_query"),
         &query_durations,
     );
-    Ok(repo_report(
+    let mut report = repo_report(
         set_name,
         set_alias.to_owned(),
         commands,
         cases,
         metrics,
         refresh_json,
-    ))
+    );
+    report.gates = guardrail_gates;
+    Ok(report)
 }
 
 fn repository_set_validation_command(set_name: &str, message: String) -> CommandResult {
@@ -345,6 +371,7 @@ fn score_repository_set_case(
         case_id: string_or(case, "id", "case").to_owned(),
         repository: set_name.to_owned(),
         passed,
+        guardrail: is_guardrail_case(case),
         rank,
         max_rank,
         false_positive_count: assessment.false_positive_count,

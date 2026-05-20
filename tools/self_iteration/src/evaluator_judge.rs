@@ -81,6 +81,7 @@ fn evaluate_research_judge_suite(input: JudgeEvalInput<'_>) -> Result<RepoReport
         case_id: "research_judge".to_owned(),
         repository: "research_judge".to_owned(),
         passed: outcome.1,
+        guardrail: false,
         rank: outcome.1.then_some(1),
         max_rank: 1,
         false_positive_count: 0,

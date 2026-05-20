@@ -221,6 +221,7 @@
       {
         "id": "sv_semantic_context_pack_source",
         "query": "semantic vector recall anchors context packs",
+        "guardrail": true,
         "limit": 10,
         "max_rank": 1,
         "required_sources": ["semantic"],
@@ -307,6 +308,7 @@
       "repository": "relay_teams",
       "kind": "definition",
       "query": "ConnectorService",
+      "guardrail": true,
       "limit": 10,
       "max_rank": 1,
       "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
@@ -352,6 +354,7 @@
       "repository": "relay_teams",
       "kind": "hybrid",
       "query": "ConnectorService",
+      "guardrail": true,
       "limit": 10,
       "max_rank": 1,
       "expected": [{"path": "src/relay_teams/connector/service.py", "line_start": 137}]
@@ -600,6 +603,7 @@
       "repository": "leveldb_cpp",
       "kind": "definition",
       "query": "DB::Open",
+      "guardrail": true,
       "limit": 10,
       "max_rank": 1,
       "expected": [{"path": "db/db_impl.cc", "line_start": 1503}]
@@ -645,6 +649,7 @@
       "repository": "leveldb_cpp",
       "kind": "hybrid",
       "query": "InternalKeyComparator",
+      "guardrail": true,
       "limit": 10,
       "max_rank": 3,
       "expected": [{"path": "db/dbformat.h"}]
