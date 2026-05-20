@@ -3,7 +3,7 @@
     "dotnet_runtime_csharp": {
       "path": "/opt/workspace/dotnet-runtime",
       "alias": "dotnet-runtime-csharp-self-iteration",
-      "ref": "HEAD",
+      "ref": "86db03a9c145cefc46fbe9e0f0dc646f739c606c",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

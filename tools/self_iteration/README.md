@@ -290,8 +290,9 @@ enumerating cases.
   evaluator.
 - Multi-language repository retrieval targets are split by language under
   `cases/repository_*_targets.json` so each language can evolve independently.
-  The default profile covers relay-teams Python/JavaScript, opencode
-  TypeScript/TSX, and LevelDB C++; Linux C, Kubernetes Go,
+  The default profile covers generated C/C++ syntax fixtures, relay-teams
+  Python/JavaScript, opencode TypeScript/TSX, and LevelDB C++; Linux C,
+  Kubernetes Go,
   Spring Framework Java, RustFS Rust, Codex Python, nvm Bash, dotnet/runtime C#,
   OkHttp Kotlin, Laravel PHP, Rails Ruby, Scala 3, and Alamofire Swift remain behind
   repository-level `profile=exhaustive`. The language files define real `symbol`, `definition`,
@@ -306,6 +307,21 @@ enumerating cases.
   and add `expected_all` or `expected_sequence` scoring so passed inheritance,
   implementation, dependency, alias, inline, caller-chain, and execution-flow
   cases still leave ranking and coverage improvement room.
+- C/C++ syntax fixtures are generated as temporary git repositories and then
+  evaluated through the normal `repo register/index/query` path. The C fixture
+  covers function pointer typedefs, operation tables, designated and compound
+  initializers, function-like macros, local includes, and callback dispatch. The
+  C++ fixture covers namespaces, template classes, out-of-line template methods,
+  virtual overrides, overloaded operators, lambda captures, namespace aliases,
+  using aliases, and header/source split. Their design and external repository
+  commit pins are recorded in
+  `docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md`.
+- Additional generated syntax fixtures cover Python, JavaScript, TypeScript/TSX,
+  Go, Java, Rust, Bash, C#, Kotlin, PHP, Ruby, Scala, and Swift. They keep
+  language-specific cases compact and reproducible while real pinned
+  repositories continue to provide scale, noise, and performance pressure. The
+  fixture matrix is documented in
+  `docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`.
 - Multi-repository repository-set targets in
   `cases/repository_multi_repository_targets.json` register each member as a
   normal full-scope repository first, create an explicit `repo-set`, refresh the

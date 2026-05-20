@@ -264,8 +264,9 @@ pub fn evaluate_candidate(
         );
         let repo_results = parallel_map(repositories, repo_jobs, {
             let runtime = runtime.clone();
+            let run_home = run_home.clone();
             move |(repo_name, repo_config, repo_cases)| {
-                evaluate_repository(&runtime, &repo_name, &repo_config, repo_cases)
+                evaluate_repository(&runtime, &run_home, &repo_name, &repo_config, repo_cases)
             }
         });
         for report in repo_results {
@@ -411,11 +412,11 @@ pub fn evaluate_candidate(
 
 fn evaluate_repository(
     runtime: &EvalRuntime,
+    run_home: &Path,
     repo_name: &str,
     repo_config: &Value,
     repo_cases: Vec<Value>,
 ) -> Result<RepoReport, String> {
-    let path = PathBuf::from(string_or(repo_config, "path", ""));
     let alias = string_or(repo_config, "alias", repo_name);
     let ref_selector = string_or(repo_config, "ref", "HEAD");
     let scope = string_or(repo_config, "scope", "all").to_owned();
@@ -423,6 +424,10 @@ fn evaluate_repository(
     let mut cases = Vec::new();
     let mut guardrail_gates = Vec::new();
     let mut metrics = Vec::new();
+    let (path, setup_commands) =
+        prepare_repository_path(runtime, run_home, repo_name, repo_config)?;
+    let setup_passed = setup_commands.iter().all(CommandResult::passed);
+    commands.extend(setup_commands);
     eprintln!(
         "[self-iterate] repository start name={} alias={} path={} scope={} query_cases={}",
         repo_name,
@@ -431,6 +436,16 @@ fn evaluate_repository(
         scope,
         repo_cases.len()
     );
+    if !setup_passed {
+        return Ok(repo_report(
+            repo_name,
+            scope,
+            commands,
+            cases,
+            metrics,
+            Value::Null,
+        ));
+    }
     if !path.exists() {
         commands.push(CommandResult {
             name: format!("{repo_name}_repository_exists"),

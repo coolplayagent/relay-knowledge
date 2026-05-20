@@ -1,0 +1,186 @@
+{
+  "repositories": {
+    "cpp_syntax_fixture": {
+      "generated_fixture": "cpp_syntax_v1",
+      "alias": "cpp-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["cpp"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 80,
+      "query_p95_budget_ms": 180
+    }
+  },
+  "query_cases": [
+    {
+      "id": "cpp_syntax_symbol_cache_template_class",
+      "repository": "cpp_syntax_fixture",
+      "kind": "symbol",
+      "query": "Cache",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["include/store/cache.hpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "include/store/cache.hpp", "excerpt_contains": "class Cache"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_definition_cache_insert_template_method",
+      "repository": "cpp_syntax_fixture",
+      "kind": "definition",
+      "query": "Cache::Insert",
+      "guardrail": true,
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/cache.cpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/cache.cpp", "excerpt_contains": "void Cache<Key>::Insert"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_definition_recording_writer_override",
+      "repository": "cpp_syntax_fixture",
+      "kind": "definition",
+      "query": "RecordingWriter::Append",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["src/cache.cpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/cache.cpp", "excerpt_contains": "void RecordingWriter::Append"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_references_nested_using_alias",
+      "repository": "cpp_syntax_fixture",
+      "kind": "references",
+      "query": "KeyList",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["include/store/cache.hpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "include/store/cache.hpp", "excerpt_contains": "KeyList keys_"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_callers_writer_append_virtual_dispatch",
+      "repository": "cpp_syntax_fixture",
+      "kind": "callers",
+      "query": "Append",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/cache.cpp", "excerpt_contains": "writer_->Append(std::string(key))"}],
+      "forbidden": [{"path": "tests/fake_cache.cpp", "excerpt_contains": "void Insert"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_callees_run_pipeline_lambda_sequence",
+      "repository": "cpp_syntax_fixture",
+      "kind": "callees",
+      "query": "RunPipeline",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "path_filters": ["src/pipeline.cpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/pipeline.cpp", "excerpt_contains": "cache.Insert(event.key)"}],
+      "expected_sequence": [
+        {"path": "src/pipeline.cpp", "excerpt_contains": "auto append_event = [&cache, &pipeline]"},
+        {"path": "src/pipeline.cpp", "excerpt_contains": "cache.Insert(event.key)"},
+        {"path": "src/pipeline.cpp", "excerpt_contains": "pipeline(event)"}
+      ],
+      "min_score": 0.35,
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_imports_cache_header",
+      "repository": "cpp_syntax_fixture",
+      "kind": "imports",
+      "query": "store/cache.hpp",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["cpp"],
+      "expected": [{"path": "include/store/pipeline.hpp", "excerpt_contains": "#include \"store/cache.hpp\""}],
+      "expected_all": [
+        {"path": "include/store/pipeline.hpp", "excerpt_contains": "#include \"store/cache.hpp\""},
+        {"path": "src/cache.cpp", "excerpt_contains": "#include \"store/cache.hpp\""}
+      ],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_hybrid_template_cache_lambda_flow",
+      "repository": "cpp_syntax_fixture",
+      "kind": "hybrid",
+      "query": "templated cache insert lambda pipeline writer append",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/pipeline.cpp", "excerpt_contains": "cache.Insert(event.key)"}],
+      "expected_all": [
+        {"path": "include/store/cache.hpp", "excerpt_contains": "template <typename Key>"},
+        {"path": "src/cache.cpp", "excerpt_contains": "void Cache<Key>::Insert"},
+        {"path": "src/pipeline.cpp", "excerpt_contains": "auto append_event = [&cache, &pipeline]"}
+      ],
+      "min_score": 0.45,
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_definition_operator_call",
+      "repository": "cpp_syntax_fixture",
+      "kind": "definition",
+      "query": "Pipeline::operator()",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["src/pipeline.cpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/pipeline.cpp", "excerpt_contains": "int Pipeline::operator()"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_references_namespace_alias",
+      "repository": "cpp_syntax_fixture",
+      "kind": "references",
+      "query": "cache_alias",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["src/pipeline.cpp"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/pipeline.cpp", "excerpt_contains": "cache_alias::Cache<std::string>"}],
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_definition_insert_avoids_test_fake",
+      "repository": "cpp_syntax_fixture",
+      "kind": "definition",
+      "query": "Insert",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["cpp"],
+      "expected": [{"path": "src/cache.cpp", "excerpt_contains": "void Cache<Key>::Insert"}],
+      "forbidden": [{"path": "tests/fake_cache.cpp", "excerpt_contains": "void Insert"}],
+      "forbidden_rank_penalty": 0.12,
+      "case_group": "cpp_tree_sitter_syntax"
+    },
+    {
+      "id": "cpp_syntax_negative_missing_policy",
+      "repository": "cpp_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingCachePolicy",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "cpp_tree_sitter_syntax"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "repositories": {
+    "bash_syntax_fixture": {
+      "generated_fixture": "bash_syntax_v1",
+      "alias": "bash-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["bash"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "bash_syntax_symbol_install_main",
+      "repository": "bash_syntax_fixture",
+      "kind": "symbol",
+      "query": "rk_install_main",
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["bin/install.sh"],
+      "language_filters": ["bash"],
+      "expected": [{"path": "bin/install.sh", "excerpt_contains": "rk_install_main()"}],
+      "case_group": "bash_tree_sitter_syntax"
+    },
+    {
+      "id": "bash_syntax_definition_runtime_dispatch",
+      "repository": "bash_syntax_fixture",
+      "kind": "definition",
+      "query": "rk_runtime_dispatch",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["bash"],
+      "expected": [{"path": "lib/runtime.sh", "excerpt_contains": "rk_runtime_dispatch()"}],
+      "forbidden": [{"path": "tests/fake_runtime.sh", "excerpt_contains": "rk_runtime_dispatch()"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "bash_tree_sitter_syntax"
+    },
+    {
+      "id": "bash_syntax_imports_sourced_runtime",
+      "repository": "bash_syntax_fixture",
+      "kind": "imports",
+      "query": "lib runtime source",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["bash"],
+      "expected": [{"path": "bin/install.sh", "excerpt_contains": ". \"$SCRIPT_DIR/../lib/runtime.sh\""}],
+      "case_group": "bash_tree_sitter_syntax"
+    },
+    {
+      "id": "bash_syntax_callees_install_case_dispatch",
+      "repository": "bash_syntax_fixture",
+      "kind": "callees",
+      "query": "rk_install_main",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["bash"],
+      "expected": [{"path": "bin/install.sh", "excerpt_contains": "rk_runtime_dispatch \"install\""}],
+      "expected_sequence": [
+        {"path": "bin/install.sh", "excerpt_contains": "case \"$command\" in"},
+        {"path": "bin/install.sh", "excerpt_contains": "rk_runtime_dispatch \"install\""},
+        {"path": "bin/install.sh", "excerpt_contains": "rk_missing_command \"$command\""}
+      ],
+      "case_group": "bash_tree_sitter_syntax"
+    },
+    {
+      "id": "bash_syntax_hybrid_artifact_download_flow",
+      "repository": "bash_syntax_fixture",
+      "kind": "hybrid",
+      "query": "installer runtime dispatch prepare home download artifact",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["bash"],
+      "expected": [{"path": "lib/runtime.sh", "excerpt_contains": "rk_download_artifact \"$mode\""}],
+      "expected_all": [
+        {"path": "lib/runtime.sh", "excerpt_contains": "rk_prepare_home \"$mode\""},
+        {"path": "lib/runtime.sh", "excerpt_contains": "printf 'download:%s"}
+      ],
+      "case_group": "bash_tree_sitter_syntax"
+    },
+    {
+      "id": "bash_syntax_negative_missing_function",
+      "repository": "bash_syntax_fixture",
+      "kind": "symbol",
+      "query": "rk_missing_installer_entry",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "bash_tree_sitter_syntax"
+    }
+  ]
+}

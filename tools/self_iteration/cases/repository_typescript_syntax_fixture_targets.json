@@ -1,0 +1,96 @@
+{
+  "repositories": {
+    "typescript_syntax_fixture": {
+      "generated_fixture": "typescript_syntax_v1",
+      "alias": "typescript-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["typescript", "tsx"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "typescript_syntax_symbol_stream_transport_interface",
+      "repository": "typescript_syntax_fixture",
+      "kind": "symbol",
+      "query": "StreamTransport",
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["src/protocol.ts"],
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/protocol.ts", "excerpt_contains": "interface StreamTransport"}],
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_definition_generic_send_envelope",
+      "repository": "typescript_syntax_fixture",
+      "kind": "definition",
+      "query": "sendEnvelope",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/protocol.ts"],
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/protocol.ts", "excerpt_contains": "async function sendEnvelope<TPayload>"}],
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_imports_type_and_runtime_protocol",
+      "repository": "typescript_syntax_fixture",
+      "kind": "imports",
+      "query": "./protocol",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/provider.ts", "excerpt_contains": "import type { StreamEnvelope"}],
+      "expected_all": [
+        {"path": "src/provider.ts", "excerpt_contains": "import { sendEnvelope }"},
+        {"path": "src/index.ts", "excerpt_contains": "export type { StreamEnvelope"}
+      ],
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_references_dynamic_import",
+      "repository": "typescript_syntax_fixture",
+      "kind": "imports",
+      "query": "import \"./protocol\"",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/provider.ts", "excerpt_contains": "await import(\"./protocol\")"}],
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_hybrid_tsx_provider_flow",
+      "repository": "typescript_syntax_fixture",
+      "kind": "hybrid",
+      "query": "tsx provider panel effect run provider envelope payload",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "expected": [{"path": "src/component.tsx", "excerpt_contains": "function ProviderPanel"}],
+      "expected_all": [
+        {"path": "src/component.tsx", "excerpt_contains": "React.useEffect"},
+        {"path": "src/provider.ts", "excerpt_contains": "return sendEnvelope(runtime, payload)"},
+        {"path": "src/index.ts", "excerpt_contains": "export { ProviderPanel"}
+      ],
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_negative_missing_provider",
+      "repository": "typescript_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingProviderRuntime",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "typescript_tree_sitter_syntax"
+    }
+  ]
+}

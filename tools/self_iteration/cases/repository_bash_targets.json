@@ -3,7 +3,7 @@
     "nvm_bash": {
       "path": "/opt/workspace/nvm",
       "alias": "nvm-bash-self-iteration",
-      "ref": "HEAD",
+      "ref": "53855417eb66b9c35b732ac39358f1aae3ee1977",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

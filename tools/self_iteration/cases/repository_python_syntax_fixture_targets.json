@@ -1,0 +1,98 @@
+{
+  "repositories": {
+    "python_syntax_fixture": {
+      "generated_fixture": "python_syntax_v1",
+      "alias": "python-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["python"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "python_syntax_symbol_service_runner",
+      "repository": "python_syntax_fixture",
+      "kind": "symbol",
+      "query": "ServiceRunner",
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["syntax_service/service.py"],
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "class ServiceRunner"}],
+      "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_definition_decorated_async_dispatch",
+      "repository": "python_syntax_fixture",
+      "kind": "definition",
+      "query": "dispatch_event",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["syntax_service/service.py"],
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "async def dispatch_event"}],
+      "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_imports_relative_errors",
+      "repository": "python_syntax_fixture",
+      "kind": "imports",
+      "query": ".errors",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "from .errors import OverloadedServiceError"}],
+      "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_callees_async_context_flow",
+      "repository": "python_syntax_fixture",
+      "kind": "callees",
+      "query": "dispatch_event",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "path_filters": ["syntax_service/service.py"],
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "await resource.write_event(event)"}],
+      "expected_sequence": [
+        {"path": "syntax_service/service.py", "excerpt_contains": "async with self.resource as resource"},
+        {"path": "syntax_service/service.py", "excerpt_contains": "await resource.write_event(event)"},
+        {"path": "syntax_service/service.py", "excerpt_contains": "self.normalize_payload(payload)"}
+      ],
+      "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_hybrid_exception_subclass_flow",
+      "repository": "python_syntax_fixture",
+      "kind": "hybrid",
+      "query": "decorated async service overload exception subclass normalize payload",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "raise OverloadedServiceError"}],
+      "expected_all": [
+        {"path": "syntax_service/errors.py", "excerpt_contains": "class OverloadedServiceError(ServiceError)"},
+        {"path": "syntax_service/decorators.py", "excerpt_contains": "def traced_operation"},
+        {"path": "syntax_service/service.py", "excerpt_contains": "@traced_operation(\"dispatch\")"}
+      ],
+      "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_negative_missing_runner",
+      "repository": "python_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingServiceRunner",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "python_tree_sitter_syntax"
+    }
+  ]
+}

@@ -57,3 +57,5 @@
 - [派生索引与新鲜度](../03-architecture-specs/08-derived-indexes-and-freshness.md)
 - [混合检索与 Context Packing](../03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
 - [代码检索排序与影响分析](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
+- [C/C++ 语法型自迭代测评集 2026-05-20](06-c-cpp-syntax-self-iteration-evaluation.md)
+- [多语言语法型自迭代测评集 2026-05-20](07-multilingual-syntax-self-iteration-evaluation.md)

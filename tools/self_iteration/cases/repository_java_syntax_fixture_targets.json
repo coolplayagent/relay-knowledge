@@ -1,0 +1,95 @@
+{
+  "repositories": {
+    "java_syntax_fixture": {
+      "generated_fixture": "java_syntax_v1",
+      "alias": "java-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["java"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "java_syntax_symbol_service_contract_interface",
+      "repository": "java_syntax_fixture",
+      "kind": "symbol",
+      "query": "ServiceContract",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/ServiceContract.java", "excerpt_contains": "interface ServiceContract<T>"}],
+      "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_definition_annotated_service_handle",
+      "repository": "java_syntax_fixture",
+      "kind": "definition",
+      "query": "AnnotatedService.handle",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/AnnotatedService.java", "excerpt_contains": "public String handle"}],
+      "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_imports_nested_builder",
+      "repository": "java_syntax_fixture",
+      "kind": "imports",
+      "query": "example.AnnotatedService.Builder",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "import example.AnnotatedService.Builder"}],
+      "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_callees_factory_dispatch_flow",
+      "repository": "java_syntax_fixture",
+      "kind": "callees",
+      "query": "ServiceFactory.dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "create().handle(value)"}],
+      "expected_sequence": [
+        {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "create().handle(value)"},
+        {"path": "src/main/java/example/AnnotatedService.java", "excerpt_contains": "normalize(value).trim()"}
+      ],
+      "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_hybrid_annotation_generic_builder",
+      "repository": "java_syntax_fixture",
+      "kind": "hybrid",
+      "query": "annotation generic service contract builder object creation handle",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/AnnotatedService.java", "excerpt_contains": "@Deprecated"}],
+      "expected_all": [
+        {"path": "src/main/java/example/AnnotatedService.java", "excerpt_contains": "implements ServiceContract<String>"},
+        {"path": "src/main/java/example/AnnotatedService.java", "excerpt_contains": "public static class Builder"},
+        {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "return builder.build()"}
+      ],
+      "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_negative_missing_service",
+      "repository": "java_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingAnnotatedService",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "java_tree_sitter_syntax"
+    }
+  ]
+}

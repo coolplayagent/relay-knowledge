@@ -1,0 +1,91 @@
+{
+  "repositories": {
+    "php_syntax_fixture": {
+      "generated_fixture": "php_syntax_v1",
+      "alias": "php-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["php"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "php_syntax_symbol_bootable_interface",
+      "repository": "php_syntax_fixture",
+      "kind": "symbol",
+      "query": "Bootable",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Contracts/Bootable.php", "excerpt_contains": "interface Bootable"}],
+      "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_definition_kernel_boot",
+      "repository": "php_syntax_fixture",
+      "kind": "definition",
+      "query": "Kernel::boot",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Kernel.php", "excerpt_contains": "public function boot"}],
+      "forbidden": [{"path": "tests/FakeKernel.php", "excerpt_contains": "public function boot"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_imports_cache_provider",
+      "repository": "php_syntax_fixture",
+      "kind": "imports",
+      "query": "App\\Providers\\CacheProvider",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Kernel.php", "excerpt_contains": "use App\\Providers\\CacheProvider"}],
+      "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_callees_kernel_boot_provider",
+      "repository": "php_syntax_fixture",
+      "kind": "callees",
+      "query": "Kernel::boot",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Kernel.php", "excerpt_contains": "$this->provider->register()"}],
+      "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_hybrid_trait_provider_bootstrap",
+      "repository": "php_syntax_fixture",
+      "kind": "hybrid",
+      "query": "namespace trait provider boot register log boot cache",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "trait LogsBoot"}],
+      "expected_all": [
+        {"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "use LogsBoot"},
+        {"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "$this->logBoot('cache')"}
+      ],
+      "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_negative_missing_kernel",
+      "repository": "php_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingKernel",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "php_tree_sitter_syntax"
+    }
+  ]
+}

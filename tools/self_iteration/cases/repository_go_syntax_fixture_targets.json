@@ -1,0 +1,101 @@
+{
+  "repositories": {
+    "go_syntax_fixture": {
+      "generated_fixture": "go_syntax_v1",
+      "alias": "go-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["go"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "go_syntax_symbol_event_processor_interface",
+      "repository": "go_syntax_fixture",
+      "kind": "symbol",
+      "query": "EventProcessor",
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["processor/worker.go"],
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/worker.go", "excerpt_contains": "type EventProcessor interface"}],
+      "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_definition_worker_receiver_run",
+      "repository": "go_syntax_fixture",
+      "kind": "definition",
+      "query": "Worker.Run",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["processor/worker.go"],
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/worker.go", "excerpt_contains": "func (w *Worker) Run"}],
+      "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_imports_grouped_alias_dot_blank",
+      "repository": "go_syntax_fixture",
+      "kind": "imports",
+      "query": "ctxalias context",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["processor/worker.go"],
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/worker.go", "excerpt_contains": "ctxalias \"context\""}],
+      "expected_all": [
+        {"path": "processor/worker.go", "excerpt_contains": "_ \"embed\""},
+        {"path": "processor/worker.go", "excerpt_contains": ". \"strings\""}
+      ],
+      "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_callees_run_pipeline_constructor_flow",
+      "repository": "go_syntax_fixture",
+      "kind": "callees",
+      "query": "RunPipeline",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/pipeline.go", "excerpt_contains": "worker.Run(context.Background(), events)"}],
+      "expected_sequence": [
+        {"path": "processor/pipeline.go", "excerpt_contains": "NewWorker(PipelineProcessor{})"},
+        {"path": "processor/pipeline.go", "excerpt_contains": "worker.Run(context.Background(), events)"}
+      ],
+      "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_hybrid_goroutine_defer_interface",
+      "repository": "go_syntax_fixture",
+      "kind": "hybrid",
+      "query": "goroutine defer close channel processor interface event payload",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/pipeline.go", "excerpt_contains": "go func()"}],
+      "expected_all": [
+        {"path": "processor/pipeline.go", "excerpt_contains": "defer close(done)"},
+        {"path": "processor/worker.go", "excerpt_contains": "processor.Process(ctx, event)"}
+      ],
+      "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_negative_missing_worker",
+      "repository": "go_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingWorker",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "go_tree_sitter_syntax"
+    }
+  ]
+}

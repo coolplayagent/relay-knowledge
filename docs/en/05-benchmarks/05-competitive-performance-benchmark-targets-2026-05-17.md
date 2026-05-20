@@ -57,3 +57,5 @@ Retrieval traces and benchmark output should record:
 - [Derived Indexes and Freshness](../03-architecture-specs/08-derived-indexes-and-freshness.md)
 - [Hybrid Retrieval and Context Packing](../03-architecture-specs/09-hybrid-retrieval-and-context-packing.md)
 - [Code Retrieval Ranking and Impact Analysis](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
+- [C/C++ Syntax Self-Iteration Evaluation Set 2026-05-20](06-c-cpp-syntax-self-iteration-evaluation.md)
+- [Multilingual Syntax Self-Iteration Evaluation Set 2026-05-20](07-multilingual-syntax-self-iteration-evaluation.md)

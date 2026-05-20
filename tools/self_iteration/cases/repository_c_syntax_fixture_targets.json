@@ -1,0 +1,191 @@
+{
+  "repositories": {
+    "c_syntax_fixture": {
+      "generated_fixture": "c_syntax_v1",
+      "alias": "c-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["c"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 80,
+      "query_p95_budget_ms": 180
+    }
+  },
+  "query_cases": [
+    {
+      "id": "c_syntax_symbol_driver_ops_struct",
+      "repository": "c_syntax_fixture",
+      "kind": "symbol",
+      "query": "rk_driver_ops",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["include/driver_ops.h"],
+      "language_filters": ["c"],
+      "expected": [{"path": "include/driver_ops.h", "excerpt_contains": "struct rk_driver_ops"}],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_definition_driver_read_function",
+      "repository": "c_syntax_fixture",
+      "kind": "definition",
+      "query": "rk_driver_read",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["src/driver_ops.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "src/driver_ops.c", "excerpt_contains": "int rk_driver_read"}],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_definition_function_pointer_typedef",
+      "repository": "c_syntax_fixture",
+      "kind": "definition",
+      "query": "rk_read_fn",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["include/driver_ops.h"],
+      "language_filters": ["c"],
+      "expected": [{"path": "include/driver_ops.h", "excerpt_contains": "typedef int (*rk_read_fn)"}],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_references_designated_initializer_read",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "rk_driver_read",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["c"],
+      "expected": [{"path": "src/driver_ops.c", "excerpt_contains": ".read = rk_driver_read"}],
+      "expected_all": [
+        {"path": "src/driver_ops.c", "excerpt_contains": ".read = rk_driver_read"},
+        {"path": "src/generated_table.c", "excerpt_contains": ".read = rk_driver_read"}
+      ],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_callers_function_pointer_read",
+      "repository": "c_syntax_fixture",
+      "kind": "callers",
+      "query": "rk_driver_read",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["c"],
+      "expected": [{"path": "src/generated_table.c", "excerpt_contains": "rk_rows[RK_STAGE_READ].read"}],
+      "forbidden": [{"path": "tests/fake_driver.c", "excerpt_contains": "rk_driver_read_fake"}],
+      "forbidden_rank_penalty": 0.12,
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_callees_dispatch_sequence",
+      "repository": "c_syntax_fixture",
+      "kind": "callees",
+      "query": "rk_dispatch_read",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "path_filters": ["src/dispatch.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "src/dispatch.c", "excerpt_contains": "ops->read(dev, buffer, length)"}],
+      "expected_sequence": [
+        {"path": "src/dispatch.c", "excerpt_contains": "rk_validate_device(dev)"},
+        {"path": "src/dispatch.c", "excerpt_contains": "ops->open(dev)"},
+        {"path": "src/dispatch.c", "excerpt_contains": "rk_lock_device(dev)"},
+        {"path": "src/dispatch.c", "excerpt_contains": "ops->read(dev, buffer, length)"}
+      ],
+      "min_score": 0.35,
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_imports_local_driver_ops_header",
+      "repository": "c_syntax_fixture",
+      "kind": "imports",
+      "query": "driver_ops.h",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["src/dispatch.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "src/dispatch.c", "excerpt_contains": "#include \"driver_ops.h\""}],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_hybrid_operation_table_dispatch",
+      "repository": "c_syntax_fixture",
+      "kind": "hybrid",
+      "query": "operation table read callback dispatch designated initializer",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["c"],
+      "expected": [{"path": "src/driver_ops.c", "excerpt_contains": "const struct rk_driver_ops rk_default_ops"}],
+      "expected_all": [
+        {"path": "include/driver_ops.h", "excerpt_contains": "struct rk_driver_ops"},
+        {"path": "src/driver_ops.c", "excerpt_contains": ".read = rk_driver_read"},
+        {"path": "src/dispatch.c", "excerpt_contains": "ops->read(dev, buffer, length)"}
+      ],
+      "min_score": 0.45,
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_references_pipeline_function_pointer_array",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "rk_pipeline",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["src/dispatch.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "src/dispatch.c", "excerpt_contains": "rk_pipeline[index](dev)"}],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_references_function_like_macro_usage",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "RK_TRACE_VALUE",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["c"],
+      "expected": [{"path": "src/driver_ops.c", "excerpt_contains": "RK_TRACE_VALUE(dev->fd)"}],
+      "forbidden": [{"path": "include/macros.h", "excerpt_contains": "#define RK_TRACE_VALUE"}],
+      "forbidden_rank_penalty": 0.08,
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_hybrid_compound_designator_table",
+      "repository": "c_syntax_fixture",
+      "kind": "hybrid",
+      "query": "compound initializer table row read function pointer",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 5,
+      "path_filters": ["src/generated_table.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "src/generated_table.c", "excerpt_contains": "[RK_STAGE_READ] = {"}],
+      "expected_all": [
+        {"path": "src/generated_table.c", "excerpt_contains": "struct rk_table_row"},
+        {"path": "src/generated_table.c", "excerpt_contains": ".read = rk_driver_read"},
+        {"path": "src/generated_table.c", "excerpt_contains": "rk_rows[RK_STAGE_READ].read"}
+      ],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
+      "id": "c_syntax_negative_missing_irq_handler",
+      "repository": "c_syntax_fixture",
+      "kind": "symbol",
+      "query": "rk_missing_irq_handler",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "c_tree_sitter_syntax"
+    }
+  ]
+}

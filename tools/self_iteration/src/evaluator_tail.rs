@@ -446,6 +446,8 @@ fn fast_repository_names() -> Vec<String> {
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| {
             vec![
+                "c_syntax_fixture".to_owned(),
+                "cpp_syntax_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),
                 "temporal_samples_go".to_owned(),
@@ -604,6 +606,1215 @@ fn failed_case(
         score_override: None,
     }
 }
+
+fn prepare_repository_path(
+    runtime: &EvalRuntime,
+    run_home: &Path,
+    repo_name: &str,
+    repo_config: &Value,
+) -> Result<(PathBuf, Vec<CommandResult>), String> {
+    let Some(fixture) = string_field(repo_config, "generated_fixture") else {
+        return Ok((PathBuf::from(string_or(repo_config, "path", "")), Vec::new()));
+    };
+    let root = run_home.join("generated-repositories").join(repo_name);
+    create_generated_repository_files(&root, fixture)?;
+    Ok((
+        root.clone(),
+        commit_generated_repository(runtime, repo_name, &root),
+    ))
+}
+
+fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), String> {
+    if root.exists() {
+        fs::remove_dir_all(root)
+            .map_err(|error| format!("failed to remove {}: {error}", root.display()))?;
+    }
+    fs::create_dir_all(root)
+        .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    for (path, content) in generated_repository_files(fixture)? {
+        write_fixture_file(&root.join(path), content)?;
+    }
+    Ok(())
+}
+
+fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'static str)>, String> {
+    match fixture {
+        "c_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "c_syntax_v1\n"),
+            ("include/driver_ops.h", C_DRIVER_OPS_H),
+            ("include/macros.h", C_MACROS_H),
+            ("src/driver_ops.c", C_DRIVER_OPS_C),
+            ("src/dispatch.c", C_DISPATCH_C),
+            ("src/generated_table.c", C_GENERATED_TABLE_C),
+            ("tests/fake_driver.c", C_FAKE_DRIVER_C),
+        ]),
+        "cpp_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "cpp_syntax_v1\n"),
+            ("include/store/cache.hpp", CPP_CACHE_HPP),
+            ("include/store/pipeline.hpp", CPP_PIPELINE_HPP),
+            ("src/cache.cpp", CPP_CACHE_CPP),
+            ("src/pipeline.cpp", CPP_PIPELINE_CPP),
+            ("tests/fake_cache.cpp", CPP_FAKE_CACHE_CPP),
+        ]),
+        "python_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "python_syntax_v1\n"),
+            ("syntax_service/__init__.py", PYTHON_INIT),
+            ("syntax_service/decorators.py", PYTHON_DECORATORS),
+            ("syntax_service/errors.py", PYTHON_ERRORS),
+            ("syntax_service/service.py", PYTHON_SERVICE),
+            ("tests/fake_service.py", PYTHON_FAKE_SERVICE),
+        ]),
+        "javascript_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "javascript_syntax_v1\n"),
+            ("src/runtime.js", JAVASCRIPT_RUNTIME),
+            ("src/registry.js", JAVASCRIPT_REGISTRY),
+            ("src/index.js", JAVASCRIPT_INDEX),
+            ("tests/fakeRuntime.js", JAVASCRIPT_FAKE_RUNTIME),
+        ]),
+        "typescript_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "typescript_syntax_v1\n"),
+            ("src/protocol.ts", TYPESCRIPT_PROTOCOL),
+            ("src/provider.ts", TYPESCRIPT_PROVIDER),
+            ("src/component.tsx", TYPESCRIPT_COMPONENT),
+            ("src/index.ts", TYPESCRIPT_INDEX),
+            ("tests/fakeProvider.ts", TYPESCRIPT_FAKE_PROVIDER),
+        ]),
+        "go_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "go_syntax_v1\n"),
+            ("go.mod", GO_MOD),
+            ("processor/worker.go", GO_WORKER),
+            ("processor/pipeline.go", GO_PIPELINE),
+            ("tests/fake_worker.go", GO_FAKE_WORKER),
+        ]),
+        "java_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "java_syntax_v1\n"),
+            ("src/main/java/example/ServiceContract.java", JAVA_SERVICE_CONTRACT),
+            ("src/main/java/example/AnnotatedService.java", JAVA_ANNOTATED_SERVICE),
+            ("src/main/java/example/ServiceFactory.java", JAVA_SERVICE_FACTORY),
+            ("src/test/java/example/FakeService.java", JAVA_FAKE_SERVICE),
+        ]),
+        "rust_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "rust_syntax_v1\n"),
+            ("src/lib.rs", RUST_LIB),
+            ("src/service.rs", RUST_SERVICE),
+            ("src/model.rs", RUST_MODEL),
+            ("tests/fake_service.rs", RUST_FAKE_SERVICE),
+        ]),
+        "bash_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "bash_syntax_v1\n"),
+            ("bin/install.sh", BASH_INSTALL),
+            ("lib/runtime.sh", BASH_RUNTIME),
+            ("tests/fake_runtime.sh", BASH_FAKE_RUNTIME),
+        ]),
+        "csharp_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "csharp_syntax_v1\n"),
+            ("src/Runtime/BufferPool.cs", CSHARP_BUFFER_POOL),
+            ("src/Runtime/RuntimeService.cs", CSHARP_RUNTIME_SERVICE),
+            ("tests/FakeRuntimeService.cs", CSHARP_FAKE_SERVICE),
+        ]),
+        "kotlin_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "kotlin_syntax_v1\n"),
+            ("src/main/kotlin/example/Client.kt", KOTLIN_CLIENT),
+            ("src/main/kotlin/example/Pipeline.kt", KOTLIN_PIPELINE),
+            ("tests/FakeClient.kt", KOTLIN_FAKE_CLIENT),
+        ]),
+        "php_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "php_syntax_v1\n"),
+            ("src/App/Kernel.php", PHP_KERNEL),
+            ("src/App/Contracts/Bootable.php", PHP_BOOTABLE),
+            ("src/App/Providers/CacheProvider.php", PHP_CACHE_PROVIDER),
+            ("tests/FakeKernel.php", PHP_FAKE_KERNEL),
+        ]),
+        "ruby_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "ruby_syntax_v1\n"),
+            ("lib/app/controller.rb", RUBY_CONTROLLER),
+            ("lib/app/extensions.rb", RUBY_EXTENSIONS),
+            ("lib/app/runtime.rb", RUBY_RUNTIME),
+            ("tests/fake_controller.rb", RUBY_FAKE_CONTROLLER),
+        ]),
+        "scala_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "scala_syntax_v1\n"),
+            ("src/main/scala/example/Pipeline.scala", SCALA_PIPELINE),
+            ("src/main/scala/example/Runtime.scala", SCALA_RUNTIME),
+            ("tests/FakePipeline.scala", SCALA_FAKE_PIPELINE),
+        ]),
+        "swift_syntax_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "swift_syntax_v1\n"),
+            ("Sources/App/SessionClient.swift", SWIFT_SESSION_CLIENT),
+            ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
+            ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
+        ]),
+        other => Err(format!("unknown generated repository fixture: {other}")),
+    }
+}
+
+fn commit_generated_repository(
+    runtime: &EvalRuntime,
+    repo_name: &str,
+    root: &Path,
+) -> Vec<CommandResult> {
+    let env = generated_git_env(&runtime.env);
+    let commands = [
+        vec!["git", "init", "-q"],
+        vec!["git", "config", "user.email", "self-iteration@example.invalid"],
+        vec!["git", "config", "user.name", "relay-knowledge self-iteration"],
+        vec!["git", "add", "."],
+        vec![
+            "git",
+            "commit",
+            "-q",
+            "-m",
+            "Generate relay-knowledge syntax fixture",
+        ],
+    ];
+    commands
+        .into_iter()
+        .enumerate()
+        .map(|(index, command)| {
+            run_limited(
+                &runtime.limiter,
+                CommandSpec::new(
+                    format!("{repo_name}_generated_fixture_git_{index}"),
+                    command.into_iter().map(ToOwned::to_owned).collect(),
+                    root,
+                    Some(env.clone()),
+                    runtime.timeout.min(30),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn generated_git_env(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut scoped = env.clone();
+    scoped.insert(
+        "GIT_AUTHOR_DATE".to_owned(),
+        "2026-05-20T00:00:00Z".to_owned(),
+    );
+    scoped.insert(
+        "GIT_COMMITTER_DATE".to_owned(),
+        "2026-05-20T00:00:00Z".to_owned(),
+    );
+    scoped
+}
+
+const C_DRIVER_OPS_H: &str = r#"#ifndef RK_DRIVER_OPS_H
+#define RK_DRIVER_OPS_H
+
+#include <stddef.h>
+
+struct rk_device;
+
+typedef int (*rk_open_fn)(struct rk_device *dev);
+typedef int (*rk_read_fn)(struct rk_device *dev, char *buffer, size_t length);
+
+struct rk_driver_ops {
+    rk_open_fn open;
+    rk_read_fn read;
+    void (*close)(struct rk_device *dev);
+};
+
+int rk_driver_open(struct rk_device *dev);
+int rk_driver_read(struct rk_device *dev, char *buffer, size_t length);
+void rk_driver_close(struct rk_device *dev);
+int rk_dispatch_read(
+    const struct rk_driver_ops *ops,
+    struct rk_device *dev,
+    char *buffer,
+    size_t length);
+
+#endif
+"#;
+
+const C_MACROS_H: &str = r#"#ifndef RK_MACROS_H
+#define RK_MACROS_H
+
+#define RK_STATUS_CLOSED 0
+#define RK_STATUS_READY 1
+#define RK_TRACE_VALUE(value) ((value) + 17)
+#define RK_TOKEN_PASTE(left, right) left##right
+#define RK_DECLARE_HANDLER(name) int name(struct rk_device *dev)
+
+enum rk_stage {
+    RK_STAGE_VALIDATE = 0,
+    RK_STAGE_LOCK = 1,
+    RK_STAGE_READ = 2,
+};
+
+#define RK_STAGE_ROW(name) [RK_STAGE_##name] = #name
+
+#endif
+"#;
+
+const C_DRIVER_OPS_C: &str = r#"#include "driver_ops.h"
+#include "macros.h"
+
+struct rk_device {
+    int fd;
+    int state;
+};
+
+int rk_driver_open(struct rk_device *dev)
+{
+    dev->state = RK_STATUS_READY;
+    return dev->state;
+}
+
+int rk_driver_read(struct rk_device *dev, char *buffer, size_t length)
+{
+    buffer[0] = (char)RK_TRACE_VALUE(dev->fd);
+    return (int)length;
+}
+
+void rk_driver_close(struct rk_device *dev)
+{
+    dev->state = RK_STATUS_CLOSED;
+}
+
+const struct rk_driver_ops rk_default_ops = {
+    .open = rk_driver_open,
+    .read = rk_driver_read,
+    .close = rk_driver_close,
+};
+"#;
+
+const C_DISPATCH_C: &str = r#"#include "driver_ops.h"
+
+static int rk_validate_device(struct rk_device *dev)
+{
+    return dev != 0;
+}
+
+static int rk_lock_device(struct rk_device *dev)
+{
+    return dev != 0;
+}
+
+static void rk_unlock_device(struct rk_device *dev)
+{
+    (void)dev;
+}
+
+typedef int (*rk_stage_fn)(struct rk_device *dev);
+
+static rk_stage_fn rk_pipeline[] = {
+    rk_validate_device,
+    rk_lock_device,
+};
+
+int rk_dispatch_read(
+    const struct rk_driver_ops *ops,
+    struct rk_device *dev,
+    char *buffer,
+    size_t length)
+{
+    if (!rk_validate_device(dev)) {
+        return -1;
+    }
+    if (ops->open(dev) < 0) {
+        return -1;
+    }
+    if (rk_lock_device(dev) < 0) {
+        return -1;
+    }
+    int result = ops->read(dev, buffer, length);
+    rk_unlock_device(dev);
+    return result;
+}
+
+int rk_run_pipeline(struct rk_device *dev)
+{
+    int total = 0;
+    for (unsigned int index = 0; index < 2; ++index) {
+        total += rk_pipeline[index](dev);
+    }
+    return total;
+}
+"#;
+
+const C_GENERATED_TABLE_C: &str = r#"#include "driver_ops.h"
+#include "macros.h"
+
+struct rk_table_row {
+    const char *name;
+    rk_read_fn read;
+};
+
+static const char *rk_stage_names[] = {
+    RK_STAGE_ROW(VALIDATE),
+    RK_STAGE_ROW(LOCK),
+    RK_STAGE_ROW(READ),
+};
+
+static const struct rk_table_row rk_rows[] = {
+    [RK_STAGE_READ] = {
+        .name = "read",
+        .read = rk_driver_read,
+    },
+};
+
+int rk_table_read(struct rk_device *dev, char *buffer, size_t length)
+{
+    (void)rk_stage_names;
+    return rk_rows[RK_STAGE_READ].read(dev, buffer, length);
+}
+"#;
+
+const C_FAKE_DRIVER_C: &str = r#"#include "driver_ops.h"
+
+int rk_driver_read_fake(struct rk_device *dev, char *buffer, size_t length)
+{
+    (void)dev;
+    (void)buffer;
+    return (int)length;
+}
+"#;
+
+const CPP_CACHE_HPP: &str = r#"#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace rk::store {
+
+class Writer {
+ public:
+    virtual ~Writer() = default;
+    virtual void Append(const std::string& key) = 0;
+};
+
+template <typename Key>
+class Cache {
+ public:
+    using KeyList = std::vector<Key>;
+
+    explicit Cache(std::unique_ptr<Writer> writer);
+    void Insert(const Key& key);
+    const Key& Lookup(const Key& key) const;
+
+ private:
+    std::unique_ptr<Writer> writer_;
+    KeyList keys_;
+};
+
+class RecordingWriter final : public Writer {
+ public:
+    void Append(const std::string& key) override;
+};
+
+}  // namespace rk::store
+"#;
+
+const CPP_PIPELINE_HPP: &str = r#"#pragma once
+
+#include "store/cache.hpp"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace rk::store {
+
+struct PipelineEvent {
+    std::string key;
+};
+
+class Pipeline {
+ public:
+    int operator()(const PipelineEvent& event) const;
+};
+
+std::unique_ptr<Cache<std::string>> BuildCache(std::unique_ptr<Writer> writer);
+int RunPipeline(Cache<std::string>& cache, const std::vector<PipelineEvent>& events);
+
+}  // namespace rk::store
+"#;
+
+const CPP_CACHE_CPP: &str = r#"#include "store/cache.hpp"
+
+#include <utility>
+
+namespace rk::store {
+
+template <typename Key>
+Cache<Key>::Cache(std::unique_ptr<Writer> writer) : writer_(std::move(writer)) {}
+
+template <typename Key>
+void Cache<Key>::Insert(const Key& key)
+{
+    keys_.push_back(key);
+    writer_->Append(std::string(key));
+}
+
+template <typename Key>
+const Key& Cache<Key>::Lookup(const Key& key) const
+{
+    for (const auto& candidate : keys_) {
+        if (candidate == key) {
+            return candidate;
+        }
+    }
+    return keys_.front();
+}
+
+void RecordingWriter::Append(const std::string& key)
+{
+    (void)key;
+}
+
+template class Cache<std::string>;
+
+}  // namespace rk::store
+"#;
+
+const CPP_PIPELINE_CPP: &str = r#"#include "store/pipeline.hpp"
+
+#include <utility>
+
+namespace rk::store {
+
+namespace cache_alias = rk::store;
+
+std::unique_ptr<Cache<std::string>> BuildCache(std::unique_ptr<Writer> writer)
+{
+    return std::make_unique<cache_alias::Cache<std::string>>(std::move(writer));
+}
+
+int Pipeline::operator()(const PipelineEvent& event) const
+{
+    return static_cast<int>(event.key.size());
+}
+
+int RunPipeline(Cache<std::string>& cache, const std::vector<PipelineEvent>& events)
+{
+    Pipeline pipeline;
+    auto append_event = [&cache, &pipeline](const PipelineEvent& event) {
+        cache.Insert(event.key);
+        return pipeline(event);
+    };
+    int total = 0;
+    for (const auto& event : events) {
+        total += append_event(event);
+    }
+    return total;
+}
+
+}  // namespace rk::store
+"#;
+
+const CPP_FAKE_CACHE_CPP: &str = r#"#include "store/cache.hpp"
+
+namespace rk::store::test {
+
+class FakeCache {
+ public:
+    void Insert(const std::string& key)
+    {
+        (void)key;
+    }
+};
+
+}  // namespace rk::store::test
+"#;
+
+const PYTHON_INIT: &str = r#""#;
+
+const PYTHON_DECORATORS: &str = r#"
+def traced_operation(name):
+    def wrap(func):
+        async def inner(*args, **kwargs):
+            return await func(*args, **kwargs)
+        inner.operation_name = name
+        return inner
+    return wrap
+"#;
+
+const PYTHON_ERRORS: &str = r#"
+class ServiceError(RuntimeError):
+    pass
+
+
+class OverloadedServiceError(ServiceError):
+    pass
+"#;
+
+const PYTHON_SERVICE: &str = r#"
+from .decorators import traced_operation
+from .errors import OverloadedServiceError, ServiceError
+
+
+class AsyncResource:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def write_event(self, event):
+        return event["payload"]
+
+
+class ServiceRunner:
+    def __init__(self, resource):
+        self.resource = resource
+
+    @traced_operation("dispatch")
+    async def dispatch_event(self, event):
+        async with self.resource as resource:
+            payload = await resource.write_event(event)
+            return self.normalize_payload(payload)
+
+    def normalize_payload(self, payload):
+        if payload == "overload":
+            raise OverloadedServiceError("overload")
+        return payload.strip()
+
+
+async def run_service(event):
+    runner = ServiceRunner(AsyncResource())
+    return await runner.dispatch_event(event)
+"#;
+
+const PYTHON_FAKE_SERVICE: &str = r#"
+class ServiceRunner:
+    def dispatch_event(self, event):
+        return event
+"#;
+
+const JAVASCRIPT_RUNTIME: &str = r#"
+import { createRegistry } from "./registry.js";
+
+export class RuntimeController {
+  constructor(registry = createRegistry()) {
+    this.registry = registry;
+  }
+
+  async dispatchEvent(event) {
+    const handler = this.registry.resolve(event.type);
+    return handler(event.payload);
+  }
+}
+
+export async function runRuntime(events) {
+  const controller = new RuntimeController();
+  return Promise.all(events.map((event) => controller.dispatchEvent(event)));
+}
+"#;
+
+const JAVASCRIPT_REGISTRY: &str = r#"
+export function createRegistry() {
+  const handlers = new Map();
+  handlers.set("write", (payload) => normalizePayload(payload));
+  return {
+    resolve(type) {
+      return handlers.get(type) ?? missingHandler;
+    },
+  };
+}
+
+export function normalizePayload(payload) {
+  return String(payload).trim();
+}
+
+function missingHandler(payload) {
+  throw new Error(`missing handler ${payload}`);
+}
+"#;
+
+const JAVASCRIPT_INDEX: &str = r#"
+export { RuntimeController, runRuntime } from "./runtime.js";
+export { createRegistry, normalizePayload } from "./registry.js";
+"#;
+
+const JAVASCRIPT_FAKE_RUNTIME: &str = r#"
+export class RuntimeController {
+  dispatchEvent(event) {
+    return event;
+  }
+}
+"#;
+
+const TYPESCRIPT_PROTOCOL: &str = r#"
+export interface StreamTransport<TEvent> {
+  send(event: TEvent): Promise<void>;
+}
+
+export type StreamEnvelope<TPayload> = {
+  id: string;
+  payload: TPayload;
+};
+
+export async function sendEnvelope<TPayload>(
+  transport: StreamTransport<StreamEnvelope<TPayload>>,
+  payload: TPayload,
+): Promise<StreamEnvelope<TPayload>> {
+  const envelope = { id: "syntax-envelope", payload };
+  await transport.send(envelope);
+  return envelope;
+}
+"#;
+
+const TYPESCRIPT_PROVIDER: &str = r#"
+import type { StreamEnvelope, StreamTransport } from "./protocol";
+import { sendEnvelope } from "./protocol";
+
+export class ProviderRuntime implements StreamTransport<StreamEnvelope<string>> {
+  async send(event: StreamEnvelope<string>): Promise<void> {
+    await import("./protocol");
+    this.record(event.payload);
+  }
+
+  record(payload: string): string {
+    return payload.trim();
+  }
+}
+
+export async function runProvider(payload: string): Promise<StreamEnvelope<string>> {
+  const runtime = new ProviderRuntime();
+  return sendEnvelope(runtime, payload);
+}
+"#;
+
+const TYPESCRIPT_COMPONENT: &str = r#"
+import React from "react";
+import { runProvider } from "./provider";
+
+export function ProviderPanel({ value }: { value: string }) {
+  const [state, setState] = React.useState(value);
+  React.useEffect(() => {
+    runProvider(state).then((envelope) => setState(envelope.payload));
+  }, [state]);
+  return <section data-provider={state}>{state}</section>;
+}
+"#;
+
+const TYPESCRIPT_INDEX: &str = r#"
+export type { StreamEnvelope, StreamTransport } from "./protocol";
+export { ProviderRuntime, runProvider } from "./provider";
+export { ProviderPanel } from "./component";
+"#;
+
+const TYPESCRIPT_FAKE_PROVIDER: &str = r#"
+export class ProviderRuntime {
+  record(payload: string): string {
+    return payload;
+  }
+}
+"#;
+
+const GO_MOD: &str = r#"module example.com/syntax
+
+go 1.22
+"#;
+
+const GO_WORKER: &str = r#"
+package processor
+
+import (
+    ctxalias "context"
+    _ "embed"
+    . "strings"
+)
+
+type EventProcessor interface {
+    Process(ctx ctxalias.Context, event Event) error
+}
+
+type Event struct {
+    Payload string
+}
+
+type Worker struct {
+    processor EventProcessor
+}
+
+func NewWorker(processor EventProcessor) *Worker {
+    return &Worker{processor: processor}
+}
+
+func (w *Worker) Run(ctx ctxalias.Context, events []Event) error {
+    for _, event := range events {
+        if err := w.processor.Process(ctx, event); err != nil {
+            return err
+        }
+        _ = TrimSpace(event.Payload)
+    }
+    return nil
+}
+"#;
+
+const GO_PIPELINE: &str = r#"
+package processor
+
+import "context"
+
+type PipelineProcessor struct{}
+
+func (PipelineProcessor) Process(ctx context.Context, event Event) error {
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        _ = event.Payload
+    }()
+    <-done
+    return ctx.Err()
+}
+
+func RunPipeline(events []Event) error {
+    worker := NewWorker(PipelineProcessor{})
+    return worker.Run(context.Background(), events)
+}
+"#;
+
+const GO_FAKE_WORKER: &str = r#"
+package tests
+
+type Worker struct{}
+
+func (Worker) Run() {}
+"#;
+
+const JAVA_SERVICE_CONTRACT: &str = r#"
+package example;
+
+public interface ServiceContract<T> {
+    default T normalize(T value) {
+        return value;
+    }
+
+    T handle(T value);
+}
+"#;
+
+const JAVA_ANNOTATED_SERVICE: &str = r#"
+package example;
+
+@Deprecated
+public class AnnotatedService implements ServiceContract<String> {
+    public AnnotatedService() {}
+
+    @Override
+    public String handle(String value) {
+        return normalize(value).trim();
+    }
+
+    public static class Builder {
+        public AnnotatedService build() {
+            return new AnnotatedService();
+        }
+    }
+}
+"#;
+
+const JAVA_SERVICE_FACTORY: &str = r#"
+package example;
+
+import example.AnnotatedService.Builder;
+
+public final class ServiceFactory {
+    public ServiceContract<String> create() {
+        Builder builder = new Builder();
+        return builder.build();
+    }
+
+    public String dispatch(String value) {
+        return create().handle(value);
+    }
+}
+"#;
+
+const JAVA_FAKE_SERVICE: &str = r#"
+package example;
+
+class FakeService {
+    String handle(String value) {
+        return value;
+    }
+}
+"#;
+
+const RUST_LIB: &str = r#"
+pub mod model;
+pub mod service;
+
+pub use service::{EventHandler, RuntimeService};
+"#;
+
+const RUST_MODEL: &str = r#"
+pub enum RuntimeEvent {
+    Start(String),
+    Stop,
+}
+"#;
+
+const RUST_SERVICE: &str = r#"
+use crate::model::RuntimeEvent;
+
+macro_rules! trace_event {
+    ($event:expr) => {
+        format!("trace::{:?}", $event)
+    };
+}
+
+pub trait EventHandler {
+    fn handle_event(&self, event: RuntimeEvent) -> String;
+}
+
+pub struct RuntimeService;
+
+impl RuntimeService {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn dispatch(&self, event: RuntimeEvent) -> String {
+        self.handle_event(event)
+    }
+}
+
+impl EventHandler for RuntimeService {
+    fn handle_event(&self, event: RuntimeEvent) -> String {
+        match event {
+            RuntimeEvent::Start(payload) => payload,
+            RuntimeEvent::Stop => trace_event!(RuntimeEvent::Stop),
+        }
+    }
+}
+"#;
+
+const RUST_FAKE_SERVICE: &str = r#"
+struct RuntimeService;
+
+impl RuntimeService {
+    fn dispatch(&self) {}
+}
+"#;
+
+const BASH_INSTALL: &str = r#"
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/runtime.sh
+. "$SCRIPT_DIR/../lib/runtime.sh"
+
+rk_install_main() {
+  local command="${1:-install}"
+  case "$command" in
+    install) rk_runtime_dispatch "install" ;;
+    doctor) rk_runtime_dispatch "doctor" ;;
+    *) rk_missing_command "$command" ;;
+  esac
+}
+
+rk_install_main "$@"
+"#;
+
+const BASH_RUNTIME: &str = r#"
+rk_runtime_dispatch() {
+  local mode="$1"
+  rk_prepare_home "$mode"
+  rk_download_artifact "$mode"
+}
+
+rk_prepare_home() {
+  mkdir -p "${RK_HOME:-$HOME/.relay-knowledge}/$1"
+}
+
+rk_download_artifact() {
+  printf 'download:%s\n' "$1"
+}
+
+rk_missing_command() {
+  printf 'missing:%s\n' "$1" >&2
+  return 64
+}
+"#;
+
+const BASH_FAKE_RUNTIME: &str = r#"
+rk_runtime_dispatch() {
+  echo fake
+}
+"#;
+
+const CSHARP_BUFFER_POOL: &str = r#"
+using System;
+using System.Buffers;
+
+namespace Syntax.Runtime;
+
+public interface IBufferSink<T>
+{
+    void Write(T item);
+}
+
+public sealed class BufferPoolSink : IBufferSink<byte[]>
+{
+    public void Write(byte[] item)
+    {
+        ArrayPool<byte>.Shared.Return(item);
+    }
+
+    public byte[] RentBuffer(int size)
+    {
+        return ArrayPool<byte>.Shared.Rent(size);
+    }
+}
+"#;
+
+const CSHARP_RUNTIME_SERVICE: &str = r#"
+using Syntax.Runtime;
+
+namespace Syntax.Runtime;
+
+public sealed class RuntimeService
+{
+    private readonly BufferPoolSink sink = new();
+
+    public void Dispatch(int size)
+    {
+        var buffer = sink.RentBuffer(size);
+        sink.Write(buffer);
+    }
+}
+"#;
+
+const CSHARP_FAKE_SERVICE: &str = r#"
+namespace Syntax.Runtime.Tests;
+
+public sealed class RuntimeService
+{
+    public void Dispatch() {}
+}
+"#;
+
+const KOTLIN_CLIENT: &str = r#"
+package example
+
+import kotlin.time.Duration
+
+typealias RequestHandler = (String) -> String
+
+object ClientRegistry {
+    fun defaultHandler(): RequestHandler = { value -> value.trim() }
+}
+
+class SyntaxClient(private val handler: RequestHandler = ClientRegistry.defaultHandler()) {
+    fun newCall(request: String): String {
+        return handler(request)
+    }
+
+    companion object {
+        fun withTimeout(timeout: Duration): SyntaxClient {
+            return SyntaxClient { value -> "$timeout:$value" }
+        }
+    }
+}
+"#;
+
+const KOTLIN_PIPELINE: &str = r#"
+package example
+
+fun runClientPipeline(values: List<String>): List<String> {
+    val client = SyntaxClient()
+    return values.map { value -> client.newCall(value) }
+}
+"#;
+
+const KOTLIN_FAKE_CLIENT: &str = r#"
+package example
+
+class SyntaxClient {
+    fun newCall(): String = "fake"
+}
+"#;
+
+const PHP_KERNEL: &str = r#"<?php
+namespace App;
+
+use App\Contracts\Bootable;
+use App\Providers\CacheProvider;
+
+final class Kernel implements Bootable
+{
+    public function __construct(private CacheProvider $provider) {}
+
+    public function boot(): void
+    {
+        $this->provider->register();
+    }
+}
+"#;
+
+const PHP_BOOTABLE: &str = r#"<?php
+namespace App\Contracts;
+
+interface Bootable
+{
+    public function boot(): void;
+}
+"#;
+
+const PHP_CACHE_PROVIDER: &str = r#"<?php
+namespace App\Providers;
+
+trait LogsBoot
+{
+    public function logBoot(string $name): string
+    {
+        return trim($name);
+    }
+}
+
+final class CacheProvider
+{
+    use LogsBoot;
+
+    public function register(): void
+    {
+        $this->logBoot('cache');
+    }
+}
+"#;
+
+const PHP_FAKE_KERNEL: &str = r#"<?php
+namespace Tests;
+
+final class Kernel
+{
+    public function boot(): void {}
+}
+"#;
+
+const RUBY_CONTROLLER: &str = r#"
+require_relative "extensions"
+
+module App
+  class Controller
+    include Extensions
+
+    def self.build
+      new(Runtime.new)
+    end
+
+    def initialize(runtime)
+      @runtime = runtime
+    end
+
+    def dispatch(event)
+      normalize_event(@runtime.handle(event))
+    end
+  end
+end
+"#;
+
+const RUBY_EXTENSIONS: &str = r#"
+module App
+  module Extensions
+    def normalize_event(event)
+      event.to_s.strip
+    end
+  end
+end
+"#;
+
+const RUBY_RUNTIME: &str = r#"
+module App
+  class Runtime
+    def handle(event)
+      event
+    end
+  end
+end
+"#;
+
+const RUBY_FAKE_CONTROLLER: &str = r#"
+class Controller
+  def dispatch(event)
+    event
+  end
+end
+"#;
+
+const SCALA_PIPELINE: &str = r#"
+package example
+
+import example.Runtime.Event
+
+trait Stage:
+  def run(event: Event): Event
+
+object Pipeline:
+  inline def identityStage: Stage = new Stage:
+    def run(event: Event): Event = event
+
+  def execute(events: List[Event]): List[Event] =
+    events.map(identityStage.run)
+"#;
+
+const SCALA_RUNTIME: &str = r#"
+package example
+
+object Runtime:
+  case class Event(payload: String)
+
+class RuntimeService(stage: Stage):
+  def dispatch(event: Runtime.Event): Runtime.Event =
+    stage.run(event)
+"#;
+
+const SCALA_FAKE_PIPELINE: &str = r#"
+package example
+
+object Pipeline:
+  def execute(): Unit = ()
+"#;
+
+const SWIFT_SESSION_CLIENT: &str = r#"
+import Foundation
+
+protocol SessionTransport {
+    func send(_ request: URLRequest) async throws -> Data
+}
+
+final class SessionClient {
+    private let transport: SessionTransport
+
+    init(transport: SessionTransport) {
+        self.transport = transport
+    }
+
+    func request(url: URL) async throws -> Data {
+        let request = URLRequest(url: url)
+        return try await transport.send(request)
+    }
+}
+"#;
+
+const SWIFT_REQUEST_PIPELINE: &str = r#"
+import Foundation
+
+struct RequestPipeline {
+    let client: SessionClient
+
+    func dispatch(urls: [URL]) async throws -> [Data] {
+        var output: [Data] = []
+        for url in urls {
+            output.append(try await client.request(url: url))
+        }
+        return output
+    }
+}
+"#;
+
+const SWIFT_FAKE_SESSION_CLIENT: &str = r#"
+import Foundation
+
+final class SessionClient {
+    func request() {}
+}
+"#;
 
 fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {
     if root.exists() {

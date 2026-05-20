@@ -128,6 +128,66 @@
         }
       ],
       "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "leveldb_cpp_definition_skiplist_template",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "SkipList",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["db/skiplist.h"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "db/skiplist.h", "excerpt_contains": "template <typename Key, class Comparator>"}],
+      "case_group": "cpp_real_world_syntax"
+    },
+    {
+      "id": "leveldb_cpp_definition_block_function_typedef",
+      "repository": "leveldb_cpp",
+      "kind": "definition",
+      "query": "BlockFunction",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 5,
+      "path_filters": ["table/two_level_iterator.cc"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "table/two_level_iterator.cc", "excerpt_contains": "typedef Iterator* (*BlockFunction)"}],
+      "case_group": "cpp_real_world_syntax"
+    },
+    {
+      "id": "leveldb_cpp_hybrid_no_destructor_variadic_template",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "NoDestructor variadic constructor template instance type",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["util/no_destructor.h"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "util/no_destructor.h", "excerpt_contains": "template <typename InstanceType>"}],
+      "expected_all": [
+        {"path": "util/no_destructor.h", "excerpt_contains": "class NoDestructor"},
+        {"path": "util/no_destructor.h", "excerpt_contains": "template <typename... ConstructorArgTypes>"}
+      ],
+      "case_group": "cpp_real_world_syntax"
+    },
+    {
+      "id": "leveldb_cpp_hybrid_std_function_lambda_compression",
+      "repository": "leveldb_cpp",
+      "kind": "hybrid",
+      "query": "std function compression lambda input output db bench",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["benchmarks/db_bench.cc"],
+      "language_filters": ["cpp"],
+      "expected": [{"path": "benchmarks/db_bench.cc", "excerpt_contains": "std::function<bool(const char*, size_t, std::string*)> compress_func"}],
+      "expected_all": [
+        {"path": "benchmarks/db_bench.cc", "excerpt_contains": "[](const char* input, size_t length, std::string* output)"},
+        {"path": "benchmarks/db_bench.cc", "excerpt_contains": "std::function<bool(const char*, size_t, char*)> uncompress_func"}
+      ],
+      "case_group": "cpp_real_world_syntax"
     }
   ]
 }

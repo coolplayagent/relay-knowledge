@@ -174,6 +174,11 @@ open coding-agent CLI, defaulting to `opencode` when no backend is configured.
 The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding
 environment as normal runtime commands and does not persist secrets in
 benchmark cases.
+External repositories in the self-iteration evaluation set are pinned to
+documented commits, and C/C++ adds tree-sitter-oriented generated syntax
+fixtures. Multilingual generated fixtures extend the same evaluation set. See
+[Book 5, Chapter 6: C/C++ Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
+and [Book 5, Chapter 7: Multilingual Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md).
 
 The underlying quality gates are:
 

@@ -263,7 +263,7 @@ fn apply_candidate_documentation_gate(
         .any(|path| !path.starts_with("docs/") && !path.ends_with(".md"));
     let documented = changed_paths
         .iter()
-        .any(|path| path == "docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md");
+        .any(|path| self_iteration_algorithm_documentation_path(path));
     let gate = GateObservation {
         name: "self_iteration_algorithm_documentation".to_owned(),
         passed: !requires_docs || documented,
@@ -271,7 +271,7 @@ fn apply_candidate_documentation_gate(
         message: if !requires_docs {
             "documentation not required for documentation-only candidate".to_owned()
         } else if documented {
-            "accepted optimization document updated".to_owned()
+            "self-iteration algorithm documentation updated".to_owned()
         } else {
             "missing candidate algorithm and architecture notes".to_owned()
         },
@@ -284,6 +284,15 @@ fn apply_candidate_documentation_gate(
     {
         gates.push(serde_json::to_value(gate).expect("gate should serialize"));
     }
+}
+
+fn self_iteration_algorithm_documentation_path(path: &str) -> bool {
+    matches!(
+        path,
+        "docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md"
+            | "docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md"
+            | "docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md"
+    )
 }
 
 fn persist_scored_run(
@@ -645,5 +654,21 @@ mod tests {
 
         assert!(run_id.starts_with("manual-evaluate-"));
         assert!(run_id.len() > "manual-evaluate-".len());
+    }
+
+    #[test]
+    fn algorithm_documentation_gate_accepts_c_cpp_evaluation_spec() {
+        assert!(self_iteration_algorithm_documentation_path(
+            "docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md"
+        ));
+        assert!(self_iteration_algorithm_documentation_path(
+            "docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md"
+        ));
+        assert!(self_iteration_algorithm_documentation_path(
+            "docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md"
+        ));
+        assert!(!self_iteration_algorithm_documentation_path(
+            "docs/zh/05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md"
+        ));
     }
 }

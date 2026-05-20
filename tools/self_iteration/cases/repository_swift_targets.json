@@ -3,7 +3,7 @@
     "alamofire_swift": {
       "path": "/opt/workspace/alamofire",
       "alias": "alamofire-swift-self-iteration",
-      "ref": "HEAD",
+      "ref": "7595cbcf59809f9977c5f6378500de2ad73b7ddb",
       "scope": "all",
       "profile": "exhaustive",
       "path_filters": [],

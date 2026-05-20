@@ -3,7 +3,7 @@
     "rails_ruby": {
       "path": "/opt/workspace/rails",
       "alias": "rails-ruby-self-iteration",
-      "ref": "HEAD",
+      "ref": "a78f8bcaac1d6f10a515aeccfb6553b895f126c3",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

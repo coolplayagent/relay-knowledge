@@ -3,7 +3,7 @@
     "scala3_scala": {
       "path": "/opt/workspace/scala3",
       "alias": "scala3-scala-self-iteration",
-      "ref": "HEAD",
+      "ref": "c101b01b41f8780122caffcc03e0f395edc8016e",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

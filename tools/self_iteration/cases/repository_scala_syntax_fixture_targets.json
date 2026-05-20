@@ -1,0 +1,89 @@
+{
+  "repositories": {
+    "scala_syntax_fixture": {
+      "generated_fixture": "scala_syntax_v1",
+      "alias": "scala-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["scala"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "scala_syntax_symbol_stage_trait",
+      "repository": "scala_syntax_fixture",
+      "kind": "symbol",
+      "query": "Stage",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "trait Stage"}],
+      "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_definition_pipeline_execute",
+      "repository": "scala_syntax_fixture",
+      "kind": "definition",
+      "query": "execute",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "def execute"}],
+      "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_imports_runtime_event",
+      "repository": "scala_syntax_fixture",
+      "kind": "imports",
+      "query": "example.Runtime.Event",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "import example.Runtime.Event"}],
+      "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_callees_runtime_dispatch",
+      "repository": "scala_syntax_fixture",
+      "kind": "callees",
+      "query": "dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Runtime.scala", "excerpt_contains": "stage.run(event)"}],
+      "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_hybrid_inline_object_phase",
+      "repository": "scala_syntax_fixture",
+      "kind": "hybrid",
+      "query": "trait object inline stage pipeline runtime event",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "inline def identityStage"}],
+      "expected_all": [
+        {"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "object Pipeline"},
+        {"path": "src/main/scala/example/Runtime.scala", "excerpt_contains": "object Runtime"}
+      ],
+      "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_negative_missing_stage",
+      "repository": "scala_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingStage",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "scala_tree_sitter_syntax"
+    }
+  ]
+}

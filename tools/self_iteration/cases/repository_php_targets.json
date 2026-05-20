@@ -3,7 +3,7 @@
     "laravel_php": {
       "path": "/opt/workspace/laravel-framework",
       "alias": "laravel-php-self-iteration",
-      "ref": "HEAD",
+      "ref": "f05ef246c22eac49c7c7e9b2815449873ccd8a22",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

@@ -118,6 +118,9 @@ harness 可以通过稳定启动脚本直接运行：
 启动脚本会在需要时自动构建 debug harness binary，默认 `fast` profile 不跑产品 release build、全量 clippy、全量 test、文件 fixture、semantic/vector fixture 或 research judge，并保留一个轻量 repo-set 跨仓门槛护栏；需要完整门禁和 workload 时使用 `./self-iterate.sh once --profile full`。v2 运行历史、渐进式记忆、报告、patch 和评分曲线保存在
 `.git/relay-knowledge-self-iteration/`，只有评分严格改进的候选修改才会被提交。research judge 支持 OpenAI-compatible HTTP 或开放 coding-agent CLI；未配置 backend 时默认使用 `opencode`。semantic/vector fixture 会继承普通运行时使用的
 `RELAY_KNOWLEDGE_*` embedding 环境变量，不会把 provider URL、API key、模型名或维度写入 benchmark cases。
+自迭代测评集中的外部仓库已固定到文档记录的 commit，C/C++ 还包含基于 tree-sitter 语法能力生成的专用 fixture；复现清单见
+[第五卷第 6 章：C/C++ 语法型自迭代测评集](docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
+和 [第五卷第 7 章：多语言语法型自迭代测评集](docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md)。
 
 底层质量门禁：
 

@@ -1,0 +1,91 @@
+{
+  "repositories": {
+    "kotlin_syntax_fixture": {
+      "generated_fixture": "kotlin_syntax_v1",
+      "alias": "kotlin-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["kotlin"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "kotlin_syntax_symbol_client_registry_object",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "symbol",
+      "query": "ClientRegistry",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "object ClientRegistry"}],
+      "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_definition_new_call",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "definition",
+      "query": "newCall",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "fun newCall(request: String)"}],
+      "forbidden": [{"path": "tests/FakeClient.kt", "excerpt_contains": "fun newCall()"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_imports_duration",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "imports",
+      "query": "kotlin.time.Duration",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "import kotlin.time.Duration"}],
+      "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_callees_client_pipeline_map",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "callees",
+      "query": "runClientPipeline",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Pipeline.kt", "excerpt_contains": "client.newCall(value)"}],
+      "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_hybrid_typealias_companion_flow",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "hybrid",
+      "query": "typealias request handler companion timeout client new call",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "typealias RequestHandler"}],
+      "expected_all": [
+        {"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "companion object"},
+        {"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "fun withTimeout"}
+      ],
+      "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_negative_missing_client",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingSyntaxClient",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "kotlin_tree_sitter_syntax"
+    }
+  ]
+}
