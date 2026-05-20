@@ -4,12 +4,17 @@ use rusqlite::{Transaction, params};
 
 use crate::{domain::RepositoryCodeRange, storage::StorageError};
 
+#[path = "finalize_files.rs"]
+mod files;
 #[path = "finalize_go_imports.rs"]
 mod go_imports;
 #[path = "finalize_imported_references.rs"]
 mod imported_references;
 #[path = "finalize_search.rs"]
 mod search_documents;
+#[cfg(test)]
+#[path = "finalize_tests.rs"]
+mod tests;
 #[path = "finalize_typescript_imports.rs"]
 mod typescript_imports;
 
@@ -19,11 +24,23 @@ pub(super) fn resolve_scope(
     repository_id: &str,
 ) -> Result<(), StorageError> {
     let mut symbol_cache = None;
+    let file_languages = files::load_file_languages(transaction, source_scope)?;
     resolve_references(transaction, source_scope)?;
-    resolve_imports(transaction, source_scope, &mut symbol_cache)?;
+    resolve_imports(
+        transaction,
+        source_scope,
+        &file_languages,
+        &mut symbol_cache,
+    )?;
     imported_references::resolve_references(transaction, source_scope, &mut symbol_cache)?;
     search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
-    rebuild_calls(transaction, source_scope, repository_id, &mut symbol_cache)
+    rebuild_calls(
+        transaction,
+        source_scope,
+        repository_id,
+        &file_languages,
+        &mut symbol_cache,
+    )
 }
 
 fn resolve_references(
@@ -119,9 +136,9 @@ fn resolve_references(
 fn resolve_imports(
     transaction: &Transaction<'_>,
     source_scope: &str,
+    files: &BTreeMap<String, String>,
     symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
-    let files = load_file_languages(transaction, source_scope)?;
     let module_paths = module_path_index(files.keys());
     let imports = load_import_keys(transaction, source_scope)?;
     let symbols_by_name = if imports.iter().any(|import| {
@@ -220,6 +237,7 @@ fn rebuild_calls(
     transaction: &Transaction<'_>,
     source_scope: &str,
     repository_id: &str,
+    file_languages: &BTreeMap<String, String>,
     symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
     transaction.execute(
@@ -234,11 +252,13 @@ fn rebuild_calls(
         params![source_scope],
     )?;
     let mut by_path = HashMap::<&str, Vec<&SymbolKey>>::new();
+    let mut by_symbol_id = HashMap::<&str, &SymbolKey>::new();
     for symbol in load_symbol_keys_once(transaction, source_scope, symbol_cache)? {
         by_path
             .entry(symbol.path.as_str())
             .or_default()
             .push(symbol);
+        by_symbol_id.insert(symbol.symbol_snapshot_id.as_str(), symbol);
     }
     let mut insert_call = transaction.prepare(
         "
@@ -250,6 +270,7 @@ fn rebuild_calls(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
     )?;
+    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     let mut select_references = transaction.prepare(
         "
         SELECT reference_id, file_id, path, name, line_start, line_end,
@@ -263,6 +284,10 @@ fn rebuild_calls(
     while let Some(row) = references.next()? {
         let reference = reference_from_row(row)?;
         let caller = caller_for_line(by_path.get(reference.path.as_str()), reference.line_start);
+        let callee = reference
+            .target_symbol_snapshot_id
+            .as_deref()
+            .and_then(|symbol_id| by_symbol_id.get(symbol_id).copied());
         let call_id = stable_id(
             "call",
             [
@@ -278,21 +303,37 @@ fn rebuild_calls(
             repository_id,
             source_scope,
             call_id,
-            reference.file_id,
-            reference.path,
+            reference.file_id.as_str(),
+            reference.path.as_str(),
             caller.map(|symbol| symbol.symbol_snapshot_id.as_str()),
             caller.map(|symbol| symbol.name.as_str()),
-            reference.target_symbol_snapshot_id,
-            reference.name,
-            reference.target_hint,
-            reference.resolution_state,
+            reference.target_symbol_snapshot_id.as_deref(),
+            reference.name.as_str(),
+            reference.target_hint.as_deref(),
+            reference.resolution_state.as_str(),
             reference.confidence_basis_points,
-            reference.confidence_tier,
+            reference.confidence_tier.as_str(),
             reference.line_start,
             reference.line_end,
         ])?;
+        search_documents::insert_call_search_document(
+            &mut search_documents,
+            search_documents::CallSearchDocument {
+                source_scope,
+                record_id: &call_id,
+                path: &reference.path,
+                language_id: file_languages
+                    .get(reference.path.as_str())
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                caller_name: caller.map(|symbol| symbol.name.as_str()),
+                callee_name: &reference.name,
+                target_hint: reference.target_hint.as_deref(),
+                caller_signature: caller.map(|symbol| symbol.signature.as_str()),
+                callee_signature: callee.map(|symbol| symbol.signature.as_str()),
+            },
+        )?;
     }
-    search_documents::rebuild_call_search_documents(transaction, source_scope)?;
 
     Ok(())
 }
@@ -302,6 +343,7 @@ struct SymbolKey {
     symbol_snapshot_id: String,
     path: String,
     name: String,
+    signature: String,
     line_range: RepositoryCodeRange,
 }
 
@@ -357,7 +399,7 @@ fn load_symbol_keys(
 ) -> Result<Vec<SymbolKey>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT symbol_snapshot_id, path, name, line_start, line_end
+        SELECT symbol_snapshot_id, path, name, signature, line_start, line_end
         FROM code_repository_symbols
         WHERE source_scope = ?1
         ORDER BY path ASC, line_start ASC, line_end DESC, name ASC
@@ -368,9 +410,10 @@ fn load_symbol_keys(
             symbol_snapshot_id: row.get(0)?,
             path: row.get(1)?,
             name: row.get(2)?,
+            signature: row.get(3)?,
             line_range: RepositoryCodeRange {
-                start: row.get(3)?,
-                end: row.get(4)?,
+                start: row.get(4)?,
+                end: row.get(5)?,
             },
         })
     })?;
@@ -416,27 +459,6 @@ fn load_import_keys(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
-}
-
-fn load_file_languages(
-    transaction: &Transaction<'_>,
-    source_scope: &str,
-) -> Result<BTreeMap<String, String>, StorageError> {
-    let mut statement = transaction.prepare(
-        "
-        SELECT path, language_id
-        FROM code_repository_files
-        WHERE source_scope = ?1
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    let pairs = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(pairs.into_iter().collect())
 }
 
 #[derive(Clone)]
@@ -955,42 +977,4 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
     }
 
     hash
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SymbolKey, caller_for_line};
-    use crate::domain::RepositoryCodeRange;
-
-    #[test]
-    fn caller_lookup_uses_sorted_prefix_and_prefers_innermost_symbol() {
-        let symbols = [
-            symbol("outer", 10, 100),
-            symbol("same_start_outer", 20, 80),
-            symbol("same_start_inner", 20, 40),
-            symbol("after_call", 60, 70),
-        ];
-        let symbol_refs = symbols.iter().collect::<Vec<_>>();
-
-        let caller = caller_for_line(Some(&symbol_refs), 30).expect("caller should match");
-
-        assert_eq!(caller.name, "same_start_inner");
-    }
-
-    #[test]
-    fn caller_lookup_ignores_symbols_that_start_after_call_line() {
-        let symbols = [symbol("before", 1, 5), symbol("after", 20, 30)];
-        let symbol_refs = symbols.iter().collect::<Vec<_>>();
-
-        assert!(caller_for_line(Some(&symbol_refs), 10).is_none());
-    }
-
-    fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
-        SymbolKey {
-            symbol_snapshot_id: format!("symbol:{name}"),
-            path: "src/lib.rs".to_owned(),
-            name: name.to_owned(),
-            line_range: RepositoryCodeRange { start, end },
-        }
-    }
 }

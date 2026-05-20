@@ -149,6 +149,84 @@ async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_querie
 }
 
 #[tokio::test]
+async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_queries() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:call-callee-signature-search";
+    let session = session_for_scope(source_scope);
+    let caller_path = "table/table.cc";
+    let callee_path = "table/block.cc";
+    let caller_file = file(source_scope, "table-file", caller_path, "cpp");
+    let callee_file = file(source_scope, "block-file", callee_path, "cpp");
+    let mut caller = symbol(
+        source_scope,
+        "internal-get-symbol",
+        "table-file",
+        caller_path,
+        "InternalGet",
+        "Status Table::InternalGet(const ReadOptions& options) {",
+    );
+    caller.line_range = RepositoryCodeRange { start: 20, end: 44 };
+    let callee = symbol(
+        source_scope,
+        "read-block-symbol",
+        "block-file",
+        callee_path,
+        "ReadBlock",
+        "Status BlockReader::ReadBlock(BlockContents* contents) {",
+    );
+    let mut call_reference = reference(
+        source_scope,
+        "read-block-reference",
+        "table-file",
+        caller_path,
+        "ReadBlock",
+    );
+    call_reference.line_range = RepositoryCodeRange { start: 30, end: 30 };
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 96,
+            files: vec![caller_file, callee_file],
+            symbols: vec![caller, callee],
+            references: vec![call_reference],
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let request = CodeRetrievalRequest::new(
+        "BlockContents",
+        selector,
+        CodeQueryKind::Callers,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+    let hits = store
+        .search_code(request)
+        .await
+        .expect("caller search should succeed");
+
+    assert_eq!(hits[0].path, caller_path);
+    assert!(hits[0].excerpt.contains("ReadBlock"));
+}
+
+#[tokio::test]
 async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:active-edge-languages";

@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779249648-streamed-call-search-finalize
+- 算法：checkpoint finalize 在从 reference cursor 流式重建 `code_repository_calls` 时，同步写入 call FTS search document；复用本轮已加载的 file-language map 和 symbol cache，为 caller/callee signature 建立 symbol id 索引，避免完成 call edge 插入后再对 `code_repository_calls`、files、caller symbols、callee symbols 做一次全量 join rebuild。repo-set merge 只在 hit 已携带 resolved overlay evidence 且成员 fresh 时，把成员 priority 提升为有界 workspace intent 分数；同分结果再用路径专门化程度和深度作稳定 tie-break。
+- 架构：变更限定在 SQLite checkpoint finalize 边界与 `application::code_repository_set_query` 的跨仓 merge helper；新增 `finalize_files` 承载文件语言加载，`finalize_search` 承载 call search document 写入 helper，并把原内联 caller lookup 单测移到独立测试文件以保持模块行数上限；不改变 parser、graph facts、schema、FTS MATCH、candidate window、单仓 query ranking、semantic/vector provider、env/paths/net、CLI/API、安装发布或 self-iteration harness。
+- 不变量：reference resolution、call id 生成、caller ownership lookup、call edge fields、call FTS content field order、language_id materialization、signature-backed caller/callee 查询、dedupe/truncate、freshness/version metadata 与旧库 schema migration 的 call-search rebuild 保持等价；repo-set priority boost 需要 positive resolved overlay evidence，stale hit/member 回落到旧小额 priority，且不扩大候选集合；未加入仓库名、路径名、case id、query 字符串或 fixture 特殊分支。
+- 预期影响/风险：Temporal samples/SDK、relay-teams 与 LevelDB 这类 call-heavy checkpoint indexing 少一次全量 SQL join 和 FTS insert pass，预期改善 register/index throughput；Temporal/OTel 类 workspace 中，已被跨仓 overlay 支撑的高优先级 usage 文件可压过同分或近同分 SDK/core definition，并通过通用路径 tie-break 稳定直接入口。风险是用户误设 priority 时 evidence-backed 高优先级仓候选小幅上移；风险由 resolved-evidence gate、freshness gate、priority cap、同分后备排序、signature search 回归测试和不改变查询评分控制。
 ## 候选优化说明：run-1779245204-repository-set-bridge-support
 - 算法：repository-set merge 在所有成员候选收集后，从已附加的 resolved overlay evidence 构建本次查询内的 origin-file 与 target-record 端点集合；只有同一条跨仓 import bridge 的 usage 文件端和 definition/file target 端都出现在候选集中时，才给两端有界 co-ranking bonus；caller ranking 在既有 assigned-result bonus 之上识别赋值左侧字段/slot 与 callee/factory 名的共享标识符词根，给予小额 named-slot bonus。
 - 架构：变更限定在 `application::code_repository_set_query` 的跨仓 merge helper、服务编排调用点、SQLite caller path-ranking helper 和单元测试；不改变 parser、graph facts、SQLite schema、FTS MATCH、candidate window、semantic/vector provider、env/paths/net、CLI/API 字段、安装发布或 self-iteration harness。
@@ -906,50 +911,8 @@ Adopted optimization notes:
 - latency metrics: cargo_build_release_ms=39005ms; cargo_fmt_check_ms=812ms; cargo_clippy_ms=184ms; cargo_test_ms=8873ms; relay_teams_index_ms=30289ms; relay_teams_register_index_ms=30378ms; relay_teams_query_p50_ms=220ms; relay_teams_query_p95_ms=654ms
 Adopted optimization notes:
        start = *byte_index; +        if byte_index > start && starts_upper_word { +            terms.push(token[start..byte_index].to_ascii_lowercase()); +            start = byte_index; } -        previous = Some(*character); +        previous = Some(character); } if start < token.len() { terms.push(token[start..].to_ascii_lowercase()); } +} + +#[cfg(test)] +mod tests { +    use super::search_document_content; + +    #[test] +    fn symbol_search_content_preserves_identifier_expansion() { +        let content = search_document_content( +            "symbol", +            [ +                "NewLRUCache", +                "", +                "leveldb::NewLRUCache", +                "function", +                "db/cache.cc", +            ], +        ); + +        assert_eq!( +            content, +            "NewLRUCache leveldb::NewLRUCache function db/cache.cc cache leveldb lru new newlrucache" +        ); +    } -    terms +    #[test] +    fn non_symbol_search_content_keeps_only_nonempty_fields() { +        let content = search_document_content("chunk", ["", "body text", "  ", "src/lib.rs"]); + +        assert_eq!(content, "body text src/lib.rs"); +    } } tokens used 304,967
-## 20260518T220331Z
-
-- summary: accepted code batch finalize optimization; score 0.91101, cases 87/87 passed, improved fmt/test/query/provider-probe metrics and recorded build/index/semantic-vector latency degradations. Full raw details remain in the patch/report artifacts.
-
-## 20260518T221448Z
-
-- candidate: production call-site ranking for non-example queries.
-- algorithm: add a bounded call-graph score penalty for paths whose segments or file stems indicate `example`, `sample`, `demo`, `tutorial`, or `quickstart`, and suppress the production source-path bonus for those paths unless the query explicitly contains the same intent terms.
-- architecture: the change stays in SQLite query ranking (`code_query_path_ranking`) and uses the existing query-intent splitter; it does not alter parser extraction, graph completeness, index storage, semantic/vector providers, environment loading, or repository registration behavior.
-- invariants: exact call, confidence, test-intent, adapter-intent, and freshness/version metadata remain intact; example paths are still returned when relevant or when the query asks for example/tutorial/sample content.
-- expected impact: improves full-scope caller queries where example/tutorial call sites tie production call sites, especially opencode `generateObject` agent-service cases, without weakening protected foundational, competitive, semantic/vector, or research-judge floors.
-- risks: generic repositories may place production code under `sample` or `demo`; explicit query intent disables the penalty and unit tests cover that escape hatch.
-## 20260518T221448Z
-
-- summary: accepted production call-site example/sample demotion; score 0.914458, cases 87/87 passed, improved competitive/accuracy/performance while recording relay-teams and LevelDB latency degradations. Full raw details remain in the patch/report artifacts.
-## 20260518T224034Z-20260518T225420Z
-- summary: accepted type-relationship chunk ranking and caller/path ranking optimizations; scores 0.915903 and 0.929207, cases 87/87 passed. Full details remain in the patch/report artifacts.
-## 20260518T234349Z
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T234349Z.patch`; score 0.925043; cases 87/87 passed; changed paths: code batch finalize/imported-reference/TypeScript finalize docs and tests.
-- summary: improved research judge, Opencode TypeScript index/query latency, local background file indexing, and semantic-vector provider probe; recorded build, relay-teams p95, LevelDB index/register, semantic-vector refresh/query, and `opencode_ts_imports_provider_shared` rank degradations. Full raw details remain in the patch/report artifacts.
-
-## 20260519T000705Z candidate
-- candidate: hybrid symbol ranking for header declaration surfaces; adds a small `function_declaration` boost for non-test C/C++ header-like Hybrid hits with positive symbol text score, confined to SQLite ranking and preserving parser/schema/provider behavior.
-- impact/risk: promoted LevelDB recovery-manifest declaration evidence over matching implementation bodies; unusual declaration locations receive no boost and tests lock the generic header tie-break.
-## 20260519T000705Z
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260519T000705Z.patch`; score 0.924743; cases 87/87 passed; changed paths: code query/path ranking/symbol ranking tests and docs.
-- summary: improved performance, research judge, relay-teams latency, and LevelDB index/register latency; recorded release build/test, Opencode TypeScript index/query, and local document file-index/query degradations.
-
-## 20260519T-function-flow candidate
-
-- candidate: function-related caller and execution-flow ranking.
-- algorithm: add generic caller context scoring for target-named file/caller surfaces and repeated target mentions, plus hybrid execution-flow chunk scoring based on query flow intent, multi-term coverage, approximate term order, and action-line density.
-- architecture: the new scoring lives in a separate SQLite query helper module to keep file length under the 1000-line hard cap; it only adjusts ranking and does not alter parser extraction, graph storage, schema, CLI/API output, env/paths/net boundaries, or repository registration.
-- invariants: definition, callee, and call-chain behavior keep existing ranking signals; zero-score rows still filter out; execution-flow bonuses apply only to hybrid queries with explicit flow intent, and caller bonuses apply only to `callers` queries.
-- expected impact: promotes `redactUrl` callers that live on the redaction surface, and promotes chunks that explain protocol/stream/lifecycle flows over local helper definitions, improving function-related self-iteration scores without fixture-specific paths or case IDs.
-- risks: repositories with intentionally generic file names receive no target-surface caller boost; very broad flow queries may still need graph-edge completeness when expected text is absent from the indexed path.
-
-## 20260519T-import-usage candidate
-
-- candidate: same-file import alias usage ranking for symbol-like import queries.
-- algorithm: for bounded `imports` query candidates with non-path symbol queries, batch-read same-file chunks and combine capped alias-use, same-target-directory, and named-binding context bonuses.
-- architecture: the change stays in SQLite code-query ranking; it does not alter parser extraction, graph facts, schema, FTS candidate selection, CLI/API fields, env/paths/net boundaries, semantic/vector settings, or the self-iteration harness.
-- invariants: path-like import queries, hybrid queries, target-symbol excerpts, import confidence, filters, dedupe, and zero-score filtering keep existing behavior; single-use aliases and namespace-only import lines receive no binding-context bonus.
-- expected impact: promotes implementation files that actually use namespace or named imports such as `ProviderShared` over equally matching setup, route, or utility import surfaces.
+## 20260518T220331Z-20260519T-import-usage archived
+- summary: older accepted finalize, call-site, type-relationship, function-flow, header-declaration, and import-usage ranking notes were compacted to keep this primary log under the 1000-line hard cap; raw details remain in their patch/report artifacts and the archive document.
 ## 20260519T050321Z
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch`
@@ -1003,6 +966,20 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: score_component:score 0.801946->0.8194514421192709; score_component:competitive_capability 0.861111->0.9444444444444445; case_score:leveldb_callers_new_lru_cache 0.5->1.0; case_rank:leveldb_callers_new_lru_cache 2->1; metric:leveldb_cpp_index_ms 4491.0->1978.0; metric:leveldb_cpp_register_index_ms 6268.0->3975.0; metric:leveldb_cpp_query_p50_ms 8312.0->4989.0; metric:leveldb_cpp_query_p95_ms 10590.0->8627.0
 - known degradations: metric:cargo_fmt_check_ms 1997.0->2218.0; metric:self_iteration_cargo_fmt_check_ms 282.0->324.0; metric:cargo_build_debug_ms 283.0->404.0; metric:temporal_samples_go_register_index_ms 3832.0->4074.0; metric:temporal_sdk_go_register_index_ms 4560.0->7544.0; metric:relay_teams_register_index_ms 5487.0->8868.0; metric:temporal_go_workspace_repo_set_refresh_ms 10277.0->11597.0; metric:temporal_go_workspace_repo_set_query_p50_ms 11720.0->12524.0
 - latency metrics: cargo_fmt_check_ms=2218ms; self_iteration_cargo_fmt_check_ms=324ms; cargo_build_debug_ms=404ms; self_iteration_cargo_check_ms=121ms; leveldb_cpp_index_ms=1978ms; leveldb_cpp_register_index_ms=3975ms; leveldb_cpp_query_p50_ms=4989ms; leveldb_cpp_query_p95_ms=8627ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779249648
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779249648.patch`
+- score: 0.833026 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.794592, stability=1.000000)
+- cases: 13/13 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260517.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_files.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_path_ranking.rs`
+- key improvements: score_component:score 0.78022->0.8330264986644896; score_component:foundational_capability 0.857143->1.0; score_component:performance 0.768419->0.7945916592471645; score_component:stability 0.933333->1.0; gate:temporal_samples_go_index false->true; gate:relay_teams_rt_imports_w3_save_request false->true; case:rt_imports_w3_save_request false->true; metric:cargo_fmt_check_ms 2097.0->1937.0
+- known degradations: metric:leveldb_cpp_query_p95_ms 6773.0->7785.0; metric:relay_teams_index_ms 3110.0->6173.0; metric:relay_teams_register_index_ms 4988.0->7889.0; metric:relay_teams_query_p50_ms 3770.0->5072.0; metric:relay_teams_query_p95_ms 5721.0->9676.0
+- latency metrics: cargo_fmt_check_ms=1937ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=2239ms; temporal_sdk_go_register_index_ms=4017ms; temporal_samples_go_index_ms=1857ms; temporal_samples_go_register_index_ms=3674ms
 
 Adopted optimization notes:
 
