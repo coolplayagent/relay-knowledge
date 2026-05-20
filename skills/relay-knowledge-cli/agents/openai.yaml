@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay Knowledge CLI"
-  short_description: "Use relay-knowledge through its CLI"
-  default_prompt: "Use $relay-knowledge-cli to index a repository and answer code graph questions with relay-knowledge."
+  short_description: "Build and query code maps and knowledge graphs through relay-knowledge CLI"
+  default_prompt: "Use $relay-knowledge-cli for code maps, code knowledge graphs, codebase or repository indexing, multi-repository repo-set queries, and code graph questions."
