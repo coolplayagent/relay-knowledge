@@ -55,8 +55,9 @@ Each GitHub Release also includes
 teaches LLM agents to use the `relay-knowledge` CLI for local graph and
 code-repository workflows. The skill package includes Linux x64 and Windows x64
 binaries under `assets/`; agents compare them with any `PATH` binary and use
-the newest semver version. The release workflow can publish the same generated
-skill layout to ClawHub when `CLAWHUB_TOKEN` is configured:
+the newest semver version. The generated `SKILL.md` metadata records the same
+numeric version as `Cargo.toml`. The release workflow can publish the same
+generated skill layout to ClawHub when `CLAWHUB_TOKEN` is configured:
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \
