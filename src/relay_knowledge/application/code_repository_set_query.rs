@@ -7,12 +7,20 @@ use crate::domain::{
 
 pub(super) struct OverlayEvidenceIndex<'a> {
     edges: &'a [CodeRepositoryCrossEdge],
-    import_origins: OnceCell<ImportOriginIndex>,
+    import_origins: OnceCell<ImportOriginIndexes>,
     target_files: BTreeMap<(String, String), Vec<usize>>,
     target_symbols: BTreeMap<(String, String), Vec<usize>>,
 }
 
-type ImportOriginIndex = BTreeMap<(String, String, u32, u32), Vec<usize>>;
+type ImportOriginLineIndex = BTreeMap<(String, String, u32, u32), Vec<usize>>;
+type ImportOriginFileIndex = BTreeMap<(String, String), Vec<usize>>;
+
+struct ImportOriginIndexes {
+    lines: ImportOriginLineIndex,
+    files: ImportOriginFileIndex,
+}
+
+const MAX_FILE_ORIGIN_EVIDENCE: usize = 2;
 
 impl<'a> OverlayEvidenceIndex<'a> {
     pub(super) fn new(edges: &'a [CodeRepositoryCrossEdge]) -> Self {
@@ -52,14 +60,24 @@ impl<'a> OverlayEvidenceIndex<'a> {
         if hit.edge_kind.as_deref() == Some("import") {
             let import_origins = self
                 .import_origins
-                .get_or_init(|| self.build_import_origin_index());
+                .get_or_init(|| self.build_import_origin_indexes());
             self.collect(
-                import_origins.get(&(
+                import_origins.lines.get(&(
                     hit.scope_id.clone(),
                     hit.path.clone(),
                     hit.line_range.start,
                     hit.line_range.end,
                 )),
+                &mut matches,
+            );
+        } else {
+            let import_origins = self
+                .import_origins
+                .get_or_init(|| self.build_import_origin_indexes());
+            self.collect(
+                import_origins
+                    .files
+                    .get(&(hit.scope_id.clone(), hit.path.clone())),
                 &mut matches,
             );
         }
@@ -85,21 +103,41 @@ impl<'a> OverlayEvidenceIndex<'a> {
             .collect()
     }
 
-    fn build_import_origin_index(&self) -> ImportOriginIndex {
-        let mut import_origins = BTreeMap::new();
+    fn build_import_origin_indexes(&self) -> ImportOriginIndexes {
+        let mut lines = BTreeMap::new();
+        let mut files = BTreeMap::new();
         for (position, edge) in self.edges.iter().enumerate() {
             if edge.from_record_kind != "module_reference" {
                 continue;
             }
             if let Some((path, line_start, line_end)) = evidence_origin(&edge.evidence_json) {
-                import_origins
-                    .entry((edge.from_source_scope.clone(), path, line_start, line_end))
+                lines
+                    .entry((
+                        edge.from_source_scope.clone(),
+                        path.clone(),
+                        line_start,
+                        line_end,
+                    ))
+                    .or_insert_with(Vec::new)
+                    .push(position);
+                files
+                    .entry((edge.from_source_scope.clone(), path))
                     .or_insert_with(Vec::new)
                     .push(position);
             }
         }
+        for positions in files.values_mut() {
+            positions.sort_by(|left, right| {
+                self.edges[*right]
+                    .confidence_basis_points
+                    .cmp(&self.edges[*left].confidence_basis_points)
+                    .then_with(|| left.cmp(right))
+            });
+            positions.truncate(MAX_FILE_ORIGIN_EVIDENCE);
+            positions.sort_unstable();
+        }
 
-        import_origins
+        ImportOriginIndexes { lines, files }
     }
 
     fn collect(&self, edges: Option<&Vec<usize>>, matches: &mut BTreeMap<usize, ()>) {
@@ -236,13 +274,41 @@ mod tests {
 
         let evidence =
             index.evidence_for_hit(&hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, false));
-        assert_eq!(evidence, vec![inbound]);
+        assert_eq!(evidence, vec![inbound, outbound.clone()]);
 
         let mut import_hit = hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, false);
         import_hit.symbol_snapshot_id = None;
         import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
         import_hit.edge_kind = Some("import".to_owned());
         assert_eq!(index.evidence_for_hit(&import_hit), vec![outbound]);
+    }
+
+    #[test]
+    fn overlay_index_caps_file_origin_evidence_for_non_import_hits() {
+        let mut edges = Vec::new();
+        for (index, confidence) in [0, 5_000, 10_000, 7_000].into_iter().enumerate() {
+            edges.push(edge(
+                &format!("edge-origin-{index}"),
+                "scope-app",
+                Some("scope-service"),
+                r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
+                confidence,
+            ));
+        }
+        let index = OverlayEvidenceIndex::new(&edges);
+
+        let evidence = index.evidence_for_hit(&hit(
+            "repo-a",
+            "scope-app",
+            "src/client.rs",
+            20,
+            0.75,
+            false,
+        ));
+
+        assert_eq!(evidence.len(), 2);
+        assert_eq!(evidence[0].edge_id, "edge-origin-2");
+        assert_eq!(evidence[1].edge_id, "edge-origin-3");
     }
 
     #[test]
