@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779288737045050045-derived-cursor-streaming
+- 算法：SQLite semantic/vector derived read model 保留既有 SQL 候选剪枝、scope/version 过滤、候选上限、评分公式和最终排序；将 `query_map` 返回的 bounded cursor 逐行解码并立即执行 Rust 后置评分，避免先把所有 raw row tuple 收集到临时 `Vec` 再遍历。
+- 架构/不变量：变更限定在 `storage::sqlite::retrieval::derived` 的候选循环；不改变 schema、BM25、semantic/vector token 或 hash 向量、candidate window、lexical/cosine admission、RRF fusion、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query、模型或 provider 特殊分支。
+- 预期影响：semantic/vector 来源参与查询时，每个 bounded candidate batch 少一次 raw row 批量分配和一次中间集合遍历，尤其在本地 graph retrieval 与多候选同维度 vector 查询中降低 CPU/内存峰值；召回、分数和排序应保持等价。
+- 风险：行为保持型改动主要风险在 SQLite row error propagation；仍逐行使用原 row projection 和 `StorageError` 映射，并保留后续 parse/score/filter 逻辑。
 ## 候选优化说明：run-1779287983198667502-vector-lexical-coverage-tiebreak
 - 算法：Vector read model 保留既有 SQL 候选剪枝、正向 cosine 要求和 lexical overlap admission guard；在 vector source score 中复用已经计算出的 lexical overlap，按 query term coverage 加入 0.05 上限的小额 tie-breaker，让本地 hash vector 近同分或碰撞时优先返回覆盖更多查询概念的候选。
 - 架构/不变量：变更限定在 SQLite derived vector retrieval 的 bounded Rust 后置评分与单元测试；不改变 schema、BM25、semantic read model、candidate window、query command、provider probe、embedding provider/env、freshness、backend status、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且不加入仓库、路径、case、query、模型或 provider 特殊分支。
@@ -967,6 +972,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=2456ms; self_iteration_cargo_fmt_check_ms=382ms; cargo_build_debug_ms=383ms; self_iteration_cargo_check_ms=2839ms; temporal_samples_go_index_ms=1027ms; temporal_samples_go_register_index_ms=1814ms; leveldb_cpp_index_ms=866ms; leveldb_cpp_register_index_ms=1693ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779288979080417260-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779288737045050045-explore.patch`
+- score: 0.945931 (foundational=1.000000, competitive=0.916667, accuracy=0.958333, semantic_vector=1.000000, research_judge=n/a, performance=0.801469, stability=1.000000)
+- cases: 31/32 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=2136ms; self_iteration_cargo_fmt_check_ms=342ms; cargo_build_debug_ms=403ms; self_iteration_cargo_check_ms=141ms; temporal_samples_go_index_ms=888ms; temporal_samples_go_register_index_ms=1634ms; temporal_sdk_go_index_ms=1669ms; temporal_sdk_go_register_index_ms=4447ms
 
 Adopted optimization notes:
 

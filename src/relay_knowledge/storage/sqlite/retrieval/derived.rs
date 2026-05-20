@@ -79,24 +79,22 @@ pub(super) fn semantic_candidates(
     )?;
 
     let mut hits = Vec::new();
-    for (
-        document_id,
-        document_kind,
-        evidence_id,
-        parent_evidence_id,
-        modality,
-        source_scope,
-        source_path,
-        labels_json,
-        content,
-        signature_json,
-        model,
-        dimension,
-        source_hash,
-    ) in rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?
-    {
+    for row in rows {
+        let (
+            document_id,
+            document_kind,
+            evidence_id,
+            parent_evidence_id,
+            modality,
+            source_scope,
+            source_path,
+            labels_json,
+            content,
+            signature_json,
+            model,
+            dimension,
+            source_hash,
+        ) = row.map_err(StorageError::from)?;
         let document_terms = parse_string_array(&signature_json)?
             .into_iter()
             .collect::<BTreeSet<_>>();
@@ -205,24 +203,22 @@ pub(super) fn vector_candidates(
 
     let mut hits = Vec::new();
     let mut query_vectors = QueryVectorCache::new(&request.query);
-    for (
-        document_id,
-        document_kind,
-        evidence_id,
-        parent_evidence_id,
-        modality,
-        source_scope,
-        source_path,
-        labels_json,
-        content,
-        vector_json,
-        model,
-        dimension,
-        source_hash,
-    ) in rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?
-    {
+    for row in rows {
+        let (
+            document_id,
+            document_kind,
+            evidence_id,
+            parent_evidence_id,
+            modality,
+            source_scope,
+            source_path,
+            labels_json,
+            content,
+            vector_json,
+            model,
+            dimension,
+            source_hash,
+        ) = row.map_err(StorageError::from)?;
         let labels = split_labels(labels_json);
         let lexical_overlap =
             overlap_score(&request.query, &content, &labels, source_path.as_deref());
