@@ -78,6 +78,66 @@ async fn hybrid_symbols_rank_header_declarations_above_matching_implementations(
     );
 }
 
+#[tokio::test]
+async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
+    let mut benchmark = symbol(
+        "benchmark-open",
+        "benchmark-file",
+        "benchmarks/db_bench.cc",
+        "method",
+        "void Open() {",
+        range(80, 80),
+    );
+    benchmark.name = "Open".to_owned();
+    benchmark.qualified_name = "benchmarks::db_bench::leveldb.Benchmark.Open".to_owned();
+    benchmark.canonical_symbol_id = "repo://repo/benchmarks::db_bench.Open".to_owned();
+    let mut target = symbol(
+        "db-open",
+        "db-file",
+        "db/db_impl.cc",
+        "function",
+        "Status DB::Open(const Options& options, const std::string& dbname) {",
+        range(1503, 1503),
+    );
+    target.name = "Open".to_owned();
+    target.qualified_name = "db::db_impl::leveldb.Open".to_owned();
+    target.canonical_symbol_id = "repo://repo/db::db_impl.Open".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("benchmark-file", "benchmarks/db_bench.cc"),
+            file("db-file", "db/db_impl.cc"),
+        ],
+        symbols: vec![benchmark, target],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("DB::Open", CodeQueryKind::Definition))
+        .await
+        .expect("definition query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("db-open"));
+}
+
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)

@@ -148,44 +148,6 @@ fn score_text_preserves_exact_match_ceiling_after_identifier_match() {
 }
 
 #[test]
-fn score_query_preserves_score_text_semantics() {
-    let query = "Cache archiveOutput";
-    let fields = ["block_cache", "def archive_output_dir() -> Path:"];
-
-    assert_eq!(
-        ScoreQuery::new(query).score(fields),
-        score_text(query, fields)
-    );
-    assert_eq!(ScoreQuery::new("   ").score(["anything"]), 0.0);
-}
-
-#[test]
-fn score_query_preserves_multi_token_identifier_scores() {
-    let score = ScoreQuery::new("cache output archive").score([
-        "block_cache",
-        "archiveOutput",
-        "def archive_output_dir() -> Path:",
-    ]);
-
-    assert_eq!(score, 6.0);
-}
-
-#[test]
-fn scoped_identity_query_bonus_matches_qualified_edge_targets() {
-    assert_eq!(
-        scoped_identity_query_bonus(
-            "pkg.service.TargetThing",
-            ["repo://example/src::pkg::service::TargetThing"],
-        ),
-        2.0
-    );
-    assert_eq!(
-        scoped_identity_query_bonus("TargetThing", ["pkg.service.TargetThing"]),
-        0.0
-    );
-}
-
-#[test]
 fn declaration_chunk_bonus_requires_declaration_shape() {
     let terms = query_terms("recover descriptor save_manifest versionedit");
 

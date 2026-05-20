@@ -30,6 +30,29 @@ fn score_query_ignores_single_letter_path_extension_noise() {
 }
 
 #[test]
+fn score_query_preserves_score_text_semantics() {
+    let query = "Cache archiveOutput";
+    let fields = ["block_cache", "def archive_output_dir() -> Path:"];
+
+    assert_eq!(
+        ScoreQuery::new(query).score(fields),
+        score_text(query, fields)
+    );
+    assert_eq!(ScoreQuery::new("   ").score(["anything"]), 0.0);
+}
+
+#[test]
+fn score_query_preserves_multi_token_identifier_scores() {
+    let score = ScoreQuery::new("cache output archive").score([
+        "block_cache",
+        "archiveOutput",
+        "def archive_output_dir() -> Path:",
+    ]);
+
+    assert_eq!(score, 6.0);
+}
+
+#[test]
 fn symbol_bonus_matches_scoped_query_subphrase() {
     let selector =
         crate::domain::CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())

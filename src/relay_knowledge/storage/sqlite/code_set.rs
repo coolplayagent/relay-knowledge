@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde_json::json;
@@ -247,7 +247,7 @@ pub(super) fn refresh_overlay(
     }
 
     let imports = imports_for_members(connection, &status.members)?;
-    let exports = exports_for_members(connection, &status.members)?;
+    let exports = ExportIndex::new(exports_for_members(connection, &status.members)?);
     let mut edges = Vec::new();
     for import in imports {
         if let Some(candidates) = matching_exports(&import, &exports) {
@@ -567,26 +567,12 @@ fn exports_for_members(
     Ok(exports)
 }
 
-fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Option<Vec<ExportTarget>> {
+fn matching_exports(import: &ImportRecord, exports: &ExportIndex) -> Option<Vec<ExportTarget>> {
     if import.resolution_state != "unresolved" || is_local_or_relative_module(&import.module) {
         return None;
     }
     let module = normalize_module_key(&import.module);
-    let mut scored_candidates = exports
-        .iter()
-        .filter(|target| target.source_scope != import.source_scope)
-        .filter_map(|target| {
-            target_match_score(target, &module).map(|score| (score, target.clone()))
-        })
-        .collect::<Vec<_>>();
-    let Some(best_score) = scored_candidates.iter().map(|(score, _)| *score).max() else {
-        return Some(Vec::new());
-    };
-    let mut candidates = scored_candidates
-        .drain(..)
-        .filter(|(score, _)| *score == best_score)
-        .map(|(_, target)| target)
-        .collect::<Vec<_>>();
+    let mut candidates = exports.matching_targets(&import.source_scope, &module);
     candidates.sort_by(|left, right| {
         left.source_scope
             .cmp(&right.source_scope)
@@ -600,28 +586,6 @@ fn matching_exports(import: &ImportRecord, exports: &[ExportTarget]) -> Option<V
     });
 
     Some(candidates)
-}
-
-fn is_local_or_relative_module(module: &str) -> bool {
-    let module = module.trim();
-    module.starts_with("./")
-        || module.starts_with("../")
-        || module.starts_with('.')
-        || module.starts_with("crate::")
-        || module.starts_with("self::")
-        || module.starts_with("super::")
-}
-
-fn target_match_score(target: &ExportTarget, module: &str) -> Option<u8> {
-    if target.keys.contains(module) {
-        return Some(4);
-    }
-    let (parent, imported_name) = module.rsplit_once('.')?;
-    (!parent.is_empty()
-        && !imported_name.is_empty()
-        && target.keys.contains(parent)
-        && target.keys.contains(imported_name))
-    .then_some(3)
 }
 
 fn edge_for_import(
@@ -828,4 +792,92 @@ struct ExportTarget {
     record_kind: String,
     record_id: String,
     keys: BTreeSet<String>,
+}
+
+struct ExportIndex {
+    targets: Vec<ExportTarget>,
+    by_key: BTreeMap<String, Vec<usize>>,
+}
+
+impl ExportIndex {
+    fn new(targets: Vec<ExportTarget>) -> Self {
+        let mut by_key = BTreeMap::<String, Vec<usize>>::new();
+        for (position, target) in targets.iter().enumerate() {
+            for key in &target.keys {
+                by_key.entry(key.clone()).or_default().push(position);
+            }
+        }
+
+        Self { targets, by_key }
+    }
+
+    fn matching_targets(&self, import_scope: &str, module: &str) -> Vec<ExportTarget> {
+        let exact = self.targets_for_key(module, import_scope);
+        if !exact.is_empty() {
+            return exact;
+        }
+
+        let Some((parent, imported_name)) = module.rsplit_once('.') else {
+            return Vec::new();
+        };
+        if parent.is_empty() || imported_name.is_empty() {
+            return Vec::new();
+        }
+
+        self.targets_for_key_intersection(parent, imported_name, import_scope)
+    }
+
+    fn targets_for_key(&self, key: &str, import_scope: &str) -> Vec<ExportTarget> {
+        self.by_key
+            .get(key)
+            .into_iter()
+            .flatten()
+            .filter_map(|position| self.target_for_import(*position, import_scope))
+            .cloned()
+            .collect()
+    }
+
+    fn targets_for_key_intersection(
+        &self,
+        left_key: &str,
+        right_key: &str,
+        import_scope: &str,
+    ) -> Vec<ExportTarget> {
+        let Some(left_positions) = self.by_key.get(left_key) else {
+            return Vec::new();
+        };
+        let Some(right_positions) = self.by_key.get(right_key) else {
+            return Vec::new();
+        };
+
+        let (probe, lookup) = if left_positions.len() <= right_positions.len() {
+            (left_positions, right_positions)
+        } else {
+            (right_positions, left_positions)
+        };
+        let lookup = lookup.iter().copied().collect::<BTreeSet<_>>();
+        probe
+            .iter()
+            .copied()
+            .filter(|position| lookup.contains(position))
+            .filter_map(|position| self.target_for_import(position, import_scope))
+            .cloned()
+            .collect()
+    }
+
+    fn target_for_import(&self, position: usize, import_scope: &str) -> Option<&ExportTarget> {
+        self.targets
+            .get(position)
+            .filter(|target| target.source_scope != import_scope)
+    }
+}
+
+fn is_local_or_relative_module(module: &str) -> bool {
+    let module = module.trim();
+    module.starts_with("./")
+        || module.starts_with("../")
+        || module.starts_with('.')
+        || module.starts_with("crate::")
+        || module.starts_with("self::")
+        || module.starts_with("super::")
 }

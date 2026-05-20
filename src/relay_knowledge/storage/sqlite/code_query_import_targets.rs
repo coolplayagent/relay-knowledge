@@ -12,7 +12,7 @@ use super::code_query_support::{
     CandidateLayer, candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
     push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
-use super::required_scope;
+use super::{prepare_code_search_statement, required_scope};
 
 const SQLITE_BIND_BATCH_SIZE: usize = 500;
 const MAX_TARGET_SYMBOL_NAMES_PER_IMPORT: usize = 4;
@@ -286,7 +286,7 @@ fn import_target_symbol_matches(
         ORDER BY path ASC, line_start ASC
         LIMIT ?
         ";
-    let mut statement = connection.prepare(sql)?;
+    let mut statement = prepare_code_search_statement(connection, sql)?;
     let rows = statement.query_map(
         params_from_iter(symbol_target_fts_values_for_limited(
             required_scope(status)?,

@@ -24,6 +24,8 @@ struct ImportOriginIndexes {
 }
 
 const MAX_FILE_ORIGIN_EVIDENCE: usize = 2;
+const EVIDENCE_BACKED_PRIORITY_SCORE_STEP: f64 = 0.12;
+const MAX_ABSOLUTE_MEMBER_PRIORITY_SCORE: i32 = 10;
 const RESOLVED_BRIDGE_SUPPORT_BONUS: f64 = 0.35;
 const MAX_BRIDGE_SUPPORT_BONUS: f64 = 0.70;
 
@@ -155,11 +157,35 @@ impl<'a> OverlayEvidenceIndex<'a> {
     }
 }
 
-pub(super) fn per_member_candidate_limit(limit: usize) -> usize {
-    std::cmp::min(
-        50,
-        std::cmp::max(limit.saturating_mul(3), limit.saturating_add(5)),
-    )
+const MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 50;
+const MAX_MULTI_MEMBER_MINIMUM_CANDIDATES: usize = 15;
+const MIN_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 6;
+const REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER: usize = 3;
+
+pub(super) fn per_member_candidate_limit(limit: usize, member_count: usize) -> usize {
+    if member_count == 0 {
+        return 0;
+    }
+
+    let requested = limit.max(1);
+    let single_member_depth = requested
+        .saturating_mul(REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER)
+        .max(requested.saturating_add(5));
+    if member_count == 1 {
+        return single_member_depth.min(MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER);
+    }
+
+    let minimum = requested.saturating_add(5).clamp(
+        MIN_REPOSITORY_SET_CANDIDATES_PER_MEMBER,
+        MAX_MULTI_MEMBER_MINIMUM_CANDIDATES,
+    );
+    let shared_budget = requested
+        .saturating_mul(REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER)
+        .max(minimum);
+    shared_budget
+        .div_ceil(member_count)
+        .max(minimum)
+        .min(MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER)
 }
 
 pub(super) fn repository_set_score(
@@ -167,8 +193,12 @@ pub(super) fn repository_set_score(
     member: &CodeRepositorySetMemberStatus,
     overlay_evidence: &[CodeRepositoryCrossEdge],
 ) -> f64 {
-    let priority_bonus = f64::from(member.member.priority) * 0.01;
     let freshness_penalty = if hit.stale || member.stale { 0.5 } else { 0.0 };
+    let priority_bonus = member_priority_bonus(
+        member.member.priority,
+        freshness_penalty == 0.0,
+        overlay_evidence,
+    );
     let edge_bonus = overlay_evidence
         .iter()
         .map(|edge| f64::from(edge.confidence_basis_points) / 10_000.0)
@@ -255,12 +285,53 @@ pub(super) fn dedupe_sort_truncate(
                     .repository_alias
                     .cmp(&right.member.repository_alias)
             })
+            .then_with(|| {
+                path_specificity_key(&left.hit.path).cmp(&path_specificity_key(&right.hit.path))
+            })
             .then_with(|| left.hit.path.cmp(&right.hit.path))
             .then_with(|| left.hit.line_range.start.cmp(&right.hit.line_range.start))
     });
     let truncated = results.len() > limit;
     results.truncate(limit);
     truncated
+}
+
+fn member_priority_bonus(
+    priority: i32,
+    fresh: bool,
+    overlay_evidence: &[CodeRepositoryCrossEdge],
+) -> f64 {
+    if !fresh || !has_resolved_overlay_evidence(overlay_evidence) {
+        return f64::from(priority) * 0.01;
+    }
+
+    f64::from(priority.clamp(
+        -MAX_ABSOLUTE_MEMBER_PRIORITY_SCORE,
+        MAX_ABSOLUTE_MEMBER_PRIORITY_SCORE,
+    )) * EVIDENCE_BACKED_PRIORITY_SCORE_STEP
+}
+
+fn has_resolved_overlay_evidence(overlay_evidence: &[CodeRepositoryCrossEdge]) -> bool {
+    overlay_evidence.iter().any(|edge| {
+        edge.resolution_state == "resolved"
+            && edge.confidence_basis_points > 0
+            && edge.to_source_scope.is_some()
+    })
+}
+
+fn path_specificity_key(path: &str) -> (usize, usize) {
+    (path_specialization_count(path), path.split('/').count())
+}
+
+fn path_specialization_count(path: &str) -> usize {
+    path.split('/')
+        .map(|segment| segment.rsplit_once('.').map_or(segment, |(stem, _)| stem))
+        .map(|stem| {
+            stem.chars()
+                .filter(|character| matches!(character, '-' | '_'))
+                .count()
+        })
+        .sum()
 }
 
 fn bridge_support_bonus(edge: &CodeRepositoryCrossEdge) -> f64 {
@@ -478,10 +549,80 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].score, 0.90);
 
-        assert_eq!(per_member_candidate_limit(1), 6);
-        assert_eq!(per_member_candidate_limit(20), 50);
         assert!(evidence_origin("not-json").is_none());
         assert!(evidence_origin("{}").is_none());
+    }
+
+    #[test]
+    fn candidate_limit_keeps_single_member_depth_and_shares_multi_member_budget() {
+        assert_eq!(per_member_candidate_limit(10, 0), 0);
+        assert_eq!(per_member_candidate_limit(1, 1), 6);
+        assert_eq!(per_member_candidate_limit(20, 1), 50);
+        assert_eq!(per_member_candidate_limit(10, 2), 15);
+        assert_eq!(per_member_candidate_limit(20, 2), 30);
+        assert_eq!(per_member_candidate_limit(20, 4), 15);
+    }
+
+    #[test]
+    fn evidence_backed_member_priority_is_bounded_workspace_ranking_intent() {
+        let preferred = member_status("app", "scope-app", 10);
+        let dependency = member_status("sdk", "scope-sdk", 0);
+        let preferred_hit = hit("repo-app", "scope-app", "src/client.rs", 1, 11.20, false);
+        let dependency_hit = hit("repo-sdk", "scope-sdk", "src/client.rs", 1, 12.20, false);
+        let evidence = vec![edge(
+            "edge-in",
+            "scope-app",
+            Some("scope-sdk"),
+            r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
+            10_000,
+        )];
+
+        assert!(
+            repository_set_score(&preferred_hit, &preferred, &evidence)
+                > repository_set_score(&dependency_hit, &dependency, &[])
+        );
+        assert!(
+            repository_set_score(&preferred_hit, &preferred, &[])
+                < repository_set_score(&dependency_hit, &dependency, &[])
+        );
+        assert_eq!(
+            member_priority_bonus(100, true, &evidence),
+            member_priority_bonus(10, true, &evidence)
+        );
+        assert_eq!(
+            member_priority_bonus(-100, true, &evidence),
+            member_priority_bonus(-10, true, &evidence)
+        );
+    }
+
+    #[test]
+    fn repository_set_ties_prefer_less_specialized_paths() {
+        let member = member_status("app", "scope-app", 0);
+        let mut results = vec![
+            CodeRepositorySetQueryHit {
+                member: member.member.clone(),
+                hit: hit(
+                    "repo-app",
+                    "scope-app",
+                    "samples/verbose_client/main.rs",
+                    1,
+                    1.0,
+                    false,
+                ),
+                overlay_evidence: Vec::new(),
+                score: 2.0,
+            },
+            CodeRepositorySetQueryHit {
+                member: member.member.clone(),
+                hit: hit("repo-app", "scope-app", "samples/client.rs", 1, 1.0, false),
+                overlay_evidence: Vec::new(),
+                score: 2.0,
+            },
+        ];
+
+        assert!(!dedupe_sort_truncate(&mut results, 2));
+
+        assert_eq!(results[0].hit.path, "samples/client.rs");
     }
 
     #[test]

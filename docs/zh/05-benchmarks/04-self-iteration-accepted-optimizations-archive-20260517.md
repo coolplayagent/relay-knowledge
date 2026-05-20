@@ -2,6 +2,10 @@
 
 本归档保存 `04-self-iteration-accepted-optimizations.md` 中的 20260517 早期详细条目，避免主记录文件超过 1000 行。
 
+## 20260518T220331Z-20260519T-import-usage compacted from primary log
+
+- summary: primary log details for accepted finalize optimization, production call-site demotion, type-relationship and caller/path ranking, TypeScript import/finalize work, header declaration ranking, function-flow ranking, and same-file import alias usage ranking were compacted on 20260520 to keep `04-self-iteration-accepted-optimizations.md` below the 1000-line repository hard cap; raw details remain available in their original patch/report artifacts.
+
 ## 20260517T030641Z
 
 - patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches/20260517T030641Z.patch`
