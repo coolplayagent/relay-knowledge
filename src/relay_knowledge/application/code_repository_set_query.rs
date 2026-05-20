@@ -1,4 +1,7 @@
-use std::{cell::OnceCell, collections::BTreeMap};
+use std::{
+    cell::OnceCell,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::domain::{
     CodeRepositoryCrossEdge, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
@@ -21,6 +24,8 @@ struct ImportOriginIndexes {
 }
 
 const MAX_FILE_ORIGIN_EVIDENCE: usize = 2;
+const RESOLVED_BRIDGE_SUPPORT_BONUS: f64 = 0.35;
+const MAX_BRIDGE_SUPPORT_BONUS: f64 = 0.70;
 
 impl<'a> OverlayEvidenceIndex<'a> {
     pub(super) fn new(edges: &'a [CodeRepositoryCrossEdge]) -> Self {
@@ -172,6 +177,52 @@ pub(super) fn repository_set_score(
     hit.score + priority_bonus + edge_bonus - freshness_penalty
 }
 
+pub(super) fn apply_bridge_support_bonus(results: &mut [CodeRepositorySetQueryHit]) {
+    let mut origin_files = BTreeSet::new();
+    let mut target_records = BTreeSet::new();
+    let mut bridge_edges = BTreeMap::new();
+    for result in results.iter() {
+        origin_files.insert((result.hit.scope_id.clone(), result.hit.path.clone()));
+        target_records.extend(hit_target_records(&result.hit));
+        for edge in &result.overlay_evidence {
+            if bridge_support_bonus(edge) > 0.0 {
+                bridge_edges.insert(edge.edge_id.clone(), edge.clone());
+            }
+        }
+    }
+
+    let mut supported_origin_files = BTreeMap::new();
+    let mut supported_target_records = BTreeMap::new();
+    for edge in bridge_edges.values() {
+        let Some((origin_path, _, _)) = evidence_origin(&edge.evidence_json) else {
+            continue;
+        };
+        let Some(target_record) = edge_target_record(edge) else {
+            continue;
+        };
+        let origin_file = (edge.from_source_scope.clone(), origin_path);
+        if !origin_files.contains(&origin_file) || !target_records.contains(&target_record) {
+            continue;
+        }
+        let bonus = bridge_support_bonus(edge);
+        add_capped_bonus(&mut supported_origin_files, origin_file, bonus);
+        add_capped_bonus(&mut supported_target_records, target_record, bonus);
+    }
+
+    for result in results {
+        let mut bonus = supported_origin_files
+            .get(&(result.hit.scope_id.clone(), result.hit.path.clone()))
+            .copied()
+            .unwrap_or(0.0);
+        for target_record in hit_target_records(&result.hit) {
+            if let Some(target_bonus) = supported_target_records.get(&target_record) {
+                bonus += *target_bonus;
+            }
+        }
+        result.score += bonus.min(MAX_BRIDGE_SUPPORT_BONUS);
+    }
+}
+
 pub(super) fn dedupe_sort_truncate(
     results: &mut Vec<CodeRepositorySetQueryHit>,
     limit: usize,
@@ -210,6 +261,47 @@ pub(super) fn dedupe_sort_truncate(
     let truncated = results.len() > limit;
     results.truncate(limit);
     truncated
+}
+
+fn bridge_support_bonus(edge: &CodeRepositoryCrossEdge) -> f64 {
+    if edge.resolution_state != "resolved" || edge.to_source_scope.is_none() {
+        return 0.0;
+    }
+
+    RESOLVED_BRIDGE_SUPPORT_BONUS * f64::from(edge.confidence_basis_points) / 10_000.0
+}
+
+fn add_capped_bonus<K: Ord>(bonuses: &mut BTreeMap<K, f64>, key: K, bonus: f64) {
+    let entry = bonuses.entry(key).or_insert(0.0);
+    *entry = (*entry + bonus).min(MAX_BRIDGE_SUPPORT_BONUS);
+}
+
+fn edge_target_record(edge: &CodeRepositoryCrossEdge) -> Option<(String, String, String)> {
+    Some((
+        edge.to_source_scope.clone()?,
+        edge.to_record_kind.clone(),
+        edge.to_record_id.clone()?,
+    ))
+}
+
+fn hit_target_records(hit: &CodeRetrievalHit) -> Vec<(String, String, String)> {
+    let mut records = Vec::with_capacity(2);
+    if let Some(symbol_id) = &hit.symbol_snapshot_id {
+        records.push((
+            hit.scope_id.clone(),
+            "code_symbol_snapshot".to_owned(),
+            symbol_id.clone(),
+        ));
+    }
+    if let Some(file_id) = &hit.file_id {
+        records.push((
+            hit.scope_id.clone(),
+            "code_file".to_owned(),
+            file_id.clone(),
+        ));
+    }
+
+    records
 }
 
 fn evidence_origin(evidence_json: &str) -> Option<(String, u32, u32)> {
@@ -390,6 +482,78 @@ mod tests {
         assert_eq!(per_member_candidate_limit(20), 50);
         assert!(evidence_origin("not-json").is_none());
         assert!(evidence_origin("{}").is_none());
+    }
+
+    #[test]
+    fn bridge_support_bonus_promotes_present_usage_and_target_pair() {
+        let app = member_status("app", "scope-app", 0);
+        let service = member_status("svc", "scope-service", 0);
+        let bridge = edge(
+            "edge-bridge",
+            "scope-app",
+            Some("scope-service"),
+            r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
+            10_000,
+        );
+        let mut results = vec![
+            CodeRepositorySetQueryHit {
+                member: app.member.clone(),
+                hit: hit("repo-app", "scope-app", "src/client.rs", 20, 0.80, false),
+                overlay_evidence: vec![bridge.clone()],
+                score: 0.80,
+            },
+            CodeRepositorySetQueryHit {
+                member: service.member.clone(),
+                hit: hit(
+                    "repo-service",
+                    "scope-service",
+                    "src/service.rs",
+                    1,
+                    0.70,
+                    false,
+                ),
+                overlay_evidence: Vec::new(),
+                score: 0.70,
+            },
+        ];
+
+        apply_bridge_support_bonus(&mut results);
+
+        assert!(results[0].score > 0.80);
+        assert!(results[1].score > 0.70);
+    }
+
+    #[test]
+    fn bridge_support_bonus_requires_both_resolved_endpoints() {
+        let app = member_status("app", "scope-app", 0);
+        let missing_target = edge(
+            "edge-missing",
+            "scope-app",
+            Some("scope-service"),
+            r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
+            10_000,
+        );
+        let mut unresolved = missing_target.clone();
+        unresolved.resolution_state = "unresolved".to_owned();
+        let mut results = vec![
+            CodeRepositorySetQueryHit {
+                member: app.member.clone(),
+                hit: hit("repo-app", "scope-app", "src/client.rs", 20, 0.80, false),
+                overlay_evidence: vec![missing_target],
+                score: 0.80,
+            },
+            CodeRepositorySetQueryHit {
+                member: app.member.clone(),
+                hit: hit("repo-app", "scope-app", "src/other.rs", 30, 0.70, false),
+                overlay_evidence: vec![unresolved],
+                score: 0.70,
+            },
+        ];
+
+        apply_bridge_support_bonus(&mut results);
+
+        assert_eq!(results[0].score, 0.80);
+        assert_eq!(results[1].score, 0.70);
     }
 
     fn member_status(

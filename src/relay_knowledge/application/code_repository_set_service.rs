@@ -21,8 +21,8 @@ use std::path::PathBuf;
 use super::{
     RelayKnowledgeService,
     code_repository_set_query::{
-        OverlayEvidenceIndex, dedupe_sort_truncate, per_member_candidate_limit,
-        repository_set_score,
+        OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
+        per_member_candidate_limit, repository_set_score,
     },
 };
 
@@ -197,6 +197,7 @@ impl RelayKnowledgeService {
                 });
             }
         }
+        apply_bridge_support_bonus(&mut results);
         let truncated = dedupe_sort_truncate(&mut results, request.limit);
         let degraded_reason = status.degraded_reason.clone().or_else(|| {
             status

@@ -419,7 +419,19 @@ fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
             &callers,
             production_intent,
         ),
-        1.15
+        1.4
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "db/db_impl.cc",
+            "NewLRUCache",
+            Some("result.block_cache = NewLRUCache(8 << 20);"),
+            "NewLRUCache",
+            &callers,
+            production_intent,
+        ),
+        1.4
     );
     assert_eq!(
         caller_result_assignment_bonus(
@@ -460,6 +472,18 @@ fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
     assert_eq!(
         caller_result_assignment_bonus(
             4.0,
+            "src/runtime/cache_config.ts",
+            "createPool",
+            Some("settings.factory = createPool(options)"),
+            "createPool",
+            &callers,
+            production_intent,
+        ),
+        1.15
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
             "examples/cache_demo.ts",
             "createPool",
             Some("settings.pool = createPool(options)"),
@@ -479,7 +503,7 @@ fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
             &callers,
             example_intent,
         ),
-        1.15
+        1.4
     );
     assert_eq!(
         caller_result_assignment_bonus(

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
 #[derive(Clone, Copy)]
@@ -5,6 +7,9 @@ pub(super) struct CallSiteQueryIntent {
     pub(super) test_or_benchmark: bool,
     pub(super) example_or_sample: bool,
 }
+
+const CALLER_RESULT_ASSIGNMENT_BONUS: f64 = 1.15;
+const CALLER_RESULT_NAMED_SLOT_BONUS: f64 = 0.25;
 
 pub(super) fn call_site_source_path_bonus(
     base_score: f64,
@@ -99,32 +104,32 @@ pub(super) fn caller_result_assignment_bonus(
         return 0.0;
     }
 
-    if caller_excerpt
+    caller_excerpt
         .lines()
-        .any(|line| line_contains_assigned_call_result(line, callee_name))
-    {
-        1.15
-    } else {
-        0.0
-    }
+        .filter_map(|line| assigned_call_result_bonus(line, callee_name))
+        .fold(0.0, f64::max)
 }
 
-fn line_contains_assigned_call_result(line: &str, callee_name: &str) -> bool {
+fn assigned_call_result_bonus(line: &str, callee_name: &str) -> Option<f64> {
     let mut search_start = 0;
     while let Some(relative_index) = line[search_start..].find(callee_name) {
         let start = search_start + relative_index;
         let end = start + callee_name.len();
         let prefix = &line[..start];
-        if identifier_boundary_before(prefix)
-            && assignment_operator_before_call(prefix)
-            && call_suffix(&line[end..])
-        {
-            return true;
+        if identifier_boundary_before(prefix) && call_suffix(&line[end..]) {
+            let Some(left_side) = assigned_call_left_side(prefix) else {
+                search_start = end;
+                continue;
+            };
+            return Some(
+                CALLER_RESULT_ASSIGNMENT_BONUS
+                    + named_assignment_slot_bonus(left_side, callee_name),
+            );
         }
         search_start = end;
     }
 
-    false
+    None
 }
 
 fn identifier_boundary_before(prefix: &str) -> bool {
@@ -134,22 +139,74 @@ fn identifier_boundary_before(prefix: &str) -> bool {
         .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'))
 }
 
-fn assignment_operator_before_call(prefix: &str) -> bool {
+fn assigned_call_left_side(prefix: &str) -> Option<&str> {
     let Some(index) = prefix.rfind('=') else {
-        return false;
+        return None;
     };
     let previous = prefix[..index]
         .chars()
         .rev()
         .find(|character| !character.is_whitespace());
     if previous.is_some_and(|character| matches!(character, '=' | '!' | '<' | '>')) {
-        return false;
+        return None;
     }
     let next = prefix[index + 1..]
         .chars()
         .find(|character| !character.is_whitespace());
+    if matches!(next, Some('>')) {
+        return None;
+    }
 
-    !matches!(next, Some('>'))
+    Some(prefix[..index].trim().trim_end_matches(':').trim())
+}
+
+fn named_assignment_slot_bonus(left_side: &str, callee_name: &str) -> f64 {
+    let left_terms = identifier_terms(left_side);
+    if left_terms.is_empty() {
+        return 0.0;
+    }
+    identifier_terms(callee_name)
+        .into_iter()
+        .any(|term| term.len() >= 4 && left_terms.contains(&term))
+        .then_some(CALLER_RESULT_NAMED_SLOT_BONUS)
+        .unwrap_or(0.0)
+}
+
+fn identifier_terms(value: &str) -> BTreeSet<String> {
+    let mut terms = BTreeSet::new();
+    for token in value.split(|character: char| !character.is_ascii_alphanumeric()) {
+        push_identifier_terms(&mut terms, token);
+    }
+
+    terms
+}
+
+fn push_identifier_terms(terms: &mut BTreeSet<String>, token: &str) {
+    let mut start = 0;
+    let characters = token.char_indices().collect::<Vec<_>>();
+    for index in 1..characters.len() {
+        let (byte_index, character) = characters[index];
+        let previous = characters[index - 1].1;
+        let next = characters.get(index + 1).map(|(_, next)| *next);
+        let acronym_tail = previous.is_ascii_uppercase()
+            && character.is_ascii_uppercase()
+            && next.is_some_and(|next| next.is_ascii_lowercase());
+        if (character.is_ascii_uppercase()
+            && (previous.is_ascii_lowercase() || previous.is_ascii_digit()))
+            || acronym_tail
+        {
+            push_identifier_term(terms, &token[start..byte_index]);
+            start = byte_index;
+        }
+    }
+    push_identifier_term(terms, &token[start..]);
+}
+
+fn push_identifier_term(terms: &mut BTreeSet<String>, term: &str) {
+    let term = term.trim().to_ascii_lowercase();
+    if !term.is_empty() {
+        terms.insert(term);
+    }
 }
 
 pub(super) fn callee_member_context_bonus(
