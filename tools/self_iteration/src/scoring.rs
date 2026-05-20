@@ -132,6 +132,12 @@ pub struct RankedAssessment {
     pub failures: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScoreBaselines<'a> {
+    pub workload_previous: Option<&'a Value>,
+    pub profile_best_accepted: Option<&'a Value>,
+}
+
 pub fn assess_ranked_hits(
     case: &Value,
     hits: &[Value],
@@ -270,8 +276,9 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
 
 pub fn score_evaluation(
     observation: &EvaluationObservation,
-    previous_run: Option<&Value>,
+    baselines: ScoreBaselines<'_>,
 ) -> ScoreBreakdown {
+    let previous_run = baselines.workload_previous;
     let foundational_scores =
         objective_scores(&observation.cases, "foundational_capability", &["accuracy"]);
     let competitive_scores = objective_scores(&observation.cases, "competitive_capability", &[]);
@@ -338,7 +345,7 @@ pub fn score_evaluation(
             performance,
             stability,
         },
-        previous_run,
+        baselines,
         &improvements,
     );
     ScoreBreakdown {
@@ -381,7 +388,7 @@ struct PreviousCase {
 fn reject_reasons(
     observation: &EvaluationObservation,
     current: ScoreComponents,
-    previous_run: Option<&Value>,
+    baselines: ScoreBaselines<'_>,
     improvements: &[Value],
 ) -> Vec<String> {
     let mut reasons = Vec::new();
@@ -397,7 +404,15 @@ fn reject_reasons(
     if !failed_gates.is_empty() {
         reasons.push(format!("quality gates failed: {}", failed_gates.join(", ")));
     }
-    let Some(previous) = previous_run else {
+    let bug_fix_priority = bug_fix_priority_improved(improvements);
+    let Some(previous) = baselines.workload_previous else {
+        if let Some(reason) = profile_best_score_reject_reason(
+            current,
+            baselines.profile_best_accepted,
+            bug_fix_priority,
+        ) {
+            reasons.push(reason);
+        }
         return reasons;
     };
     for (name, value) in [
@@ -418,7 +433,12 @@ fn reject_reasons(
     if reasons.iter().any(|reason| reason.contains("regressed")) {
         return reasons;
     }
-    if bug_fix_priority_improved(improvements)
+    if let Some(reason) =
+        profile_best_score_reject_reason(current, baselines.profile_best_accepted, bug_fix_priority)
+    {
+        reasons.push(reason);
+    }
+    if bug_fix_priority
         || current.score > previous_number(previous, "score") + SCORE_EPSILON
         || pareto_improved(current, previous)
     {
@@ -436,6 +456,25 @@ fn reject_reasons(
     }
     reasons.push("candidate did not improve score or tracked objectives beyond epsilon".to_owned());
     reasons
+}
+
+fn profile_best_score_reject_reason(
+    current: ScoreComponents,
+    profile_best_accepted: Option<&Value>,
+    bug_fix_priority: bool,
+) -> Option<String> {
+    if bug_fix_priority {
+        return None;
+    }
+    let previous = profile_best_accepted?;
+    let profile_best_score = previous_number(previous, "score");
+    if current.score > profile_best_score + SCORE_EPSILON {
+        return None;
+    }
+    Some(format!(
+        "candidate score {:.6} did not beat profile best accepted score {:.6} beyond epsilon",
+        current.score, profile_best_score
+    ))
 }
 
 fn changes(

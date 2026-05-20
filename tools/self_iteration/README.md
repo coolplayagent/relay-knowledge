@@ -110,7 +110,10 @@ guardrail query. It reuses
 repeated registration and indexing cost. Score history is isolated by profile
 and category focus, so `fast --categories semantic_vector` compares only
 against matching semantic/vector-focused fast runs and does not treat
-full/exhaustive judge scores as fast regressions. Override the subset with
+full/exhaustive judge scores as fast regressions. Acceptance also checks the
+best accepted run for the same profile across category focuses, so a first run
+for a new category cannot be committed below the established profile-level bar.
+Override the subset with
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
@@ -279,6 +282,11 @@ The candidate is accepted when:
 hard_constraints_pass
 and no_protected_foundational_competitive_semantic_vector_or_stability_regression
 and (
+  no_profile_best_accepted
+  or weighted_score > profile_best_accepted_weighted_score + score_epsilon
+  or bug_fix_priority_improved(candidate, previous)
+)
+and (
   bug_fix_priority_improved(candidate, previous)
   or
   weighted_score > previous_weighted_score + score_epsilon
@@ -291,7 +299,10 @@ fixes an observed program failure by turning a previously failed quality gate
 into a passing gate or a previously failing evaluation case into a passing
 case. This priority can override the weighted-score tie-breaker and raw timing
 degradations, but it does not override missing diffs, current quality-gate
-failures, or protected objective regressions.
+failures, or protected objective regressions. The profile-level best accepted
+bar uses committed runs with the same profile, regardless of category focus,
+to prevent a newly focused category from accepting a lower-scoring candidate
+only because its same-category baseline is empty.
 
 `epsilon_pareto_improved(candidate, previous)` means at least one tracked objective improves beyond its epsilon threshold and no tracked objective regresses beyond its epsilon threshold. The default thresholds are:
 

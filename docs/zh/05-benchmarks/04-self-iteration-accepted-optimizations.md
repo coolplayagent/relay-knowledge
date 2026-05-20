@@ -990,5 +990,4 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 
 Adopted optimization notes:
 
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
+Rust self-iteration v2 accepted this candidate because the performance-focused validate run had no same profile/category baseline. This record documents the policy gap closed by the later harness change that requires focused candidates to beat the best accepted run for the same profile when such a run exists.

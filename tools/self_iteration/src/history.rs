@@ -126,18 +126,32 @@ pub fn best_accepted_run_for_workload(
     category_focus: Option<&str>,
 ) -> Result<Option<Value>, String> {
     let runs = load_runs(paths)?;
-    Ok(runs
-        .into_iter()
-        .filter(|run| {
-            run_profile(run) == profile && run_category_focus(run) == category_focus && adopted(run)
-        })
-        .max_by(|left, right| {
-            let left_score = left.get("score").and_then(Value::as_f64).unwrap_or(0.0);
-            let right_score = right.get("score").and_then(Value::as_f64).unwrap_or(0.0);
-            left_score
-                .partial_cmp(&right_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }))
+    Ok(best_accepted_run(runs.into_iter().filter(|run| {
+        run_profile(run) == profile && run_category_focus(run) == category_focus
+    })))
+}
+
+pub fn best_accepted_run_for_profile(
+    paths: &HistoryPaths,
+    profile: &str,
+) -> Result<Option<Value>, String> {
+    let runs = load_runs(paths)?;
+    Ok(best_accepted_run(
+        runs.into_iter().filter(|run| run_profile(run) == profile),
+    ))
+}
+
+fn best_accepted_run<I>(runs: I) -> Option<Value>
+where
+    I: Iterator<Item = Value>,
+{
+    runs.filter(adopted).max_by(|left, right| {
+        let left_score = left.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        let right_score = right.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        left_score
+            .partial_cmp(&right_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 pub fn write_report(paths: &HistoryPaths, run_id: &str, report: &Value) -> Result<PathBuf, String> {
@@ -692,6 +706,8 @@ mod tests {
                 "category_focus": "semantic_vector",
                 "selected_categories": ["semantic_vector"],
                 "accepted": true,
+                "committed": true,
+                "commit": "semantic123",
                 "score": 0.9
             }),
             json!({
@@ -701,6 +717,8 @@ mod tests {
                 "category_focus": "competitive",
                 "selected_categories": ["competitive"],
                 "accepted": true,
+                "committed": true,
+                "commit": "competitive123",
                 "score": 0.95
             }),
             json!({
@@ -736,6 +754,71 @@ mod tests {
         );
         assert_eq!(
             semantic_previous.get("run_id").and_then(Value::as_str),
+            Some("run-semantic")
+        );
+    }
+
+    #[test]
+    fn profile_best_accepted_ignores_category_focus() {
+        let workspace = temp_workspace("history-profile-best");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+        let runs = [
+            json!({
+                "run_id": "run-competitive",
+                "timestamp": "1",
+                "profile": "fast",
+                "category_focus": "competitive",
+                "accepted": true,
+                "committed": true,
+                "commit": "competitive123",
+                "score": 0.84
+            }),
+            json!({
+                "run_id": "run-semantic",
+                "timestamp": "2",
+                "profile": "fast",
+                "category_focus": "semantic_vector",
+                "accepted": true,
+                "committed": true,
+                "commit": "semantic123",
+                "score": 0.95
+            }),
+            json!({
+                "run_id": "run-performance",
+                "timestamp": "3",
+                "profile": "fast",
+                "category_focus": "performance",
+                "accepted": false,
+                "committed": false,
+                "score": 0.99
+            }),
+            json!({
+                "run_id": "run-full",
+                "timestamp": "4",
+                "profile": "full",
+                "category_focus": "competitive",
+                "accepted": true,
+                "committed": true,
+                "commit": "full123",
+                "score": 0.98
+            }),
+        ];
+        fs::write(
+            &paths.runs_jsonl,
+            runs.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("runs");
+
+        let best = best_accepted_run_for_profile(&paths, "fast")
+            .expect("history")
+            .expect("profile best");
+
+        assert_eq!(
+            best.get("run_id").and_then(Value::as_str),
             Some("run-semantic")
         );
     }

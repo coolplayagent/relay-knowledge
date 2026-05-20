@@ -6,7 +6,10 @@ use serde_json::Value;
 use crate::{
     command::{CommandResult, CommandSpec, run_command},
     config::{CategorySet, Config, EvaluationCategory},
-    history::{HistoryPaths, adopted, best_accepted_run_for_workload, is_evaluate_run, load_runs},
+    history::{
+        HistoryPaths, adopted, best_accepted_run_for_profile, best_accepted_run_for_workload,
+        is_evaluate_run, load_runs,
+    },
     history_synthesis::synthesize_history,
     memory::{
         historical_patch_memory_index, progressive_memory_index, rejection_recovery_memory_review,
@@ -104,16 +107,15 @@ pub fn build_prompt(
     let best = best_accepted_run_for_workload(paths, profile, category_focus_key.as_deref())
         .ok()
         .flatten();
+    let profile_best = best_accepted_run_for_profile(paths, profile).ok().flatten();
     let best_summary = best
         .as_ref()
-        .map(|run| {
-            format!(
-                "Best accepted score={} commit={}",
-                value(run, "score"),
-                value(run, "commit")
-            )
-        })
-        .unwrap_or_else(|| "No accepted v2 historical run yet.".to_owned());
+        .map(run_brief)
+        .unwrap_or_else(|| "none for this profile/category".to_owned());
+    let profile_best_summary = profile_best
+        .as_ref()
+        .map(run_brief)
+        .unwrap_or_else(|| "none for this profile".to_owned());
     let rejected = recent_rejections(paths);
     let recovery_memory = rejection_recovery_memory_review(paths, 5);
     let progressive_memory = progressive_memory_index(paths, 12);
@@ -139,7 +141,9 @@ Constraints:
 Workspace: {workspace}
 Evaluation profile: {profile}
 Evaluation category focus: {category_focus}
-Historical context: {best_summary}
+Historical context:
+- Best accepted for this profile/category: {best_summary}
+- Best accepted for this profile: {profile_best_summary}
 Historical synthesis:
 {history_synthesis}
 
@@ -175,6 +179,7 @@ pub fn build_unattended_prompt(
     let best = best_accepted_run_for_workload(paths, profile, Some(&category_focus_key))
         .ok()
         .flatten();
+    let profile_best = best_accepted_run_for_profile(paths, profile).ok().flatten();
     let latest =
         crate::history::previous_scored_run_for_workload(paths, profile, Some(&category_focus_key))
             .ok()
@@ -217,7 +222,8 @@ Goal:
 
 Baseline:
 - Latest scored run: {latest_summary}
-- Best accepted run: {best_summary}
+- Best accepted run for this profile/category: {best_summary}
+- Best accepted run for this profile: {profile_best_summary}
 
 Recent rejected attempts:
 {rejected}
@@ -243,6 +249,10 @@ Before editing, inspect only the files needed for this category. In your final n
             .as_ref()
             .map(run_brief)
             .unwrap_or_else(|| "none for this profile/category".to_owned()),
+        profile_best_summary = profile_best
+            .as_ref()
+            .map(run_brief)
+            .unwrap_or_else(|| "none for this profile".to_owned()),
         rejected = recent_rejections(paths),
         memory = progressive_memory_index(paths, if macro_explore { 5 } else { 3 }),
     )

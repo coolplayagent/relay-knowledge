@@ -195,7 +195,14 @@ fn run_generation_iteration(
         &config.profile,
         category_focus.as_deref(),
     )?;
-    let score = scoring::score_evaluation(&evaluation.observation, previous_run.as_ref());
+    let profile_best_accepted = history::best_accepted_run_for_profile(paths, &config.profile)?;
+    let score = scoring::score_evaluation(
+        &evaluation.observation,
+        scoring::ScoreBaselines {
+            workload_previous: previous_run.as_ref(),
+            profile_best_accepted: profile_best_accepted.as_ref(),
+        },
+    );
     let commit = if score.accepted {
         write_adopted_optimization_document(
             &config.workspace,
@@ -361,7 +368,14 @@ fn persist_scored_run(
         &config.profile,
         category_focus.as_deref(),
     )?;
-    let score = scoring::score_evaluation(&evaluation.observation, previous.as_ref());
+    let profile_best_accepted = history::best_accepted_run_for_profile(paths, &config.profile)?;
+    let score = scoring::score_evaluation(
+        &evaluation.observation,
+        scoring::ScoreBaselines {
+            workload_previous: previous.as_ref(),
+            profile_best_accepted: profile_best_accepted.as_ref(),
+        },
+    );
     persist_scored_run_with_score(PersistInput {
         config,
         paths,
@@ -517,6 +531,7 @@ fn comparison_baseline(
     previous_run: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let best_accepted = history::best_accepted_run_for_workload(paths, profile, category_focus)?;
+    let profile_best_accepted = history::best_accepted_run_for_profile(paths, profile)?;
     Ok(serde_json::json!({
         "comparison_kind": "latest_scored_workload_run",
         "profile": profile,
@@ -526,6 +541,8 @@ fn comparison_baseline(
         "latest_accepted": previous_run.map(history::adopted),
         "best_accepted_run_id": best_accepted.as_ref().and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
         "best_accepted_score": best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
+        "profile_best_accepted_run_id": profile_best_accepted.as_ref().and_then(|run| run.get("run_id")).and_then(serde_json::Value::as_str),
+        "profile_best_accepted_score": profile_best_accepted.as_ref().and_then(|run| run.get("score")).and_then(serde_json::Value::as_f64),
     }))
 }
 
@@ -684,8 +701,17 @@ pub(crate) fn print_score(record: &serde_json::Value) {
             .and_then(serde_json::Value::as_f64)
             .map(|score| format!("{score:.6}"))
             .unwrap_or_else(|| "n/a".to_owned());
+        let profile_best = baseline
+            .get("profile_best_accepted_run_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("none");
+        let profile_best_score = baseline
+            .get("profile_best_accepted_score")
+            .and_then(serde_json::Value::as_f64)
+            .map(|score| format!("{score:.6}"))
+            .unwrap_or_else(|| "n/a".to_owned());
         println!(
-            "[self-iterate] comparison baseline latest={latest} score={latest_score}; best_accepted={best} score={best_score}"
+            "[self-iterate] comparison baseline latest={latest} score={latest_score}; best_accepted={best} score={best_score}; profile_best_accepted={profile_best} score={profile_best_score}"
         );
     }
     println!(

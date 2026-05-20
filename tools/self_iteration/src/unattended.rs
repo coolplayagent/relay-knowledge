@@ -558,7 +558,15 @@ fn evaluate_unattended_layer(
         &input.config.profile,
         category_focus.as_deref(),
     )?;
-    let score = scoring::score_evaluation(&evaluation.observation, previous_run.as_ref());
+    let profile_best_accepted =
+        history::best_accepted_run_for_profile(input.paths, &input.config.profile)?;
+    let score = scoring::score_evaluation(
+        &evaluation.observation,
+        scoring::ScoreBaselines {
+            workload_previous: previous_run.as_ref(),
+            profile_best_accepted: profile_best_accepted.as_ref(),
+        },
+    );
     let commit = if input.commit && score.accepted {
         write_adopted_optimization_document(
             &input.config.workspace,
@@ -664,7 +672,15 @@ fn persist_scored_run_with_metadata(
         &input.config.profile,
         category_focus.as_deref(),
     )?;
-    let score = scoring::score_evaluation(&input.evaluation.observation, previous.as_ref());
+    let profile_best_accepted =
+        history::best_accepted_run_for_profile(input.paths, &input.config.profile)?;
+    let score = scoring::score_evaluation(
+        &input.evaluation.observation,
+        scoring::ScoreBaselines {
+            workload_previous: previous.as_ref(),
+            profile_best_accepted: profile_best_accepted.as_ref(),
+        },
+    );
     persist_scored_run_with_score(PersistInput {
         config: input.config,
         paths: input.paths,

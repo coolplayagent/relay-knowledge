@@ -32,7 +32,7 @@ mod tests {
             generated_diff: true,
         };
 
-        let score = score_evaluation(&observation, None);
+        let score = score_evaluation(&observation, ScoreBaselines::default());
 
         assert!(!score.accepted);
         assert!(score.reject_reasons[0].contains("quality gates failed"));
@@ -63,7 +63,13 @@ mod tests {
             generated_diff: true,
         };
 
-        let score = score_evaluation(&observation, Some(&previous));
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
 
         assert!(score.accepted);
         assert!(score.improvements.iter().any(|item| {
@@ -108,7 +114,13 @@ mod tests {
             generated_diff: true,
         };
 
-        let score = score_evaluation(&observation, Some(&previous));
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
 
         assert!(!score.accepted);
         assert!(!score
@@ -159,7 +171,13 @@ mod tests {
             generated_diff: true,
         };
 
-        let score = score_evaluation(&observation, Some(&previous));
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: Some(&previous),
+                profile_best_accepted: None,
+            },
+        );
 
         assert!(score
             .improvements
@@ -172,5 +190,87 @@ mod tests {
         assert!(score.improvements.iter().any(|item| {
             item.get("kind").and_then(Value::as_str) == Some("case_false_positive_count")
         }));
+    }
+
+    #[test]
+    fn profile_best_accepted_rejects_first_category_run_below_global_bar() {
+        let profile_best = serde_json::json!({
+            "run_id": "run-semantic-best",
+            "score": 0.950057
+        });
+        let observation = mixed_capability_observation();
+
+        let score = score_evaluation(
+            &observation,
+            ScoreBaselines {
+                workload_previous: None,
+                profile_best_accepted: Some(&profile_best),
+            },
+        );
+
+        assert!((score.score - 0.86613).abs() < 0.00001);
+        assert!(!score.accepted);
+        assert!(score.reject_reasons.iter().any(|reason| {
+            reason.contains("did not beat profile best accepted score 0.950057")
+        }));
+    }
+
+    #[test]
+    fn first_category_run_without_profile_best_remains_accepted() {
+        let score = score_evaluation(&mixed_capability_observation(), ScoreBaselines::default());
+
+        assert!(score.accepted);
+    }
+
+    #[test]
+    fn first_category_run_can_beat_profile_best() {
+        let profile_best = serde_json::json!({
+            "run_id": "run-old-best",
+            "score": 0.8
+        });
+
+        let score = score_evaluation(
+            &mixed_capability_observation(),
+            ScoreBaselines {
+                workload_previous: None,
+                profile_best_accepted: Some(&profile_best),
+            },
+        );
+
+        assert!(score.accepted);
+    }
+
+    fn mixed_capability_observation() -> EvaluationObservation {
+        EvaluationObservation {
+            gates: Vec::new(),
+            cases: vec![
+                case("foundation", "foundational_capability", 0.947917),
+                case("competitive", "competitive_capability", 0.621212),
+                case("semantic", "semantic_vector", 1.0),
+            ],
+            metrics: vec![MetricObservation {
+                name: "query_p95_ms".to_owned(),
+                value: 1000.0,
+                budget: Some(782.9),
+                lower_is_better: true,
+                key: true,
+            }],
+            generated_diff: true,
+        }
+    }
+
+    fn case(case_id: &str, objective: &str, score_override: f64) -> CaseObservation {
+        CaseObservation {
+            case_id: case_id.to_owned(),
+            repository: "repo".to_owned(),
+            passed: true,
+            guardrail: false,
+            rank: Some(1),
+            max_rank: 1,
+            false_positive_count: 0,
+            message: "ok".to_owned(),
+            objective: objective.to_owned(),
+            score_override: Some(score_override),
+        }
     }
 }
