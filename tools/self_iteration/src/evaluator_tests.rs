@@ -357,6 +357,34 @@ mod tests {
     }
 
     #[test]
+    fn generated_repository_names_cannot_escape_run_home() {
+        let run_home = std::env::temp_dir().join("relay-knowledge-self-iteration-safe-roots");
+
+        assert_eq!(
+            generated_repository_root(&run_home, "c_syntax_fixture")
+                .expect("safe name")
+                .strip_prefix(&run_home)
+                .expect("root should stay under run home"),
+            Path::new("generated-repositories/c_syntax_fixture")
+        );
+        for unsafe_name in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "nested/repo",
+            "nested\\repo",
+            "/absolute",
+            "repo.name",
+        ] {
+            assert!(
+                generated_repository_root(&run_home, unsafe_name).is_err(),
+                "{unsafe_name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn judge_uses_openai_compatible_http_when_configured() {
         let env = BTreeMap::from([
             (

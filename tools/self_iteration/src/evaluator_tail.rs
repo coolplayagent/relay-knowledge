@@ -616,12 +616,25 @@ fn prepare_repository_path(
     let Some(fixture) = string_field(repo_config, "generated_fixture") else {
         return Ok((PathBuf::from(string_or(repo_config, "path", "")), Vec::new()));
     };
-    let root = run_home.join("generated-repositories").join(repo_name);
+    let root = generated_repository_root(run_home, repo_name)?;
     create_generated_repository_files(&root, fixture)?;
     Ok((
         root.clone(),
         commit_generated_repository(runtime, repo_name, &root),
     ))
+}
+
+fn generated_repository_root(run_home: &Path, repo_name: &str) -> Result<PathBuf, String> {
+    if repo_name.is_empty()
+        || !repo_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return Err(format!(
+            "generated repository name must be a safe path component: {repo_name:?}"
+        ));
+    }
+    Ok(run_home.join("generated-repositories").join(repo_name))
 }
 
 fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), String> {
@@ -762,6 +775,7 @@ fn commit_generated_repository(
         vec![
             "git",
             "commit",
+            "--no-gpg-sign",
             "-q",
             "-m",
             "Generate relay-knowledge syntax fixture",
