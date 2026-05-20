@@ -66,10 +66,11 @@ use code_query_line_ranges::{
     optional_line_range_with_symbol_context, symbol_result_line_range,
 };
 use code_query_path_ranking::{
-    call_site_example_path_penalty, call_site_source_path_bonus, call_site_test_path_penalty,
-    callee_member_context_bonus, declaration_surface_path_bonus, import_test_path_penalty,
-    query_mentions_example_or_sample, query_mentions_test_or_benchmark,
-    symbol_declaration_surface_path_bonus, symbol_test_path_penalty,
+    CallSiteQueryIntent, call_site_example_path_penalty, call_site_source_path_bonus,
+    call_site_test_path_penalty, callee_member_context_bonus, caller_result_assignment_bonus,
+    declaration_surface_path_bonus, import_test_path_penalty, query_mentions_example_or_sample,
+    query_mentions_test_or_benchmark, symbol_declaration_surface_path_bonus,
+    symbol_test_path_penalty,
 };
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
 use code_query_support::*;
@@ -498,6 +499,10 @@ fn search_calls(
     let score_query = ScoreQuery::new(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
     let query_has_example_intent = query_mentions_example_or_sample(query);
+    let call_site_query_intent = CallSiteQueryIntent {
+        test_or_benchmark: query_has_test_intent,
+        example_or_sample: query_has_example_intent,
+    };
     let rows = rows
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
@@ -594,6 +599,15 @@ fn search_calls(
                     row.caller_excerpt.as_deref(),
                     &row.callee_name,
                     request,
+                )
+                + caller_result_assignment_bonus(
+                    base_score,
+                    &row.path,
+                    query,
+                    row.caller_excerpt.as_deref(),
+                    &row.callee_name,
+                    request,
+                    call_site_query_intent,
                 )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + caller_context_density_bonus(

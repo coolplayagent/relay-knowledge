@@ -1,5 +1,11 @@
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
+#[derive(Clone, Copy)]
+pub(super) struct CallSiteQueryIntent {
+    pub(super) test_or_benchmark: bool,
+    pub(super) example_or_sample: bool,
+}
+
 pub(super) fn call_site_source_path_bonus(
     base_score: f64,
     path: &str,
@@ -67,6 +73,83 @@ pub(super) fn call_site_example_path_penalty(
     }
 
     -0.6
+}
+
+pub(super) fn caller_result_assignment_bonus(
+    base_score: f64,
+    path: &str,
+    query: &str,
+    caller_excerpt: Option<&str>,
+    callee_name: &str,
+    request: &CodeRetrievalRequest,
+    intent: CallSiteQueryIntent,
+) -> f64 {
+    if base_score <= 0.0
+        || request.code_query_kind != CodeQueryKind::Callers
+        || (path_looks_like_test_or_benchmark(path) && !intent.test_or_benchmark)
+        || (path_looks_like_example_or_sample(path) && !intent.example_or_sample)
+        || (path_looks_like_adapter_surface(path) && !query_mentions_adapter_surface(query))
+    {
+        return 0.0;
+    }
+    let Some(caller_excerpt) = caller_excerpt else {
+        return 0.0;
+    };
+    if callee_name.trim().is_empty() {
+        return 0.0;
+    }
+
+    if caller_excerpt
+        .lines()
+        .any(|line| line_contains_assigned_call_result(line, callee_name))
+    {
+        1.15
+    } else {
+        0.0
+    }
+}
+
+fn line_contains_assigned_call_result(line: &str, callee_name: &str) -> bool {
+    let mut search_start = 0;
+    while let Some(relative_index) = line[search_start..].find(callee_name) {
+        let start = search_start + relative_index;
+        let end = start + callee_name.len();
+        let prefix = &line[..start];
+        if identifier_boundary_before(prefix)
+            && assignment_operator_before_call(prefix)
+            && call_suffix(&line[end..])
+        {
+            return true;
+        }
+        search_start = end;
+    }
+
+    false
+}
+
+fn identifier_boundary_before(prefix: &str) -> bool {
+    prefix
+        .chars()
+        .next_back()
+        .is_none_or(|character| !(character.is_ascii_alphanumeric() || character == '_'))
+}
+
+fn assignment_operator_before_call(prefix: &str) -> bool {
+    let Some(index) = prefix.rfind('=') else {
+        return false;
+    };
+    let previous = prefix[..index]
+        .chars()
+        .rev()
+        .find(|character| !character.is_whitespace());
+    if previous.is_some_and(|character| matches!(character, '=' | '!' | '<' | '>')) {
+        return false;
+    }
+    let next = prefix[index + 1..]
+        .chars()
+        .find(|character| !character.is_whitespace());
+
+    !matches!(next, Some('>'))
 }
 
 pub(super) fn callee_member_context_bonus(

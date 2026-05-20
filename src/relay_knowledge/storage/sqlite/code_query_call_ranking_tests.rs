@@ -296,6 +296,205 @@ async fn callers_rank_target_named_surface_above_generic_transport_wrappers() {
     assert!(hits[0].excerpt.contains("redactUrl(snapshot.url"));
 }
 
+#[tokio::test]
+async fn callers_rank_assigned_result_sites_above_plain_invocations() {
+    let assigned_path = "src/runtime/cache_config.ts";
+    let plain_path = "src/runtime/cache_factory.ts";
+    let test_path = "tests/cache_config_test.ts";
+    let mut assigned_symbol = symbol(
+        "assigned-symbol",
+        "assigned-file",
+        assigned_path,
+        "configureRuntimeCache",
+    );
+    assigned_symbol.line_range = range(20, 32);
+    let mut plain_symbol = symbol("plain-symbol", "plain-file", plain_path, "warmRuntimeCache");
+    plain_symbol.line_range = range(40, 52);
+    let mut test_symbol = symbol("test-symbol", "test-file", test_path, "cacheConfigTest");
+    test_symbol.line_range = range(60, 72);
+
+    let assigned_chunk = chunk(
+        "assigned-chunk",
+        "assigned-file",
+        assigned_path,
+        "export function configureRuntimeCache(options) {\n  settings.pool = createPool(options)\n}",
+        Some("assigned-symbol"),
+        range(20, 23),
+    );
+    let plain_chunk = chunk(
+        "plain-chunk",
+        "plain-file",
+        plain_path,
+        "export function warmRuntimeCache(options) {\n  return createPool(options)\n}",
+        Some("plain-symbol"),
+        range(40, 43),
+    );
+    let test_chunk = chunk(
+        "test-chunk",
+        "test-file",
+        test_path,
+        "test('cache config', () => {\n  settings.pool = createPool(fakeOptions)\n})",
+        Some("test-symbol"),
+        range(60, 63),
+    );
+
+    let mut assigned_call = call("assigned-call", "assigned-file", assigned_path);
+    assigned_call.caller_symbol_snapshot_id = Some("assigned-symbol".to_owned());
+    assigned_call.caller_name = Some("configureRuntimeCache".to_owned());
+    assigned_call.callee_name = "createPool".to_owned();
+    assigned_call.target_hint = Some("createPool".to_owned());
+    assigned_call.confidence_basis_points = 6_000;
+    assigned_call.line_range = range(22, 22);
+    let mut plain_call = call("plain-call", "plain-file", plain_path);
+    plain_call.caller_symbol_snapshot_id = Some("plain-symbol".to_owned());
+    plain_call.caller_name = Some("warmRuntimeCache".to_owned());
+    plain_call.callee_name = "createPool".to_owned();
+    plain_call.target_hint = Some("createPool".to_owned());
+    plain_call.confidence_basis_points = 6_000;
+    plain_call.line_range = range(42, 42);
+    let mut test_call = call("test-call", "test-file", test_path);
+    test_call.caller_symbol_snapshot_id = Some("test-symbol".to_owned());
+    test_call.caller_name = Some("cacheConfigTest".to_owned());
+    test_call.callee_name = "createPool".to_owned();
+    test_call.target_hint = Some("createPool".to_owned());
+    test_call.confidence_basis_points = 8_000;
+    test_call.line_range = range(62, 62);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("assigned-file", assigned_path, "typescript"),
+            file("plain-file", plain_path, "typescript"),
+            file("test-file", test_path, "typescript"),
+        ],
+        symbols: vec![assigned_symbol, plain_symbol, test_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![plain_call, test_call, assigned_call],
+        chunks: vec![plain_chunk, test_chunk, assigned_chunk],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("createPool", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, assigned_path);
+    assert!(hits[0].excerpt.contains("settings.pool = createPool"));
+}
+
+#[test]
+fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
+    let callers = request("createPool", CodeQueryKind::Callers);
+    let callees = request("createPool", CodeQueryKind::Callees);
+    let production_intent = CallSiteQueryIntent {
+        test_or_benchmark: false,
+        example_or_sample: false,
+    };
+    let example_intent = CallSiteQueryIntent {
+        test_or_benchmark: false,
+        example_or_sample: true,
+    };
+
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "src/runtime/cache_config.ts",
+            "createPool",
+            Some("settings.pool = createPool(options)"),
+            "createPool",
+            &callers,
+            production_intent,
+        ),
+        1.15
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "src/runtime/client.go",
+            "Dial",
+            Some("client, err := Dial(options)"),
+            "Dial",
+            &callers,
+            production_intent,
+        ),
+        1.15
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "src/runtime/cache_config.ts",
+            "createPool",
+            Some("if (current == createPool(options)) return"),
+            "createPool",
+            &callers,
+            production_intent,
+        ),
+        0.0
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "src/runtime/cache_config.ts",
+            "createPool",
+            Some("settings.pool = recreatePool(options)"),
+            "createPool",
+            &callers,
+            production_intent,
+        ),
+        0.0
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "examples/cache_demo.ts",
+            "createPool",
+            Some("settings.pool = createPool(options)"),
+            "createPool",
+            &callers,
+            production_intent,
+        ),
+        0.0
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "examples/cache_demo.ts",
+            "createPool example",
+            Some("settings.pool = createPool(options)"),
+            "createPool",
+            &callers,
+            example_intent,
+        ),
+        1.15
+    );
+    assert_eq!(
+        caller_result_assignment_bonus(
+            4.0,
+            "src/runtime/cache_config.ts",
+            "createPool",
+            Some("settings.pool = createPool(options)"),
+            "createPool",
+            &callees,
+            production_intent,
+        ),
+        0.0
+    );
+}
+
 #[test]
 fn callee_member_context_bonus_requires_member_call_shape() {
     let callees = request("OwnerTarget", CodeQueryKind::Callees);
