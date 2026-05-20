@@ -21,6 +21,29 @@ impl Mode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strategy {
+    Single,
+    UnattendedLayered,
+}
+
+impl Strategy {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "single" => Ok(Self::Single),
+            "unattended-layered" | "unattended_layered" | "layered" => Ok(Self::UnattendedLayered),
+            other => Err(format!("invalid strategy: {other}")),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::UnattendedLayered => "unattended-layered",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Jobs {
     Auto,
     Fixed(usize),
@@ -136,6 +159,12 @@ impl CategorySet {
         self.categories.contains(&category)
     }
 
+    pub fn single(category: EvaluationCategory) -> Self {
+        let mut categories = BTreeSet::new();
+        categories.insert(category);
+        Self { categories }
+    }
+
     pub fn labels(&self) -> Vec<&'static str> {
         EvaluationCategory::ALL
             .into_iter()
@@ -152,6 +181,7 @@ impl CategorySet {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub mode: Mode,
+    pub strategy: Strategy,
     pub workspace: PathBuf,
     pub yolo: bool,
     pub model: Option<String>,
@@ -172,6 +202,19 @@ pub struct Config {
     pub repo_jobs: Jobs,
     pub query_jobs: Jobs,
     pub categories: Option<CategorySet>,
+    pub max_wall_clock_hours: u64,
+    pub explore_timeout_seconds: u64,
+    pub macro_explore_timeout_seconds: u64,
+    pub max_explore_attempts_per_cycle: usize,
+    pub max_consecutive_empty_candidates: usize,
+    pub max_consecutive_promotion_failures: usize,
+    pub macro_after_competitive_failures: usize,
+    pub macro_after_empty_candidates: usize,
+    pub cycle_sleep_seconds: u64,
+    pub cooldown_after_accept_seconds: u64,
+    pub cooldown_after_timeout_seconds: u64,
+    pub deep_check_interval_accepts: usize,
+    pub deep_check_interval_hours: u64,
 }
 
 impl Config {
@@ -191,6 +234,7 @@ impl Config {
         let mode = parser.take_mode().unwrap_or(Mode::Loop);
         let mut config = Self {
             mode,
+            strategy: Strategy::Single,
             workspace: default_workspace()?,
             yolo: false,
             model: None,
@@ -211,10 +255,24 @@ impl Config {
             repo_jobs: Jobs::Auto,
             query_jobs: Jobs::Auto,
             categories: None,
+            max_wall_clock_hours: 36,
+            explore_timeout_seconds: 900,
+            macro_explore_timeout_seconds: 2700,
+            max_explore_attempts_per_cycle: 3,
+            max_consecutive_empty_candidates: 8,
+            max_consecutive_promotion_failures: 10,
+            macro_after_competitive_failures: 4,
+            macro_after_empty_candidates: 6,
+            cycle_sleep_seconds: 120,
+            cooldown_after_accept_seconds: 300,
+            cooldown_after_timeout_seconds: 900,
+            deep_check_interval_accepts: 6,
+            deep_check_interval_hours: 12,
         };
         while let Some(arg) = parser.next() {
             match arg.as_str() {
                 "--workspace" => config.workspace = PathBuf::from(parser.value("--workspace")?),
+                "--strategy" => config.strategy = Strategy::parse(&parser.value("--strategy")?)?,
                 "--yolo" => config.yolo = true,
                 "--model" => config.model = Some(parser.value("--model")?),
                 "--codex-profile" => config.codex_profile = Some(parser.value("--codex-profile")?),
@@ -233,7 +291,12 @@ impl Config {
                     config.stop_after_accepted = Some(positive_usize(&parser.value(&arg)?, &arg)?);
                 }
                 "--sleep-seconds" => {
-                    config.sleep_seconds = positive_u64(&parser.value(&arg)?, &arg)?;
+                    let value = positive_u64(&parser.value(&arg)?, &arg)?;
+                    config.sleep_seconds = value;
+                    config.cycle_sleep_seconds = value;
+                }
+                "--cycle-sleep-seconds" => {
+                    config.cycle_sleep_seconds = positive_u64(&parser.value(&arg)?, &arg)?;
                 }
                 "--commit-message" => {
                     config.commit_message = Some(parser.value("--commit-message")?)
@@ -248,8 +311,56 @@ impl Config {
                 "--categories" => {
                     config.categories = Some(CategorySet::parse(&parser.value("--categories")?)?);
                 }
+                "--max-wall-clock-hours" => {
+                    config.max_wall_clock_hours = positive_u64(&parser.value(&arg)?, &arg)?;
+                }
+                "--explore-timeout-seconds" => {
+                    config.explore_timeout_seconds = positive_u64(&parser.value(&arg)?, &arg)?;
+                }
+                "--macro-explore-timeout-seconds" => {
+                    config.macro_explore_timeout_seconds =
+                        positive_u64(&parser.value(&arg)?, &arg)?;
+                }
+                "--max-explore-attempts-per-cycle" => {
+                    config.max_explore_attempts_per_cycle =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--max-consecutive-empty-candidates" => {
+                    config.max_consecutive_empty_candidates =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--max-consecutive-promotion-failures" => {
+                    config.max_consecutive_promotion_failures =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--macro-after-competitive-failures" => {
+                    config.macro_after_competitive_failures =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--macro-after-empty-candidates" => {
+                    config.macro_after_empty_candidates =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--cooldown-after-accept-seconds" => {
+                    config.cooldown_after_accept_seconds =
+                        positive_u64(&parser.value(&arg)?, &arg)?;
+                }
+                "--cooldown-after-timeout-seconds" => {
+                    config.cooldown_after_timeout_seconds =
+                        positive_u64(&parser.value(&arg)?, &arg)?;
+                }
+                "--deep-check-interval-accepts" => {
+                    config.deep_check_interval_accepts =
+                        positive_usize(&parser.value(&arg)?, &arg)?;
+                }
+                "--deep-check-interval-hours" => {
+                    config.deep_check_interval_hours = positive_u64(&parser.value(&arg)?, &arg)?;
+                }
                 other if other.starts_with("--workspace=") => {
                     config.workspace = PathBuf::from(suffix(other, "--workspace="));
+                }
+                other if other.starts_with("--strategy=") => {
+                    config.strategy = Strategy::parse(suffix(other, "--strategy="))?;
                 }
                 other if other.starts_with("--profile=") => {
                     config.profile = profile(suffix(other, "--profile=").to_owned())?;
@@ -265,6 +376,24 @@ impl Config {
                 }
                 other if other.starts_with("--categories=") => {
                     config.categories = Some(CategorySet::parse(suffix(other, "--categories="))?);
+                }
+                other if other.starts_with("--max-wall-clock-hours=") => {
+                    config.max_wall_clock_hours = positive_u64(
+                        suffix(other, "--max-wall-clock-hours="),
+                        "--max-wall-clock-hours",
+                    )?;
+                }
+                other if other.starts_with("--explore-timeout-seconds=") => {
+                    config.explore_timeout_seconds = positive_u64(
+                        suffix(other, "--explore-timeout-seconds="),
+                        "--explore-timeout-seconds",
+                    )?;
+                }
+                other if other.starts_with("--macro-explore-timeout-seconds=") => {
+                    config.macro_explore_timeout_seconds = positive_u64(
+                        suffix(other, "--macro-explore-timeout-seconds="),
+                        "--macro-explore-timeout-seconds",
+                    )?;
                 }
                 other => return Err(format!("unexpected argument: {other}")),
             }
@@ -453,6 +582,51 @@ mod tests {
         .expect_err("invalid category should fail");
 
         assert!(error.contains("invalid evaluation category"));
+    }
+
+    #[test]
+    fn parses_unattended_layered_defaults() {
+        let config = Config::parse(vec![
+            "loop".to_owned(),
+            "--strategy".to_owned(),
+            "unattended-layered".to_owned(),
+        ])
+        .expect("config should parse");
+
+        assert_eq!(config.strategy, Strategy::UnattendedLayered);
+        assert_eq!(config.max_wall_clock_hours, 36);
+        assert_eq!(config.explore_timeout_seconds, 900);
+        assert_eq!(config.macro_explore_timeout_seconds, 2700);
+        assert_eq!(config.max_explore_attempts_per_cycle, 3);
+        assert_eq!(config.macro_after_competitive_failures, 4);
+        assert_eq!(config.macro_after_empty_candidates, 6);
+        assert_eq!(config.cycle_sleep_seconds, 120);
+    }
+
+    #[test]
+    fn parses_unattended_layered_overrides() {
+        let config = Config::parse(vec![
+            "loop".to_owned(),
+            "--strategy=layered".to_owned(),
+            "--max-wall-clock-hours=48".to_owned(),
+            "--explore-timeout-seconds=600".to_owned(),
+            "--macro-explore-timeout-seconds=1800".to_owned(),
+            "--max-explore-attempts-per-cycle".to_owned(),
+            "2".to_owned(),
+            "--macro-after-competitive-failures".to_owned(),
+            "3".to_owned(),
+            "--cycle-sleep-seconds".to_owned(),
+            "30".to_owned(),
+        ])
+        .expect("config should parse");
+
+        assert_eq!(config.strategy, Strategy::UnattendedLayered);
+        assert_eq!(config.max_wall_clock_hours, 48);
+        assert_eq!(config.explore_timeout_seconds, 600);
+        assert_eq!(config.macro_explore_timeout_seconds, 1800);
+        assert_eq!(config.max_explore_attempts_per_cycle, 2);
+        assert_eq!(config.macro_after_competitive_failures, 3);
+        assert_eq!(config.cycle_sleep_seconds, 30);
     }
 
     #[test]

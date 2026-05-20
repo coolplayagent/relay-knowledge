@@ -31,6 +31,8 @@ Useful variants:
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile fast --categories semantic_vector,competitive
 ./self-iterate.sh once --profile smoke --dry-run-codex
+./self-iterate.sh loop --strategy unattended-layered
+./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
 
 ## Progress logs
@@ -141,6 +143,49 @@ limit.
 The prompt includes bounded run history, a direct synthesis of accepted and
 rejected patterns, progressive memory, and patch indexes so repeated rejections
 stay tied to recent evidence instead of retrying the same shape of patch.
+
+## Unattended layered strategy
+
+`--strategy unattended-layered` is the default long-run mode for 1-2 day
+unattended sessions. It keeps the normal single-iteration behavior untouched
+unless the strategy is explicitly selected.
+
+Defaults are tuned for a 36-hour run: `--max-wall-clock-hours 36`,
+`--stop-after-accepted 8`, `--explore-timeout-seconds 900`,
+`--macro-explore-timeout-seconds 2700`,
+`--max-explore-attempts-per-cycle 3`,
+`--max-consecutive-empty-candidates 8`,
+`--max-consecutive-promotion-failures 10`,
+`--macro-after-competitive-failures 4`,
+`--macro-after-empty-candidates 6`, `--cycle-sleep-seconds 120`,
+`--cooldown-after-accept-seconds 300`, and
+`--cooldown-after-timeout-seconds 900`.
+
+Each cycle runs short `smoke` explore attempts over the rotation
+`competitive -> semantic_vector -> performance -> repository_sets`. Codex runs
+only in the explore layer. A candidate that passes the smoke screen is validated
+with `fast` under the same category and only then reaches the existing
+accept/commit path. The generated patch is reused across screen and validation
+so the same candidate is not regenerated.
+
+When short attempts stall, the strategy escalates to `macro_explore` for
+competitive capability. Macro escalation triggers after repeated competitive
+promotion failures, repeated empty candidates, or a competitive-capability gap
+against the best accepted focused baseline. The macro prompt includes
+`research_judge_suite.competitive_feature_targets` and
+`implementation_guardrails` from `cases.json`, asks for a larger ranking,
+indexing, relationship extraction, query-planning, context-construction, or
+retrieval-evidence improvement, and still forbids fixture-specific
+enumeration.
+
+Run state is persisted in
+`.git/relay-knowledge-self-iteration/unattended-state-v2.json` so a crashed
+session can resume its category rotation, failure counters, accepted count, and
+deep-check schedule. Layered history records add `strategy`, `layer`,
+`parent_run_id`, `promoted_from_run_id`, `macro_trigger`,
+`promotion_decision`, and wall-clock fields. Passing `--use-current-candidate`
+skips Codex and starts the layered path from the current diff's smoke screen and
+fast validation.
 
 ## Scoring and acceptance
 
