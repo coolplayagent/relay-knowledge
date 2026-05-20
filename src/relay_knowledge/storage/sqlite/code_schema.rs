@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use crate::storage::StorageError;
 
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
+const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -349,6 +350,12 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_scopes(repository_id, resolved_commit_sha, path_filters_json, language_filters_json);
         ",
     )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "code_repository_schema_migrations",
+        "applied_at_ms",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
     rebuild_call_search_documents_after_signature_upgrade(connection)?;
@@ -629,11 +636,25 @@ fn backfill_search_chunks(connection: &Connection) -> Result<(), StorageError> {
         ",
         [],
     )?;
-
     Ok(())
 }
-
 fn backfill_edge_search_language_ids(connection: &Connection) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)? {
+        return Ok(());
+    }
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    if let Err(error) = backfill_edge_search_language_ids_once(connection) {
+        let _ = connection.execute_batch("ROLLBACK");
+        return Err(error);
+    }
+    connection
+        .execute_batch("COMMIT")
+        .map_err(StorageError::from)
+}
+fn backfill_edge_search_language_ids_once(connection: &Connection) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)? {
+        return Ok(());
+    }
     connection.execute(
         "
         UPDATE code_repository_search
@@ -655,10 +676,9 @@ fn backfill_edge_search_language_ids(connection: &Connection) -> Result<(), Stor
         ",
         [],
     )?;
-
+    mark_code_schema_migration(connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)?;
     Ok(())
 }
-
 fn code_schema_migration_applied(
     connection: &Connection,
     name: &str,
@@ -677,7 +697,6 @@ fn code_schema_migration_applied(
         )
         .map_err(StorageError::from)
 }
-
 fn mark_code_schema_migration(connection: &Connection, name: &str) -> Result<(), StorageError> {
     connection.execute(
         "
@@ -686,25 +705,20 @@ fn mark_code_schema_migration(connection: &Connection, name: &str) -> Result<(),
         ",
         [name],
     )?;
-
     Ok(())
 }
-
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, StorageError> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
 }
-
 fn table_has_columns(
     connection: &Connection,
     table: &str,
     required_columns: &[&str],
 ) -> Result<bool, StorageError> {
     let columns = table_columns(connection, table)?;
-
     Ok(required_columns
         .iter()
         .all(|required| columns.iter().any(|column| column == required)))
@@ -715,7 +729,8 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        CALL_SEARCH_SIGNATURE_MIGRATION, code_schema_migration_applied, initialize_code_schema,
+        CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION,
+        code_schema_migration_applied, initialize_code_schema,
     };
 
     #[test]
@@ -917,5 +932,66 @@ mod tests {
             .expect("call search row should load");
 
         assert_eq!(content, "already migrated sentinel");
+    }
+
+    #[test]
+    fn edge_language_backfill_is_marked_after_one_legacy_update() {
+        let connection = Connection::open_in_memory().expect("database should open");
+        connection
+            .execute(
+                "CREATE TABLE code_repository_schema_migrations (name TEXT PRIMARY KEY)",
+                [],
+            )
+            .expect("legacy migration table should initialize");
+        initialize_code_schema(&connection).expect("code schema should initialize");
+        connection
+            .execute_batch(
+                "
+                DELETE FROM code_repository_schema_migrations
+                WHERE name = 'edge-search-language-ids-v1';
+                INSERT INTO code_repositories
+                VALUES ('repo', 'fixture', '/tmp/repo', '[]', '[]', NULL, NULL, NULL, 'fresh',
+                        0, 0, 0, 0, 0, NULL);
+                INSERT INTO code_repository_files
+                VALUES ('repo', 'scope', 'import-file', 'src/lib.rs', 'rust', 'hash',
+                        20, 1, 'parsed', NULL);
+                INSERT INTO code_repository_search (
+                    source_scope, document_kind, record_id, path, language_id, content
+                )
+                VALUES ('scope', 'import', 'import-1', 'src/lib.rs', '', 'use crate::target');
+                ",
+            )
+            .expect("legacy edge search row should insert");
+
+        initialize_code_schema(&connection).expect("legacy edge language should backfill");
+        assert_eq!(edge_search_language(&connection), "rust");
+        assert!(
+            code_schema_migration_applied(&connection, EDGE_SEARCH_LANGUAGE_ID_MIGRATION)
+                .expect("migration marker should load")
+        );
+
+        connection
+            .execute(
+                "UPDATE code_repository_search SET language_id = '' WHERE record_id = 'import-1'",
+                [],
+            )
+            .expect("sentinel row should be editable");
+        initialize_code_schema(&connection).expect("marked edge language backfill should skip");
+
+        assert_eq!(edge_search_language(&connection), "");
+    }
+
+    fn edge_search_language(connection: &Connection) -> String {
+        connection
+            .query_row(
+                "
+                SELECT language_id
+                FROM code_repository_search
+                WHERE document_kind = 'import' AND record_id = 'import-1'
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("edge search row should load")
     }
 }
