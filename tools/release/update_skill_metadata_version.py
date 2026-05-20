@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Update or verify SKILL.md frontmatter metadata.version."""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+
+VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
+FRONTMATTER_BOUNDARY = "---"
+METADATA_HEADER = "metadata:"
+METADATA_VERSION_PREFIX = "  version:"
+
+
+def validate_version(version: str) -> None:
+    if not VERSION_PATTERN.fullmatch(version):
+        raise ValueError(f"metadata.version must be numeric semver: {version}")
+
+
+def frontmatter_end_index(lines: list[str]) -> int:
+    if not lines or lines[0] != FRONTMATTER_BOUNDARY:
+        raise ValueError("SKILL.md must start with YAML frontmatter")
+    try:
+        return lines.index(FRONTMATTER_BOUNDARY, 1)
+    except ValueError as error:
+        raise ValueError("SKILL.md frontmatter is missing a closing boundary") from error
+
+
+def metadata_header_index(lines: list[str], end_index: int) -> int:
+    for index in range(1, end_index):
+        if lines[index] == METADATA_HEADER:
+            return index
+    raise ValueError("SKILL.md frontmatter is missing metadata")
+
+
+def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
+    for index in range(metadata_index + 1, end_index):
+        line = lines[index]
+        if line and not line.startswith(" "):
+            return None
+        if line.startswith(METADATA_VERSION_PREFIX):
+            return index
+    return None
+
+
+def read_metadata_version(path: Path) -> str | None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    end_index = frontmatter_end_index(lines)
+    metadata_index = metadata_header_index(lines, end_index)
+    version_index = metadata_version_index(lines, metadata_index, end_index)
+    if version_index is None:
+        return None
+    return lines[version_index].split(":", 1)[1].strip()
+
+
+def write_metadata_version(path: Path, version: str) -> None:
+    validate_version(version)
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    end_index = frontmatter_end_index(lines)
+    metadata_index = metadata_header_index(lines, end_index)
+    version_index = metadata_version_index(lines, metadata_index, end_index)
+
+    if version_index is None:
+        lines.insert(metadata_index + 1, f"  version: {version}")
+    else:
+        lines[version_index] = f"  version: {version}"
+
+    trailing_newline = "\n" if text.endswith("\n") else ""
+    path.write_text("\n".join(lines) + trailing_newline, encoding="utf-8")
+
+
+def check_metadata_version(path: Path, expected: str) -> None:
+    validate_version(expected)
+    actual = read_metadata_version(path)
+    if actual != expected:
+        raise ValueError(f"{path} metadata.version is {actual!r}; expected {expected!r}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="verify without rewriting")
+    parser.add_argument("skill_md", type=Path)
+    parser.add_argument("version")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        if args.check:
+            check_metadata_version(args.skill_md, args.version)
+        else:
+            write_metadata_version(args.skill_md, args.version)
+            check_metadata_version(args.skill_md, args.version)
+    except (OSError, ValueError) as error:
+        print(error, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

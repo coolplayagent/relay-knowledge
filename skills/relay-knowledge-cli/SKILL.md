@@ -2,6 +2,7 @@
 name: relay-knowledge-cli
 description: Use relay-knowledge through its local CLI for knowledge graph ingestion, hybrid GraphRAG queries, code repository registration, indexing, code graph search, impact analysis, setup diagnostics, installation checks, and upgrade checks. Use when an agent should operate relay-knowledge by running CLI commands and parsing JSON output. Do not use this skill for MCP server setup, MCP tools, ACP adapters, or protocol-level agent access.
 metadata:
+  version: 1.0.6
   openclaw:
     skillKey: relay-knowledge-cli
     homepage: https://github.com/coolplayagent/relay-knowledge
