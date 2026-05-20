@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779289140323481046-exact-path-symbol-chunk-ranking
+- 算法：复用既有 exact-path scoring，让 symbol/definition 与 Hybrid chunk 后置排序在 query 精确指向文件路径或文件名时提升真实 path 命中，而不是只给路径字段 substring 小分；mention-only 候选仍可召回但不应压过实际文件。
+- 架构/不变量：变更限定在 SQLite code retrieval 的 bounded Rust scoring 与 focused ranking tests；不改变 FTS MATCH、candidate window、schema、parser、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API JSON、安装发布或 self-iteration harness，且未加入仓库、路径、case、query 或 fixture 特殊分支。
+- 预期影响/风险：竞争性代码检索中，路径型 Hybrid/Definition 查询更稳定地返回被点名的文件内 symbol/chunk，减少文档注释或源码文本提到同一路径时的 false-positive 排名；风险是确实按路径查找时该文件内候选小幅上移，受 exact full-path/basename match、既有 FTS 候选、正分过滤和 top-k 截断约束。
 ## 候选优化说明：run-1779288737045050045-derived-cursor-streaming
 - 算法：SQLite semantic/vector derived read model 保留既有 SQL 候选剪枝、scope/version 过滤、候选上限、评分公式和最终排序；将 `query_map` 返回的 bounded cursor 逐行解码并立即执行 Rust 后置评分，避免先把所有 raw row tuple 收集到临时 `Vec` 再遍历。
 - 架构/不变量：变更限定在 `storage::sqlite::retrieval::derived` 的候选循环；不改变 schema、BM25、semantic/vector token 或 hash 向量、candidate window、lexical/cosine admission、RRF fusion、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query、模型或 provider 特殊分支。
@@ -986,6 +990,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=2136ms; self_iteration_cargo_fmt_check_ms=342ms; cargo_build_debug_ms=403ms; self_iteration_cargo_check_ms=141ms; temporal_samples_go_index_ms=888ms; temporal_samples_go_register_index_ms=1634ms; temporal_sdk_go_index_ms=1669ms; temporal_sdk_go_register_index_ms=4447ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779289571171823700-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779289140323481046-explore.patch`
+- score: 0.844285 (foundational=0.900000, competitive=0.602778, accuracy=0.751389, semantic_vector=1.000000, research_judge=n/a, performance=0.742631, stability=1.000000)
+- cases: 29/42 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=2094ms; self_iteration_cargo_fmt_check_ms=402ms; cargo_build_debug_ms=382ms; self_iteration_cargo_check_ms=2335ms; c_syntax_fixture_index_ms=161ms; c_syntax_fixture_register_index_ms=222ms; c_syntax_fixture_query_p50_ms=181ms; c_syntax_fixture_query_p95_ms=314ms
 
 Adopted optimization notes:
 

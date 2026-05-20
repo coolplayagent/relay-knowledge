@@ -245,6 +245,67 @@ async fn hybrid_chunks_prefer_compact_high_coverage_usage() {
     assert!(hits[0].score > hits[1].score);
 }
 
+#[tokio::test]
+async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
+    let target_path = "src/runtime/config.ts";
+    let noise_path = "aaa/noise.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("noise-file", noise_path, "typescript"),
+            file("target-file", target_path, "typescript"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "noise-chunk",
+                "noise-file",
+                noise_path,
+                "See src/runtime/config.ts for runtime configuration.",
+                range(1, 3),
+                None,
+            ),
+            chunk(
+                "target-chunk",
+                "target-file",
+                target_path,
+                "const defaults = loadRuntimeSettings();",
+                range(10, 12),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(target_path, CodeQueryKind::Hybrid))
+        .await
+        .expect("path hybrid query should succeed");
+
+    assert_eq!(hits[0].path, target_path);
+    let target = lexical_hit_score(&hits, 10).expect("target chunk should be recalled");
+    let noise = lexical_hit_score(&hits, 1).expect("noise chunk should be recalled");
+    assert!(
+        target > noise,
+        "exact chunk path should outrank mention-only hit: {target} <= {noise}",
+    );
+}
+
 fn lexical_hit_score(hits: &[CodeRetrievalHit], line_start: u32) -> Option<f64> {
     hits.iter()
         .find(|hit| {

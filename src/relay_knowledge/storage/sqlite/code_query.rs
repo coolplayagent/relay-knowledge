@@ -512,6 +512,7 @@ fn search_chunks(
                 )
             });
             let score = score_query.score([&row.content, &row.path])
+                + score_exact_path(&query, &row.path)
                 + declaration_bonus
                 + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
                 + symbol_bonus;

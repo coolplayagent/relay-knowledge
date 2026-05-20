@@ -138,6 +138,71 @@ async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
     assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("db-open"));
 }
 
+#[tokio::test]
+async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
+    let target_path = "src/runtime/config.rs";
+    let noise_path = "aaa/noise.rs";
+    let mut target = symbol(
+        "target-symbol",
+        "target-file",
+        target_path,
+        "function",
+        "fn load_settings() -> Settings {",
+        range(12, 12),
+    );
+    target.name = "load_settings".to_owned();
+    target.qualified_name = "runtime::load_settings".to_owned();
+    let mut noise = symbol(
+        "noise-symbol",
+        "noise-file",
+        noise_path,
+        "function",
+        "fn unrelated() {}",
+        range(4, 4),
+    );
+    noise.name = "unrelated".to_owned();
+    noise.doc_comment = Some(format!("See {target_path} for runtime configuration."));
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("noise-file", noise_path),
+            file("target-file", target_path),
+        ],
+        symbols: vec![noise, target],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(target_path, CodeQueryKind::Definition))
+        .await
+        .expect("path definition query should succeed");
+
+    assert_eq!(hits[0].path, target_path);
+    let target_score = score_for_path(&hits, target_path).expect("target should match");
+    let noise_score = score_for_path(&hits, noise_path).expect("noise should match");
+    assert!(
+        target_score > noise_score,
+        "exact symbol path should outrank mention-only hit: {target_score} <= {noise_score}",
+    );
+}
+
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)

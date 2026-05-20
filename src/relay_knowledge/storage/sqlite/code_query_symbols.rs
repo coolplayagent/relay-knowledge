@@ -211,14 +211,15 @@ fn symbol_rows_to_hits(
                 row.signature.as_str(),
                 row.doc_comment.as_deref().unwrap_or_default(),
                 row.path.as_str(),
-            ]) + symbol_query_bonus(
-                query,
-                &row.name,
-                &row.qualified_name,
-                &row.signature,
-                &row.canonical_symbol_id,
-                request,
-            );
+            ]) + score_exact_path(query, &row.path)
+                + symbol_query_bonus(
+                    query,
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                    request,
+                );
             (score > 0.0).then(|| {
                 let score = score
                     + 2.0
