@@ -104,6 +104,27 @@ fn fts_query_compound_identifier_alternatives_are_bounded() {
 }
 
 #[test]
+fn candidate_limits_are_layer_aware_and_bounded_for_repo_set_fanout() {
+    let request = candidate_limit_request(30);
+
+    assert_eq!(candidate_limit(&request, CandidateLayer::Symbol), 800);
+    assert_eq!(candidate_limit(&request, CandidateLayer::Reference), 700);
+    assert_eq!(candidate_limit(&request, CandidateLayer::Call), 800);
+    assert_eq!(candidate_limit(&request, CandidateLayer::Import), 700);
+    assert_eq!(candidate_limit(&request, CandidateLayer::Chunk), 900);
+
+    let top_k_request = candidate_limit_request(10);
+    assert_eq!(candidate_limit(&top_k_request, CandidateLayer::Call), 400);
+    assert_eq!(candidate_limit(&top_k_request, CandidateLayer::Chunk), 450);
+
+    let direct_call_request = direct_call_candidate_limit_request(10);
+    assert_eq!(
+        candidate_limit(&direct_call_request, CandidateLayer::Call),
+        1000
+    );
+}
+
+#[test]
 fn score_text_matches_identifier_parts_inside_snake_case_names() {
     let score = score_text(
         "archive output directory",
@@ -865,6 +886,34 @@ fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest
 
     CodeRetrievalRequest::new(query, selector, kind, 10, FreshnessPolicy::AllowStale)
         .expect("request should be valid")
+}
+
+fn candidate_limit_request(limit: usize) -> CodeRetrievalRequest {
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should be valid");
+
+    CodeRetrievalRequest::new(
+        "target",
+        selector,
+        CodeQueryKind::Hybrid,
+        limit,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should be valid")
+}
+
+fn direct_call_candidate_limit_request(limit: usize) -> CodeRetrievalRequest {
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+        .expect("selector should be valid");
+
+    CodeRetrievalRequest::new(
+        "target",
+        selector,
+        CodeQueryKind::Callers,
+        limit,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should be valid")
 }
 
 fn code_query_snapshot(

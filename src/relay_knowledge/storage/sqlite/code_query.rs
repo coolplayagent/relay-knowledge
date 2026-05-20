@@ -183,8 +183,8 @@ fn search_symbols(
             status,
             request,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Symbol),
+            candidate_limit(request, CandidateLayer::Symbol),
         )),
         |row| {
             Ok(SymbolRow {
@@ -319,8 +319,8 @@ fn search_references(
             status,
             request,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Reference),
+            candidate_limit(request, CandidateLayer::Reference),
         )),
         |row| {
             Ok(ReferenceRow {
@@ -461,8 +461,8 @@ fn search_calls(
             status,
             request,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Call),
+            candidate_limit(request, CandidateLayer::Call),
         )),
         |row| {
             Ok(CallRow {
@@ -691,8 +691,8 @@ fn search_imports(
             status,
             request,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Import),
+            candidate_limit(request, CandidateLayer::Import),
         )),
         |row| {
             Ok(ImportRow {
@@ -860,8 +860,8 @@ fn search_chunks(
             status,
             request,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Chunk),
+            candidate_limit(request, CandidateLayer::Chunk),
         )),
         |row| {
             Ok(ChunkRow {

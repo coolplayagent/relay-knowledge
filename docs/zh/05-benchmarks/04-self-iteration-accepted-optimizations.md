@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779234885-layer-aware-code-query-candidate-windows
+- 算法：把 SQLite code retrieval 的单一 `limit * 100` 候选窗口拆成按 retrieval layer 配置的有界窗口；symbol/reference/call/import/chunk 分别使用不同 multiplier、minimum 与 maximum，使普通 top-k 查询减少过量 FTS row materialization，repo-set fan-out 也不会把每个成员的每个 layer 推到旧的 2000 row 上限；显式 `callers`/`callees` 查询保留较宽的 1000 row call 窗口，避免长尾调用点被提前截断。
+- 架构：变更限定在 `storage::sqlite::code_query_support` 的候选预算函数及其调用点，`search_symbols`、`search_references`、`search_calls`、`search_imports`、import-target symbol lookup 与 `search_chunks` 仍走原有 FTS、path/language filter、后置评分、dedupe/truncate、freshness/version evidence；不改 parser、graph facts、SQLite schema、repo-set overlay、semantic/vector provider、env/paths/net、CLI/API、安装发布或 self-iteration harness。
+- 不变量：所有候选仍先经过 FTS MATCH、scope/path/language filter 与 direction/import filters，再进入既有 Rust scoring；每层窗口保留最小 200-300 条、最大 700-900 条，不引入仓库、路径、case id、query 字符串、模型或 provider 特殊分支；foundational、competitive、semantic/vector 与 stability protected floors 的事实来源和 API 输出格式保持不变。
+- 预期影响/风险：LevelDB、relay-teams 与 Temporal repo-set 的 hybrid/caller/import 查询会少解码和评分大量低收益候选，降低 p50/p95 与 repo-set query 乘法放大，同时保持多语言 fuzzy、qualified 和 compact chunk ranking 的泛化能力。风险是极低相关度目标若只出现在旧窗口深处可能不再进入后置评分；该风险受 layer-specific 最小窗口、FTS/path/language 前置过滤、现有 full-scope regression/challenge cases 与新增预算单测控制。
 ## 候选优化说明：run-1779224375-compact-high-coverage-hybrid-chunks
 - 算法：Hybrid lexical chunk 后置评分对已由 FTS 召回且 base score 足够高的候选，若源码块不超过 20 个非空行、覆盖至少 4 个且不少于 75% 的规范化查询词，则给有界 compactness bonus；同时让既有 scoped identity bonus 匹配长查询中的第一个 scoped token 子短语，例如 `client.Dial`，而不是要求整条自然语言 query 都连续出现在 symbol identity 中。
 - 架构：变更限定在 SQLite code query 的 Rust scoring 层，复用既有 execution-flow/scoped-identity helper 与单测；不改变 parser、graph facts、SQLite schema、FTS MATCH、candidate limit、repo-set fan-out/overlay、semantic/vector provider、env/paths/net、CLI/API、安装发布或 self-iteration harness。

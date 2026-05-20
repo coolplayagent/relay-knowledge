@@ -9,7 +9,7 @@ use crate::{
 
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
-    candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
+    CandidateLayer, candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
     push_language_filter_values, push_path_filter_values, score_text, symbol_fts_match_query,
 };
 use super::required_scope;
@@ -216,7 +216,9 @@ fn search_imports_by_target_hint_chunk(
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
     push_language_filter_values(&mut values, &request.repository.language_filters);
-    values.push(Value::Integer(candidate_limit(request) as i64));
+    values.push(Value::Integer(
+        candidate_limit(request, CandidateLayer::Import) as i64,
+    ));
     let sql = format!(
         "
         SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
@@ -289,8 +291,8 @@ fn import_target_symbol_matches(
         params_from_iter(symbol_target_fts_values_for_limited(
             required_scope(status)?,
             &fts_query,
-            candidate_limit(request),
-            candidate_limit(request),
+            candidate_limit(request, CandidateLayer::Symbol),
+            candidate_limit(request, CandidateLayer::Symbol),
         )),
         |row| {
             Ok((

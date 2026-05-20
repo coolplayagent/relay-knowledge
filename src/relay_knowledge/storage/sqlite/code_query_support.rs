@@ -716,8 +716,34 @@ pub(super) fn candidate_patterns(query: &str, max_patterns: usize) -> Vec<String
     patterns
 }
 
-pub(super) fn candidate_limit(request: &CodeRetrievalRequest) -> usize {
-    request.limit.saturating_mul(100).clamp(500, 2000)
+#[derive(Clone, Copy)]
+pub(super) enum CandidateLayer {
+    Symbol,
+    Reference,
+    Call,
+    Import,
+    Chunk,
+}
+
+pub(super) fn candidate_limit(request: &CodeRetrievalRequest, layer: CandidateLayer) -> usize {
+    let requested = request.limit.max(1);
+    let (multiplier, minimum, maximum) = match layer {
+        CandidateLayer::Symbol => (40usize, 200usize, 800usize),
+        CandidateLayer::Reference => (35, 200, 700),
+        CandidateLayer::Call
+            if matches!(
+                request.code_query_kind,
+                CodeQueryKind::Callers | CodeQueryKind::Callees
+            ) =>
+        {
+            (100, 500, 1000)
+        }
+        CandidateLayer::Call => (40, 250, 800),
+        CandidateLayer::Import => (35, 200, 700),
+        CandidateLayer::Chunk => (45, 300, 900),
+    };
+
+    requested.saturating_mul(multiplier).clamp(minimum, maximum)
 }
 
 pub(super) fn fts_match_query(query: &str) -> String {
