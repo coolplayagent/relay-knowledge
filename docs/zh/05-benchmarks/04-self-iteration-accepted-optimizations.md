@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779290792704425429-derived-scope-version-pushdown
+- 算法：SQLite semantic/vector derived read model 为 `source_scope, created_graph_version` 建立持久索引，并在有 scope 的查询中生成 `source_scope = ? AND created_graph_version <= ?`，让 SQLite 可先按仓库/图版本缩小候选，再执行 bounded token LIKE 剪枝与 ranking。
+- 架构/不变量：变更限定在 retrieval schema 初始化、derived candidate request binding 与 focused tests；不改变 graph/schema row 内容、BM25、semantic token signature、hash vector、candidate 上限、lexical/cosine admission、RRF fusion、CLI/API JSON、provider backend、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query、模型或 provider 特殊分支。
+- 预期影响/风险：scoped graph retrieval 在多仓或多 scope 数据库中减少 semantic/vector candidate scan 的无关行数，预期降低 smoke profile 查询 CPU 和延迟；风险是首次打开旧库需要创建两个普通 B-tree 索引，索引维护会给 derived document 写入增加小额成本，但查询召回、分数和排序保持等价。
 ## 候选优化说明：run-1779289906426170921-derived-token-signature-filter
 - 算法：SQLite semantic read model 的 SQL 候选剪枝直接使用已存储的 normalized token signature，并按 JSON string token 生成 literal LIKE pattern；vector read model 保留 content/path/label 候选字段，但同样对 `%`、`_` 与 escape 字符做 literal escaping，避免 identifier token 被 SQL wildcard 扩大。
 - 架构/不变量：变更限定在 `storage::sqlite::retrieval::derived` 的 bounded candidate planner 与单元测试；不改变 schema、BM25、semantic overlap score、hash vector、candidate 上限、lexical/cosine admission、RRF fusion、CLI/API JSON、provider backend、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query、模型或 provider 特殊分支。
@@ -969,6 +973,20 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=1978ms; self_iteration_cargo_fmt_check_ms=363ms; cargo_build_debug_ms=34598ms; self_iteration_cargo_check_ms=141ms; relay_teams_index_ms=2119ms; relay_teams_register_index_ms=2806ms; relay_teams_query_p50_ms=787ms; relay_teams_query_p95_ms=787ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779291615794938640-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779290792704425429-explore.patch`
+- score: 0.866130 (foundational=0.947917, competitive=0.621212, accuracy=0.784564, semantic_vector=1.000000, research_judge=n/a, performance=0.782900, stability=1.000000)
+- cases: 40/52 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=1916ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; relay_teams_index_ms=2159ms; relay_teams_register_index_ms=2846ms; relay_teams_query_p50_ms=1149ms; relay_teams_query_p95_ms=2097ms
 
 Adopted optimization notes:
 

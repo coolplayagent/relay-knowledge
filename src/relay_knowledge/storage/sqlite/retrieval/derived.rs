@@ -38,6 +38,7 @@ pub(super) fn semantic_candidates(
     }
 
     let result_limit = bounded_candidate_limit(request);
+    let (scope_version_condition, scope_version_values) = derived_scope_version_filter(request)?;
     let (candidate_condition, ranking_expression, candidate_values) =
         derived_candidate_filter(&query_terms, SEMANTIC_CANDIDATE_FIELDS);
     let sql = format!(
@@ -46,8 +47,7 @@ pub(super) fn semantic_candidates(
                source_scope, source_path, entity_labels_json, content, token_signature_json,
                model, dimension, source_hash
         FROM graph_semantic_documents
-        WHERE (? IS NULL OR source_scope = ?)
-          AND created_graph_version <= ?
+        WHERE {scope_version_condition}
           AND ({candidate_condition})
         ORDER BY {ranking_expression} DESC, created_graph_version DESC, document_id ASC
         LIMIT ?
@@ -56,7 +56,7 @@ pub(super) fn semantic_candidates(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(derived_candidate_values(
-            request,
+            scope_version_values,
             candidate_values,
             result_limit,
         )?),
@@ -155,6 +155,7 @@ pub(super) fn vector_candidates(
     if query_terms.is_empty() {
         return Ok(Vec::new());
     }
+    let (scope_version_condition, scope_version_values) = derived_scope_version_filter(request)?;
     let (candidate_condition, ranking_expression, candidate_values) =
         derived_candidate_filter(&query_terms, VECTOR_CANDIDATE_FIELDS);
     let sql = format!(
@@ -163,8 +164,7 @@ pub(super) fn vector_candidates(
                source_scope, source_path, entity_labels_json, content, vector_json, model,
                dimension, source_hash
         FROM graph_vector_documents
-        WHERE (? IS NULL OR source_scope = ?)
-          AND created_graph_version <= ?
+        WHERE {scope_version_condition}
           AND ({candidate_condition})
         ORDER BY {ranking_expression} DESC, created_graph_version DESC, document_id ASC
         LIMIT ?
@@ -173,7 +173,7 @@ pub(super) fn vector_candidates(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(
         params_from_iter(derived_candidate_values(
-            request,
+            scope_version_values,
             candidate_values,
             result_limit,
         )?),
@@ -406,29 +406,37 @@ fn escape_like_pattern(value: &str) -> String {
     escaped
 }
 
-fn derived_candidate_values(
+fn derived_scope_version_filter(
     request: &GraphSearchRequest,
-    candidate_values: Vec<Value>,
-    result_limit: usize,
-) -> Result<Vec<Value>, StorageError> {
+) -> Result<(&'static str, Vec<Value>), StorageError> {
     let graph_version = i64::try_from(request.graph_version.get()).map_err(|_| {
         StorageError::InvalidInput("graph version is too large for sqlite query".to_owned())
     })?;
+    match &request.source_scope {
+        Some(scope) => Ok((
+            "source_scope = ? AND created_graph_version <= ?",
+            vec![Value::Text(scope.clone()), Value::Integer(graph_version)],
+        )),
+        None => Ok((
+            "created_graph_version <= ?",
+            vec![Value::Integer(graph_version)],
+        )),
+    }
+}
+
+fn derived_candidate_values(
+    mut scope_version_values: Vec<Value>,
+    candidate_values: Vec<Value>,
+    result_limit: usize,
+) -> Result<Vec<Value>, StorageError> {
     let result_limit = i64::try_from(result_limit).map_err(|_| {
         StorageError::InvalidInput("candidate result limit is too large".to_owned())
     })?;
-    let source_scope = request
-        .source_scope
-        .as_ref()
-        .map_or(Value::Null, |scope| Value::Text(scope.clone()));
-    let mut values = Vec::with_capacity(candidate_values.len() + 4);
-    values.push(source_scope.clone());
-    values.push(source_scope);
-    values.push(Value::Integer(graph_version));
-    values.extend(candidate_values);
-    values.push(Value::Integer(result_limit));
+    scope_version_values.reserve(candidate_values.len() + 1);
+    scope_version_values.extend(candidate_values);
+    scope_version_values.push(Value::Integer(result_limit));
 
-    Ok(values)
+    Ok(scope_version_values)
 }
 
 #[cfg(test)]
@@ -446,6 +454,37 @@ mod tests {
         };
 
         assert_eq!(bounded_candidate_limit(&request), 80);
+    }
+
+    #[test]
+    fn derived_scope_version_filter_uses_indexable_scope_predicate() {
+        let scoped_request = GraphSearchRequest {
+            query: "semantic".to_owned(),
+            source_scope: Some("repo-a".to_owned()),
+            graph_version: crate::domain::GraphVersion::new(7),
+            limit: 10,
+            disabled_retriever_sources: Vec::new(),
+        };
+        let unscoped_request = GraphSearchRequest {
+            source_scope: None,
+            ..scoped_request.clone()
+        };
+
+        let (scoped_condition, scoped_values) =
+            derived_scope_version_filter(&scoped_request).expect("scoped filter should build");
+        let (unscoped_condition, unscoped_values) =
+            derived_scope_version_filter(&unscoped_request).expect("unscoped filter should build");
+
+        assert_eq!(
+            scoped_condition,
+            "source_scope = ? AND created_graph_version <= ?"
+        );
+        assert_eq!(
+            scoped_values,
+            vec![Value::Text("repo-a".to_owned()), Value::Integer(7)]
+        );
+        assert_eq!(unscoped_condition, "created_graph_version <= ?");
+        assert_eq!(unscoped_values, vec![Value::Integer(7)]);
     }
 
     #[test]
