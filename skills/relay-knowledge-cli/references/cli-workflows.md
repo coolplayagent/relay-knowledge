@@ -2,8 +2,29 @@
 
 ## Installation and Upgrade Checks
 
-Use a GitHub Release archive when the user wants prebuilt binaries. Verify the
-archive with `checksums.txt`, then place the binary on `PATH`.
+Use the skill's bundled binary when it is the newest matching candidate for the
+current platform. Released skill packages include `assets/linux-x86_64/relay-knowledge`
+and `assets/windows-x86_64/relay-knowledge.exe`. Compare each usable candidate
+with `relay-knowledge version --format json`; choose the newest semver version,
+and prefer the `PATH` binary when versions match.
+
+Use a GitHub Release archive when the bundled asset is absent, unusable, or
+older than the requested published version. Before downloading, tell the user to
+configure proxy settings if their network needs them:
+
+```bash
+export HTTPS_PROXY=http://proxy.example:8080
+export HTTP_PROXY=http://proxy.example:8080
+export NO_PROXY=localhost,127.0.0.1
+```
+
+```powershell
+$env:HTTPS_PROXY = "http://proxy.example:8080"
+$env:HTTP_PROXY = "http://proxy.example:8080"
+$env:NO_PROXY = "localhost,127.0.0.1"
+```
+
+Verify the archive with `checksums.txt`, then place the binary on `PATH`.
 
 Use Cargo when Rust is available:
 
@@ -29,7 +50,11 @@ the runtime cache directory.
 - Resolve the executable before running workflow commands with the active
   shell's executable lookup command: `command -v relay-knowledge` on POSIX,
   `Get-Command relay-knowledge` in PowerShell, or `where.exe relay-knowledge`
-  in cmd.exe. Then run `relay-knowledge version --format json`.
+  in cmd.exe. Also check the matching bundled asset:
+  `assets/linux-x86_64/relay-knowledge` on Linux x64 or
+  `assets/windows-x86_64/relay-knowledge.exe` on Windows x64. Then run
+  `version --format json` for each candidate and select the newest semver
+  version; if the versions are equal, prefer `PATH`.
   Use only published installs on `PATH`: a verified GitHub Release archive, or
   `cargo install relay-knowledge` from crates.io when Cargo is the selected
   published package channel. Do not use source-checkout build artifacts or

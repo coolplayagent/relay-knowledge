@@ -39,10 +39,11 @@ relay-knowledge service doctor
 ```
 
 每个 GitHub Release 还会包含
-`relay-knowledge-cli-skill-<tag>.tar.gz`，这是一个纯文本、兼容 ClawHub
-的 skill，用于引导 LLM agent 通过 `relay-knowledge` CLI 使用本地图谱和代码仓库工作流。配置
-`CLAWHUB_TOKEN` 后，release workflow 可以把同一个
-`skills/relay-knowledge-cli` 目录发布到 ClawHub：
+`relay-knowledge-cli-skill-<tag>.tar.gz`，这是一个兼容 ClawHub
+的 skill，用于引导 LLM agent 通过 `relay-knowledge` CLI 使用本地图谱和代码仓库工作流。skill
+包会在 `assets/` 下内置 Linux x64 和 Windows x64 二进制；agent 会将它们与 `PATH`
+中的二进制比较，并使用 semver 最新版本。配置 `CLAWHUB_TOKEN` 后，release workflow
+可以把同一个生成后的 skill 布局发布到 ClawHub：
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \

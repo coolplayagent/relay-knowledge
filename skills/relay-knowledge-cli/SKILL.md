@@ -21,8 +21,12 @@ relay-knowledge help repo query --format json
 ```
 
 Resolve the executable before the first operation by looking for the published
-`relay-knowledge` binary on `PATH`. Use the command form that matches the
-active shell:
+`relay-knowledge` binary on `PATH` and for this skill's bundled asset binary
+for the current platform. Released skill packages include Linux x64 and Windows
+x64 binaries at `assets/linux-x86_64/relay-knowledge` and
+`assets/windows-x86_64/relay-knowledge.exe`.
+
+Use the command form that matches the active shell:
 
 ```bash
 command -v relay-knowledge
@@ -39,11 +43,22 @@ where.exe relay-knowledge
 relay-knowledge version --format json
 ```
 
+When both `PATH` and the bundled `assets` binary are available, run
+`version --format json` for each candidate and use the newest semver version.
+If the versions are equal, prefer the `PATH` binary so user-managed installs are
+respected. If the current OS or CPU architecture has no bundled asset, use only
+the published `PATH` install or install from a published channel.
+
 Do not use source-checkout build artifacts or source builds as an installation
 path. This skill is intended to operate published installs only. If the binary
 is missing, install it from a published channel first: prefer a verified GitHub
 Release archive, or use `cargo install relay-knowledge` from crates.io when
 Cargo is the selected published package channel.
+
+Before downloading a binary from GitHub Releases or crates.io, tell the user to
+configure a proxy when their network requires one. Prefer standard
+`HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` environment variables, and preserve
+those settings for checksum verification and follow-up diagnostics.
 
 Do not start or configure MCP from this skill. If a task asks for MCP,
 Streamable HTTP, resources, prompts, sessions, or protocol tools, use the

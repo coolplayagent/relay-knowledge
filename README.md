@@ -51,11 +51,12 @@ relay-knowledge service doctor
 ```
 
 Each GitHub Release also includes
-`relay-knowledge-cli-skill-<tag>.tar.gz`, a text-only ClawHub-compatible skill
-that teaches LLM agents to use the `relay-knowledge` CLI for local graph and
-code-repository workflows. The release workflow can publish the same
-`skills/relay-knowledge-cli` directory to ClawHub when `CLAWHUB_TOKEN` is
-configured:
+`relay-knowledge-cli-skill-<tag>.tar.gz`, a ClawHub-compatible skill that
+teaches LLM agents to use the `relay-knowledge` CLI for local graph and
+code-repository workflows. The skill package includes Linux x64 and Windows x64
+binaries under `assets/`; agents compare them with any `PATH` binary and use
+the newest semver version. The release workflow can publish the same generated
+skill layout to ClawHub when `CLAWHUB_TOKEN` is configured:
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \
