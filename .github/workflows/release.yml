@@ -100,6 +100,9 @@ jobs:
           test -f skills/relay-knowledge-cli/references/cli-workflows.md
           grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
           grep -q 'relay-knowledge version check --format json' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'newest semver' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'HTTPS_PROXY' skills/relay-knowledge-cli/references/cli-workflows.md
           grep -q 'repo query' skills/relay-knowledge-cli/SKILL.md
           grep -q 'Do not use this skill for MCP' skills/relay-knowledge-cli/SKILL.md
           grep -q 'default_prompt: "Use \$relay-knowledge-cli' skills/relay-knowledge-cli/agents/openai.yaml
@@ -222,11 +225,25 @@ jobs:
 
   skill:
     name: Package CLI skill
-    needs: verify
+    needs:
+      - verify
+      - build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Download Linux x64 release archive
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu
+          path: skill-artifacts/linux-x86_64
+
+      - name: Download Windows x64 release archive
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc
+          path: skill-artifacts/windows-x86_64
 
       - name: Validate CLI skill version inputs
         shell: bash
@@ -244,8 +261,30 @@ jobs:
         run: |
           set -euo pipefail
           package="${BIN_NAME}-cli-skill-${{ needs.verify.outputs.tag }}"
+          linux_archive="skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz"
+          windows_archive="skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc.zip"
           mkdir -p "dist/$package"
           cp -R skills/relay-knowledge-cli/. "dist/$package/"
+          mkdir -p "dist/$package/assets/linux-x86_64" "dist/$package/assets/windows-x86_64"
+
+          tar -xzf "$linux_archive" -C skill-artifacts/linux-x86_64
+          cp "skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu/${BIN_NAME}" \
+            "dist/$package/assets/linux-x86_64/${BIN_NAME}"
+
+          python3 - "$windows_archive" "skill-artifacts/windows-x86_64" <<'PY'
+          import sys
+          import zipfile
+
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              archive.extractall(sys.argv[2])
+          PY
+          cp "skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc/${BIN_NAME}.exe" \
+            "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
+
+          chmod 0755 "dist/$package/assets/linux-x86_64/${BIN_NAME}"
+          chmod 0755 "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
+          test -x "dist/$package/assets/linux-x86_64/${BIN_NAME}"
+          test -f "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
 
       - name: Upload skill archive
@@ -353,9 +392,9 @@ jobs:
 
           ## CLI Skill
 
-          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. It is intentionally separate from MCP protocol access.
+          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes Linux x64 and Windows x64 binaries under `assets/` and selects the newest semver version when both PATH and bundled binaries are available. It is intentionally separate from MCP protocol access.
 
-          Registry maintainers can publish the same skill directory with:
+          Registry maintainers can publish the same generated skill layout with:
 
           ```bash
           clawhub publish skills/relay-knowledge-cli --slug relay-knowledge-cli --name "Relay Knowledge CLI" --version ${{ needs.verify.outputs.version }}
@@ -447,6 +486,48 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Download Linux x64 release archive
+        if: steps.clawhub-token.outputs.publish == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu
+          path: skill-artifacts/linux-x86_64
+
+      - name: Download Windows x64 release archive
+        if: steps.clawhub-token.outputs.publish == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc
+          path: skill-artifacts/windows-x86_64
+
+      - name: Install CLI skill asset binaries
+        if: steps.clawhub-token.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          linux_archive="skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu.tar.gz"
+          windows_archive="skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc.zip"
+          mkdir -p "skills/relay-knowledge-cli/assets/linux-x86_64" "skills/relay-knowledge-cli/assets/windows-x86_64"
+
+          tar -xzf "$linux_archive" -C skill-artifacts/linux-x86_64
+          cp "skill-artifacts/linux-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-unknown-linux-gnu/${BIN_NAME}" \
+            "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
+
+          python3 - "$windows_archive" "skill-artifacts/windows-x86_64" <<'PY'
+          import sys
+          import zipfile
+
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              archive.extractall(sys.argv[2])
+          PY
+          cp "skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc/${BIN_NAME}.exe" \
+            "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
+
+          chmod 0755 "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
+          chmod 0755 "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
+          test -x "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
+          test -f "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
 
       - name: Install ClawHub CLI
         if: steps.clawhub-token.outputs.publish == 'true'
