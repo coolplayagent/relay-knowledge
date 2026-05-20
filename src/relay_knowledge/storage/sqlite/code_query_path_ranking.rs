@@ -140,9 +140,7 @@ fn identifier_boundary_before(prefix: &str) -> bool {
 }
 
 fn assigned_call_left_side(prefix: &str) -> Option<&str> {
-    let Some(index) = prefix.rfind('=') else {
-        return None;
-    };
+    let index = prefix.rfind('=')?;
     let previous = prefix[..index]
         .chars()
         .rev()
@@ -165,11 +163,14 @@ fn named_assignment_slot_bonus(left_side: &str, callee_name: &str) -> f64 {
     if left_terms.is_empty() {
         return 0.0;
     }
-    identifier_terms(callee_name)
+    if identifier_terms(callee_name)
         .into_iter()
         .any(|term| term.len() >= 4 && left_terms.contains(&term))
-        .then_some(CALLER_RESULT_NAMED_SLOT_BONUS)
-        .unwrap_or(0.0)
+    {
+        CALLER_RESULT_NAMED_SLOT_BONUS
+    } else {
+        0.0
+    }
 }
 
 fn identifier_terms(value: &str) -> BTreeSet<String> {
