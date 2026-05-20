@@ -179,6 +179,11 @@ it performs short smoke-level Codex explores, validates promising candidates
 with the fast profile, persists resume state in
 `.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates
 to longer competitive-capability macro exploration when short attempts stall.
+External repositories in the self-iteration evaluation set are pinned to
+documented commits, and C/C++ adds tree-sitter-oriented generated syntax
+fixtures. Multilingual generated fixtures extend the same evaluation set. See
+[Book 5, Chapter 6: C/C++ Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md)
+and [Book 5, Chapter 7: Multilingual Syntax Self-Iteration Evaluation Set](docs/en/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md).
 
 The underlying quality gates are:
 

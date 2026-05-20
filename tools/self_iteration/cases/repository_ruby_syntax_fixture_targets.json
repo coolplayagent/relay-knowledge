@@ -1,0 +1,89 @@
+{
+  "repositories": {
+    "ruby_syntax_fixture": {
+      "generated_fixture": "ruby_syntax_v1",
+      "alias": "ruby-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["ruby"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "ruby_syntax_symbol_controller_class",
+      "repository": "ruby_syntax_fixture",
+      "kind": "symbol",
+      "query": "Controller",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/controller.rb", "excerpt_contains": "class Controller"}],
+      "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_definition_singleton_build",
+      "repository": "ruby_syntax_fixture",
+      "kind": "definition",
+      "query": "Controller.build",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/controller.rb", "excerpt_contains": "def self.build"}],
+      "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_imports_require_relative_extensions",
+      "repository": "ruby_syntax_fixture",
+      "kind": "imports",
+      "query": "extensions",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/controller.rb", "excerpt_contains": "require_relative \"extensions\""}],
+      "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_callees_controller_dispatch",
+      "repository": "ruby_syntax_fixture",
+      "kind": "callees",
+      "query": "dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/controller.rb", "excerpt_contains": "normalize_event(@runtime.handle(event))"}],
+      "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_hybrid_module_mixin_runtime",
+      "repository": "ruby_syntax_fixture",
+      "kind": "hybrid",
+      "query": "module mixin controller runtime normalize event dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/extensions.rb", "excerpt_contains": "module Extensions"}],
+      "expected_all": [
+        {"path": "lib/app/controller.rb", "excerpt_contains": "include Extensions"},
+        {"path": "lib/app/runtime.rb", "excerpt_contains": "class Runtime"}
+      ],
+      "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_negative_missing_controller",
+      "repository": "ruby_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingController",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "ruby_tree_sitter_syntax"
+    }
+  ]
+}

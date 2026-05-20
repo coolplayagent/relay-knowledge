@@ -129,7 +129,7 @@ Goal:
 - Preserve foundational capability, competitive capability, semantic/vector retrieval, and stability as protected floors.
 - Improve multi-repository code retrieval, indexing throughput, semantic/vector retrieval, research alignment, and measured performance.
 - Treat tools/self_iteration/cases.json as the target workload. Improve general parser, graph, retrieval, indexing, ranking, and service behavior instead of enumerating fixture strings.
-- Any implementation candidate must update docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md with algorithm, architecture, invariants, expected impact, and risks.
+- Any implementation candidate must update docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md with algorithm, architecture, invariants, expected impact, and risks. Evaluation-set-only candidates may instead update the matching benchmark specification document, such as docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md or docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md.
 
 Constraints:
 - Follow AGENTS.md and hard architecture constraints.

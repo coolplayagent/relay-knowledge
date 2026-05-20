@@ -1,0 +1,91 @@
+{
+  "repositories": {
+    "swift_syntax_fixture": {
+      "generated_fixture": "swift_syntax_v1",
+      "alias": "swift-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["swift"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "swift_syntax_symbol_session_transport_protocol",
+      "repository": "swift_syntax_fixture",
+      "kind": "symbol",
+      "query": "SessionTransport",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/SessionClient.swift", "excerpt_contains": "protocol SessionTransport"}],
+      "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_definition_session_client_request",
+      "repository": "swift_syntax_fixture",
+      "kind": "definition",
+      "query": "SessionClient.request",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/SessionClient.swift", "excerpt_contains": "func request(url: URL) async throws"}],
+      "forbidden": [{"path": "Tests/AppTests/FakeSessionClient.swift", "excerpt_contains": "func request()"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_imports_foundation",
+      "repository": "swift_syntax_fixture",
+      "kind": "imports",
+      "query": "Foundation",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/SessionClient.swift", "excerpt_contains": "import Foundation"}],
+      "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_callees_request_pipeline_dispatch",
+      "repository": "swift_syntax_fixture",
+      "kind": "callees",
+      "query": "RequestPipeline.dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "try await client.request(url: url)"}],
+      "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_hybrid_protocol_async_client_flow",
+      "repository": "swift_syntax_fixture",
+      "kind": "hybrid",
+      "query": "protocol session transport async request pipeline url data",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/SessionClient.swift", "excerpt_contains": "private let transport: SessionTransport"}],
+      "expected_all": [
+        {"path": "Sources/App/SessionClient.swift", "excerpt_contains": "try await transport.send(request)"},
+        {"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "output.append"}
+      ],
+      "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_negative_missing_client",
+      "repository": "swift_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingSessionClient",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "swift_tree_sitter_syntax"
+    }
+  ]
+}

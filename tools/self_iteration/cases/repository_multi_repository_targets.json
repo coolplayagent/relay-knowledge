@@ -3,7 +3,7 @@
     "temporal_samples_go": {
       "path": "/opt/workspace/temporal-samples-go",
       "alias": "temporal-samples-go-self-iteration",
-      "ref": "HEAD",
+      "ref": "231564bebe0be78e78233ef14992158c623d1e86",
       "scope": "all",
       "path_filters": [],
       "language_filters": [],
@@ -14,7 +14,7 @@
     "temporal_sdk_go": {
       "path": "/opt/workspace/temporal-sdk-go",
       "alias": "temporal-sdk-go-self-iteration",
-      "ref": "HEAD",
+      "ref": "ff47f19909ac85aacff89645360de0dba6f6f898",
       "scope": "all",
       "path_filters": [],
       "language_filters": [],
@@ -25,7 +25,7 @@
     "otel_collector_contrib": {
       "path": "/opt/workspace/opentelemetry-collector-contrib",
       "alias": "otel-collector-contrib-self-iteration",
-      "ref": "HEAD",
+      "ref": "84fe8df16c34efbb7e929310c955df8f4861d2f4",
       "scope": "all",
       "path_filters": [],
       "language_filters": [],
@@ -36,7 +36,7 @@
     "otel_collector": {
       "path": "/opt/workspace/opentelemetry-collector",
       "alias": "otel-collector-self-iteration",
-      "ref": "HEAD",
+      "ref": "31e51520f30fc5c4362949e41307ea57b7b45a9d",
       "scope": "all",
       "path_filters": [],
       "language_filters": [],

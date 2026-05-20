@@ -1,0 +1,93 @@
+{
+  "repositories": {
+    "csharp_syntax_fixture": {
+      "generated_fixture": "csharp_syntax_v1",
+      "alias": "csharp-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["csharp"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "csharp_syntax_symbol_buffer_sink_interface",
+      "repository": "csharp_syntax_fixture",
+      "kind": "symbol",
+      "query": "IBufferSink",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/BufferPool.cs", "excerpt_contains": "interface IBufferSink<T>"}],
+      "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_definition_rent_buffer",
+      "repository": "csharp_syntax_fixture",
+      "kind": "definition",
+      "query": "RentBuffer",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/BufferPool.cs", "excerpt_contains": "public byte[] RentBuffer"}],
+      "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_imports_system_buffers",
+      "repository": "csharp_syntax_fixture",
+      "kind": "imports",
+      "query": "System.Buffers",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/BufferPool.cs", "excerpt_contains": "using System.Buffers"}],
+      "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_callees_runtime_dispatch",
+      "repository": "csharp_syntax_fixture",
+      "kind": "callees",
+      "query": "RuntimeService.Dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.RentBuffer(size)"}],
+      "expected_sequence": [
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.RentBuffer(size)"},
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.Write(buffer)"}
+      ],
+      "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_hybrid_array_pool_flow",
+      "repository": "csharp_syntax_fixture",
+      "kind": "hybrid",
+      "query": "generic buffer sink array pool runtime dispatch rent write",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/BufferPool.cs", "excerpt_contains": "ArrayPool<byte>.Shared.Rent"}],
+      "expected_all": [
+        {"path": "src/Runtime/BufferPool.cs", "excerpt_contains": "ArrayPool<byte>.Shared.Return"},
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "private readonly BufferPoolSink sink = new()"}
+      ],
+      "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_negative_missing_service",
+      "repository": "csharp_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingRuntimeService",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "csharp_tree_sitter_syntax"
+    }
+  ]
+}

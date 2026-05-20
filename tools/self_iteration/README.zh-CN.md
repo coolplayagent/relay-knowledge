@@ -183,8 +183,8 @@ CSV 是 scored-run history，不是 patch 目录清单；它包含 run mode、pa
   `objective`、`max_results`、`truncated`、`degraded_reason` 和更细粒度的命中字段，用来表达路径/内容分离、scope 前置、候选收缩、后台索引和诊断目标。每条文件查询都使用 subprocess timeout，防止候选实现卡死 evaluator。
 - 多语言代码仓库检索 targets：语言 case 已按
   `cases/repository_*_targets.json` 拆分，让每种语言能独立扩展。默认
-  profile 覆盖 relay-teams Python/JavaScript、opencode TypeScript/TSX 和
-  LevelDB C++；Linux C、Kubernetes Go、Spring Framework
+  profile 覆盖生成式 C/C++ 语法 fixture、relay-teams Python/JavaScript、
+  opencode TypeScript/TSX 和 LevelDB C++；Linux C、Kubernetes Go、Spring Framework
   Java、RustFS Rust、Codex Python、nvm Bash、dotnet/runtime C#、OkHttp Kotlin、
   Laravel PHP、Rails Ruby、Scala 3 和 Alamofire Swift 继续由 repository 级
   `profile=exhaustive` 控制。语言
@@ -197,6 +197,17 @@ CSV 是 scored-run history，不是 patch 目录清单；它包含 run mode、pa
   阈值，作为稳定回归护栏；challenge cases 去掉 path filter、降低 limit 与
   max rank，并用 `expected_all` 或 `expected_sequence` 让继承、实现、依赖、
   别名、内联、调用链和执行流 case 即使通过也继续保留排序和覆盖率改进空间。
+- C/C++ 语法 fixture 会在 evaluation home 下生成临时 git 仓库，再走普通
+  `repo register/index/query` 路径。C fixture 覆盖 function pointer typedef、
+  operation table、designated/compound initializer、function-like macro、本地
+  include 和 callback dispatch；C++ fixture 覆盖 namespace、template class、
+  out-of-line template method、virtual override、operator、lambda capture、
+  namespace alias、using alias 和 header/source split。设计说明与外部仓库固定
+  commit 见 `docs/zh/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md`。
+- 额外生成式语法 fixture 覆盖 Python、JavaScript、TypeScript/TSX、Go、Java、
+  Rust、Bash、C#、Kotlin、PHP、Ruby、Scala 和 Swift。它们用于紧凑、可复现地
+  覆盖语言特有语法，真实固定仓库继续承担规模、噪声和性能压力；fixture 矩阵见
+  `docs/zh/05-benchmarks/07-multilingual-syntax-self-iteration-evaluation.md`。
 - 多仓库 repository-set targets 位于
   `cases/repository_multi_repository_targets.json`。评估器会先把每个成员作为普通
   `scope=all` 仓库注册和索引，再创建显式 `repo-set`、刷新跨仓 overlay，并运行

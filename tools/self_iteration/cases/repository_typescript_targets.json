@@ -3,7 +3,7 @@
     "opencode_typescript": {
       "path": "/opt/workspace/opencode",
       "alias": "opencode-typescript-self-iteration",
-      "ref": "HEAD",
+      "ref": "6e4db5666ae33ebadf3b8ca077d6b1b149d0b0c3",
       "scope": "all",
       "path_filters": [],
       "language_filters": [],

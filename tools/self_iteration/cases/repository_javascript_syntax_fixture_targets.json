@@ -1,0 +1,97 @@
+{
+  "repositories": {
+    "javascript_syntax_fixture": {
+      "generated_fixture": "javascript_syntax_v1",
+      "alias": "javascript-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["javascript"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "javascript_syntax_symbol_runtime_controller",
+      "repository": "javascript_syntax_fixture",
+      "kind": "symbol",
+      "query": "RuntimeController",
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["src/runtime.js"],
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/runtime.js", "excerpt_contains": "class RuntimeController"}],
+      "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_definition_dispatch_event_method",
+      "repository": "javascript_syntax_fixture",
+      "kind": "definition",
+      "query": "dispatchEvent",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/runtime.js", "excerpt_contains": "async dispatchEvent(event)"}],
+      "forbidden": [{"path": "tests/fakeRuntime.js", "excerpt_contains": "dispatchEvent(event)"}],
+      "forbidden_rank_penalty": 0.1,
+      "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_imports_registry_module",
+      "repository": "javascript_syntax_fixture",
+      "kind": "imports",
+      "query": "./registry.js",
+      "limit": 10,
+      "max_rank": 4,
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/runtime.js", "excerpt_contains": "import { createRegistry }"}],
+      "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_callees_dispatch_callback_flow",
+      "repository": "javascript_syntax_fixture",
+      "kind": "callees",
+      "query": "dispatchEvent",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/runtime.js", "excerpt_contains": "handler(event.payload)"}],
+      "expected_sequence": [
+        {"path": "src/runtime.js", "excerpt_contains": "this.registry.resolve(event.type)"},
+        {"path": "src/runtime.js", "excerpt_contains": "handler(event.payload)"}
+      ],
+      "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_hybrid_esm_callback_registry",
+      "repository": "javascript_syntax_fixture",
+      "kind": "hybrid",
+      "query": "ES module registry async dispatch callback normalize payload",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/registry.js", "excerpt_contains": "handlers.set(\"write\""}],
+      "expected_all": [
+        {"path": "src/runtime.js", "excerpt_contains": "new RuntimeController"},
+        {"path": "src/registry.js", "excerpt_contains": "normalizePayload(payload)"},
+        {"path": "src/index.js", "excerpt_contains": "export { RuntimeController"}
+      ],
+      "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_negative_missing_controller",
+      "repository": "javascript_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingRuntimeController",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "javascript_tree_sitter_syntax"
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "repositories": {
+    "rust_syntax_fixture": {
+      "generated_fixture": "rust_syntax_v1",
+      "alias": "rust-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["rust"],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "rust_syntax_symbol_event_handler_trait",
+      "repository": "rust_syntax_fixture",
+      "kind": "symbol",
+      "query": "EventHandler",
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "pub trait EventHandler"}],
+      "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_definition_runtime_service_dispatch",
+      "repository": "rust_syntax_fixture",
+      "kind": "definition",
+      "query": "RuntimeService::dispatch",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "pub fn dispatch"}],
+      "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_references_module_import_event",
+      "repository": "rust_syntax_fixture",
+      "kind": "references",
+      "query": "RuntimeEvent",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "use crate::model::RuntimeEvent"}],
+      "expected_all": [
+        {"path": "src/model.rs", "excerpt_contains": "pub enum RuntimeEvent"},
+        {"path": "src/service.rs", "excerpt_contains": "RuntimeEvent::Start(payload)"}
+      ],
+      "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_callees_dispatch_trait_method",
+      "repository": "rust_syntax_fixture",
+      "kind": "callees",
+      "query": "dispatch",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 8,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "self.handle_event(event)"}],
+      "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_hybrid_trait_impl_macro_noise",
+      "repository": "rust_syntax_fixture",
+      "kind": "hybrid",
+      "query": "trait implementation runtime service stop event macro trace",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "impl EventHandler for RuntimeService"}],
+      "expected_all": [
+        {"path": "src/service.rs", "excerpt_contains": "macro_rules! trace_event"},
+        {"path": "src/service.rs", "excerpt_contains": "RuntimeEvent::Stop => trace_event!"}
+      ],
+      "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_negative_missing_trait",
+      "repository": "rust_syntax_fixture",
+      "kind": "symbol",
+      "query": "MissingEventHandler",
+      "limit": 10,
+      "expect_empty": true,
+      "case_group": "rust_tree_sitter_syntax"
+    }
+  ]
+}

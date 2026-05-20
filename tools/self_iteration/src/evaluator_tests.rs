@@ -308,6 +308,83 @@ mod tests {
     }
 
     #[test]
+    fn generated_language_fixtures_write_syntax_dense_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "relay-knowledge-self-iteration-fixture-test-{}",
+            std::process::id()
+        ));
+        if root.exists() {
+            std::fs::remove_dir_all(&root).expect("remove stale fixture");
+        }
+
+        create_generated_repository_files(&root.join("c"), "c_syntax_v1")
+            .expect("c fixture should write");
+        create_generated_repository_files(&root.join("cpp"), "cpp_syntax_v1")
+            .expect("cpp fixture should write");
+        create_generated_repository_files(&root.join("python"), "python_syntax_v1")
+            .expect("python fixture should write");
+        create_generated_repository_files(&root.join("typescript"), "typescript_syntax_v1")
+            .expect("typescript fixture should write");
+        create_generated_repository_files(&root.join("go"), "go_syntax_v1")
+            .expect("go fixture should write");
+        create_generated_repository_files(&root.join("swift"), "swift_syntax_v1")
+            .expect("swift fixture should write");
+
+        let c_source =
+            std::fs::read_to_string(root.join("c/src/driver_ops.c")).expect("c source");
+        let cpp_source =
+            std::fs::read_to_string(root.join("cpp/src/pipeline.cpp")).expect("cpp source");
+        let python_source = std::fs::read_to_string(root.join("python/syntax_service/service.py"))
+            .expect("python source");
+        let typescript_source =
+            std::fs::read_to_string(root.join("typescript/src/provider.ts"))
+                .expect("typescript source");
+        let go_source =
+            std::fs::read_to_string(root.join("go/processor/worker.go")).expect("go source");
+        let swift_source =
+            std::fs::read_to_string(root.join("swift/Sources/App/SessionClient.swift"))
+                .expect("swift source");
+        assert!(c_source.contains(".read = rk_driver_read"));
+        assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
+        assert!(cpp_source.contains("auto append_event = [&cache, &pipeline]"));
+        assert!(cpp_source.contains("cache_alias::Cache<std::string>"));
+        assert!(python_source.contains("@traced_operation(\"dispatch\")"));
+        assert!(typescript_source.contains("await import(\"./protocol\")"));
+        assert!(go_source.contains("ctxalias \"context\""));
+        assert!(swift_source.contains("protocol SessionTransport"));
+
+        std::fs::remove_dir_all(&root).expect("cleanup fixture");
+    }
+
+    #[test]
+    fn generated_repository_names_cannot_escape_run_home() {
+        let run_home = std::env::temp_dir().join("relay-knowledge-self-iteration-safe-roots");
+
+        assert_eq!(
+            generated_repository_root(&run_home, "c_syntax_fixture")
+                .expect("safe name")
+                .strip_prefix(&run_home)
+                .expect("root should stay under run home"),
+            Path::new("generated-repositories/c_syntax_fixture")
+        );
+        for unsafe_name in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "nested/repo",
+            "nested\\repo",
+            "/absolute",
+            "repo.name",
+        ] {
+            assert!(
+                generated_repository_root(&run_home, unsafe_name).is_err(),
+                "{unsafe_name:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn judge_uses_openai_compatible_http_when_configured() {
         let env = BTreeMap::from([
             (

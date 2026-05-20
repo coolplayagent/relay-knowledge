@@ -3,7 +3,7 @@
     "okhttp_kotlin": {
       "path": "/opt/workspace/okhttp",
       "alias": "okhttp-kotlin-self-iteration",
-      "ref": "HEAD",
+      "ref": "1d9a8ba6c335355da9c71586abf82c9516e1bac5",
       "profile": "exhaustive",
       "scope": "all",
       "path_filters": [],

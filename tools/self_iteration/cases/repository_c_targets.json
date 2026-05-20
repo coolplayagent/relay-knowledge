@@ -132,6 +132,73 @@
         }
       ],
       "case_group": "language_kind_matrix"
+    },
+    {
+      "id": "linux_c_hybrid_seq_operations_table",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "seq_operations start next stop show network procfs",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["net/core/net-procfs.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "net/core/net-procfs.c", "excerpt_contains": "static const struct seq_operations dev_seq_ops"}],
+      "expected_all": [
+        {"path": "net/core/net-procfs.c", "excerpt_contains": ".start = dev_seq_start"},
+        {"path": "net/core/net-procfs.c", "excerpt_contains": ".next  = dev_seq_next"},
+        {"path": "net/core/net-procfs.c", "excerpt_contains": ".show  = dev_seq_show"}
+      ],
+      "case_group": "c_real_world_syntax"
+    },
+    {
+      "id": "linux_c_references_export_symbol_find_vma",
+      "repository": "linux_sample",
+      "kind": "references",
+      "query": "find_vma",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["mm/mmap.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "mm/mmap.c", "excerpt_contains": "EXPORT_SYMBOL(find_vma)"}],
+      "case_group": "c_real_world_syntax"
+    },
+    {
+      "id": "linux_c_hybrid_watchdog_ops_designators",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "watchdog ops start stop ping set timeout probe",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["drivers/watchdog/rn5t618_wdt.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "drivers/watchdog/rn5t618_wdt.c", "excerpt_contains": "static const struct watchdog_ops rn5t618_wdt_ops"}],
+      "expected_all": [
+        {"path": "drivers/watchdog/rn5t618_wdt.c", "excerpt_contains": ".start          = rn5t618_wdt_start"},
+        {"path": "drivers/watchdog/rn5t618_wdt.c", "excerpt_contains": ".set_timeout    = rn5t618_wdt_set_timeout"},
+        {"path": "drivers/watchdog/rn5t618_wdt.c", "excerpt_contains": ".probe = rn5t618_wdt_probe"}
+      ],
+      "case_group": "c_real_world_syntax"
+    },
+    {
+      "id": "linux_c_hybrid_genl_small_ops_array",
+      "repository": "linux_sample",
+      "kind": "hybrid",
+      "query": "generic netlink small ops doit dumpit validate flags",
+      "objective": "competitive_capability",
+      "limit": 20,
+      "max_rank": 8,
+      "path_filters": ["net/ncsi/ncsi-netlink.c"],
+      "language_filters": ["c"],
+      "expected": [{"path": "net/ncsi/ncsi-netlink.c", "excerpt_contains": "static const struct genl_small_ops ncsi_ops[]"}],
+      "expected_all": [
+        {"path": "net/ncsi/ncsi-netlink.c", "excerpt_contains": ".cmd = NCSI_CMD_PKG_INFO"},
+        {"path": "net/ncsi/ncsi-netlink.c", "excerpt_contains": ".dumpit = ncsi_pkg_info_all_nl"},
+        {"path": "net/ncsi/ncsi-netlink.c", "excerpt_contains": ".flags = GENL_ADMIN_PERM"}
+      ],
+      "case_group": "c_real_world_syntax"
     }
   ]
 }
