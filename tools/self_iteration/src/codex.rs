@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::{
     command::{CommandResult, CommandSpec, run_command},
-    config::{CategorySet, Config, EvaluationCategory},
+    config::{CategorySet, Config, DEFAULT_CODEX_MODEL, EvaluationCategory},
     history::{
         HistoryPaths, adopted, best_accepted_run_for_profile, best_accepted_run_for_workload,
         is_evaluate_run, load_runs,
@@ -86,12 +86,18 @@ pub fn build_codex_command(config: &Config) -> Vec<String> {
             "danger-full-access".to_owned(),
         ]);
     }
-    if let Some(model) = &config.model {
-        command.extend(["-m".to_owned(), model.clone()]);
-    }
     if let Some(profile) = &config.codex_profile {
         command.extend(["-p".to_owned(), profile.clone()]);
     }
+    let model = config.model.as_deref().unwrap_or(DEFAULT_CODEX_MODEL);
+    command.extend(["-m".to_owned(), model.to_owned()]);
+    command.extend([
+        "-c".to_owned(),
+        format!(
+            "model_reasoning_effort=\"{}\"",
+            config.codex_reasoning_effort
+        ),
+    ]);
     command.push("-".to_owned());
     command
 }
@@ -368,6 +374,75 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+
+    #[test]
+    fn codex_command_defaults_to_gpt55_xhigh() {
+        let config = Config::parse(vec![
+            "once".to_owned(),
+            "--workspace".to_owned(),
+            "/tmp/relay-knowledge".to_owned(),
+        ])
+        .expect("config should parse");
+
+        let command = build_codex_command(&config);
+
+        assert_eq!(
+            command,
+            vec![
+                "codex",
+                "exec",
+                "-C",
+                "/tmp/relay-knowledge",
+                "-m",
+                "gpt-5.5",
+                "-c",
+                "model_reasoning_effort=\"xhigh\"",
+                "-"
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_command_keeps_explicit_generation_overrides() {
+        let config = Config::parse(vec![
+            "once".to_owned(),
+            "--workspace".to_owned(),
+            "/tmp/relay-knowledge".to_owned(),
+            "--yolo".to_owned(),
+            "--codex-path".to_owned(),
+            "/usr/local/bin/codex".to_owned(),
+            "--model".to_owned(),
+            "o3".to_owned(),
+            "--codex-reasoning-effort=high".to_owned(),
+            "--codex-profile".to_owned(),
+            "self-iteration".to_owned(),
+        ])
+        .expect("config should parse");
+
+        let command = build_codex_command(&config);
+
+        assert_eq!(
+            command,
+            vec![
+                "/usr/local/bin/codex",
+                "-a",
+                "never",
+                "exec",
+                "-C",
+                "/tmp/relay-knowledge",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-s",
+                "danger-full-access",
+                "-p",
+                "self-iteration",
+                "-m",
+                "o3",
+                "-c",
+                "model_reasoning_effort=\"high\"",
+                "-"
+            ]
+        );
+    }
 
     #[test]
     fn prompt_includes_direct_history_synthesis() {

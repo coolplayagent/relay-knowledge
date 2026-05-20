@@ -50,10 +50,16 @@ product command stdout and stderr are still captured for the JSON report.
 The local Codex CLI does not expose a literal `--yolo` flag. This framework maps `--yolo` to the current non-interactive high-permission Codex invocation:
 
 ```bash
-codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -
+codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -
 ```
 
 Use it only in an externally trusted workspace. The loop is designed to run unattended.
+
+Self-iteration generation defaults to `gpt-5.5` with Codex
+`model_reasoning_effort="xhigh"` so unattended candidates use the strongest
+local reasoning profile by default. Override the model with `--model` and the
+reasoning effort with `--codex-reasoning-effort low|medium|high|xhigh` when a
+run intentionally needs a cheaper or different generation mode.
 
 ## Loop behavior
 

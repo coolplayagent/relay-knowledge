@@ -49,10 +49,14 @@ home、解析后的并发度、质量门禁 stage、仓库 workload 规模、rep
 本地 Codex CLI 没有字面意义上的 `--yolo` 参数。本框架会把 `--yolo` 映射到当前非交互、高权限 Codex 调用：
 
 ```bash
-codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -
+codex -a never exec --dangerously-bypass-approvals-and-sandbox -s danger-full-access -C /opt/workspace/relay-knowledge -m gpt-5.5 -c 'model_reasoning_effort="xhigh"' -
 ```
 
 只应在外部可信的工作区中使用。该循环按无人值守运行设计。
+
+自迭代生成阶段默认使用 `gpt-5.5`，并为 Codex 设置
+`model_reasoning_effort="xhigh"`，让无人值守候选默认走最高本地推理档位。需要更低成本或不同生成模式时，可用 `--model` 覆盖模型，用
+`--codex-reasoning-effort low|medium|high|xhigh` 覆盖推理强度。
 
 ## 循环行为
 

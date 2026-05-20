@@ -1,5 +1,8 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
+pub const DEFAULT_CODEX_MODEL: &str = "gpt-5.5";
+pub const DEFAULT_CODEX_REASONING_EFFORT: &str = "xhigh";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Loop,
@@ -185,6 +188,7 @@ pub struct Config {
     pub workspace: PathBuf,
     pub yolo: bool,
     pub model: Option<String>,
+    pub codex_reasoning_effort: String,
     pub codex_profile: Option<String>,
     pub codex_path: Option<String>,
     pub codex_timeout_seconds: u64,
@@ -237,7 +241,8 @@ impl Config {
             strategy: Strategy::Single,
             workspace: default_workspace()?,
             yolo: false,
-            model: None,
+            model: Some(DEFAULT_CODEX_MODEL.to_owned()),
+            codex_reasoning_effort: DEFAULT_CODEX_REASONING_EFFORT.to_owned(),
             codex_profile: None,
             codex_path: None,
             codex_timeout_seconds: 3600,
@@ -275,6 +280,10 @@ impl Config {
                 "--strategy" => config.strategy = Strategy::parse(&parser.value("--strategy")?)?,
                 "--yolo" => config.yolo = true,
                 "--model" => config.model = Some(parser.value("--model")?),
+                "--codex-reasoning-effort" => {
+                    config.codex_reasoning_effort =
+                        codex_reasoning_effort(&parser.value("--codex-reasoning-effort")?)?;
+                }
                 "--codex-profile" => config.codex_profile = Some(parser.value("--codex-profile")?),
                 "--codex-path" => config.codex_path = Some(parser.value("--codex-path")?),
                 "--codex-timeout-seconds" => {
@@ -364,6 +373,13 @@ impl Config {
                 }
                 other if other.starts_with("--profile=") => {
                     config.profile = profile(suffix(other, "--profile=").to_owned())?;
+                }
+                other if other.starts_with("--model=") => {
+                    config.model = Some(suffix(other, "--model=").to_owned());
+                }
+                other if other.starts_with("--codex-reasoning-effort=") => {
+                    config.codex_reasoning_effort =
+                        codex_reasoning_effort(suffix(other, "--codex-reasoning-effort="))?;
                 }
                 other if other.starts_with("--jobs=") => {
                     config.jobs = Jobs::parse(suffix(other, "--jobs="))?;
@@ -477,6 +493,14 @@ fn profile(value: String) -> Result<String, String> {
     }
 }
 
+fn codex_reasoning_effort(value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "low" | "medium" | "high" | "xhigh" => Ok(normalized),
+        _ => Err(format!("invalid codex reasoning effort: {value}")),
+    }
+}
+
 fn positive_u64(value: &str, name: &str) -> Result<u64, String> {
     let parsed = value
         .parse::<u64>()
@@ -523,8 +547,39 @@ mod tests {
 
         assert_eq!(config.mode, Mode::Evaluate);
         assert_eq!(config.profile, "smoke");
+        assert_eq!(config.model.as_deref(), Some(DEFAULT_CODEX_MODEL));
+        assert_eq!(
+            config.codex_reasoning_effort,
+            DEFAULT_CODEX_REASONING_EFFORT
+        );
         assert_eq!(config.jobs, Jobs::Fixed(2));
         assert_eq!(config.repo_jobs, Jobs::Fixed(1));
+    }
+
+    #[test]
+    fn parses_codex_generation_overrides() {
+        let config = Config::parse(vec![
+            "once".to_owned(),
+            "--model=o3".to_owned(),
+            "--codex-reasoning-effort".to_owned(),
+            "high".to_owned(),
+        ])
+        .expect("config should parse");
+
+        assert_eq!(config.model.as_deref(), Some("o3"));
+        assert_eq!(config.codex_reasoning_effort, "high");
+    }
+
+    #[test]
+    fn rejects_invalid_codex_reasoning_effort() {
+        let error = Config::parse(vec![
+            "once".to_owned(),
+            "--codex-reasoning-effort".to_owned(),
+            "extreme".to_owned(),
+        ])
+        .expect_err("invalid effort should fail");
+
+        assert!(error.contains("invalid codex reasoning effort"));
     }
 
     #[test]
