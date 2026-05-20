@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779279305-repo-set-returned-overlay-pruning
+- 算法：repository-set query 仍用完整 overlay evidence 参与成员优先级、edge confidence 与 bridge co-ranking；完成 bridge bonus、dedupe 与 top-k 截断后，只在返回 JSON 中保留三类可解释 evidence：精确 import line evidence、直接指向当前 hit symbol/file 的 target evidence、以及本次返回结果中 origin file 与 target record 两端都出现的 resolved bridge evidence。
+- 架构/不变量：变更限定在 `application::code_repository_set_query` 的返回证据整理和服务编排收尾；单仓 retrieval、repo-set per-member fanout、SQLite schema、parser、FTS 文档、candidate window、scoring 输入、semantic/vector read model、env/paths/net 与 self-iteration harness 均不改变；完整 evidence 仍先用于排序，再做 API payload pruning。
+- 预期影响：Temporal/OTel 这类多仓 Hybrid 查询不再把每个 usage chunk 的无关文件级 import edge 全量序列化到 top-k 响应，降低 repo-set query JSON 体积与 CLI/evaluator p50/p95，同时让返回解释更聚焦于真实跨仓 usage-definition bridge。
+- 风险：调试时看不到被用于基础 edge confidence 的部分 origin-file 噪声 evidence；风险受排序前完整 evidence 保留、import hit 不裁剪、direct target evidence 保留、bridge 两端共现保留和单元测试控制。本候选建立在 `run-1779244212` origin-file evidence 与 `run-1779245204` bridge support 上，避免 `run-1779278117` 在 Hybrid symbol/call 层跳过召回导致 competitive capability 回退的拒绝模式。
 ## 候选优化说明：run-1779266107-caller-callee-identity-fast-path
 - 算法：`callers` 查询先识别单一或 scoped callee identity，并通过 `code_repository_calls(source_scope, callee_name, ...)` 的既有索引执行有界 direct lookup；命中未饱和且足以回答时直接进入原 call scoring/dedupe，否则与原 FTS + direction prefilter 结果合并，`callees` 与 Hybrid 仍走原路径。
 - 架构/不变量：将 call retrieval 拆到 `code_query_calls` 模块，保留原 row projection、caller context excerpt、assignment/repeated-site/test-path ranking、path/language pushdown、freshness/version metadata、FTS fallback、bounded search retry、schema、parser、repo-set overlay、semantic/vector、env/paths/net 与 self-iteration harness；未加入仓库名、路径名、case id、query 字符串或 fixture 枚举。
@@ -929,87 +934,22 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779245204.patch`; score 0.819451; cases 13/13 passed.
 - summary: accepted repository-set bridge support and caller named-slot ranking restored LevelDB caller rank and competitive capability, with full metric details retained in the report artifact and the strategy summary above.
 
-## run-1779249648
+## run-1779249648-to-run-1779266107 compacted
+- summary: accepted streamed call-search finalize, hybrid chunk anchor FTS, symbol identity fast path, edge language marker, repository-set fanout retry, export-key index, and caller callee identity fast path entries were compacted to keep this primary benchmark log under the 1000-line hard cap; full patch/report artifacts remain under `.git/relay-knowledge-self-iteration/patches-v2/` and `reports-v2/`, with strategy details preserved in the candidate sections above.
+## self-iteration dynamic category guardrails candidate compacted
+- summary: category-focus selection and explicit guardrail-gate notes are compacted here; details remain in the harness history, patch, report artifacts, and progressive memory summaries.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779249648.patch`
-- score: 0.833026 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.794592, stability=1.000000)
-- cases: 13/13 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260517.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_files.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_path_ranking.rs`
-- key improvements: score_component:score 0.78022->0.8330264986644896; score_component:foundational_capability 0.857143->1.0; score_component:performance 0.768419->0.7945916592471645; score_component:stability 0.933333->1.0; gate:temporal_samples_go_index false->true; gate:relay_teams_rt_imports_w3_save_request false->true; case:rt_imports_w3_save_request false->true; metric:cargo_fmt_check_ms 2097.0->1937.0
-- known degradations: metric:leveldb_cpp_query_p95_ms 6773.0->7785.0; metric:relay_teams_index_ms 3110.0->6173.0; metric:relay_teams_register_index_ms 4988.0->7889.0; metric:relay_teams_query_p50_ms 3770.0->5072.0; metric:relay_teams_query_p95_ms 5721.0->9676.0
-- latency metrics: cargo_fmt_check_ms=1937ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=2239ms; temporal_sdk_go_register_index_ms=4017ms; temporal_samples_go_index_ms=1857ms; temporal_samples_go_register_index_ms=3674ms
+## run-1779279305
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779254116
-- compacted: accepted hybrid chunk anchor FTS candidate, score 0.830563, full patch/report retained at `.git/relay-knowledge-self-iteration/patches-v2/run-1779254116.patch` and report artifacts.
-
-## run-1779256273
-- compacted: accepted symbol identity fast path candidate, score 0.813180, full patch/report retained at `.git/relay-knowledge-self-iteration/patches-v2/run-1779256273.patch` and report artifacts.
-
-## run-1779257829
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779257829.patch`
-- score: 0.846219 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.867882, stability=1.000000)
-- cases: 13/13 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_schema.rs`
-- key improvements: score_component:score 0.81318->0.8462188144971885; score_component:performance 0.684332->0.8678823027621585; metric:temporal_sdk_go_index_ms 2764.0->1873.0; metric:temporal_sdk_go_register_index_ms 4600.0->4392.0; metric:temporal_samples_go_index_ms 1958.0->967.0; metric:temporal_samples_go_register_index_ms 8707.0->1793.0; metric:leveldb_cpp_index_ms 1897.0->866.0; metric:leveldb_cpp_register_index_ms 5462.0->1710.0
-- known degradations: metric:cargo_fmt_check_ms 2021.0->2196.0; metric:cargo_build_debug_ms 363.0->403.0
-- latency metrics: cargo_fmt_check_ms=2196ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=403ms; self_iteration_cargo_check_ms=141ms; temporal_sdk_go_index_ms=1873ms; temporal_sdk_go_register_index_ms=4392ms; temporal_samples_go_index_ms=967ms; temporal_samples_go_register_index_ms=1793ms
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779279305.patch`
+- score: 0.939465 (foundational=1.000000, competitive=0.863636, accuracy=0.931818, semantic_vector=1.000000, research_judge=n/a, performance=0.830363, stability=1.000000)
+- cases: 22/23 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`
+- key improvements: score_component:performance 0.821027->0.8303632110427289; metric:self_iteration_cargo_check_ms 2299.0->121.0; metric:temporal_sdk_go_index_ms 2155.0->1392.0; metric:temporal_sdk_go_register_index_ms 2902.0->2139.0; metric:temporal_samples_go_index_ms 986.0->846.0; metric:temporal_samples_go_register_index_ms 2093.0->1573.0; metric:relay_teams_index_ms 2380.0->1937.0; metric:relay_teams_register_index_ms 3127.0->2684.0
+- known degradations: metric:cargo_fmt_check_ms 1958.0->2078.0; metric:self_iteration_cargo_fmt_check_ms 303.0->343.0; metric:cargo_build_debug_ms 283.0->343.0; metric:leveldb_cpp_index_ms 828.0->1167.0; metric:leveldb_cpp_register_index_ms 1551.0->1934.0; metric:leveldb_cpp_query_p50_ms 1073.0->1296.0; metric:leveldb_cpp_query_p95_ms 1429.0->1476.0; metric:relay_teams_query_p95_ms 2034.0->2562.0
+- latency metrics: cargo_fmt_check_ms=2078ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1392ms; temporal_sdk_go_register_index_ms=2139ms; temporal_samples_go_index_ms=846ms; temporal_samples_go_register_index_ms=1573ms
 
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
-## run-1779262414
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779262414.patch`
-- score: 0.839604 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.831131, stability=1.000000)
-- cases: 13/13 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_targets.rs`, `src/relay_knowledge/storage/sqlite/code_query_prepare.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:score 0.751911->0.8396036555315955; score_component:competitive_capability 0.666667->1.0; score_component:stability 0.933333->1.0; gate:leveldb_cpp_leveldb_callers_new_lru_cache false->true; gate:leveldb_cpp_leveldb_hybrid_internal_key_comparator false->true; case:leveldb_callers_new_lru_cache false->true; case:leveldb_hybrid_internal_key_comparator false->true; metric:cargo_build_debug_ms 24458.0->322.0
-- known degradations: score_component:performance 0.843948->0.8311314196199753; metric:cargo_fmt_check_ms 2157.0->2255.0; metric:self_iteration_cargo_fmt_check_ms 323.0->383.0; metric:temporal_samples_go_index_ms 887.0->1190.0; metric:temporal_samples_go_register_index_ms 1653.0->2075.0; metric:relay_teams_query_p50_ms 1106.0->1148.0; metric:leveldb_cpp_index_ms 827.0->886.0; metric:leveldb_cpp_register_index_ms 1594.0->1933.0
-- latency metrics: cargo_fmt_check_ms=2255ms; self_iteration_cargo_fmt_check_ms=383ms; cargo_build_debug_ms=322ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1390ms; temporal_sdk_go_register_index_ms=2357ms; temporal_samples_go_index_ms=1190ms; temporal_samples_go_register_index_ms=2075ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779265683
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779265683.patch`
-- score: 0.839793 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.832182, stability=1.000000)
-- cases: 13/13 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_set.rs`
-- key improvements: score_component:score 0.833247->0.8397926825357442; score_component:performance 0.795814->0.8321815696430236; metric:cargo_fmt_check_ms 2353.0->2118.0; metric:self_iteration_cargo_check_ms 202.0->121.0; metric:temporal_samples_go_index_ms 1389.0->947.0; metric:leveldb_cpp_index_ms 907.0->867.0; metric:relay_teams_register_index_ms 5797.0->3665.0; metric:relay_teams_query_p50_ms 1329.0->1106.0
-- known degradations: metric:temporal_samples_go_register_index_ms 2156.0->3747.0; metric:relay_teams_index_ms 2698.0->2858.0; metric:temporal_go_workspace_repo_set_query_p50_ms 7347.0->10022.0; metric:temporal_go_workspace_repo_set_query_p95_ms 7347.0->10022.0
-- latency metrics: cargo_fmt_check_ms=2118ms; self_iteration_cargo_fmt_check_ms=322ms; cargo_build_debug_ms=505ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1853ms; temporal_sdk_go_register_index_ms=2660ms; temporal_samples_go_index_ms=947ms; temporal_samples_go_register_index_ms=3747ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779266107
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779266107.patch`
-- score: 0.843861 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.854785, stability=1.000000)
-- cases: 13/13 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_call_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_calls.rs`, `src/relay_knowledge/storage/sqlite/code_query_prepare.rs`
-- key improvements: score_component:performance 0.832182->0.8547854489307346; metric:cargo_build_debug_ms 505.0->303.0; metric:relay_teams_index_ms 2858.0->2096.0; metric:relay_teams_register_index_ms 3665.0->2923.0; metric:relay_teams_query_p50_ms 1106.0->1051.0; metric:temporal_samples_go_index_ms 947.0->868.0; metric:temporal_samples_go_register_index_ms 3747.0->1656.0; metric:leveldb_cpp_index_ms 867.0->826.0
-- known degradations: metric:temporal_sdk_go_index_ms 1853.0->1912.0
-- latency metrics: cargo_fmt_check_ms=2117ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=121ms; relay_teams_index_ms=2096ms; relay_teams_register_index_ms=2923ms; relay_teams_query_p50_ms=1051ms; relay_teams_query_p95_ms=1614ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## self-iteration dynamic category guardrails candidate
-
-- candidate: 自迭代 Rust harness 增加 `--categories` 聚焦参数，并把显式 `guardrail=true` case 转成硬质量 gate。
-- algorithm: 聚焦运行按 `foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`research_judge`、`performance` 或 `all` 选择主攻 workload；`performance` 聚焦保留会产生性能指标的 repository、repo-set、semantic/vector 和 file-fixture workload；无论聚焦哪个类别，底线 `guardrail=true` case 都会转成 `guardrail_case_*` gate 拒绝候选。
-- architecture: 类别解析集中在 self-iteration config，workload 选择集中在 evaluator selection helper；run history 额外记录 `category_focus`/`selected_categories` 并按 profile + category focus 查找对比基线；`self-iterate.sh` 继续透传参数，case 文件只用声明式 `guardrail` 字段，不需要脚本侧维护硬编码 case id。
-- invariants: 未传 `--categories` 时仍使用 profile 默认语义；fast 默认扩展到每仓 8 条普通 case、2 条 repo-set case，并增加 1 条 semantic/vector guardrail；聚焦模式会跳过没有选中 query case 且不是所选 repo-set 成员的仓库；full/exhaustive 默认仍运行完整慢 suite；smoke 仍只做 launcher/format 类轻量验证。
-- expected impact: 允许先用 `--categories semantic_vector` 等方式集中拉高低分项，同时防止基础 repository、跨仓和 semantic/vector 底线能力被优化过程打坏；默认 fast 也获得更多 case 信号，不再长期停留在已满分的小集合。
-- risks: 同一 profile 下不同 category focus 的历史分数不再共享采纳比较基线；已有旧历史缺少 `category_focus` 字段时只会继续作为默认 workload 基线，不会污染新的聚焦运行。

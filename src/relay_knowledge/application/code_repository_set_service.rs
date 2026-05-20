@@ -22,7 +22,7 @@ use super::{
     RelayKnowledgeService,
     code_repository_set_query::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
-        per_member_candidate_limit, repository_set_score,
+        per_member_candidate_limit, prune_returned_overlay_evidence, repository_set_score,
     },
 };
 
@@ -199,6 +199,7 @@ impl RelayKnowledgeService {
         }
         apply_bridge_support_bonus(&mut results);
         let truncated = dedupe_sort_truncate(&mut results, request.limit);
+        prune_returned_overlay_evidence(&mut results);
         let degraded_reason = status.degraded_reason.clone().or_else(|| {
             status
                 .overlay

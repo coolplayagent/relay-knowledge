@@ -253,6 +253,51 @@ pub(super) fn apply_bridge_support_bonus(results: &mut [CodeRepositorySetQueryHi
     }
 }
 
+pub(super) fn prune_returned_overlay_evidence(results: &mut [CodeRepositorySetQueryHit]) {
+    let retained_bridge_edges = retained_bridge_edge_ids(results);
+    for result in results {
+        let hit_is_import = hit_is_import_edge(&result.hit);
+        let target_records = hit_target_records(&result.hit);
+        result.overlay_evidence.retain(|edge| {
+            hit_is_import
+                || target_records
+                    .iter()
+                    .any(|target_record| edge_targets_record(edge, target_record))
+                || retained_bridge_edges.contains(&edge.edge_id)
+        });
+    }
+}
+
+fn retained_bridge_edge_ids(results: &[CodeRepositorySetQueryHit]) -> BTreeSet<String> {
+    let mut origin_files = BTreeSet::new();
+    let mut target_records = BTreeSet::new();
+    for result in results {
+        origin_files.insert((result.hit.scope_id.clone(), result.hit.path.clone()));
+        target_records.extend(hit_target_records(&result.hit));
+    }
+
+    let mut retained = BTreeSet::new();
+    for result in results {
+        for edge in &result.overlay_evidence {
+            let Some((origin_path, _, _)) = evidence_origin(&edge.evidence_json) else {
+                continue;
+            };
+            let Some(target_record) = edge_target_record(edge) else {
+                continue;
+            };
+            let origin_file = (edge.from_source_scope.clone(), origin_path);
+            if bridge_support_bonus(edge) > 0.0
+                && origin_files.contains(&origin_file)
+                && target_records.contains(&target_record)
+            {
+                retained.insert(edge.edge_id.clone());
+            }
+        }
+    }
+
+    retained
+}
+
 pub(super) fn dedupe_sort_truncate(
     results: &mut Vec<CodeRepositorySetQueryHit>,
     limit: usize,
@@ -355,6 +400,10 @@ fn edge_target_record(edge: &CodeRepositoryCrossEdge) -> Option<(String, String,
     ))
 }
 
+fn edge_targets_record(edge: &CodeRepositoryCrossEdge, record: &(String, String, String)) -> bool {
+    edge_target_record(edge).as_ref() == Some(record)
+}
+
 fn hit_target_records(hit: &CodeRetrievalHit) -> Vec<(String, String, String)> {
     let mut records = Vec::with_capacity(2);
     if let Some(symbol_id) = &hit.symbol_snapshot_id {
@@ -373,6 +422,10 @@ fn hit_target_records(hit: &CodeRetrievalHit) -> Vec<(String, String, String)> {
     }
 
     records
+}
+
+fn hit_is_import_edge(hit: &CodeRetrievalHit) -> bool {
+    hit.edge_kind.as_deref() == Some("import")
 }
 
 fn evidence_origin(evidence_json: &str) -> Option<(String, u32, u32)> {
@@ -653,15 +706,18 @@ mod tests {
                     0.70,
                     false,
                 ),
-                overlay_evidence: Vec::new(),
+                overlay_evidence: vec![bridge.clone()],
                 score: 0.70,
             },
         ];
 
         apply_bridge_support_bonus(&mut results);
+        prune_returned_overlay_evidence(&mut results);
 
         assert!(results[0].score > 0.80);
         assert!(results[1].score > 0.70);
+        assert_eq!(results[0].overlay_evidence, vec![bridge.clone()]);
+        assert_eq!(results[1].overlay_evidence, vec![bridge]);
     }
 
     #[test]
@@ -695,6 +751,28 @@ mod tests {
 
         assert_eq!(results[0].score, 0.80);
         assert_eq!(results[1].score, 0.70);
+    }
+
+    #[test]
+    fn returned_overlay_evidence_prunes_origin_only_file_noise() {
+        let app = member_status("app", "scope-app", 0);
+        let origin_only = edge(
+            "edge-origin-only",
+            "scope-app",
+            Some("scope-service"),
+            r#"{"from_path":"src/client.rs","from_line_start":1,"from_line_end":1}"#,
+            10_000,
+        );
+        let mut results = vec![CodeRepositorySetQueryHit {
+            member: app.member.clone(),
+            hit: hit("repo-app", "scope-app", "src/client.rs", 20, 0.80, false),
+            overlay_evidence: vec![origin_only],
+            score: 0.80,
+        }];
+
+        prune_returned_overlay_evidence(&mut results);
+
+        assert!(results[0].overlay_evidence.is_empty());
     }
 
     fn member_status(
