@@ -18,6 +18,8 @@ mod code_query_import_targets;
 mod code_query_line_ranges;
 #[path = "code_query_path_ranking.rs"]
 mod code_query_path_ranking;
+#[path = "code_query_prepare.rs"]
+mod code_query_prepare;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_support.rs"]
@@ -70,6 +72,7 @@ use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_example_or_sample,
     query_mentions_test_or_benchmark,
 };
+use code_query_prepare::{prepare_code_search_statement, retry_code_search_operation};
 use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow};
 use code_query_support::*;
 use code_query_symbols::search_symbols;
@@ -79,7 +82,7 @@ pub(super) fn search_code(
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let status = required_repository(connection, &request.repository)?;
-    search_code_with_status(connection, &status, &request)
+    retry_code_search_operation(|| search_code_with_status(connection, &status, &request))
 }
 
 pub(super) fn search_code_scope(
@@ -95,7 +98,7 @@ pub(super) fn search_code_scope(
                 ))
             })?;
 
-    search_code_with_status(connection, &status, &request)
+    retry_code_search_operation(|| search_code_with_status(connection, &status, &request))
 }
 
 fn search_code_with_status(
@@ -175,7 +178,7 @@ fn search_references(
         LIMIT ?
         "
     );
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
@@ -317,7 +320,7 @@ fn search_calls(
         LIMIT ?
         "
     );
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited_with_language_and_call_direction(
             required_scope(status)?,
@@ -560,7 +563,7 @@ fn search_imports(
         LIMIT ?
         "
     );
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,
@@ -729,7 +732,7 @@ fn search_chunks(
         LIMIT ?
         "
     );
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,

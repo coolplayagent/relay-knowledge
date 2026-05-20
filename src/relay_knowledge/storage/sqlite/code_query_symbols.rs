@@ -17,7 +17,8 @@ use super::{
     },
     code_query_rows::SymbolRow,
     code_query_support::*,
-    dedupe_sort_truncate, hit_from_parts, required_scope, selected_row,
+    dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement, required_scope,
+    selected_row,
 };
 
 struct SymbolIdentityRows {
@@ -104,7 +105,7 @@ fn search_symbol_identity_rows(
     push_language_filter_values(&mut values, &request.repository.language_filters);
     values.push(rusqlite::types::Value::Integer((direct_limit + 1) as i64));
 
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(params_from_iter(values), row_to_symbol)?;
     let mut rows = rows
         .collect::<Result<Vec<_>, _>>()
@@ -150,7 +151,7 @@ fn search_symbol_fts_rows(
         LIMIT ?
         "
     );
-    let mut statement = connection.prepare(&sql)?;
+    let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
         params_from_iter(fts_values_for_limited_with_language(
             required_scope(status)?,

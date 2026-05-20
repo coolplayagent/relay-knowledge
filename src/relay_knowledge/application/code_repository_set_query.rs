@@ -157,11 +157,35 @@ impl<'a> OverlayEvidenceIndex<'a> {
     }
 }
 
-pub(super) fn per_member_candidate_limit(limit: usize) -> usize {
-    std::cmp::min(
-        50,
-        std::cmp::max(limit.saturating_mul(3), limit.saturating_add(5)),
-    )
+const MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 50;
+const MAX_MULTI_MEMBER_MINIMUM_CANDIDATES: usize = 15;
+const MIN_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 6;
+const REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER: usize = 3;
+
+pub(super) fn per_member_candidate_limit(limit: usize, member_count: usize) -> usize {
+    if member_count == 0 {
+        return 0;
+    }
+
+    let requested = limit.max(1);
+    let single_member_depth = requested
+        .saturating_mul(REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER)
+        .max(requested.saturating_add(5));
+    if member_count == 1 {
+        return single_member_depth.min(MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER);
+    }
+
+    let minimum = requested.saturating_add(5).clamp(
+        MIN_REPOSITORY_SET_CANDIDATES_PER_MEMBER,
+        MAX_MULTI_MEMBER_MINIMUM_CANDIDATES,
+    );
+    let shared_budget = requested
+        .saturating_mul(REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER)
+        .max(minimum);
+    shared_budget
+        .div_ceil(member_count)
+        .max(minimum)
+        .min(MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER)
 }
 
 pub(super) fn repository_set_score(
@@ -525,10 +549,18 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].score, 0.90);
 
-        assert_eq!(per_member_candidate_limit(1), 6);
-        assert_eq!(per_member_candidate_limit(20), 50);
         assert!(evidence_origin("not-json").is_none());
         assert!(evidence_origin("{}").is_none());
+    }
+
+    #[test]
+    fn candidate_limit_keeps_single_member_depth_and_shares_multi_member_budget() {
+        assert_eq!(per_member_candidate_limit(10, 0), 0);
+        assert_eq!(per_member_candidate_limit(1, 1), 6);
+        assert_eq!(per_member_candidate_limit(20, 1), 50);
+        assert_eq!(per_member_candidate_limit(10, 2), 15);
+        assert_eq!(per_member_candidate_limit(20, 2), 30);
+        assert_eq!(per_member_candidate_limit(20, 4), 15);
     }
 
     #[test]

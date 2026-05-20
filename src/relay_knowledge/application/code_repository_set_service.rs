@@ -164,7 +164,7 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let edge_index = OverlayEvidenceIndex::new(&edges);
         let mut results = Vec::new();
-        let candidate_limit = per_member_candidate_limit(request.limit);
+        let candidate_limit = per_member_candidate_limit(request.limit, status.members.len());
         for member_status in &status.members {
             let member = &member_status.member;
             let selector = CodeRepositorySelector::new(
