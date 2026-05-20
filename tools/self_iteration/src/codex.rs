@@ -1,10 +1,11 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     command::{CommandResult, CommandSpec, run_command},
-    config::{CategorySet, Config},
+    config::{CategorySet, Config, EvaluationCategory},
     history::{HistoryPaths, adopted, best_accepted_run_for_workload, is_evaluate_run, load_runs},
     history_synthesis::synthesize_history,
     memory::{
@@ -158,6 +159,141 @@ Make one concrete candidate code change now. Before editing, use the historical 
 "#,
         workspace = workspace.display(),
     )
+}
+
+pub fn build_unattended_prompt(
+    paths: &HistoryPaths,
+    workspace: &Path,
+    run_id: &str,
+    profile: &str,
+    category: EvaluationCategory,
+    macro_explore: bool,
+    cases_config: &Value,
+) -> String {
+    let categories = CategorySet::single(category);
+    let category_focus_key = categories.focus_key();
+    let best = best_accepted_run_for_workload(paths, profile, Some(&category_focus_key))
+        .ok()
+        .flatten();
+    let latest =
+        crate::history::previous_scored_run_for_workload(paths, profile, Some(&category_focus_key))
+            .ok()
+            .flatten();
+    let feature_targets = if macro_explore {
+        competitive_feature_targets(cases_config, 6)
+    } else {
+        "Macro targets omitted for short explore; use the current category and recent rejection summary."
+            .to_owned()
+    };
+    let guardrails = if macro_explore {
+        implementation_guardrails(cases_config, 5)
+    } else {
+        "Do not enumerate known queries, paths, repositories, symbols, or fixture strings."
+            .to_owned()
+    };
+    let exploration_mode = if macro_explore {
+        "macro_explore"
+    } else {
+        "explore"
+    };
+    let expected_change = if macro_explore {
+        "Make a larger, general competitive-capability improvement in ranking, indexing, relationship extraction, query planning, context construction, or retrieval evidence. Prefer a coherent algorithmic change over a local tweak."
+    } else {
+        "Make one narrow, concrete candidate improvement for the current category."
+    };
+    format!(
+        r#"You are running relay-knowledge unattended self-iteration run {run_id}.
+
+Mode: {exploration_mode}
+Workspace: {workspace}
+Screen profile: {profile}
+Category focus: {category_focus}
+
+Goal:
+- {expected_change}
+- Preserve foundational capability, semantic/vector retrieval, stability, and existing competitive behavior.
+- Update docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md when code, tests, benchmark behavior, or harness policy changes.
+- Do not create commits; the harness owns accepted commits.
+
+Baseline:
+- Latest scored run: {latest_summary}
+- Best accepted run: {best_summary}
+
+Recent rejected attempts:
+{rejected}
+
+Relevant memory index:
+{memory}
+
+Competitive feature targets:
+{feature_targets}
+
+Implementation guardrails:
+{guardrails}
+
+Before editing, inspect only the files needed for this category. In your final notes, state the strategy used and why it should improve the category without fixture specialization.
+"#,
+        workspace = workspace.display(),
+        category_focus = category.label(),
+        latest_summary = latest
+            .as_ref()
+            .map(run_brief)
+            .unwrap_or_else(|| "none for this profile/category".to_owned()),
+        best_summary = best
+            .as_ref()
+            .map(run_brief)
+            .unwrap_or_else(|| "none for this profile/category".to_owned()),
+        rejected = recent_rejections(paths),
+        memory = progressive_memory_index(paths, if macro_explore { 5 } else { 3 }),
+    )
+}
+
+fn run_brief(run: &Value) -> String {
+    format!(
+        "run_id={} score={} competitive={} reasons={}",
+        value(run, "run_id"),
+        value(run, "score"),
+        value(run, "competitive_capability"),
+        run.get("reject_reasons")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default()
+    )
+}
+
+fn competitive_feature_targets(cases_config: &Value, limit: usize) -> String {
+    suite_strings(cases_config, "competitive_feature_targets", limit)
+}
+
+fn implementation_guardrails(cases_config: &Value, limit: usize) -> String {
+    suite_strings(cases_config, "implementation_guardrails", limit)
+}
+
+fn suite_strings(cases_config: &Value, field: &str, limit: usize) -> String {
+    let items = cases_config
+        .get("research_judge_suite")
+        .and_then(|suite| suite.get(field))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .take(limit)
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if items.is_empty() {
+        "No research judge targets configured.".to_owned()
+    } else {
+        items.join("\n")
+    }
 }
 
 fn recent_rejections(paths: &HistoryPaths) -> String {

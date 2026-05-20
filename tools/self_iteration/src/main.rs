@@ -8,10 +8,11 @@ mod history;
 mod history_synthesis;
 mod memory;
 mod scoring;
+mod unattended;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use config::{Config, Mode};
+use config::{Config, Mode, Strategy};
 use git_ops::PatchSnapshot;
 use scoring::{EvaluationObservation, GateObservation};
 
@@ -51,6 +52,9 @@ fn run(mut config: Config) -> Result<i32, String> {
 }
 
 fn run_loop(config: &Config, paths: &history::HistoryPaths) -> Result<i32, String> {
+    if config.strategy == Strategy::UnattendedLayered {
+        return unattended::run_unattended_layered_loop(config, paths);
+    }
     if config.max_iterations == Some(0) || config.stop_after_accepted == Some(0) {
         return Ok(0);
     }
@@ -219,6 +223,7 @@ fn run_generation_iteration(
         commit: commit.as_deref(),
         score: &score,
         previous_run: previous_run.as_ref(),
+        metadata: None,
     })?;
     if record["accepted"].as_bool().unwrap_or(false) {
         println!(
@@ -235,7 +240,7 @@ fn run_generation_iteration(
     }
 }
 
-fn evaluate_candidate_for_patch(
+pub(crate) fn evaluate_candidate_for_patch(
     config: &Config,
     paths: &history::HistoryPaths,
     run_id: &str,
@@ -253,7 +258,7 @@ fn evaluate_candidate_for_patch(
     )
 }
 
-fn apply_candidate_documentation_gate(
+pub(crate) fn apply_candidate_documentation_gate(
     evaluation: &mut evaluator::EvaluationRun,
     patch: &PatchSnapshot,
 ) {
@@ -321,22 +326,26 @@ fn persist_scored_run(
         commit,
         score: &score,
         previous_run: previous.as_ref(),
+        metadata: None,
     })
 }
 
-struct PersistInput<'a> {
-    config: &'a Config,
-    paths: &'a history::HistoryPaths,
-    run_id: &'a str,
-    patch: &'a PatchSnapshot,
-    codex: Option<&'a codex::CodexResult>,
-    evaluation: &'a evaluator::EvaluationRun,
-    commit: Option<&'a str>,
-    score: &'a scoring::ScoreBreakdown,
-    previous_run: Option<&'a serde_json::Value>,
+pub(crate) struct PersistInput<'a> {
+    pub(crate) config: &'a Config,
+    pub(crate) paths: &'a history::HistoryPaths,
+    pub(crate) run_id: &'a str,
+    pub(crate) patch: &'a PatchSnapshot,
+    pub(crate) codex: Option<&'a codex::CodexResult>,
+    pub(crate) evaluation: &'a evaluator::EvaluationRun,
+    pub(crate) commit: Option<&'a str>,
+    pub(crate) score: &'a scoring::ScoreBreakdown,
+    pub(crate) previous_run: Option<&'a serde_json::Value>,
+    pub(crate) metadata: Option<&'a serde_json::Value>,
 }
 
-fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::Value, String> {
+pub(crate) fn persist_scored_run_with_score(
+    input: PersistInput<'_>,
+) -> Result<serde_json::Value, String> {
     let timestamp = unix_timestamp_string();
     let patch = patch_metadata(input.patch);
     let optimization_plan = optimization_plan(input.patch, input.score, input.codex);
@@ -352,8 +361,10 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
     let report = serde_json::json!({
         "run_id": input.run_id,
         "profile": input.config.profile,
+        "strategy": input.config.strategy.label(),
         "category_focus": category_focus.as_deref(),
         "selected_categories": selected_categories_report,
+        "unattended": input.metadata,
         "workspace": input.config.workspace.display().to_string(),
         "patch": patch,
         "optimization_plan": optimization_plan,
@@ -390,6 +401,25 @@ fn persist_scored_run_with_score(input: PersistInput<'_>) -> Result<serde_json::
         object.insert("patch".to_owned(), patch);
         object.insert("optimization_plan".to_owned(), optimization_plan);
         object.insert("comparison_baseline".to_owned(), comparison_baseline);
+        object.insert(
+            "strategy".to_owned(),
+            serde_json::json!(input.config.strategy.label()),
+        );
+        if let Some(metadata) = input.metadata.and_then(serde_json::Value::as_object) {
+            for key in [
+                "layer",
+                "parent_run_id",
+                "promoted_from_run_id",
+                "macro_trigger",
+                "promotion_decision",
+                "wall_clock_started_at",
+                "wall_clock_elapsed_seconds",
+            ] {
+                if let Some(value) = metadata.get(key) {
+                    object.insert(key.to_owned(), value.clone());
+                }
+            }
+        }
     }
     if !history::is_evaluate_run(&record) {
         memory::write_run_memory(input.paths, &record)?;
@@ -453,7 +483,7 @@ fn comparison_baseline(
     }))
 }
 
-fn write_adopted_optimization_document(
+pub(crate) fn write_adopted_optimization_document(
     workspace: &std::path::Path,
     run_id: &str,
     patch: &PatchSnapshot,
@@ -545,7 +575,7 @@ fn compact_changes(changes: &[serde_json::Value]) -> String {
     }
 }
 
-fn print_score(record: &serde_json::Value) {
+pub(crate) fn print_score(record: &serde_json::Value) {
     let score_accepted = record
         .get("score_accepted")
         .and_then(serde_json::Value::as_bool)
@@ -618,7 +648,7 @@ fn print_score(record: &serde_json::Value) {
     );
 }
 
-fn number(record: &serde_json::Value, name: &str) -> f64 {
+pub(crate) fn number(record: &serde_json::Value, name: &str) -> f64 {
     record
         .get(name)
         .and_then(serde_json::Value::as_f64)
@@ -629,12 +659,27 @@ fn new_run_id() -> String {
     format!("run-{}", unix_timestamp_string())
 }
 
+pub(crate) fn new_layer_run_id(layer: &str) -> String {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos().to_string())
+        .unwrap_or_else(|_| "0".to_owned());
+    format!("run-{suffix}-{layer}")
+}
+
 fn new_manual_evaluate_run_id() -> String {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos().to_string())
         .unwrap_or_else(|_| "0".to_owned());
     format!("manual-evaluate-{suffix}")
+}
+
+pub(crate) fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn unix_timestamp_string() -> String {

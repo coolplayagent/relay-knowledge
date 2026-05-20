@@ -163,6 +163,7 @@ started directly through the stable launcher:
 ```bash
 ./self-iterate.sh
 ./self-iterate.sh once
+./self-iterate.sh loop --strategy unattended-layered
 ./self-iterate.sh chart
 ```
 
@@ -173,7 +174,11 @@ the configured score. The research judge supports OpenAI-compatible HTTP or an
 open coding-agent CLI, defaulting to `opencode` when no backend is configured.
 The semantic/vector fixture inherits the same `RELAY_KNOWLEDGE_*` embedding
 environment as normal runtime commands and does not persist secrets in
-benchmark cases.
+benchmark cases. The `unattended-layered` strategy is tuned for 1-2 day runs:
+it performs short smoke-level Codex explores, validates promising candidates
+with the fast profile, persists resume state in
+`.git/relay-knowledge-self-iteration/unattended-state-v2.json`, and escalates
+to longer competitive-capability macro exploration when short attempts stall.
 External repositories in the self-iteration evaluation set are pinned to
 documented commits, and C/C++ adds tree-sitter-oriented generated syntax
 fixtures. Multilingual generated fixtures extend the same evaluation set. See

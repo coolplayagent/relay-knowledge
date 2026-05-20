@@ -31,6 +31,8 @@ tools/self_iteration/target/debug/relay-knowledge-self-iterate loop --workspace 
 ./self-iterate.sh once --profile fast --categories semantic_vector
 ./self-iterate.sh once --profile fast --categories semantic_vector,competitive
 ./self-iterate.sh once --profile smoke --dry-run-codex
+./self-iterate.sh loop --strategy unattended-layered
+./self-iterate.sh loop --strategy unattended-layered --max-wall-clock-hours 48 --stop-after-accepted 12
 ```
 
 ## 进度日志
@@ -80,6 +82,18 @@ v2 harness 将 `runs-v2.jsonl`、`reports-v2/` 和 `patches-v2/` 与早期 run/r
 可用 `--categories` 聚焦某个分数族，但不会移除底线保护。支持的类别包括 `foundational`、`competitive`、`semantic_vector`、`file_fixtures`、`repository_sets`、`research_judge`、`performance` 和 `all`。聚焦运行会执行显式 `guardrail=true` case 加上所选类别的 case；guardrail case 失败会转成 quality gate 失败，即使聚焦分数提升也会拒绝候选。例如 `--categories semantic_vector` 会运行完整 semantic/vector suite，并同时保留 repository 与 repo-set 底线 case；`--categories competitive` 会运行 competitive repository cases 和相同底线 case；`--categories performance` 会保留 repository、repo-set、semantic/vector 和 file-fixture 中会产生性能指标的 workload，而不是只剩 guardrail。
 
 并发默认使用 `--jobs auto`、`--repo-jobs auto` 和 `--query-jobs auto`。`auto` 会更积极地使用本机：全局 command limiter 和 query pool 默认等于可用 CPU 数，repository jobs 默认等于可用 CPU 数的一半。仓库 register/index 以及 repository-set create/add/refresh 这类共享评估库写命令仍会串行化，写边界之后的查询子进程可并发运行。可用 `--jobs N` 或 `RELAY_KNOWLEDGE_SELF_ITERATION_JOBS=N` 覆盖全局并发。
+
+## 无人值守分层策略
+
+`--strategy unattended-layered` 是面向 1-2 天无人值守运行的长周期策略。未显式传入该策略时，现有单轮 loop/once 行为保持不变。
+
+默认参数按 36 小时窗口设置：`--max-wall-clock-hours 36`、`--stop-after-accepted 8`、`--explore-timeout-seconds 900`、`--macro-explore-timeout-seconds 2700`、`--max-explore-attempts-per-cycle 3`、`--max-consecutive-empty-candidates 8`、`--max-consecutive-promotion-failures 10`、`--macro-after-competitive-failures 4`、`--macro-after-empty-candidates 6`、`--cycle-sleep-seconds 120`、`--cooldown-after-accept-seconds 300` 和 `--cooldown-after-timeout-seconds 900`。
+
+每个 cycle 先用 `smoke` profile 做短探索，按 `competitive -> semantic_vector -> performance -> repository_sets` 轮转 category。Codex 只在 explore 层运行；候选通过 smoke screen 后，复用同一个 patch 进入同 category 的 `fast` validate，只有 validate 通过才进入既有 accept/commit 路径。这样不会为了同一个候选重复调用 Codex。
+
+当短探索持续没有产出时，策略会升级到竞争力能力的 `macro_explore`。触发条件包括 repeated competitive promotion failure、连续 empty candidate，或当前 competitive capability 相对 best accepted focused baseline 出现超过阈值的差距。macro prompt 会注入 `cases.json` 中 `research_judge_suite.competitive_feature_targets` 和 `implementation_guardrails`，要求 Codex 做 ranking、indexing、relationship extraction、query planning、context construction 或 retrieval evidence 这类较大的泛化改进，同时继续禁止 fixture/query/path/symbol 特化枚举。
+
+运行状态写入 `.git/relay-knowledge-self-iteration/unattended-state-v2.json`，用于崩溃后恢复 category rotation、失败计数、accepted 计数和 deep-check 调度。分层 run history 会额外记录 `strategy`、`layer`、`parent_run_id`、`promoted_from_run_id`、`macro_trigger`、`promotion_decision` 和 wall-clock 字段。传入 `--use-current-candidate` 时会跳过 Codex，直接从当前 diff 的 smoke screen 和 fast validate 开始。
 
 ## 评分和采纳
 
