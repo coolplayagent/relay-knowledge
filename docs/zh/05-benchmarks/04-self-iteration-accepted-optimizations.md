@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779317832-reference-identity-fast-path
+- 算法：为 `references` 检索增加 source-scope 内的 identity-first 计划；当 query 是单一符号或 `Owner.Symbol`/`Owner::Symbol` scoped identity 时，先通过 `code_repository_references(source_scope, name, kind, path)` 的既有索引读取有界候选，并用 resolved target hint/canonical symbol id 校验 scoped owner，再在 direct 结果具体且未饱和时跳过 FTS，否则与原 FTS 候选合并。
+- 架构/不变量：变更限定在 SQLite code reference retrieval 模块化、bounded read-plan helper 和 focused tests；不改变 parser、schema、FTS 文档写入、candidate 上限、reference/call/import/symbol 事实、repo-set overlay、semantic/vector read model、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query 或 fixture 特殊分支。
+- 预期影响/风险：relay-teams、LevelDB、Temporal/OTel 等多仓 exact/scoped reference 查询可跳过宽 FTS scan，且 scoped owner 只存在于已解析 symbol identity 时也能召回，预期改善 fast profile reference 查询延迟和多仓 fan-out 稳定性；风险是低歧义 exact reference 会更早返回 direct 排序，受 200 条 direct 上限、saturation fallback、scoped identity guard、原 scoring/dedupe/top-k 和 FTS fallback 约束。
 ## 候选优化说明：run-1779290792704425429-derived-scope-version-pushdown
 - 算法：SQLite semantic/vector derived read model 为 `source_scope, created_graph_version` 建立持久索引，并在有 scope 的查询中生成 `source_scope = ? AND created_graph_version <= ?`，让 SQLite 可先按仓库/图版本缩小候选，再执行 bounded token LIKE 剪枝与 ranking。
 - 架构/不变量：变更限定在 retrieval schema 初始化、derived candidate request binding 与 focused tests；不改变 graph/schema row 内容、BM25、semantic token signature、hash vector、candidate 上限、lexical/cosine admission、RRF fusion、CLI/API JSON、provider backend、env/paths/net、安装发布或 self-iteration harness，且没有仓库、路径、case、query、模型或 provider 特殊分支。
@@ -964,30 +968,20 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 ## run-1779279305-to-run-1779289571171823700 compacted
 - summary: returned overlay pruning, vector lexical coverage tie-break, derived cursor streaming, and exact-path symbol/chunk ranking accepted records were compacted on 2026-05-20 to keep this primary benchmark log under the repository line cap; strategy details remain in the candidate sections above and raw metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
 
-## run-1779290426265110061-validate
+## run-1779290426265110061-to-run-1779291615794938640 compacted
+- summary: derived token signature filter and derived scope/version pushdown validate records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; full details moved to the archive document and raw patch/report artifacts remain under `.git/relay-knowledge-self-iteration/`.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779289906426170921-explore.patch`
-- score: 0.950057 (foundational=0.900000, competitive=1.000000, accuracy=0.950000, semantic_vector=1.000000, research_judge=n/a, performance=0.844760, stability=1.000000)
-- cases: 12/12 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+## run-1779317832
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779317832.patch`
+- score: 0.844527 (foundational=0.947917, competitive=0.519231, accuracy=0.733574, semantic_vector=1.000000, research_judge=n/a, performance=0.787526, stability=1.000000)
+- cases: 31/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260517.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_reference_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_references.rs`
 - key improvements: none recorded
 - known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=1978ms; self_iteration_cargo_fmt_check_ms=363ms; cargo_build_debug_ms=34598ms; self_iteration_cargo_check_ms=141ms; relay_teams_index_ms=2119ms; relay_teams_register_index_ms=2806ms; relay_teams_query_p50_ms=787ms; relay_teams_query_p95_ms=787ms
+- latency metrics: cargo_fmt_check_ms=1997ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=1210ms; leveldb_cpp_index_ms=5063ms; leveldb_cpp_register_index_ms=5124ms; leveldb_cpp_query_p50_ms=224ms; leveldb_cpp_query_p95_ms=427ms
 
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
-## run-1779291615794938640-validate
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779290792704425429-explore.patch`
-- score: 0.866130 (foundational=0.947917, competitive=0.621212, accuracy=0.784564, semantic_vector=1.000000, research_judge=n/a, performance=0.782900, stability=1.000000)
-- cases: 40/52 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=1916ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; relay_teams_index_ms=2159ms; relay_teams_register_index_ms=2846ms; relay_teams_query_p50_ms=1149ms; relay_teams_query_p95_ms=2097ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate because the performance-focused validate run had no same profile/category baseline. This record documents the policy gap closed by the later harness change that requires focused candidates to beat the best accepted run for the same profile when such a run exists.

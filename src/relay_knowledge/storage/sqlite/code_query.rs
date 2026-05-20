@@ -22,6 +22,8 @@ mod code_query_line_ranges;
 mod code_query_path_ranking;
 #[path = "code_query_prepare.rs"]
 mod code_query_prepare;
+#[path = "code_query_references.rs"]
+mod code_query_references;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
 #[path = "code_query_support.rs"]
@@ -67,7 +69,8 @@ use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
 };
 use code_query_prepare::{prepare_code_search_statement, retry_code_search_operation};
-use code_query_rows::{ChunkRow, ImportRow, ReferenceRow};
+use code_query_references::search_references;
+use code_query_rows::{ChunkRow, ImportRow};
 use code_query_support::*;
 use code_query_symbols::search_symbols;
 
@@ -136,126 +139,6 @@ fn search_code_with_status(
     dedupe_sort_truncate(&mut hits, request.limit);
 
     Ok(hits)
-}
-
-fn search_references(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = fts_match_query(&request.query);
-    let fts_filter = fts_path_and_language_filter_sql(status, request);
-    let sql = format!(
-        "
-        SELECT r.file_id, r.path, f.language_id, r.name, r.kind,
-               r.target_symbol_snapshot_id, r.byte_start, r.byte_end,
-               r.line_start, r.line_end, r.target_hint, r.resolution_state,
-               r.confidence_basis_points, r.confidence_tier, s.canonical_symbol_id
-        FROM code_repository_references r
-        INNER JOIN code_repository_files f
-            ON f.source_scope = r.source_scope AND f.path = r.path
-        LEFT JOIN code_repository_symbols s
-            ON s.source_scope = r.source_scope
-           AND s.symbol_snapshot_id = r.target_symbol_snapshot_id
-        WHERE r.source_scope = ?
-          AND r.reference_id IN (
-              SELECT record_id
-              FROM code_repository_search
-              WHERE code_repository_search MATCH ?
-                AND source_scope = ?
-                AND document_kind = 'reference'
-                {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
-              LIMIT ?
-          )
-        ORDER BY r.path ASC, r.line_start ASC
-        LIMIT ?
-        "
-    );
-    let mut statement = prepare_code_search_statement(connection, &sql)?;
-    let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
-            required_scope(status)?,
-            status,
-            request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Reference),
-            candidate_limit(request, CandidateLayer::Reference),
-        )),
-        |row| {
-            Ok(ReferenceRow {
-                file_id: row.get(0)?,
-                path: row.get(1)?,
-                language_id: row.get(2)?,
-                name: row.get(3)?,
-                kind: row.get(4)?,
-                target_symbol_snapshot_id: row.get(5)?,
-                byte_range: RepositoryCodeRange {
-                    start: row.get(6)?,
-                    end: row.get(7)?,
-                },
-                line_range: RepositoryCodeRange {
-                    start: row.get(8)?,
-                    end: row.get(9)?,
-                },
-                target_hint: row.get(10)?,
-                resolution_state: row.get(11)?,
-                confidence_basis_points: row.get(12)?,
-                confidence_tier: row.get(13)?,
-                target_canonical_symbol_id: row.get(14)?,
-            })
-        },
-    )?;
-    let score_query = ScoreQuery::new(&request.query);
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
-        .filter_map(|row| {
-            let score = score_query.score([
-                row.name.as_str(),
-                row.kind.as_str(),
-                row.target_hint.as_deref().unwrap_or_default(),
-                row.target_canonical_symbol_id
-                    .as_deref()
-                    .unwrap_or_default(),
-            ]) + scoped_identity_query_bonus(
-                &request.query,
-                [
-                    row.target_hint.as_deref().unwrap_or_default(),
-                    row.target_canonical_symbol_id
-                        .as_deref()
-                        .unwrap_or_default(),
-                ],
-            );
-            (score > 0.0).then(|| {
-                hit_from_parts(
-                    status,
-                    HitParts {
-                        path: row.path,
-                        language_id: row.language_id,
-                        byte_range: row.byte_range,
-                        line_range: row.line_range,
-                        symbol_snapshot_id: row.target_symbol_snapshot_id,
-                        canonical_symbol_id: row.target_canonical_symbol_id,
-                        file_id: Some(row.file_id),
-                        retrieval_layers: vec![CodeRetrievalLayer::Reference],
-                        score: score + 1.5,
-                        excerpt: format!("{} reference to {}", row.kind, row.name),
-                        degraded_reason: None,
-                        edge_kind: Some(row.kind),
-                        edge_resolution_state: Some(row.resolution_state),
-                        edge_target_hint: row.target_hint,
-                        edge_confidence_basis_points: Some(row.confidence_basis_points),
-                        edge_confidence_tier: Some(row.confidence_tier),
-                    },
-                )
-            })
-        })
-        .collect())
 }
 
 fn search_imports(
@@ -588,6 +471,10 @@ mod chunk_ranking_tests;
 #[cfg(test)]
 #[path = "code_query_symbol_ranking_tests.rs"]
 mod symbol_ranking_tests;
+
+#[cfg(test)]
+#[path = "code_query_reference_ranking_tests.rs"]
+mod reference_ranking_tests;
 
 #[cfg(test)]
 #[path = "code_query_excerpt_tests.rs"]

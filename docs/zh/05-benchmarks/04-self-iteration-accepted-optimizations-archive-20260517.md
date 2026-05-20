@@ -6,6 +6,28 @@
 
 - summary: primary log details for accepted finalize optimization, production call-site demotion, type-relationship and caller/path ranking, TypeScript import/finalize work, header declaration ranking, function-flow ranking, and same-file import alias usage ranking were compacted on 20260520 to keep `04-self-iteration-accepted-optimizations.md` below the 1000-line repository hard cap; raw details remain available in their original patch/report artifacts.
 
+## run-1779290426265110061-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779289906426170921-explore.patch`
+- score: 0.950057 (foundational=0.900000, competitive=1.000000, accuracy=0.950000, semantic_vector=1.000000, research_judge=n/a, performance=0.844760, stability=1.000000)
+- cases: 12/12 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=1978ms; self_iteration_cargo_fmt_check_ms=363ms; cargo_build_debug_ms=34598ms; self_iteration_cargo_check_ms=141ms; relay_teams_index_ms=2119ms; relay_teams_register_index_ms=2806ms; relay_teams_query_p50_ms=787ms; relay_teams_query_p95_ms=787ms
+- notes: Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness; the candidate targeted general derived retrieval behavior.
+
+## run-1779291615794938640-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779290792704425429-explore.patch`
+- score: 0.866130 (foundational=0.947917, competitive=0.621212, accuracy=0.784564, semantic_vector=1.000000, research_judge=n/a, performance=0.782900, stability=1.000000)
+- cases: 40/52 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=1916ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; relay_teams_index_ms=2159ms; relay_teams_register_index_ms=2846ms; relay_teams_query_p50_ms=1149ms; relay_teams_query_p95_ms=2097ms
+- notes: accepted because the performance-focused validate run had no same profile/category baseline; the later harness change requires focused candidates to beat the best accepted run for the same profile when present.
+
 ## 20260517T030641Z
 
 - patch: `/opt/workspace/relay-knowledge/.git/relay-knowledge-self-iteration/patches/20260517T030641Z.patch`
