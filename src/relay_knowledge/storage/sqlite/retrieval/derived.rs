@@ -17,6 +17,14 @@ const DERIVED_RESULT_MULTIPLIER: usize = 8;
 const MAX_DERIVED_RESULT_LIMIT: usize = 512;
 const MAX_DERIVED_QUERY_TERMS: usize = 16;
 const VECTOR_LEXICAL_COVERAGE_WEIGHT: f64 = 0.05;
+const SEMANTIC_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[DerivedCandidateField::json_token(
+    "lower(token_signature_json)",
+)];
+const VECTOR_CANDIDATE_FIELDS: &[DerivedCandidateField] = &[
+    DerivedCandidateField::contains("lower(content)"),
+    DerivedCandidateField::contains("lower(coalesce(source_path, ''))"),
+    DerivedCandidateField::contains("lower(entity_labels_json)"),
+];
 
 pub(super) fn semantic_candidates(
     connection: &Connection,
@@ -30,15 +38,8 @@ pub(super) fn semantic_candidates(
     }
 
     let result_limit = bounded_candidate_limit(request);
-    let (candidate_condition, ranking_expression, candidate_values) = derived_candidate_filter(
-        &query_terms,
-        &[
-            "lower(token_signature_json)",
-            "lower(content)",
-            "lower(coalesce(source_path, ''))",
-            "lower(entity_labels_json)",
-        ],
-    );
+    let (candidate_condition, ranking_expression, candidate_values) =
+        derived_candidate_filter(&query_terms, SEMANTIC_CANDIDATE_FIELDS);
     let sql = format!(
         "
         SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
@@ -154,14 +155,8 @@ pub(super) fn vector_candidates(
     if query_terms.is_empty() {
         return Ok(Vec::new());
     }
-    let (candidate_condition, ranking_expression, candidate_values) = derived_candidate_filter(
-        &query_terms,
-        &[
-            "lower(content)",
-            "lower(coalesce(source_path, ''))",
-            "lower(entity_labels_json)",
-        ],
-    );
+    let (candidate_condition, ranking_expression, candidate_values) =
+        derived_candidate_filter(&query_terms, VECTOR_CANDIDATE_FIELDS);
     let sql = format!(
         "
         SELECT document_id, document_kind, evidence_id, parent_evidence_id, modality,
@@ -319,25 +314,62 @@ fn vector_source_score(cosine: f64, lexical_overlap: f64, query_term_count: usiz
     cosine + lexical_coverage * VECTOR_LEXICAL_COVERAGE_WEIGHT
 }
 
+#[derive(Clone, Copy)]
+struct DerivedCandidateField {
+    expression: &'static str,
+    pattern_kind: DerivedPatternKind,
+}
+
+impl DerivedCandidateField {
+    const fn contains(expression: &'static str) -> Self {
+        Self {
+            expression,
+            pattern_kind: DerivedPatternKind::Contains,
+        }
+    }
+
+    const fn json_token(expression: &'static str) -> Self {
+        Self {
+            expression,
+            pattern_kind: DerivedPatternKind::JsonToken,
+        }
+    }
+
+    fn pattern(self, term: &str) -> String {
+        match self.pattern_kind {
+            DerivedPatternKind::Contains => format!("%{}%", escape_like_pattern(term)),
+            DerivedPatternKind::JsonToken => {
+                format!("%\"{}\"%", escape_like_pattern(term))
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DerivedPatternKind {
+    Contains,
+    JsonToken,
+}
+
 fn derived_candidate_filter(
     query_terms: &BTreeSet<String>,
-    fields: &[&str],
+    fields: &[DerivedCandidateField],
 ) -> (String, String, Vec<Value>) {
     let terms = query_terms
         .iter()
         .take(MAX_DERIVED_QUERY_TERMS)
-        .map(|term| format!("%{term}%"))
+        .map(String::as_str)
         .collect::<Vec<_>>();
     let mut values = Vec::new();
 
     let candidate_groups = terms
         .iter()
-        .map(|pattern| {
+        .map(|term| {
             let clauses = fields
                 .iter()
                 .map(|field| {
-                    values.push(Value::Text(pattern.clone()));
-                    format!("{field} LIKE ?")
+                    values.push(Value::Text(field.pattern(term)));
+                    format!("{} LIKE ? ESCAPE '\\'", field.expression)
                 })
                 .collect::<Vec<_>>();
             format!("({})", clauses.join(" OR "))
@@ -345,10 +377,13 @@ fn derived_candidate_filter(
         .collect::<Vec<_>>();
 
     let mut ranking_terms = Vec::new();
-    for pattern in &terms {
+    for term in &terms {
         for field in fields {
-            values.push(Value::Text(pattern.clone()));
-            ranking_terms.push(format!("CASE WHEN {field} LIKE ? THEN 1 ELSE 0 END"));
+            values.push(Value::Text(field.pattern(term)));
+            ranking_terms.push(format!(
+                "CASE WHEN {} LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END",
+                field.expression
+            ));
         }
     }
 
@@ -357,6 +392,18 @@ fn derived_candidate_filter(
         ranking_terms.join(" + "),
         values,
     )
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    escaped
 }
 
 fn derived_candidate_values(
@@ -407,16 +454,47 @@ mod tests {
             .map(|index| format!("term{index}"))
             .collect::<BTreeSet<_>>();
         let fields = [
-            "lower(content)",
-            "lower(source_path)",
-            "lower(entity_labels_json)",
+            DerivedCandidateField::contains("lower(content)"),
+            DerivedCandidateField::contains("lower(source_path)"),
+            DerivedCandidateField::contains("lower(entity_labels_json)"),
         ];
 
         let (condition, ranking, values) = derived_candidate_filter(&query_terms, &fields);
 
-        assert!(condition.contains("lower(content) LIKE ?"));
-        assert!(ranking.contains("CASE WHEN lower(content) LIKE ?"));
+        assert!(condition.contains("lower(content) LIKE ? ESCAPE '\\'"));
+        assert!(ranking.contains("CASE WHEN lower(content) LIKE ? ESCAPE '\\'"));
         assert_eq!(values.len(), MAX_DERIVED_QUERY_TERMS * fields.len() * 2);
+    }
+
+    #[test]
+    fn derived_candidate_filter_uses_literal_patterns_for_identifiers() {
+        let query_terms = BTreeSet::from(["retry_policy".to_owned()]);
+
+        let (_, _, contains_values) = derived_candidate_filter(
+            &query_terms,
+            &[DerivedCandidateField::contains("lower(content)")],
+        );
+        let (_, _, token_values) = derived_candidate_filter(
+            &query_terms,
+            &[DerivedCandidateField::json_token(
+                "lower(token_signature_json)",
+            )],
+        );
+
+        assert_eq!(
+            contains_values,
+            vec![
+                Value::Text("%retry\\_policy%".to_owned()),
+                Value::Text("%retry\\_policy%".to_owned()),
+            ]
+        );
+        assert_eq!(
+            token_values,
+            vec![
+                Value::Text("%\"retry\\_policy\"%".to_owned()),
+                Value::Text("%\"retry\\_policy\"%".to_owned()),
+            ]
+        );
     }
 
     #[test]
