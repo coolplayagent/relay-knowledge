@@ -17,6 +17,11 @@ pub(super) struct ScoreQuery {
     tokens: Vec<String>,
 }
 
+pub(super) struct SymbolIdentityQuery {
+    leaf_name: String,
+    scoped_terms: Option<Vec<String>>,
+}
+
 struct ScoreField {
     original: String,
     lower: String,
@@ -78,6 +83,86 @@ impl ScoreQuery {
 
         score
     }
+}
+
+impl SymbolIdentityQuery {
+    pub(super) fn from_query(query: &str) -> Option<Self> {
+        for raw_token in query.split_whitespace().map(str::trim) {
+            if raw_token.contains('/')
+                || raw_token.contains('\\')
+                || token_has_path_like_extension(raw_token)
+            {
+                continue;
+            }
+            if raw_token.contains("::") || raw_token.contains('.') {
+                let terms = identity_terms(raw_token);
+                if terms.len() >= 2 {
+                    return Some(Self {
+                        leaf_name: terms.last()?.clone(),
+                        scoped_terms: Some(
+                            terms
+                                .into_iter()
+                                .map(|term| term.to_ascii_lowercase())
+                                .collect(),
+                        ),
+                    });
+                }
+            }
+        }
+
+        let mut tokens = query.split_whitespace().map(str::trim);
+        let token = tokens.next()?;
+        if tokens.next().is_some() || !simple_identity_token(token) {
+            return None;
+        }
+
+        Some(Self {
+            leaf_name: token.to_owned(),
+            scoped_terms: None,
+        })
+    }
+
+    pub(super) fn leaf_name(&self) -> &str {
+        &self.leaf_name
+    }
+
+    pub(super) fn is_scoped(&self) -> bool {
+        self.scoped_terms.is_some()
+    }
+
+    pub(super) fn matches_symbol(
+        &self,
+        name: &str,
+        qualified_name: &str,
+        signature: &str,
+        canonical_symbol_id: &str,
+    ) -> bool {
+        if name != self.leaf_name {
+            return false;
+        }
+        let Some(scoped_terms) = &self.scoped_terms else {
+            return true;
+        };
+
+        [qualified_name, signature, canonical_symbol_id]
+            .iter()
+            .any(|field| contains_scoped_terms(field, scoped_terms))
+    }
+}
+
+fn identity_terms(token: &str) -> Vec<String> {
+    token
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|term| !term.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn simple_identity_token(token: &str) -> bool {
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 const MIN_DECOMPOSED_SCORE_TERM_LEN: usize = 2;

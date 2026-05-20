@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779256273-symbol-identity-fast-path
+- 算法：为 definition/symbol 查询增加 symbol-table identity-first 计划；当 query 是单一符号名或包含 `::`/`.` scoped token 时，先用 `(source_scope, name)` 索引读取有界候选，再要求 scoped token 在 qualified name、signature 或 canonical id 中连续匹配；命中且未触及 direct 上限时直接返回，Hybrid 仍把 direct hit 与既有 FTS 召回合并。
+- 架构：将 symbol retrieval 从 `code_query.rs` 拆到 `code_query_symbols`，保留 FTS 计划、后置 scorer、line-range/excerpt、path/language/freshness/version 输出；新增 identity parser 位于 `code_query_support`，不改变 parser、schema、graph facts、repo-set overlay、semantic/vector、env/paths/net、CLI/API 或 self-iteration harness。
+- 不变量：direct 分支只走精确 symbol name、既有 path/language filter、bounded direct limit、contiguous scoped identity guard、原 symbol scoring 与 dedupe/truncate；direct raw rows 饱和时回退 FTS，path-like tokens 如 `leveldb/filter_policy.h` 不作为 symbol identity，未加入仓库、路径、case id 或 query fixture 特殊分支。
+- 预期影响/风险：LevelDB、relay-teams、Spring、Kubernetes 等大仓的 scoped/exact definition 查询少做宽 BM25 symbol 候选扫描，预期改善 query p50/p95，尤其避开上轮 schema/language-edge 高性能但破坏 foundational gates 的拒绝模式。风险是 exact-name 多义符号在未饱和时更早返回；风险受 scoped contiguous match、test/benchmark path penalty、hit-count gate、FTS fallback 和新增 DB::Open 非连续路径噪声单测控制。
 ## 候选优化说明：run-1779254116-hybrid-chunk-anchor-fts
 - 算法：将 SQLite code query 的 FTS 构造拆入独立 helper，并为 Hybrid chunk 候选召回增加 anchor-term planner；长查询仍用完整 query 做 Rust 后置评分，但 FTS MATCH 只 OR 有界数量的高信号 identifier/长词 anchor，并在规划前按大小写无关规则去重重复 term。
 - 架构：变更限定在 `storage::sqlite::code_query_support` 与新增 `code_query_fts` helper；symbol/reference/call/import FTS 语义、SQLite schema、parser、graph facts、repo-set overlay、semantic/vector provider、env/paths/net、CLI/API、安装发布与 self-iteration harness 保持不变，同时把超长 support 模块降到 1000 行以内。
@@ -930,27 +935,8 @@ Adopted optimization notes:
 
 Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
 
-## 20260519T-rust-self-iteration-harness candidate
-- candidate: 将 Python 自迭代器迁移到独立 `tools/self_iteration` Rust harness，保留 `loop|once|evaluate|chart`、渐进式记忆、文档 gate、受保护目标和 no-fixture-special-casing 约束。
-- algorithm/architecture/impact/risk: Rust 子进程执行器、有界 limiter、仓库/查询并发和 pipe-safe stdin 降低评估等待；v2 状态写入独立 runs/reports/patches/score 文件，格式不兼容早期 history，CPU/I/O 压力通过 jobs 参数和环境变量限流。
-
-## run-1779223761
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779223761.patch`; score 0.765603; cases 12/13 passed; changed paths: SQLite storage/schema docs.
-- summary: v2 accepted bounded SQLite schema maintenance, improving temporal samples and LevelDB index/register/query latency while recording relay-teams index/register/query latency degradations; full raw details remain in the report artifacts.
-
-## run-1779224375
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779224375.patch`; score 0.788328; cases 13/13 passed; changed paths: SQLite query ranking/chunk scoring docs.
-- summary: accepted compact high-coverage hybrid chunks and scoped identity scoring, improving Temporal repo-set retrieval and competitive capability while recording LevelDB index/register/query degradations; full raw metrics remain in the report artifact.
-
-## run-history-synthesis candidate
-- candidate: Rust v2 harness 新增按 profile 汇总且有硬字符上限的历史综合摘要、连续拒绝簇记忆和比较基线诊断；下一轮 Codex 可直接看到 latest scored baseline、best accepted、重复拒绝原因、退化热点，以及“局部 metric 改善但总分未赢”的 rejected 尝试，不再只收到 patch/detail 路径索引。
-- algorithm/architecture/impact/risk: 新增独立 `history_synthesis` prompt 输入；memory summary 写入 score delta、top improvements/degradations、changed paths 和 protected floors；record/report 写入 `comparison_baseline`；手动 evaluate 使用唯一 patch/report 名，CSV 写入 mode/patch/score_accepted/committed，SVG 用绿色表示已提交采纳、琥珀色表示评分会通过的手动评估；`accepted=true` 只表示已创建 git commit；评分门禁、rejected patch 恢复、accepted commit 基线、protected objective regression、epsilon、Pareto 和 bug-fix-priority 规则保持原样。
-
-## run-1779240531
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779240531.patch`; score 0.795293; cases 13/13 passed; changed paths: SQLite call ranking and path ranking docs.
-- summary: accepted assigned-result caller ranking, improving LevelDB `NewLRUCache` caller rank and competitive capability while recording performance regressions; full raw metrics remain in the report artifact.
+## 20260519T-run-1779223761-to-run-1779240531 compacted
+- summary: Rust v2 harness migration, bounded SQLite schema maintenance, compact high-coverage hybrid chunks, history synthesis, and assigned-result caller ranking were compacted on 20260520 to keep this primary benchmark log under the repository line cap. Raw patch/report details remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
 
 ## run-1779242800
 
@@ -999,6 +985,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:performance 0.763023->0.7809078505992915; metric:cargo_fmt_check_ms 2276.0->1997.0; metric:temporal_sdk_go_index_ms 2984.0->2844.0; metric:temporal_sdk_go_register_index_ms 7131.0->6586.0; metric:temporal_samples_go_index_ms 12439.0->1958.0; metric:temporal_samples_go_register_index_ms 14495.0->3851.0; metric:relay_teams_index_ms 5475.0->3511.0; metric:relay_teams_register_index_ms 7570.0->5387.0
 - known degradations: metric:leveldb_cpp_index_ms 2056.0->5599.0; metric:leveldb_cpp_register_index_ms 4109.0->7528.0; metric:leveldb_cpp_query_p50_ms 6341.0->8430.0; metric:leveldb_cpp_query_p95_ms 8495.0->10433.0; metric:temporal_go_workspace_repo_set_refresh_ms 3184.0->10755.0
 - latency metrics: cargo_fmt_check_ms=1997ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=322ms; self_iteration_cargo_check_ms=141ms; temporal_sdk_go_index_ms=2844ms; temporal_sdk_go_register_index_ms=6586ms; temporal_samples_go_index_ms=1958ms; temporal_samples_go_register_index_ms=3851ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779256273
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779256273.patch`
+- score: 0.813180 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=0.000000, research_judge=n/a, performance=0.684332, stability=1.000000)
+- cases: 13/13 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_identity_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_score_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`, `src/relay_knowledge/storage/sqlite/code_query_unit_tests.rs`
+- key improvements: score_component:score 0.723038->0.8131797309037593; score_component:foundational_capability 0.714286->1.0; score_component:competitive_capability 0.833333->1.0; score_component:stability 0.9->1.0; gate:relay_teams_rt_callees_summary false->true; gate:leveldb_cpp_leveldb_definition_db_open false->true; gate:leveldb_cpp_leveldb_definition_dbimpl_get false->true; case:rt_callees_summary false->true
+- known degradations: score_component:performance 0.875342->0.6843318383542184; metric:self_iteration_cargo_fmt_check_ms 283.0->343.0; metric:temporal_sdk_go_index_ms 1453.0->2764.0; metric:temporal_sdk_go_register_index_ms 3330.0->4600.0; metric:relay_teams_index_ms 2117.0->3610.0; metric:relay_teams_register_index_ms 2884.0->5522.0; metric:relay_teams_query_p50_ms 1046.0->5116.0; metric:relay_teams_query_p95_ms 1469.0->8065.0
+- latency metrics: cargo_fmt_check_ms=2021ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=363ms; self_iteration_cargo_check_ms=141ms; temporal_sdk_go_index_ms=2764ms; temporal_sdk_go_register_index_ms=4600ms; relay_teams_index_ms=3610ms; relay_teams_register_index_ms=5522ms
 
 Adopted optimization notes:
 

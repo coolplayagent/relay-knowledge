@@ -22,6 +22,8 @@ mod code_query_path_ranking;
 mod code_query_rows;
 #[path = "code_query_support.rs"]
 mod code_query_support;
+#[path = "code_query_symbols.rs"]
+mod code_query_symbols;
 
 use crate::{
     domain::{
@@ -61,19 +63,16 @@ use code_query_import_targets::{
     attach_import_query_usage_context, attach_import_target_symbols,
     search_imports_by_target_symbols,
 };
-use code_query_line_ranges::{
-    SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, call_result_line_range,
-    optional_line_range_with_symbol_context, symbol_result_line_range,
-};
+use code_query_line_ranges::{call_result_line_range, optional_line_range_with_symbol_context};
 use code_query_path_ranking::{
     CallSiteQueryIntent, call_site_example_path_penalty, call_site_source_path_bonus,
     call_site_test_path_penalty, callee_member_context_bonus, caller_result_assignment_bonus,
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_example_or_sample,
-    query_mentions_test_or_benchmark, symbol_declaration_surface_path_bonus,
-    symbol_test_path_penalty,
+    query_mentions_test_or_benchmark,
 };
-use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow, SymbolRow};
+use code_query_rows::{CallRow, ChunkRow, ImportRow, ReferenceRow};
 use code_query_support::*;
+use code_query_symbols::search_symbols;
 
 pub(super) fn search_code(
     connection: &mut Connection,
@@ -140,143 +139,6 @@ fn search_code_with_status(
     dedupe_sort_truncate(&mut hits, request.limit);
 
     Ok(hits)
-}
-
-fn search_symbols(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = symbol_fts_match_query(&request.query);
-    let fts_filter = fts_path_and_language_filter_sql(status, request);
-    let sql = format!(
-        "
-        SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
-               byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
-               (
-                   SELECT MIN(previous.line_start)
-                   FROM code_repository_symbols previous
-                   WHERE previous.source_scope = code_repository_symbols.source_scope
-                     AND previous.path = code_repository_symbols.path
-                     AND previous.line_end < code_repository_symbols.line_start
-                     AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
-               ) AS previous_symbol_context_start
-        FROM code_repository_symbols
-        WHERE source_scope = ?
-          AND symbol_snapshot_id IN (
-              SELECT record_id
-              FROM code_repository_search
-              WHERE code_repository_search MATCH ?
-                AND source_scope = ?
-                AND document_kind = 'symbol'
-                {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
-              LIMIT ?
-          )
-        ORDER BY path ASC, line_start ASC
-        LIMIT ?
-        "
-    );
-    let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
-            required_scope(status)?,
-            status,
-            request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Symbol),
-            candidate_limit(request, CandidateLayer::Symbol),
-        )),
-        |row| {
-            Ok(SymbolRow {
-                symbol_snapshot_id: row.get(0)?,
-                canonical_symbol_id: row.get(1)?,
-                file_id: row.get(2)?,
-                path: row.get(3)?,
-                language_id: row.get(4)?,
-                signature: row.get(5)?,
-                doc_comment: row.get(6)?,
-                byte_range: RepositoryCodeRange {
-                    start: row.get(7)?,
-                    end: row.get(8)?,
-                },
-                line_range: RepositoryCodeRange {
-                    start: row.get(9)?,
-                    end: row.get(10)?,
-                },
-                name: row.get(11)?,
-                qualified_name: row.get(12)?,
-                kind: row.get(13)?,
-                previous_symbol_context_start: row.get(14)?,
-            })
-        },
-    )?;
-    let query = request.query.as_str();
-    let score_query = ScoreQuery::new(query);
-    let query_has_test_intent = query_mentions_test_or_benchmark(query);
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
-        .filter_map(|row| {
-            let score = score_query.score([
-                row.name.as_str(),
-                row.qualified_name.as_str(),
-                row.kind.as_str(),
-                row.signature.as_str(),
-                row.doc_comment.as_deref().unwrap_or_default(),
-                row.path.as_str(),
-            ]) + symbol_query_bonus(
-                query,
-                &row.name,
-                &row.qualified_name,
-                &row.signature,
-                &row.canonical_symbol_id,
-                request,
-            );
-            (score > 0.0).then(|| {
-                let score = score
-                    + 2.0
-                    + symbol_kind_bonus(&row.kind, request)
-                    + symbol_declaration_surface_path_bonus(score, &row.kind, &row.path, request)
-                    + symbol_test_path_penalty(score, &row.path, request, query_has_test_intent);
-                let line_range = symbol_result_line_range(&row);
-                let excerpt = symbol_excerpt(
-                    &row.name,
-                    &row.qualified_name,
-                    &row.signature,
-                    row.doc_comment.as_deref(),
-                );
-                hit_from_parts(
-                    status,
-                    HitParts {
-                        path: row.path,
-                        language_id: row.language_id,
-                        byte_range: row.byte_range,
-                        line_range,
-                        symbol_snapshot_id: Some(row.symbol_snapshot_id),
-                        canonical_symbol_id: Some(row.canonical_symbol_id),
-                        file_id: Some(row.file_id),
-                        retrieval_layers: vec![
-                            CodeRetrievalLayer::Symbol,
-                            CodeRetrievalLayer::Definition,
-                        ],
-                        score,
-                        excerpt,
-                        degraded_reason: None,
-                        edge_kind: None,
-                        edge_resolution_state: None,
-                        edge_target_hint: None,
-                        edge_confidence_basis_points: None,
-                        edge_confidence_tier: None,
-                    },
-                )
-            })
-        })
-        .collect())
 }
 
 fn search_references(
@@ -982,6 +844,10 @@ mod tests;
 #[cfg(test)]
 #[path = "code_query_score_tests.rs"]
 mod score_tests;
+
+#[cfg(test)]
+#[path = "code_query_identity_tests.rs"]
+mod identity_tests;
 
 #[cfg(test)]
 #[path = "code_query_call_ranking_tests.rs"]
