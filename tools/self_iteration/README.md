@@ -31,6 +31,16 @@ Useful variants:
 ./self-iterate.sh once --profile smoke --dry-run-codex
 ```
 
+## Progress logs
+
+The harness writes live progress to stderr with the `[self-iterate]` prefix. Each
+subprocess reports `command start`, a 15-second `command running` heartbeat, and
+`command done` or `command timeout` with exit status and duration. Evaluation
+also reports the selected profile, evaluation home, resolved parallelism, quality
+gate stages, repository workload size, repository-set workload size, and final
+gate/case/command counts. This keeps long `fast` runs observable even though
+product command stdout and stderr are still captured for the JSON report.
+
 ## YOLO mode
 
 The local Codex CLI does not expose a literal `--yolo` flag. This framework maps `--yolo` to the current non-interactive high-permission Codex invocation:

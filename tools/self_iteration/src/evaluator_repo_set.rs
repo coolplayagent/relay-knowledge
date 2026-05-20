@@ -69,6 +69,13 @@ fn evaluate_repository_set(
     let mut commands = Vec::new();
     let mut cases = Vec::new();
     let mut metrics = Vec::new();
+    eprintln!(
+        "[self-iterate] repository-set start name={} alias={} members={} query_cases={}",
+        set_name,
+        set_alias,
+        array_field(set_config, "members").len(),
+        set_cases.len()
+    );
     let create = run_writer_limited(
         runtime,
         CommandSpec::new(

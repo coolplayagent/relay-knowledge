@@ -9,6 +9,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+const COMMAND_PROGRESS_INTERVAL: Duration = Duration::from_secs(15);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResult {
     pub name: String,
@@ -81,8 +83,10 @@ pub fn inherited_env() -> BTreeMap<String, String> {
 pub fn run_command(spec: &CommandSpec) -> CommandResult {
     let started = Instant::now();
     let Some(program) = spec.command.first() else {
+        log_command_invalid(spec, started, "empty command");
         return failed_result(spec, 1, started, "empty command");
     };
+    log_command_started(spec);
     let mut command = Command::new(program);
     command.args(spec.command.iter().skip(1));
     command.current_dir(&spec.cwd);
@@ -97,7 +101,11 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(error) => return failed_result(spec, 1, started, &error.to_string()),
+        Err(error) => {
+            let message = error.to_string();
+            log_command_invalid(spec, started, &message);
+            return failed_result(spec, 1, started, &message);
+        }
     };
     let stdout_reader = child.stdout.take().map(read_pipe);
     let stderr_reader = child.stderr.take().map(read_pipe);
@@ -108,19 +116,23 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
             .map(|handle| write_pipe(handle, stdin.clone()))
     });
     let timeout = Duration::from_secs(spec.timeout_seconds);
+    let mut next_progress = COMMAND_PROGRESS_INTERVAL;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                let stdout = join_reader(stdout_reader);
                 let mut stderr = join_reader(stderr_reader);
                 append_stdin_error(&mut stderr, stdin_writer);
-                return CommandResult {
+                let result = CommandResult {
                     name: spec.name.clone(),
                     command: spec.command.clone(),
                     exit_code: status.code().unwrap_or(1),
                     duration_ms: started.elapsed().as_millis() as u64,
-                    stdout: join_reader(stdout_reader),
+                    stdout,
                     stderr,
                 };
+                log_command_finished(&result);
+                return result;
             }
             Ok(None) if started.elapsed() >= timeout => {
                 let _ = child.kill();
@@ -129,7 +141,7 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
                 let mut stderr = join_reader(stderr_reader);
                 append_stdin_error(&mut stderr, stdin_writer);
                 stderr.push_str(&format!("\ntimeout after {}s", spec.timeout_seconds));
-                return CommandResult {
+                let result = CommandResult {
                     name: spec.name.clone(),
                     command: spec.command.clone(),
                     exit_code: 124,
@@ -137,9 +149,24 @@ pub fn run_command(spec: &CommandSpec) -> CommandResult {
                     stdout,
                     stderr,
                 };
+                log_command_timeout(&result, spec.timeout_seconds);
+                return result;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(error) => return failed_result(spec, 1, started, &error.to_string()),
+            Ok(None) => {
+                let elapsed = started.elapsed();
+                if elapsed >= next_progress {
+                    log_command_running(spec, elapsed);
+                    while next_progress <= elapsed {
+                        next_progress += COMMAND_PROGRESS_INTERVAL;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => {
+                let message = error.to_string();
+                log_command_invalid(spec, started, &message);
+                return failed_result(spec, 1, started, &message);
+            }
         }
     }
 }
@@ -186,6 +213,76 @@ fn append_stdin_error(stderr: &mut String, writer: Option<JoinHandle<Result<(), 
     }
     stderr.push_str("stdin write failed: ");
     stderr.push_str(&error);
+}
+
+fn log_command_started(spec: &CommandSpec) {
+    eprintln!(
+        "[self-iterate] command start name={} program={} argc={} timeout_s={}",
+        spec.name,
+        compact_log_text(command_program(spec), 120),
+        spec.command.len(),
+        spec.timeout_seconds
+    );
+}
+
+fn log_command_running(spec: &CommandSpec, elapsed: Duration) {
+    eprintln!(
+        "[self-iterate] command running name={} elapsed_s={} timeout_s={}",
+        spec.name,
+        elapsed.as_secs(),
+        spec.timeout_seconds
+    );
+}
+
+fn log_command_finished(result: &CommandResult) {
+    let status = if result.passed() { "ok" } else { "failed" };
+    let message = result.gate_message();
+    if result.passed() || message.is_empty() {
+        eprintln!(
+            "[self-iterate] command done name={} status={} exit={} duration_ms={}",
+            result.name, status, result.exit_code, result.duration_ms
+        );
+    } else {
+        eprintln!(
+            "[self-iterate] command done name={} status={} exit={} duration_ms={} message={:?}",
+            result.name,
+            status,
+            result.exit_code,
+            result.duration_ms,
+            compact_log_text(&message, 240)
+        );
+    }
+}
+
+fn log_command_timeout(result: &CommandResult, timeout_seconds: u64) {
+    eprintln!(
+        "[self-iterate] command timeout name={} exit={} duration_ms={} timeout_s={}",
+        result.name, result.exit_code, result.duration_ms, timeout_seconds
+    );
+}
+
+fn log_command_invalid(spec: &CommandSpec, started: Instant, message: &str) {
+    eprintln!(
+        "[self-iterate] command failed_to_start name={} duration_ms={} message={:?}",
+        spec.name,
+        started.elapsed().as_millis(),
+        compact_log_text(message, 240)
+    );
+}
+
+fn command_program(spec: &CommandSpec) -> &str {
+    spec.command
+        .first()
+        .map(String::as_str)
+        .unwrap_or("<empty>")
+}
+
+fn compact_log_text(value: &str, max_chars: usize) -> String {
+    let normalized = value
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>();
+    tail(normalized.trim(), max_chars)
 }
 
 pub fn last_output_line(stdout: &str, stderr: &str) -> String {

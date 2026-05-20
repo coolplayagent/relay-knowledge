@@ -119,9 +119,20 @@ pub fn evaluate_candidate(
     generated_diff: bool,
     candidate_diff: &str,
 ) -> Result<EvaluationRun, String> {
+    let evaluation_started = Instant::now();
     let job_plan = JobPlan::resolve(config);
     let limiter = Limiter::new(job_plan.global);
     let (run_home, cached_home) = evaluation_home(config, paths, run_id);
+    eprintln!(
+        "[self-iterate] evaluation start run_id={} profile={} home={} cached_home={} jobs=global:{},repo:{},query:{}",
+        run_id,
+        config.profile,
+        run_home.display(),
+        cached_home,
+        job_plan.global,
+        job_plan.repositories,
+        job_plan.queries
+    );
     if run_home.exists() && !config.keep_workdirs && !cached_home {
         fs::remove_dir_all(&run_home)
             .map_err(|error| format!("failed to remove {}: {error}", run_home.display()))?;
@@ -153,6 +164,7 @@ pub fn evaluate_candidate(
             run_home,
             cached_home,
             job_plan,
+            started: evaluation_started,
         });
     }
     if config.profile == "smoke" {
@@ -167,6 +179,7 @@ pub fn evaluate_candidate(
             run_home,
             cached_home,
             job_plan,
+            started: evaluation_started,
         });
     }
 
@@ -200,31 +213,37 @@ pub fn evaluate_candidate(
         .unwrap_or_default();
     let repositories = repository_configs
         .iter()
-        .map(|(name, config)| (name.clone(), config.clone()))
-        .collect::<Vec<_>>();
-    let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
-    let repo_results = parallel_map(repositories, repo_jobs, {
-        let grouped_cases = grouped_cases.clone();
-        let profile = config.profile.clone();
-        let runtime = runtime.clone();
-        move |(repo_name, repo_config)| {
-            if !repository_in_profile(&profile, &repo_name, &repo_config) {
+        .filter_map(|(name, repo_config)| {
+            if !repository_in_profile(&config.profile, name, repo_config) {
                 return None;
             }
             let repo_cases = grouped_cases
-                .get(&repo_name)
+                .get(name)
                 .cloned()
-                .map(|cases| limit_cases_for_profile(&profile, cases))
+                .map(|cases| limit_cases_for_profile(&config.profile, cases))
                 .unwrap_or_default();
-            Some(evaluate_repository(
-                &runtime,
-                &repo_name,
-                &repo_config,
-                repo_cases,
-            ))
+            Some((name.clone(), repo_config.clone(), repo_cases))
+        })
+        .collect::<Vec<_>>();
+    let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
+    let repository_case_count = repositories
+        .iter()
+        .map(|(_, _, repo_cases)| repo_cases.len())
+        .sum::<usize>();
+    eprintln!(
+        "[self-iterate] repository workload start repositories={} query_cases={} repo_jobs={} query_jobs={}",
+        repositories.len(),
+        repository_case_count,
+        repo_jobs,
+        runtime.query_jobs
+    );
+    let repo_results = parallel_map(repositories, repo_jobs, {
+        let runtime = runtime.clone();
+        move |(repo_name, repo_config, repo_cases)| {
+            evaluate_repository(&runtime, &repo_name, &repo_config, repo_cases)
         }
     });
-    for report in repo_results.into_iter().flatten() {
+    for report in repo_results {
         let report = report?;
         commands.extend(report.commands.clone());
         gates.extend(report.commands.iter().map(GateObservation::from_command));
@@ -232,8 +251,18 @@ pub fn evaluate_candidate(
         metrics.extend(report.metrics.clone());
         repo_reports.push(report);
     }
+    eprintln!(
+        "[self-iterate] repository workload done reports={} commands={} cases={}",
+        repo_reports.len(),
+        commands.len(),
+        cases.len()
+    );
 
     if profile_runs_repository_sets(&config.profile) {
+        eprintln!(
+            "[self-iterate] repository-set workload start profile={}",
+            config.profile
+        );
         for report in
             evaluate_repository_sets(&runtime, cases_config, &repository_configs, &config.profile)?
         {
@@ -243,9 +272,16 @@ pub fn evaluate_candidate(
             metrics.extend(report.metrics.clone());
             repo_reports.push(report);
         }
+        eprintln!(
+            "[self-iterate] repository-set workload done reports={} commands={} cases={}",
+            repo_reports.len(),
+            commands.len(),
+            cases.len()
+        );
     }
 
     if profile_runs_slow_suites(&config.profile) {
+        eprintln!("[self-iterate] file fixture workload start");
         let file_report = evaluate_file_fixtures(&runtime, &run_home, cases_config)?;
         commands.extend(file_report.commands.clone());
         gates.extend(
@@ -256,6 +292,12 @@ pub fn evaluate_candidate(
         );
         cases.extend(file_report.cases);
         metrics.extend(file_report.metrics);
+        eprintln!(
+            "[self-iterate] file fixture workload done commands={} cases={} metrics={}",
+            commands.len(),
+            cases.len(),
+            metrics.len()
+        );
     }
 
     if profile_runs_slow_suites(&config.profile) {
@@ -263,12 +305,19 @@ pub fn evaluate_candidate(
             .get("semantic_vector_suite")
             .and_then(Value::as_object)
         {
+            eprintln!("[self-iterate] semantic/vector workload start");
             let report = evaluate_semantic_vector_suite(&runtime, &Value::Object(suite.clone()))?;
             commands.extend(report.commands.clone());
             gates.extend(report.commands.iter().map(GateObservation::from_command));
             cases.extend(report.cases.clone());
             metrics.extend(report.metrics.clone());
             repo_reports.push(report);
+            eprintln!(
+                "[self-iterate] semantic/vector workload done commands={} cases={} metrics={}",
+                commands.len(),
+                cases.len(),
+                metrics.len()
+            );
         }
     }
 
@@ -277,6 +326,7 @@ pub fn evaluate_candidate(
             .get("research_judge_suite")
             .and_then(Value::as_object)
         {
+            eprintln!("[self-iterate] research judge workload start");
             let report = evaluate_research_judge_suite(JudgeEvalInput {
                 workspace: &config.workspace,
                 run_home: &run_home,
@@ -294,6 +344,12 @@ pub fn evaluate_candidate(
             cases.extend(report.cases.clone());
             metrics.extend(report.metrics.clone());
             repo_reports.push(report);
+            eprintln!(
+                "[self-iterate] research judge workload done gates={} cases={} metrics={}",
+                gates.len(),
+                cases.len(),
+                metrics.len()
+            );
         }
     }
 
@@ -308,6 +364,7 @@ pub fn evaluate_candidate(
         run_home,
         cached_home,
         job_plan,
+        started: evaluation_started,
     })
 }
 
@@ -324,6 +381,14 @@ fn evaluate_repository(
     let mut commands = Vec::new();
     let mut cases = Vec::new();
     let mut metrics = Vec::new();
+    eprintln!(
+        "[self-iterate] repository start name={} alias={} path={} scope={} query_cases={}",
+        repo_name,
+        alias,
+        path.display(),
+        scope,
+        repo_cases.len()
+    );
     if !path.exists() {
         commands.push(CommandResult {
             name: format!("{repo_name}_repository_exists"),
@@ -485,6 +550,11 @@ fn evaluate_file_fixtures(
         })
         .unwrap_or_default();
     let all_cases = array_field(cases_config, "file_query_cases");
+    eprintln!(
+        "[self-iterate] file fixtures prepared fixtures={} query_cases={}",
+        fixtures.len(),
+        all_cases.len()
+    );
     for (fixture_name, fixture) in fixtures {
         let fixture_cases = all_cases
             .iter()
@@ -764,6 +834,7 @@ struct FinishInput<'a> {
     run_home: PathBuf,
     cached_home: bool,
     job_plan: JobPlan,
+    started: Instant,
 }
 
 fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
@@ -777,6 +848,19 @@ fn finish(input: FinishInput<'_>) -> Result<EvaluationRun, String> {
         metrics: input.metrics,
         generated_diff: input.generated_diff,
     };
+    let passed_gates = observation.gates.iter().filter(|gate| gate.passed).count();
+    let passed_cases = observation.cases.iter().filter(|case| case.passed).count();
+    eprintln!(
+        "[self-iterate] evaluation done profile={} duration_ms={} gates={}/{} cases={}/{} commands={} metrics={}",
+        input.config.profile,
+        input.started.elapsed().as_millis(),
+        passed_gates,
+        observation.gates.len(),
+        passed_cases,
+        observation.cases.len(),
+        input.commands.len(),
+        observation.metrics.len()
+    );
     let report = serde_json::json!({
         "profile": input.config.profile,
         "generated_diff": input.generated_diff,
@@ -811,9 +895,21 @@ fn run_quality_gate_stages(
     gates: &mut Vec<GateObservation>,
     metrics: &mut Vec<MetricObservation>,
 ) -> bool {
-    for stage in quality_gate_stages(profile) {
+    let stages = quality_gate_stages(profile);
+    let stage_count = stages.len();
+    for (stage_index, stage) in stages.into_iter().enumerate() {
+        let stage_started = Instant::now();
+        let stage_label = quality_gate_stage_label(&stage);
+        eprintln!(
+            "[self-iterate] quality stage {}/{} start {}",
+            stage_index + 1,
+            stage_count,
+            stage_label
+        );
         let mut stage_passed = true;
+        let mut stage_gate_count = 0usize;
         for result in run_quality_gate_stage(stage, workspace, limiter) {
+            stage_gate_count += 1;
             metrics.push(MetricObservation {
                 name: format!("{}_ms", result.name),
                 value: result.duration_ms as f64,
@@ -828,11 +924,45 @@ fn run_quality_gate_stages(
             stage_passed &= result.passed();
             commands.push(result);
         }
+        eprintln!(
+            "[self-iterate] quality stage {}/{} done passed={} duration_ms={} gates={}",
+            stage_index + 1,
+            stage_count,
+            stage_passed,
+            stage_started.elapsed().as_millis(),
+            stage_gate_count
+        );
         if !stage_passed {
+            eprintln!("[self-iterate] quality gates failed; skipping evaluation workload");
             return false;
         }
     }
     true
+}
+
+fn quality_gate_stage_label(stage: &QualityGateStage) -> String {
+    match stage {
+        QualityGateStage::Parallel(gates) => {
+            format!("parallel gates={}", quality_gate_names(gates))
+        }
+        QualityGateStage::Rails(rails) => {
+            let rails = rails
+                .iter()
+                .enumerate()
+                .map(|(index, rail)| format!("rail{}={}", index + 1, quality_gate_names(rail)))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("rails {rails}")
+        }
+    }
+}
+
+fn quality_gate_names(gates: &[QualityGate]) -> String {
+    gates
+        .iter()
+        .map(|gate| gate.name)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn run_quality_gate_stage(

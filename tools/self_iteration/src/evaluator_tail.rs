@@ -637,7 +637,17 @@ fn evaluate_background_file_case(
     ));
     create_file_fixture(&root, fixture)?;
     let started = Instant::now();
-    let fixture_env = background_file_env(&runtime.env, &root, number_or(case, "scan_interval_ms", 250));
+    let fixture_env = background_file_env(
+        &runtime.env,
+        &root,
+        number_or(case, "scan_interval_ms", 250),
+    );
+    eprintln!(
+        "[self-iterate] background file fixture service start fixture={} case={} timeout_s={}",
+        fixture_name,
+        string_or(case, "id", "case"),
+        runtime.timeout.min(number_or(case, "timeout_seconds", 8))
+    );
     let mut service = Command::new(&runtime.binary)
         .args(["service", "run"])
         .current_dir(&runtime.workspace)
@@ -651,7 +661,9 @@ fn evaluate_background_file_case(
         apply_fixture_action(&root, action)?;
     }
     let deadline = Instant::now()
-        + std::time::Duration::from_secs(runtime.timeout.min(number_or(case, "timeout_seconds", 8)));
+        + std::time::Duration::from_secs(
+            runtime.timeout.min(number_or(case, "timeout_seconds", 8)),
+        );
     let mut final_query = None;
     while Instant::now() < deadline {
         if service
@@ -674,6 +686,12 @@ fn evaluate_background_file_case(
         if passed {
             break;
         }
+        eprintln!(
+            "[self-iterate] background file fixture polling fixture={} case={} elapsed_ms={}",
+            fixture_name,
+            string_or(case, "id", "case"),
+            started.elapsed().as_millis()
+        );
         std::thread::sleep(std::time::Duration::from_millis(number_or(
             case,
             "poll_interval_ms",
@@ -683,6 +701,12 @@ fn evaluate_background_file_case(
     let _ = service.kill();
     let _ = service.wait();
     let duration_ms = started.elapsed().as_millis() as u64;
+    eprintln!(
+        "[self-iterate] background file fixture service done fixture={} case={} duration_ms={}",
+        fixture_name,
+        string_or(case, "id", "case"),
+        duration_ms
+    );
     let query = final_query.unwrap_or(CommandResult {
         name: format!("{}_{}_query", fixture_name, string_or(case, "id", "case")),
         command: file_query_command(&runtime.binary, case),
@@ -1032,6 +1056,22 @@ fn repo_report(
     metrics: Vec<MetricObservation>,
     index_summary: Value,
 ) -> RepoReport {
+    let passed_commands = commands.iter().filter(|command| command.passed()).count();
+    let passed_cases = cases.iter().filter(|case| case.passed).count();
+    let command_duration_ms = commands
+        .iter()
+        .map(|command| command.duration_ms)
+        .sum::<u64>();
+    eprintln!(
+        "[self-iterate] report done name={} commands={}/{} cases={}/{} metrics={} command_duration_ms={}",
+        repo_name,
+        passed_commands,
+        commands.len(),
+        passed_cases,
+        cases.len(),
+        metrics.len(),
+        command_duration_ms
+    );
     RepoReport {
         repository: repo_name.to_owned(),
         scope,
