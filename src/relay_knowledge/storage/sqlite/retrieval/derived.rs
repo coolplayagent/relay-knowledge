@@ -16,6 +16,7 @@ use super::{
 const DERIVED_RESULT_MULTIPLIER: usize = 8;
 const MAX_DERIVED_RESULT_LIMIT: usize = 512;
 const MAX_DERIVED_QUERY_TERMS: usize = 16;
+const VECTOR_LEXICAL_COVERAGE_WEIGHT: f64 = 0.05;
 
 pub(super) fn semantic_candidates(
     connection: &Connection,
@@ -223,7 +224,9 @@ pub(super) fn vector_candidates(
         .map_err(StorageError::from)?
     {
         let labels = split_labels(labels_json);
-        if overlap_score(&request.query, &content, &labels, source_path.as_deref()) <= 0.0 {
+        let lexical_overlap =
+            overlap_score(&request.query, &content, &labels, source_path.as_deref());
+        if lexical_overlap <= 0.0 {
             continue;
         }
         let dimension = usize::try_from(dimension).map_err(|_| {
@@ -232,13 +235,14 @@ pub(super) fn vector_candidates(
         if dimension == 0 {
             continue;
         }
-        let score = cosine_similarity(
+        let cosine = cosine_similarity(
             query_vectors.vector(dimension),
             &parse_f64_array(&vector_json)?,
         );
-        if score <= 0.0 {
+        if cosine <= 0.0 {
             continue;
         }
+        let score = vector_source_score(cosine, lexical_overlap, query_terms.len());
 
         let group_id = parent_evidence_id
             .as_deref()
@@ -305,6 +309,18 @@ fn bounded_candidate_limit(request: &GraphSearchRequest) -> usize {
         .limit
         .saturating_mul(DERIVED_RESULT_MULTIPLIER)
         .clamp(1, MAX_DERIVED_RESULT_LIMIT)
+}
+
+fn vector_source_score(cosine: f64, lexical_overlap: f64, query_term_count: usize) -> f64 {
+    if cosine <= 0.0 {
+        return 0.0;
+    }
+    if query_term_count == 0 {
+        return cosine;
+    }
+    let lexical_coverage = (lexical_overlap / query_term_count as f64).clamp(0.0, 1.0);
+
+    cosine + lexical_coverage * VECTOR_LEXICAL_COVERAGE_WEIGHT
 }
 
 fn derived_candidate_filter(
@@ -417,6 +433,18 @@ mod tests {
         assert_eq!(cache.vectors.len(), 1);
         assert_eq!(cache.vector(8).len(), 8);
         assert_eq!(cache.vectors.len(), 2);
+    }
+
+    #[test]
+    fn vector_source_score_uses_lexical_coverage_as_bounded_tie_breaker() {
+        let fuller_match = vector_source_score(0.40, 4.0, 4);
+        let sparse_match = vector_source_score(0.42, 1.0, 4);
+        let stronger_vector_match = vector_source_score(0.70, 1.0, 4);
+
+        assert!(fuller_match > sparse_match);
+        assert!(stronger_vector_match > fuller_match);
+        assert_eq!(vector_source_score(-0.5, 4.0, 4), 0.0);
+        assert_eq!(vector_source_score(0.5, 4.0, 0), 0.5);
     }
 
     #[test]

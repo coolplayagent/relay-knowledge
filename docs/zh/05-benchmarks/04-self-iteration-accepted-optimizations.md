@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779287983198667502-vector-lexical-coverage-tiebreak
+- 算法：Vector read model 保留既有 SQL 候选剪枝、正向 cosine 要求和 lexical overlap admission guard；在 vector source score 中复用已经计算出的 lexical overlap，按 query term coverage 加入 0.05 上限的小额 tie-breaker，让本地 hash vector 近同分或碰撞时优先返回覆盖更多查询概念的候选。
+- 架构/不变量：变更限定在 SQLite derived vector retrieval 的 bounded Rust 后置评分与单元测试；不改变 schema、BM25、semantic read model、candidate window、query command、provider probe、embedding provider/env、freshness、backend status、CLI/API JSON、env/paths/net、安装发布或 self-iteration harness，且不加入仓库、路径、case、query、模型或 provider 特殊分支。
+- 预期影响：Semantic/vector 查询中，vector 来源仍由 cosine 表示向量相似度，但在本地确定性 hash 向量发生低维碰撞或近同分时，完整覆盖查询概念的证据应更稳定地排在只命中少量词的邻近噪声之前；semantic coverage、backend 可用性和 protected repository guardrail 行为应保持不变。
+- 风险：少数 cosine 差距小于 coverage tie-breaker 的候选会交换顺序；风险受原 SQL 候选、正 overlap、正 cosine、0.05 权重、source-local RRF rank 和最终 top-k 截断约束。
 ## 候选优化说明：run-1779279305-repo-set-returned-overlay-pruning
 - 算法：repository-set query 仍用完整 overlay evidence 参与成员优先级、edge confidence 与 bridge co-ranking；完成 bridge bonus、dedupe 与 top-k 截断后，只在返回 JSON 中保留三类可解释 evidence：精确 import line evidence、直接指向当前 hit symbol/file 的 target evidence、以及本次返回结果中 origin file 与 target record 两端都出现的 resolved bridge evidence。
 - 架构/不变量：变更限定在 `application::code_repository_set_query` 的返回证据整理和服务编排收尾；单仓 retrieval、repo-set per-member fanout、SQLite schema、parser、FTS 文档、candidate window、scoring 输入、semantic/vector read model、env/paths/net 与 self-iteration harness 均不改变；完整 evidence 仍先用于排序，再做 API payload pruning。
@@ -948,6 +953,20 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: score_component:performance 0.821027->0.8303632110427289; metric:self_iteration_cargo_check_ms 2299.0->121.0; metric:temporal_sdk_go_index_ms 2155.0->1392.0; metric:temporal_sdk_go_register_index_ms 2902.0->2139.0; metric:temporal_samples_go_index_ms 986.0->846.0; metric:temporal_samples_go_register_index_ms 2093.0->1573.0; metric:relay_teams_index_ms 2380.0->1937.0; metric:relay_teams_register_index_ms 3127.0->2684.0
 - known degradations: metric:cargo_fmt_check_ms 1958.0->2078.0; metric:self_iteration_cargo_fmt_check_ms 303.0->343.0; metric:cargo_build_debug_ms 283.0->343.0; metric:leveldb_cpp_index_ms 828.0->1167.0; metric:leveldb_cpp_register_index_ms 1551.0->1934.0; metric:leveldb_cpp_query_p50_ms 1073.0->1296.0; metric:leveldb_cpp_query_p95_ms 1429.0->1476.0; metric:relay_teams_query_p95_ms 2034.0->2562.0
 - latency metrics: cargo_fmt_check_ms=2078ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1392ms; temporal_sdk_go_register_index_ms=2139ms; temporal_samples_go_index_ms=846ms; temporal_samples_go_register_index_ms=1573ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779288399750189897-validate
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779287983198667502-explore.patch`
+- score: 0.976096 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.867197, stability=1.000000)
+- cases: 8/8 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/retrieval/derived.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=2456ms; self_iteration_cargo_fmt_check_ms=382ms; cargo_build_debug_ms=383ms; self_iteration_cargo_check_ms=2839ms; temporal_samples_go_index_ms=1027ms; temporal_samples_go_register_index_ms=1814ms; leveldb_cpp_index_ms=866ms; leveldb_cpp_register_index_ms=1693ms
 
 Adopted optimization notes:
 
