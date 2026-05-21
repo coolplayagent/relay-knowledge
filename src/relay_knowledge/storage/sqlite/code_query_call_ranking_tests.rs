@@ -622,6 +622,68 @@ async fn callers_rank_assigned_result_sites_above_plain_invocations() {
     assert!(hits[0].excerpt.contains("settings.pool = createPool"));
 }
 
+#[tokio::test]
+async fn callers_rank_high_confidence_inferred_target_bindings() {
+    let local_path = "src/generated_table.c";
+    let transitive_path = "src/dispatch.c";
+    let mut local_call = call("local-slot-call", "local-file", local_path);
+    local_call.caller_name = Some("rk_table_read".to_owned());
+    local_call.callee_name = "read".to_owned();
+    local_call.target_hint = Some("rk_driver_read".to_owned());
+    local_call.resolution_state = "inferred".to_owned();
+    local_call.confidence_basis_points = 7_500;
+    local_call.line_range = range(21, 21);
+    let mut transitive_call = call("transitive-slot-call", "transitive-file", transitive_path);
+    transitive_call.caller_name = Some("rk_driver_read_dispatch".to_owned());
+    transitive_call.callee_name = "read".to_owned();
+    transitive_call.target_hint = Some("rk_driver_read".to_owned());
+    transitive_call.resolution_state = "inferred".to_owned();
+    transitive_call.confidence_basis_points = 5_500;
+    transitive_call.line_range = range(24, 24);
+    let local_binding = chunk(
+        "local-binding",
+        "local-file",
+        local_path,
+        "static const struct rk_table_row rk_rows[] = {\n  { .read = rk_driver_read },\n};",
+        None,
+        range(18, 22),
+    );
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("local-file", local_path, "c"),
+            file("transitive-file", transitive_path, "c"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![transitive_call, local_call],
+        chunks: vec![local_binding],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_driver_read", CodeQueryKind::Callers))
+        .await
+        .expect("caller query should succeed");
+
+    assert_eq!(hits[0].path, local_path);
+    assert!(hits[0].score > hits[1].score);
+}
+
 #[test]
 fn caller_result_assignment_bonus_requires_assignment_shape_and_query_intent() {
     let callers = request("createPool", CodeQueryKind::Callers);

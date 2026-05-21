@@ -8,6 +8,8 @@ mod code_query_api_identities;
 mod code_query_call_counts;
 #[path = "code_query_call_direction.rs"]
 mod code_query_call_direction;
+#[path = "code_query_call_target_ranking.rs"]
+mod code_query_call_target_ranking;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
 #[path = "code_query_designated_initializer_scoring.rs"]

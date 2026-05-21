@@ -16,6 +16,7 @@ use super::{
     code_query_call_direction::{
         call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
     },
+    code_query_call_target_ranking::high_confidence_inferred_target_bonus,
     code_query_excerpts::{call_excerpt, line_declares_local_callable},
     code_query_flow_scoring::caller_context_density_bonus,
     code_query_line_ranges::{call_result_line_range, optional_line_range_with_symbol_context},
@@ -660,6 +661,15 @@ fn call_rows_to_hits(
                     &row.callee_name,
                     request,
                     call_site_query_intent,
+                )
+                + high_confidence_inferred_target_bonus(
+                    base_score,
+                    query,
+                    &row.callee_name,
+                    target_hint,
+                    &row.resolution_state,
+                    row.confidence_basis_points,
+                    request,
                 )
                 + same_named_caller_penalty(row.caller_name.as_deref(), &row.callee_name, request)
                 + caller_context_density_bonus(
