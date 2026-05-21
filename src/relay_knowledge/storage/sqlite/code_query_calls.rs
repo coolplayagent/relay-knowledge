@@ -35,6 +35,17 @@ struct CallIdentityRows {
     saturated: bool,
 }
 
+struct CallIdentityQuery {
+    direction: CallIdentityDirection,
+    symbol: SymbolIdentityQuery,
+}
+
+#[derive(Clone, Copy)]
+enum CallIdentityDirection {
+    Caller,
+    Callee,
+}
+
 type CalleeExecutionGroupKey = (String, String, u32, u32);
 type CalleeExecutionSiteKey = (CalleeExecutionGroupKey, u32, u32, String, String);
 type CalleeExecutionOrder = BTreeMap<CalleeExecutionSiteKey, (usize, usize)>;
@@ -47,25 +58,15 @@ pub(super) fn search_calls(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let identity = call_callee_identity_query(request);
+    let identity = call_identity_query(request);
     let mut identity_hits = Vec::new();
     if let Some(identity) = &identity {
-        let identity_rows =
-            search_call_callee_identity_rows(connection, status, request, identity)?;
+        let identity_rows = search_call_identity_rows(connection, status, request, identity)?;
         let saturated = identity_rows.saturated;
         let rows = identity_rows
             .rows
             .into_iter()
-            .filter(|row| {
-                identity.matches_symbol(
-                    &row.callee_name,
-                    row.target_hint.as_deref().unwrap_or_default(),
-                    row.callee_signature.as_deref().unwrap_or_default(),
-                    row.callee_canonical_symbol_id
-                        .as_deref()
-                        .unwrap_or_default(),
-                )
-            })
+            .filter(|row| identity.matches_row(row))
             .collect::<Vec<_>>();
         identity_hits = call_rows_to_hits(status, request, rows);
         if call_identity_hits_can_answer_without_fts(
@@ -89,21 +90,22 @@ pub(super) fn search_calls(
     Ok(hits)
 }
 
-fn search_call_callee_identity_rows(
+fn search_call_identity_rows(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
-    identity: &SymbolIdentityQuery,
+    identity: &CallIdentityQuery,
 ) -> Result<CallIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("c.path", status, request);
     let language_filter = language_filter_sql_for_column("f.language_id", status, request);
     let direct_limit = call_identity_candidate_limit(request);
     let sql = call_rows_sql(&format!(
         "
-          AND c.callee_name = ?
+          AND {} = ?
           {path_filter}
           {language_filter}
-        "
+        ",
+        identity.match_column()
     ));
     let mut values = vec![
         Value::Text(required_scope(status)?.to_owned()),
@@ -124,6 +126,46 @@ fn search_call_callee_identity_rows(
     rows.truncate(direct_limit);
 
     Ok(CallIdentityRows { rows, saturated })
+}
+
+impl CallIdentityQuery {
+    fn leaf_name(&self) -> &str {
+        self.symbol.leaf_name()
+    }
+
+    fn is_scoped(&self) -> bool {
+        self.symbol.is_scoped()
+    }
+
+    fn match_column(&self) -> &'static str {
+        match self.direction {
+            CallIdentityDirection::Caller => "c.caller_name",
+            CallIdentityDirection::Callee => "c.callee_name",
+        }
+    }
+
+    fn matches_row(&self, row: &CallRow) -> bool {
+        match self.direction {
+            CallIdentityDirection::Caller => self.symbol.matches_symbol(
+                row.caller_name.as_deref().unwrap_or_default(),
+                row.caller_canonical_symbol_id
+                    .as_deref()
+                    .unwrap_or_default(),
+                row.caller_signature.as_deref().unwrap_or_default(),
+                row.caller_canonical_symbol_id
+                    .as_deref()
+                    .unwrap_or_default(),
+            ),
+            CallIdentityDirection::Callee => self.symbol.matches_symbol(
+                &row.callee_name,
+                row.target_hint.as_deref().unwrap_or_default(),
+                row.callee_signature.as_deref().unwrap_or_default(),
+                row.callee_canonical_symbol_id
+                    .as_deref()
+                    .unwrap_or_default(),
+            ),
+        }
+    }
 }
 
 fn search_call_fts_rows(
@@ -525,21 +567,29 @@ fn local_callable_declaration_bonus(
     }
 }
 
-fn call_callee_identity_query(request: &CodeRetrievalRequest) -> Option<SymbolIdentityQuery> {
-    (request.code_query_kind == CodeQueryKind::Callers)
-        .then(|| SymbolIdentityQuery::from_query(&request.query))
-        .flatten()
+fn call_identity_query(request: &CodeRetrievalRequest) -> Option<CallIdentityQuery> {
+    let direction = match request.code_query_kind {
+        CodeQueryKind::Callers => CallIdentityDirection::Callee,
+        CodeQueryKind::Callees => CallIdentityDirection::Caller,
+        _ => return None,
+    };
+    let symbol = SymbolIdentityQuery::from_query(&request.query)?;
+
+    Some(CallIdentityQuery { direction, symbol })
 }
 
 fn call_identity_hits_can_answer_without_fts(
     request: &CodeRetrievalRequest,
-    identity: &SymbolIdentityQuery,
+    identity: &CallIdentityQuery,
     hit_count: usize,
     saturated: bool,
 ) -> bool {
     hit_count > 0
         && !saturated
-        && request.code_query_kind == CodeQueryKind::Callers
+        && matches!(
+            request.code_query_kind,
+            CodeQueryKind::Callers | CodeQueryKind::Callees
+        )
         && (identity.is_scoped()
             || (hit_count <= request.limit && specific_call_identity_leaf(identity.leaf_name())))
 }
@@ -575,30 +625,65 @@ mod tests {
     fn caller_identity_fast_path_requires_bounded_exact_target_hits() {
         let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
             .expect("selector should validate");
-        let request = CodeRetrievalRequest::new(
+        let callers_request = CodeRetrievalRequest::new(
             "TargetThing",
-            selector,
+            selector.clone(),
             CodeQueryKind::Callers,
             10,
             FreshnessPolicy::AllowStale,
         )
         .expect("request should validate");
-        let identity =
-            SymbolIdentityQuery::from_query("TargetThing").expect("identity query should parse");
+        let callees_request = CodeRetrievalRequest::new(
+            "TargetThing",
+            selector,
+            CodeQueryKind::Callees,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+        let callers_identity =
+            call_identity_query(&callers_request).expect("callers identity should parse");
+        let callees_identity =
+            call_identity_query(&callees_request).expect("callees identity should parse");
 
         assert!(call_identity_hits_can_answer_without_fts(
-            &request, &identity, 3, false
+            &callers_request,
+            &callers_identity,
+            3,
+            false
         ));
         assert!(!call_identity_hits_can_answer_without_fts(
-            &request, &identity, 11, false
+            &callers_request,
+            &callers_identity,
+            11,
+            false
         ));
         assert!(!call_identity_hits_can_answer_without_fts(
-            &request, &identity, 3, true
+            &callers_request,
+            &callers_identity,
+            3,
+            true
         ));
-        let broad_identity =
-            SymbolIdentityQuery::from_query("Table").expect("identity query should parse");
+        assert!(call_identity_hits_can_answer_without_fts(
+            &callees_request,
+            &callees_identity,
+            3,
+            false
+        ));
+        let broad_identity = call_identity_query(
+            &CodeRetrievalRequest::new(
+                "Table",
+                CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+                    .expect("selector should validate"),
+                CodeQueryKind::Callees,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .expect("identity query should parse");
         assert!(!call_identity_hits_can_answer_without_fts(
-            &request,
+            &callees_request,
             &broad_identity,
             1,
             false

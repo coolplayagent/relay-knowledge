@@ -394,6 +394,56 @@ async fn callees_apply_direction_before_candidate_limit() {
 }
 
 #[tokio::test]
+async fn callees_use_exact_caller_identity_before_fts_candidate_window() {
+    let mut files = Vec::new();
+    let mut calls = Vec::new();
+    for index in 0..1050 {
+        let file_id = format!("noise-file-{index}");
+        let path = format!("noise/caller_{index}.py");
+        files.push(file(&file_id, &path, "python"));
+        let mut call = call(&format!("aa-noise-call-{index:04}"), &file_id, &path);
+        call.caller_name = Some("TargetThingNoise".to_owned());
+        call.callee_name = "TargetThing".to_owned();
+        calls.push(call);
+    }
+    files.push(file("target-file", "src/service.py", "python"));
+    let mut target = call("zz-target-call", "target-file", "src/service.py");
+    target.caller_name = Some("TargetThing".to_owned());
+    target.callee_name = "TargetCallee".to_owned();
+    calls.push(target);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls,
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("TargetThing", CodeQueryKind::Callees))
+        .await
+        .expect("callee query should succeed");
+
+    assert_eq!(hits[0].path, "src/service.py");
+    assert!(hits[0].excerpt.contains("TargetCallee"));
+}
+
+#[tokio::test]
 async fn callers_rank_target_named_surface_above_generic_transport_wrappers() {
     let redactor_path = "packages/http-recorder/src/redactor.ts";
     let executor_path = "packages/llm/src/route/executor.ts";

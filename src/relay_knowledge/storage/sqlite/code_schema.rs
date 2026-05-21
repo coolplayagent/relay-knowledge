@@ -338,6 +338,8 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_references(source_scope, name, kind, path);
         CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
             ON code_repository_calls(source_scope, callee_name, caller_name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_calls_caller_lookup
+            ON code_repository_calls(source_scope, caller_name, path, line_start);
         CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup
