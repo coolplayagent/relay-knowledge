@@ -20,6 +20,9 @@ use std::path::PathBuf;
 
 use super::{
     RelayKnowledgeService,
+    code_repository_set_plan::{
+        dependency_symbol_plan_needs_hybrid_fallback, repository_set_member_query_kind,
+    },
     code_repository_set_query::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
         per_member_candidate_limit, prune_returned_overlay_evidence, repository_set_score,
@@ -165,6 +168,12 @@ impl RelayKnowledgeService {
         let edge_index = OverlayEvidenceIndex::new(&edges);
         let mut results = Vec::new();
         let candidate_limit = per_member_candidate_limit(request.limit, status.members.len());
+        let highest_priority = status
+            .members
+            .iter()
+            .map(|member| member.member.priority)
+            .max()
+            .unwrap_or(0);
         for member_status in &status.members {
             let member = &member_status.member;
             let selector = CodeRepositorySelector::new(
@@ -174,18 +183,34 @@ impl RelayKnowledgeService {
                 request.language_filters.clone(),
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+            let member_query_kind =
+                repository_set_member_query_kind(&request, member_status, highest_priority);
             let search_request = CodeRetrievalRequest::new(
                 request.query.clone(),
-                selector,
-                request.code_query_kind,
+                selector.clone(),
+                member_query_kind,
                 candidate_limit,
                 FreshnessPolicy::AllowStale,
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-            let hits = store
+            let mut hits = store
                 .search_code_scope(member.source_scope.clone(), search_request)
                 .await
                 .map_err(storage_api_error)?;
+            if dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_kind, &hits) {
+                let fallback_request = CodeRetrievalRequest::new(
+                    request.query.clone(),
+                    selector,
+                    request.code_query_kind,
+                    candidate_limit,
+                    FreshnessPolicy::AllowStale,
+                )
+                .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+                hits = store
+                    .search_code_scope(member.source_scope.clone(), fallback_request)
+                    .await
+                    .map_err(storage_api_error)?;
+            }
             for hit in hits {
                 let overlay_evidence = edge_index.evidence_for_hit(&hit);
                 let score = repository_set_score(&hit, member_status, &overlay_evidence);

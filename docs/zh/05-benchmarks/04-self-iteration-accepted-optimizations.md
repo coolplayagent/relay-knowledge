@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779399365-repository-set-dependency-symbol-plan
+- 算法/架构：repository-set Hybrid 查询增加 priority-aware dependency member plan：最高优先级成员继续执行完整 Hybrid stack，以保留应用/样例用法、chunk flow、call/import/reference evidence；低优先级成员在查询包含至少两个 API-shaped identity（dotted/scoped/CamelCase）时先执行 bounded Symbol plan，并让 Symbol 查询复用既有 API identity direct-symbol lookup，用依赖仓的 API definition/symbol evidence 填充跨仓 top-k。若 symbol plan 覆盖不到至少两个 API identity，则立即回退到原完整 Hybrid 查询，避免只有弱符号噪声时剪掉真实用法。
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH、单仓默认 retrieval、candidate limit、ranking/scoring、overlay refresh、bridge support、member diversification、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness；只改变 repository-set 服务层的 member query kind arbitration，且保留原 path/language/freshness filters、overlay scoring、dedupe/top-k、stale/degraded metadata 和 fallback；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期降低 Temporal/OTel 这类 app+SDK workspace 查询中依赖仓重复执行 reference/call/import/chunk FTS fanout 的成本，使跨仓 usage+definition 查询仍展示高优先级仓用法和低优先级仓 API 定义，同时减少共享 SQLite 连接锁占用和 repo-set query p50/p95。风险是用户把低优先级成员也当作探索式源码用法仓时，若该成员已有两个以上 API symbol hit，部分 lexical 用法不会同次返回；风险由 priority gate、multi-identity gate、coverage fallback、原 full-Hybrid top member、overlay merge 和 focused planner tests 控制。
+- 策略关联：建立在 accepted `run-1779395376` 的 Hybrid symbol planner 与 `run-1779365756` 的 repository-set member diversification 上，把优化放在跨仓 query-plan arbitration 层；刻意避免 rejected `run-1779394754` 的全局 repo-set fanout收缩和 latest rejected `run-1779398333` 的 FTS-local token tweak，以免靠窄候选窗口或 FTS 召回扰动换取局部 metric 改善。
 ## 候选优化说明：run-1779395376-pure-hybrid-symbol-identity-plan
 - 算法/架构：Hybrid code retrieval 增加 bounded symbol-identity planner：当查询是单一安全 symbol identity（如 `ConnectorService`、`DBImpl::Get`）且 direct symbol identity 结果未饱和并能覆盖 requested top-k 时，`search_symbols` 直接返回 symbol hits，外层 Hybrid plan 随即跳过 reference、call、import 与 chunk fanout；多词 flow/API/architecture 查询仍执行完整 Hybrid retrieval stack。
 - 不变量：不改变 parser facts、SQLite schema、FTS document 写入、candidate limits、单仓 symbol scoring、reference/call/import/chunk ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；只作用于 exact one-token identity、positive symbol hit、非饱和 direct identity window，并继续经过 path/language filters、dedupe/top-k、freshness/stale metadata 与 repository-set merge；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -990,15 +995,18 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779388874-to-run-1779390358 compacted
 - summary: accepted compact unique API-sequence ranking and operation-surface designated-initializer ranking reached `run-1779390358` score 0.966613 with foundational, competitive, semantic_vector, and stability floors at 1.0. Full algorithm notes, metrics, known degradations, raw patches, and reports remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779388874.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779390358.patch`, reports, and progressive memory.
 
-## run-1779395376
+## run-1779395376 compacted
+- summary: accepted pure Hybrid symbol-identity plan scored 0.967269 with foundational, competitive, semantic_vector, and stability floors at 1.0; main gains were Temporal/LevelDB index/register/query metrics, while C/C++ fixture index/query and relay-teams index timings remained known regressions. Full patch, paths, metrics, and raw report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779395376.patch`, reports, and progressive memory.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779395376.patch`
-- score: 0.967269 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.818158, stability=1.000000)
+## run-1779399365
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779399365.patch`
+- score: 0.968533 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.825184, stability=1.000000)
 - cases: 43/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:performance 0.804409->0.818158427158297; metric:temporal_sdk_go_index_ms 1792.0->929.0; metric:temporal_sdk_go_register_index_ms 2480.0->1596.0; metric:temporal_samples_go_index_ms 1249.0->625.0; metric:temporal_samples_go_register_index_ms 1836.0->1231.0; metric:leveldb_cpp_index_ms 1187.0->586.0; metric:leveldb_cpp_register_index_ms 1753.0->1213.0; metric:leveldb_cpp_query_p50_ms 1173.0->1089.0
-- known degradations: metric:cpp_syntax_fixture_index_ms 545.0->1127.0; metric:cpp_syntax_fixture_register_index_ms 1110.0->1692.0; metric:cpp_syntax_fixture_query_p50_ms 1166.0->1267.0; metric:cpp_syntax_fixture_query_p95_ms 1309.0->1469.0; metric:c_syntax_fixture_index_ms 1085.0->1248.0; metric:c_syntax_fixture_register_index_ms 1629.0->1790.0; metric:relay_teams_index_ms 1291.0->1831.0; metric:relay_teams_register_index_ms 1877.0->2377.0
-- latency metrics: cargo_fmt_check_ms=1535ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=243ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=929ms; temporal_sdk_go_register_index_ms=1596ms; temporal_samples_go_index_ms=625ms; temporal_samples_go_register_index_ms=1231ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_plan.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`, `src/relay_knowledge/application/mod.rs`, `src/relay_knowledge/storage/sqlite/code_query_api_identities.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: metric:c_syntax_fixture_index_ms 1187.0->545.0; metric:c_syntax_fixture_register_index_ms 1772.0->1110.0; metric:c_syntax_fixture_query_p50_ms 1187.0->1129.0; metric:c_syntax_fixture_query_p95_ms 1493.0->1194.0; metric:cpp_syntax_fixture_index_ms 1407.0->1189.0; metric:cpp_syntax_fixture_register_index_ms 1953.0->1734.0; metric:leveldb_cpp_index_ms 1127.0->787.0; metric:leveldb_cpp_query_p50_ms 1248.0->1126.0
+- known degradations: metric:temporal_sdk_go_index_ms 929.0->969.0; metric:temporal_samples_go_index_ms 606.0->1252.0; metric:temporal_samples_go_register_index_ms 1277.0->1925.0; metric:cpp_syntax_fixture_query_p95_ms 1301.0->1355.0; metric:relay_teams_index_ms 1151.0->1312.0; metric:relay_teams_register_index_ms 1738.0->1878.0; metric:leveldb_cpp_register_index_ms 1673.0->1957.0
+- latency metrics: cargo_fmt_check_ms=1515ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=969ms; temporal_sdk_go_register_index_ms=1575ms; c_syntax_fixture_index_ms=545ms; c_syntax_fixture_register_index_ms=1110ms
 
 Adopted optimization notes:
 

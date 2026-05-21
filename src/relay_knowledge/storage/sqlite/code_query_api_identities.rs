@@ -53,7 +53,10 @@ pub(super) fn hybrid_api_symbol_identities(
     query: &str,
     request: &CodeRetrievalRequest,
 ) -> Vec<ApiSymbolIdentity> {
-    if request.code_query_kind != CodeQueryKind::Hybrid {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Hybrid | CodeQueryKind::Symbol
+    ) {
         return Vec::new();
     }
 
@@ -363,9 +366,16 @@ mod tests {
     }
 
     #[test]
-    fn api_identity_extraction_requires_hybrid_multi_identity_context() {
+    fn api_identity_extraction_requires_symbol_or_hybrid_multi_identity_context() {
         assert!(
             hybrid_api_symbol_identities("InterruptCh", &request(CodeQueryKind::Hybrid)).is_empty()
+        );
+        assert!(
+            !hybrid_api_symbol_identities(
+                "worker.New RegisterWorkflow",
+                &request(CodeQueryKind::Symbol),
+            )
+            .is_empty()
         );
         assert!(
             hybrid_api_symbol_identities(

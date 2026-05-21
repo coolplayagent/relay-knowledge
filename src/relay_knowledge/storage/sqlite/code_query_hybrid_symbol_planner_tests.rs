@@ -111,6 +111,64 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
     );
 }
 
+#[tokio::test]
+async fn multi_api_symbol_query_keeps_direct_identity_facets() {
+    let path = "src/worker.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("worker-file", path)],
+        symbols: vec![
+            qualified_symbol("new-symbol", "worker-file", path, "New", "worker.New"),
+            qualified_symbol(
+                "register-symbol",
+                "worker-file",
+                path,
+                "RegisterWorkflow",
+                "worker.RegisterWorkflow",
+            ),
+            qualified_symbol(
+                "interrupt-symbol",
+                "worker-file",
+                path,
+                "InterruptCh",
+                "worker.InterruptCh",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "worker.New RegisterWorkflow InterruptCh task queue",
+            CodeQueryKind::Symbol,
+            10,
+        ))
+        .await
+        .expect("symbol query should succeed");
+
+    assert!(
+        hits.iter().any(|hit| hit.excerpt.contains("New"))
+            && hits.iter().any(|hit| hit.excerpt.contains("InterruptCh")),
+        "multi-API symbol query should keep later direct identity facets: {hits:?}",
+    );
+}
+
 #[test]
 fn hybrid_symbol_plan_requires_unambiguous_symbol_window() {
     let read_request = request("read", CodeQueryKind::Hybrid, 2);
@@ -194,6 +252,16 @@ fn symbol(
     path: &str,
     name: &str,
 ) -> RepositoryCodeSymbolRecord {
+    qualified_symbol(symbol_snapshot_id, file_id, path, name, name)
+}
+
+fn qualified_symbol(
+    symbol_snapshot_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+    qualified_name: &str,
+) -> RepositoryCodeSymbolRecord {
     RepositoryCodeSymbolRecord {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
@@ -203,7 +271,7 @@ fn symbol(
         path: path.to_owned(),
         language_id: "typescript".to_owned(),
         name: name.to_owned(),
-        qualified_name: name.to_owned(),
+        qualified_name: qualified_name.to_owned(),
         kind: "class".to_owned(),
         signature: format!("class {name} {{}}"),
         doc_comment: None,

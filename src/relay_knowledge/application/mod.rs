@@ -2,6 +2,7 @@
 
 mod code_query_source_fallback;
 mod code_repository_set_lifecycle;
+mod code_repository_set_plan;
 mod code_repository_set_query;
 mod code_repository_set_service;
 mod code_service;

@@ -385,11 +385,11 @@ fn identity_hits_can_answer_without_fts(
 ) -> bool {
     hit_count > 0
         && !saturated
+        && query_is_single_symbol_identity(&request.query)
         && (matches!(
             request.code_query_kind,
             CodeQueryKind::Definition | CodeQueryKind::Symbol
-        ) || (request.code_query_kind == CodeQueryKind::Hybrid
-            && query_is_single_symbol_identity(&request.query)))
+        ) || request.code_query_kind == CodeQueryKind::Hybrid)
         && (identity.is_scoped() || hit_count <= request.limit)
 }
 
