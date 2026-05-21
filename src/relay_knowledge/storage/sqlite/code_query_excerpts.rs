@@ -3,7 +3,7 @@ pub(super) fn call_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &
     let Some(site) = caller_excerpt
         .map(str::trim)
         .filter(|excerpt| !excerpt.is_empty())
-        .map(|excerpt| call_site_excerpt(excerpt, callee))
+        .map(|excerpt| call_site_excerpt(excerpt, callee, false))
     else {
         return summary;
     };
@@ -32,24 +32,120 @@ pub(super) fn reference_excerpt(source_excerpt: Option<&str>, kind: &str, name: 
     }
 }
 
-fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String {
-    let matching_line = caller_excerpt
+pub(super) fn callee_excerpt(caller_excerpt: Option<&str>, caller: &str, callee: &str) -> String {
+    let summary = format!("{caller} calls {callee}");
+    let Some(site) = caller_excerpt
+        .map(str::trim)
+        .filter(|excerpt| !excerpt.is_empty())
+        .map(|excerpt| call_site_excerpt(excerpt, callee, true))
+    else {
+        return summary;
+    };
+
+    if site.is_empty() || site == summary {
+        summary
+    } else {
+        format!("{summary}: {site}")
+    }
+}
+
+fn call_site_excerpt(
+    caller_excerpt: &str,
+    callee: &str,
+    include_execution_context: bool,
+) -> String {
+    if let Some((index, _)) = caller_excerpt
         .lines()
-        .find(|line| line_declares_local_callable(line, callee))
+        .enumerate()
+        .find(|(_, line)| line_declares_local_callable(line, callee))
+    {
+        return call_context_excerpt(caller_excerpt, index, include_execution_context, true);
+    }
+
+    caller_excerpt
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line_looks_like_call_to(line, callee))
         .or_else(|| {
             caller_excerpt
                 .lines()
-                .find(|line| line_looks_like_call_to(line, callee))
+                .enumerate()
+                .find(|(_, line)| line_contains_identifier(line, callee))
         })
-        .or_else(|| {
-            caller_excerpt
-                .lines()
-                .find(|line| line_contains_identifier(line, callee))
-        });
-    matching_line
-        .map(compact_excerpt_line)
+        .map(|(index, line)| {
+            if include_execution_context {
+                call_context_excerpt(caller_excerpt, index, include_execution_context, false)
+            } else {
+                compact_excerpt_line(line)
+            }
+        })
         .filter(|line| !line.is_empty())
         .unwrap_or_else(|| compact_excerpt_line(caller_excerpt))
+}
+
+const MAX_CALLEE_CONTEXT_LINES: usize = 10;
+const MAX_LOCAL_CALLABLE_CONTEXT_LINES: usize = 6;
+
+fn call_context_excerpt(
+    caller_excerpt: &str,
+    start_index: usize,
+    include_execution_context: bool,
+    local_callable: bool,
+) -> String {
+    if include_execution_context {
+        let limit = if local_callable {
+            MAX_LOCAL_CALLABLE_CONTEXT_LINES
+        } else {
+            MAX_CALLEE_CONTEXT_LINES
+        };
+        compact_context_lines(caller_excerpt, start_index, limit, local_callable)
+    } else {
+        caller_excerpt
+            .lines()
+            .nth(start_index)
+            .map(compact_excerpt_line)
+            .unwrap_or_default()
+    }
+}
+
+fn compact_context_lines(
+    caller_excerpt: &str,
+    start_index: usize,
+    limit: usize,
+    stop_at_balanced_body: bool,
+) -> String {
+    let mut selected = Vec::new();
+    let mut brace_depth = 0i32;
+    let mut saw_body = false;
+    for line in caller_excerpt.lines().skip(start_index) {
+        let compact = compact_excerpt_line(line);
+        if !compact.is_empty() {
+            selected.push(compact);
+        }
+        let (opens, closes) = brace_delta(line);
+        brace_depth += opens as i32 - closes as i32;
+        saw_body |= opens > 0;
+        if selected.len() >= limit {
+            break;
+        }
+        if stop_at_balanced_body && saw_body && brace_depth <= 0 {
+            break;
+        }
+    }
+
+    selected.join(" ")
+}
+
+fn brace_delta(line: &str) -> (usize, usize) {
+    line.chars().fold((0, 0), |(opens, closes), character| {
+        if character == '{' {
+            (opens + 1, closes)
+        } else if character == '}' {
+            (opens, closes + 1)
+        } else {
+            (opens, closes)
+        }
+    })
 }
 
 fn reference_site_excerpt(source_excerpt: &str, name: &str) -> String {

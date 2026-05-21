@@ -17,7 +17,7 @@ use super::{
         call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
     },
     code_query_call_target_ranking::high_confidence_inferred_target_bonus,
-    code_query_excerpts::{call_excerpt, line_declares_local_callable},
+    code_query_excerpts::{call_excerpt, callee_excerpt, line_declares_local_callable},
     code_query_flow_scoring::caller_context_density_bonus,
     code_query_line_ranges::{call_result_line_range, optional_line_range_with_symbol_context},
     code_query_path_ranking::{
@@ -720,11 +720,11 @@ fn call_rows_to_hits(
                         score: score
                             + 1.25
                             + call_edge_confidence_bonus(row.confidence_basis_points),
-                        excerpt: call_excerpt(
-                            row.caller_excerpt.as_deref(),
-                            &caller,
-                            &row.callee_name,
-                        ),
+                        excerpt: if request.code_query_kind == CodeQueryKind::Callees {
+                            callee_excerpt(row.caller_excerpt.as_deref(), &caller, &row.callee_name)
+                        } else {
+                            call_excerpt(row.caller_excerpt.as_deref(), &caller, &row.callee_name)
+                        },
                         degraded_reason: None,
                         edge_kind: Some("call".to_owned()),
                         edge_resolution_state: Some(row.resolution_state),

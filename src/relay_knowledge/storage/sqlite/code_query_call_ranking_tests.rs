@@ -167,6 +167,7 @@ async fn callees_preserve_execution_order_inside_matched_caller() {
         .collect::<Vec<_>>();
 
     assert!(excerpts[0].contains("rk_validate_device"));
+    assert!(excerpts[0].contains("ops->read(dev, buffer, length)"));
     assert!(excerpts[1].contains("open"));
     assert!(excerpts[2].contains("rk_lock_device"));
     assert!(excerpts[3].contains("read"));
@@ -249,6 +250,8 @@ async fn callees_rank_local_callable_declaration_before_lambda_body_calls() {
         .collect::<Vec<_>>();
 
     assert!(excerpts[0].contains("append_event"));
+    assert!(excerpts[0].contains("cache.Insert"));
+    assert!(excerpts[0].contains("pipeline(event)"));
     assert!(excerpts[1].contains("Insert"));
     assert!(excerpts[2].contains("pipeline"));
 }
