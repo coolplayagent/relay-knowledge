@@ -28,6 +28,8 @@ mod code_query_line_ranges;
 mod code_query_path_ranking;
 #[path = "code_query_prepare.rs"]
 mod code_query_prepare;
+#[path = "code_query_proximity_scoring.rs"]
+mod code_query_proximity_scoring;
 #[path = "code_query_references.rs"]
 mod code_query_references;
 #[path = "code_query_rows.rs"]
@@ -77,6 +79,7 @@ use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
 };
 use code_query_prepare::{prepare_code_search_statement, retry_code_search_operation};
+use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::search_references;
 use code_query_rows::{ChunkRow, ImportRow};
 use code_query_support::*;
@@ -522,6 +525,13 @@ fn search_chunks(
                     request,
                 )
                 + compact_api_sequence_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                )
+                + query_proximity_chunk_bonus(
                     score,
                     &request.query,
                     &row.content,

@@ -921,30 +921,14 @@ Adopted optimization notes:
 - summary: older accepted parser, import ranking, path ranking, benchmark latency, and research-judge entries were compacted on 2026-05-20 to keep this primary log under the tracked-file line cap; full patch/report details remain in `.git/relay-knowledge-self-iteration/patches/`, reports, and progressive memory.
 ## 20260518T195201Z-to-20260518T202013Z compacted
 - summary: accepted hybrid chunk ranking and import target-symbol ranking records were compacted to keep this primary log under the tracked-file line cap; full patch, score, metric, and raw excerpt details remain in `.git/relay-knowledge-self-iteration/patches/` and historical reports.
-## 20260518T213007Z
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T213007Z.patch`
-- score: 0.916663 (foundational=0.969136, competitive=0.856151, accuracy=0.912643, semantic_vector=1.0, research_judge=0.85, performance=0.862429, stability=1.0)
-- cases: 87/87 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser_c.rs`, `src/relay_knowledge/code/parser_c_tests.rs`
-- key improvements: score_component:score 0.904638->0.916663; score_component:competitive_capability 0.844246->0.856151; score_component:accuracy 0.906691->0.912643; score_component:research_judge 0.8->0.85; metric:cargo_build_release_ms 42438.0->37047; metric:cargo_fmt_check_ms 856.0->784; metric:opencode_typescript_index_ms 24344.0->22285; metric:opencode_typescript_register_index_ms 24559.0->22506
-- known degradations: score_component:performance 0.869089->0.862429; metric:cargo_test_ms 8497.0->8772; metric:relay_teams_index_ms 30538.0->33836; metric:relay_teams_register_index_ms 30648.0->33933; metric:leveldb_cpp_index_ms 1503.0->1610; metric:leveldb_cpp_register_index_ms 1709.0->1818; metric:local_background_auto_index_files_background_service_auto_indexes_new_document_file_auto_index_first_seen_ms 787.0->1222.0; metric:semantic_vector_refresh_ms 319.0->418
-- latency metrics: cargo_build_release_ms=37047ms; cargo_fmt_check_ms=784ms; cargo_clippy_ms=181ms; cargo_test_ms=8772ms; relay_teams_index_ms=33836ms; relay_teams_register_index_ms=33933ms; relay_teams_query_p50_ms=220ms; relay_teams_query_p95_ms=660ms
-Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
+## 20260518T213007Z compacted
+- summary: accepted C parser optimization with score 0.916663 and 87/87 cases passed; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches/20260518T213007Z.patch` and historical reports.
 ## 20260518T214222Z
 - summary: search-document content optimization accepted with score 0.923286; raw metrics and patch excerpt were compacted to keep this primary log under the 1000-line hard cap. Full details remain in the patch/report artifacts.
 ## 20260518T220331Z-20260519T-import-usage archived
 - summary: older accepted finalize, call-site, type-relationship, function-flow, header-declaration, and import-usage ranking notes were compacted to keep this primary log under the 1000-line hard cap; raw details remain in their patch/report artifacts and the archive document.
-## 20260519T050321Z
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch`
-- score: 0.885665 (foundational=0.867521, competitive=0.840893, accuracy=0.854207, semantic_vector=1.0, research_judge=0.85, performance=0.788231, stability=1.0)
-- cases: 98/104 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_exported_value_tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=44839ms; cargo_fmt_check_ms=947ms; cargo_clippy_ms=215ms; cargo_test_ms=10089ms; relay_teams_index_ms=59395ms; relay_teams_register_index_ms=59499ms; relay_teams_query_p50_ms=641ms; relay_teams_query_p95_ms=2898ms
-
-Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见该条 patch 文件。
+## 20260519T050321Z compacted
+- summary: parser manual extraction candidate scored 0.885665 with 98/104 cases passed; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch` and historical reports.
 
 ## 20260519T-run-1779223761-to-run-1779240531 compacted
 - summary: Rust v2 harness migration, bounded SQLite schema maintenance, compact high-coverage hybrid chunks, history synthesis, and assigned-result caller ranking were compacted on 20260520 to keep this primary benchmark log under the repository line cap. Raw patch/report details remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
@@ -1002,6 +986,26 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - key improvements: score_component:competitive_capability 0.857372->0.875; case:temporal_go_repo_set_worker_registration_flow false->true; metric:leveldb_cpp_index_ms 1147.0->1109.0; metric:leveldb_cpp_register_index_ms 1734.0->1675.0; metric:cpp_syntax_fixture_query_p50_ms 1334.0->1230.0; metric:cpp_syntax_fixture_query_p95_ms 1603.0->1431.0; metric:relay_teams_index_ms 1192.0->1152.0; metric:relay_teams_query_p95_ms 1499.0->1453.0
 - known degradations: metric:leveldb_cpp_query_p50_ms 1193.0->1269.0; metric:cpp_syntax_fixture_index_ms 1167.0->1210.0; metric:cpp_syntax_fixture_register_index_ms 1711.0->1776.0; metric:c_syntax_fixture_index_ms 1195.0->1451.0; metric:c_syntax_fixture_register_index_ms 1760.0->2016.0
 - latency metrics: cargo_fmt_check_ms=1495ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=909ms; temporal_sdk_go_register_index_ms=1576ms; temporal_samples_go_index_ms=626ms; temporal_samples_go_register_index_ms=1253ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## candidate run-1779375550-query-proximity-hybrid-ranking
+- 算法/架构：Hybrid chunk ranking adds a bounded query-proximity signal after the existing FTS candidate window and base scorer. For long multi-term code queries, it scans six-line windows inside each recalled chunk and gives a capped bonus only when one local window covers most normalized query terms, so tightly related declarations or implementation context outrank broad class/file chunks whose matches are scattered.
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH planning、candidate limits、symbol/reference/call/import retrieval、repo-set overlay, semantic/vector read model, env/paths/net, CLI/API, installation behavior, or the self-iteration harness. The signal is Hybrid-only, requires a positive high base score, at least five meaningful query terms, at most 80 nonblank chunk lines, path/language filters, non-test guards unless the query asks for tests, and it does not stack onto queries already shaped as three-or-more API identity sequences; final dedupe/top-k still applies.
+- 预期影响：Expected to improve multi-repository and large-codebase retrieval for queries that combine API names, data-flow nouns, and configuration terms, especially when the best evidence sits in a short declaration or body window while larger neighbors match the same words only by scattering them through a long chunk. This directly builds on accepted hybrid chunk ranking from `run-1779371550` and API-identity coverage from `run-1779373568`.
+- 风险：Localized windows can lift a nearby declaration above a broader architectural surface for some exploratory Hybrid queries. The risk is bounded by the 75%/five-term coverage gate, six-line window, 80-line chunk cap, 1.9 score cap, existing base-score requirement, test-path guard, unchanged recall window, and no fixture/query/path enumeration; it avoids the rejected `run-1779372563` pattern of narrow path demotion that improved local metrics while regressing overall query latency.
+
+## run-1779375550
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779375550.patch`
+- score: 0.933757 (foundational=0.947917, competitive=0.894231, accuracy=0.921074, semantic_vector=1.000000, research_judge=n/a, performance=0.824912, stability=1.000000)
+- cases: 43/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_proximity_scoring.rs`
+- key improvements: score_component:score 0.926903->0.9337565742997391; score_component:competitive_capability 0.875->0.8942307692307693; score_component:performance 0.810343->0.824911880012796; case_score:leveldb_hybrid_recovery_manifest_full_scope 0.5->1.0; case_rank:leveldb_hybrid_recovery_manifest_full_scope 2->1; metric:temporal_samples_go_register_index_ms 1253.0->1193.0; metric:leveldb_cpp_index_ms 1109.0->586.0; metric:leveldb_cpp_register_index_ms 1675.0->1212.0
+- known degradations: metric:cargo_fmt_check_ms 1495.0->1595.0; metric:temporal_sdk_go_index_ms 909.0->950.0; metric:cpp_syntax_fixture_query_p95_ms 1431.0->1481.0; metric:relay_teams_index_ms 1152.0->1833.0; metric:relay_teams_register_index_ms 1759.0->2419.0; metric:relay_teams_query_p50_ms 1148.0->1189.0; metric:c_syntax_fixture_register_index_ms 2016.0->2232.0; metric:c_syntax_fixture_query_p50_ms 1189.0->1252.0
+- latency metrics: cargo_fmt_check_ms=1595ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=101ms; temporal_samples_go_index_ms=626ms; temporal_samples_go_register_index_ms=1193ms; temporal_sdk_go_index_ms=950ms; temporal_sdk_go_register_index_ms=1596ms
 
 Adopted optimization notes:
 

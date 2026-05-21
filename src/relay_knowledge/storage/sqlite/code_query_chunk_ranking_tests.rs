@@ -436,6 +436,86 @@ async fn hybrid_chunks_rank_source_definition_bodies_above_declaration_surfaces(
 }
 
 #[tokio::test]
+async fn hybrid_chunks_rank_local_query_term_proximity_above_scattered_matches() {
+    let broad_path = "db/version_set.h";
+    let focused_path = "db/db_impl.h";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("broad-file", broad_path, "cpp"),
+            file("focused-file", focused_path, "cpp"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "broad-chunk",
+                "broad-file",
+                broad_path,
+                "class VersionSet {\n\
+                 public:\n\
+                    Status Recover(bool* save_manifest);\n\
+                    void MarkFileNumberUsed(uint64_t number);\n\
+                    uint64_t ManifestFileNumber() const;\n\
+                    void AddLiveFiles(std::set<uint64_t>* live);\n\
+                    void AppendVersion(Version* version);\n\
+                    void Finalize(Version* version);\n\
+                    uint64_t NewFileNumber();\n\
+                    uint64_t LastSequence() const;\n\
+                    void SetLastSequence(uint64_t sequence);\n\
+                    std::string descriptor_name_;\n\
+                };",
+                range(10, 18),
+                None,
+            ),
+            chunk(
+                "focused-chunk",
+                "focused-file",
+                focused_path,
+                "class DBImpl {\n\
+                 private:\n\
+                    // Recover the descriptor and append updates to the edit.\n\
+                    Status Recover(VersionEdit* edit, bool* save_manifest);\n\
+                };",
+                range(40, 45),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "Recover descriptor save_manifest VersionEdit",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    let focused =
+        lexical_hit_score(&hits, 40).expect("focused declaration chunk should be recalled");
+    let broad = lexical_hit_score(&hits, 10).expect("broad declaration chunk should be recalled");
+    assert!(
+        focused > broad,
+        "localized query evidence should outrank scattered class evidence: {focused} <= {broad}",
+    );
+}
+
+#[tokio::test]
 async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
     let target_path = "src/runtime/config.ts";
     let noise_path = "aaa/noise.ts";
