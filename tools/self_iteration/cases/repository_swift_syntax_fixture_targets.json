@@ -1,7 +1,7 @@
 {
   "repositories": {
     "swift_syntax_fixture": {
-      "generated_fixture": "swift_syntax_v1",
+      "generated_fixture": "swift_syntax_v2",
       "alias": "swift-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -77,6 +77,22 @@
         {"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "output.append"}
       ],
       "case_group": "swift_tree_sitter_syntax"
+    },
+    {
+      "id": "swift_syntax_hybrid_async_closure_request",
+      "repository": "swift_syntax_fixture",
+      "kind": "hybrid",
+      "query": "swift async closure request pipeline url data",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "let request = { (url: URL) async throws -> Data in"}],
+      "expected_all": [
+        {"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "try await request(url)"},
+        {"path": "Sources/App/RequestPipeline.swift", "excerpt_contains": "try await client.request(url: url)"}
+      ],
+      "case_group": "swift_tree_sitter_lambda"
     },
     {
       "id": "swift_syntax_negative_missing_client",

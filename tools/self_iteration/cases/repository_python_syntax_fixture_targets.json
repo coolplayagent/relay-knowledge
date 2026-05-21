@@ -1,7 +1,7 @@
 {
   "repositories": {
     "python_syntax_fixture": {
-      "generated_fixture": "python_syntax_v1",
+      "generated_fixture": "python_syntax_v2",
       "alias": "python-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -84,6 +84,22 @@
         {"path": "syntax_service/service.py", "excerpt_contains": "@traced_operation(\"dispatch\")"}
       ],
       "case_group": "python_tree_sitter_syntax"
+    },
+    {
+      "id": "python_syntax_hybrid_lambda_payload_filter",
+      "repository": "python_syntax_fixture",
+      "kind": "hybrid",
+      "query": "lambda payload filter normalize service runner",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["python"],
+      "expected": [{"path": "syntax_service/service.py", "excerpt_contains": "self.payload_filter = lambda value: value.strip()"}],
+      "expected_all": [
+        {"path": "syntax_service/service.py", "excerpt_contains": "return self.payload_filter(payload)"},
+        {"path": "syntax_service/service.py", "excerpt_contains": "def normalize_payload"}
+      ],
+      "case_group": "python_tree_sitter_lambda"
     },
     {
       "id": "python_syntax_negative_missing_runner",

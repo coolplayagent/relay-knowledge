@@ -1,7 +1,7 @@
 {
   "repositories": {
     "typescript_syntax_fixture": {
-      "generated_fixture": "typescript_syntax_v1",
+      "generated_fixture": "typescript_syntax_v2",
       "alias": "typescript-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -82,6 +82,22 @@
         {"path": "src/index.ts", "excerpt_contains": "export { ProviderPanel"}
       ],
       "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
+      "id": "typescript_syntax_hybrid_typed_arrow_projector",
+      "repository": "typescript_syntax_fixture",
+      "kind": "hybrid",
+      "query": "typed arrow payload projector trim provider record",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/protocol.ts", "excerpt_contains": "export const trimPayload: PayloadProjector<string> = (payload) => payload.trim()"}],
+      "expected_all": [
+        {"path": "src/protocol.ts", "excerpt_contains": "export type PayloadProjector<TPayload>"},
+        {"path": "src/provider.ts", "excerpt_contains": "return trimPayload(payload)"}
+      ],
+      "case_group": "typescript_tree_sitter_lambda"
     },
     {
       "id": "typescript_syntax_negative_missing_provider",

@@ -1,7 +1,7 @@
 {
   "repositories": {
     "php_syntax_fixture": {
-      "generated_fixture": "php_syntax_v1",
+      "generated_fixture": "php_syntax_v2",
       "alias": "php-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -77,6 +77,22 @@
         {"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "$this->logBoot('cache')"}
       ],
       "case_group": "php_tree_sitter_syntax"
+    },
+    {
+      "id": "php_syntax_hybrid_arrow_normalizer",
+      "repository": "php_syntax_fixture",
+      "kind": "hybrid",
+      "query": "php arrow function normalizer log boot provider",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["php"],
+      "expected": [{"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "$normalizer = fn(string $value): string => trim($value)"}],
+      "expected_all": [
+        {"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "return $normalizer($name)"},
+        {"path": "src/App/Providers/CacheProvider.php", "excerpt_contains": "$this->logBoot('cache')"}
+      ],
+      "case_group": "php_tree_sitter_lambda"
     },
     {
       "id": "php_syntax_negative_missing_kernel",
