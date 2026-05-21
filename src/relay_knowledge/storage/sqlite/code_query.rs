@@ -2,6 +2,8 @@
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
+#[path = "code_query_api_identities.rs"]
+mod code_query_api_identities;
 #[path = "code_query_call_counts.rs"]
 mod code_query_call_counts;
 #[path = "code_query_call_direction.rs"]

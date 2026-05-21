@@ -10,6 +10,9 @@ use crate::{
 
 use super::{
     HitParts,
+    code_query_api_identities::{
+        ApiSymbolIdentity, api_identity_symbol_bonus, hybrid_api_symbol_identities,
+    },
     code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
     code_query_path_ranking::{
         query_mentions_test_or_benchmark, symbol_declaration_surface_path_bonus,
@@ -32,6 +35,7 @@ pub(super) fn search_symbols(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let identity = SymbolIdentityQuery::from_query(&request.query);
+    let api_identities = hybrid_api_symbol_identities(&request.query, request);
     let mut identity_hits = Vec::new();
     if let Some(identity) = &identity {
         let identity_rows = search_symbol_identity_rows(connection, status, request, identity)?;
@@ -48,7 +52,7 @@ pub(super) fn search_symbols(
                 )
             })
             .collect::<Vec<_>>();
-        identity_hits = symbol_rows_to_hits(status, request, rows);
+        identity_hits = symbol_rows_to_hits(status, request, rows, &api_identities);
         if identity_hits_can_answer_without_fts(request, identity, identity_hits.len(), saturated) {
             dedupe_sort_truncate(&mut identity_hits, request.limit);
             return Ok(identity_hits);
@@ -59,8 +63,15 @@ pub(super) fn search_symbols(
         status,
         request,
         search_symbol_fts_rows(connection, status, request)?,
+        &api_identities,
     );
     hits.extend(identity_hits);
+    hits.extend(search_hybrid_api_identity_hits(
+        connection,
+        status,
+        request,
+        &api_identities,
+    )?);
 
     Ok(hits)
 }
@@ -71,9 +82,24 @@ fn search_symbol_identity_rows(
     request: &CodeRetrievalRequest,
     identity: &SymbolIdentityQuery,
 ) -> Result<SymbolIdentityRows, StorageError> {
+    search_symbol_identity_rows_by_name(
+        connection,
+        status,
+        request,
+        identity.leaf_name(),
+        symbol_identity_candidate_limit(request),
+    )
+}
+
+fn search_symbol_identity_rows_by_name(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    name: &str,
+    direct_limit: usize,
+) -> Result<SymbolIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("path", status, request);
     let language_filter = language_filter_sql_for_column("language_id", status, request);
-    let direct_limit = symbol_identity_candidate_limit(request);
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
@@ -97,7 +123,7 @@ fn search_symbol_identity_rows(
     );
     let mut values = vec![
         rusqlite::types::Value::Text(required_scope(status)?.to_owned()),
-        rusqlite::types::Value::Text(identity.leaf_name().to_owned()),
+        rusqlite::types::Value::Text(name.to_owned()),
     ];
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
@@ -114,6 +140,42 @@ fn search_symbol_identity_rows(
     rows.truncate(direct_limit);
 
     Ok(SymbolIdentityRows { rows, saturated })
+}
+
+fn search_hybrid_api_identity_hits(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    identities: &[ApiSymbolIdentity],
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    if identities.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut rows = Vec::new();
+    for identity in identities {
+        rows.extend(
+            search_symbol_identity_rows_by_name(
+                connection,
+                status,
+                request,
+                identity.leaf_name(),
+                hybrid_api_identity_candidate_limit(request),
+            )?
+            .rows
+            .into_iter()
+            .filter(|row| {
+                identity.matches_symbol(
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
+                )
+            }),
+        );
+    }
+
+    Ok(symbol_rows_to_hits(status, request, rows, identities))
 }
 
 fn search_symbol_fts_rows(
@@ -196,6 +258,7 @@ fn symbol_rows_to_hits(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
     rows: Vec<SymbolRow>,
+    api_identities: &[ApiSymbolIdentity],
 ) -> Vec<CodeRetrievalHit> {
     let query = request.query.as_str();
     let score_query = ScoreQuery::new(query);
@@ -219,6 +282,13 @@ fn symbol_rows_to_hits(
                     &row.signature,
                     &row.canonical_symbol_id,
                     request,
+                )
+                + api_identity_symbol_bonus(
+                    api_identities,
+                    &row.name,
+                    &row.qualified_name,
+                    &row.signature,
+                    &row.canonical_symbol_id,
                 );
             (score > 0.0).then(|| {
                 let score = score
@@ -279,4 +349,8 @@ fn identity_hits_can_answer_without_fts(
 
 fn symbol_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
     candidate_limit(request, CandidateLayer::Symbol).min(200)
+}
+
+fn hybrid_api_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    request.limit.clamp(10, 40)
 }
