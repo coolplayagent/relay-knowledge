@@ -2,7 +2,7 @@ use super::*;
 use crate::domain::CodeIndexResourceBudget;
 use std::fs;
 
-mod fixtures;
+pub(super) mod fixtures;
 
 use super::changes::{GitChange, parse_name_status_z, tracked_entries};
 use super::git::git_batch_blobs;

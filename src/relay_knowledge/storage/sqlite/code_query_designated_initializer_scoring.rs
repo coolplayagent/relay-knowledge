@@ -90,14 +90,12 @@ fn line_has_designated_initializer_assignment(line: &str) -> bool {
     let Some((left, _)) = line.split_once('=') else {
         return false;
     };
-    left.split(|character: char| character == ',' || character == '{')
-        .map(str::trim)
-        .any(|part| {
-            part.starts_with('.')
-                || (part.starts_with('[')
-                    && part.contains(']')
-                    && part.split(']').next().is_some_and(|index| index.len() > 2))
-        })
+    left.split([',', '{']).map(str::trim).any(|part| {
+        part.starts_with('.')
+            || (part.starts_with('[')
+                && part.contains(']')
+                && part.split(']').next().is_some_and(|index| index.len() > 2))
+    })
 }
 
 fn line_assigns_callable_identifier(line: &str) -> bool {

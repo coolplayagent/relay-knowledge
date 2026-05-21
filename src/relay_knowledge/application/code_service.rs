@@ -12,7 +12,7 @@ use crate::{
         CodeIndexError, build_index_snapshot, changed_paths_for_diff,
         deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
         prepare_full_index_plan, preview_repository_scope, register_repository,
-        resolve_repository_ref, resolve_repository_snapshot,
+        resolve_repository_ref, resolve_repository_snapshot, source_declarations_for_identity,
     },
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
@@ -23,6 +23,9 @@ use crate::{
 };
 
 use super::RelayKnowledgeService;
+use super::code_query_source_fallback::{
+    append_definition_source_fallback, plan_definition_source_fallback,
+};
 
 const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
@@ -457,10 +460,23 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let results = store
+        let mut results = store
             .search_code(request.clone())
             .await
             .map_err(storage_api_error)?;
+        if let Some(plan) = plan_definition_source_fallback(&scoped_status, &request, &results) {
+            let registration = registration_from_status(&status);
+            let declarations = run_blocking_code(move || {
+                source_declarations_for_identity(
+                    &registration,
+                    &plan.commit,
+                    plan.paths,
+                    &plan.identity,
+                )
+            })
+            .await?;
+            append_definition_source_fallback(&scoped_status, &request, &mut results, declarations);
+        }
         let degraded_reason = results
             .iter()
             .find_map(|hit| hit.degraded_reason.clone())

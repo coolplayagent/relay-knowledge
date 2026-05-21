@@ -48,12 +48,12 @@ pub(super) fn reference(id: &str, path: &str, name: &str) -> RepositoryCodeRefer
     }
 }
 
-pub(super) struct TempGitRepo {
+pub(in crate::code) struct TempGitRepo {
     pub(super) path: PathBuf,
 }
 
 impl TempGitRepo {
-    pub(super) fn create(name: &str) -> Self {
+    pub(in crate::code) fn create(name: &str) -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
@@ -67,7 +67,7 @@ impl TempGitRepo {
         repo
     }
 
-    pub(super) fn registration(&self) -> CodeRepositoryRegistration {
+    pub(in crate::code) fn registration(&self) -> CodeRepositoryRegistration {
         CodeRepositoryRegistration::new(
             "repo",
             "alias",
@@ -83,7 +83,7 @@ impl TempGitRepo {
             .expect("selector should validate")
     }
 
-    pub(super) fn write(&self, relative: &str, content: &str) {
+    pub(in crate::code) fn write(&self, relative: &str, content: &str) {
         let path = self.path.join(relative);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("parent directory should exist");
@@ -91,7 +91,7 @@ impl TempGitRepo {
         fs::write(path, content).expect("fixture file should be written");
     }
 
-    pub(super) fn git<const N: usize>(&self, args: [&str; N]) {
+    pub(in crate::code) fn git<const N: usize>(&self, args: [&str; N]) {
         let output = Command::new("git")
             .current_dir(&self.path)
             .args(args)
@@ -104,7 +104,7 @@ impl TempGitRepo {
         );
     }
 
-    pub(super) fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+    pub(in crate::code) fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
         let output = Command::new("git")
             .current_dir(&self.path)
             .args(args)
