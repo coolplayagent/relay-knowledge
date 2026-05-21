@@ -2,9 +2,11 @@ use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
 const MAX_HYBRID_API_IDENTITIES: usize = 6;
 const MIN_SIMPLE_API_IDENTITY_LEN: usize = 4;
-const SCOPED_API_IDENTITY_BONUS: f64 = 2.0;
-const SIMPLE_API_IDENTITY_BONUS: f64 = 1.0;
-const MAX_SEQUENCE_COVERAGE_BONUS: f64 = 0.75;
+const SCOPED_API_IDENTITY_BASE_BONUS: f64 = 2.35;
+const SIMPLE_API_IDENTITY_BASE_BONUS: f64 = 2.0;
+const API_IDENTITY_FACET_BONUS_STEP: f64 = 0.45;
+const MAX_API_IDENTITY_FACET_BONUS: f64 = 1.35;
+const SHARED_SCOPED_OWNER_API_IDENTITY_BONUS: f64 = 4.1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ApiSymbolIdentity {
@@ -19,6 +21,12 @@ impl ApiSymbolIdentity {
 
     fn is_scoped(&self) -> bool {
         self.scoped_terms.is_some()
+    }
+
+    fn owner_terms(&self) -> Option<&[String]> {
+        let scoped_terms = self.scoped_terms.as_ref()?;
+        let owner_len = scoped_terms.len().checked_sub(1)?;
+        (owner_len > 0).then_some(&scoped_terms[..owner_len])
     }
 
     pub(super) fn matches_symbol(
@@ -81,12 +89,42 @@ pub(super) fn api_identity_symbol_bonus(
     }) else {
         return 0.0;
     };
-    let coverage_bonus =
-        ((identities.len().saturating_sub(1).min(3)) as f64 * 0.5).min(MAX_SEQUENCE_COVERAGE_BONUS);
+    let facet_bonus = api_identity_facet_bonus(identities.len());
+    let owner_bonus =
+        shared_scoped_owner_bonus(identity, identities, &[qualified_name, canonical_symbol_id]);
     if identity.is_scoped() {
-        SCOPED_API_IDENTITY_BONUS + coverage_bonus
+        SCOPED_API_IDENTITY_BASE_BONUS + facet_bonus
     } else {
-        SIMPLE_API_IDENTITY_BONUS + coverage_bonus
+        SIMPLE_API_IDENTITY_BASE_BONUS + facet_bonus + owner_bonus
+    }
+}
+
+fn api_identity_facet_bonus(identity_count: usize) -> f64 {
+    (identity_count.saturating_sub(1) as f64 * API_IDENTITY_FACET_BONUS_STEP)
+        .min(MAX_API_IDENTITY_FACET_BONUS)
+}
+
+fn shared_scoped_owner_bonus(
+    identity: &ApiSymbolIdentity,
+    identities: &[ApiSymbolIdentity],
+    fields: &[&str],
+) -> f64 {
+    if identity.is_scoped() {
+        return 0.0;
+    }
+
+    if identities
+        .iter()
+        .filter_map(ApiSymbolIdentity::owner_terms)
+        .any(|owner_terms| {
+            fields
+                .iter()
+                .any(|field| contains_scoped_terms(field, owner_terms))
+        })
+    {
+        SHARED_SCOPED_OWNER_API_IDENTITY_BONUS
+    } else {
+        0.0
     }
 }
 
@@ -240,7 +278,7 @@ mod tests {
                 "worker.InterruptCh",
                 "func InterruptCh() <-chan interface{}",
                 "repo://repo/worker.InterruptCh",
-            ) >= SIMPLE_API_IDENTITY_BONUS
+            ) >= SIMPLE_API_IDENTITY_BASE_BONUS
         );
         assert!(
             api_identity_symbol_bonus(
@@ -249,12 +287,79 @@ mod tests {
                 "worker.New",
                 "func New(client Client, taskQueue string) Worker",
                 "repo://repo/worker.New",
-            ) >= SCOPED_API_IDENTITY_BONUS
+            ) >= SCOPED_API_IDENTITY_BASE_BONUS
         );
         assert_eq!(
             api_identity_symbol_bonus(&identities, "TaskQueue", "worker.TaskQueue", "", ""),
             0.0
         );
+    }
+
+    #[test]
+    fn multi_identity_queries_give_each_api_facet_enough_direct_symbol_weight() {
+        let request = request(CodeQueryKind::Hybrid);
+        let identities = hybrid_api_symbol_identities(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            &request,
+        );
+
+        let later_facets = [
+            ("RegisterWorkflow", "func RegisterWorkflow(w interface{})"),
+            ("RegisterActivity", "func RegisterActivity(a interface{})"),
+            ("InterruptCh", "func InterruptCh() <-chan interface{}"),
+        ];
+        for (name, signature) in later_facets {
+            assert!(
+                api_identity_symbol_bonus(&identities, name, name, signature, "")
+                    >= SIMPLE_API_IDENTITY_BASE_BONUS + 1.0,
+                "{name} should carry enough facet weight to survive broad lexical usage chunks",
+            );
+        }
+    }
+
+    #[test]
+    fn simple_api_facets_prefer_symbols_under_scoped_query_owner() {
+        let request = request(CodeQueryKind::Hybrid);
+        let identities = hybrid_api_symbol_identities(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            &request,
+        );
+
+        let public_worker_bonus = api_identity_symbol_bonus(
+            &identities,
+            "InterruptCh",
+            "worker.InterruptCh",
+            "func InterruptCh() <-chan interface{}",
+            "repo://repo/worker.InterruptCh",
+        );
+        let internal_bonus = api_identity_symbol_bonus(
+            &identities,
+            "InterruptCh",
+            "internal.InterruptCh",
+            "func InterruptCh() <-chan interface{}",
+            "repo://repo/internal.InterruptCh",
+        );
+
+        assert!(public_worker_bonus >= internal_bonus + 4.0);
+    }
+
+    #[test]
+    fn shared_owner_bonus_ignores_signature_type_mentions() {
+        let request = request(CodeQueryKind::Hybrid);
+        let identities = hybrid_api_symbol_identities(
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+            &request,
+        );
+
+        let envconfig_bonus = api_identity_symbol_bonus(
+            &identities,
+            "MustLoadDefaultClientOptions",
+            "envconfig.MustLoadDefaultClientOptions",
+            "func MustLoadDefaultClientOptions() client.Options",
+            "repo://repo/envconfig.MustLoadDefaultClientOptions",
+        );
+
+        assert!(envconfig_bonus < SIMPLE_API_IDENTITY_BASE_BONUS + 2.0);
     }
 
     #[test]
