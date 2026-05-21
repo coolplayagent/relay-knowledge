@@ -161,6 +161,9 @@ const MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 50;
 const MAX_MULTI_MEMBER_MINIMUM_CANDIDATES: usize = 15;
 const MIN_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 6;
 const REPOSITORY_SET_TOTAL_FANOUT_MULTIPLIER: usize = 3;
+const MAX_DIVERSIFIED_RESULTS_PER_MEMBER: usize = 3;
+const DIVERSITY_MIN_RELATIVE_SCORE: f64 = 0.45;
+const DIVERSITY_MAX_SCORE_GAP: f64 = 10.0;
 
 pub(super) fn per_member_candidate_limit(limit: usize, member_count: usize) -> usize {
     if member_count == 0 {
@@ -321,6 +324,16 @@ pub(super) fn dedupe_sort_truncate(
         }
     }
     results.extend(best.into_values());
+    sort_repository_set_results(results);
+    let truncated = results.len() > limit;
+    if truncated {
+        diversify_repository_set_results(results, limit);
+    }
+    results.truncate(limit);
+    truncated
+}
+
+fn sort_repository_set_results(results: &mut [CodeRepositorySetQueryHit]) {
     results.sort_by(|left, right| {
         right
             .score
@@ -336,9 +349,76 @@ pub(super) fn dedupe_sort_truncate(
             .then_with(|| left.hit.path.cmp(&right.hit.path))
             .then_with(|| left.hit.line_range.start.cmp(&right.hit.line_range.start))
     });
-    let truncated = results.len() > limit;
-    results.truncate(limit);
-    truncated
+}
+
+fn diversify_repository_set_results(results: &mut Vec<CodeRepositorySetQueryHit>, limit: usize) {
+    if limit == 0 {
+        return;
+    }
+    let member_order = repository_set_member_order(results);
+    if member_order.len() <= 1 {
+        return;
+    }
+
+    let target_per_member =
+        (limit / member_order.len()).clamp(1, MAX_DIVERSIFIED_RESULTS_PER_MEMBER);
+    let score_floor = diversified_member_score_floor(results[0].score);
+    let mut selected = BTreeSet::new();
+    let mut counts = BTreeMap::<(String, String), usize>::new();
+    for member_key in &member_order {
+        while selected.len() < limit
+            && counts.get(member_key).copied().unwrap_or(0) < target_per_member
+        {
+            let Some(index) = results.iter().enumerate().position(|(index, result)| {
+                !selected.contains(&index)
+                    && repository_set_member_key(result) == *member_key
+                    && result.score >= score_floor
+            }) else {
+                break;
+            };
+            selected.insert(index);
+            *counts.entry(member_key.clone()).or_insert(0) += 1;
+        }
+    }
+
+    for index in 0..results.len() {
+        if selected.len() >= limit {
+            break;
+        }
+        selected.insert(index);
+    }
+
+    *results = selected
+        .into_iter()
+        .map(|index| results[index].clone())
+        .collect();
+}
+
+fn repository_set_member_order(results: &[CodeRepositorySetQueryHit]) -> Vec<(String, String)> {
+    let mut members = Vec::new();
+    for result in results {
+        let key = repository_set_member_key(result);
+        if !members.contains(&key) {
+            members.push(key);
+        }
+    }
+
+    members
+}
+
+fn repository_set_member_key(result: &CodeRepositorySetQueryHit) -> (String, String) {
+    (
+        result.member.repository_id.clone(),
+        result.member.source_scope.clone(),
+    )
+}
+
+fn diversified_member_score_floor(best_score: f64) -> f64 {
+    if best_score <= 0.0 {
+        return f64::INFINITY;
+    }
+
+    (best_score * DIVERSITY_MIN_RELATIVE_SCORE).max(best_score - DIVERSITY_MAX_SCORE_GAP)
 }
 
 fn member_priority_bonus(
@@ -679,6 +759,31 @@ mod tests {
     }
 
     #[test]
+    fn repository_set_top_k_diversifies_relevant_members() {
+        let app = member_status("app", "scope-app", 0);
+        let sdk = member_status("sdk", "scope-sdk", 0);
+        let mut results = vec![
+            set_hit(&app, 1, 12.0),
+            set_hit(&app, 2, 11.8),
+            set_hit(&app, 3, 11.6),
+            set_hit(&app, 4, 11.4),
+            set_hit(&sdk, 10, 8.9),
+            set_hit(&sdk, 11, 8.7),
+        ];
+
+        assert!(dedupe_sort_truncate(&mut results, 5));
+
+        assert_eq!(results[0].member.repository_alias, "app");
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| result.member.repository_alias == "sdk")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn bridge_support_bonus_promotes_present_usage_and_target_pair() {
         let app = member_status("app", "scope-app", 0);
         let service = member_status("svc", "scope-service", 0);
@@ -837,6 +942,26 @@ mod tests {
             edge_confidence_tier: None,
             score,
             excerpt: format!("excerpt {line}"),
+        }
+    }
+
+    fn set_hit(
+        member: &CodeRepositorySetMemberStatus,
+        line: u32,
+        score: f64,
+    ) -> CodeRepositorySetQueryHit {
+        CodeRepositorySetQueryHit {
+            member: member.member.clone(),
+            hit: hit(
+                &member.member.repository_id,
+                &member.member.source_scope,
+                &format!("src/{}.rs", line),
+                line,
+                score,
+                false,
+            ),
+            overlay_evidence: Vec::new(),
+            score,
         }
     }
 

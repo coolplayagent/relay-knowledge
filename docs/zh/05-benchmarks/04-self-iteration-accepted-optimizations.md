@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779365756-repository-set-member-diversified-top-k
+- 算法/架构：repository-set query 保留每个 member 的既有 bounded fanout、单仓 code retrieval、overlay evidence、priority、edge confidence 与 bridge support scoring；在全局 dedupe/sort 后，如果 top-k 被多个 member 竞争且候选已超过返回上限，则按分数排序后的 member 顺序为每个相关 member 保留最多 3 个高质量候选，再用全局高分候选填满剩余窗口。高质量门槛由当前 best score 的相对比例和最大分差共同限定，避免低分 member 噪声因配额进入结果。
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate window、单仓 ranking、semantic/vector read model、repo-set overlay refresh、env/paths/net、CLI/API 或 self-iteration harness；diversification 只在 repository-set final merge 且结果已超过 limit 时触发，最终结果仍按原全局 score/path tie-break 顺序输出，dedupe key、freshness/stale penalty、bridge support、returned evidence pruning 与 top-k 上限保持不变；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期改善 Temporal/OTel 这类多仓 workspace 查询中 usage 仓库的重复高分样例挤占 SDK/core 定义候选的问题，让 worker/client/factory/registration 等跨仓 usage-definition 查询能同时暴露应用用法与依赖 API evidence，并提升 `expected_all` 覆盖和多仓检索研究一致性。风险是少数 workspace 查询会用相关依赖仓候选替换掉同一应用仓的第 N 个近重复结果；风险受相对分数门槛、最大分差、每 member 上限、原 score 排序、positive relevance、limit 和 existing guardrail 控制。
+- 策略关联：建立在 `run-1779279305` 的 returned overlay pruning、`run-1779245204` 的 bridge support、以及最新 `run-1779363937` 保持单仓 retrieval/indirect-call floor 的 accepted strategy 上；避免 `run-1779361336`/`run-1779332630` 中触碰 `graph_bm25` schema/constructor 与 C++ flow ranking 后导致 gate 失败的拒绝模式，也避免用 Temporal fixture path 或 symbol 名称做特例。
 ## 候选优化说明：run-1779363360-compact-api-sequence-hybrid-ranking
 - 算法/架构：Hybrid chunk ranking 在既有 BM25 召回与 Rust 后置评分之后，识别 query 中的 API/lifecycle identity 序列（dotted、scoped、CamelCase 调用名），并对短代码块内按调用行覆盖至少三个 identity 的紧凑流程给予有界 bonus；完整覆盖 query API 序列的短流程会高于只覆盖部分调用的短流程，超长或分散流程不加分。同时，既有 call caller lookup index 只在 legacy `code_repository_calls` 具备 `line_start` 时创建，避免旧库 schema maintenance 在索引创建前失败；SQLite schema compatibility inspection 对 `graph_bm25` FTS5 constructor/schema/busy transient 增加短有界 retry，放在打开数据库的维护边界。
 - 不变量：不改变 parser facts、SQLite table/column schema、FTS MATCH、candidate window、call/reference/import/symbol ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；ranking 只作用于已召回 Hybrid chunk rows，仍受 path/language filter、test/benchmark intent guard、正分过滤、dedupe 与 top-k 约束；legacy index guard 不回填缺失 call line columns，不改变新库索引定义；schema compatibility retry 只匹配明确 transient message，不吞掉 missing-table 或永久 schema 错误，且没有仓库名、路径名、case id、query 字符串或 fixture 枚举。
@@ -951,19 +956,8 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 ## run-1779317832-to-run-1779323184 compacted
 - summary: reference identity fast path, reference/call source excerpts, and C-family usage reference facts accepted records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory, with strategy details preserved in the candidate sections above.
 
-## run-1779324524
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779324524.patch`
-- score: 0.896865 (foundational=0.947917, competitive=0.732372, accuracy=0.840144, semantic_vector=1.000000, research_judge=n/a, performance=0.817789, stability=1.000000)
-- cases: 38/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_call_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_calls.rs`, `src/relay_knowledge/storage/sqlite/code_query_excerpt_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_excerpts.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
-- key improvements: score_component:score 0.880741->0.8968653970594981; score_component:competitive_capability 0.679487->0.7323717948717948; score_component:performance 0.792844->0.8177885306724252; case:cpp_syntax_callees_run_pipeline_lambda_sequence false->true; case:c_syntax_callees_dispatch_sequence false->true; metric:cargo_fmt_check_ms 2157.0->2018.0; metric:cpp_syntax_fixture_index_ms 1133.0->727.0; metric:cpp_syntax_fixture_register_index_ms 1921.0->1414.0
-- known degradations: case_rank:c_syntax_callees_dispatch_sequence 1->4; metric:temporal_sdk_go_index_ms 1271.0->1697.0; metric:temporal_sdk_go_register_index_ms 2038.0->2444.0; metric:c_syntax_fixture_register_index_ms 1952.0->2136.0; metric:relay_teams_query_p50_ms 1106.0->1172.0; metric:relay_teams_query_p95_ms 1691.0->2117.0
-- latency metrics: cargo_fmt_check_ms=2018ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=121ms; cpp_syntax_fixture_index_ms=727ms; cpp_syntax_fixture_register_index_ms=1414ms; cpp_syntax_fixture_query_p50_ms=1149ms; cpp_syntax_fixture_query_p95_ms=1249ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1779324524 compacted
+- summary: accepted callee sequence, source excerpt, and graph BM25 stability records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779324524.patch`, reports, and progressive memory, with strategy details preserved above.
 
 ## candidate run-1779331577
 - 算法/架构：将既有 `callers` exact callee identity direct lookup 泛化为双向 call identity lookup，并为 `code_repository_calls(source_scope, caller_name, path, line_start)` 增加 caller 方向索引；`callees` 查询若是单一或 scoped caller identity，会先用真实 caller 字段取有界候选，再复用原 call-row scorer、execution-order、path/language filter、dedupe 与 top-k 逻辑，只有候选饱和或不足以封闭回答时才落回 FTS。
@@ -989,6 +983,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:competitive_capability 0.732372->0.7516025641025641; case:c_syntax_callers_function_pointer_read false->true; metric:temporal_sdk_go_index_ms 1694.0->867.0; metric:temporal_sdk_go_register_index_ms 2320.0->1493.0; metric:temporal_samples_go_index_ms 1167.0->606.0; metric:temporal_samples_go_register_index_ms 1773.0->1192.0; metric:leveldb_cpp_register_index_ms 1815.0->1733.0; metric:cpp_syntax_fixture_query_p95_ms 1391.0->1327.0
 - known degradations: metric:leveldb_cpp_query_p95_ms 1333.0->1431.0; metric:c_syntax_fixture_index_ms 566.0->1248.0; metric:c_syntax_fixture_register_index_ms 1112.0->1813.0; metric:c_syntax_fixture_query_p50_ms 1127.0->1208.0; metric:c_syntax_fixture_query_p95_ms 1207.0->1415.0; metric:cpp_syntax_fixture_index_ms 1067.0->1209.0; metric:cpp_syntax_fixture_register_index_ms 1632.0->1775.0; metric:relay_teams_query_p50_ms 1109.0->1169.0
 - latency metrics: cargo_fmt_check_ms=1393ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=102ms; temporal_sdk_go_index_ms=867ms; temporal_sdk_go_register_index_ms=1493ms; temporal_samples_go_index_ms=606ms; temporal_samples_go_register_index_ms=1192ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779365756
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779365756.patch`
+- score: 0.904019 (foundational=0.947917, competitive=0.769231, accuracy=0.858574, semantic_vector=1.000000, research_judge=n/a, performance=0.812480, stability=1.000000)
+- cases: 40/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`
+- key improvements: score_component:competitive_capability 0.751603->0.7692307692307693; case:temporal_go_repo_set_worker_registration_flow false->true; metric:leveldb_cpp_index_ms 1187.0->646.0; metric:leveldb_cpp_register_index_ms 1733.0->1211.0; metric:leveldb_cpp_query_p50_ms 1190.0->1147.0; metric:leveldb_cpp_query_p95_ms 1431.0->1330.0; metric:c_syntax_fixture_index_ms 1248.0->1147.0; metric:c_syntax_fixture_register_index_ms 1813.0->1713.0
+- known degradations: metric:temporal_sdk_go_index_ms 867.0->1251.0; metric:temporal_sdk_go_register_index_ms 1493.0->1957.0; metric:temporal_samples_go_index_ms 606.0->688.0; metric:temporal_samples_go_register_index_ms 1192.0->1254.0; metric:c_syntax_fixture_query_p50_ms 1208.0->1249.0; metric:cpp_syntax_fixture_query_p95_ms 1327.0->1369.0; metric:relay_teams_index_ms 1132.0->1873.0; metric:relay_teams_register_index_ms 1718.0->2439.0
+- latency metrics: cargo_fmt_check_ms=1412ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=243ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=1251ms; temporal_sdk_go_register_index_ms=1957ms; temporal_samples_go_index_ms=688ms; temporal_samples_go_register_index_ms=1254ms
 
 Adopted optimization notes:
 
