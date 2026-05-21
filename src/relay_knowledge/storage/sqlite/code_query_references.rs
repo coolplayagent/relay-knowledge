@@ -14,6 +14,10 @@ use super::{
     required_scope, selected_row,
 };
 
+const REFERENCE_ASSIGNMENT_USAGE_BONUS: f64 = 1.4;
+const REFERENCE_INDIRECT_CALL_USAGE_BONUS: f64 = 1.8;
+const REFERENCE_MEMBER_CALL_USAGE_BONUS: f64 = 1.2;
+
 struct ReferenceIdentityRows {
     rows: Vec<ReferenceRow>,
     saturated: bool,
@@ -209,7 +213,7 @@ fn reference_rows_to_hits(
     rows.into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
-            let score = score_query.score([
+            let base_score = score_query.score([
                 row.name.as_str(),
                 row.kind.as_str(),
                 row.target_hint.as_deref().unwrap_or_default(),
@@ -225,6 +229,13 @@ fn reference_rows_to_hits(
                         .unwrap_or_default(),
                 ],
             );
+            let score = base_score
+                + reference_usage_context_bonus(
+                    base_score,
+                    &row.name,
+                    row.source_excerpt.as_deref(),
+                    request,
+                );
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -254,6 +265,130 @@ fn reference_rows_to_hits(
             })
         })
         .collect()
+}
+
+pub(super) fn reference_usage_context_bonus(
+    base_score: f64,
+    name: &str,
+    source_excerpt: Option<&str>,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::References {
+        return 0.0;
+    }
+    let Some(source_excerpt) = source_excerpt else {
+        return 0.0;
+    };
+
+    source_excerpt
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with("//") && !line.starts_with('*'))
+        .filter_map(|line| reference_line_usage_bonus(line, name))
+        .fold(0.0, f64::max)
+}
+
+fn reference_line_usage_bonus(line: &str, name: &str) -> Option<f64> {
+    identifier_ranges(line, name)
+        .filter(|(start, end)| !line_declares_reference_name(line, name, *start, *end))
+        .map(|(start, end)| reference_identifier_usage_bonus(line, start, end))
+        .max_by(f64::total_cmp)
+        .filter(|bonus| *bonus > 0.0)
+}
+
+fn reference_identifier_usage_bonus(line: &str, start: usize, end: usize) -> f64 {
+    let before = line.get(..start).unwrap_or_default();
+    let after = line.get(end..).unwrap_or_default().trim_start();
+    if identifier_is_indirect_call(after) {
+        return REFERENCE_INDIRECT_CALL_USAGE_BONUS;
+    }
+    if identifier_is_member_call(before, after) {
+        return REFERENCE_MEMBER_CALL_USAGE_BONUS;
+    }
+    if identifier_is_assignment_value(before) {
+        return REFERENCE_ASSIGNMENT_USAGE_BONUS;
+    }
+
+    0.0
+}
+
+fn line_declares_reference_name(line: &str, name: &str, start: usize, end: usize) -> bool {
+    let before = line.get(..start).unwrap_or_default().trim_end();
+    let after = line.get(end..).unwrap_or_default().trim_start();
+    if before.ends_with('.') || before.ends_with("->") || identifier_is_assignment_value(before) {
+        return false;
+    }
+    if after.starts_with('(') && declaration_prefix_before_name(before) {
+        return true;
+    }
+    if after.starts_with('[') && array_declarator_has_initializer(after) {
+        return true;
+    }
+
+    declaration_prefix_before_name(before) && before.split_whitespace().last() != Some(name)
+}
+
+fn declaration_prefix_before_name(before: &str) -> bool {
+    let token_count = before.split_whitespace().count();
+    token_count >= 1
+        && before
+            .chars()
+            .all(|character| !matches!(character, '=' | '+' | '-' | '*' | '/' | '%' | '?'))
+}
+
+fn array_declarator_has_initializer(after: &str) -> bool {
+    let Some(equals_index) = after.find('=') else {
+        return false;
+    };
+    !after
+        .get(..equals_index)
+        .is_some_and(|prefix| prefix.contains(')'))
+}
+
+fn identifier_is_assignment_value(before: &str) -> bool {
+    before
+        .chars()
+        .rev()
+        .find(|character| !character.is_whitespace())
+        .is_some_and(|character| character == '=')
+}
+
+fn identifier_is_indirect_call(after: &str) -> bool {
+    let Some(rest) = after.strip_prefix('[') else {
+        return false;
+    };
+    let Some((_, tail)) = rest.split_once(']') else {
+        return false;
+    };
+    tail.trim_start().starts_with('(')
+}
+
+fn identifier_is_member_call(before: &str, after: &str) -> bool {
+    after.starts_with('(')
+        && (before.trim_end().ends_with('.') || before.trim_end().ends_with("->"))
+}
+
+fn identifier_ranges<'a>(
+    line: &'a str,
+    name: &'a str,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    line.match_indices(name).filter_map(|(start, _)| {
+        let end = start + name.len();
+        let has_start_boundary = line.get(..start).is_some_and(|prefix| {
+            prefix
+                .chars()
+                .next_back()
+                .is_none_or(|c| !identifier_char(c))
+        });
+        let has_end_boundary = line
+            .get(end..)
+            .is_some_and(|suffix| suffix.chars().next().is_none_or(|c| !identifier_char(c)));
+        (has_start_boundary && has_end_boundary).then_some((start, end))
+    })
+}
+
+fn identifier_char(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
 }
 
 fn reference_identity_hits_can_answer_without_fts(

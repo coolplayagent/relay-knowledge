@@ -80,7 +80,7 @@ use code_query_path_ranking::{
 };
 use code_query_prepare::{prepare_code_search_statement, retry_code_search_operation};
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
-use code_query_references::search_references;
+use code_query_references::{reference_usage_context_bonus, search_references};
 use code_query_rows::{ChunkRow, ImportRow};
 use code_query_support::*;
 use code_query_symbols::search_symbols;
@@ -190,6 +190,21 @@ fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, leaf_name: &str) -> 
         .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .find(|part| !part.is_empty())
         .is_some_and(|part| part == leaf_name)
+}
+
+fn exact_reference_chunk_bonus(
+    request: &CodeRetrievalRequest,
+    base_score: f64,
+    content: &str,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::References {
+        return 0.0;
+    }
+    let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
+        return 0.0;
+    };
+
+    reference_usage_context_bonus(base_score, identity.leaf_name(), Some(content), request)
 }
 
 fn exact_definition_chunk_bonus(request: &CodeRetrievalRequest, content: &str) -> f64 {
@@ -517,6 +532,7 @@ fn search_chunks(
                 + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
                 + symbol_bonus;
             let score = score
+                + exact_reference_chunk_bonus(request, score, &row.content)
                 + compact_high_coverage_chunk_bonus(
                     score,
                     &request.query,

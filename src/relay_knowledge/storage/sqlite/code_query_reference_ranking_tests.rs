@@ -112,6 +112,223 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
     assert!(hits[0].excerpt.contains("cache_alias::Cache"));
 }
 
+#[tokio::test]
+async fn exact_reference_fallback_chunks_rank_usage_context_before_declarations() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("dispatch-file", "src/dispatch.c", "c")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "pipeline-declaration-chunk",
+                "dispatch-file",
+                "src/dispatch.c",
+                "static rk_stage_fn rk_pipeline[] = {\n    rk_validate_device,\n    rk_lock_device,\n};",
+                range(20, 23),
+            ),
+            chunk(
+                "pipeline-call-chunk",
+                "dispatch-file",
+                "src/dispatch.c",
+                "int rk_run_pipeline(struct rk_device *dev)\n{\n    int total = 0;\n    total += rk_pipeline[index](dev);\n    return total;\n}",
+                range(45, 50),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_pipeline", CodeQueryKind::References))
+        .await
+        .expect("fallback reference query should succeed");
+
+    assert!(hits[0].excerpt.contains("rk_pipeline[index](dev)"));
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
+async fn exact_reference_queries_rank_initializer_usage_before_declarations() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("header-file", "include/driver_ops.h", "c"),
+            file("driver-file", "src/driver_ops.c", "c"),
+            file("table-file", "src/generated_table.c", "c"),
+        ],
+        symbols: Vec::new(),
+        references: vec![
+            reference_on_line(
+                "header-declaration",
+                "header-file",
+                "include/driver_ops.h",
+                "rk_driver_read",
+                None,
+                18,
+            ),
+            reference_on_line(
+                "driver-definition",
+                "driver-file",
+                "src/driver_ops.c",
+                "rk_driver_read",
+                None,
+                15,
+            ),
+            reference_on_line(
+                "driver-initializer",
+                "driver-file",
+                "src/driver_ops.c",
+                "rk_driver_read",
+                None,
+                28,
+            ),
+            reference_on_line(
+                "table-initializer",
+                "table-file",
+                "src/generated_table.c",
+                "rk_driver_read",
+                None,
+                18,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "header-chunk",
+                "header-file",
+                "include/driver_ops.h",
+                "int rk_driver_read(struct rk_device *dev, char *buffer, size_t length);",
+                range(18, 18),
+            ),
+            chunk(
+                "driver-definition-chunk",
+                "driver-file",
+                "src/driver_ops.c",
+                "int rk_driver_read(struct rk_device *dev, char *buffer, size_t length)\n{\n    return (int)length;\n}",
+                range(15, 18),
+            ),
+            chunk(
+                "driver-initializer-chunk",
+                "driver-file",
+                "src/driver_ops.c",
+                "const struct rk_driver_ops rk_default_ops = {\n    .open = rk_driver_open,\n    .read = rk_driver_read,\n    .close = rk_driver_close,\n};",
+                range(26, 30),
+            ),
+            chunk(
+                "table-initializer-chunk",
+                "table-file",
+                "src/generated_table.c",
+                "static const struct rk_table_row rk_rows[] = {\n    [RK_STAGE_READ] = {\n        .read = rk_driver_read,\n    },\n};",
+                range(16, 20),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_driver_read", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, "src/driver_ops.c");
+    assert!(hits[0].excerpt.contains(".read = rk_driver_read"));
+    assert!(hits[1].excerpt.contains(".read = rk_driver_read"));
+    assert!(hits[0].score > hits[2].score);
+}
+
+#[tokio::test]
+async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarations() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("dispatch-file", "src/dispatch.c", "c")],
+        symbols: Vec::new(),
+        references: vec![
+            reference_on_line(
+                "pipeline-declaration",
+                "dispatch-file",
+                "src/dispatch.c",
+                "rk_pipeline",
+                None,
+                20,
+            ),
+            reference_on_line(
+                "pipeline-call",
+                "dispatch-file",
+                "src/dispatch.c",
+                "rk_pipeline",
+                None,
+                48,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "pipeline-declaration-chunk",
+                "dispatch-file",
+                "src/dispatch.c",
+                "static rk_stage_fn rk_pipeline[] = {\n    rk_validate_device,\n    rk_lock_device,\n};",
+                range(20, 23),
+            ),
+            chunk(
+                "pipeline-call-chunk",
+                "dispatch-file",
+                "src/dispatch.c",
+                "int rk_run_pipeline(struct rk_device *dev)\n{\n    int total = 0;\n    total += rk_pipeline[index](dev);\n    return total;\n}",
+                range(45, 50),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_pipeline", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert!(hits[0].excerpt.contains("rk_pipeline[index](dev)"));
+    assert!(hits[0].score > hits[1].score);
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");
@@ -166,6 +383,24 @@ fn reference(
     name: &str,
     target_symbol_snapshot_id: Option<&str>,
 ) -> RepositoryCodeReferenceRecord {
+    reference_on_line(
+        reference_id,
+        file_id,
+        path,
+        name,
+        target_symbol_snapshot_id,
+        40,
+    )
+}
+
+fn reference_on_line(
+    reference_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+    target_symbol_snapshot_id: Option<&str>,
+    line: u32,
+) -> RepositoryCodeReferenceRecord {
     RepositoryCodeReferenceRecord {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
@@ -179,8 +414,8 @@ fn reference(
         resolution_state: "resolved".to_owned(),
         confidence_basis_points: 8_000,
         confidence_tier: "inferred".to_owned(),
-        byte_range: range(40, 40),
-        line_range: range(40, 40),
+        byte_range: range(line, line),
+        line_range: range(line, line),
     }
 }
 
