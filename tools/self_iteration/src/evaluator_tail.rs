@@ -1277,7 +1277,8 @@ export async function sendEnvelope<TPayload>(
 
 const TYPESCRIPT_PROVIDER: &str = r#"
 import type { StreamEnvelope, StreamTransport } from "./protocol";
-import { sendEnvelope, trimPayload } from "./protocol";
+import { sendEnvelope } from "./protocol";
+import { trimPayload } from "./protocol";
 
 export class ProviderRuntime implements StreamTransport<StreamEnvelope<string>> {
   async send(event: StreamEnvelope<string>): Promise<void> {
@@ -1443,7 +1444,7 @@ public final class ServiceFactory {
     }
 
     public String dispatch(String value) {
-        Function<String, String> transformer = input -> create().handle(input);
+        Function<String, String> transformer = ignored -> create().handle(value);
         return transformer.apply(value);
     }
 }

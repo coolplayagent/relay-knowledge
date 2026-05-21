@@ -91,7 +91,7 @@
       "limit": 12,
       "max_rank": 5,
       "language_filters": ["java"],
-      "expected": [{"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "Function<String, String> transformer = input -> create().handle(input)"}],
+      "expected": [{"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "Function<String, String> transformer = ignored -> create().handle(value)"}],
       "expected_all": [
         {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "import java.util.function.Function"},
         {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "return transformer.apply(value)"}
