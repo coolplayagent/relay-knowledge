@@ -1,7 +1,7 @@
 {
   "repositories": {
     "csharp_syntax_fixture": {
-      "generated_fixture": "csharp_syntax_v1",
+      "generated_fixture": "csharp_syntax_v2",
       "alias": "csharp-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -60,7 +60,7 @@
       "expected": [{"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.RentBuffer(size)"}],
       "expected_sequence": [
         {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.RentBuffer(size)"},
-        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.Write(buffer)"}
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.Write(returnBuffer(buffer))"}
       ],
       "case_group": "csharp_tree_sitter_syntax"
     },
@@ -79,6 +79,22 @@
         {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "private readonly BufferPoolSink sink = new()"}
       ],
       "case_group": "csharp_tree_sitter_syntax"
+    },
+    {
+      "id": "csharp_syntax_hybrid_func_lambda_buffer",
+      "repository": "csharp_syntax_fixture",
+      "kind": "hybrid",
+      "query": "Func lambda return buffer dispatch sink write",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["csharp"],
+      "expected": [{"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "Func<byte[], byte[]> returnBuffer = rented => rented"}],
+      "expected_all": [
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "sink.Write(returnBuffer(buffer))"},
+        {"path": "src/Runtime/RuntimeService.cs", "excerpt_contains": "using System"}
+      ],
+      "case_group": "csharp_tree_sitter_lambda"
     },
     {
       "id": "csharp_syntax_negative_missing_service",

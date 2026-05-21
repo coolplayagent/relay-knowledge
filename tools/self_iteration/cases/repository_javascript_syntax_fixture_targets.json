@@ -1,7 +1,7 @@
 {
   "repositories": {
     "javascript_syntax_fixture": {
-      "generated_fixture": "javascript_syntax_v1",
+      "generated_fixture": "javascript_syntax_v2",
       "alias": "javascript-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -83,6 +83,22 @@
         {"path": "src/index.js", "excerpt_contains": "export { RuntimeController"}
       ],
       "case_group": "javascript_tree_sitter_syntax"
+    },
+    {
+      "id": "javascript_syntax_hybrid_arrow_payload_pipeline",
+      "repository": "javascript_syntax_fixture",
+      "kind": "hybrid",
+      "query": "arrow payload pipeline registry normalize handler",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["javascript"],
+      "expected": [{"path": "src/registry.js", "excerpt_contains": "const payloadPipeline = (payload) => normalizePayload(payload)"}],
+      "expected_all": [
+        {"path": "src/registry.js", "excerpt_contains": "handlers.set(\"write\", payloadPipeline)"},
+        {"path": "src/runtime.js", "excerpt_contains": "handler(event.payload)"}
+      ],
+      "case_group": "javascript_tree_sitter_lambda"
     },
     {
       "id": "javascript_syntax_negative_missing_controller",

@@ -30,6 +30,8 @@ The evaluator creates two small git repositories under the evaluation home, comm
 
 The fixture sources are generated from constants in `tools/self_iteration/src/evaluator_tail.rs`; the git author and committer dates are fixed so the generated commits are repeatable for unchanged content.
 
+C has no native lambda syntax, so its fixture intentionally uses function pointer typedefs, operation tables, and callback dispatch as the language-correct equivalent. C++ uses a captured lambda in `RunPipeline`, with cases that require both `cache.Insert` and `pipeline(event)` evidence.
+
 ## Case Families
 
 C cases live in `tools/self_iteration/cases/repository_c_syntax_fixture_targets.json` and cover:

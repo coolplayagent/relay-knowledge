@@ -10,23 +10,34 @@ Beyond C/C++, the evaluator now generates these fixture repositories under the e
 
 | Repository key | Fixture version | Language focus |
 | --- | --- | --- |
-| `python_syntax_fixture` | `python_syntax_v1` | decorators, async functions, async context managers, relative imports, exception subclasses |
-| `javascript_syntax_fixture` | `javascript_syntax_v1` | ESM export/import, class methods, async callbacks, registry dispatch, test fake demotion |
-| `typescript_syntax_fixture` | `typescript_syntax_v1` | interfaces/type aliases, generic functions, type-only imports, dynamic imports, barrel exports, TSX components |
-| `go_syntax_fixture` | `go_syntax_v1` | receiver methods, interfaces, grouped import alias/dot/blank forms, goroutines, defer, constructor flow |
-| `java_syntax_fixture` | `java_syntax_v1` | generic interfaces, annotations, nested builders, constructor/object creation, method overrides |
-| `rust_syntax_fixture` | `rust_syntax_v1` | traits/impls, associated functions, module imports, enum match flow, macro-call noise |
+| `python_syntax_fixture` | `python_syntax_v2` | decorators, async functions, async context managers, relative imports, exception subclasses, lambda payload filters |
+| `javascript_syntax_fixture` | `javascript_syntax_v2` | ESM export/import, class methods, async callbacks, arrow handlers, registry dispatch, test fake demotion |
+| `typescript_syntax_fixture` | `typescript_syntax_v2` | interfaces/type aliases, typed arrow projectors, generic functions, type-only imports, dynamic imports, barrel exports, TSX components |
+| `go_syntax_fixture` | `go_syntax_v2` | receiver methods, interfaces, grouped import alias/dot/blank forms, function literals, goroutines, defer, constructor flow |
+| `java_syntax_fixture` | `java_syntax_v2` | generic interfaces, annotations, functional-interface lambdas, nested builders, constructor/object creation, method overrides |
+| `rust_syntax_fixture` | `rust_syntax_v2` | traits/impls, associated functions, module imports, closure dispatch, enum match flow, macro-call noise |
 | `bash_syntax_fixture` | `bash_syntax_v1` | sourced scripts, shell functions, case branches, command substitution, installer dispatch |
-| `csharp_syntax_fixture` | `csharp_syntax_v1` | namespaces, generic interfaces, using directives, target-typed new, ArrayPool flow |
-| `kotlin_syntax_fixture` | `kotlin_syntax_v1` | objects, typealiases, companion objects, constructor/call flow, lambda handlers |
-| `php_syntax_fixture` | `php_syntax_v1` | namespaces/use imports, interfaces, traits, constructor property promotion, provider boot flow |
-| `ruby_syntax_fixture` | `ruby_syntax_v1` | modules/classes, singleton methods, require_relative, mixins, constant/runtime flow |
-| `scala_syntax_fixture` | `scala_syntax_v1` | packages, traits, objects, inline methods, imports, stage/runtime flow |
-| `swift_syntax_fixture` | `swift_syntax_v1` | protocols, final classes, structs, imports, async throws, delegate/session flow |
+| `csharp_syntax_fixture` | `csharp_syntax_v2` | namespaces, generic interfaces, using directives, target-typed new, `Func<>` lambdas, ArrayPool flow |
+| `kotlin_syntax_fixture` | `kotlin_syntax_v2` | objects, typealiases, companion objects, constructor/call flow, lambda handlers |
+| `php_syntax_fixture` | `php_syntax_v2` | namespaces/use imports, interfaces, traits, constructor property promotion, arrow-function provider flow |
+| `ruby_syntax_fixture` | `ruby_syntax_v2` | modules/classes, singleton methods, require_relative, mixins, lambda runtime flow |
+| `scala_syntax_fixture` | `scala_syntax_v2` | packages, traits, objects, inline methods, imports, function literals, stage/runtime flow |
+| `swift_syntax_fixture` | `swift_syntax_v2` | protocols, final classes, structs, imports, async throws, closure request flow |
+
+## Lambda And Callback Coverage
+
+The generated fixtures now distinguish native lambda support from language-specific callback equivalents:
+
+| Language | Coverage target |
+| --- | --- |
+| Python, JavaScript, TypeScript, Java, Rust, C#, Kotlin, PHP, Ruby, Scala, Swift, C++ | Native lambda, closure, arrow function, function literal, block, or closure-expression syntax with a scored `*_lambda` case |
+| Go | Function literal callback syntax with a scored `go_tree_sitter_lambda` case |
+| C | Function pointer typedefs, operation tables, and callback dispatch in the C/C++ fixture set |
+| Bash | No lambda syntax; shell functions and `case` dispatch remain the intended control-flow coverage |
 
 ## Case Design
 
-- Each fixture currently provides 6 core syntax cases: `symbol`, `definition`, `imports`, `callees` or relationship flow, `hybrid`, and `negative`.
+- Most generated fixtures now provide 7 core syntax cases: `symbol`, `definition`, `imports`, `callees` or relationship flow, `hybrid`, an explicit lambda/closure case where the language supports one, and `negative`.
 - Hybrid and relationship cases use `expected_all`, `expected_sequence`, `forbidden`, or `forbidden_rank_penalty` to preserve continuous scoring pressure after basic pass/fail is achieved.
 - Generated fixtures are not added to the normal fast repository list by default. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
 

@@ -1,7 +1,7 @@
 {
   "repositories": {
     "go_syntax_fixture": {
-      "generated_fixture": "go_syntax_v1",
+      "generated_fixture": "go_syntax_v2",
       "alias": "go-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -87,6 +87,22 @@
         {"path": "processor/worker.go", "excerpt_contains": "processor.Process(ctx, event)"}
       ],
       "case_group": "go_tree_sitter_syntax"
+    },
+    {
+      "id": "go_syntax_hybrid_function_literal_notify",
+      "repository": "go_syntax_fixture",
+      "kind": "hybrid",
+      "query": "function literal notify payload goroutine callback",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["go"],
+      "expected": [{"path": "processor/pipeline.go", "excerpt_contains": "notify := func(payload string) string"}],
+      "expected_all": [
+        {"path": "processor/pipeline.go", "excerpt_contains": "_ = notify(event.Payload)"},
+        {"path": "processor/pipeline.go", "excerpt_contains": "go func()"}
+      ],
+      "case_group": "go_tree_sitter_lambda"
     },
     {
       "id": "go_syntax_negative_missing_worker",

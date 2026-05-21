@@ -321,13 +321,13 @@ mod tests {
             .expect("c fixture should write");
         create_generated_repository_files(&root.join("cpp"), "cpp_syntax_v1")
             .expect("cpp fixture should write");
-        create_generated_repository_files(&root.join("python"), "python_syntax_v1")
+        create_generated_repository_files(&root.join("python"), "python_syntax_v2")
             .expect("python fixture should write");
-        create_generated_repository_files(&root.join("typescript"), "typescript_syntax_v1")
+        create_generated_repository_files(&root.join("typescript"), "typescript_syntax_v2")
             .expect("typescript fixture should write");
-        create_generated_repository_files(&root.join("go"), "go_syntax_v1")
+        create_generated_repository_files(&root.join("go"), "go_syntax_v2")
             .expect("go fixture should write");
-        create_generated_repository_files(&root.join("swift"), "swift_syntax_v1")
+        create_generated_repository_files(&root.join("swift"), "swift_syntax_v2")
             .expect("swift fixture should write");
 
         let c_source =
@@ -341,17 +341,22 @@ mod tests {
                 .expect("typescript source");
         let go_source =
             std::fs::read_to_string(root.join("go/processor/worker.go")).expect("go source");
+        let go_pipeline =
+            std::fs::read_to_string(root.join("go/processor/pipeline.go")).expect("go pipeline");
         let swift_source =
-            std::fs::read_to_string(root.join("swift/Sources/App/SessionClient.swift"))
+            std::fs::read_to_string(root.join("swift/Sources/App/RequestPipeline.swift"))
                 .expect("swift source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(cpp_source.contains("auto append_event = [&cache, &pipeline]"));
         assert!(cpp_source.contains("cache_alias::Cache<std::string>"));
         assert!(python_source.contains("@traced_operation(\"dispatch\")"));
+        assert!(python_source.contains("lambda value: value.strip()"));
         assert!(typescript_source.contains("await import(\"./protocol\")"));
+        assert!(typescript_source.contains("trimPayload(payload)"));
         assert!(go_source.contains("ctxalias \"context\""));
-        assert!(swift_source.contains("protocol SessionTransport"));
+        assert!(go_pipeline.contains("notify := func(payload string) string"));
+        assert!(swift_source.contains("let request = { (url: URL) async throws -> Data in"));
 
         std::fs::remove_dir_all(&root).expect("cleanup fixture");
     }

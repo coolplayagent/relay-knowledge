@@ -669,45 +669,45 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("src/pipeline.cpp", CPP_PIPELINE_CPP),
             ("tests/fake_cache.cpp", CPP_FAKE_CACHE_CPP),
         ]),
-        "python_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "python_syntax_v1\n"),
+        "python_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "python_syntax_v2\n"),
             ("syntax_service/__init__.py", PYTHON_INIT),
             ("syntax_service/decorators.py", PYTHON_DECORATORS),
             ("syntax_service/errors.py", PYTHON_ERRORS),
             ("syntax_service/service.py", PYTHON_SERVICE),
             ("tests/fake_service.py", PYTHON_FAKE_SERVICE),
         ]),
-        "javascript_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "javascript_syntax_v1\n"),
+        "javascript_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "javascript_syntax_v2\n"),
             ("src/runtime.js", JAVASCRIPT_RUNTIME),
             ("src/registry.js", JAVASCRIPT_REGISTRY),
             ("src/index.js", JAVASCRIPT_INDEX),
             ("tests/fakeRuntime.js", JAVASCRIPT_FAKE_RUNTIME),
         ]),
-        "typescript_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "typescript_syntax_v1\n"),
+        "typescript_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "typescript_syntax_v2\n"),
             ("src/protocol.ts", TYPESCRIPT_PROTOCOL),
             ("src/provider.ts", TYPESCRIPT_PROVIDER),
             ("src/component.tsx", TYPESCRIPT_COMPONENT),
             ("src/index.ts", TYPESCRIPT_INDEX),
             ("tests/fakeProvider.ts", TYPESCRIPT_FAKE_PROVIDER),
         ]),
-        "go_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "go_syntax_v1\n"),
+        "go_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "go_syntax_v2\n"),
             ("go.mod", GO_MOD),
             ("processor/worker.go", GO_WORKER),
             ("processor/pipeline.go", GO_PIPELINE),
             ("tests/fake_worker.go", GO_FAKE_WORKER),
         ]),
-        "java_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "java_syntax_v1\n"),
+        "java_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "java_syntax_v2\n"),
             ("src/main/java/example/ServiceContract.java", JAVA_SERVICE_CONTRACT),
             ("src/main/java/example/AnnotatedService.java", JAVA_ANNOTATED_SERVICE),
             ("src/main/java/example/ServiceFactory.java", JAVA_SERVICE_FACTORY),
             ("src/test/java/example/FakeService.java", JAVA_FAKE_SERVICE),
         ]),
-        "rust_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "rust_syntax_v1\n"),
+        "rust_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "rust_syntax_v2\n"),
             ("src/lib.rs", RUST_LIB),
             ("src/service.rs", RUST_SERVICE),
             ("src/model.rs", RUST_MODEL),
@@ -719,40 +719,40 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("lib/runtime.sh", BASH_RUNTIME),
             ("tests/fake_runtime.sh", BASH_FAKE_RUNTIME),
         ]),
-        "csharp_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "csharp_syntax_v1\n"),
+        "csharp_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "csharp_syntax_v2\n"),
             ("src/Runtime/BufferPool.cs", CSHARP_BUFFER_POOL),
             ("src/Runtime/RuntimeService.cs", CSHARP_RUNTIME_SERVICE),
             ("tests/FakeRuntimeService.cs", CSHARP_FAKE_SERVICE),
         ]),
-        "kotlin_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "kotlin_syntax_v1\n"),
+        "kotlin_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "kotlin_syntax_v2\n"),
             ("src/main/kotlin/example/Client.kt", KOTLIN_CLIENT),
             ("src/main/kotlin/example/Pipeline.kt", KOTLIN_PIPELINE),
             ("tests/FakeClient.kt", KOTLIN_FAKE_CLIENT),
         ]),
-        "php_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "php_syntax_v1\n"),
+        "php_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "php_syntax_v2\n"),
             ("src/App/Kernel.php", PHP_KERNEL),
             ("src/App/Contracts/Bootable.php", PHP_BOOTABLE),
             ("src/App/Providers/CacheProvider.php", PHP_CACHE_PROVIDER),
             ("tests/FakeKernel.php", PHP_FAKE_KERNEL),
         ]),
-        "ruby_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "ruby_syntax_v1\n"),
+        "ruby_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "ruby_syntax_v2\n"),
             ("lib/app/controller.rb", RUBY_CONTROLLER),
             ("lib/app/extensions.rb", RUBY_EXTENSIONS),
             ("lib/app/runtime.rb", RUBY_RUNTIME),
             ("tests/fake_controller.rb", RUBY_FAKE_CONTROLLER),
         ]),
-        "scala_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "scala_syntax_v1\n"),
+        "scala_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "scala_syntax_v2\n"),
             ("src/main/scala/example/Pipeline.scala", SCALA_PIPELINE),
             ("src/main/scala/example/Runtime.scala", SCALA_RUNTIME),
             ("tests/FakePipeline.scala", SCALA_FAKE_PIPELINE),
         ]),
-        "swift_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "swift_syntax_v1\n"),
+        "swift_syntax_v2" => Ok(vec![
+            (".relay-knowledge-fixture-version", "swift_syntax_v2\n"),
             ("Sources/App/SessionClient.swift", SWIFT_SESSION_CLIENT),
             ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
             ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
@@ -1172,6 +1172,7 @@ class AsyncResource:
 class ServiceRunner:
     def __init__(self, resource):
         self.resource = resource
+        self.payload_filter = lambda value: value.strip()
 
     @traced_operation("dispatch")
     async def dispatch_event(self, event):
@@ -1182,7 +1183,7 @@ class ServiceRunner:
     def normalize_payload(self, payload):
         if payload == "overload":
             raise OverloadedServiceError("overload")
-        return payload.strip()
+        return self.payload_filter(payload)
 
 
 async def run_service(event):
@@ -1219,7 +1220,8 @@ export async function runRuntime(events) {
 const JAVASCRIPT_REGISTRY: &str = r#"
 export function createRegistry() {
   const handlers = new Map();
-  handlers.set("write", (payload) => normalizePayload(payload));
+  const payloadPipeline = (payload) => normalizePayload(payload);
+  handlers.set("write", payloadPipeline);
   return {
     resolve(type) {
       return handlers.get(type) ?? missingHandler;
@@ -1259,6 +1261,10 @@ export type StreamEnvelope<TPayload> = {
   payload: TPayload;
 };
 
+export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;
+
+export const trimPayload: PayloadProjector<string> = (payload) => payload.trim();
+
 export async function sendEnvelope<TPayload>(
   transport: StreamTransport<StreamEnvelope<TPayload>>,
   payload: TPayload,
@@ -1271,7 +1277,7 @@ export async function sendEnvelope<TPayload>(
 
 const TYPESCRIPT_PROVIDER: &str = r#"
 import type { StreamEnvelope, StreamTransport } from "./protocol";
-import { sendEnvelope } from "./protocol";
+import { sendEnvelope, trimPayload } from "./protocol";
 
 export class ProviderRuntime implements StreamTransport<StreamEnvelope<string>> {
   async send(event: StreamEnvelope<string>): Promise<void> {
@@ -1280,7 +1286,7 @@ export class ProviderRuntime implements StreamTransport<StreamEnvelope<string>> 
   }
 
   record(payload: string): string {
-    return payload.trim();
+    return trimPayload(payload);
   }
 }
 
@@ -1367,9 +1373,12 @@ type PipelineProcessor struct{}
 
 func (PipelineProcessor) Process(ctx context.Context, event Event) error {
     done := make(chan struct{})
+    notify := func(payload string) string {
+        return payload
+    }
     go func() {
         defer close(done)
-        _ = event.Payload
+        _ = notify(event.Payload)
     }()
     <-done
     return ctx.Err()
@@ -1425,6 +1434,7 @@ const JAVA_SERVICE_FACTORY: &str = r#"
 package example;
 
 import example.AnnotatedService.Builder;
+import java.util.function.Function;
 
 public final class ServiceFactory {
     public ServiceContract<String> create() {
@@ -1433,7 +1443,8 @@ public final class ServiceFactory {
     }
 
     public String dispatch(String value) {
-        return create().handle(value);
+        Function<String, String> transformer = input -> create().handle(input);
+        return transformer.apply(value);
     }
 }
 "#;
@@ -1483,7 +1494,8 @@ impl RuntimeService {
     }
 
     pub fn dispatch(&self, event: RuntimeEvent) -> String {
-        self.handle_event(event)
+        let invoke = |event| self.handle_event(event);
+        invoke(event)
     }
 }
 
@@ -1578,6 +1590,7 @@ public sealed class BufferPoolSink : IBufferSink<byte[]>
 "#;
 
 const CSHARP_RUNTIME_SERVICE: &str = r#"
+using System;
 using Syntax.Runtime;
 
 namespace Syntax.Runtime;
@@ -1589,7 +1602,8 @@ public sealed class RuntimeService
     public void Dispatch(int size)
     {
         var buffer = sink.RentBuffer(size);
-        sink.Write(buffer);
+        Func<byte[], byte[]> returnBuffer = rented => rented;
+        sink.Write(returnBuffer(buffer));
     }
 }
 "#;
@@ -1677,7 +1691,8 @@ trait LogsBoot
 {
     public function logBoot(string $name): string
     {
-        return trim($name);
+        $normalizer = fn(string $value): string => trim($value);
+        return $normalizer($name);
     }
 }
 
@@ -1737,7 +1752,8 @@ const RUBY_RUNTIME: &str = r#"
 module App
   class Runtime
     def handle(event)
-      event
+      normalizer = ->(payload) { payload.to_s.strip }
+      normalizer.call(event)
     end
   end
 end
@@ -1764,7 +1780,8 @@ object Pipeline:
     def run(event: Event): Event = event
 
   def execute(events: List[Event]): List[Event] =
-    events.map(identityStage.run)
+    val invoke: Event => Event = event => identityStage.run(event)
+    events.map(invoke)
 "#;
 
 const SCALA_RUNTIME: &str = r#"
@@ -1813,9 +1830,12 @@ struct RequestPipeline {
     let client: SessionClient
 
     func dispatch(urls: [URL]) async throws -> [Data] {
+        let request = { (url: URL) async throws -> Data in
+            try await client.request(url: url)
+        }
         var output: [Data] = []
         for url in urls {
-            output.append(try await client.request(url: url))
+            output.append(try await request(url))
         }
         return output
     }

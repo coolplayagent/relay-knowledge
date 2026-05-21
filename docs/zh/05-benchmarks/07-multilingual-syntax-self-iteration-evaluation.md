@@ -10,23 +10,34 @@
 
 | Repository key | Fixture version | 语言重点 |
 | --- | --- | --- |
-| `python_syntax_fixture` | `python_syntax_v1` | decorator、async function、async context manager、relative import、exception subclass |
-| `javascript_syntax_fixture` | `javascript_syntax_v1` | ESM export/import、class method、async callback、registry dispatch、test fake demotion |
-| `typescript_syntax_fixture` | `typescript_syntax_v1` | interface/type alias、generic function、type-only import、dynamic import、barrel export、TSX component |
-| `go_syntax_fixture` | `go_syntax_v1` | receiver method、interface、grouped import alias/dot/blank、goroutine、defer、constructor flow |
-| `java_syntax_fixture` | `java_syntax_v1` | generic interface、annotation、nested builder、constructor/object creation、method override |
-| `rust_syntax_fixture` | `rust_syntax_v1` | trait/impl、associated function、module import、enum match flow、macro call noise |
+| `python_syntax_fixture` | `python_syntax_v2` | decorator、async function、async context manager、relative import、exception subclass、lambda payload filter |
+| `javascript_syntax_fixture` | `javascript_syntax_v2` | ESM export/import、class method、async callback、arrow handler、registry dispatch、test fake demotion |
+| `typescript_syntax_fixture` | `typescript_syntax_v2` | interface/type alias、typed arrow projector、generic function、type-only import、dynamic import、barrel export、TSX component |
+| `go_syntax_fixture` | `go_syntax_v2` | receiver method、interface、grouped import alias/dot/blank、function literal、goroutine、defer、constructor flow |
+| `java_syntax_fixture` | `java_syntax_v2` | generic interface、annotation、functional-interface lambda、nested builder、constructor/object creation、method override |
+| `rust_syntax_fixture` | `rust_syntax_v2` | trait/impl、associated function、module import、closure dispatch、enum match flow、macro call noise |
 | `bash_syntax_fixture` | `bash_syntax_v1` | sourced script、shell function、case branch、command substitution、installer dispatch |
-| `csharp_syntax_fixture` | `csharp_syntax_v1` | namespace、interface generic、using directive、target-typed new、ArrayPool flow |
-| `kotlin_syntax_fixture` | `kotlin_syntax_v1` | object、typealias、companion object、constructor/call flow、lambda handler |
-| `php_syntax_fixture` | `php_syntax_v1` | namespace/use、interface、trait、constructor property promotion、provider boot flow |
-| `ruby_syntax_fixture` | `ruby_syntax_v1` | module/class、singleton method、require_relative、mixin、constant/runtime flow |
-| `scala_syntax_fixture` | `scala_syntax_v1` | package、trait、object、inline method、import、stage/runtime flow |
-| `swift_syntax_fixture` | `swift_syntax_v1` | protocol、final class、struct, import、async throws、delegate/session flow |
+| `csharp_syntax_fixture` | `csharp_syntax_v2` | namespace、interface generic、using directive、target-typed new、`Func<>` lambda、ArrayPool flow |
+| `kotlin_syntax_fixture` | `kotlin_syntax_v2` | object、typealias、companion object、constructor/call flow、lambda handler |
+| `php_syntax_fixture` | `php_syntax_v2` | namespace/use、interface、trait、constructor property promotion、arrow-function provider flow |
+| `ruby_syntax_fixture` | `ruby_syntax_v2` | module/class、singleton method、require_relative、mixin、lambda runtime flow |
+| `scala_syntax_fixture` | `scala_syntax_v2` | package、trait、object、inline method、import、function literal、stage/runtime flow |
+| `swift_syntax_fixture` | `swift_syntax_v2` | protocol、final class、struct、import、async throws、closure request flow |
+
+## Lambda 与 callback 覆盖
+
+生成式 fixture 会区分语言原生 lambda 能力和语言特定 callback 等价能力：
+
+| 语言 | 覆盖目标 |
+| --- | --- |
+| Python、JavaScript、TypeScript、Java、Rust、C#、Kotlin、PHP、Ruby、Scala、Swift、C++ | 原生 lambda、closure、arrow function、function literal、block 或 closure expression，并配套 `*_lambda` 评分 case |
+| Go | function literal callback，并配套 `go_tree_sitter_lambda` case |
+| C | C/C++ fixture 中的 function pointer typedef、operation table 和 callback dispatch |
+| Bash | 无 lambda 语法；继续以 shell function 与 `case` dispatch 覆盖控制流 |
 
 ## Case 设计
 
-- 每个 fixture 当前提供 6 条基础语法 case：`symbol`、`definition`、`imports`、`callees` 或关系流、`hybrid` 和 `negative`。
+- 大多数生成式 fixture 现在提供 7 条基础语法 case：`symbol`、`definition`、`imports`、`callees` 或关系流、`hybrid`、语言支持时的显式 lambda/closure case，以及 `negative`。
 - `hybrid` 与关系类 case 使用 `expected_all`、`expected_sequence`、`forbidden` 或 `forbidden_rank_penalty` 保留连续评分空间，让通过后的排序、覆盖率和性能仍能继续优化。
 - 生成式 fixture 默认不加入普通 fast repository 列表；需要定向验证时设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`，例如：
 

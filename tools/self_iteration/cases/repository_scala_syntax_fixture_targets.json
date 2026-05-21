@@ -1,7 +1,7 @@
 {
   "repositories": {
     "scala_syntax_fixture": {
-      "generated_fixture": "scala_syntax_v1",
+      "generated_fixture": "scala_syntax_v2",
       "alias": "scala-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -75,6 +75,22 @@
         {"path": "src/main/scala/example/Runtime.scala", "excerpt_contains": "object Runtime"}
       ],
       "case_group": "scala_tree_sitter_syntax"
+    },
+    {
+      "id": "scala_syntax_hybrid_function_literal_invoke",
+      "repository": "scala_syntax_fixture",
+      "kind": "hybrid",
+      "query": "scala function literal invoke event pipeline map",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["scala"],
+      "expected": [{"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "val invoke: Event => Event = event => identityStage.run(event)"}],
+      "expected_all": [
+        {"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "events.map(invoke)"},
+        {"path": "src/main/scala/example/Pipeline.scala", "excerpt_contains": "inline def identityStage"}
+      ],
+      "case_group": "scala_tree_sitter_lambda"
     },
     {
       "id": "scala_syntax_negative_missing_stage",

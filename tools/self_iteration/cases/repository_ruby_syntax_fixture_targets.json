@@ -1,7 +1,7 @@
 {
   "repositories": {
     "ruby_syntax_fixture": {
-      "generated_fixture": "ruby_syntax_v1",
+      "generated_fixture": "ruby_syntax_v2",
       "alias": "ruby-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -75,6 +75,22 @@
         {"path": "lib/app/runtime.rb", "excerpt_contains": "class Runtime"}
       ],
       "case_group": "ruby_tree_sitter_syntax"
+    },
+    {
+      "id": "ruby_syntax_hybrid_lambda_runtime_normalizer",
+      "repository": "ruby_syntax_fixture",
+      "kind": "hybrid",
+      "query": "ruby lambda normalizer runtime handle call payload",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["ruby"],
+      "expected": [{"path": "lib/app/runtime.rb", "excerpt_contains": "normalizer = ->(payload) { payload.to_s.strip }"}],
+      "expected_all": [
+        {"path": "lib/app/runtime.rb", "excerpt_contains": "normalizer.call(event)"},
+        {"path": "lib/app/controller.rb", "excerpt_contains": "@runtime.handle(event)"}
+      ],
+      "case_group": "ruby_tree_sitter_lambda"
     },
     {
       "id": "ruby_syntax_negative_missing_controller",

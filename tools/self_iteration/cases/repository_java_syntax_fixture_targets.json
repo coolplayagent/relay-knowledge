@@ -1,7 +1,7 @@
 {
   "repositories": {
     "java_syntax_fixture": {
-      "generated_fixture": "java_syntax_v1",
+      "generated_fixture": "java_syntax_v2",
       "alias": "java-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -81,6 +81,22 @@
         {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "return builder.build()"}
       ],
       "case_group": "java_tree_sitter_syntax"
+    },
+    {
+      "id": "java_syntax_hybrid_function_lambda_dispatch",
+      "repository": "java_syntax_fixture",
+      "kind": "hybrid",
+      "query": "java function lambda transformer dispatch apply service",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["java"],
+      "expected": [{"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "Function<String, String> transformer = input -> create().handle(input)"}],
+      "expected_all": [
+        {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "import java.util.function.Function"},
+        {"path": "src/main/java/example/ServiceFactory.java", "excerpt_contains": "return transformer.apply(value)"}
+      ],
+      "case_group": "java_tree_sitter_lambda"
     },
     {
       "id": "java_syntax_negative_missing_service",

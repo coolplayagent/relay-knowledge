@@ -29,6 +29,8 @@
 
 这些 fixture 的源文件由 `tools/self_iteration/src/evaluator_tail.rs` 中的常量生成；生成仓库使用固定 git author/committer date，保证内容相同情况下 commit 可重复。
 
+C 没有原生 lambda 语法，因此 fixture 明确使用 function pointer typedef、operation table 和 callback dispatch 作为语言正确的等价覆盖。C++ 在 `RunPipeline` 中使用 captured lambda，并用 case 同时约束 `cache.Insert` 与 `pipeline(event)` 证据。
+
 ## Case 分层
 
 新增 C case 位于 `tools/self_iteration/cases/repository_c_syntax_fixture_targets.json`，覆盖：

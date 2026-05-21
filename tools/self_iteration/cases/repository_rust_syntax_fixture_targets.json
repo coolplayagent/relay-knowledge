@@ -1,7 +1,7 @@
 {
   "repositories": {
     "rust_syntax_fixture": {
-      "generated_fixture": "rust_syntax_v1",
+      "generated_fixture": "rust_syntax_v2",
       "alias": "rust-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -80,6 +80,22 @@
         {"path": "src/service.rs", "excerpt_contains": "RuntimeEvent::Stop => trace_event!"}
       ],
       "case_group": "rust_tree_sitter_syntax"
+    },
+    {
+      "id": "rust_syntax_hybrid_dispatch_closure",
+      "repository": "rust_syntax_fixture",
+      "kind": "hybrid",
+      "query": "rust closure invoke dispatch handle event",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["rust"],
+      "expected": [{"path": "src/service.rs", "excerpt_contains": "let invoke = |event| self.handle_event(event)"}],
+      "expected_all": [
+        {"path": "src/service.rs", "excerpt_contains": "invoke(event)"},
+        {"path": "src/service.rs", "excerpt_contains": "fn handle_event"}
+      ],
+      "case_group": "rust_tree_sitter_lambda"
     },
     {
       "id": "rust_syntax_negative_missing_trait",

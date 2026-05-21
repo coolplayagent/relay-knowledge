@@ -1,7 +1,7 @@
 {
   "repositories": {
     "kotlin_syntax_fixture": {
-      "generated_fixture": "kotlin_syntax_v1",
+      "generated_fixture": "kotlin_syntax_v2",
       "alias": "kotlin-syntax-fixture-self-iteration",
       "ref": "HEAD",
       "scope": "all",
@@ -77,6 +77,22 @@
         {"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "fun withTimeout"}
       ],
       "case_group": "kotlin_tree_sitter_syntax"
+    },
+    {
+      "id": "kotlin_syntax_hybrid_lambda_handler_timeout",
+      "repository": "kotlin_syntax_fixture",
+      "kind": "hybrid",
+      "query": "kotlin lambda request handler timeout default trim",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 5,
+      "language_filters": ["kotlin"],
+      "expected": [{"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "fun defaultHandler(): RequestHandler = { value -> value.trim() }"}],
+      "expected_all": [
+        {"path": "src/main/kotlin/example/Client.kt", "excerpt_contains": "return SyntaxClient { value -> \"$timeout:$value\" }"},
+        {"path": "src/main/kotlin/example/Pipeline.kt", "excerpt_contains": "values.map { value -> client.newCall(value) }"}
+      ],
+      "case_group": "kotlin_tree_sitter_lambda"
     },
     {
       "id": "kotlin_syntax_negative_missing_client",
