@@ -581,6 +581,10 @@ mod identity_tests;
 mod call_ranking_tests;
 
 #[cfg(test)]
+#[path = "code_query_indirect_call_tests.rs"]
+mod indirect_call_tests;
+
+#[cfg(test)]
 #[path = "code_query_chunk_ranking_tests.rs"]
 mod chunk_ranking_tests;
 
