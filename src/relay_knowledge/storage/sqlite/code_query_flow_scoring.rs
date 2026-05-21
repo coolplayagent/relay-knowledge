@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::domain::{CodeQueryKind, CodeRetrievalRequest};
 
 const EXECUTION_FLOW_TERMS: &[&str] = &[
@@ -24,6 +26,9 @@ const INLINE_CONSTRUCT_TERMS: &[&str] = &[
 const COMPACT_HIGH_COVERAGE_MAX_NONBLANK_LINES: usize = 20;
 const COMPACT_HIGH_COVERAGE_MIN_BASE_SCORE: f64 = 6.0;
 const COMPACT_HIGH_COVERAGE_MIN_MATCHED_TERMS: usize = 4;
+const COMPACT_API_SEQUENCE_MAX_NONBLANK_LINES: usize = 18;
+const COMPACT_API_SEQUENCE_MAX_SPAN_LINES: usize = 14;
+const COMPACT_API_SEQUENCE_MIN_MATCHED_IDENTITIES: usize = 3;
 
 pub(super) fn caller_context_density_bonus(
     base_score: f64,
@@ -196,6 +201,158 @@ pub(super) fn compact_high_coverage_chunk_bonus(
 
     let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
     (0.35 + (coverage * 0.4)).min(0.75)
+}
+
+pub(super) fn compact_api_sequence_chunk_bonus(
+    base_score: f64,
+    query: &str,
+    content: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score < COMPACT_HIGH_COVERAGE_MIN_BASE_SCORE
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || (path_looks_like_test_or_benchmark(path) && !query_mentions_test_or_benchmark(query))
+    {
+        return 0.0;
+    }
+
+    let identities = query_api_sequence_identities(query);
+    if identities.len() < COMPACT_API_SEQUENCE_MIN_MATCHED_IDENTITIES {
+        return 0.0;
+    }
+    let Some(sequence) = matched_api_sequence(content, &identities) else {
+        return 0.0;
+    };
+
+    let nonblank_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(COMPACT_API_SEQUENCE_MAX_NONBLANK_LINES + 1)
+        .count();
+    if nonblank_lines == 0 || nonblank_lines > COMPACT_API_SEQUENCE_MAX_NONBLANK_LINES {
+        return 0.0;
+    }
+    let span = sequence
+        .last_line
+        .saturating_sub(sequence.first_line)
+        .saturating_add(1);
+    if span > COMPACT_API_SEQUENCE_MAX_SPAN_LINES {
+        return 0.0;
+    }
+
+    let coverage = sequence.matched_identities as f64 / identities.len() as f64;
+    let density = sequence.matched_lines as f64 / nonblank_lines as f64;
+    let complete_sequence_bonus = if sequence.matched_identities == identities.len() {
+        2.0
+    } else {
+        0.0
+    };
+    (0.45 + (coverage * 1.15) + (density * 0.45) + complete_sequence_bonus).min(3.8)
+}
+
+struct ApiSequenceMatch {
+    matched_identities: usize,
+    matched_lines: usize,
+    first_line: usize,
+    last_line: usize,
+}
+
+fn matched_api_sequence(content: &str, identities: &[Vec<String>]) -> Option<ApiSequenceMatch> {
+    let mut matched_identity_indexes = BTreeSet::new();
+    let mut matched_lines = BTreeSet::new();
+    let mut first_line = None;
+    let mut last_line = 0usize;
+
+    for (line_index, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if !line_looks_like_api_call(line) {
+            continue;
+        }
+        let line_terms = identifier_terms(line);
+        let matched_before = matched_identity_indexes.len();
+        for (identity_index, identity_terms) in identities.iter().enumerate() {
+            if identity_terms_match_line(identity_terms, &line_terms) {
+                matched_identity_indexes.insert(identity_index);
+            }
+        }
+        if matched_identity_indexes.len() > matched_before {
+            matched_lines.insert(line_index);
+            first_line.get_or_insert(line_index);
+            last_line = line_index;
+        }
+    }
+
+    (matched_identity_indexes.len() >= COMPACT_API_SEQUENCE_MIN_MATCHED_IDENTITIES).then(|| {
+        ApiSequenceMatch {
+            matched_identities: matched_identity_indexes.len(),
+            matched_lines: matched_lines.len(),
+            first_line: first_line.unwrap_or(0),
+            last_line,
+        }
+    })
+}
+
+fn query_api_sequence_identities(query: &str) -> Vec<Vec<String>> {
+    let mut identities = Vec::new();
+    for raw in query.split_whitespace().map(str::trim) {
+        if !token_looks_like_api_identity(raw) {
+            continue;
+        }
+        let terms = identifier_terms(raw)
+            .into_iter()
+            .filter(|term| term.len() >= 3)
+            .filter(|term| !matches!(term.as_str(), "the" | "and" | "for" | "with" | "from"))
+            .collect::<Vec<_>>();
+        if !terms.is_empty() && !identities.contains(&terms) {
+            identities.push(terms);
+        }
+    }
+
+    identities
+}
+
+fn token_looks_like_api_identity(token: &str) -> bool {
+    let token = token.trim_matches(|character: char| {
+        !(character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | ':'))
+    });
+    if token.contains('.') || token.contains("::") {
+        return true;
+    }
+
+    let mut previous = None;
+    token.chars().any(|character| {
+        let boundary = character.is_ascii_uppercase()
+            && previous.is_some_and(|prev: char| prev.is_ascii_lowercase());
+        previous = Some(character);
+        boundary
+    })
+}
+
+fn line_looks_like_api_call(line: &str) -> bool {
+    if line.is_empty()
+        || line.starts_with("//")
+        || line.starts_with('#')
+        || line.starts_with('*')
+        || !line.contains('(')
+    {
+        return false;
+    }
+
+    line.contains('.')
+        || line.contains("::")
+        || line.contains("->")
+        || line.contains(":=")
+        || line.contains(" = ")
+}
+
+fn identity_terms_match_line(identity_terms: &[String], line_terms: &[String]) -> bool {
+    identity_terms.iter().all(|identity_term| {
+        line_terms
+            .iter()
+            .any(|line_term| related_identifier_terms(line_term, identity_term))
+    })
 }
 
 fn query_execution_flow_intent(query: &str) -> bool {
@@ -635,6 +792,54 @@ mod tests {
             ),
             0.0
         );
+    }
+
+    #[test]
+    fn compact_api_sequence_bonus_prefers_complete_short_lifecycle_flows() {
+        let hybrid = request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+        );
+        let complete = compact_api_sequence_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "func main() {\n\
+            w := worker.New(c, \"hello-world\", worker.Options{})\n\
+            w.RegisterWorkflow(helloworld.Workflow)\n\
+            w.RegisterActivity(helloworld.Activity)\n\
+            err = w.Run(worker.InterruptCh())\n\
+            }",
+            "helloworld/worker/main.go",
+            &hybrid,
+        );
+        let partial = compact_api_sequence_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            "func main() {\n\
+            w := worker.New(c, caller.TaskQueue, worker.Options{})\n\
+            w.RegisterWorkflow(caller.EchoCallerWorkflow)\n\
+            err = w.Run(worker.InterruptCh())\n\
+            }",
+            "nexus/caller/worker/main.go",
+            &hybrid,
+        );
+        let verbose = compact_api_sequence_chunk_bonus(
+            8.0,
+            &hybrid.query,
+            &(0..24)
+                .map(|_| "w.RegisterWorkflow(flow.Workflow); w.RegisterActivity(flow.Activity)")
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "worker-specific-task-queues/worker/main.go",
+            &hybrid,
+        );
+
+        assert!(complete > partial, "complete={complete} partial={partial}");
+        assert!(
+            partial > 0.0,
+            "partial compact API sequence should still score"
+        );
+        assert_eq!(verbose, 0.0);
     }
 
     fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {

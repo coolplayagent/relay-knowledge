@@ -1,3 +1,5 @@
+use std::{thread, time::Duration};
+
 use rusqlite::{Connection, params};
 
 use crate::storage::StorageError;
@@ -34,6 +36,7 @@ const INDEX_REFRESH_TASK_COLUMNS: &[&str] = &[
     "updated_at_ms",
 ];
 const LEGACY_NEXT_RETRY_AFTER_COLUMN: &str = "next_retry_after_ms";
+const SCHEMA_COMPATIBILITY_RETRY_DELAYS_MS: [u64; 5] = [10, 30, 90, 270, 810];
 
 const GRAPH_BM25_COLUMNS: &[&str] = &[
     "document_id",
@@ -166,6 +169,20 @@ const CODE_GRAPH_SCHEMAS: &[DerivedTableSchema] = &[
 ];
 
 pub(super) fn prepare_existing_database(connection: &Connection) -> Result<(), StorageError> {
+    for delay_ms in SCHEMA_COMPATIBILITY_RETRY_DELAYS_MS {
+        match prepare_existing_database_once(connection) {
+            Ok(()) => return Ok(()),
+            Err(error) if schema_compatibility_error_is_retryable(&error) => {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    prepare_existing_database_once(connection)
+}
+
+fn prepare_existing_database_once(connection: &Connection) -> Result<(), StorageError> {
     drop_incompatible_table(connection, "graph_bm25", GRAPH_BM25_COLUMNS)?;
     drop_incompatible_table(
         connection,
@@ -177,6 +194,21 @@ pub(super) fn prepare_existing_database(connection: &Connection) -> Result<(), S
     rebuild_incompatible_index_refresh_tasks(connection)?;
 
     Ok(())
+}
+
+fn schema_compatibility_error_is_retryable(error: &StorageError) -> bool {
+    match error {
+        StorageError::Sqlite(error) => {
+            schema_compatibility_error_message_is_retryable(&error.to_string())
+        }
+        _ => false,
+    }
+}
+
+fn schema_compatibility_error_message_is_retryable(message: &str) -> bool {
+    message.contains("vtable constructor failed: graph_bm25")
+        || message.contains("database schema is locked")
+        || message.contains("database is locked")
 }
 
 fn rebuild_incompatible_index_refresh_tasks(connection: &Connection) -> Result<(), StorageError> {
@@ -424,4 +456,28 @@ fn table_exists(connection: &Connection, table: &str) -> Result<bool, StorageErr
             |row| row.get::<_, bool>(0),
         )
         .map_err(StorageError::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        schema_compatibility_error_is_retryable, schema_compatibility_error_message_is_retryable,
+    };
+    use crate::storage::StorageError;
+
+    #[test]
+    fn schema_compatibility_retry_is_limited_to_transient_open_errors() {
+        assert!(schema_compatibility_error_message_is_retryable(
+            "vtable constructor failed: graph_bm25"
+        ));
+        assert!(schema_compatibility_error_message_is_retryable(
+            "database schema is locked"
+        ));
+        assert!(!schema_compatibility_error_message_is_retryable(
+            "no such table: graph_bm25"
+        ));
+        assert!(!schema_compatibility_error_is_retryable(
+            &StorageError::InvalidInput("database is locked".to_owned())
+        ));
+    }
 }

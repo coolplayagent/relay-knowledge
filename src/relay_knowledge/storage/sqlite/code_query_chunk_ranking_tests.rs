@@ -246,6 +246,107 @@ async fn hybrid_chunks_prefer_compact_high_coverage_usage() {
 }
 
 #[tokio::test]
+async fn hybrid_chunks_prefer_complete_compact_api_sequences() {
+    let complete_path = "samples/helloworld/worker/main.go";
+    let partial_path = "samples/nexus/caller/worker/main.go";
+    let verbose_path = "samples/worker-specific-task-queues/worker/main.go";
+    let complete = "func main() {\n\
+\tc, err := client.Dial(envconfig.MustLoadDefaultClientOptions())\n\
+\tif err != nil { panic(err) }\n\
+\tw := worker.New(c, \"hello-world\", worker.Options{})\n\
+\tw.RegisterWorkflow(helloworld.Workflow)\n\
+\tw.RegisterActivity(helloworld.Activity)\n\
+\terr = w.Run(worker.InterruptCh())\n\
+}";
+    let partial = "func main() {\n\
+\tc, err := client.Dial(clientOptions)\n\
+\tw := worker.New(c, caller.TaskQueue, worker.Options{})\n\
+\tw.RegisterWorkflow(caller.EchoCallerWorkflow)\n\
+\tw.RegisterWorkflow(caller.HelloCallerWorkflow)\n\
+\terr = w.Run(worker.InterruptCh())\n\
+}";
+    let verbose = (0..24)
+        .map(|index| {
+            if index % 2 == 0 {
+                "w.RegisterWorkflow(flow.Workflow)"
+            } else {
+                "w.RegisterActivity(flow.Activity)"
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("complete-file", complete_path, "go"),
+            file("partial-file", partial_path, "go"),
+            file("verbose-file", verbose_path, "go"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "partial-chunk",
+                "partial-file",
+                partial_path,
+                partial,
+                range(20, 28),
+                None,
+            ),
+            chunk(
+                "verbose-chunk",
+                "verbose-file",
+                verbose_path,
+                &verbose,
+                range(80, 110),
+                None,
+            ),
+            chunk(
+                "complete-chunk",
+                "complete-file",
+                complete_path,
+                complete,
+                range(40, 49),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    let summary = hits
+        .iter()
+        .map(|hit| format!("{}:{}={}", hit.path, hit.line_range.start, hit.score))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_eq!(hits[0].path, complete_path, "{summary}");
+    let complete_score = lexical_hit_score(&hits, 40).expect("complete flow should be recalled");
+    let partial_score = lexical_hit_score(&hits, 20).expect("partial flow should be recalled");
+    assert!(complete_score > partial_score);
+}
+
+#[tokio::test]
 async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
     let target_path = "src/runtime/config.ts";
     let noise_path = "aaa/noise.ts";
