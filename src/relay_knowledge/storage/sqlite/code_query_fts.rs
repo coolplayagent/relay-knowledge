@@ -6,7 +6,9 @@ const MAX_COMPOUND_IDENTIFIER_LEN: usize = 80;
 const MIN_SUBPHRASE_IDENTIFIER_PARTS: usize = 2;
 const MAX_SUBPHRASE_IDENTIFIER_PARTS: usize = 4;
 const MAX_COMPOUND_FTS_ALTERNATIVES: usize = 24;
-const MAX_HYBRID_CHUNK_RECALL_TERMS: usize = 4;
+const MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS: usize = 4;
+const MAX_HYBRID_CHUNK_RECALL_TERMS: usize = 6;
+const MAX_HYBRID_CHUNK_RECALL_ANCHORS: usize = 3;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -20,7 +22,7 @@ pub(in crate::storage::sqlite::code::code_query) fn hybrid_chunk_fts_match_query
     query: &str,
 ) -> String {
     let terms = dedupe_terms(super::fts_query_terms(query));
-    if terms.len() <= MAX_HYBRID_CHUNK_RECALL_TERMS {
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return fts_match_query_with_operator(&terms, " OR ", true);
     }
 
@@ -81,6 +83,7 @@ fn dedupe_terms(terms: Vec<String>) -> Vec<String> {
 }
 
 fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
+    let mut recall_terms = leading_hybrid_chunk_recall_anchors(terms);
     let mut ranked = terms
         .iter()
         .enumerate()
@@ -93,19 +96,56 @@ fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
             .then_with(|| left.1.cmp(&right.1))
             .then_with(|| left.2.cmp(right.2))
     });
-    ranked.truncate(MAX_HYBRID_CHUNK_RECALL_TERMS);
-    ranked.sort_by_key(|candidate| candidate.1);
+    for (priority, _, term) in ranked {
+        if recall_terms.len() >= MAX_HYBRID_CHUNK_RECALL_TERMS {
+            break;
+        }
+        if priority < 2 {
+            continue;
+        }
+        push_case_insensitive_unique_term(&mut recall_terms, term);
+    }
 
-    ranked
-        .into_iter()
-        .map(|(_, _, term)| term.clone())
-        .collect()
+    recall_terms
+}
+
+fn leading_hybrid_chunk_recall_anchors(terms: &[String]) -> Vec<String> {
+    let mut anchors = Vec::new();
+    for term in terms {
+        if anchors.len() >= MAX_HYBRID_CHUNK_RECALL_ANCHORS {
+            break;
+        }
+        if leading_hybrid_chunk_anchor(term) {
+            push_case_insensitive_unique_term(&mut anchors, term);
+        }
+    }
+
+    anchors
+}
+
+fn leading_hybrid_chunk_anchor(term: &str) -> bool {
+    let length = term.chars().count();
+    (4..=16).contains(&length)
+        && term
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+}
+
+fn push_case_insensitive_unique_term(terms: &mut Vec<String>, term: &str) {
+    if !terms
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(term))
+    {
+        terms.push(term.to_owned());
+    }
 }
 
 fn hybrid_chunk_term_priority(term: &str) -> usize {
     let length = term.chars().count();
     let length_score = if length >= 12 {
         6
+    } else if length >= 10 {
+        5
     } else if length >= 8 {
         4
     } else if length >= 5 {
@@ -229,7 +269,10 @@ mod tests {
         assert!(fts_query.contains("\"workflow\""));
         assert!(!fts_query.contains("\"Open\""));
         assert_eq!(fts_query.matches("\"client\"").count(), 1);
-        assert!(fts_query.matches(" OR ").count() <= MAX_COMPOUND_FTS_ALTERNATIVES + 4);
+        assert!(
+            fts_query.matches(" OR ").count()
+                <= MAX_COMPOUND_FTS_ALTERNATIVES + MAX_HYBRID_CHUNK_RECALL_TERMS
+        );
     }
 
     #[test]
@@ -238,5 +281,16 @@ mod tests {
             hybrid_chunk_fts_match_query("cache cache Lookup Insert"),
             "(\"cache\" OR \"Lookup\" OR \"Insert\") OR \"cachelookupinsert\" OR \"cache_lookup_insert\""
         );
+    }
+
+    #[test]
+    fn hybrid_chunk_fts_query_keeps_leading_lowercase_intent_terms() {
+        let fts_query = hybrid_chunk_fts_match_query(
+            "operation table read callback dispatch designated initializer",
+        );
+
+        for term in ["operation", "table", "read", "designated", "initializer"] {
+            assert!(fts_query.contains(&format!("\"{term}\"")));
+        }
     }
 }

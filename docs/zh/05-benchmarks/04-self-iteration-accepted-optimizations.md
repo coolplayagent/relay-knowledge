@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779366747-hybrid-chunk-anchor-and-initializer-scoring
+- 算法/架构：Hybrid chunk FTS 召回对长查询不再只按长度/结构选最高优先级词；先保留最多 3 个靠前、全小写、长度受限的 intent anchor，再用既有结构化 identifier 优先级补齐到 6 个有界召回词。这样保留用户写在查询前部的短代码语义词，例如 table/read/cache/insert，同时继续偏好 CamelCase、snake_case、长 identifier 与 compound identifier window；candidate limit、SQLite FTS5、Rust 后置评分和 top-k merge 仍负责最终排序。对已经召回的 Hybrid chunk，再识别带 `.field = identifier` 或 `[INDEX] = ...` 形态的 C-family designated initializer/table entries，并仅在 query 同时表达 callback/table/initializer/dispatch 等意图时给有界 bonus，让真实操作表绑定不被同名函数声明或重复 dispatch 片段淹没。
+- 不变量：不改变 parser facts、SQLite schema、search document 写入、candidate window 上限、symbol/reference/call/import scoring、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；新增 anchors 只影响 Hybrid chunk MATCH 的 bounded OR 计划，不改变 Definition/Symbol/References/Callers/Callees/Imports 的专用召回计划；designated-initializer bonus 只作用于已召回且 base score 为正的 Hybrid chunk，要求 query intent、非测试路径或显式 test intent、真实 designator assignment 和至少一个 query/content term match；混合大小写的 dotted method fragment 继续不作为 leading anchor，避免 `client.Open` 这类查询把短 method token 放大成噪声；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期改善长自然语言加代码概念的 hybrid 查询召回和排序，尤其是 operation-table、callback dispatch、factory/registration、cache insert pipeline 这类由短动词/名词和长解释词共同定位的源码块，减少只保留 designated/initializer/structured 长词而漏掉真实 `.read`、`table`、`insert` chunk 的情况，并提升多仓 code retrieval 和 research alignment 中的 evidence coverage。风险是长 Hybrid 查询的 chunk FTS OR 分支从最多 4 个基础词增至最多 6 个基础词，少数查询可能多召回近义上下文并增加 FTS CPU；另一个风险是含 C-style designated initializer 的 chunk 在相关意图查询中上移。风险受 6 词上限、3 个 leading anchor 上限、case-insensitive 去重、designator shape gate、query intent gate、既有 candidate limit、positive score filter、dedupe/top-k、path/language filter 与 query-p95 gate 控制。
+- 策略关联：建立在 `run-1779365756` 的 repo-set member diversification accepted strategy 和 `run-1779324524`/`run-1779363360` 的 compact chunk/call-graph accepted strategy 上，把改动放在通用 query planning 层以改善召回覆盖；避免 `run-1779361336` 最新拒绝中继续调 C++ flow scoring 导致 `operator()` 与 template lambda flow gate 回退的模式，也避免通过 Temporal、C/C++ fixture path、symbol 名称或 expected excerpt 做特例。
 ## 候选优化说明：run-1779365756-repository-set-member-diversified-top-k
 - 算法/架构：repository-set query 保留每个 member 的既有 bounded fanout、单仓 code retrieval、overlay evidence、priority、edge confidence 与 bridge support scoring；在全局 dedupe/sort 后，如果 top-k 被多个 member 竞争且候选已超过返回上限，则按分数排序后的 member 顺序为每个相关 member 保留最多 3 个高质量候选，再用全局高分候选填满剩余窗口。高质量门槛由当前 best score 的相对比例和最大分差共同限定，避免低分 member 噪声因配额进入结果。
 - 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate window、单仓 ranking、semantic/vector read model、repo-set overlay refresh、env/paths/net、CLI/API 或 self-iteration harness；diversification 只在 repository-set final merge 且结果已超过 limit 时触发，最终结果仍按原全局 score/path tie-break 顺序输出，dedupe key、freshness/stale penalty、bridge support、returned evidence pruning 与 top-k 上限保持不变；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -974,19 +979,8 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 - 预期影响/风险：预期改善 C/C++ ops table、callback table、vtable-like struct 和 generated dispatch table 中“函数实现通过成员指针被调用”的 caller 查询，使 `rk_rows[...].read(...)` 这类间接调用不再被 direct call graph 漏掉，并泛化到其它表驱动代码。风险是常见成员名如 `read`、`open` 可能带入同名间接调用噪声；风险由 direct-empty gate、绑定行 identifier 边界、成员字段上限、原 test-path penalty、confidence 差异、bounded query 和 FTS fallback 控制。
 - 策略关联：建立在 `run-1779331577` 的 call identity direct lookup 与 `run-1779363360` 的 chunk ranking/search surface 上，避免 `run-1779330885` 的 `graph_bm25`/FTS constructor 拒绝模式，也避免继续用 fixture-specific ranking 常量修补 `c_syntax_callers_function_pointer_read`。
 
-## run-1779363937
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779363937.patch`
-- score: 0.900069 (foundational=0.947917, competitive=0.751603, accuracy=0.849760, semantic_vector=1.000000, research_judge=n/a, performance=0.812082, stability=1.000000)
-- cases: 39/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_calls.rs`, `src/relay_knowledge/storage/sqlite/code_query_indirect_call_tests.rs`
-- key improvements: score_component:competitive_capability 0.732372->0.7516025641025641; case:c_syntax_callers_function_pointer_read false->true; metric:temporal_sdk_go_index_ms 1694.0->867.0; metric:temporal_sdk_go_register_index_ms 2320.0->1493.0; metric:temporal_samples_go_index_ms 1167.0->606.0; metric:temporal_samples_go_register_index_ms 1773.0->1192.0; metric:leveldb_cpp_register_index_ms 1815.0->1733.0; metric:cpp_syntax_fixture_query_p95_ms 1391.0->1327.0
-- known degradations: metric:leveldb_cpp_query_p95_ms 1333.0->1431.0; metric:c_syntax_fixture_index_ms 566.0->1248.0; metric:c_syntax_fixture_register_index_ms 1112.0->1813.0; metric:c_syntax_fixture_query_p50_ms 1127.0->1208.0; metric:c_syntax_fixture_query_p95_ms 1207.0->1415.0; metric:cpp_syntax_fixture_index_ms 1067.0->1209.0; metric:cpp_syntax_fixture_register_index_ms 1632.0->1775.0; metric:relay_teams_query_p50_ms 1109.0->1169.0
-- latency metrics: cargo_fmt_check_ms=1393ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=102ms; temporal_sdk_go_index_ms=867ms; temporal_sdk_go_register_index_ms=1493ms; temporal_samples_go_index_ms=606ms; temporal_samples_go_register_index_ms=1192ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1779363937 compacted
+- summary: accepted indirect function-pointer callers and related call-ranking metrics were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779363937.patch`, reports, and progressive memory, with strategy details preserved above.
 
 ## run-1779365756
 
@@ -997,6 +991,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:competitive_capability 0.751603->0.7692307692307693; case:temporal_go_repo_set_worker_registration_flow false->true; metric:leveldb_cpp_index_ms 1187.0->646.0; metric:leveldb_cpp_register_index_ms 1733.0->1211.0; metric:leveldb_cpp_query_p50_ms 1190.0->1147.0; metric:leveldb_cpp_query_p95_ms 1431.0->1330.0; metric:c_syntax_fixture_index_ms 1248.0->1147.0; metric:c_syntax_fixture_register_index_ms 1813.0->1713.0
 - known degradations: metric:temporal_sdk_go_index_ms 867.0->1251.0; metric:temporal_sdk_go_register_index_ms 1493.0->1957.0; metric:temporal_samples_go_index_ms 606.0->688.0; metric:temporal_samples_go_register_index_ms 1192.0->1254.0; metric:c_syntax_fixture_query_p50_ms 1208.0->1249.0; metric:cpp_syntax_fixture_query_p95_ms 1327.0->1369.0; metric:relay_teams_index_ms 1132.0->1873.0; metric:relay_teams_register_index_ms 1718.0->2439.0
 - latency metrics: cargo_fmt_check_ms=1412ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=243ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=1251ms; temporal_sdk_go_register_index_ms=1957ms; temporal_samples_go_index_ms=688ms; temporal_samples_go_register_index_ms=1254ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779366747
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779366747.patch`
+- score: 0.909485 (foundational=0.947917, competitive=0.798077, accuracy=0.872997, semantic_vector=1.000000, research_judge=n/a, performance=0.807592, stability=1.000000)
+- cases: 41/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_designated_initializer_scoring.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`
+- key improvements: score_component:score 0.904019->0.9094852282159729; score_component:competitive_capability 0.769231->0.7980769230769231; case:c_syntax_hybrid_operation_table_dispatch false->true; metric:temporal_sdk_go_index_ms 1251.0->849.0; metric:temporal_sdk_go_register_index_ms 1957.0->1517.0; metric:temporal_samples_go_index_ms 688.0->586.0; metric:temporal_samples_go_register_index_ms 1254.0->1193.0; metric:relay_teams_index_ms 1873.0->1091.0
+- known degradations: metric:leveldb_cpp_index_ms 646.0->1106.0; metric:leveldb_cpp_register_index_ms 1211.0->1672.0; metric:leveldb_cpp_query_p50_ms 1147.0->1229.0; metric:leveldb_cpp_query_p95_ms 1330.0->1577.0; metric:cpp_syntax_fixture_index_ms 1089.0->1168.0; metric:cpp_syntax_fixture_register_index_ms 1652.0->1713.0; metric:cpp_syntax_fixture_query_p95_ms 1369.0->1450.0; metric:relay_teams_query_p95_ms 1369.0->1432.0
+- latency metrics: cargo_fmt_check_ms=1393ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=223ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=849ms; temporal_sdk_go_register_index_ms=1517ms; temporal_samples_go_index_ms=586ms; temporal_samples_go_register_index_ms=1193ms
 
 Adopted optimization notes:
 

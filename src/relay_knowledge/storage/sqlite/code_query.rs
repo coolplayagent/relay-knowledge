@@ -8,6 +8,8 @@ mod code_query_call_counts;
 mod code_query_call_direction;
 #[path = "code_query_calls.rs"]
 mod code_query_calls;
+#[path = "code_query_designated_initializer_scoring.rs"]
+mod code_query_designated_initializer_scoring;
 #[path = "code_query_excerpts.rs"]
 mod code_query_excerpts;
 #[path = "code_query_flow_scoring.rs"]
@@ -53,6 +55,7 @@ pub(super) use super::code_query_hits::{
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
 use code_query_calls::search_calls;
+use code_query_designated_initializer_scoring::designated_initializer_chunk_bonus;
 use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
     execution_flow_chunk_bonus, inline_construct_chunk_bonus,
@@ -524,6 +527,13 @@ fn search_chunks(
                     request,
                 )
                 + execution_flow_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                )
+                + designated_initializer_chunk_bonus(
                     score,
                     &request.query,
                     &row.content,
