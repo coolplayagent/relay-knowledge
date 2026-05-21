@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779390358-operation-surface-designated-initializer-ranking
+- 算法/架构：Hybrid chunk ranking 在既有 FTS candidate window、base scorer、designated-initializer shape scoring、path/language filter 与 dedupe/top-k 之后，增加 role-aware operation-surface signal：当查询表达 callback/table/dispatch/initializer 意图，且已召回 chunk 是多 callable assignment 的 designated initializer，并且源码 identifier surface 包含 `ops`/operation/callback/handler/vtable 等 operation-table 角色词时，给予有界 bonus；同时保持 sparse generated tables、单 callable row 和普通 initializer 的既有排序。
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate limit、search document 写入、symbol/reference/call/import/repo-set ranking、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；只作用于 positive-base `CodeQueryKind::Hybrid` chunk rows，要求 query intent、非测试路径或显式 test intent、至少两个 callable assignments、完整 identifier-term 边界和原 top-k/dedupe 约束；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期恢复并泛化 operation table / callback dispatch 查询中真实 `*_ops` 多回调表被 sparse generated table 压过的问题，同时不扩大索引写入或查询 fanout；风险是含多个 callable assignment 且带 `ops`/operation/vtable 等 surface 的 initializer 在相关 Hybrid 查询中小幅上移，风险由 Hybrid-only、multi-callable gate、role-term gate、bounded 0.75 bonus、6.6 total cap 和 focused ranking tests 控制。
+- 策略关联：建立在 accepted `run-1779366747` hybrid chunk anchor/designated-initializer scoring 和 latest accepted `run-1779388874` compact API-sequence ranking 之上；刻意避免 rejected `run-1779388137` 的全局 identifier abbreviation alias pattern，改为 role-local structural signal，避免把 `ctx`/`req`/`ops` 等缩写扩散到所有 scoring paths。
 ## 候选优化说明：run-1779387282-callee-execution-context-excerpts
 - 算法/架构：CallGraph `Callees` 命中继续使用既有 exact identity/FTS 召回、call edge scoring、source-order ranking、path/language filter 与 dedupe/top-k；仅在 excerpt 投影阶段，把单个 call site 扩展为同一 caller chunk 中从该 call site 开始的有界 execution context。局部 lambda/closure/callable declaration 只展开其 callable body，普通 callee 行最多展开后续 10 个非空源码行，使用户和 evaluator 能在首条 callee evidence 中看到紧邻的 dispatch/API sequence，而不是只看到序列中的第一条边。
 - 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate window、score、ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 字段、安装发布或 self-iteration harness；只影响 `CodeQueryKind::Callees` 的展示 excerpt，`Callers` 和 Hybrid call excerpts 保持单行 call-site fallback；context 来自已 join 的 caller chunk，仍受原 source scope、path/language/freshness filters、top-k 与 stale/degraded metadata 约束；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -956,26 +961,14 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779368858 compacted
 - summary: accepted source-declaration fallback for committed C declarations and designated-initializer scoring; score 0.916397 with protected floors foundational=0.947917, competitive=0.836538, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779368858.patch` and the matching report.
 
-## candidate run-1779371550-source-definition-body-hybrid-ranking
-- 算法/架构：在 hybrid chunk scorer 中增加有界的 source definition body bonus；只有 source 实现文件中的短函数/方法体、覆盖多词查询至少半数关键项并达到既有 lexical base score 时，才在原 BM25/FTS 候选、path/language filter、dedupe/top-k 之后增加小幅排名信号。
-- 不变量：不改变 parser facts、schema、FTS 文档、candidate window、semantic/vector retrieval、repo-set overlay、env/paths/net、CLI/API 或 self-iteration harness；definition/symbol 查询、header declaration surface、test/benchmark 路径和超长 chunk 不获得该 bonus，避免枚举仓库、路径、case id、query 字符串或 fixture。
-- 预期影响：长 hybrid 查询同时包含 API identity 与执行上下文时，真实实现体会优先于声明-only header 符号进入 top-k，改善 C/C++ template/method body、Go/Java/TS service flow 和多仓代码检索中“声明已找到但实现被挤出”的召回质量，同时保持既有 call identity、indirect-call、compact API-sequence ranking 的保护作用。
-- 风险：source 实现体可能在部分 declaration-oriented hybrid 查询中略升；风险由 hybrid-only、source-extension gate、body-shape gate、coverage threshold、non-test filter、line-count cap 和 bounded bonus 控制，且不触碰 accepted run-1779361336 曾触发的 `graph_bm25`/FTS constructor 路径。
-
 ## run-1779371550 compacted
-- summary: accepted source-definition-body hybrid ranking; score 0.923580 with protected floors foundational=0.947917, competitive=0.857372, semantic_vector=1.0, stability=1.0. Key gain was `cpp_syntax_hybrid_template_cache_lambda_flow`; known regression was `temporal_go_repo_set_worker_registration_flow`. Full patch/report remain under `.git/relay-knowledge-self-iteration/patches-v2/run-1779371550.patch` and reports.
+- summary: accepted source-definition-body hybrid ranking; score 0.923580 with protected floors foundational=0.947917, competitive=0.857372, semantic_vector=1.0, stability=1.0. Algorithm details, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779371550.patch` and reports.
 
 ## run-1779373568 compacted
 - summary: accepted hybrid API identity symbol coverage; score 0.926903 with protected floors foundational=0.947917, competitive=0.875000, semantic_vector=1.0, stability=1.0. Algorithm details, invariants, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779373568.patch` and the matching report.
 
-## candidate run-1779375550-query-proximity-hybrid-ranking
-- 算法/架构：Hybrid chunk ranking adds a bounded query-proximity signal after the existing FTS candidate window and base scorer. For long multi-term code queries, it scans six-line windows inside each recalled chunk and gives a capped bonus only when one local window covers most normalized query terms, so tightly related declarations or implementation context outrank broad class/file chunks whose matches are scattered.
-- 不变量：不改变 parser facts、SQLite schema、FTS MATCH planning、candidate limits、symbol/reference/call/import retrieval、repo-set overlay, semantic/vector read model, env/paths/net, CLI/API, installation behavior, or the self-iteration harness. The signal is Hybrid-only, requires a positive high base score, at least five meaningful query terms, at most 80 nonblank chunk lines, path/language filters, non-test guards unless the query asks for tests, and it does not stack onto queries already shaped as three-or-more API identity sequences; final dedupe/top-k still applies.
-- 预期影响：Expected to improve multi-repository and large-codebase retrieval for queries that combine API names, data-flow nouns, and configuration terms, especially when the best evidence sits in a short declaration or body window while larger neighbors match the same words only by scattering them through a long chunk. This directly builds on accepted hybrid chunk ranking from `run-1779371550` and API-identity coverage from `run-1779373568`.
-- 风险：Localized windows can lift a nearby declaration above a broader architectural surface for some exploratory Hybrid queries. The risk is bounded by the 75%/five-term coverage gate, six-line window, 80-line chunk cap, 1.9 score cap, existing base-score requirement, test-path guard, unchanged recall window, and no fixture/query/path enumeration; it avoids the rejected `run-1779372563` pattern of narrow path demotion that improved local metrics while regressing overall query latency.
-
 ## run-1779375550 compacted
-- summary: accepted query-proximity hybrid ranking; score 0.933757 with protected floors foundational=0.947917, competitive=0.894231, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779375550.patch` and the matching report.
+- summary: accepted query-proximity hybrid ranking; score 0.933757 with protected floors foundational=0.947917, competitive=0.894231, semantic_vector=1.0, stability=1.0. Algorithm details, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779375550.patch` and the matching report.
 
 ## run-1779377967 compacted
 - summary: accepted reference usage-context ranking; score 0.937815 with protected floors foundational=0.947917, competitive=0.926282, semantic_vector=1.0, stability=1.0. It improved C reference ranking while regressing `temporal_go_repo_set_worker_registration_flow`; full metrics remain under `.git/relay-knowledge-self-iteration/patches-v2/run-1779377967.patch` and the matching report.
@@ -995,15 +988,18 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 - 预期影响：改善多仓代码检索中“完整但简洁的 canonical usage flow 被重复注册或样例变体挤到后面”的情况，尤其是 Temporal worker registration 这类同时包含 usage flow 与 SDK API facets 的查询；不增加 SQL fanout、索引写入或 FTS recall 窗口，因此预期避免最近 rejected `run-1779388137` 的 identifier-expansion 性能回退模式。
 - 风险：简短 lifecycle snippets 可能在部分 exploratory Hybrid 查询中上移；风险由 exact-once identity counts、short-span caps、Hybrid-only gate、test guard 和 bounded bonus 控制。该候选建立在 accepted `run-1779387282` 的 call/excerpt ranking 与早期 compact API-sequence ranking 之上，刻意避开 rejected `run-1779388137` 的 identifier-ranking/latency tradeoff。
 
-## run-1779388874
+## run-1779388874 compacted
+- summary: accepted compact unique API-sequence ranking scored 0.965664 with foundational=1.0, competitive=0.990385, semantic_vector=1.0, stability=1.0, and performance=0.820995; it improved Temporal worker registration and recorded `c_syntax_hybrid_operation_table_dispatch` as the main remaining rank regression. Full details remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779388874.patch`, report, and memory summary.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779388874.patch`
-- score: 0.965664 (foundational=1.000000, competitive=0.990385, accuracy=0.995192, semantic_vector=1.000000, research_judge=n/a, performance=0.820995, stability=1.000000)
+## run-1779390358
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779390358.patch`
+- score: 0.966613 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.814518, stability=1.000000)
 - cases: 43/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_api_sequence_scoring.rs`
-- key improvements: score_component:score 0.958944->0.9656637131488197; score_component:performance 0.789541->0.8209949875789128; case_score:temporal_go_repo_set_worker_registration_flow 0.625->1.0; case_rank:temporal_go_repo_set_worker_registration_flow 4->1; metric:temporal_sdk_go_index_ms 1251.0->1131.0; metric:temporal_sdk_go_register_index_ms 1918.0->1798.0; metric:temporal_samples_go_index_ms 1409.0->625.0; metric:temporal_samples_go_register_index_ms 2055.0->1652.0
-- known degradations: case_score:c_syntax_hybrid_operation_table_dispatch 1.0->0.75; case_rank:c_syntax_hybrid_operation_table_dispatch 1->2; metric:relay_teams_query_p95_ms 1291.0->1352.0; metric:c_syntax_fixture_query_p50_ms 1250.0->1292.0; metric:leveldb_cpp_index_ms 625.0->1266.0; metric:leveldb_cpp_register_index_ms 1712.0->1832.0; metric:semantic_vector_provider_probe_ms 344.0->546.0; metric:semantic_vector_query_p50_ms 586.0->626.0
-- latency metrics: cargo_fmt_check_ms=1514ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=101ms; relay_teams_index_ms=1170ms; relay_teams_register_index_ms=1797ms; relay_teams_query_p50_ms=1147ms; relay_teams_query_p95_ms=1352ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_designated_initializer_scoring.rs`
+- key improvements: score_component:competitive_capability 0.990385->1.0; case_score:c_syntax_hybrid_operation_table_dispatch 0.75->1.0; case_rank:c_syntax_hybrid_operation_table_dispatch 2->1; metric:cargo_build_debug_ms 323.0->243.0; metric:temporal_sdk_go_index_ms 1131.0->910.0; metric:temporal_sdk_go_register_index_ms 1798.0->1556.0; metric:temporal_samples_go_register_index_ms 1652.0->1212.0; metric:leveldb_cpp_index_ms 1266.0->1186.0
+- known degradations: score_component:performance 0.820995->0.8145178582125812; metric:leveldb_cpp_query_p50_ms 1129.0->1227.0; metric:leveldb_cpp_query_p95_ms 1307.0->1428.0; metric:cpp_syntax_fixture_index_ms 566.0->1207.0; metric:cpp_syntax_fixture_register_index_ms 1393.0->1772.0; metric:cpp_syntax_fixture_query_p50_ms 1189.0->1229.0; metric:cpp_syntax_fixture_query_p95_ms 1287.0->1471.0; metric:relay_teams_query_p50_ms 1147.0->1186.0
+- latency metrics: cargo_fmt_check_ms=1493ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=243ms; self_iteration_cargo_check_ms=102ms; temporal_sdk_go_index_ms=910ms; temporal_sdk_go_register_index_ms=1556ms; temporal_samples_go_index_ms=606ms; temporal_samples_go_register_index_ms=1212ms
 
 Adopted optimization notes:
 

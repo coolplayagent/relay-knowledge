@@ -347,6 +347,84 @@ async fn hybrid_chunks_prefer_complete_compact_api_sequences() {
 }
 
 #[tokio::test]
+async fn hybrid_chunks_prefer_multi_callback_operation_tables() {
+    let generated_path = "src/generated_table.c";
+    let ops_path = "src/driver_ops.c";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("generated-file", generated_path, "c"),
+            file("ops-file", ops_path, "c"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "generated-table",
+                "generated-file",
+                generated_path,
+                "static const struct rk_table_row rk_rows[] = {\n\
+                    [RK_STAGE_READ] = {\n\
+                        .name = \"read\",\n\
+                        .read = rk_driver_read,\n\
+                    },\n\
+                };",
+                range(15, 20),
+                None,
+            ),
+            chunk(
+                "driver-ops",
+                "ops-file",
+                ops_path,
+                "const struct rk_driver_ops rk_default_ops = {\n\
+                    .open = rk_driver_open,\n\
+                    .read = rk_driver_read,\n\
+                    .close = rk_driver_close,\n\
+                };",
+                range(26, 30),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "operation table read callback dispatch designated initializer",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    let summary = hits
+        .iter()
+        .map(|hit| format!("{}:{}={}", hit.path, hit.line_range.start, hit.score))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert_eq!(hits[0].path, ops_path, "{summary}");
+    let ops_score = lexical_hit_score(&hits, 26).expect("operation table should be recalled");
+    let generated_score = lexical_hit_score(&hits, 15).expect("generated table should be recalled");
+    assert!(
+        ops_score > generated_score,
+        "operation table should outrank sparse generated table: {ops_score} <= {generated_score}",
+    );
+}
+
+#[tokio::test]
 async fn hybrid_chunks_rank_source_definition_bodies_above_declaration_surfaces() {
     let header_path = "include/store/cache.hpp";
     let source_path = "src/cache.cpp";

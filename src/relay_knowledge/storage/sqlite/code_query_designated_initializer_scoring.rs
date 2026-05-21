@@ -13,9 +13,10 @@ const DESIGNATED_INITIALIZER_TERMS: &[&str] = &[
     "tables",
 ];
 const DESIGNATED_INITIALIZER_BASE_BONUS: f64 = 1.8;
-const DESIGNATED_INITIALIZER_MAX_BONUS: f64 = 5.8;
+const DESIGNATED_INITIALIZER_MAX_BONUS: f64 = 6.6;
 const DESIGNATOR_LINE_BONUS: f64 = 0.45;
 const CALLABLE_ASSIGNMENT_BONUS: f64 = 0.85;
+const OPERATION_TABLE_SURFACE_BONUS: f64 = 0.75;
 
 pub(super) fn designated_initializer_chunk_bonus(
     base_score: f64,
@@ -46,7 +47,12 @@ pub(super) fn designated_initializer_chunk_bonus(
     let coverage = matched_terms.len() as f64 / query_terms.len().max(1) as f64;
     let designator_density = shape.designator_lines.min(4) as f64 * DESIGNATOR_LINE_BONUS;
     let callable_density = shape.callable_assignments.min(3) as f64 * CALLABLE_ASSIGNMENT_BONUS;
-    (DESIGNATED_INITIALIZER_BASE_BONUS + designator_density + callable_density + (coverage * 0.6))
+    let operation_surface = operation_table_surface_bonus(&query_terms, &content_terms, &shape);
+    (DESIGNATED_INITIALIZER_BASE_BONUS
+        + designator_density
+        + callable_density
+        + operation_surface
+        + (coverage * 0.6))
         .min(DESIGNATED_INITIALIZER_MAX_BONUS)
 }
 
@@ -63,6 +69,46 @@ fn query_designated_initializer_intent(query: &str) -> bool {
 struct DesignatedInitializerShape {
     designator_lines: usize,
     callable_assignments: usize,
+}
+
+fn operation_table_surface_bonus(
+    query_terms: &[String],
+    content_terms: &[String],
+    shape: &DesignatedInitializerShape,
+) -> f64 {
+    if shape.callable_assignments < 2
+        || !query_terms.iter().any(|term| {
+            matches!(
+                term.as_str(),
+                "callback" | "callbacks" | "dispatch" | "operation" | "operations"
+            )
+        })
+        || !query_terms.iter().any(|term| {
+            matches!(
+                term.as_str(),
+                "initializer" | "initializers" | "table" | "tables"
+            )
+        })
+        || !content_terms.iter().any(|term| {
+            matches!(
+                term.as_str(),
+                "callback"
+                    | "callbacks"
+                    | "dispatch"
+                    | "handler"
+                    | "handlers"
+                    | "operation"
+                    | "operations"
+                    | "ops"
+                    | "vtable"
+                    | "vtbl"
+            )
+        })
+    {
+        return 0.0;
+    }
+
+    OPERATION_TABLE_SURFACE_BONUS
 }
 
 fn designated_initializer_shape(content: &str) -> DesignatedInitializerShape {
@@ -285,6 +331,64 @@ mod tests {
         assert!(
             multi_callable > sparse,
             "sparse={sparse} multi={multi_callable}"
+        );
+    }
+
+    #[test]
+    fn designated_initializer_bonus_detects_operation_surface_shorthand() {
+        let hybrid = request(
+            "operation table read callback dispatch designated initializer",
+            CodeQueryKind::Hybrid,
+        );
+        let generic_table = designated_initializer_chunk_bonus(
+            2.0,
+            &hybrid.query,
+            "const struct rk_driver_table rk_default_table = {\n\
+                .open = rk_driver_open,\n\
+                .read = rk_driver_read,\n\
+                .close = rk_driver_close,\n\
+            };",
+            "src/driver_table.c",
+            &hybrid,
+        );
+        let operation_table = designated_initializer_chunk_bonus(
+            2.0,
+            &hybrid.query,
+            "const struct rk_driver_ops rk_default_ops = {\n\
+                .open = rk_driver_open,\n\
+                .read = rk_driver_read,\n\
+                .close = rk_driver_close,\n\
+            };",
+            "src/driver_ops.c",
+            &hybrid,
+        );
+
+        assert!(
+            operation_table > generic_table + 0.5,
+            "operation_table={operation_table} generic_table={generic_table}"
+        );
+    }
+
+    #[test]
+    fn operation_surface_bonus_requires_multiple_callable_assignments() {
+        let hybrid = request(
+            "operation table read callback dispatch designated initializer",
+            CodeQueryKind::Hybrid,
+        );
+        let sparse_operation_table = designated_initializer_chunk_bonus(
+            2.0,
+            &hybrid.query,
+            "static const struct rk_driver_ops rk_default_ops = {\n\
+                .name = \"read\",\n\
+                .read = rk_driver_read,\n\
+            };",
+            "src/driver_ops.c",
+            &hybrid,
+        );
+
+        assert!(
+            sparse_operation_table < 5.0,
+            "sparse operation table should not receive operation-surface bonus: {sparse_operation_table}"
         );
     }
 
