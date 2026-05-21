@@ -35,7 +35,12 @@ pub(super) fn reference_excerpt(source_excerpt: Option<&str>, kind: &str, name: 
 fn call_site_excerpt(caller_excerpt: &str, callee: &str) -> String {
     let matching_line = caller_excerpt
         .lines()
-        .find(|line| line_looks_like_call_to(line, callee))
+        .find(|line| line_declares_local_callable(line, callee))
+        .or_else(|| {
+            caller_excerpt
+                .lines()
+                .find(|line| line_looks_like_call_to(line, callee))
+        })
         .or_else(|| {
             caller_excerpt
                 .lines()
@@ -65,6 +70,32 @@ fn line_looks_like_call_to(line: &str, callee: &str) -> bool {
 
 fn line_contains_identifier(line: &str, identifier: &str) -> bool {
     identifier_match_ranges(line, identifier).next().is_some()
+}
+
+pub(super) fn line_declares_local_callable(line: &str, callee_name: &str) -> bool {
+    let Some((_, end)) = identifier_match_ranges(line, callee_name).next() else {
+        return false;
+    };
+    callable_initializer_suffix(&line[end..])
+}
+
+fn callable_initializer_suffix(suffix: &str) -> bool {
+    let suffix = suffix.trim_start();
+    let initializer = suffix
+        .strip_prefix(":=")
+        .or_else(|| suffix.strip_prefix('='));
+    let Some(initializer) = initializer else {
+        return false;
+    };
+    let initializer = initializer.trim_start();
+
+    initializer.contains("=>")
+        || initializer.contains("lambda")
+        || initializer.contains("func(")
+        || initializer.contains("func ")
+        || initializer.contains("](")
+        || initializer.contains("] (")
+        || initializer.contains("[]")
 }
 
 fn identifier_match_ranges<'a>(

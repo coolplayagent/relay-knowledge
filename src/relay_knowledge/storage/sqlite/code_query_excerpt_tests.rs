@@ -42,6 +42,28 @@ int rk_dispatch_read(
 }
 
 #[test]
+fn call_excerpt_prefers_local_callable_declaration_over_later_invocation() {
+    let excerpt = call_excerpt(
+        Some(
+            r#"
+auto append_event = [&cache, &pipeline](const PipelineEvent& event) {
+    cache.Insert(event.key);
+    return pipeline(event);
+};
+total += append_event(event);
+"#,
+        ),
+        "RunPipeline",
+        "append_event",
+    );
+
+    assert_eq!(
+        excerpt,
+        "RunPipeline calls append_event: auto append_event = [&cache, &pipeline](const PipelineEvent& event) {"
+    );
+}
+
+#[test]
 fn reference_excerpt_includes_matching_source_line() {
     let excerpt = reference_excerpt(
         Some(

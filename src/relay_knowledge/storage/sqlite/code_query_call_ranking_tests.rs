@@ -80,6 +80,180 @@ async fn callees_rank_receiver_qualified_member_call_sites() {
 }
 
 #[tokio::test]
+async fn callees_preserve_execution_order_inside_matched_caller() {
+    let path = "src/dispatch.c";
+    let mut caller_symbol = symbol("dispatch-symbol", "dispatch-file", path, "rk_dispatch_read");
+    caller_symbol.signature = "int rk_dispatch_read(struct rk_driver_ops *ops)".to_owned();
+    caller_symbol.line_range = range(24, 43);
+    let caller_chunk = chunk(
+        "dispatch-chunk",
+        "dispatch-file",
+        path,
+        "int rk_dispatch_read(struct rk_driver_ops *ops) {\n\
+  if (!rk_validate_device(dev)) return -1;\n\
+  if (ops->open(dev) < 0) return -1;\n\
+  if (rk_lock_device(dev) < 0) return -1;\n\
+  int result = ops->read(dev, buffer, length);\n\
+  rk_unlock_device(dev);\n\
+  return result;\n\
+}",
+        Some("dispatch-symbol"),
+        range(24, 43),
+    );
+    let mut validate = call("validate-call", "dispatch-file", path);
+    validate.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    validate.caller_name = Some("rk_dispatch_read".to_owned());
+    validate.callee_name = "rk_validate_device".to_owned();
+    validate.target_hint = Some("rk_validate_device".to_owned());
+    validate.confidence_basis_points = 8_000;
+    validate.line_range = range(26, 26);
+    let mut open = call("open-call", "dispatch-file", path);
+    open.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    open.caller_name = Some("rk_dispatch_read".to_owned());
+    open.callee_name = "open".to_owned();
+    open.target_hint = Some("open".to_owned());
+    open.line_range = range(27, 27);
+    let mut lock = call("lock-call", "dispatch-file", path);
+    lock.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    lock.caller_name = Some("rk_dispatch_read".to_owned());
+    lock.callee_name = "rk_lock_device".to_owned();
+    lock.target_hint = Some("rk_lock_device".to_owned());
+    lock.confidence_basis_points = 8_000;
+    lock.line_range = range(28, 28);
+    let mut read = call("read-call", "dispatch-file", path);
+    read.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    read.caller_name = Some("rk_dispatch_read".to_owned());
+    read.callee_name = "read".to_owned();
+    read.target_hint = Some("read".to_owned());
+    read.line_range = range(29, 29);
+    let mut unlock = call("unlock-call", "dispatch-file", path);
+    unlock.caller_symbol_snapshot_id = Some("dispatch-symbol".to_owned());
+    unlock.caller_name = Some("rk_dispatch_read".to_owned());
+    unlock.callee_name = "rk_unlock_device".to_owned();
+    unlock.target_hint = Some("rk_unlock_device".to_owned());
+    unlock.confidence_basis_points = 8_000;
+    unlock.line_range = range(30, 30);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("dispatch-file", path, "c")],
+        symbols: vec![caller_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![read, unlock, lock, open, validate],
+        chunks: vec![caller_chunk],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("rk_dispatch_read", CodeQueryKind::Callees))
+        .await
+        .expect("callee query should succeed");
+    let excerpts = hits
+        .iter()
+        .map(|hit| hit.excerpt.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(excerpts[0].contains("rk_validate_device"));
+    assert!(excerpts[1].contains("open"));
+    assert!(excerpts[2].contains("rk_lock_device"));
+    assert!(excerpts[3].contains("read"));
+}
+
+#[tokio::test]
+async fn callees_rank_local_callable_declaration_before_lambda_body_calls() {
+    let path = "src/pipeline.cpp";
+    let mut caller_symbol = symbol("pipeline-symbol", "pipeline-file", path, "RunPipeline");
+    caller_symbol.signature = "int RunPipeline(Cache<std::string>& cache)".to_owned();
+    caller_symbol.line_range = range(18, 31);
+    let caller_chunk = chunk(
+        "pipeline-chunk",
+        "pipeline-file",
+        path,
+        "int RunPipeline(Cache<std::string>& cache, const std::vector<PipelineEvent>& events) {\n\
+  Pipeline pipeline;\n\
+  auto append_event = [&cache, &pipeline](const PipelineEvent& event) {\n\
+    cache.Insert(event.key);\n\
+    return pipeline(event);\n\
+  };\n\
+  for (const auto& event : events) {\n\
+    total += append_event(event);\n\
+  }\n\
+  return total;\n\
+}",
+        Some("pipeline-symbol"),
+        range(18, 31),
+    );
+    let mut insert = call("insert-call", "pipeline-file", path);
+    insert.caller_symbol_snapshot_id = Some("pipeline-symbol".to_owned());
+    insert.caller_name = Some("RunPipeline".to_owned());
+    insert.callee_name = "Insert".to_owned();
+    insert.target_hint = Some("Insert".to_owned());
+    insert.confidence_basis_points = 5_000;
+    insert.line_range = range(23, 23);
+    let mut pipeline = call("pipeline-call", "pipeline-file", path);
+    pipeline.caller_symbol_snapshot_id = Some("pipeline-symbol".to_owned());
+    pipeline.caller_name = Some("RunPipeline".to_owned());
+    pipeline.callee_name = "pipeline".to_owned();
+    pipeline.target_hint = Some("pipeline".to_owned());
+    pipeline.line_range = range(24, 24);
+    let mut append_event = call("append-event-call", "pipeline-file", path);
+    append_event.caller_symbol_snapshot_id = Some("pipeline-symbol".to_owned());
+    append_event.caller_name = Some("RunPipeline".to_owned());
+    append_event.callee_name = "append_event".to_owned();
+    append_event.target_hint = Some("append_event".to_owned());
+    append_event.line_range = range(28, 28);
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("pipeline-file", path, "cpp")],
+        symbols: vec![caller_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: vec![pipeline, insert, append_event],
+        chunks: vec![caller_chunk],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("RunPipeline", CodeQueryKind::Callees))
+        .await
+        .expect("callee query should succeed");
+    let excerpts = hits
+        .iter()
+        .map(|hit| hit.excerpt.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(excerpts[0].contains("append_event"));
+    assert!(excerpts[1].contains("Insert"));
+    assert!(excerpts[2].contains("pipeline"));
+}
+
+#[tokio::test]
 async fn callees_match_scoped_caller_query_from_symbol_signature() {
     let path = "table/table.cc";
     let mut caller_symbol = symbol("internal-get-symbol", "table-file", path, "InternalGet");

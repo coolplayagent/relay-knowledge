@@ -587,10 +587,22 @@ pub(super) fn callee_related_name_bonus(
                 .iter()
                 .any(|callee_token| callee_token == query_token)
     }) {
-        0.35 + (1.2 / callee_identifier_part_count(callee_name))
+        if callee_name_is_query_fragment(&query_tokens, &callee_tokens) {
+            0.15
+        } else {
+            0.35 + (1.2 / callee_identifier_part_count(callee_name))
+        }
     } else {
         0.0
     }
+}
+
+fn callee_name_is_query_fragment(query_tokens: &[String], callee_tokens: &[String]) -> bool {
+    !callee_tokens.is_empty()
+        && query_tokens.len() > callee_tokens.len()
+        && callee_tokens
+            .iter()
+            .all(|callee| query_tokens.iter().any(|query| query == callee))
 }
 
 pub(super) fn directional_call_context_bonus(

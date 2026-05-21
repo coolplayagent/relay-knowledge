@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rusqlite::{Connection, Row, params_from_iter, types::Value};
 
 use crate::{
@@ -14,7 +16,7 @@ use super::{
     code_query_call_direction::{
         call_direction_fts_filter_sql, fts_values_for_limited_with_language_and_call_direction,
     },
-    code_query_excerpts::call_excerpt,
+    code_query_excerpts::{call_excerpt, line_declares_local_callable},
     code_query_flow_scoring::caller_context_density_bonus,
     code_query_line_ranges::{call_result_line_range, optional_line_range_with_symbol_context},
     code_query_path_ranking::{
@@ -32,6 +34,13 @@ struct CallIdentityRows {
     rows: Vec<CallRow>,
     saturated: bool,
 }
+
+type CalleeExecutionGroupKey = (String, String, u32, u32);
+type CalleeExecutionSiteKey = (CalleeExecutionGroupKey, u32, u32, String, String);
+type CalleeExecutionOrder = BTreeMap<CalleeExecutionSiteKey, (usize, usize)>;
+
+const CALLEE_EXECUTION_ORDER_STEP: f64 = 0.18;
+const LOCAL_CALLABLE_DECLARATION_BONUS: f64 = 1.8;
 
 pub(super) fn search_calls(
     connection: &Connection,
@@ -243,6 +252,7 @@ fn call_rows_to_hits(
     };
     let call_site_counts = (request.code_query_kind == CodeQueryKind::Callers)
         .then(|| caller_target_call_counts(&rows));
+    let callee_execution_order = callee_execution_order(&rows, request);
 
     rows.into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
@@ -353,6 +363,13 @@ fn call_rows_to_hits(
                     row.caller_excerpt.as_deref(),
                     request,
                 )
+                + local_callable_declaration_bonus(
+                    base_score,
+                    row.caller_excerpt.as_deref(),
+                    &row.callee_name,
+                    request,
+                )
+                + callee_execution_order_bonus(&callee_execution_order, &row, request)
                 + repeated_site_bonus
                 + callee_related_name_bonus(query, &row.callee_name, request);
             let score = score + source_path_bonus + test_path_penalty + example_path_penalty;
@@ -401,6 +418,111 @@ fn call_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn callee_execution_order(
+    rows: &[CallRow],
+    request: &CodeRetrievalRequest,
+) -> CalleeExecutionOrder {
+    if request.code_query_kind != CodeQueryKind::Callees {
+        return BTreeMap::new();
+    }
+
+    let mut grouped = BTreeMap::<CalleeExecutionGroupKey, Vec<CalleeExecutionSiteKey>>::new();
+    for row in rows {
+        let Some(group_key) = callee_execution_group_key(row) else {
+            continue;
+        };
+        let site_key = callee_execution_site_key(group_key.clone(), row);
+        grouped.entry(group_key).or_default().push(site_key);
+    }
+
+    let mut order = BTreeMap::new();
+    for sites in grouped.values_mut() {
+        sites.sort();
+        sites.dedup();
+        if sites.len() <= 1 {
+            continue;
+        }
+        let site_count = sites.len();
+        for (position, site) in sites.iter().cloned().enumerate() {
+            order.insert(site, (position, site_count));
+        }
+    }
+
+    order
+}
+
+fn callee_execution_group_key(row: &CallRow) -> Option<CalleeExecutionGroupKey> {
+    let caller = row
+        .caller_symbol_snapshot_id
+        .as_deref()
+        .or(row.caller_name.as_deref())?;
+    let (caller_start, caller_end) = row
+        .caller_line_range
+        .as_ref()
+        .map_or((0, 0), |range| (range.start, range.end));
+
+    Some((
+        row.path.clone(),
+        caller.to_owned(),
+        caller_start,
+        caller_end,
+    ))
+}
+
+fn callee_execution_site_key(
+    group_key: CalleeExecutionGroupKey,
+    row: &CallRow,
+) -> CalleeExecutionSiteKey {
+    (
+        group_key,
+        row.line_range.start,
+        row.line_range.end,
+        row.callee_name.clone(),
+        row.target_hint.clone().unwrap_or_default(),
+    )
+}
+
+fn callee_execution_order_bonus(
+    order: &CalleeExecutionOrder,
+    row: &CallRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if request.code_query_kind != CodeQueryKind::Callees {
+        return 0.0;
+    }
+    let Some(group_key) = callee_execution_group_key(row) else {
+        return 0.0;
+    };
+    let site_key = callee_execution_site_key(group_key, row);
+    let Some((position, site_count)) = order.get(&site_key) else {
+        return 0.0;
+    };
+
+    site_count.saturating_sub(*position).min(5) as f64 * CALLEE_EXECUTION_ORDER_STEP
+}
+
+fn local_callable_declaration_bonus(
+    base_score: f64,
+    caller_excerpt: Option<&str>,
+    callee_name: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::Callees {
+        return 0.0;
+    }
+    let Some(caller_excerpt) = caller_excerpt else {
+        return 0.0;
+    };
+    if caller_excerpt
+        .lines()
+        .any(|line| line_declares_local_callable(line, callee_name))
+    {
+        LOCAL_CALLABLE_DECLARATION_BONUS
+    } else {
+        0.0
+    }
 }
 
 fn call_callee_identity_query(request: &CodeRetrievalRequest) -> Option<SymbolIdentityQuery> {

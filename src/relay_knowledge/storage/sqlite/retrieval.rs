@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    thread,
+    time::Duration,
+};
 
 mod advanced;
 
@@ -39,10 +43,44 @@ const LOCAL_SEMANTIC_MODEL: &str = "relay-local-token-semantic-v1";
 const LOCAL_VECTOR_MODEL: &str = "relay-local-hash-ann-v1";
 pub(super) const LOCAL_TOKENIZER_VERSION: &str = "relay-normalized-terms-v2";
 const LOCAL_VECTOR_DIMENSION: usize = 16;
+const GRAPH_RETRIEVAL_SCHEMA_RETRY_DELAYS_MS: [u64; 4] = [10, 30, 90, 270];
 
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
-    connection.execute_batch(
-        "
+    execute_retrieval_schema(connection)?;
+    if migration::derived_documents_missing(connection)? {
+        migration::rebuild_bm25_documents(connection)?;
+    }
+
+    Ok(())
+}
+
+fn execute_retrieval_schema(connection: &Connection) -> Result<(), StorageError> {
+    for delay_ms in GRAPH_RETRIEVAL_SCHEMA_RETRY_DELAYS_MS {
+        match connection.execute_batch(RETRIEVAL_SCHEMA_SQL) {
+            Ok(()) => return Ok(()),
+            Err(error) if graph_retrieval_schema_error_is_retryable(&error) => {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            Err(error) => return Err(StorageError::from(error)),
+        }
+    }
+
+    connection
+        .execute_batch(RETRIEVAL_SCHEMA_SQL)
+        .map_err(StorageError::from)
+}
+
+fn graph_retrieval_schema_error_is_retryable(error: &rusqlite::Error) -> bool {
+    graph_retrieval_schema_error_message_is_retryable(&error.to_string())
+}
+
+fn graph_retrieval_schema_error_message_is_retryable(message: &str) -> bool {
+    message.contains("vtable constructor failed: graph_bm25")
+        || message.contains("database schema is locked")
+        || message.contains("database is locked")
+}
+
+const RETRIEVAL_SCHEMA_SQL: &str = "
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_bm25 USING fts5(
             document_id UNINDEXED,
             document_kind UNINDEXED,
@@ -97,14 +135,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         ON graph_semantic_documents(source_scope, created_graph_version DESC);
         CREATE INDEX IF NOT EXISTS graph_vector_documents_scope_version
         ON graph_vector_documents(source_scope, created_graph_version DESC);
-        ",
-    )?;
-    if migration::derived_documents_missing(connection)? {
-        migration::rebuild_bm25_documents(connection)?;
-    }
-
-    Ok(())
-}
+        ";
 
 pub(super) struct EvidenceDocumentInput<'a> {
     pub evidence_id: &'a str,
