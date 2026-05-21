@@ -27,6 +27,9 @@ pub(super) fn collect_manual_nodes(
         if let Some((name, range)) = manual_call(context, node) {
             upsert_reference(output, reference_record(context, &name, "call", &range)?);
         }
+        if let Some((name, kind, range)) = manual_reference(context, node) {
+            upsert_reference(output, reference_record(context, &name, kind, &range)?);
+        }
         push_children_reverse(node, &mut stack);
     }
 
@@ -329,7 +332,102 @@ fn manual_call(context: &FileParseContext<'_>, node: Node<'_>) -> Option<(String
         .or_else(|| node.child_by_field_name("constructor"))
         .or_else(|| node.child(0))?;
 
-    last_identifier_text(context.content, function).map(|name| (name, syntax_range(function)))
+    callable_expression_name(context.content, function)
+}
+
+fn callable_expression_name(content: &str, function: Node<'_>) -> Option<(String, SyntaxRange)> {
+    if function.kind() == "subscript_expression" {
+        let argument = function.child_by_field_name("argument");
+        for index in 0..function.named_child_count() {
+            let child = function.named_child(u32::try_from(index).ok()?)?;
+            if argument.is_some_and(|argument| node_contains(argument, child)) {
+                continue;
+            }
+            if let Some(callable) = callable_expression_name(content, child) {
+                return Some(callable);
+            }
+        }
+    }
+
+    last_identifier_text(content, function).map(|name| (name, syntax_range(function)))
+}
+
+fn manual_reference(
+    context: &FileParseContext<'_>,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    if !matches!(context.language_id, "c" | "cpp") || !c_family_reference_node(node.kind()) {
+        return None;
+    }
+    let name = node_text(context.content, node);
+    if !c_family_reference_name(&name) {
+        return None;
+    }
+    if node.kind() == "type_identifier" && c_family_type_reference_context(node) {
+        return Some((name, "type", syntax_range(node)));
+    }
+    if c_family_value_reference_context(node) {
+        return Some((name, "implementation", syntax_range(node)));
+    }
+
+    None
+}
+
+fn c_family_reference_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "identifier" | "field_identifier" | "namespace_identifier" | "type_identifier"
+    )
+}
+
+fn c_family_reference_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn c_family_type_reference_context(node: Node<'_>) -> bool {
+    has_ancestor_kind(node, "field_declaration")
+        || has_ancestor_kind(node, "parameter_declaration")
+        || has_ancestor_kind(node, "qualified_type_identifier")
+        || has_ancestor_kind(node, "scoped_type_identifier")
+}
+
+fn c_family_value_reference_context(node: Node<'_>) -> bool {
+    has_ancestor_kind(node, "initializer_list")
+        || has_non_argument_subscript_ancestor(node)
+        || has_ancestor_kind(node, "qualified_identifier")
+        || has_ancestor_kind(node, "scoped_identifier")
+}
+
+fn has_non_argument_subscript_ancestor(mut node: Node<'_>) -> bool {
+    while let Some(parent) = node.parent() {
+        if parent.kind() == "subscript_expression" {
+            return !parent
+                .child_by_field_name("argument")
+                .is_some_and(|argument| node_contains(argument, node));
+        }
+        node = parent;
+    }
+
+    false
+}
+
+fn has_ancestor_kind(mut node: Node<'_>, kind: &str) -> bool {
+    while let Some(parent) = node.parent() {
+        if parent.kind() == kind {
+            return true;
+        }
+        node = parent;
+    }
+
+    false
+}
+
+fn node_contains(parent: Node<'_>, child: Node<'_>) -> bool {
+    parent.start_byte() <= child.start_byte() && parent.end_byte() >= child.end_byte()
 }
 
 fn constructed_type_call(content: &str, node: Node<'_>) -> Option<(String, SyntaxRange)> {

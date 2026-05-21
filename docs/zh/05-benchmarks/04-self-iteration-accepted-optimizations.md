@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779323184-c-family-usage-reference-facts
+- 算法/架构：C/C++ manual parser 在 tree-sitter tags 之外，为 initializer list、subscript callable、field declaration type、qualified/scoped identifier usage 提取有界 non-call reference facts；subscripted function-pointer call 的 callee 选择 callable base identifier；exact `references` 查询在 reference facts 为空且 query 是单一/scoped identity 时合并有界 chunk fallback。
+- 不变量：只作用于 `c`/`cpp` parser fact extraction 与 exact references 空结果 fallback，不改变 SQLite schema、FTS MATCH 构造、candidate limit、已有 reference 命中的排序、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；reference 名称必须是安全 ASCII identifier，subscript argument 不会替代 callable，既有 call/reference 去重继续阻止同一 site 重复写入，且没有仓库名、路径名、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：C/C++ alias、designated initializer、function-pointer table 和 namespace alias usage 会进入 fresh graph facts，cached 或 parser-missed exact reference 查询仍可通过源码 chunk 召回，预期改善 `references`、`callers/callees` 和 Hybrid 对表驱动 dispatch、template alias 与 namespace alias flow 的召回；风险是大型 C/C++ fresh index reference row 数小幅增加，且少数 exact reference 空结果查询会返回 lexical chunk，受上下文白名单、identifier validation、path/language filter、bounded candidate windows、空结果 gate 和最终 top-k 约束。
 ## 候选优化说明：run-1779320316-c-typedef-alias-type-symbols
 - 算法/架构：C parser 对顶层 `typedef` declaration 不再整体跳过，而是把每个合法 declarator 名称索引为 `type` symbol；同时 exact `definition` 查询在 symbol 结果缺少 canonical leaf identity 命中时合并有界 lexical chunk 计划，并给声明形态的 exact chunk 小幅加权，让已缓存旧索引、上下文 symbol 命中或 parser-missed 类型别名仍可通过源码声明召回。
 - 不变量：function pointer variable 与 typedef function alias 不会被写成 `function` 或 `function_declaration`，call graph 只由真实 call/reference facts 重建；fallback 只在 `definition` exact identifier 缺少同名 canonical symbol 时运行，不改变已有 exact symbol 命中的排序，不改变 SQLite schema、FTS 文档格式、candidate limit、repo-set overlay、semantic/vector、env/paths/net、CLI/API、安装发布或 harness，且没有仓库名、路径名、case id、query 字符串或 fixture 枚举。
@@ -876,16 +880,8 @@ b fn alpha() {}\n"); diff --git a/src/relay_knowledge/domain/code_repository.rs 
 - latency metrics: cargo_build_release_ms=47327ms; cargo_fmt_check_ms=1082ms; cargo_clippy_ms=297ms; cargo_test_ms=7399ms; relay_teams_index_ms=20009ms; relay_teams_register_index_ms=20140ms; relay_teams_query_p50_ms=402ms; relay_teams_query_p95_ms=799ms
 Adopted optimization notes:
      source_scope, document_kind, record_id, path, language_id, content +                    ) +                    VALUES (?1, 'symbol', ?2, ?2, 'rust', 'target') +                    ", +                    rusqlite::params!["scope", path], +                ) +                .expect("search row should insert"); +        } + +        let transaction = connection.transaction().expect("transaction should open"); +        delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"]) +            .expect("paths should delete"); +        transaction.commit().expect("transaction should commit"); + +        for table in PATH_TABLES +            .iter() +            .copied() +            .chain(["code_repository_search"]) +        { +            let remaining = connection +                .query_row( +                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"), +                    [], +                    |row| row.get::<_, usize>(0), +                ) +                .expect("remaining row count should load"); +            assert_eq!(remaining, 1, "{table} should keep only the unmatched path"); +        } +    } +} tokens used 217,237
-## 20260518T114107Z
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T114107Z.patch`
-- score: 0.94048 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.85, performance=0.8232, stability=1.0)
-- cases: 45/45 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_build_release_ms=50953ms; cargo_fmt_check_ms=1136ms; cargo_clippy_ms=387ms; cargo_test_ms=7592ms; relay_teams_index_ms=46379ms; relay_teams_register_index_ms=46512ms; relay_teams_query_p50_ms=410ms; relay_teams_query_p95_ms=816ms
-Adopted optimization notes:
-d' +          AND EXISTS ( +                SELECT 1 +                FROM unique_path_symbol +                WHERE unique_path_symbol.name = code_repository_references.name +                  AND unique_path_symbol.path = code_repository_references.path +          ) ", params![source_scope], )?; transaction.execute( " -        UPDATE code_repository_references AS reference +        WITH symbol_names AS ( +            SELECT DISTINCT name +            FROM code_repository_symbols +            WHERE source_scope = ?1 +        ) +        UPDATE code_repository_references SET resolution_state = 'ambiguous', confidence_basis_points = 5000, confidence_tier = 'ambiguous' -        WHERE reference.source_scope = ?1 -          AND reference.resolution_state = 'unresolved' -          AND EXISTS ( -                SELECT 1 -                FROM code_repository_symbols AS symbol -                WHERE symbol.source_scope = reference.source_scope -                  AND symbol.name = reference.name -            ) +        WHERE source_scope = ?1 +          AND resolution_state = 'unresolved' +          AND name IN (SELECT name FROM symbol_names) ", params![source_scope], )?; tokens used 189,842
+## 20260518T114107Z compacted
+- summary: accepted finalize reference-resolution SQL compaction with score 0.94048 and 45/45 cases passed; raw patch, metrics, and notes remain in `.git/relay-knowledge-self-iteration/patches/20260518T114107Z.patch` and historical reports.
 ## 20260518T114915Z
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches/20260518T114915Z.patch`
 - score: 0.94613 (foundational=1.0, competitive=1.0, accuracy=1.0, semantic_vector=1.0, research_judge=0.87, performance=0.831535, stability=1.0)
@@ -997,3 +993,18 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779323184
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779323184.patch`
+- score: 0.880741 (foundational=0.947917, competitive=0.679487, accuracy=0.813702, semantic_vector=1.000000, research_judge=n/a, performance=0.792844, stability=1.000000)
+- cases: 36/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/manual.rs`, `src/relay_knowledge/code/parser_c_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_reference_ranking_tests.rs`
+- key improvements: score_component:score 0.858679->0.8807406772458526; score_component:competitive_capability 0.557692->0.6794871794871795; case:c_syntax_references_pipeline_function_pointer_array false->true; case:c_syntax_references_designated_initializer_read false->true; case:cpp_syntax_references_nested_using_alias false->true; case:cpp_syntax_references_namespace_alias false->true; metric:self_iteration_cargo_fmt_check_ms 363.0->322.0; metric:temporal_sdk_go_index_ms 1368.0->1271.0
+- known degradations: score_component:performance 0.819138->0.7928435060667026; metric:cargo_fmt_check_ms 2030.0->2157.0; metric:cargo_build_debug_ms 303.0->343.0; metric:leveldb_cpp_query_p95_ms 1268.0->1776.0; metric:c_syntax_fixture_index_ms 788.0->1088.0; metric:c_syntax_fixture_register_index_ms 1861.0->1952.0; metric:c_syntax_fixture_query_p50_ms 1108.0->1332.0; metric:c_syntax_fixture_query_p95_ms 1292.0->1548.0
+- latency metrics: cargo_fmt_check_ms=2157ms; self_iteration_cargo_fmt_check_ms=322ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1271ms; temporal_sdk_go_register_index_ms=2038ms; temporal_samples_go_index_ms=803ms; temporal_samples_go_register_index_ms=1547ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+

@@ -357,6 +357,101 @@ void f(int); void f(double);
 }
 
 #[test]
+fn c_initializer_and_subscripted_function_pointer_uses_are_references() {
+    let snapshot = parse_source_snapshot(
+        "src/dispatch.c",
+        br#"
+struct rk_device;
+typedef int (*rk_stage_fn)(struct rk_device *dev);
+int rk_validate_device(struct rk_device *dev);
+int rk_driver_read(struct rk_device *dev);
+
+static rk_stage_fn rk_pipeline[] = {
+    rk_validate_device,
+};
+
+static const struct rk_table_row {
+    rk_stage_fn read;
+} rk_rows[] = {
+    [0] = {
+        .read = rk_driver_read,
+    },
+};
+
+int rk_run_pipeline(struct rk_device *dev)
+{
+    return rk_pipeline[0](dev) + rk_rows[0].read(dev);
+}
+"#,
+    );
+
+    assert!(snapshot.references.iter().any(|reference| {
+        reference.name == "rk_driver_read" && reference.kind == "implementation"
+    }));
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .any(|reference| reference.name == "rk_pipeline"),
+        "function pointer arrays should remain searchable by their callable identifier"
+    );
+    assert!(
+        snapshot
+            .calls
+            .iter()
+            .any(|call| call.callee_name == "rk_pipeline"),
+        "subscripted function pointer calls should use the array identifier, not the index"
+    );
+    assert!(
+        !snapshot.calls.iter().any(|call| call.callee_name == "0"),
+        "subscript arguments should not replace the callable identifier"
+    );
+}
+
+#[test]
+fn cpp_type_and_namespace_alias_uses_are_references() {
+    let snapshot = parse_source_snapshot(
+        "src/cache.cpp",
+        br#"
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace rk::store {
+
+template <typename Key>
+class Cache {
+ public:
+    using KeyList = std::vector<Key>;
+
+ private:
+    KeyList keys_;
+};
+
+namespace cache_alias = rk::store;
+
+std::unique_ptr<Cache<std::string>> BuildCache()
+{
+    return std::make_unique<cache_alias::Cache<std::string>>();
+}
+
+}  // namespace rk::store
+"#,
+    );
+
+    assert!(
+        snapshot
+            .references
+            .iter()
+            .any(|reference| reference.name == "KeyList" && reference.kind == "type"),
+        "field declarations should expose type-alias uses as type references"
+    );
+    assert!(snapshot.references.iter().any(|reference| {
+        reference.name == "cache_alias" && reference.kind == "implementation"
+    }));
+}
+
+#[test]
 fn cpp_function_definitions_own_calls_inside_namespaces() {
     let snapshot = parse_source_snapshot(
         "db/db_impl.cc",

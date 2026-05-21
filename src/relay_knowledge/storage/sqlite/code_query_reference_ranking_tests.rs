@@ -71,6 +71,47 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
     assert!(hits[0].excerpt.contains("RuntimeOwner.TargetThing()"));
 }
 
+#[tokio::test]
+async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_missing() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("pipeline-file", "src/pipeline.cpp", "cpp")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![chunk(
+            "pipeline-chunk",
+            "pipeline-file",
+            "src/pipeline.cpp",
+            "namespace cache_alias = rk::store;\n\
+             auto cache = std::make_unique<cache_alias::Cache<std::string>>();",
+            range(7, 8),
+        )],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("cache_alias", CodeQueryKind::References))
+        .await
+        .expect("reference fallback query should succeed");
+
+    assert_eq!(hits[0].path, "src/pipeline.cpp");
+    assert!(hits[0].excerpt.contains("cache_alias::Cache"));
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");

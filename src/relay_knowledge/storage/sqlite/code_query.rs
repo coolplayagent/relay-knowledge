@@ -126,6 +126,9 @@ fn search_code_with_status(
     ) {
         hits.extend(search_references(connection, status, request)?);
     }
+    if references_query_needs_chunk_fallback(request, &hits) {
+        hits.extend(search_chunks(connection, status, request)?);
+    }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Callers | CodeQueryKind::Callees
@@ -162,6 +165,15 @@ fn definition_query_needs_chunk_fallback(
             .as_deref()
             .is_some_and(|symbol_id| canonical_symbol_leaf_matches(symbol_id, identity.leaf_name()))
     })
+}
+
+fn references_query_needs_chunk_fallback(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    request.code_query_kind == CodeQueryKind::References
+        && hits.is_empty()
+        && SymbolIdentityQuery::from_query(&request.query).is_some()
 }
 
 fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, leaf_name: &str) -> bool {
