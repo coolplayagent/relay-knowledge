@@ -275,30 +275,29 @@ int accepts_callback(int cb(int));
 }
 
 #[test]
-fn c_typedef_function_types_are_not_function_symbols() {
-    let snapshot = parse_source_snapshot(
-        "include/linux/comparison.h",
-        br#"
+fn c_typedef_function_types_are_type_symbols_not_callable_functions() {
+    let content = r#"
 typedef int comparison_fn_t(const void *, const void *);
 typedef int (*callback_fn_t)(void);
 int compare_values(const void *, const void *);
-"#,
-    );
+"#;
+    let snapshot = parse_source_snapshot("include/linux/comparison.h", content.as_bytes());
 
-    assert!(
-        !snapshot
+    for name in ["comparison_fn_t", "callback_fn_t"] {
+        let alias = snapshot
             .symbols
             .iter()
-            .any(|symbol| symbol.name == "comparison_fn_t"),
-        "typedef function aliases should not be indexed as callable functions"
-    );
-    assert!(
-        !snapshot
-            .symbols
-            .iter()
-            .any(|symbol| symbol.name == "callback_fn_t"),
-        "typedef function pointer aliases should not be indexed as callable functions"
-    );
+            .find(|symbol| symbol.name == name)
+            .unwrap_or_else(|| panic!("{name} should be indexed as a type alias"));
+        assert_eq!(alias.kind, "type");
+        assert!(
+            !snapshot.symbols.iter().any(|symbol| {
+                symbol.name == name
+                    && matches!(symbol.kind.as_str(), "function" | "function_declaration")
+            }),
+            "typedef aliases should not be indexed as callable functions"
+        );
+    }
     assert!(snapshot.symbols.iter().any(|symbol| {
         symbol.name == "compare_values" && symbol.kind == "function_declaration"
     }));

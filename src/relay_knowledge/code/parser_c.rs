@@ -19,9 +19,12 @@ pub(super) fn manual_definitions(
                     .map(|name| vec![(name, "function", syntax_range(node))])
             })
             .unwrap_or_default(),
+        "type_definition" if !has_ancestor_kind(node, "compound_statement") => {
+            typedef_type_symbols(content, node)
+        }
         "declaration" if !has_ancestor_kind(node, "compound_statement") => {
             if is_typedef_declaration(content, node) {
-                Vec::new()
+                typedef_type_symbols(content, node)
             } else {
                 let mut symbols = function_declaration_symbols(content, node);
                 symbols.extend(top_level_data_symbols(content, node));
@@ -40,6 +43,21 @@ pub(super) fn manual_definitions(
         }
         _ => Vec::new(),
     }
+}
+
+fn typedef_type_symbols(
+    content: &str,
+    declaration: Node<'_>,
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    let range = syntax_range(declaration);
+    let mut cursor = declaration.walk();
+
+    declaration
+        .children_by_field_name("declarator", &mut cursor)
+        .filter_map(|declarator| declarator_name(content, declarator))
+        .filter(|name| data_symbol_name(name))
+        .map(|name| (name, "type", range.clone()))
+        .collect()
 }
 
 fn top_level_data_symbols(
@@ -228,7 +246,10 @@ fn is_function_pointer_variable(function_declarator: Node<'_>) -> bool {
 fn declarator_name(content: &str, node: Node<'_>) -> Option<String> {
     let mut stack = vec![node];
     while let Some(current) = stack.pop() {
-        if matches!(current.kind(), "identifier" | "field_identifier") {
+        if matches!(
+            current.kind(),
+            "identifier" | "field_identifier" | "type_identifier"
+        ) {
             return Some(node_text(content, current));
         }
         if let Some(declarator) = current.child_by_field_name("declarator") {
