@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-        CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRetrievalHit, FreshnessPolicy,
         RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
@@ -212,6 +212,84 @@ async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
 }
 
 #[tokio::test]
+async fn path_import_queries_rank_public_header_importers_before_implementation_importers() {
+    let header_path = "include/store/pipeline.hpp";
+    let implementation_path = "src/cache.cpp";
+    let test_path = "tests/fake_cache.cpp";
+    let target_path = "include/store/cache.hpp";
+    let mut header_import = import(
+        "header-cache-import",
+        "header-file",
+        header_path,
+        "#include \"store/cache.hpp\"",
+    );
+    header_import.target_hint = Some(target_path.to_owned());
+    header_import.line_range = range(3, 3);
+    let mut implementation_import = import(
+        "implementation-cache-import",
+        "implementation-file",
+        implementation_path,
+        "#include \"store/cache.hpp\"",
+    );
+    implementation_import.target_hint = Some(target_path.to_owned());
+    implementation_import.line_range = range(1, 1);
+    let mut test_import = import(
+        "test-cache-import",
+        "test-file",
+        test_path,
+        "#include \"store/cache.hpp\"",
+    );
+    test_import.target_hint = Some(target_path.to_owned());
+    test_import.line_range = range(1, 1);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 4,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("header-file", header_path, "cpp"),
+            file("implementation-file", implementation_path, "cpp"),
+            file("test-file", test_path, "cpp"),
+            file("target-file", target_path, "cpp"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![implementation_import, test_import, header_import],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("store/cache.hpp", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, header_path);
+    let header_score = score_for_path(&hits, header_path).expect("header import should match");
+    let implementation_score =
+        score_for_path(&hits, implementation_path).expect("implementation import should match");
+    let test_score = score_for_path(&hits, test_path).expect("test import should match");
+    assert!(
+        header_score > implementation_score,
+        "public header importer should outrank implementation importer: {header_score} <= {implementation_score}",
+    );
+    assert!(
+        implementation_score > test_score,
+        "implementation importer should still outrank test importer: {implementation_score} <= {test_score}",
+    );
+}
+
+#[tokio::test]
 async fn path_import_queries_demote_test_importers_without_test_intent() {
     let production_path = "table/filter_block.cc";
     let test_path = "table/filter_block_test.cc";
@@ -262,6 +340,12 @@ async fn path_import_queries_demote_test_importers_without_test_intent() {
 
     assert_eq!(hits[0].path, production_path);
     assert_eq!(hits[1].path, test_path);
+}
+
+fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
+    hits.iter()
+        .find(|hit| hit.path == path)
+        .map(|hit| hit.score)
 }
 
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {

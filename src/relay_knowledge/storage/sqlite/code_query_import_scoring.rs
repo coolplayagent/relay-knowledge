@@ -27,6 +27,28 @@ pub(super) fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
     }
 }
 
+pub(super) fn import_public_dependency_surface_bonus(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || !query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let target_is_header =
+        target_hint.is_some_and(path_has_header_extension) || path_has_header_extension(query);
+    if !target_is_header
+        || !path_has_header_extension(path)
+        || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    0.85
+}
+
 pub(super) fn import_target_symbol_bonus(query: &str, matched_symbol_name: Option<&str>) -> f64 {
     let Some(matched_symbol_name) = matched_symbol_name else {
         return 0.0;
@@ -233,6 +255,31 @@ fn parent_dir(path: &str) -> Option<&str> {
     path.rsplit_once('/')
         .map(|(parent, _)| parent)
         .filter(|parent| !parent.is_empty())
+}
+
+fn path_has_header_extension(path: &str) -> bool {
+    path.rsplit('/')
+        .next()
+        .and_then(|file_name| file_name.rsplit_once('.').map(|(_, extension)| extension))
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "h" | "hh" | "hpp" | "hxx" | "inc" | "ipp"
+            )
+        })
+}
+
+fn path_looks_like_test_or_benchmark(path: &str) -> bool {
+    path.to_ascii_lowercase().split('/').any(|segment| {
+        matches!(
+            segment,
+            "test" | "tests" | "__tests__" | "testing" | "bench" | "benchmark" | "benchmarks"
+        ) || segment.ends_with("_test")
+            || segment.ends_with(".test.ts")
+            || segment.ends_with(".test.tsx")
+            || segment.ends_with(".spec.ts")
+            || segment.ends_with(".spec.tsx")
+    })
 }
 
 fn named_import_binding_count_for_query(module: &str, query: &str) -> Option<usize> {

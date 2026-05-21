@@ -79,6 +79,71 @@ async fn hybrid_symbols_rank_header_declarations_above_matching_implementations(
 }
 
 #[tokio::test]
+async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor() {
+    let path = "include/store/cache.hpp";
+    let mut class = symbol(
+        "cache-class",
+        "cache-file",
+        path,
+        "class",
+        "class Cache {",
+        range(9, 27),
+    );
+    class.name = "Cache".to_owned();
+    class.qualified_name = "rk::store::Cache".to_owned();
+    class.canonical_symbol_id = "repo://repo/include::store::cache::rk::store.Cache".to_owned();
+    let mut constructor = symbol(
+        "cache-constructor",
+        "cache-file",
+        path,
+        "method",
+        "Cache(std::unique_ptr<Writer> writer)",
+        range(20, 20),
+    );
+    constructor.name = "Cache".to_owned();
+    constructor.qualified_name = "rk::store::Cache::Cache".to_owned();
+    constructor.canonical_symbol_id =
+        "repo://repo/include::store::cache::rk::store.Cache.Cache".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("cache-file", path)],
+        symbols: vec![constructor, class],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("Cache", CodeQueryKind::Symbol))
+        .await
+        .expect("symbol query should succeed");
+
+    assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("cache-class"));
+    let class_score = score_for_symbol(&hits, "cache-class").expect("class should match");
+    let constructor_score =
+        score_for_symbol(&hits, "cache-constructor").expect("constructor should match");
+    assert!(
+        class_score > constructor_score,
+        "type declaration should outrank same-named constructor: {class_score} <= {constructor_score}",
+    );
+}
+
+#[tokio::test]
 async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
     let mut benchmark = symbol(
         "benchmark-open",
@@ -206,6 +271,12 @@ async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)
+        .map(|hit| hit.score)
+}
+
+fn score_for_symbol(hits: &[CodeRetrievalHit], symbol_snapshot_id: &str) -> Option<f64> {
+    hits.iter()
+        .find(|hit| hit.symbol_snapshot_id.as_deref() == Some(symbol_snapshot_id))
         .map(|hit| hit.score)
 }
 

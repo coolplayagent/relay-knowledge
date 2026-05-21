@@ -262,6 +262,7 @@ fn symbol_rows_to_hits(
 ) -> Vec<CodeRetrievalHit> {
     let query = request.query.as_str();
     let score_query = ScoreQuery::new(query);
+    let exact_identity = SymbolIdentityQuery::from_query(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
 
     rows.into_iter()
@@ -289,7 +290,8 @@ fn symbol_rows_to_hits(
                     &row.qualified_name,
                     &row.signature,
                     &row.canonical_symbol_id,
-                );
+                )
+                + type_symbol_identity_bonus(exact_identity.as_ref(), &row, request);
             (score > 0.0).then(|| {
                 let score = score
                     + 2.0
@@ -330,6 +332,49 @@ fn symbol_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn type_symbol_identity_bonus(
+    identity: Option<&SymbolIdentityQuery>,
+    row: &SymbolRow,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if !matches!(
+        request.code_query_kind,
+        CodeQueryKind::Definition | CodeQueryKind::Symbol
+    ) || !type_symbol_kind(&row.kind)
+    {
+        return 0.0;
+    }
+    let Some(identity) = identity else {
+        return 0.0;
+    };
+    if identity.matches_symbol(
+        &row.name,
+        &row.qualified_name,
+        &row.signature,
+        &row.canonical_symbol_id,
+    ) {
+        0.55
+    } else {
+        0.0
+    }
+}
+
+fn type_symbol_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class"
+            | "enum"
+            | "interface"
+            | "record"
+            | "struct"
+            | "trait"
+            | "type"
+            | "type_alias"
+            | "typedef"
+            | "union"
+    )
 }
 
 fn identity_hits_can_answer_without_fts(

@@ -66,8 +66,8 @@ use code_query_flow_scoring::{
 };
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
-    import_same_file_usage_bonus, import_surface_bonus, import_target_directory_bonus,
-    import_target_symbol_bonus, query_looks_like_import_path,
+    import_public_dependency_surface_bonus, import_same_file_usage_bonus, import_surface_bonus,
+    import_target_directory_bonus, import_target_symbol_bonus, query_looks_like_import_path,
 };
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
@@ -394,6 +394,13 @@ fn search_imports(
                     &row.module,
                     row.target_hint.as_deref(),
                     row.matched_symbol_name.as_deref(),
+                    request.code_query_kind,
+                )
+                + import_public_dependency_surface_bonus(
+                    base_score,
+                    &request.query,
+                    &row.path,
+                    row.target_hint.as_deref(),
                     request.code_query_kind,
                 )
                 + import_test_path_penalty(base_score, &row.path, request, query_has_test_intent)
