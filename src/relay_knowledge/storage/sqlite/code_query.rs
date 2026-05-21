@@ -4,6 +4,8 @@ use rusqlite::{Connection, params_from_iter};
 
 #[path = "code_query_api_identities.rs"]
 mod code_query_api_identities;
+#[path = "code_query_api_sequence_scoring.rs"]
+mod code_query_api_sequence_scoring;
 #[path = "code_query_call_counts.rs"]
 mod code_query_call_counts;
 #[path = "code_query_call_direction.rs"]
@@ -60,6 +62,7 @@ pub(super) use super::code_query_hits::{
 #[cfg(test)]
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
+use code_query_api_sequence_scoring::compact_unique_api_sequence_chunk_bonus;
 use code_query_calls::search_calls;
 use code_query_designated_initializer_scoring::designated_initializer_chunk_bonus;
 use code_query_flow_scoring::{
@@ -550,6 +553,13 @@ fn search_chunks(
                     request,
                 )
                 + compact_api_sequence_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                )
+                + compact_unique_api_sequence_chunk_bonus(
                     score,
                     &request.query,
                     &row.content,
