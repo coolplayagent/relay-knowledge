@@ -130,6 +130,10 @@ fn search_code_with_status(
         CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
     ) {
         hits.extend(search_symbols(connection, status, request)?);
+        if hybrid_symbol_query_can_answer_without_non_symbol_layers(request, &hits) {
+            dedupe_sort_truncate(&mut hits, request.limit);
+            return Ok(hits);
+        }
     }
     if definition_query_needs_chunk_fallback(request, &hits) {
         hits.extend(search_chunks(connection, status, request)?);
@@ -249,6 +253,52 @@ fn declaration_line_defines_identity(line: &str, leaf_name: &str) -> bool {
         .into_iter()
         .filter_map(|prefix| line.strip_prefix(prefix))
         .any(|remainder| line_starts_with_identifier(remainder, leaf_name))
+}
+
+fn hybrid_symbol_query_can_answer_without_non_symbol_layers(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    if request.code_query_kind != CodeQueryKind::Hybrid
+        || hits.is_empty()
+        || !query_is_single_symbol_identity(&request.query)
+    {
+        return false;
+    }
+    let Some(identity) = SymbolIdentityQuery::from_query(&request.query) else {
+        return false;
+    };
+
+    let exact_symbol_hits = hits
+        .iter()
+        .filter(|hit| hybrid_symbol_hit_matches_identity(hit, &identity))
+        .count();
+    exact_symbol_hits > 0 && exact_symbol_hits <= request.limit.max(1)
+}
+
+fn hybrid_symbol_hit_matches_identity(
+    hit: &CodeRetrievalHit,
+    identity: &SymbolIdentityQuery,
+) -> bool {
+    if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+        || hit.symbol_snapshot_id.is_none()
+    {
+        return false;
+    }
+    let Some(canonical_symbol_id) = hit.canonical_symbol_id.as_deref() else {
+        return false;
+    };
+
+    if identity.is_scoped() {
+        identity.matches_symbol(
+            identity.leaf_name(),
+            &hit.excerpt,
+            &hit.excerpt,
+            canonical_symbol_id,
+        )
+    } else {
+        canonical_symbol_leaf_matches(canonical_symbol_id, identity.leaf_name())
+    }
 }
 
 fn line_starts_with_identifier(line: &str, identifier: &str) -> bool {
@@ -639,6 +689,10 @@ mod score_tests;
 #[cfg(test)]
 #[path = "code_query_identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(test)]
+#[path = "code_query_hybrid_symbol_planner_tests.rs"]
+mod hybrid_symbol_planner_tests;
 
 #[cfg(test)]
 #[path = "code_query_call_ranking_tests.rs"]

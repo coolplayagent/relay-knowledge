@@ -150,6 +150,15 @@ impl SymbolIdentityQuery {
     }
 }
 
+pub(super) fn query_is_single_symbol_identity(query: &str) -> bool {
+    let mut tokens = query.split_whitespace();
+    let Some(token) = tokens.next() else {
+        return false;
+    };
+
+    tokens.next().is_none() && SymbolIdentityQuery::from_query(token).is_some()
+}
+
 fn identity_terms(token: &str) -> Vec<String> {
     token
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
