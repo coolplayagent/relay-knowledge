@@ -990,15 +990,23 @@ Adopted optimization notes: 历史 raw patch excerpt 已压缩；完整变更见
 ## run-1779365756-to-run-1779366747 compacted
 - summary: accepted repository-set member diversification plus hybrid chunk anchor/designated-initializer scoring records were compacted on 2026-05-21 to keep this primary benchmark log under the 1000-line hard cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779365756.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779366747.patch`, reports, and progressive memory, with strategy details preserved above.
 
-## run-1779368858
+## run-1779368858 compacted
+- summary: accepted source-declaration fallback for committed C declarations and designated-initializer scoring; score 0.916397 with protected floors foundational=0.947917, competitive=0.836538, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779368858.patch` and the matching report.
+## candidate run-1779371550-source-definition-body-hybrid-ranking
+- 算法/架构：在 hybrid chunk scorer 中增加有界的 source definition body bonus；只有 source 实现文件中的短函数/方法体、覆盖多词查询至少半数关键项并达到既有 lexical base score 时，才在原 BM25/FTS 候选、path/language filter、dedupe/top-k 之后增加小幅排名信号。
+- 不变量：不改变 parser facts、schema、FTS 文档、candidate window、semantic/vector retrieval、repo-set overlay、env/paths/net、CLI/API 或 self-iteration harness；definition/symbol 查询、header declaration surface、test/benchmark 路径和超长 chunk 不获得该 bonus，避免枚举仓库、路径、case id、query 字符串或 fixture。
+- 预期影响：长 hybrid 查询同时包含 API identity 与执行上下文时，真实实现体会优先于声明-only header 符号进入 top-k，改善 C/C++ template/method body、Go/Java/TS service flow 和多仓代码检索中“声明已找到但实现被挤出”的召回质量，同时保持既有 call identity、indirect-call、compact API-sequence ranking 的保护作用。
+- 风险：source 实现体可能在部分 declaration-oriented hybrid 查询中略升；风险由 hybrid-only、source-extension gate、body-shape gate、coverage threshold、non-test filter、line-count cap 和 bounded bonus 控制，且不触碰 accepted run-1779361336 曾触发的 `graph_bm25`/FTS constructor 路径。
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779368858.patch`
-- score: 0.916397 (foundational=0.947917, competitive=0.836538, accuracy=0.892228, semantic_vector=1.000000, research_judge=n/a, performance=0.798983, stability=1.000000)
+## run-1779371550
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779371550.patch`
+- score: 0.923580 (foundational=0.947917, competitive=0.857372, accuracy=0.902644, semantic_vector=1.000000, research_judge=n/a, performance=0.813425, stability=1.000000)
 - cases: 42/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_query_source_fallback.rs`, `src/relay_knowledge/application/code_service.rs`, `src/relay_knowledge/application/mod.rs`, `src/relay_knowledge/code/mod.rs`, `src/relay_knowledge/code/source_declaration_tests.rs`, `src/relay_knowledge/code/tests.rs`, `src/relay_knowledge/code/tests/fixtures.rs`, `src/relay_knowledge/storage/sqlite/code_query_designated_initializer_scoring.rs`
-- key improvements: score_component:score 0.909485->0.916397156522624; score_component:competitive_capability 0.798077->0.8365384615384616; case:c_syntax_definition_function_pointer_typedef false->true; metric:leveldb_cpp_query_p95_ms 1577.0->1434.0; metric:c_syntax_fixture_index_ms 1433.0->1169.0; metric:c_syntax_fixture_register_index_ms 1979.0->1733.0; metric:cpp_syntax_fixture_query_p50_ms 1251.0->1211.0; metric:cpp_syntax_fixture_query_p95_ms 1450.0->1369.0
-- known degradations: score_component:performance 0.807592->0.7989834906527544; metric:cargo_fmt_check_ms 1393.0->1494.0; metric:cargo_build_debug_ms 223.0->283.0; metric:temporal_sdk_go_index_ms 849.0->1273.0; metric:temporal_sdk_go_register_index_ms 1517.0->1919.0; metric:temporal_samples_go_index_ms 586.0->707.0; metric:temporal_samples_go_register_index_ms 1193.0->1333.0; metric:leveldb_cpp_index_ms 1106.0->1150.0
-- latency metrics: cargo_fmt_check_ms=1494ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=1273ms; temporal_sdk_go_register_index_ms=1919ms; temporal_samples_go_index_ms=707ms; temporal_samples_go_register_index_ms=1333ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_chunk_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_flow_scoring.rs`
+- key improvements: score_component:score 0.916397->0.9235799045701392; score_component:competitive_capability 0.836538->0.8573717948717949; score_component:performance 0.798983->0.8134246835093205; case:cpp_syntax_hybrid_template_cache_lambda_flow false->true; metric:temporal_samples_go_index_ms 707.0->647.0; metric:temporal_samples_go_register_index_ms 1333.0->1254.0; metric:temporal_sdk_go_index_ms 1273.0->930.0; metric:temporal_sdk_go_register_index_ms 1919.0->1618.0
+- known degradations: case:temporal_go_repo_set_worker_registration_flow true->false; metric:cpp_syntax_fixture_query_p50_ms 1211.0->1274.0; metric:cpp_syntax_fixture_query_p95_ms 1369.0->1475.0; metric:relay_teams_query_p95_ms 1432.0->1557.0; metric:leveldb_cpp_index_ms 1150.0->1312.0; metric:leveldb_cpp_register_index_ms 1716.0->1877.0; metric:semantic_vector_provider_probe_ms 527.0->607.0; metric:semantic_vector_query_p50_ms 587.0->627.0
+- latency metrics: cargo_fmt_check_ms=1494ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=102ms; temporal_samples_go_index_ms=647ms; temporal_samples_go_register_index_ms=1254ms; temporal_sdk_go_index_ms=930ms; temporal_sdk_go_register_index_ms=1618ms
 
 Adopted optimization notes:
 

@@ -58,7 +58,7 @@ use code_query_calls::search_calls;
 use code_query_designated_initializer_scoring::designated_initializer_chunk_bonus;
 use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
-    execution_flow_chunk_bonus, inline_construct_chunk_bonus,
+    execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
@@ -541,6 +541,13 @@ fn search_chunks(
                     request,
                 )
                 + inline_construct_chunk_bonus(
+                    score,
+                    &request.query,
+                    &row.content,
+                    &row.path,
+                    request,
+                )
+                + source_definition_body_chunk_bonus(
                     score,
                     &request.query,
                     &row.content,

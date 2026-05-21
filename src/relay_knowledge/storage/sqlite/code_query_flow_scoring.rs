@@ -29,6 +29,9 @@ const COMPACT_HIGH_COVERAGE_MIN_MATCHED_TERMS: usize = 4;
 const COMPACT_API_SEQUENCE_MAX_NONBLANK_LINES: usize = 18;
 const COMPACT_API_SEQUENCE_MAX_SPAN_LINES: usize = 14;
 const COMPACT_API_SEQUENCE_MIN_MATCHED_IDENTITIES: usize = 3;
+const SOURCE_DEFINITION_BODY_MAX_NONBLANK_LINES: usize = 36;
+const SOURCE_DEFINITION_BODY_MIN_BASE_SCORE: f64 = 6.0;
+const SOURCE_DEFINITION_BODY_MIN_MATCHED_TERMS: usize = 4;
 
 pub(super) fn caller_context_density_bonus(
     base_score: f64,
@@ -252,6 +255,49 @@ pub(super) fn compact_api_sequence_chunk_bonus(
     (0.45 + (coverage * 1.15) + (density * 0.45) + complete_sequence_bonus).min(3.8)
 }
 
+pub(super) fn source_definition_body_chunk_bonus(
+    base_score: f64,
+    query: &str,
+    content: &str,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score < SOURCE_DEFINITION_BODY_MIN_BASE_SCORE
+        || request.code_query_kind != CodeQueryKind::Hybrid
+        || !path_looks_like_source_implementation(path)
+        || path_looks_like_test_or_benchmark(path)
+        || !content_looks_like_definition_body(content)
+    {
+        return 0.0;
+    }
+
+    let query_terms = meaningful_terms(query);
+    if query_terms.len() < SOURCE_DEFINITION_BODY_MIN_MATCHED_TERMS {
+        return 0.0;
+    }
+    let content_terms = meaningful_terms(content);
+    let matched_terms = matched_query_terms(&query_terms, &content_terms);
+    let required_matches =
+        SOURCE_DEFINITION_BODY_MIN_MATCHED_TERMS.max(query_terms.len().div_ceil(2));
+    if matched_terms.len() < required_matches {
+        return 0.0;
+    }
+
+    let nonblank_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(SOURCE_DEFINITION_BODY_MAX_NONBLANK_LINES + 1)
+        .count();
+    if nonblank_lines == 0 || nonblank_lines > SOURCE_DEFINITION_BODY_MAX_NONBLANK_LINES {
+        return 0.0;
+    }
+
+    let coverage = matched_terms.len() as f64 / query_terms.len() as f64;
+    let action_density = source_body_action_density(content);
+    (0.65 + (coverage * 1.7) + action_density).min(2.75)
+}
+
 struct ApiSequenceMatch {
     matched_identities: usize,
     matched_lines: usize,
@@ -429,6 +475,44 @@ fn content_has_inline_construct(content: &str) -> bool {
     content.lines().any(line_contains_inline_construct)
 }
 
+fn content_looks_like_definition_body(content: &str) -> bool {
+    if !(content.contains('{') && content.contains('}')) {
+        return false;
+    }
+
+    let mut saw_signature = false;
+    for line in content.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with("//") || line.starts_with('*') {
+            continue;
+        }
+        if line == "{" && saw_signature {
+            return true;
+        }
+        if line_looks_like_definition_signature(line) {
+            if line.contains('{') {
+                return true;
+            }
+            saw_signature = true;
+        } else if line.ends_with(';') || line.ends_with('}') {
+            saw_signature = false;
+        }
+    }
+
+    false
+}
+
+fn line_looks_like_definition_signature(line: &str) -> bool {
+    line.contains('(')
+        && !line.ends_with(';')
+        && !line.starts_with('#')
+        && !line.starts_with("if ")
+        && !line.starts_with("for ")
+        && !line.starts_with("while ")
+        && !line.starts_with("switch ")
+        && !line.starts_with("catch ")
+        && !line.starts_with("return ")
+}
+
 fn inline_construct_density(content: &str) -> f64 {
     let construct_lines = content
         .lines()
@@ -472,6 +556,26 @@ fn line_contains_pipe_closure(line: &str) -> bool {
     line.matches('|').take(3).count() >= 2
 }
 
+fn source_body_action_density(content: &str) -> f64 {
+    let action_lines = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            line.contains("->")
+                || line.contains('.')
+                || line.contains("::")
+                || line.contains(":=")
+                || line.contains(" = ")
+                || line.contains("return ")
+                || line.contains("await ")
+        })
+        .take(6)
+        .count();
+
+    (action_lines as f64 * 0.18).min(0.9)
+}
+
 fn path_looks_like_test_or_benchmark(path: &str) -> bool {
     path.to_ascii_lowercase().split('/').any(|segment| {
         matches!(
@@ -483,6 +587,37 @@ fn path_looks_like_test_or_benchmark(path: &str) -> bool {
             || segment.ends_with(".spec.ts")
             || segment.ends_with(".spec.tsx")
     })
+}
+
+fn path_looks_like_source_implementation(path: &str) -> bool {
+    let extension = path
+        .rsplit('/')
+        .next()
+        .and_then(|file_name| file_name.rsplit_once('.').map(|(_, extension)| extension))
+        .map(str::to_ascii_lowercase);
+    matches!(
+        extension.as_deref(),
+        Some(
+            "c" | "cc"
+                | "cpp"
+                | "cxx"
+                | "cs"
+                | "go"
+                | "java"
+                | "js"
+                | "jsx"
+                | "kt"
+                | "kts"
+                | "php"
+                | "py"
+                | "rb"
+                | "rs"
+                | "scala"
+                | "swift"
+                | "ts"
+                | "tsx"
+        )
+    )
 }
 
 fn path_looks_like_test(path: &str) -> bool {

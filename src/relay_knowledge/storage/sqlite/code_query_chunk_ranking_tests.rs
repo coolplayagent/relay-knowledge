@@ -347,6 +347,95 @@ async fn hybrid_chunks_prefer_complete_compact_api_sequences() {
 }
 
 #[tokio::test]
+async fn hybrid_chunks_rank_source_definition_bodies_above_declaration_surfaces() {
+    let header_path = "include/store/cache.hpp";
+    let source_path = "src/cache.cpp";
+    let pipeline_path = "src/pipeline.cpp";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("header-file", header_path, "cpp"),
+            file("source-file", source_path, "cpp"),
+            file("pipeline-file", pipeline_path, "cpp"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![
+            chunk(
+                "header-cache",
+                "header-file",
+                header_path,
+                "template <typename Key>\n\
+                class Cache {\n\
+                 public:\n\
+                    void Insert(const Key& key);\n\
+                    virtual void Append(const std::string& key) = 0;\n\
+                };",
+                range(10, 18),
+                None,
+            ),
+            chunk(
+                "source-insert",
+                "source-file",
+                source_path,
+                "template <typename Key>\n\
+                void Cache<Key>::Insert(const Key& key)\n\
+                {\n\
+                    keys_.push_back(key);\n\
+                    writer_->Append(std::string(key));\n\
+                }",
+                range(30, 36),
+                None,
+            ),
+            chunk(
+                "pipeline-lambda",
+                "pipeline-file",
+                pipeline_path,
+                "int RunPipeline(Cache<std::string>& cache) {\n\
+                    Pipeline pipeline;\n\
+                    auto append_event = [&cache, &pipeline](const PipelineEvent& event) {\n\
+                        cache.Insert(event.key);\n\
+                        return pipeline(event);\n\
+                    };\n\
+                }",
+                range(50, 58),
+                None,
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "templated cache insert lambda pipeline writer append",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    let source = lexical_hit_score(&hits, 30).expect("source body should be recalled");
+    let header = lexical_hit_score(&hits, 10).expect("header declaration should be recalled");
+    assert!(
+        source > header,
+        "source definition body should outrank declaration-only surface: {source} <= {header}",
+    );
+}
+
+#[tokio::test]
 async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
     let target_path = "src/runtime/config.ts";
     let noise_path = "aaa/noise.ts";
