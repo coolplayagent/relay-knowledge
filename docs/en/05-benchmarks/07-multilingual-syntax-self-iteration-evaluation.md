@@ -10,7 +10,7 @@ Beyond C/C++, the evaluator now generates these fixture repositories under the e
 
 | Repository key | Fixture version | Language focus |
 | --- | --- | --- |
-| `python_syntax_fixture` | `python_syntax_v2` | decorators, async functions, async context managers, relative imports, exception subclasses, lambda payload filters |
+| `python_syntax_fixture` | `python_syntax_v2` | decorators, async functions, async context managers, relative imports, exception subclasses, lambda payload filters, text-only docs that mention class/function names |
 | `javascript_syntax_fixture` | `javascript_syntax_v2` | ESM export/import, class methods, async callbacks, arrow handlers, registry dispatch, test fake demotion |
 | `typescript_syntax_fixture` | `typescript_syntax_v2` | interfaces/type aliases, typed arrow projectors, generic functions, type-only imports, dynamic imports, barrel exports, TSX components |
 | `go_syntax_fixture` | `go_syntax_v2` | receiver methods, interfaces, grouped import alias/dot/blank forms, function literals, goroutines, defer, constructor flow |
@@ -39,6 +39,7 @@ The generated fixtures now distinguish native lambda support from language-speci
 
 - Most generated fixtures now provide 7 core syntax cases: `symbol`, `definition`, `imports`, `callees` or relationship flow, `hybrid`, an explicit lambda/closure case where the language supports one, and `negative`.
 - Hybrid and relationship cases use `expected_all`, `expected_sequence`, `forbidden`, or `forbidden_rank_penalty` to preserve continuous scoring pressure after basic pass/fail is achieved.
+- Python syntax fixture cases also cover text-only Markdown documentation references, where `references` queries for `ServiceRunner` and `dispatch_event` must recover the documentation line as `text_fallback` evidence without graph-edge confidence.
 - Generated fixtures are not added to the normal fast repository list by default. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
 
 ```bash

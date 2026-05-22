@@ -10,7 +10,7 @@
 
 | Repository key | Fixture version | 语言重点 |
 | --- | --- | --- |
-| `python_syntax_fixture` | `python_syntax_v2` | decorator、async function、async context manager、relative import、exception subclass、lambda payload filter |
+| `python_syntax_fixture` | `python_syntax_v2` | decorator、async function、async context manager、relative import、exception subclass、lambda payload filter、提到类/函数名的 text-only 文档 |
 | `javascript_syntax_fixture` | `javascript_syntax_v2` | ESM export/import、class method、async callback、arrow handler、registry dispatch、test fake demotion |
 | `typescript_syntax_fixture` | `typescript_syntax_v2` | interface/type alias、typed arrow projector、generic function、type-only import、dynamic import、barrel export、TSX component |
 | `go_syntax_fixture` | `go_syntax_v2` | receiver method、interface、grouped import alias/dot/blank、function literal、goroutine、defer、constructor flow |
@@ -39,6 +39,7 @@
 
 - 大多数生成式 fixture 现在提供 7 条基础语法 case：`symbol`、`definition`、`imports`、`callees` 或关系流、`hybrid`、语言支持时的显式 lambda/closure case，以及 `negative`。
 - `hybrid` 与关系类 case 使用 `expected_all`、`expected_sequence`、`forbidden` 或 `forbidden_rank_penalty` 保留连续评分空间，让通过后的排序、覆盖率和性能仍能继续优化。
+- Python 语法 fixture 还覆盖 text-only Markdown 文档引用：对 `ServiceRunner` 和 `dispatch_event` 的 `references` 查询必须能恢复文档描述行，并以 `text_fallback` 证据返回且不携带 graph-edge confidence。
 - 生成式 fixture 默认不加入普通 fast repository 列表；需要定向验证时设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`，例如：
 
 ```bash

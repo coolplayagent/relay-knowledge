@@ -671,6 +671,7 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
         ]),
         "python_syntax_v2" => Ok(vec![
             (".relay-knowledge-fixture-version", "python_syntax_v2\n"),
+            ("docs/operations.md", PYTHON_OPERATIONS_MD),
             ("syntax_service/__init__.py", PYTHON_INIT),
             ("syntax_service/decorators.py", PYTHON_DECORATORS),
             ("syntax_service/errors.py", PYTHON_ERRORS),
@@ -1131,6 +1132,12 @@ class FakeCache {
 };
 
 }  // namespace rk::store::test
+"#;
+
+const PYTHON_OPERATIONS_MD: &str = r#"# Syntax service operations
+
+The ServiceRunner class owns the async dispatch lifecycle for production workers.
+The dispatch_event function normalizes payload text before writing event records.
 "#;
 
 const PYTHON_INIT: &str = r#""#;
