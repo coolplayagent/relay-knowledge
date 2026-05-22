@@ -25,15 +25,16 @@ matching.
 
 ## Runtime Selection
 
-Resolve `relay-knowledge` before running workflow commands. Compare the
-published binary on `PATH` with the bundled asset binary for the current
-platform by running `version --format json` for each usable candidate. Use the
-newest semver version. If versions are equal, prefer the `PATH` binary so
-user-managed installs remain authoritative.
+Resolve `relay-knowledge` before running workflow commands. Prefer the bundled
+asset binary for the current platform whenever it exists, is executable, and
+`version --format json` succeeds. Keep that absolute path in a shell variable
+and use it for every CLI command.
 
-If the current operating system or CPU architecture has no bundled asset,
-install `relay-knowledge` from a published channel first, such as a verified
-GitHub Release archive or `cargo install relay-knowledge` from crates.io.
+Use a published binary on `PATH` only when the bundled asset is absent,
+unusable, unsupported on the current operating system or CPU architecture, or
+explicitly requested by the user. If no usable binary is available, install
+`relay-knowledge` from a published channel first, such as a verified GitHub
+Release archive or `cargo install relay-knowledge` from crates.io.
 
 ## Protocol Boundary
 

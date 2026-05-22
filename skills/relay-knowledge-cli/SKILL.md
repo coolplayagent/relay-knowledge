@@ -12,43 +12,48 @@ metadata:
 
 ## Workflow
 
-Use the compiled `relay-knowledge` binary as the control surface. Prefer JSON
-output for automation and read command metadata before issuing unfamiliar
-commands:
+Use the compiled `relay-knowledge` binary as the control surface. Resolve the
+executable before the first operation. Prefer JSON output for automation and
+read command metadata before issuing unfamiliar commands.
+
+Prefer the bundled `assets` binary for the current platform whenever it exists
+and `version --format json` succeeds. Released skill packages include Linux x64
+and Windows x64 binaries at `assets/linux-x86_64/relay-knowledge` and
+`assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
+only when the bundled asset is missing, not executable, fails its version check,
+has no matching OS or CPU architecture, or the user explicitly asks for the
+system-installed binary. Version comparisons are diagnostic only; do not choose
+a newer `PATH` binary over a working bundled asset by default.
+
+The command examples below use `relay-knowledge` as readable shorthand for the
+resolved executable. When the bundled asset is selected, substitute that asset
+path for `relay-knowledge` while keeping the same arguments.
+
+Use the command form that matches the active shell. On POSIX, check the asset
+first and fall back to `PATH` only when the asset is unusable:
 
 ```bash
-relay-knowledge help --format json
-relay-knowledge help repo query --format json
-```
-
-Resolve the executable before the first operation by looking for the published
-`relay-knowledge` binary on `PATH` and for this skill's bundled asset binary
-for the current platform. Released skill packages include Linux x64 and Windows
-x64 binaries at `assets/linux-x86_64/relay-knowledge` and
-`assets/windows-x86_64/relay-knowledge.exe`.
-
-Use the command form that matches the active shell:
-
-```bash
+/absolute/path/to/relay-knowledge-cli/assets/linux-x86_64/relay-knowledge version --format json
 command -v relay-knowledge
 relay-knowledge version --format json
 ```
 
 ```powershell
+C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe version --format json
 Get-Command relay-knowledge
 relay-knowledge version --format json
 ```
 
 ```cmd
+C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe version --format json
 where.exe relay-knowledge
 relay-knowledge version --format json
 ```
 
-When both `PATH` and the bundled `assets` binary are available, run
-`version --format json` for each candidate and use the newest semver version.
-If the versions are equal, prefer the `PATH` binary so user-managed installs are
-respected. If the current OS or CPU architecture has no bundled asset, use only
-the published `PATH` install or install from a published channel.
+```bash
+relay-knowledge help --format json
+relay-knowledge help repo query --format json
+```
 
 Do not use source-checkout build artifacts or source builds as an installation
 path. This skill is intended to operate published installs only. If the binary
@@ -130,19 +135,17 @@ Remove the temporary directory after capturing the test result.
 
 ## Readiness
 
-Check whether the CLI exists, then inspect runtime configuration and live
-health:
+Check whether the resolved CLI works, then inspect runtime configuration and
+live health:
 
 ```bash
-command -v relay-knowledge
 relay-knowledge version
 relay-knowledge setup doctor --format json
 relay-knowledge health --format json
 relay-knowledge service doctor --format json
 ```
 
-On Windows, use `Get-Command relay-knowledge` in PowerShell or
-`where.exe relay-knowledge` in cmd.exe before running the same diagnostics.
+On Windows, run the same diagnostics through the resolved executable.
 
 Run live diagnostics with a command timeout when the host shell supports one,
 and report timeout as a diagnostic finding instead of waiting indefinitely. On
