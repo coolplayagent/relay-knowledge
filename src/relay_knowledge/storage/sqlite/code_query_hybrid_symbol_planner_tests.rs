@@ -169,6 +169,83 @@ async fn multi_api_symbol_query_keeps_direct_identity_facets() {
     );
 }
 
+#[tokio::test]
+async fn covered_multi_api_symbol_query_elides_fts_noise() {
+    let path = "src/worker.ts";
+    let noise_path = "worker/registerworkflow/interruptch/noise.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("worker-file", path), file("noise-file", noise_path)],
+        symbols: vec![
+            qualified_symbol("new-symbol", "worker-file", path, "New", "worker.New"),
+            qualified_symbol(
+                "register-symbol",
+                "worker-file",
+                path,
+                "RegisterWorkflow",
+                "worker.RegisterWorkflow",
+            ),
+            qualified_symbol(
+                "interrupt-symbol",
+                "worker-file",
+                path,
+                "InterruptCh",
+                "worker.InterruptCh",
+            ),
+            qualified_symbol(
+                "noise-symbol",
+                "noise-file",
+                noise_path,
+                "WorkerNoise",
+                "worker.WorkerNoise",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let covered_hits = store
+        .search_code(request(
+            "worker.New New RegisterWorkflow InterruptCh",
+            CodeQueryKind::Symbol,
+            10,
+        ))
+        .await
+        .expect("covered symbol query should succeed");
+    assert!(
+        covered_hits.iter().all(|hit| hit.path == path),
+        "covered API identity symbol query should use direct identity rows only: {covered_hits:?}",
+    );
+
+    let open_hits = store
+        .search_code(request(
+            "worker.New New RegisterWorkflow InterruptCh noise",
+            CodeQueryKind::Symbol,
+            10,
+        ))
+        .await
+        .expect("open symbol query should succeed");
+    assert!(
+        open_hits.iter().any(|hit| hit.path == noise_path),
+        "non-closed symbol query should keep FTS recall for additional terms: {open_hits:?}",
+    );
+}
+
 #[test]
 fn hybrid_symbol_plan_requires_unambiguous_symbol_window() {
     let read_request = request("read", CodeQueryKind::Hybrid, 2);

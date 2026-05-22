@@ -19,6 +19,20 @@ impl ApiSymbolIdentity {
         &self.leaf_name
     }
 
+    pub(super) fn matches_query_token(&self, token: &str) -> bool {
+        let token = token.trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | ':'))
+        });
+        if token.eq_ignore_ascii_case(&self.leaf_name) {
+            return true;
+        }
+        let Some(expected_scoped_terms) = &self.scoped_terms else {
+            return false;
+        };
+
+        scoped_terms(token) == *expected_scoped_terms
+    }
+
     fn is_scoped(&self) -> bool {
         self.scoped_terms.is_some()
     }
@@ -384,6 +398,17 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn api_identity_query_token_matching_accepts_scoped_and_leaf_facets() {
+        let request = request(CodeQueryKind::Symbol);
+        let identities = hybrid_api_symbol_identities("worker.New New RegisterWorkflow", &request);
+
+        assert!(identities[0].matches_query_token("worker.New"));
+        assert!(identities[0].matches_query_token("New"));
+        assert!(identities[1].matches_query_token("RegisterWorkflow"));
+        assert!(!identities[1].matches_query_token("workflow"));
     }
 
     fn request(kind: CodeQueryKind) -> CodeRetrievalRequest {

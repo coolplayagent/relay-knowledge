@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779452982-covered-api-symbol-direct-plan
+- 算法：SQLite Symbol 检索先复用既有 multi-API identity direct-symbol probes；当 query 只由已抽取 API identity 的 scoped token/leaf token 组成、每个 identity 都有非饱和 direct hit 且 kind 为 `Symbol` 时，直接返回去重后的 identity hits，跳过 symbol FTS MATCH 与后续 FTS candidate scoring；query 含自然语言 filler、identity 覆盖不足或 direct name window 饱和时继续执行原 Symbol FTS。
+- 架构/不变量：变更限定在 `storage::sqlite` 的 symbol retrieval planner 和 API identity token matcher；不改变 parser facts、SQLite schema、FTS 文档写入、candidate limits、Hybrid/Definition/References/Calls/Imports/Chunk 查询、repo-set overlay/merge/fallback、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness。closed-query 判定只接受 identity raw/leaf facets，不枚举仓库、路径、case id、query 字符串或 fixture。
+- 预期影响/风险：Temporal/OTel repository-set 依赖成员已由应用层改写为 `client.Dial Dial MustLoadDefaultClientOptions`、`worker.New New RegisterWorkflow ...` 这类 closed Symbol query，预期减少依赖仓每次查询的 FTS MATCH、bm25 排序、row materialization 与后置 scorer 成本，并降低 FTS 噪声进入 dependency top-k；风险是纯 Symbol API facet 查询只返回直接定义而不补充同词 FTS 邻近 symbol，受 Symbol-only、multi-identity、closed-query、coverage、non-saturation、自然语言 filler fallback 和 focused tests 控制。
+- 策略关联：建立在最新 accepted `run-1779452125` 的 repository-set dependency API symbol query 上，把优化从应用层 query 改写推进到通用 SQLite symbol plan arbitration；避免全局 repo-set fanout 收缩、FTS-local token tweak 或 fixture/path 枚举，保护 foundational、competitive、semantic/vector 和 stability floors。
 ## 候选优化说明：run-1779452125-repository-set-dependency-api-symbol-query
 - 算法：repository-set Hybrid 查询的低优先级依赖成员仍沿用 Symbol-first 计划，但内部依赖查询会从原 query 提取 API-shaped identity facets，仅保留 scoped token 与 leaf token，例如 `client.Dial Dial MustLoadDefaultClientOptions`，再交给 symbol FTS 与既有 symbol scorer；最高优先级成员、非 API 查询和覆盖不足时的 Hybrid fallback 继续使用完整原始 query。
 - 架构/不变量：变更限定在 `application::code_repository_set_plan` 和服务编排的成员级 `CodeRetrievalRequest` 构造；不改变 parser facts、SQLite schema、FTS 文档写入、单仓默认 retrieval、candidate limit、overlay refresh/evidence、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness。fallback 覆盖判断仍基于原 query 的 API identity leaves，覆盖少于两个 identity 时立即回退完整 Hybrid；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -972,19 +977,8 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779435315 compacted
 - summary: latest accepted checkpoint batch delete-elision scored 0.964516 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; performance was 0.802867 and 52/52 cases passed. Full metrics, patch, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779435315.patch`, reports, and progressive memory; strategy details remain in the candidate section above.
 
-## run-1779439043
-
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1779439043.patch`
-- score: 0.989255 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.940307, stability=1.000000)
-- cases: 52/52 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_schema.rs`, `src/relay_knowledge/storage/sqlite/code_schema_tests.rs`
-- key improvements: score_component:score 0.960958->0.9892552174950271; score_component:performance 0.783102->0.9403067638612612; metric:self_iteration_cargo_fmt_check_ms 384.0->323.0; metric:temporal_sdk_go_index_ms 1774.0->585.0; metric:temporal_sdk_go_register_index_ms 2581.0->646.0; metric:temporal_samples_go_index_ms 827.0->121.0; metric:temporal_samples_go_register_index_ms 1573.0->182.0; metric:cpp_syntax_fixture_index_ms 1209.0->204.0
-- known degradations: metric:semantic_vector_provider_probe_ms 524.0->625.0
-- latency metrics: cargo_fmt_check_ms=2257ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=585ms; temporal_sdk_go_register_index_ms=646ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=182ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1779439043 compacted
+- summary: accepted code-search backfill marker scored 0.989255 with 52/52 cases passed and performance 0.940307; full patch, changed paths, metrics, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779439043.patch`, reports, and progressive memory.
 
 ## run-1779452125
 
@@ -995,6 +989,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=1636ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=7066ms; self_iteration_cargo_check_ms=444ms; temporal_sdk_go_index_ms=29501ms; temporal_sdk_go_register_index_ms=29643ms; cpp_syntax_fixture_index_ms=1009ms; cpp_syntax_fixture_register_index_ms=1050ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779452982
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779452982.patch`
+- score: 0.962453 (foundational=1.000000, competitive=0.916667, accuracy=0.958333, semantic_vector=1.000000, research_judge=n/a, performance=0.893258, stability=1.000000)
+- cases: 41/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_api_identities.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: score_component:score 0.950907->0.9624530629947737; score_component:performance 0.829111->0.8932577573783728; metric:cargo_fmt_check_ms 1636.0->1491.0; metric:cargo_build_debug_ms 7066.0->222.0; metric:self_iteration_cargo_check_ms 444.0->101.0; metric:temporal_sdk_go_index_ms 29501.0->445.0; metric:temporal_sdk_go_register_index_ms 29643.0->506.0; metric:temporal_samples_go_index_ms 5140.0->122.0
+- known degradations: metric:cpp_syntax_fixture_query_p50_ms 162.0->192.0; metric:c_syntax_fixture_query_p95_ms 241.0->289.0; metric:leveldb_cpp_query_p50_ms 163.0->202.0; metric:leveldb_cpp_query_p95_ms 685.0->870.0; metric:relay_teams_query_p95_ms 1589.0->1768.0
+- latency metrics: cargo_fmt_check_ms=1491ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=222ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=445ms; temporal_sdk_go_register_index_ms=506ms; temporal_samples_go_index_ms=122ms; temporal_samples_go_register_index_ms=183ms
 
 Adopted optimization notes:
 

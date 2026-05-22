@@ -29,6 +29,12 @@ struct SymbolIdentityRows {
     saturated: bool,
 }
 
+struct ApiIdentityRows {
+    rows: Vec<SymbolRow>,
+    matched_identity_count: usize,
+    saturated: bool,
+}
+
 pub(super) fn search_symbols(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -59,6 +65,15 @@ pub(super) fn search_symbols(
         }
     }
 
+    let api_identity_rows =
+        search_hybrid_api_identity_rows(connection, status, request, &api_identities)?;
+    if api_identity_rows_can_answer_without_fts(request, &api_identities, &api_identity_rows) {
+        let mut hits =
+            symbol_rows_to_hits(status, request, api_identity_rows.rows, &api_identities);
+        dedupe_sort_truncate(&mut hits, request.limit);
+        return Ok(hits);
+    }
+
     let mut hits = symbol_rows_to_hits(
         status,
         request,
@@ -66,12 +81,12 @@ pub(super) fn search_symbols(
         &api_identities,
     );
     hits.extend(identity_hits);
-    hits.extend(search_hybrid_api_identity_hits(
-        connection,
+    hits.extend(symbol_rows_to_hits(
         status,
         request,
+        api_identity_rows.rows,
         &api_identities,
-    )?);
+    ));
 
     Ok(hits)
 }
@@ -142,26 +157,33 @@ fn search_symbol_identity_rows_by_name(
     Ok(SymbolIdentityRows { rows, saturated })
 }
 
-fn search_hybrid_api_identity_hits(
+fn search_hybrid_api_identity_rows(
     connection: &Connection,
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
     identities: &[ApiSymbolIdentity],
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+) -> Result<ApiIdentityRows, StorageError> {
     if identities.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: 0,
+            saturated: false,
+        });
     }
 
     let mut rows = Vec::new();
+    let mut matched_identity_count = 0;
+    let mut saturated = false;
     for identity in identities {
-        rows.extend(
-            search_symbol_identity_rows_by_name(
-                connection,
-                status,
-                request,
-                identity.leaf_name(),
-                hybrid_api_identity_candidate_limit(request),
-            )?
+        let identity_rows = search_symbol_identity_rows_by_name(
+            connection,
+            status,
+            request,
+            identity.leaf_name(),
+            hybrid_api_identity_candidate_limit(request),
+        )?;
+        saturated |= identity_rows.saturated;
+        let matched_rows = identity_rows
             .rows
             .into_iter()
             .filter(|row| {
@@ -171,11 +193,43 @@ fn search_hybrid_api_identity_hits(
                     &row.signature,
                     &row.canonical_symbol_id,
                 )
-            }),
-        );
+            })
+            .collect::<Vec<_>>();
+        if !matched_rows.is_empty() {
+            matched_identity_count += 1;
+        }
+        rows.extend(matched_rows);
     }
 
-    Ok(symbol_rows_to_hits(status, request, rows, identities))
+    Ok(ApiIdentityRows {
+        rows,
+        matched_identity_count,
+        saturated,
+    })
+}
+
+fn api_identity_rows_can_answer_without_fts(
+    request: &CodeRetrievalRequest,
+    identities: &[ApiSymbolIdentity],
+    rows: &ApiIdentityRows,
+) -> bool {
+    request.code_query_kind == CodeQueryKind::Symbol
+        && identities.len() >= 2
+        && rows.matched_identity_count == identities.len()
+        && !rows.saturated
+        && api_identity_query_terms_are_closed(&request.query, identities)
+}
+
+fn api_identity_query_terms_are_closed(query: &str, identities: &[ApiSymbolIdentity]) -> bool {
+    query
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .all(|token| {
+            identities
+                .iter()
+                .any(|identity| identity.matches_query_token(token))
+        })
 }
 
 fn search_symbol_fts_rows(
