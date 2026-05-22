@@ -587,7 +587,7 @@ fn search_chunks(
                     request,
                 )
             });
-            let score = score_query.score([&row.content, &row.path])
+            let score = score_query.score([row.content.as_str(), row.path.as_str()])
                 + score_exact_path(&query, &row.path)
                 + declaration_bonus
                 + exact_definition_chunk_bonus(request, &row.content)

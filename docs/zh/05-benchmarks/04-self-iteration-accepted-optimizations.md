@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779434421-lazy-borrowed-score-fields
+- 算法/架构：SQLite code retrieval 的 `ScoreQuery` 从按候选字段预先 clone/trim/lowercase，改为借用 `&str` 字段，ASCII exact match 不分配，只有 substring fallback 才惰性 lowercase；identifier-term cache 仍按字段复用，symbol/reference/call/import/chunk 后置评分共用同一 scorer。
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate limits、ranking weights/top-k、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 harness；分数语义保持等价，path/language/freshness 过滤、scoped identity、identifier expansion 和零分过滤保持不变，不枚举仓库/路径/query/fixture。
+- 预期影响/风险：预期减少多仓 Hybrid、calls、imports、references 和 chunk 查询中每个候选的堆分配与大块源码 lowercase 成本，改善 relay-teams、LevelDB、C/C++ syntax、Temporal repo-set query p50/p95；风险是借用生命周期或懒加载分支改变得分，受现有 scorer/ranking tests 和等价调用面控制。
+- 策略关联：建立在 accepted `run-1779433139` 的 search-document allocation reduction 和 `run-1779234885` 的 layer-aware candidate-window budgeting 上，把性能优化推进到通用 post-FTS scorer；避免 `run-1779282285` 文档/fixture-only rejected pattern。
 ## 候选优化说明：run-1779433139-reusable-search-document-buffers
 - 算法/架构：SQLite code indexing 的 `SearchDocumentInserter` 从每条 FTS 文档临时分配 `String` 和 symbol term `Vec`，改为 inserter 持有可复用内容缓冲与 symbol-term 缓冲；batch/finalize 的 symbol、chunk、call search-document 写入继续复用既有 prepared statement，snapshot 单文档 helper 保持原调用表面，所有路径共享同一内容拼接规则和同一 FTS5 表，只减少高频 search-document materialization 的堆分配与释放。
 - 不变量：不改变 parser facts、SQLite schema、FTS document 内容、identifier expansion、candidate windows、ranking/scoring、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；每次写入前清空缓冲，symbol term 仍排序去重，空字段过滤、path/language/freshness metadata、dedupe/top-k 和所有查询语义保持不变；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -988,6 +993,20 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=2281ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=625ms; relay_teams_index_ms=171774ms; relay_teams_register_index_ms=173085ms; relay_teams_query_p50_ms=1192ms; relay_teams_query_p95_ms=1414ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779434421
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1779434421.patch`
+- score: 0.963817 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.798985, stability=1.000000)
+- cases: 52/52 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
+- key improvements: score_component:score 0.949367->0.9638172567514673; score_component:performance 0.718707->0.7989847597303735; metric:self_iteration_cargo_check_ms 625.0->121.0; metric:temporal_sdk_go_index_ms 2277.0->1732.0; metric:temporal_sdk_go_register_index_ms 2559.0->2437.0; metric:leveldb_cpp_index_ms 13367.0->1393.0; metric:leveldb_cpp_register_index_ms 13670.0->2259.0; metric:leveldb_cpp_query_p95_ms 1459.0->1304.0
+- known degradations: metric:temporal_samples_go_index_ms 1007.0->1088.0; metric:temporal_samples_go_register_index_ms 1290.0->2055.0; metric:cpp_syntax_fixture_index_ms 1219.0->1329.0; metric:cpp_syntax_fixture_register_index_ms 1522.0->2115.0; metric:c_syntax_fixture_index_ms 807.0->1449.0; metric:c_syntax_fixture_register_index_ms 1090.0->2356.0; metric:relay_teams_query_p50_ms 1192.0->1294.0
+- latency metrics: cargo_fmt_check_ms=2336ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=1732ms; temporal_sdk_go_register_index_ms=2437ms; temporal_samples_go_index_ms=1088ms; temporal_samples_go_register_index_ms=2055ms
 
 Adopted optimization notes:
 
