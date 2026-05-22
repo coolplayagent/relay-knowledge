@@ -226,6 +226,98 @@ async fn query_degrades_when_candidate_path_lookup_is_unavailable() {
     );
 }
 
+#[tokio::test]
+async fn import_query_uses_grep_fallback_for_unindexed_external_dependency() {
+    if Command::new("rg").arg("--version").output().is_err() {
+        return;
+    }
+    let repo = FixtureRepo::create("code-ripgrep-external-import");
+    repo.write(
+        "src/component.tsx",
+        r#"
+import React from "react";
+
+export function Panel({ value }: { value: string }) {
+    const [state, setState] = React.useState(value);
+    React.useEffect(() => setState(value.trim()), [value]);
+    return <section>{state}</section>;
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "external import"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: vec!["tsx".to_owned()],
+            },
+            context("register-external-import"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-external-import"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "react",
+                CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), vec!["tsx".to_owned()])
+                    .expect("selector should validate"),
+                CodeQueryKind::Imports,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-external-import"),
+        )
+        .await
+        .expect("query should succeed");
+
+    assert!(
+        response
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("external dependency import is not indexed")),
+        "unexpected degraded reason: {:?}",
+        response.degraded_reason
+    );
+    assert!(
+        response.results.iter().any(|hit| {
+            hit.path == "src/component.tsx"
+                && hit.edge_kind.as_deref() == Some("import")
+                && hit.edge_resolution_state.as_deref() == Some("unresolved")
+        }),
+        "expected unresolved import graph evidence: {:?}",
+        response.results
+    );
+    assert!(
+        response.results.iter().any(|hit| {
+            hit.path == "src/component.tsx"
+                && hit.excerpt.contains("react")
+                && hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+        }),
+        "expected current-repository text fallback evidence: {:?}",
+        response.results
+    );
+}
+
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
         .expect("selector should validate")

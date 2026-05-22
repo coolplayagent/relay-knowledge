@@ -357,10 +357,14 @@ enumerating cases.
   Kubernetes Go,
   Spring Framework Java, RustFS Rust, Codex Python, nvm Bash, dotnet/runtime C#,
   OkHttp Kotlin, Laravel PHP, Rails Ruby, Scala 3, and Alamofire Swift remain behind
-  repository-level `profile=exhaustive`. The language files define real `symbol`, `definition`,
-  `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
+  repository-level `profile=exhaustive`. The language files define real
+  `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
   functions, methods, classes, exported values, macros, includes/imports,
-  callback or trait relationships, and execution flows. Relationship targets
+  callback or trait relationships, and execution flows. Import cases may require
+  the external-dependency grep fallback diagnostic: when an import target is
+  unresolved because the dependency library is not indexed, the product searches
+  only the current indexed repository source and returns `text_fallback`
+  evidence for LLM reasoning. Relationship targets
   stay split into regression and challenge groups, with extended relationship
   files adding explicit implementation, alias, and inline callback/closure
   scenarios for Rust, Go, C, C++, Java, Python, JavaScript, and TypeScript.

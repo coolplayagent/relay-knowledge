@@ -29,6 +29,7 @@ const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub(crate) enum SourceGrepKind {
     Definition,
     References,
+    Imports,
     Hybrid,
 }
 
@@ -189,7 +190,9 @@ fn materialize_git_blobs_with_budget(
 fn ripgrep_match_limit(kind: SourceGrepKind, result_limit: usize) -> usize {
     match kind {
         SourceGrepKind::Definition => result_limit.max(MAX_DEFINITION_MATCHES_PER_FILE),
-        SourceGrepKind::References | SourceGrepKind::Hybrid => result_limit,
+        SourceGrepKind::References | SourceGrepKind::Imports | SourceGrepKind::Hybrid => {
+            result_limit
+        }
     }
 }
 

@@ -266,7 +266,7 @@ async fn code_impact_tool(server: &McpServer, arguments: Value, request_id: Stri
 pub(super) fn code_query_tool_definition() -> Value {
     json!({
         "name": CODE_QUERY_TOOL,
-        "description": "Query an authorized indexed code graph repository.",
+        "description": "Query an authorized indexed code graph repository. Unresolved external imports may include bounded current-repository grep text_fallback evidence and a diagnostic.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -312,7 +312,7 @@ pub(super) fn code_impact_tool_definition() -> Value {
 pub(super) fn code_repository_set_query_tool_definition() -> Value {
     json!({
         "name": CODE_REPOSITORY_SET_QUERY_TOOL,
-        "description": "Query an authorized repository set across multiple indexed code graph snapshots.",
+        "description": "Query an authorized repository set across multiple indexed code graph snapshots. Unresolved external imports may include bounded current-repository grep text_fallback evidence and a diagnostic.",
         "inputSchema": {
             "type": "object",
             "properties": {

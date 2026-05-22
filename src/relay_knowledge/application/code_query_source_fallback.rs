@@ -12,6 +12,7 @@ use crate::{
 };
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
+const EXTERNAL_IMPORT_GREP_DIAGNOSTIC: &str = "external dependency import is not indexed in the code graph; searched current repository source with internal grep fallback";
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
 
 pub(super) struct CodeGrepFallbackPlan {
@@ -106,6 +107,20 @@ pub(super) fn plan_code_grep_fallback(
                 needs_scope_paths: true,
             })
         }
+        CodeQueryKind::Imports => {
+            let query = import_grep_query(results)?;
+            Some(CodeGrepFallbackPlan {
+                commit,
+                query,
+                paths: Vec::new(),
+                path_filters,
+                language_filters,
+                limit: request.limit,
+                kind: SourceGrepKind::Imports,
+                identity: None,
+                needs_scope_paths: true,
+            })
+        }
         CodeQueryKind::Hybrid if results.len() < request.limit => {
             let identity = source_grep_identity(&request.query)?;
             Some(CodeGrepFallbackPlan {
@@ -132,7 +147,7 @@ pub(super) fn append_code_grep_fallback(
     outcome: SourceGrepOutcome,
 ) -> Option<String> {
     if outcome.matches.is_empty() {
-        return outcome.degraded_reason;
+        return fallback_diagnostic(plan, outcome.degraded_reason);
     }
     let score_bounds = ScoreBounds::from_results(results);
     let base_fallback_score = grep_score(plan.kind, score_bounds);
@@ -160,7 +175,7 @@ pub(super) fn append_code_grep_fallback(
     }
     dedupe_sort_truncate(results, request.limit);
 
-    outcome.degraded_reason
+    fallback_diagnostic(plan, outcome.degraded_reason)
 }
 
 fn add_code_grep_layers(hit: &mut CodeRetrievalHit, kind: SourceGrepKind) {
@@ -325,7 +340,24 @@ fn grep_score(kind: SourceGrepKind, score_bounds: ScoreBounds) -> f64 {
     match kind {
         SourceGrepKind::Definition => score_bounds.best.unwrap_or(0.0) + 3.5,
         SourceGrepKind::References => score_bounds.best.unwrap_or(0.0) + 2.0,
-        SourceGrepKind::Hybrid => score_bounds.lowest.map(|score| score - 0.25).unwrap_or(1.0),
+        SourceGrepKind::Imports | SourceGrepKind::Hybrid => {
+            score_bounds.lowest.map(|score| score - 0.25).unwrap_or(1.0)
+        }
+    }
+}
+
+fn fallback_diagnostic(
+    plan: &CodeGrepFallbackPlan,
+    degraded_reason: Option<String>,
+) -> Option<String> {
+    let Some(reason) = degraded_reason else {
+        return (plan.kind == SourceGrepKind::Imports)
+            .then(|| EXTERNAL_IMPORT_GREP_DIAGNOSTIC.to_owned());
+    };
+    if plan.kind == SourceGrepKind::Imports {
+        Some(format!("{EXTERNAL_IMPORT_GREP_DIAGNOSTIC}; {reason}"))
+    } else {
+        Some(reason)
     }
 }
 
@@ -338,7 +370,7 @@ fn source_grep_match_score(
         SourceGrepKind::References => {
             reference_source_grep_score_adjustment(&plan.query, &matched.excerpt)
         }
-        SourceGrepKind::Definition | SourceGrepKind::Hybrid => 0.0,
+        SourceGrepKind::Definition | SourceGrepKind::Hybrid | SourceGrepKind::Imports => 0.0,
     };
 
     (base_score + adjustment).max(0.0)
@@ -544,6 +576,100 @@ fn source_grep_identity(query: &str) -> Option<String> {
     (query.split_whitespace().count() == 1).then_some(identity)
 }
 
+fn import_grep_query(results: &[CodeRetrievalHit]) -> Option<String> {
+    results
+        .iter()
+        .find_map(unindexed_external_import_specifier)
+        .and_then(|specifier| {
+            if specifier.len() <= 128 {
+                Some(specifier)
+            } else {
+                definition_identity(&specifier)
+            }
+        })
+}
+
+fn unindexed_external_import_specifier(hit: &CodeRetrievalHit) -> Option<String> {
+    if hit.edge_kind.as_deref() != Some("import")
+        || hit.edge_resolution_state.as_deref() != Some("unresolved")
+    {
+        return None;
+    }
+
+    hit.edge_target_hint
+        .as_deref()
+        .and_then(external_import_specifier)
+}
+
+fn external_import_specifier(target_hint: &str) -> Option<String> {
+    let specifier = import_specifier(target_hint)?;
+    (!local_import_specifier(&specifier)).then_some(specifier)
+}
+
+fn import_specifier(target_hint: &str) -> Option<String> {
+    let trimmed = target_hint.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(quoted) = quoted_import_specifier(trimmed) {
+        return Some(quoted.to_owned());
+    }
+    if let Some(rest) = trimmed.strip_prefix("pub use ") {
+        return statement_head(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("use ") {
+        return statement_head(rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("from ") {
+        let module = rest
+            .split_once(" import ")
+            .map_or(rest, |(module, _)| module);
+        return statement_head(module);
+    }
+    if let Some(rest) = trimmed.strip_prefix("import ") {
+        let module = rest.split_once(" from ").map_or(rest, |(_, module)| module);
+        return statement_head(module);
+    }
+
+    statement_head(trimmed)
+}
+
+fn quoted_import_specifier(value: &str) -> Option<&str> {
+    let mut quoted = None;
+    for quote in ['"', '\'', '`'] {
+        if let Some(start) = value.find(quote) {
+            let after_start = value.get(start + quote.len_utf8()..)?;
+            if let Some(end) = after_start.find(quote) {
+                quoted = Some(after_start.get(..end)?);
+            }
+        }
+    }
+    quoted.filter(|specifier| !specifier.trim().is_empty())
+}
+
+fn statement_head(value: &str) -> Option<String> {
+    let head = value
+        .trim()
+        .trim_matches(['"', '\'', '`', '<', '>'])
+        .trim_end_matches(';')
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(',')
+        .trim();
+    (!head.is_empty()).then(|| head.to_owned())
+}
+
+fn local_import_specifier(specifier: &str) -> bool {
+    let specifier = specifier.trim();
+    specifier.starts_with('.')
+        || specifier.starts_with('/')
+        || matches!(specifier, "crate" | "self" | "super")
+        || specifier.starts_with("crate::")
+        || specifier.starts_with("self::")
+        || specifier.starts_with("super::")
+}
+
 fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     let mut merged = Vec::new();
     for value in left.iter().chain(right.iter()) {
@@ -659,6 +785,136 @@ mod tests {
                 .retrieval_layers
                 .contains(&CodeRetrievalLayer::TextFallback)
         );
+    }
+
+    #[test]
+    fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability() {
+        let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/component.tsx", "react");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("react".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+        let mut results = vec![import_hit];
+        let plan = plan_code_grep_fallback(&status(), &request, &results)
+            .expect("unresolved import should plan source fallback");
+        assert_eq!(plan.query, "react");
+        let outcome = SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/component.tsx".to_owned(),
+                language_id: "tsx".to_owned(),
+                excerpt: "import React from \"react\";".to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 26 },
+                line_range: RepositoryCodeRange { start: 1, end: 1 },
+            }],
+            degraded_reason: None,
+        };
+
+        let reason = append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome)
+            .expect("import fallback should explain external dependency fallback");
+
+        assert!(reason.contains("external dependency import is not indexed"));
+        assert!(results.iter().any(|hit| {
+            hit.retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+        }));
+        assert!(results.iter().any(|hit| {
+            hit.retrieval_layers
+                .contains(&CodeRetrievalLayer::TextFallback)
+        }));
+    }
+
+    #[test]
+    fn import_fallback_keeps_graph_evidence_ahead_of_text_fallback() {
+        let mut request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
+        request.limit = 1;
+        let mut import_hit = hit("src/component.tsx", "react");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("react".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+        let plan = plan_code_grep_fallback(&status(), &request, &[import_hit.clone()])
+            .expect("unresolved import should plan source fallback");
+        let mut results = vec![import_hit];
+        let outcome = SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/component.tsx".to_owned(),
+                language_id: "tsx".to_owned(),
+                excerpt: "import React from \"react\";".to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 26 },
+                line_range: RepositoryCodeRange { start: 1, end: 1 },
+            }],
+            degraded_reason: None,
+        };
+
+        append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].excerpt, "react");
+        assert_eq!(
+            results[0].edge_resolution_state.as_deref(),
+            Some("unresolved")
+        );
+        assert!(
+            results[0]
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+        );
+    }
+
+    #[test]
+    fn import_fallback_skips_empty_import_results() {
+        let request = request("react", CodeQueryKind::Imports, Vec::new());
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_resolved_import_graph_hits() {
+        let request = request("crate::local", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/lib.rs", "use crate::local;");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("resolved".to_owned());
+        import_hit.edge_target_hint = Some("crate::local".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_ambiguous_import_graph_hits() {
+        let request = request("RetryPolicy", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/app.rs", "use app::RetryPolicy;");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("ambiguous".to_owned());
+        import_hit.edge_target_hint = Some("app::RetryPolicy".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_local_unresolved_import_graph_hits() {
+        let request = request("crate::local", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/lib.rs", "use crate::local;");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("use crate::local;".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_dot_prefixed_local_unresolved_import_graph_hits() {
+        let request = request(".pkg", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("pkg/app.py", "from .pkg import service");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("from .pkg import service".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
     }
 
     #[test]

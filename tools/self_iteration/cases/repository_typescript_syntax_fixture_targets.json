@@ -56,6 +56,24 @@
       "case_group": "typescript_tree_sitter_syntax"
     },
     {
+      "id": "typescript_syntax_external_react_import_grep_fallback",
+      "repository": "typescript_syntax_fixture",
+      "kind": "imports",
+      "query": "react",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 5,
+      "language_filters": ["tsx"],
+      "expected": [{
+        "path": "src/component.tsx",
+        "excerpt_contains": "import React from \"react\"",
+        "retrieval_layer": "text_fallback"
+      }],
+      "degraded_reason_contains": "external dependency import is not indexed",
+      "case_group": "typescript_tree_sitter_syntax"
+    },
+    {
       "id": "typescript_syntax_references_dynamic_import",
       "repository": "typescript_syntax_fixture",
       "kind": "imports",

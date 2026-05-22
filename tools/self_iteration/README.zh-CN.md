@@ -199,7 +199,10 @@ CSV 是 scored-run history，不是 patch 目录清单；它包含 run mode、pa
   `profile=exhaustive` 控制。语言
   case 覆盖真实 `symbol`、`definition`、`references`、`callers`、
   `callees`、`imports`、`hybrid` 场景，包括函数、方法、类、导出值、宏、
-  include/import、callback/trait 关系和执行流。relationship targets 仍拆成
+  include/import、callback/trait 关系和执行流。import case 可以要求
+  external-dependency grep fallback 诊断：当 import target 因依赖库未纳入代码图谱而保持
+  unresolved 时，产品只在当前已索引仓库源码内搜索，并返回 `text_fallback` 证据供 LLM 推理。
+  relationship targets 仍拆成
   regression 与 challenge 两组，并通过 extended relationship 文件为 Rust、
   Go、C、C++、Java、Python、JavaScript、TypeScript 显式补充实现、别名和
   inline callback/closure 场景。regression cases 保留 path filter 和较宽 rank

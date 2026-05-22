@@ -241,16 +241,14 @@ impl RelayKnowledgeService {
         apply_bridge_support_bonus(&mut results);
         let truncated = dedupe_sort_truncate(&mut results, request.limit, &request.query);
         prune_returned_overlay_evidence(&mut results);
-        let degraded_reason = status
-            .degraded_reason
-            .clone()
-            .or_else(|| {
-                status
-                    .overlay
-                    .stale
-                    .then(|| "repository set overlay is stale".to_owned())
-            })
-            .or(fallback_degraded_reason);
+        let degraded_reason = join_degraded_reasons([
+            status.degraded_reason.clone(),
+            status
+                .overlay
+                .stale
+                .then(|| "repository set overlay is stale".to_owned()),
+            fallback_degraded_reason,
+        ]);
 
         Ok(CodeRepositorySetQueryResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -428,6 +426,17 @@ pub(super) async fn required_set_status(
     refresh_repository_set_freshness(&mut status);
 
     Ok(status)
+}
+
+fn join_degraded_reasons(reasons: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let mut joined = Vec::new();
+    for reason in reasons.into_iter().flatten() {
+        if !joined.contains(&reason) {
+            joined.push(reason);
+        }
+    }
+
+    (!joined.is_empty()).then(|| joined.join("; "))
 }
 
 async fn refresh_moving_member_freshness(
