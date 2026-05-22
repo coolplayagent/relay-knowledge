@@ -15,6 +15,7 @@ DESCRIPTION_PREFIX = "description:"
 MAX_DESCRIPTION_CHARS = 1024
 METADATA_HEADER = "metadata:"
 METADATA_VERSION_PREFIX = "  version:"
+YAML_NULL_VALUES = {"null", "Null", "NULL", "~"}
 
 
 def validate_version(version: str) -> None:
@@ -38,6 +39,56 @@ def metadata_header_index(lines: list[str], end_index: int) -> int:
     raise ValueError("SKILL.md frontmatter is missing metadata")
 
 
+def top_level_continuation_exists(lines: list[str], index: int, end_index: int) -> bool:
+    for next_line in lines[index + 1 : end_index]:
+        if not next_line:
+            continue
+        if not next_line.startswith((" ", "\t")):
+            return False
+        return True
+    return False
+
+
+def plain_scalar_without_comment(raw_value: str) -> str:
+    value = raw_value.strip()
+    for index, character in enumerate(value):
+        if character == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value
+
+
+def quoted_scalar(raw_value: str, quote: str) -> str:
+    escaped = False
+    for index, character in enumerate(raw_value[1:], start=1):
+        if quote == '"' and character == "\\" and not escaped:
+            escaped = True
+            continue
+        if character == quote and not escaped:
+            trailing = plain_scalar_without_comment(raw_value[index + 1 :])
+            if trailing:
+                raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+            return raw_value[1:index]
+        escaped = False
+    raise ValueError("SKILL.md frontmatter description must be a single-line value")
+
+
+def single_line_yaml_description(raw_value: str, has_continuation: bool) -> str:
+    value = raw_value.strip()
+    if not value or value[0] == "#":
+        raise ValueError("SKILL.md frontmatter description must not be empty")
+    if value[0] in {"|", ">"}:
+        raise ValueError("SKILL.md frontmatter description must be a single-line value")
+    if has_continuation:
+        raise ValueError("SKILL.md frontmatter description must be a single-line value")
+    if value[0] in {"'", '"'}:
+        description = quoted_scalar(value, value[0])
+    else:
+        description = plain_scalar_without_comment(value)
+    if not description or description in YAML_NULL_VALUES:
+        raise ValueError("SKILL.md frontmatter description must not be empty")
+    return description
+
+
 def frontmatter_description(lines: list[str], end_index: int) -> str:
     description = None
     for index in range(1, end_index):
@@ -45,13 +96,11 @@ def frontmatter_description(lines: list[str], end_index: int) -> str:
         if line.startswith(DESCRIPTION_PREFIX):
             if description is not None:
                 raise ValueError("SKILL.md frontmatter has duplicate description fields")
-            description = line.split(":", 1)[1].strip()
-            if not description:
-                raise ValueError("SKILL.md frontmatter description must not be empty")
-            if description[0] in {"|", ">"}:
-                raise ValueError(
-                    "SKILL.md frontmatter description must be a single-line value"
-                )
+            raw_value = line.split(":", 1)[1]
+            description = single_line_yaml_description(
+                raw_value,
+                top_level_continuation_exists(lines, index, end_index),
+            )
     if description is None:
         raise ValueError("SKILL.md frontmatter is missing description")
     return description
