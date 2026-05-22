@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use super::{
     RelayKnowledgeService,
     code_repository_set_plan::{
-        dependency_symbol_plan_needs_hybrid_fallback, repository_set_member_query_kind,
+        dependency_symbol_plan_needs_hybrid_fallback, repository_set_member_query_plan,
     },
     code_repository_set_query::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
@@ -185,12 +185,12 @@ impl RelayKnowledgeService {
                 request.language_filters.clone(),
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
-            let member_query_kind =
-                repository_set_member_query_kind(&request, member_status, highest_priority);
+            let member_query_plan =
+                repository_set_member_query_plan(&request, member_status, highest_priority);
             let search_request = CodeRetrievalRequest::new(
-                request.query.clone(),
+                member_query_plan.query,
                 selector.clone(),
-                member_query_kind,
+                member_query_plan.kind,
                 candidate_limit,
                 FreshnessPolicy::AllowStale,
             )
@@ -200,7 +200,8 @@ impl RelayKnowledgeService {
                 .search_code_scope(member.source_scope.clone(), search_request)
                 .await
                 .map_err(storage_api_error)?;
-            if dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_kind, &hits) {
+            if dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_plan.kind, &hits)
+            {
                 let fallback_request = CodeRetrievalRequest::new(
                     request.query.clone(),
                     selector,

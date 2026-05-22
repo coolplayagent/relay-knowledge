@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779452125-repository-set-dependency-api-symbol-query
+- 算法：repository-set Hybrid 查询的低优先级依赖成员仍沿用 Symbol-first 计划，但内部依赖查询会从原 query 提取 API-shaped identity facets，仅保留 scoped token 与 leaf token，例如 `client.Dial Dial MustLoadDefaultClientOptions`，再交给 symbol FTS 与既有 symbol scorer；最高优先级成员、非 API 查询和覆盖不足时的 Hybrid fallback 继续使用完整原始 query。
+- 架构/不变量：变更限定在 `application::code_repository_set_plan` 和服务编排的成员级 `CodeRetrievalRequest` 构造；不改变 parser facts、SQLite schema、FTS 文档写入、单仓默认 retrieval、candidate limit、overlay refresh/evidence、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness。fallback 覆盖判断仍基于原 query 的 API identity leaves，覆盖少于两个 identity 时立即回退完整 Hybrid；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：Temporal/OTel 类 app+SDK workspace 中，依赖仓 symbol side 不再把 `workflow client task queue` 等自然语言 filler 推入 Symbol FTS 和后置评分，预期降低 repo-set query p50/p95 并让 SDK/core API definitions 更稳定进入 top-k；风险是依赖仓中只靠自然语言上下文而非 API identity 命中的 symbol 会下移，受 priority gate、multi-identity gate、coverage fallback、top member full Hybrid、overlay merge 和 planner 单测控制。
+- 策略关联：本 profile/category 没有已采纳或已拒绝历史，因此选择跨仓 query-plan 的通用算法候选而不是局部 fixture 调权；实现延续已记录的 `run-1779399365` dependency symbol plan，避免全局 repo-set fanout 收缩或 FTS-local token tweak 这类窄窗口调整模式。
 ## 候选优化说明：run-1779439043-code-search-backfill-marker
 - 算法/架构：SQLite code schema initialization 为 legacy `code_repository_search` backfill 增加 `code-search-backfill-v1` migration marker；首次打开数据库时若 FTS search 表已有内容则只记录 marker，若为空则执行既有 symbol/reference/import/call/chunk backfill 后记录 marker，后续 CLI query/index 进程打开同一 cached home 时直接跳过全表 FTS row count 和旧库 backfill probes。
 - 不变量：不改变 parser facts、SQLite 表结构、FTS document 内容、checkpoint/finalize、retrieval ranking、candidate windows、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；marker 只表达一次性 legacy backfill 已经完成或不需要，正常 indexing/finalize 仍负责维护 search rows，不枚举仓库、路径、query 或 fixture。
@@ -203,39 +208,8 @@
 - 不变量：原始 token 仍参与精确/substring 评分，snake/camel 标识符等价逻辑、scoped identity bonus、path/language filter、freshness/version metadata、dedupe/truncate 与零分过滤保持不变；slash、backslash 和 known file-extension token 不拆分，避免 `*.h` 等路径查询引入宽泛噪声。
 - 预期影响：提升多仓库 Go/TypeScript/Rust/C/C++ 代码检索中 qualified function、import alias、package member 与 header path 查询的排序稳定性，尤其让 repo-set expected-all 中 SDK/core 定义和关系查询目标从已召回候选中获得更合理分数，同时不牺牲 foundational、semantic/vector 与 stability protected floors。
 - 风险：qualified 查询会额外给其子词命中的候选加分，少数只匹配通用包名的结果可能上移；风险受去重、两字符下限、现有 FTS bounded candidates、layer-specific bonuses 和 top-k 截断控制，未加入仓库、路径、case、模型或 provider 特殊分支。
-## 候选优化说明：manual-c-composite-initializer-symbols-20260519
-- 算法/架构：C parser manual extraction 在顶层 `declaration` 中保留既有函数声明抽取，同时把有界行数内、带 `initializer_list` 或 macro/call initializer、且类型为 `struct`/`union`/`enum` 或声明符为数组的全局数据声明记录为 `constant` symbol；生成的 symbol 继续走现有 signature、chunk、FTS、call/reference、SQLite 写入与查询排序路径。
-- 不变量：typedef、函数指针变量、函数声明、函数定义、局部声明、标量 macro 初始化、超过 80 行的大型表、schema、candidate limit、ranking 权重、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布和 self-iteration harness 均不变。
-- 预期影响：Linux 与 C/C++ 头源混合仓库中的 callback table、sysfs/bin_attribute、vm_operations、file_operations 等顶层初始化表获得稳定源跨度和 lexical chunk，改善 `special_mapping_vmops`、`page_idle_bitmap_attr`、read/write/fault callback 关系与 execution-flow hybrid 查询的召回和 judge 对代码图完整性的评价。
-- 已知风险：少量短小顶层复合初始化表会新增 constant symbol/chunk 并增加 FTS 行；风险受顶层作用域、复合类型/数组、初始化形态、80 行上界、既有 dedupe/truncate 与 bounded candidate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
-## 候选优化说明：manual-call-search-symbol-signature-fts-20260519
-- 算法/架构：checkpoint finalize、snapshot apply 与旧库 backfill 写入 `call` FTS 文档时，在既有 caller/callee/target/path 字段后追加已索引 caller 与 callee symbol signature；`callers`/`callees` 后置评分同步把对应端的 signature 作为现有 `ScoreQuery` 字段，不新增 SQL schema、candidate limit 或评分权重。
-- 不变量：call edge 事实、reference/import resolution、candidate limit、dedupe/truncate、CLI/API 字段、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布与 self-iteration harness 均不变；没有 caller/callee symbol 的 call 继续使用原有字段。
-- 预期影响：C/C++、Java、Go、TypeScript 等大仓中，`Table::InternalGet`、`pkg.Type.method` 这类 scoped callee/caller 查询可通过函数签名中的 owner-qualified surface 召回已有 call edge，改善代码图查询零结果与研究 judge 对 source-span evidence 的评价。
-- 已知风险：call FTS 文档会多写短签名字段，register-to-index 的 FTS 写入体积略增；风险受已有 signature 512 字节上界、bounded candidate limit、direction prefilter 与后置评分控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
-## 候选优化说明：manual-js-ts-exported-object-value-symbols-20260519
-- 算法：JS/TS parser manual extraction 在既有 exported constructed value 规则上，增加对短小 `export const name = {...}` 与 `export const name = [...]` 公共值的 `constant` symbol 抽取，并 unwrap bounded `as`/`satisfies`/parenthesized 表达式后判断实际值形态。
-- 架构：变更限定在 tree-sitter 解析后的 manual symbol extraction 层，复用现有 export ancestor、identifier validation、symbol upsert、signature/chunk 生成与 64 行上界；不改变 SQLite schema、FTS candidate、ranking/scoring、finalize、CLI/API、semantic/vector provider/env、research judge、网络/QoS、安装发布或 self-iteration harness 行为。
-- 不变量：非导出局部对象、普通函数调用结果、动态属性、超过行数上界的大对象继续不入图；函数值、member-call/new 构造值、现有 JS tree-sitter tags、imports/calls/references、path/language filters 和 freshness/version evidence 保持原行为。
-- 预期影响：relay-teams JS、opencode TS/TSX 等大仓中公开 state/config/protocol/route surface 会获得稳定 symbol 与 symbol chunk，改善 `state`、公开对象定义、背景流/协议配置相关 hybrid 查询的召回和研究评审对代码图完整性的评价。
-- 已知风险：少量短小导出对象/数组会增加 symbol/chunk 数并参与近同名排序；风险受 export-only、合法标识符、表达式形态、64 行上界、既有 FTS bounded candidates 和 dedupe/truncate 控制，未引入仓库、路径、case、provider、模型或密钥特殊分支。
-## 候选优化说明：manual-typescript-imported-reference-finalize-20260519
-- 算法：checkpoint finalize 在完成 TypeScript/TSX named import 解析后，利用已解析的 import `target_hint` 与目标文件符号表，把同文件中仍为 unresolved/ambiguous 的同名 reference/call 绑定到唯一导入符号；随后再重建 reference search document 与 call graph/search document，确保检索使用最终 resolved edge。
-- 架构：变更位于 SQLite checkpoint finalize 的跨文件解析层，新增独立 imported-reference 模块复用既有 symbol cache、TypeScript import parser 与 path normalization；不改变 parser capture、SQLite schema、FTS candidate limit、query scoring/ranking、CLI/API JSON、semantic/vector provider/env、research judge 配置、网络/QoS、安装发布或 self-iteration harness 行为。
-- 不变量：只处理已 resolved 的 TypeScript/TSX named import、目标文件中唯一同名符号、且 reference 当前不是 resolved 的记录；本地同文件唯一解析优先，ambiguous 多目标继续保留 ambiguous/unresolved，Python/Java/Go/C/C++ import 规则和 existing import result scoring 不变。
-- 预期影响/风险：opencode、relay-teams 等大型 TS/JS 仓库中，存在同名 helper 的导入调用可由 import edge 精确提升为 resolved call edge，改善 callers/callees 证据、edge confidence、research judge 对图完整性的评价，并减少 `redactUrl` 这类同名跨包调用排序噪声；风险是 finalize 多一次按 resolved TS imports 迭代引用更新，成本受 import 数、symbol cache 和唯一目标约束。
-## 候选优化说明：manual-callee-member-call-context-bonus-20260519
-- 算法：在 `callees` 查询的 bounded call graph 后置评分中检测 caller chunk 里的 receiver-qualified 调用行，例如 `ToolRuntime.stream(...)`、`object.method(...)`、`Owner::method(...)` 或 `ptr->method(...)`；当候选已由 caller 名称进入正分集合且 callee 名称以成员调用形式出现时，给予小额 0.45 bonus，让具体成员调用证据能压过近同分的本地 helper 调用。
-- 架构：变更限定在 SQLite code query Rust scoring 层，复用已查询出的 caller chunk excerpt，不扩大 FTS MATCH、candidate limit、SQLite schema、索引事实、parser extraction、semantic/vector provider、CLI/API、judge、HTTP/QoS 或安装发布行为。
-- 不变量：只有 `CodeQueryKind::Callees` 且 base score 为正的候选参与；普通 `function(...)`、对象字面量属性 `method: value`、空 callee、caller/callee/import/hybrid 其它查询、path/language filter、confidence、dedupe/truncate、freshness/version metadata 和环境读取规则保持不变。
-- 预期影响：Opencode TypeScript、relay-teams JS、Kubernetes Go、Spring Java、LevelDB C++ 等大仓中，询问某个函数的 callees 时，带 receiver 的直接外部/服务调用不再被 resolved helper 因 confidence 微弱优势压过，重点改善 `streamWith` -> `ToolRuntime.stream` 这类 call graph query rank 与 research judge 对代码图证据解释性的评价。
-- 已知风险：少数 receiver-qualified 成员调用会在同一 caller 的 callee 列表中小幅上移；风险受正 base score、callee-only 作用域、明确成员调用前缀、调用后缀、bounded candidates 和既有 truncate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
-## 候选优化说明：manual-type-relationship-declaration-chunk-bonus-20260518T224034Z
-- 算法：在 Hybrid chunk 后置评分中识别“继承、扩展、实现、覆盖”等关系意图查询；当候选 chunk 同时具有 `class`、`struct`、`interface` 或 `abstract class` 的继承/实现声明形态，并满足既有三词以上内容覆盖门槛时，把普通声明块 bonus 从 2.0 提升为 2.75，单纯实现函数或无关系声明的 chunk 不加分。
-- 架构：变更限定在 SQLite code query 的 bounded candidate Rust scoring 层，不扩大 FTS MATCH、candidate limit、SQLite schema、索引事实、parser extraction、semantic/vector provider、CLI/API、judge、HTTP/QoS 或安装发布行为。
-- 不变量：抽象接口 `interface` boost、普通多 prototype 声明块、path/language filter、symbol/edge scoring、dedupe/truncate、freshness/version metadata 和环境读取规则保持不变；关系 bonus 只作用于已召回的 Hybrid lexical chunk。
-- 预期影响：LevelDB、Linux、Kubernetes、Spring、TypeScript/JavaScript 等大仓中，询问 inheritance/override/implements/extends 的研究型查询更容易把类型关系声明块排在方法实现或邻近 helper 之前，重点改善 `BloomFilterPolicy inherits FilterPolicy KeyMayMatch override` 这类 competitive relationship case 与 judge 对代码图关系解释性的评价。
-- 已知风险：少数包含继承声明且匹配多查询词的 declaration chunk 会小幅上移；风险受关系意图词、声明形态、多词覆盖、bounded candidates 和既有 truncate 控制，不引入仓库、路径、case、provider、模型或密钥特殊分支。
+## 20260518-20260519 manual parser/retrieval entries compacted
+- summary: C composite initializer symbols, call signature FTS, JS/TS exported values, TypeScript imported-reference finalize, callee member-call context, and relationship declaration chunk ranking entries are compacted here to keep this primary benchmark log under the tracked-file line cap; full algorithms, invariants, risks, patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/`.
 ## 候选优化说明：manual-shared-finalize-symbol-cache-20260519
 - 目标/算法/架构/不变量：保护 foundational、competitive、semantic/vector、research judge、performance 与 stability 下限，降低多仓 full-scope `repo register` finalize 阶段重复读取 symbol 表的固定成本；scope finalize 增加惰性 `SymbolKey` cache，Python/Java/TypeScript symbol-aware import resolution 与 call graph rebuild 共享同一批已排序 symbol keys，C/C++ 等无需 symbol-aware import 的仓库仍延迟到 call rebuild 才加载。SQLite schema、事实表内容、reference/import/call resolution 规则、search document、candidate limit、ranking/scoring、CLI/API、provider/env、judge、网络/QoS、安装发布与 self-iteration harness 行为保持不变。
 - 预期影响/风险：opencode、relay-teams、Kubernetes、Spring 等含大量 TS/Python/Java named import 或 static import 的仓库少一次全量 `code_repository_symbols` scan 和一次 call rebuild symbol clone，预期改善 register-to-index wall time 与 finalize 稳定性；风险是 finalize 期间共享 cache 的生命周期变长，但仍限于单 scope transaction、惰性加载、既有 row budgets 和 deterministic caller line lookup 单测。
@@ -1007,6 +981,20 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 - key improvements: score_component:score 0.960958->0.9892552174950271; score_component:performance 0.783102->0.9403067638612612; metric:self_iteration_cargo_fmt_check_ms 384.0->323.0; metric:temporal_sdk_go_index_ms 1774.0->585.0; metric:temporal_sdk_go_register_index_ms 2581.0->646.0; metric:temporal_samples_go_index_ms 827.0->121.0; metric:temporal_samples_go_register_index_ms 1573.0->182.0; metric:cpp_syntax_fixture_index_ms 1209.0->204.0
 - known degradations: metric:semantic_vector_provider_probe_ms 524.0->625.0
 - latency metrics: cargo_fmt_check_ms=2257ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=585ms; temporal_sdk_go_register_index_ms=646ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=182ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779452125
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779452125.patch`
+- score: 0.950907 (foundational=1.000000, competitive=0.916667, accuracy=0.958333, semantic_vector=1.000000, research_judge=n/a, performance=0.829111, stability=1.000000)
+- cases: 41/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_plan.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=1636ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=7066ms; self_iteration_cargo_check_ms=444ms; temporal_sdk_go_index_ms=29501ms; temporal_sdk_go_register_index_ms=29643ms; cpp_syntax_fixture_index_ms=1009ms; cpp_syntax_fixture_register_index_ms=1050ms
 
 Adopted optimization notes:
 
