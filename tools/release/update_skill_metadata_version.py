@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update or verify SKILL.md frontmatter metadata.version."""
+"""Update or verify SKILL.md frontmatter metadata."""
 
 from __future__ import annotations
 
@@ -11,8 +11,30 @@ from pathlib import Path
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 FRONTMATTER_BOUNDARY = "---"
+DESCRIPTION_PREFIX = "description:"
+MAX_DESCRIPTION_CHARS = 1024
 METADATA_HEADER = "metadata:"
 METADATA_VERSION_PREFIX = "  version:"
+YAML_NULL_VALUES = {"null", "Null", "NULL", "~"}
+DOUBLE_QUOTED_ESCAPES = {
+    "0": "\0",
+    "a": "\x07",
+    "b": "\b",
+    "t": "\t",
+    "n": "\n",
+    "v": "\x0b",
+    "f": "\f",
+    "r": "\r",
+    "e": "\x1b",
+    '"': '"',
+    "/": "/",
+    "\\": "\\",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": "\u2028",
+    "P": "\u2029",
+}
+DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS = {"x": 2, "u": 4, "U": 8}
 
 
 def validate_version(version: str) -> None:
@@ -36,6 +58,137 @@ def metadata_header_index(lines: list[str], end_index: int) -> int:
     raise ValueError("SKILL.md frontmatter is missing metadata")
 
 
+def top_level_continuation_exists(lines: list[str], index: int, end_index: int) -> bool:
+    for next_line in lines[index + 1 : end_index]:
+        if not next_line:
+            continue
+        if not next_line.startswith((" ", "\t")):
+            return False
+        return True
+    return False
+
+
+def plain_scalar_without_comment(raw_value: str) -> str:
+    value = raw_value.strip()
+    for index, character in enumerate(value):
+        if character == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value
+
+
+def verify_quoted_scalar_trailing(raw_value: str, index: int) -> None:
+    trailing = plain_scalar_without_comment(raw_value[index + 1 :])
+    if trailing:
+        raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+
+
+def single_quoted_scalar(raw_value: str) -> str:
+    parsed = []
+    index = 1
+    while index < len(raw_value):
+        character = raw_value[index]
+        if character == "'":
+            if index + 1 < len(raw_value) and raw_value[index + 1] == "'":
+                parsed.append("'")
+                index += 2
+                continue
+            verify_quoted_scalar_trailing(raw_value, index)
+            return "".join(parsed)
+        parsed.append(character)
+        index += 1
+    raise ValueError("SKILL.md frontmatter description must be a single-line value")
+
+
+def double_quoted_escape(raw_value: str, index: int) -> tuple[str, int]:
+    if index + 1 >= len(raw_value):
+        raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+    escape = raw_value[index + 1]
+    if escape in DOUBLE_QUOTED_ESCAPES:
+        return DOUBLE_QUOTED_ESCAPES[escape], index + 2
+    if escape in DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS:
+        width = DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS[escape]
+        start = index + 2
+        end = start + width
+        codepoint = raw_value[start:end]
+        if len(codepoint) != width or not all(
+            character in "0123456789abcdefABCDEF" for character in codepoint
+        ):
+            raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+        try:
+            return chr(int(codepoint, 16)), end
+        except ValueError as error:
+            raise ValueError(
+                "SKILL.md frontmatter description has invalid YAML text"
+            ) from error
+    raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+
+
+def double_quoted_scalar(raw_value: str) -> str:
+    parsed = []
+    index = 1
+    while index < len(raw_value):
+        character = raw_value[index]
+        if character == '"':
+            verify_quoted_scalar_trailing(raw_value, index)
+            return "".join(parsed)
+        if character == "\\":
+            decoded, index = double_quoted_escape(raw_value, index)
+            parsed.append(decoded)
+            continue
+        parsed.append(character)
+        index += 1
+    raise ValueError("SKILL.md frontmatter description must be a single-line value")
+
+
+def quoted_scalar(raw_value: str) -> str:
+    if raw_value[0] == "'":
+        return single_quoted_scalar(raw_value)
+    return double_quoted_scalar(raw_value)
+
+
+def single_line_yaml_description(raw_value: str, has_continuation: bool) -> str:
+    value = raw_value.strip()
+    if not value or value[0] == "#":
+        raise ValueError("SKILL.md frontmatter description must not be empty")
+    if value[0] in {"|", ">"}:
+        raise ValueError("SKILL.md frontmatter description must be a single-line value")
+    if has_continuation:
+        raise ValueError("SKILL.md frontmatter description must be a single-line value")
+    if value[0] in {"'", '"'}:
+        description = quoted_scalar(value)
+    else:
+        description = plain_scalar_without_comment(value)
+    if not description or description in YAML_NULL_VALUES:
+        raise ValueError("SKILL.md frontmatter description must not be empty")
+    return description
+
+
+def frontmatter_description(lines: list[str], end_index: int) -> str:
+    description = None
+    for index in range(1, end_index):
+        line = lines[index]
+        if line.startswith(DESCRIPTION_PREFIX):
+            if description is not None:
+                raise ValueError("SKILL.md frontmatter has duplicate description fields")
+            raw_value = line.split(":", 1)[1]
+            description = single_line_yaml_description(
+                raw_value,
+                top_level_continuation_exists(lines, index, end_index),
+            )
+    if description is None:
+        raise ValueError("SKILL.md frontmatter is missing description")
+    return description
+
+
+def validate_description(path: Path, description: str) -> None:
+    description_chars = len(description)
+    if description_chars > MAX_DESCRIPTION_CHARS:
+        raise ValueError(
+            f"{path} description is {description_chars} characters; "
+            f"maximum is {MAX_DESCRIPTION_CHARS}"
+        )
+
+
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
     for index in range(metadata_index + 1, end_index):
         line = lines[index]
@@ -54,6 +207,12 @@ def read_metadata_version(path: Path) -> str | None:
     if version_index is None:
         return None
     return lines[version_index].split(":", 1)[1].strip()
+
+
+def check_frontmatter_description(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    end_index = frontmatter_end_index(lines)
+    validate_description(path, frontmatter_description(lines, end_index))
 
 
 def write_metadata_version(path: Path, version: str) -> None:
@@ -80,6 +239,11 @@ def check_metadata_version(path: Path, expected: str) -> None:
         raise ValueError(f"{path} metadata.version is {actual!r}; expected {expected!r}")
 
 
+def check_skill_metadata(path: Path, expected: str) -> None:
+    check_metadata_version(path, expected)
+    check_frontmatter_description(path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify without rewriting")
@@ -92,10 +256,10 @@ def main() -> int:
     args = parse_args()
     try:
         if args.check:
-            check_metadata_version(args.skill_md, args.version)
+            check_skill_metadata(args.skill_md, args.version)
         else:
             write_metadata_version(args.skill_md, args.version)
-            check_metadata_version(args.skill_md, args.version)
+            check_skill_metadata(args.skill_md, args.version)
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1

@@ -64,6 +64,25 @@ jobs:
       - name: GraphRAG evaluation fixture gate
         run: cargo test --test relay_knowledge graphrag_fixture_dataset_scores_phase4_cases
 
+  skill-metadata:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Skill metadata gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_version="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          python3 tools/release/update_skill_metadata_version.py --check \
+            skills/relay-knowledge-cli/SKILL.md "$manifest_version"
+
   coverage:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest

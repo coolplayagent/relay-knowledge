@@ -23,6 +23,10 @@ matching.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in
   generated release packages.
 
+Keep the `SKILL.md` frontmatter `description` at or below 1024 Unicode
+characters. Local checks, pre-commit, PR CI, release packaging, and ClawHub
+publish validation all run the shared skill metadata gate.
+
 ## Runtime Selection
 
 Resolve `relay-knowledge` before running workflow commands. Prefer the bundled
