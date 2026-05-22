@@ -239,7 +239,7 @@ impl RelayKnowledgeService {
             }
         }
         apply_bridge_support_bonus(&mut results);
-        let truncated = dedupe_sort_truncate(&mut results, request.limit);
+        let truncated = dedupe_sort_truncate(&mut results, request.limit, &request.query);
         prune_returned_overlay_evidence(&mut results);
         let degraded_reason = status
             .degraded_reason

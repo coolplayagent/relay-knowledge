@@ -100,7 +100,7 @@ fn symbol_hit_matches_identity(hit: &CodeRetrievalHit, identity: &str) -> bool {
             || text_contains_identifier(&hit.excerpt, identity))
 }
 
-fn api_query_identity_leaves(query: &str) -> Vec<String> {
+pub(super) fn api_query_identity_leaves(query: &str) -> Vec<String> {
     let mut identities = Vec::new();
     for identity in api_query_identities(query) {
         if !identities.contains(&identity.leaf) {
