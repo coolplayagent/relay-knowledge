@@ -44,7 +44,8 @@ relay-knowledge service doctor
 包会在 `assets/` 下内置 Linux x64 和 Windows x64 二进制；agent 会将它们与 `PATH`
 中的二进制比较，并使用 semver 最新版本。生成后的 `SKILL.md` metadata 会记录与
 `Cargo.toml` 相同的数字版本。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个
-生成后的 skill 布局发布到 ClawHub：
+生成后的 skill 布局发布到 ClawHub。skill 包还会携带根目录 `README.md`，供 registry
+和包使用者查看：
 
 ```bash
 clawhub publish skills/relay-knowledge-cli \

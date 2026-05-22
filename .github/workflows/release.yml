@@ -97,9 +97,13 @@ jobs:
           set -euo pipefail
           manifest_version="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          test -f skills/relay-knowledge-cli/README.md
           test -f skills/relay-knowledge-cli/SKILL.md
           test -f skills/relay-knowledge-cli/agents/openai.yaml
           test -f skills/relay-knowledge-cli/references/cli-workflows.md
+          grep -q 'Relay Knowledge CLI Skill' skills/relay-knowledge-cli/README.md
+          grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/README.md
+          grep -q 'does not configure MCP' skills/relay-knowledge-cli/README.md
           grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
           python3 tools/release/update_skill_metadata_version.py --check \
             skills/relay-knowledge-cli/SKILL.md "$manifest_version"
@@ -269,6 +273,7 @@ jobs:
           windows_archive="skill-artifacts/windows-x86_64/${BIN_NAME}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc.zip"
           mkdir -p "dist/$package"
           cp -R skills/relay-knowledge-cli/. "dist/$package/"
+          test -f "dist/$package/README.md"
           python3 tools/release/update_skill_metadata_version.py \
             "dist/$package/SKILL.md" "${{ needs.verify.outputs.version }}"
           mkdir -p "dist/$package/assets/linux-x86_64" "dist/$package/assets/windows-x86_64"
@@ -294,6 +299,7 @@ jobs:
           python3 tools/release/update_skill_metadata_version.py --check \
             "dist/$package/SKILL.md" "${{ needs.verify.outputs.version }}"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
+          tar -tzf "dist/$package.tar.gz" | grep -Fx "$package/README.md" >/dev/null
 
       - name: Upload skill archive
         uses: actions/upload-artifact@v6
@@ -400,7 +406,7 @@ jobs:
 
           ## CLI Skill
 
-          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes Linux x64 and Windows x64 binaries under `assets/` and selects the newest semver version when both PATH and bundled binaries are available. It is intentionally separate from MCP protocol access.
+          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance, Linux x64 and Windows x64 binaries under `assets/`, and selects the newest semver version when both PATH and bundled binaries are available. It is intentionally separate from MCP protocol access.
 
           Registry maintainers can publish the same generated skill layout with:
 
