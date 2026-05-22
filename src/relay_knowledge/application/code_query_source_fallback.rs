@@ -136,11 +136,13 @@ pub(super) fn append_code_grep_fallback(
     let best_score = results.first().map_or(0.0, |hit| hit.score);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
-        if results.iter().any(|hit| {
+        if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
                 && hit.excerpt == matched.excerpt
         }) {
+            add_code_grep_layers(existing, plan.kind);
+            existing.score = existing.score.max(grep_score(plan.kind, best_score));
             continue;
         }
         let path_metadata = metadata.get(&matched.path);
@@ -158,6 +160,14 @@ pub(super) fn append_code_grep_fallback(
     outcome.degraded_reason
 }
 
+fn add_code_grep_layers(hit: &mut CodeRetrievalHit, kind: SourceGrepKind) {
+    if kind == SourceGrepKind::Definition {
+        add_retrieval_layer(hit, CodeRetrievalLayer::Definition);
+    }
+    add_retrieval_layer(hit, CodeRetrievalLayer::Lexical);
+    add_retrieval_layer(hit, CodeRetrievalLayer::TextFallback);
+}
+
 pub(super) fn append_definition_source_fallback(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
@@ -170,11 +180,15 @@ pub(super) fn append_definition_source_fallback(
     let best_score = results.first().map_or(0.0, |hit| hit.score);
     let metadata = path_metadata(results);
     for declaration in declarations {
-        if results.iter().any(|hit| {
+        if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == declaration.path
                 && hit.line_range.start == declaration.line_range.start
                 && hit.excerpt == declaration.excerpt
         }) {
+            add_retrieval_layer(existing, CodeRetrievalLayer::Definition);
+            add_retrieval_layer(existing, CodeRetrievalLayer::Lexical);
+            add_retrieval_layer(existing, CodeRetrievalLayer::TextFallback);
+            existing.score = existing.score.max(best_score + 4.0);
             continue;
         }
         let path_metadata = metadata.get(&declaration.path);
@@ -219,6 +233,12 @@ pub(super) fn append_definition_source_fallback(
         });
     }
     dedupe_sort_truncate(results, request.limit);
+}
+
+fn add_retrieval_layer(hit: &mut CodeRetrievalHit, layer: CodeRetrievalLayer) {
+    if !hit.retrieval_layers.contains(&layer) {
+        hit.retrieval_layers.push(layer);
+    }
 }
 
 fn code_grep_hit(

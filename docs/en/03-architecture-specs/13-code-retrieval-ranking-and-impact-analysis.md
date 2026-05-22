@@ -33,7 +33,7 @@ Code repository queries use AST-first cooperation with exact grep fallback. Defi
 
 FTS and grep candidate windows apply scope/path/language filters before bounded scoring. High fan-out caller/callee queries are truncated by edge score and line containment so one call edge is not multiplied across unrelated chunks.
 
-Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by candidate-file, match, line-length, and timeout budgets, and it searches indexed commit content rather than the dirty working tree. If `rg` is unavailable, times out, or exhausts its budget, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization.
+Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by storage-side candidate-path limits, candidate-file, match, line-length, and timeout budgets, and it searches indexed commit content rather than the dirty working tree. If `rg` is unavailable, times out, or exhausts its budget, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization.
 
 Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
 

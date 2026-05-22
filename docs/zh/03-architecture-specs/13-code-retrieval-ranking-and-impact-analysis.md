@@ -33,7 +33,7 @@
 
 FTS 和 grep candidate window 必须先应用 scope/path/language filter，再进入有界评分。高 fan-out caller/callee 查询需要按 edge score 和 line containment 截断，避免一条调用边被多个无关 chunk 放大。
 
-Ripgrep 兜底与 Git 快照读取一样运行在 blocking-worker 边界之后，并受候选文件数、命中数、单行长度和 timeout 预算约束。它搜索已索引 commit 内容，而不是脏工作树。`rg` 不存在、超时或预算耗尽时，查询仍保持有效，并通过 degraded reason 暴露诊断，不能绕过 freshness 或授权边界。
+Ripgrep 兜底与 Git 快照读取一样运行在 blocking-worker 边界之后，并受存储侧候选路径上限、候选文件数、命中数、单行长度和 timeout 预算约束。它搜索已索引 commit 内容，而不是脏工作树。`rg` 不存在、超时或预算耗尽时，查询仍保持有效，并通过 degraded reason 暴露诊断，不能绕过 freshness 或授权边界。
 
 候选窗口应输出可观测字段：每个 layer 的 pre-filter count、post-filter count、score count、truncation reason 和耗时。影响分析、caller/callee 和 import 查询必须随 changed path、seed symbol、module hint 和 edge confidence 扩展，而不是随完整 scope table size 扩展。
 

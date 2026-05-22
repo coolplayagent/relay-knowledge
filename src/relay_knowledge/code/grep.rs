@@ -1,8 +1,10 @@
 use std::{
     collections::BTreeSet,
     fs,
+    io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    thread::JoinHandle,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -15,7 +17,8 @@ use super::{
     source_line_defines_identity,
 };
 
-const MAX_GREP_CANDIDATE_FILES: usize = 256;
+pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
+const MAX_GREP_CANDIDATE_FILES: usize = SOURCE_GREP_CANDIDATE_FILE_LIMIT;
 const MAX_GREP_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GREP_LINE_BYTES: usize = 4096;
 const RIPGREP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -94,7 +97,7 @@ pub(crate) fn source_grep_matches(
             });
         }
     };
-    let mut matches = match parse_ripgrep_matches(&output, request.limit) {
+    let mut matches = match parse_ripgrep_matches(&output.stdout, request.limit) {
         Ok(matches) => matches,
         Err(error) => {
             return Ok(SourceGrepOutcome {
@@ -199,32 +202,65 @@ fn run_ripgrep(root: &Path, query: &str, limit: usize) -> RipgrepRun {
         }
         Err(error) => return RipgrepRun::Degraded(format!("ripgrep failed to start: {error}")),
     };
+    let stdout = child.stdout.take().map(spawn_pipe_reader);
+    let stderr = child.stderr.take().map(spawn_pipe_reader);
     let started = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() >= RIPGREP_TIMEOUT => {
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = collect_pipe_reader(stdout, "stdout");
+                let _ = collect_pipe_reader(stderr, "stderr");
                 return RipgrepRun::Degraded("ripgrep timeout".to_owned());
             }
             Ok(None) => std::thread::sleep(RIPGREP_POLL_INTERVAL),
-            Err(error) => return RipgrepRun::Degraded(format!("ripgrep wait failed: {error}")),
+            Err(error) => {
+                let _ = collect_pipe_reader(stdout, "stdout");
+                let _ = collect_pipe_reader(stderr, "stderr");
+                return RipgrepRun::Degraded(format!("ripgrep wait failed: {error}"));
+            }
         }
-    }
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(error) => return RipgrepRun::Degraded(format!("ripgrep output failed: {error}")),
     };
-    if output.status.success() || output.status.code() == Some(1) {
-        return RipgrepRun::Output(output.stdout);
+    let stdout = match collect_pipe_reader(stdout, "stdout") {
+        Ok(output) => output,
+        Err(error) => return RipgrepRun::Degraded(error),
+    };
+    let stderr = match collect_pipe_reader(stderr, "stderr") {
+        Ok(output) => output,
+        Err(error) => return RipgrepRun::Degraded(error),
+    };
+    if status.success() || status.code() == Some(1) {
+        return RipgrepRun::Output(RipgrepOutput { stdout });
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&stderr).trim().to_owned();
     RipgrepRun::Degraded(if stderr.is_empty() {
         "ripgrep exited with an error".to_owned()
     } else {
         format!("ripgrep exited with an error: {stderr}")
     })
+}
+
+fn spawn_pipe_reader(mut pipe: impl Read + Send + 'static) -> JoinHandle<io::Result<Vec<u8>>> {
+    std::thread::spawn(move || {
+        let mut output = Vec::new();
+        pipe.read_to_end(&mut output)?;
+        Ok(output)
+    })
+}
+
+fn collect_pipe_reader(
+    reader: Option<JoinHandle<io::Result<Vec<u8>>>>,
+    stream: &str,
+) -> Result<Vec<u8>, String> {
+    let Some(reader) = reader else {
+        return Ok(Vec::new());
+    };
+    reader
+        .join()
+        .map_err(|_| format!("ripgrep {stream} reader panicked"))?
+        .map_err(|error| format!("ripgrep {stream} read failed: {error}"))
 }
 
 fn parse_ripgrep_matches(
@@ -354,8 +390,12 @@ struct MaterializedFiles {
 }
 
 enum RipgrepRun {
-    Output(Vec<u8>),
+    Output(RipgrepOutput),
     Degraded(String),
+}
+
+struct RipgrepOutput {
+    stdout: Vec<u8>,
 }
 
 struct TempSourceTree {

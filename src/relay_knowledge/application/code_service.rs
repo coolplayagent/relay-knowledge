@@ -9,11 +9,11 @@ use crate::{
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        CodeIndexError, build_index_snapshot, changed_paths_for_diff,
-        deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
-        prepare_full_index_plan, preview_repository_scope, register_repository,
-        resolve_repository_ref, resolve_repository_snapshot, source_declarations_for_identity,
-        source_grep_matches,
+        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, build_index_snapshot,
+        changed_paths_for_diff, deleted_symbol_names_for_diff,
+        partition_changed_paths_for_selector, prepare_full_index_plan, preview_repository_scope,
+        register_repository, resolve_repository_ref, resolve_repository_snapshot,
+        source_declarations_for_identity, source_grep_matches,
     },
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
@@ -753,12 +753,14 @@ pub(crate) async fn apply_code_grep_fallback(
                 ))
             })?;
         let paths = store
-            .code_file_fingerprints_for_scope(source_scope.to_owned())
+            .code_file_candidate_paths_for_scope(
+                source_scope.to_owned(),
+                plan.path_filters.clone(),
+                plan.language_filters.clone(),
+                SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
+            )
             .await
-            .map_err(storage_api_error)?
-            .into_iter()
-            .map(|fingerprint| fingerprint.path)
-            .collect();
+            .map_err(storage_api_error)?;
         plan.with_scope_paths(paths)
     } else {
         plan
@@ -773,7 +775,6 @@ pub(crate) async fn apply_code_grep_fallback(
     let fallback_degraded_reason =
         append_code_grep_fallback(scoped_status, request, results, &plan, outcome);
     if !had_matches
-        && fallback_degraded_reason.is_some()
         && plan.kind == crate::code::SourceGrepKind::Definition
         && let Some(identity) = &plan.identity
     {

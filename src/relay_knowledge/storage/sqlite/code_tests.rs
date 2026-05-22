@@ -51,6 +51,39 @@ async fn text_only_chunk_hits_are_marked_as_text_fallback() {
 }
 
 #[tokio::test]
+async fn candidate_paths_for_scope_apply_filters_before_limit() {
+    let mut snapshot =
+        snapshot_with_chunk_status("repo", "src/lib.rs", "body", CodeParseStatus::Parsed, None);
+    snapshot.files.push(code_test_support::file(
+        "doc",
+        "docs/operations.md",
+        "unknown",
+        CodeParseStatus::TextOnly,
+        None,
+    ));
+    snapshot.files.push(code_test_support::file(
+        "notes",
+        "docs/notes.txt",
+        "unknown",
+        CodeParseStatus::TextOnly,
+        None,
+    ));
+    let store = store_with_repository_snapshot(snapshot).await;
+
+    let paths = store
+        .code_file_candidate_paths_for_scope(
+            code_test_support::TEST_SOURCE_SCOPE.to_owned(),
+            vec!["docs".to_owned()],
+            vec!["unknown".to_owned()],
+            1,
+        )
+        .await
+        .expect("candidate paths should load");
+
+    assert_eq!(paths, ["docs/notes.txt"]);
+}
+
+#[tokio::test]
 async fn hybrid_deduplication_preserves_retrieval_layers() {
     let store = store_with_repository_snapshot(snapshot_with_symbol_and_matching_chunk()).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())

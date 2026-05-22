@@ -97,6 +97,81 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
     assert!(hit.edge_confidence_tier.is_none());
 }
 
+#[tokio::test]
+async fn definition_query_line_scans_when_ripgrep_omits_long_lines() {
+    let repo = FixtureRepo::create("code-ripgrep-long-line-definition");
+    let filler = "x".repeat(5000);
+    repo.write(
+        "docs/api.txt",
+        &format!("int rk_long_line_definition(void); // {filler}\n"),
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "long definition line"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "long-line-fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-long-line-definition"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("long-line-fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-long-line-definition"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "rk_long_line_definition",
+                CodeRepositorySelector::new(
+                    "long-line-fixture",
+                    "HEAD",
+                    vec!["docs/api.txt".to_owned()],
+                    vec!["unknown".to_owned()],
+                )
+                .expect("selector should validate"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-long-line-definition"),
+        )
+        .await
+        .expect("query should succeed");
+
+    let hit = response
+        .results
+        .iter()
+        .find(|hit| {
+            hit.path == "docs/api.txt"
+                && hit.excerpt.contains("int rk_long_line_definition(void);")
+                && hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::Definition)
+                && hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+        })
+        .expect("long definition line should be recovered by line scanner");
+    assert!(hit.edge_confidence_basis_points.is_none());
+    assert!(hit.edge_confidence_tier.is_none());
+}
+
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
         .expect("selector should validate")

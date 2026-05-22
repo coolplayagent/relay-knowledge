@@ -38,7 +38,8 @@ use git::{
     git_bytes, git_object_exists, git_optional, resolve_git_root, resolve_ref, resolve_tree,
 };
 pub(crate) use grep::{
-    SourceGrepKind, SourceGrepMatch, SourceGrepOutcome, SourceGrepRequest, source_grep_matches,
+    SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
+    SourceGrepRequest, source_grep_matches,
 };
 use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
