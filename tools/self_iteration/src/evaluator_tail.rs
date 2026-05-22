@@ -876,6 +876,7 @@ int rk_driver_open(struct rk_device *dev)
 
 int rk_driver_read(struct rk_device *dev, char *buffer, size_t length)
 {
+    // RK_TRACE_NOTE documents fallback-only macro text.
     buffer[0] = (char)RK_TRACE_VALUE(dev->fd);
     return (int)length;
 }

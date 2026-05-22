@@ -271,6 +271,25 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
             return false;
         }
     }
+    if let Some(expected) = pattern.get("retrieval_layer").and_then(Value::as_str) {
+        let layers = hit
+            .get("retrieval_layers")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if !layers.iter().any(|layer| layer.as_str() == Some(expected)) {
+            return false;
+        }
+    }
+    if pattern
+        .get("edge_confidence_absent")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && (hit.get("edge_confidence_basis_points").is_some()
+            || hit.get("edge_confidence_tier").is_some())
+    {
+        return false;
+    }
     true
 }
 

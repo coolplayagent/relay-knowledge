@@ -27,9 +27,13 @@ Signals include BM25, identifier-part matches, CamelCase/snake_case segmentation
 
 Industry code-search practice requires lexical, structural, and semantic layering: Zoekt/Google Code Search style trigram candidates are good for substring and regex screening, BM25 for natural language and documentation chunks, Tree-sitter captures for symbols and edges, and semantic/vector retrieval for conceptual explanation queries. Ranking must not let semantic scores override exact symbols or resolved edges, and broad regex results cannot bypass scope, path, language, or revision filters.
 
+Code repository queries use AST-first cooperation with exact grep fallback. Definition, reference, and hybrid queries first consult the versioned tree-sitter graph and SQLite FTS read model. When that structured path has a specific recall gap, a bounded ripgrep pass may search the same indexed revision scope for exact text evidence. Grep fallback is a lexical layer only: it can recover precise source lines and improve recall, but it cannot report resolved graph edges or confidence that the AST graph did not establish.
+
 ## 4. Candidate Window
 
-FTS candidate windows apply scope/path/language filters before bounded scoring. High fan-out caller/callee queries are truncated by edge score and line containment so one call edge is not multiplied across unrelated chunks.
+FTS and grep candidate windows apply scope/path/language filters before bounded scoring. High fan-out caller/callee queries are truncated by edge score and line containment so one call edge is not multiplied across unrelated chunks.
+
+Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by candidate-file, match, line-length, and timeout budgets, and it searches indexed commit content rather than the dirty working tree. If `rg` is unavailable, times out, or exhausts its budget, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization.
 
 Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
 
@@ -52,6 +56,7 @@ Impact output is not an absolute conclusion; it is a risk grouping with evidence
 
 - Query `foo_bar` can match `fooBar`, `FooBar`, and multipart symbol names, while typed edge queries stay narrower.
 - Caller/callee results point to chunks containing the call line.
+- Grep fallback hits are marked with lexical/text-fallback provenance and never include resolved edge confidence.
 - Impact output explains whether each result came from diff, call, reference, import, or test signals.
 - Benchmarks are not improved by enumerating known queries, paths, or symbols; improvements come from general ranking signals, index structures, or candidate pushdown.
 

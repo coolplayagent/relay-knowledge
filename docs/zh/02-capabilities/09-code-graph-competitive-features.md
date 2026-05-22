@@ -15,12 +15,13 @@
 - Symbol 命中同时包含 `symbol_snapshot_id` 和 `canonical_symbol_id`。
 - Reference、caller/callee、import 和 impact 命中暴露 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。
 - Code query 返回 revision-scoped hit，包含 path、line range、kind、score、freshness、symbol identity、edge diagnostics 和 excerpt。
+- 精确 ripgrep 兜底命中的 `retrieval_layers` 包含 `lexical` 和 `text_fallback`；definition 兜底还可以包含 `definition`。这些命中的 edge diagnostic 字段保持为空，因为它们是源码文本证据，不是 resolved graph edge。
 
 ## 竞争力特性
 
 普通代码搜索无法区分“名字相同但快照不同”的符号，也无法解释调用边是否 resolved。代码图用 snapshot symbol 和 canonical symbol 同时建模，把不确定性作为元数据返回。
 
-相对纯 grep、纯 trigram 或纯 embedding 搜索，代码图把 Sourcegraph/Zoekt 类词法候选、Tree-sitter 结构捕获、BM25 chunk、语义/向量解释召回和版本 scope 组合起来。精确 symbol 和 resolved edge 优先，语义相似只作为补充信号，避免自然语言相关性压过结构事实。
+相对纯 grep、纯 trigram 或纯 embedding 搜索，代码图把 Sourcegraph/Zoekt 类词法候选、Tree-sitter 结构捕获、BM25 chunk、语义/向量解释召回和版本 scope 组合起来。精确 symbol 和 resolved edge 优先，语义相似只作为补充信号，避免自然语言相关性压过结构事实。当 AST 或已索引词法读模型存在具体召回缺口时，ripgrep 作为有界精确文本恢复层参与协作。
 
 ## 命令/API 入口
 
@@ -32,7 +33,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 ## 降级与诊断
 
 Parser 或 query failure 只隔离到受影响文件，不会中止整个仓库 batch。未解析或歧义边不会伪装成确定调用。
-宽泛 regex、未解析边、parser degraded 和 stale code index 都必须在响应中可见；benchmark 提升不能依赖已知 path、query 或 symbol 特例。
+宽泛 regex、未解析边、parser degraded、stale code index、ripgrep 缺失、ripgrep timeout 和 ripgrep budget exhaustion 都必须在响应中可见；benchmark 提升不能依赖已知 path、query 或 symbol 特例。
 
 ## 关联架构章节
 

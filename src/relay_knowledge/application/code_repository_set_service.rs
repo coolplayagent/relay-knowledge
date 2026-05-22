@@ -7,8 +7,8 @@ use crate::{
     code::{CodeIndexError, resolve_repository_snapshot},
     domain::{
         CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest, CodeRepositorySetStatus,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest,
+        CodeRepositorySetStatus, CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
     },
     storage::{
         CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
@@ -27,6 +27,7 @@ use super::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
         per_member_candidate_limit, prune_returned_overlay_evidence, repository_set_score,
     },
+    code_service::apply_code_grep_fallback,
 };
 
 const REPOSITORY_SET_REFRESH_TASK_LEASE_MS: u64 = 10 * 60 * 1000;
@@ -167,6 +168,7 @@ impl RelayKnowledgeService {
             .map_err(storage_api_error)?;
         let edge_index = OverlayEvidenceIndex::new(&edges);
         let mut results = Vec::new();
+        let mut fallback_degraded_reason = None;
         let candidate_limit = per_member_candidate_limit(request.limit, status.members.len());
         let highest_priority = status
             .members
@@ -193,6 +195,7 @@ impl RelayKnowledgeService {
                 FreshnessPolicy::AllowStale,
             )
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+            let mut active_request = search_request.clone();
             let mut hits = store
                 .search_code_scope(member.source_scope.clone(), search_request)
                 .await
@@ -206,11 +209,23 @@ impl RelayKnowledgeService {
                     FreshnessPolicy::AllowStale,
                 )
                 .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+                active_request = fallback_request.clone();
                 hits = store
                     .search_code_scope(member.source_scope.clone(), fallback_request)
                     .await
                     .map_err(storage_api_error)?;
             }
+            let base_status = required_member_repository(&store, &member.repository_id).await?;
+            let scoped_member_status =
+                code_status_for_repository_set_member(&base_status, member_status);
+            fallback_degraded_reason = fallback_degraded_reason.or(apply_code_grep_fallback(
+                &store,
+                &base_status,
+                &scoped_member_status,
+                &active_request,
+                &mut hits,
+            )
+            .await?);
             for hit in hits {
                 let overlay_evidence = edge_index.evidence_for_hit(&hit);
                 let score = repository_set_score(&hit, member_status, &overlay_evidence);
@@ -225,12 +240,16 @@ impl RelayKnowledgeService {
         apply_bridge_support_bonus(&mut results);
         let truncated = dedupe_sort_truncate(&mut results, request.limit);
         prune_returned_overlay_evidence(&mut results);
-        let degraded_reason = status.degraded_reason.clone().or_else(|| {
-            status
-                .overlay
-                .stale
-                .then(|| "repository set overlay is stale".to_owned())
-        });
+        let degraded_reason = status
+            .degraded_reason
+            .clone()
+            .or_else(|| {
+                status
+                    .overlay
+                    .stale
+                    .then(|| "repository set overlay is stale".to_owned())
+            })
+            .or(fallback_degraded_reason);
 
         Ok(CodeRepositorySetQueryResponse {
             metadata: ApiMetadata::graph_only(&context, graph_version),
@@ -553,6 +572,45 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     }
 
     merged
+}
+
+async fn required_member_repository(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    repository_id: &str,
+) -> Result<CodeRepositoryStatus, ApiError> {
+    store
+        .code_repository_status(repository_id.to_owned())
+        .await
+        .map_err(storage_api_error)?
+        .ok_or_else(|| {
+            ApiError::invalid_argument(format!(
+                "code repository set member repository '{repository_id}' is not registered"
+            ))
+        })
+}
+
+fn code_status_for_repository_set_member(
+    base_status: &CodeRepositoryStatus,
+    member_status: &CodeRepositorySetMemberStatus,
+) -> CodeRepositoryStatus {
+    let member = &member_status.member;
+    CodeRepositoryStatus {
+        repository_id: member.repository_id.clone(),
+        alias: member.repository_alias.clone(),
+        root_path: base_status.root_path.clone(),
+        path_filters: member.path_filters.clone(),
+        language_filters: member.language_filters.clone(),
+        last_indexed_scope_id: Some(member.source_scope.clone()),
+        last_indexed_commit: Some(member.resolved_commit_sha.clone()),
+        tree_hash: Some(member_status.tree_hash.clone()),
+        state: member_status.freshness_state.clone(),
+        indexed_file_count: member_status.indexed_file_count,
+        symbol_count: member_status.symbol_count,
+        reference_count: member_status.reference_count,
+        chunk_count: member_status.chunk_count,
+        stale: member_status.stale,
+        degraded_reason: member_status.degraded_reason.clone(),
+    }
 }
 
 fn now_millis() -> u64 {

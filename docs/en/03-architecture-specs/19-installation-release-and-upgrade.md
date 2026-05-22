@@ -25,6 +25,8 @@ Installation and release are part of product architecture. Stable releases are v
 
 Installers or install scripts support version selection, install directory selection, dry run, checksum verification, service-definition generation, failure rollback, and uninstall plans. Runtime data is not written to release extraction directories by default.
 
+Ripgrep is an optional runtime enhancement for exact code-source fallback. Installers and packaged diagnostics should detect whether `rg` is on `PATH` and report that code graph queries still work without it, while exact fallback hits may be degraded.
+
 ## 4. Runtime State
 
 Configuration, databases, indexes, logs, caches, temporary files, and dead-letter data live in platform directories owned by `paths`. Upgrades preserve runtime state and explicitly run schema/index migrations.

@@ -19,6 +19,23 @@ mod tests {
     }
 
     #[test]
+    fn hit_pattern_can_require_retrieval_layer_and_absent_edge_confidence() {
+        let hit = serde_json::json!({
+            "path": "src/driver_ops.c",
+            "retrieval_layers": ["lexical", "text_fallback"],
+            "excerpt": "RK_TRACE_NOTE documents fallback-only macro text"
+        });
+        let pattern = serde_json::json!({
+            "path": "src/driver_ops.c",
+            "retrieval_layer": "text_fallback",
+            "edge_confidence_absent": true,
+            "excerpt_contains": "RK_TRACE_NOTE"
+        });
+
+        assert!(hit_matches_any(&hit, &[pattern]));
+    }
+
+    #[test]
     fn failed_gate_rejects() {
         let observation = EvaluationObservation {
             gates: vec![GateObservation {

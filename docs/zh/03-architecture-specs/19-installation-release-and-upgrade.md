@@ -25,6 +25,8 @@
 
 Installer 或安装脚本支持：版本选择、安装目录选择、dry run、校验和验证、service definition 生成、失败回滚和 uninstall plan。默认不会把数据写入 release 解压目录。
 
+Ripgrep 是精确代码源码兜底的可选运行时增强依赖。安装器和打包诊断应检测 `PATH` 中是否存在 `rg`，并说明缺少它时代码图查询仍可工作，但精确兜底命中可能降级。
+
 ## 4. 运行时状态
 
 配置、数据库、索引、日志、缓存、临时文件和 dead-letter 数据写入 `paths` 管理的平台目录。升级时必须保留 runtime state，并显式执行 schema/index migration。
