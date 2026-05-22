@@ -143,6 +143,11 @@ Constraints:
 - Follow AGENTS.md and hard architecture constraints.
 - Keep this self-iteration harness independent under tools/self_iteration.
 - Do not create commits yourself; the harness owns accepted commits.
+- Code graph import hits whose targets are external or otherwise unresolved may
+  use the product's internal grep fallback over the current indexed repository
+  source. Treat `text_fallback` results and the external dependency diagnostic
+  as source-text evidence, not as proof that the dependency library itself is
+  indexed in the code graph.
 
 Workspace: {workspace}
 Evaluation profile: {profile}
@@ -225,6 +230,11 @@ Goal:
 - Preserve foundational capability, semantic/vector retrieval, stability, and existing competitive behavior.
 - Update docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md when code, tests, benchmark behavior, or harness policy changes.
 - Do not create commits; the harness owns accepted commits.
+- When code graph import targets are external or unresolved, relay-knowledge may
+  use internal grep over the current indexed repository source and report
+  `text_fallback` plus an external dependency diagnostic. Use that as local
+  source-text evidence only; do not infer that the external dependency library
+  has been indexed.
 
 Baseline:
 - Latest scored run: {latest_summary}
@@ -504,6 +514,29 @@ mod tests {
         assert!(prompt.contains("Best accepted run: accepted"));
         assert!(prompt.contains("Local improvements that did not win"));
         assert!(prompt.contains("broader algorithmic change"));
+        assert!(prompt.contains("external dependency diagnostic"));
+        assert!(prompt.contains("source-text evidence"));
+    }
+
+    #[test]
+    fn unattended_prompt_explains_external_import_grep_fallback() {
+        let workspace = temp_workspace("codex-unattended-prompt");
+        let paths = HistoryPaths::new(&workspace);
+        paths.ensure().expect("history paths");
+
+        let prompt = build_unattended_prompt(
+            &paths,
+            &workspace,
+            "run-test",
+            "fast",
+            EvaluationCategory::Competitive,
+            false,
+            &json!({}),
+        );
+
+        assert!(prompt.contains("external dependency diagnostic"));
+        assert!(prompt.contains("external dependency library"));
+        assert!(prompt.contains("text_fallback"));
     }
 
     fn temp_workspace(prefix: &str) -> std::path::PathBuf {

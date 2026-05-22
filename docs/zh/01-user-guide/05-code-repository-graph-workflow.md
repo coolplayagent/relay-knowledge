@@ -87,7 +87,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --for
 
 branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个 branch 复用同一 scope，但响应仍保留本次请求的 ref 作为审计信息。rebase 或 force-move 后的新 head 必须先重新索引，否则查询会失败而不是返回旧 branch 内容。
 
-符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。
+符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。如果 import 指向没有作为代码图谱 target 建索引的外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 grep fallback 在当前已索引仓库源码中搜索。此类命中会携带 `text_fallback`，响应诊断会说明外部依赖 import 未被索引，因此 agent 应把结果当成本仓源码文本证据，而不是依赖库图谱证据。
 
 ### 多仓库 Repository Set 查询
 

@@ -12,7 +12,7 @@ use relay_knowledge::{
     domain::{
         CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
         CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryRequest, FreshnessPolicy,
+        CodeRepositorySetQueryRequest, CodeRetrievalLayer, FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::SqliteGraphStore,
@@ -366,6 +366,86 @@ pub fn original() -> u32 {
             .degraded_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("now resolves"))
+    );
+}
+
+#[tokio::test]
+async fn repository_set_import_query_reports_external_dependency_grep_fallback() {
+    if Command::new("rg").arg("--version").output().is_err() {
+        return;
+    }
+    let repo = FixtureRepo::create("repo-set-external-import");
+    repo.write(
+        "src/lib.rs",
+        r#"
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct Event {
+    pub payload: String,
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "external rust import"]);
+    let service = service_with_memory_store().await;
+
+    register_and_index(&service, &repo, "app").await;
+    service
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            context("external-set-create"),
+        )
+        .await
+        .expect("set should create");
+    add_member(&service, "workspace", "app", 0).await;
+
+    let response = service
+        .query_code_repository_set(
+            CodeRepositorySetQueryRequest::new(
+                "workspace",
+                "serde",
+                CodeQueryKind::Imports,
+                10,
+                FreshnessPolicy::AllowStale,
+                Vec::new(),
+                vec!["rust".to_owned()],
+            )
+            .expect("query request should validate"),
+            context("external-import-set-query"),
+        )
+        .await
+        .expect("repository-set query should succeed");
+
+    assert!(
+        response
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("external dependency import is not indexed")),
+        "unexpected degraded reason: {:?}",
+        response.degraded_reason
+    );
+    assert!(
+        response.results.iter().any(|result| {
+            result.member.repository_alias == "app"
+                && result.hit.edge_kind.as_deref() == Some("import")
+                && result.hit.edge_resolution_state.as_deref() == Some("unresolved")
+        }),
+        "expected unresolved import graph evidence: {:?}",
+        response.results
+    );
+    assert!(
+        response.results.iter().any(|result| {
+            result.member.repository_alias == "app"
+                && result.hit.excerpt.contains("serde")
+                && result
+                    .hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+        }),
+        "expected current-repository text fallback evidence: {:?}",
+        response.results
     );
 }
 

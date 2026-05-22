@@ -87,7 +87,7 @@ Results include repository id, alias, `scope_id`, requested ref, resolved commit
 
 Branches, tags, and `HEAD` first resolve to commit/tree. Multiple branches with the same tree hash reuse one scope, while the response keeps the requested ref for audit. After rebase or force-move, index the new head before querying; the query fails instead of returning old branch content.
 
-Symbol hits also include `canonical_symbol_id` for expressing logical symbol identity across snapshots. Reference, call, and import hits return `edge_kind`, `edge_resolution_state`, `edge_target_hint`, `edge_confidence_basis_points`, and `edge_confidence_tier`. Uniquely unresolved targets are marked `unresolved` or `ambiguous` instead of being written as certain calls.
+Symbol hits also include `canonical_symbol_id` for expressing logical symbol identity across snapshots. Reference, call, and import hits return `edge_kind`, `edge_resolution_state`, `edge_target_hint`, `edge_confidence_basis_points`, and `edge_confidence_tier`. Uniquely unresolved targets are marked `unresolved` or `ambiguous` instead of being written as certain calls. If an import points at an external dependency that is not indexed as a code graph target, `repo query --kind imports` and repository-set import queries may run the bounded internal grep fallback over the current indexed repository source. Those hits carry `text_fallback` and the response diagnostic says the external dependency import was not indexed, so agents should treat the result as local source-text evidence rather than dependency-library graph evidence.
 
 ### Multi-Repository Repository Set Queries
 

@@ -524,6 +524,9 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
     let mut assessment = assess_ranked_hits(case, hits, expected, forbidden);
+    assessment
+        .failures
+        .extend(payload_constraint_failures(case, &payload, hits.len()));
     let mut rank = assessment.rank;
     let mut passed = assessment.failures.is_empty();
     if case
