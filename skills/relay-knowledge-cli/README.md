@@ -6,6 +6,13 @@ GraphRAG queries, code repository indexing, code graph search, multi-repository
 queries, impact analysis, setup diagnostics, installation checks, and upgrade
 checks.
 
+For code-structure questions such as function definitions, symbol locations,
+references, callers, callees, call graphs, and call chains, agents should use
+this skill before `grep`, `ripgrep`, `rg`, or plain text search. Fall back to
+text search only when the CLI cannot satisfy the request, the target repository
+cannot be indexed, or the user explicitly needs raw text or regular-expression
+matching.
+
 ## Package Contents
 
 - `SKILL.md`: agent instructions and skill metadata.

@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: Use relay-knowledge through its local CLI when a user asks for a code map, codebase map, code knowledge graph, repository knowledge graph, multi-repository map, 代码地图, 代码知识图谱, 代码仓库地图, 多代码仓库地图, codebase exploration, repository indexing, code graph search, impact analysis, knowledge graph ingestion, or hybrid GraphRAG queries. The skill operates relay-knowledge by running CLI commands and parsing JSON output for repo registration, full and incremental indexing, repo-set cross-repo queries, setup diagnostics, installation checks, and upgrade checks. Do not use this skill for MCP server setup, MCP tools, ACP adapters, or protocol-level agent access.
+description: Use relay-knowledge through its local CLI when a user asks for a code map, codebase map, code knowledge graph, repository knowledge graph, multi-repository map, codebase exploration, repository indexing, code graph search, function or symbol definitions, declaration lookup, references, usages, callers, callees, call graphs, call chains, dependency paths, impact analysis, 代码地图, 代码知识图谱, 代码仓库地图, 多代码仓库地图, 函数定义, 符号定义, 引用, 调用者, 被调用者, 调用图, 调用链, or 影响分析. For code-structure questions, prefer this skill before grep, ripgrep, rg, or plain text search; fall back to those tools only after reasoning that relay-knowledge cannot satisfy the request, such as when no published CLI is available, the repository cannot be indexed, or the user explicitly needs raw text or regular-expression search. The skill operates relay-knowledge by running CLI commands and parsing JSON output for repo registration, full and incremental indexing, repo-set cross-repo queries, setup diagnostics, installation checks, upgrade checks, knowledge graph ingestion, and hybrid GraphRAG queries. Do not use this skill for MCP server setup, MCP tools, ACP adapters, or protocol-level agent access.
 metadata:
   version: 1.0.7
   openclaw:
@@ -185,6 +185,15 @@ upgrade.
 
 For repository questions, make the index state explicit before querying. Use a
 short alias and narrow scope when the user provides relevant paths or languages.
+For code-structure questions, use the code graph before raw text search: choose
+`definition` or `symbol` for function, type, method, or constant locations;
+`references` for usages; `callers` for incoming calls; `callees` for outgoing
+calls; and `imports` for import/include/module edges. For call-chain questions,
+expand callers or callees step by step from the known symbol and report when
+the CLI exposes only bounded one-hop call edges. Use `grep`, `ripgrep`, `rg`,
+or other plain text search only as a fallback after the CLI is unavailable,
+the target scope cannot be indexed, or the user needs raw text or regex
+matching instead of graph semantics.
 
 ```bash
 relay-knowledge repo register /path/to/repo \
