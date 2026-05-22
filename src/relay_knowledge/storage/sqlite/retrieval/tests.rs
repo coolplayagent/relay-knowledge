@@ -115,3 +115,19 @@ fn graph_retrieval_schema_retry_is_limited_to_transient_open_errors() {
         "no such table: graph_bm25"
     ));
 }
+
+#[test]
+fn graph_bm25_query_retry_is_limited_to_transient_query_errors() {
+    assert!(bm25::graph_bm25_query_error_message_is_retryable(
+        "vtable constructor failed: graph_bm25"
+    ));
+    assert!(bm25::graph_bm25_query_error_message_is_retryable(
+        "database table is locked: graph_bm25"
+    ));
+    assert!(!bm25::graph_bm25_query_error_message_is_retryable(
+        "no such table: graph_bm25"
+    ));
+    assert!(!bm25::graph_bm25_query_error_is_retryable(
+        &StorageError::InvalidInput("database is locked".to_owned())
+    ));
+}

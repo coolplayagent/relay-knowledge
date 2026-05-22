@@ -66,6 +66,33 @@ fn hybrid_grep_fallback_fills_after_structured_hits() {
 }
 
 #[test]
+fn hybrid_grep_fallback_skips_exact_symbol_coverage() {
+    let request = request("ConnectorService", CodeQueryKind::Hybrid, Vec::new());
+    let mut result = hit("src/service.py", "class ConnectorService:");
+    result.language_id = "python".to_owned();
+    result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    result.canonical_symbol_id =
+        Some("repo://repo/src::relay_teams::connector::service::ConnectorService".to_owned());
+
+    assert!(plan_code_grep_fallback(&status(), &request, &[result]).is_none());
+}
+
+#[test]
+fn hybrid_grep_fallback_uses_text_fallback_for_non_symbol_coverage() {
+    let request = request("ConnectorService", CodeQueryKind::Hybrid, Vec::new());
+    let result = hit(
+        "docs/service.md",
+        "ConnectorService appears in deployment notes.",
+    );
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[result])
+        .expect("lexical-only context should still allow source fallback");
+
+    assert_eq!(plan.kind, SourceGrepKind::Hybrid);
+    assert!(plan.needs_scope_paths());
+}
+
+#[test]
 fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");

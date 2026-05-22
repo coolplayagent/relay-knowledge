@@ -126,6 +126,9 @@ pub(super) fn plan_code_grep_fallback(
         }
         CodeQueryKind::Hybrid if results.len() < request.limit => {
             let identity = source_grep_identity(&request.query)?;
+            if hybrid_results_cover_identity(results, &identity) {
+                return None;
+            }
             Some(CodeGrepFallbackPlan {
                 commit,
                 query: identity,
@@ -520,6 +523,31 @@ fn hit_mentions_identity(hit: &CodeRetrievalHit, identity: &str) -> bool {
             .canonical_symbol_id
             .as_deref()
             .is_some_and(|symbol_id| symbol_id.contains(identity))
+}
+
+fn hybrid_results_cover_identity(results: &[CodeRetrievalHit], identity: &str) -> bool {
+    results.iter().any(|hit| {
+        hit.retrieval_layers.iter().any(|layer| {
+            matches!(
+                layer,
+                CodeRetrievalLayer::Symbol | CodeRetrievalLayer::Definition
+            )
+        }) && (hit
+            .canonical_symbol_id
+            .as_deref()
+            .is_some_and(|symbol_id| canonical_symbol_leaf_matches(symbol_id, identity))
+            || hit
+                .excerpt
+                .lines()
+                .any(|line| source_identifier_ranges(line, identity).next().is_some()))
+    })
+}
+
+fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, identity: &str) -> bool {
+    canonical_symbol_id
+        .rsplit(|character: char| !source_identifier_char(character))
+        .find(|term| !term.is_empty())
+        .is_some_and(|leaf| leaf == identity)
 }
 
 fn push_candidate_path(paths: &mut Vec<String>, path: &str) {

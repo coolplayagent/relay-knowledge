@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779465105-hybrid-symbol-elision-with-bm25-query-retry
+- 算法/架构：Hybrid 单标识符查询在已有 Symbol/Definition 结果通过 canonical leaf 或 identifier 边界覆盖 query identity 时，不再启动应用层源码 grep fallback；同时 BM25 候选读取把 `graph_bm25` 的 transient vtable constructor/schema/table lock 错误放进有界 query retry，而不是只在 schema 初始化阶段重试。前者减少 exact API 查询的 scope path materialization 和 ripgrep worker work，后者保护同一检索请求继续使用 BM25、semantic/vector、graph evidence 与 code graph merge，不改变 SQLite schema、parser facts、FTS MATCH、candidate limit、repository-set fanout、env/paths/net 或 tools/self_iteration harness。
+- 不变量：Hybrid elision 只接受单 token safe identifier，并要求已有 Symbol/Definition layer；lexical-only、text_fallback、Definition、References、Imports、unresolved external import fallback 继续走原 bounded fallback；BM25 retry 只匹配明确 transient SQLite message，不吞掉 missing-table、invalid query 或非 SQLite storage errors；dedupe/top-k、path/language/freshness filters、semantic/vector read model、diagnostic fields 与 graph confidence semantics 保持不变；没有仓库名、路径名、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期保留 `run-1779464360` 中 exact Hybrid 查询的性能收益，降低多仓 exact API 查询的无效源码 fallback work，并恢复该 rejected run 因 `vtable constructor failed: graph_bm25` 导致的 C++ virtual-dispatch gate/stability 回退。风险是用户对 exact Hybrid 单符号查询期望额外文本 mentions 时结果不再由 grep 补齐，以及极少数持久 SQLite 锁会多等待 65ms；风险受 Symbol/Definition coverage gate、lexical fallback 保留、短有界 retry 和 focused tests 控制。
+- 策略关联：建立在 accepted `run-1779463498` 的 bounded source fallback evidence 边界与 earlier accepted graph BM25 transient-retry strategy 上，同时避免 rejected `run-1779464360` 只做应用层 elision、没有覆盖 query-time `graph_bm25` transient failure 的模式。
 ## 候选优化说明：run-1779463498-bounded-external-import-grep-paths
 - 算法/架构：Import 查询在发现 unresolved external dependency graph hit 后，内部 grep fallback 不再默认请求整个 indexed scope 的候选文件窗口，而是从已经召回且同一 external specifier 匹配的 import graph hit 中提取有界路径集合，最多 32 个 path；只有无法从 graph hit 得到安全路径时才回退原 full-scope candidate lookup。源文件搜索仍通过 `application::code_query_source_fallback` 进入 `code::grep` 的 bounded blocking worker，不改变 net/env/paths、SQLite schema、parser facts 或 repository-set 编排。
 - 不变量：ImportGraph hit 仍是主证据，`text_fallback` 只表达当前仓库源码中存在同一 external specifier；resolved/ambiguous/local imports 不触发 fallback；path、language、safe git blob、grep byte/timeout/result limit、dedupe/top-k、diagnostic 文案和 graph confidence 字段语义保持；不枚举仓库、路径、case id、query 字符串或 fixture。
@@ -984,27 +989,18 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779435315 compacted
 - summary: latest accepted checkpoint batch delete-elision scored 0.964516 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; performance was 0.802867 and 52/52 cases passed. Full metrics, patch, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779435315.patch`, reports, and progressive memory; strategy details remain in the candidate section above.
 
-## run-1779439043 compacted
-- summary: accepted code-search backfill marker scored 0.989255 with 52/52 cases passed and performance 0.940307; full patch, changed paths, metrics, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779439043.patch`, reports, and progressive memory.
+## run-1779439043-to-run-1779463498 compacted
+- summary: accepted code-search backfill marker, repository-set dependency API symbol query/direct plan, line-aware reference evidence, repository-set API identity coverage/declaration demotion, and bounded external import fallback records are compacted to keep this primary benchmark log under the 1000-line hard cap. Latest accepted in this range was `run-1779463498` with score 0.969160 and foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full raw metrics, changed paths, adopted notes, patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries, with strategy details preserved in candidate sections above.
 
-## run-1779452125-to-run-1779452982 compacted
-- summary: accepted repository-set dependency API symbol query and covered API symbol direct plan records were compacted to keep this primary benchmark log under the 1000-line hard cap; latest accepted score was 0.962453 with foundational=1.0, competitive=0.916667, semantic_vector=1.0, stability=1.0, and performance=0.893258. Full raw metrics, changed paths, patches, reports, and progressive memory remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779452125.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779452982.patch`, reports, and memory summaries, with strategy details preserved in the candidate sections above.
+## run-1779465105
 
-## run-1779453521 compacted
-- summary: accepted line-aware reference evidence scored 0.973276 with foundational=1.0, competitive=0.993590, semantic_vector=1.0, stability=1.0; full metrics, patch, changed paths, and risks remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779453521.patch`, reports, and progressive memory, with strategy details preserved in the candidate section above.
-
-## run-1779456158 compacted
-- summary: accepted repository-set API identity coverage and bounded source-fallback declaration demotion scored 0.976534 with 43/43 cases passed and foundational, competitive, semantic_vector, and stability floors at 1.0; full metrics, changed paths, patch, and report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779456158.patch`, reports, and progressive memory, with strategy details preserved in the candidate section above.
-
-## run-1779463498
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779463498.patch`
-- score: 0.969160 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.828667, stability=1.000000)
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779465105.patch`
+- score: 0.976355 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.868639, stability=1.000000)
 - cases: 43/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_query_source_fallback.rs`, `src/relay_knowledge/application/code_query_source_fallback_tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=2058ms; self_iteration_cargo_fmt_check_ms=344ms; cargo_build_debug_ms=344ms; self_iteration_cargo_check_ms=1188ms; temporal_sdk_go_index_ms=38346ms; temporal_sdk_go_register_index_ms=38508ms; relay_teams_index_ms=141744ms; relay_teams_register_index_ms=141805ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_query_source_fallback.rs`, `src/relay_knowledge/application/code_query_source_fallback_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/bm25.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
+- key improvements: score_component:competitive_capability 0.961538->1.0; score_component:stability 0.988889->1.0; gate:cpp_syntax_fixture_cpp_syntax_callers_writer_append_virtual_dispatch false->true; case:cpp_syntax_callers_writer_append_virtual_dispatch false->true; metric:cargo_fmt_check_ms 2176.0->1775.0; metric:self_iteration_cargo_fmt_check_ms 343.0->303.0; metric:cpp_syntax_fixture_index_ms 242.0->60.0; metric:cpp_syntax_fixture_register_index_ms 303.0->121.0
+- known degradations: score_component:performance 0.918137->0.8686393666644389; metric:cargo_build_debug_ms 263.0->302.0; metric:temporal_sdk_go_index_ms 525.0->566.0; metric:temporal_sdk_go_register_index_ms 586.0->627.0; metric:temporal_samples_go_index_ms 122.0->201.0; metric:temporal_samples_go_register_index_ms 183.0->282.0; metric:cpp_syntax_fixture_query_p50_ms 141.0->202.0; metric:cpp_syntax_fixture_query_p95_ms 243.0->322.0
+- latency metrics: cargo_fmt_check_ms=1775ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=302ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=566ms; temporal_sdk_go_register_index_ms=627ms; temporal_samples_go_index_ms=201ms; temporal_samples_go_register_index_ms=282ms
 
 Adopted optimization notes:
 

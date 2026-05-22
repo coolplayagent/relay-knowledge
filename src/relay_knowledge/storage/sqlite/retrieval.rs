@@ -6,6 +6,9 @@ use std::{
 
 mod advanced;
 
+#[path = "retrieval/bm25.rs"]
+mod bm25;
+
 use rusqlite::{Connection, params};
 
 use crate::{
@@ -32,6 +35,7 @@ mod aliases;
 #[path = "retrieval/ranking.rs"]
 mod ranking;
 
+use bm25::{RawBm25Row, bm25_candidate_rows};
 use context::{
     code_artifact_for_document, entities_for_evidence, evidence_ids_from_bm25_rows, evidence_span,
     facts_for_evidence_ids, graph_evidence_candidates, retrievable_status,
@@ -75,8 +79,13 @@ fn graph_retrieval_schema_error_is_retryable(error: &rusqlite::Error) -> bool {
 }
 
 fn graph_retrieval_schema_error_message_is_retryable(message: &str) -> bool {
+    graph_bm25_transient_error_message(message)
+}
+
+fn graph_bm25_transient_error_message(message: &str) -> bool {
     message.contains("vtable constructor failed: graph_bm25")
         || message.contains("database schema is locked")
+        || message.contains("database table is locked")
         || message.contains("database is locked")
 }
 
@@ -629,59 +638,7 @@ fn bm25_candidates(
     let Some(match_query) = fts_query(&request.query) else {
         return Ok(Vec::new());
     };
-    let mut statement = connection.prepare(
-        "
-        SELECT
-            graph_bm25.document_id,
-            graph_bm25.document_kind,
-            graph_bm25.evidence_id,
-            graph_bm25.parent_evidence_id,
-            graph_bm25.modality,
-            graph_bm25.source_scope,
-            graph_bm25.source_path,
-            graph_bm25.entity_labels,
-            graph_bm25.content,
-            bm25(graph_bm25) AS rank
-        FROM graph_bm25
-        LEFT JOIN evidence e
-          ON graph_bm25.document_kind = 'evidence'
-         AND e.id = graph_bm25.evidence_id
-        WHERE graph_bm25 MATCH ?1
-          AND (?2 IS NULL OR graph_bm25.source_scope = ?2)
-          AND graph_bm25.created_graph_version <= ?3
-          AND (
-              graph_bm25.document_kind != 'evidence'
-              OR e.status IN ('accepted', 'proposed')
-          )
-        ORDER BY rank ASC, graph_bm25.document_id ASC
-        LIMIT ?4
-        ",
-    )?;
-    let rows = statement.query_map(
-        params![
-            match_query,
-            request.source_scope.as_deref(),
-            request.graph_version.get(),
-            request.limit.saturating_mul(4).max(request.limit)
-        ],
-        |row| {
-            Ok(RawBm25Row {
-                document_id: row.get(0)?,
-                document_kind: row.get(1)?,
-                evidence_id: row.get(2)?,
-                parent_evidence_id: row.get(3)?,
-                modality: row.get(4)?,
-                source_scope: row.get(5)?,
-                source_path: row.get(6)?,
-                entity_labels: split_labels(row.get(7)?),
-                content: row.get(8)?,
-                rank: row.get(9)?,
-            })
-        },
-    )?;
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
+    let rows = bm25_candidate_rows(connection, request, &match_query)?;
     let facts_by_evidence = facts_for_evidence_ids(
         connection,
         evidence_ids_from_bm25_rows(&rows),
@@ -769,19 +726,6 @@ pub(super) struct ScoredHit {
     pub(super) source_score: f64,
     pub(super) modality: String,
     pub(super) explanation: Option<String>,
-}
-
-struct RawBm25Row {
-    document_id: String,
-    document_kind: String,
-    evidence_id: String,
-    parent_evidence_id: Option<String>,
-    modality: String,
-    source_scope: String,
-    source_path: Option<String>,
-    entity_labels: Vec<String>,
-    content: String,
-    rank: f64,
 }
 
 fn fts_query(query: &str) -> Option<String> {
