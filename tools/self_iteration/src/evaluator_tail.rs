@@ -523,10 +523,16 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
     let hits = score_array_field(&payload, "results");
     let expected = score_array_field(case, "expected");
     let forbidden = score_array_field(case, "forbidden");
+    let payload_failures = payload_constraint_failures(case, &payload, hits.len());
     let mut assessment = assess_ranked_hits(case, hits, expected, forbidden);
-    assessment
-        .failures
-        .extend(payload_constraint_failures(case, &payload, hits.len()));
+    assessment.failures.extend(payload_failures.clone());
+    if !payload_failures.is_empty() {
+        assessment.details = format!(
+            "{} payload_failures={}",
+            assessment.details,
+            payload_failures.join("; ")
+        );
+    }
     let mut rank = assessment.rank;
     let mut passed = assessment.failures.is_empty();
     if case
@@ -534,18 +540,24 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        passed = hits.is_empty();
+        let mut failures = if hits.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("expected_empty_results={}", hits.len())]
+        };
+        failures.extend(payload_failures);
+        passed = failures.is_empty();
         rank = passed.then_some(0);
         assessment = RankedAssessment {
             rank,
             false_positive_count: 0,
             score: if passed { 1.0 } else { 0.0 },
-            details: "expect_empty".to_owned(),
-            failures: if passed {
-                Vec::new()
+            details: if failures.is_empty() {
+                "expect_empty".to_owned()
             } else {
-                vec![format!("expected_empty_results={}", hits.len())]
+                format!("expect_empty failures={}", failures.join("; "))
             },
+            failures,
         };
     }
     CaseObservation {

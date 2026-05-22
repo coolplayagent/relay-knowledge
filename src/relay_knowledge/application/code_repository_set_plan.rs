@@ -5,7 +5,27 @@ use crate::domain::{
 
 const MIN_DEPENDENCY_SYMBOL_PLAN_IDENTITIES: usize = 2;
 
-pub(super) fn repository_set_member_query_kind(
+pub(super) struct RepositorySetMemberQueryPlan {
+    pub(super) query: String,
+    pub(super) kind: CodeQueryKind,
+}
+
+pub(super) fn repository_set_member_query_plan(
+    request: &CodeRepositorySetQueryRequest,
+    member: &CodeRepositorySetMemberStatus,
+    highest_priority: i32,
+) -> RepositorySetMemberQueryPlan {
+    let kind = repository_set_member_query_kind(request, member, highest_priority);
+    let query = if kind == CodeQueryKind::Symbol {
+        dependency_symbol_query(&request.query).unwrap_or_else(|| request.query.clone())
+    } else {
+        request.query.clone()
+    };
+
+    RepositorySetMemberQueryPlan { query, kind }
+}
+
+fn repository_set_member_query_kind(
     request: &CodeRepositorySetQueryRequest,
     member: &CodeRepositorySetMemberStatus,
     highest_priority: i32,
@@ -17,6 +37,32 @@ pub(super) fn repository_set_member_query_kind(
         request.code_query_kind
     } else {
         CodeQueryKind::Symbol
+    }
+}
+
+fn dependency_symbol_query(query: &str) -> Option<String> {
+    let identities = api_query_identities(query);
+    if identities.len() < MIN_DEPENDENCY_SYMBOL_PLAN_IDENTITIES {
+        return None;
+    }
+
+    let mut terms = Vec::new();
+    for identity in identities {
+        push_unique_query_term(&mut terms, &identity.raw);
+        if !identity.raw.eq_ignore_ascii_case(&identity.leaf) {
+            push_unique_query_term(&mut terms, &identity.leaf);
+        }
+    }
+
+    (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+fn push_unique_query_term(terms: &mut Vec<String>, term: &str) {
+    if !terms
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(term))
+    {
+        terms.push(term.to_owned());
     }
 }
 
@@ -54,13 +100,32 @@ fn symbol_hit_matches_identity(hit: &CodeRetrievalHit, identity: &str) -> bool {
             || text_contains_identifier(&hit.excerpt, identity))
 }
 
-fn api_query_identity_leaves(query: &str) -> Vec<String> {
+pub(super) fn api_query_identity_leaves(query: &str) -> Vec<String> {
+    let mut identities = Vec::new();
+    for identity in api_query_identities(query) {
+        if !identities.contains(&identity.leaf) {
+            identities.push(identity.leaf);
+        }
+    }
+
+    identities
+}
+
+struct ApiQueryIdentity {
+    raw: String,
+    leaf: String,
+}
+
+fn api_query_identities(query: &str) -> Vec<ApiQueryIdentity> {
     let mut identities = Vec::new();
     for raw_token in query.split_whitespace().map(str::trim) {
-        let Some(identity) = api_query_identity_leaf(raw_token) else {
+        let Some(identity) = api_query_identity(raw_token) else {
             continue;
         };
-        if !identities.contains(&identity) {
+        if !identities
+            .iter()
+            .any(|existing: &ApiQueryIdentity| existing.raw.eq_ignore_ascii_case(&identity.raw))
+        {
             identities.push(identity);
         }
     }
@@ -68,7 +133,7 @@ fn api_query_identity_leaves(query: &str) -> Vec<String> {
     identities
 }
 
-fn api_query_identity_leaf(token: &str) -> Option<String> {
+fn api_query_identity(token: &str) -> Option<ApiQueryIdentity> {
     let token = token.trim_matches(|character: char| {
         !(character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | ':'))
     });
@@ -80,9 +145,16 @@ fn api_query_identity_leaf(token: &str) -> Option<String> {
         return None;
     }
     if token.contains('.') || token.contains("::") {
-        return identity_terms(token).last().cloned();
+        let leaf = identity_terms(token).last().cloned()?;
+        return Some(ApiQueryIdentity {
+            raw: token.to_owned(),
+            leaf,
+        });
     }
-    simple_api_identity_token(token).then(|| token.to_owned())
+    simple_api_identity_token(token).then(|| ApiQueryIdentity {
+        raw: token.to_owned(),
+        leaf: token.to_owned(),
+    })
 }
 
 fn identity_terms(value: &str) -> Vec<String> {
@@ -207,6 +279,31 @@ mod tests {
         assert_eq!(
             repository_set_member_query_kind(&request, &dependency, 10),
             CodeQueryKind::Symbol
+        );
+        let app_plan = repository_set_member_query_plan(&request, &app, 10);
+        assert_eq!(app_plan.kind, CodeQueryKind::Hybrid);
+        assert_eq!(app_plan.query, request.query);
+        let dependency_plan = repository_set_member_query_plan(&request, &dependency, 10);
+        assert_eq!(dependency_plan.kind, CodeQueryKind::Symbol);
+        assert_eq!(
+            dependency_plan.query,
+            "worker.New New RegisterWorkflow RegisterActivity InterruptCh"
+        );
+        let client_request = CodeRepositorySetQueryRequest::new(
+            "workspace",
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+            CodeQueryKind::Hybrid,
+            10,
+            FreshnessPolicy::WaitUntilFresh,
+            Vec::new(),
+            vec!["go".to_owned()],
+        )
+        .expect("request should validate");
+        let client_dependency_plan =
+            repository_set_member_query_plan(&client_request, &dependency, 10);
+        assert_eq!(
+            client_dependency_plan.query,
+            "client.Dial Dial MustLoadDefaultClientOptions"
         );
         assert!(dependency_symbol_plan_needs_hybrid_fallback(
             &request,

@@ -3,6 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
+use super::code_repository_set_identity_coverage::select_identity_coverage_results;
 use crate::domain::{
     CodeRepositoryCrossEdge, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
     CodeRetrievalHit,
@@ -304,6 +305,7 @@ fn retained_bridge_edge_ids(results: &[CodeRepositorySetQueryHit]) -> BTreeSet<S
 pub(super) fn dedupe_sort_truncate(
     results: &mut Vec<CodeRepositorySetQueryHit>,
     limit: usize,
+    query: &str,
 ) -> bool {
     let mut best =
         BTreeMap::<(String, String, String, u32, u32, String), CodeRepositorySetQueryHit>::new();
@@ -327,7 +329,7 @@ pub(super) fn dedupe_sort_truncate(
     sort_repository_set_results(results);
     let truncated = results.len() > limit;
     if truncated {
-        diversify_repository_set_results(results, limit);
+        diversify_repository_set_results(results, limit, query);
     }
     results.truncate(limit);
     truncated
@@ -351,7 +353,11 @@ fn sort_repository_set_results(results: &mut [CodeRepositorySetQueryHit]) {
     });
 }
 
-fn diversify_repository_set_results(results: &mut Vec<CodeRepositorySetQueryHit>, limit: usize) {
+fn diversify_repository_set_results(
+    results: &mut Vec<CodeRepositorySetQueryHit>,
+    limit: usize,
+    query: &str,
+) {
     if limit == 0 {
         return;
     }
@@ -380,6 +386,8 @@ fn diversify_repository_set_results(results: &mut Vec<CodeRepositorySetQueryHit>
             *counts.entry(member_key.clone()).or_insert(0) += 1;
         }
     }
+
+    select_identity_coverage_results(results, query, limit, &mut selected);
 
     for index in 0..results.len() {
         if selected.len() >= limit {
@@ -530,9 +538,14 @@ fn evidence_origin(evidence_json: &str) -> Option<(String, u32, u32)> {
 }
 
 #[cfg(test)]
+#[path = "code_repository_set_query_test_support.rs"]
+mod code_repository_set_query_test_support;
+
+#[cfg(test)]
 mod tests {
+    use super::code_repository_set_query_test_support::{edge, hit, member_status, set_hit};
     use super::*;
-    use crate::domain::{CodeRepositorySetMember, CodeRetrievalLayer, RepositoryCodeRange};
+    use crate::domain::CodeRetrievalLayer;
 
     #[test]
     fn overlay_index_attaches_target_and_import_origin_evidence_in_edge_order() {
@@ -678,7 +691,7 @@ mod tests {
                 score: 0.80,
             },
         ];
-        assert!(dedupe_sort_truncate(&mut results, 1));
+        assert!(dedupe_sort_truncate(&mut results, 1, ""));
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].score, 0.90);
 
@@ -753,7 +766,7 @@ mod tests {
             },
         ];
 
-        assert!(!dedupe_sort_truncate(&mut results, 2));
+        assert!(!dedupe_sort_truncate(&mut results, 2, ""));
 
         assert_eq!(results[0].hit.path, "samples/client.rs");
     }
@@ -771,7 +784,7 @@ mod tests {
             set_hit(&sdk, 11, 8.7),
         ];
 
-        assert!(dedupe_sort_truncate(&mut results, 5));
+        assert!(dedupe_sort_truncate(&mut results, 5, ""));
 
         assert_eq!(results[0].member.repository_alias, "app");
         assert_eq!(
@@ -878,117 +891,5 @@ mod tests {
         prune_returned_overlay_evidence(&mut results);
 
         assert!(results[0].overlay_evidence.is_empty());
-    }
-
-    fn member_status(
-        repository_alias: &str,
-        source_scope: &str,
-        priority: i32,
-    ) -> CodeRepositorySetMemberStatus {
-        CodeRepositorySetMemberStatus {
-            member: CodeRepositorySetMember {
-                set_id: "set-workspace".to_owned(),
-                repository_id: format!("repo-{repository_alias}"),
-                repository_alias: repository_alias.to_owned(),
-                ref_selector: "HEAD".to_owned(),
-                resolved_commit_sha: format!("commit-{source_scope}"),
-                source_scope: source_scope.to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
-                priority,
-            },
-            tree_hash: format!("tree-{source_scope}"),
-            freshness_state: "fresh".to_owned(),
-            stale: false,
-            indexed_file_count: 1,
-            symbol_count: 1,
-            reference_count: 0,
-            chunk_count: 1,
-            degraded_reason: None,
-        }
-    }
-
-    fn hit(
-        repository_id: &str,
-        scope_id: &str,
-        path: &str,
-        line: u32,
-        score: f64,
-        stale: bool,
-    ) -> CodeRetrievalHit {
-        CodeRetrievalHit {
-            repository_id: repository_id.to_owned(),
-            scope_id: scope_id.to_owned(),
-            resolved_commit_sha: format!("commit-{scope_id}"),
-            tree_hash: format!("tree-{scope_id}"),
-            path: path.to_owned(),
-            language_id: "rust".to_owned(),
-            byte_range: RepositoryCodeRange { start: 0, end: 10 },
-            line_range: RepositoryCodeRange {
-                start: line,
-                end: line,
-            },
-            symbol_snapshot_id: Some(format!("symbol-{line}")),
-            canonical_symbol_id: None,
-            file_id: Some("file-1".to_owned()),
-            retrieval_layers: vec![CodeRetrievalLayer::Symbol],
-            index_versions: vec!["code:1".to_owned()],
-            stale,
-            degraded_reason: None,
-            edge_kind: None,
-            edge_resolution_state: None,
-            edge_target_hint: None,
-            edge_confidence_basis_points: None,
-            edge_confidence_tier: None,
-            score,
-            excerpt: format!("excerpt {line}"),
-        }
-    }
-
-    fn set_hit(
-        member: &CodeRepositorySetMemberStatus,
-        line: u32,
-        score: f64,
-    ) -> CodeRepositorySetQueryHit {
-        CodeRepositorySetQueryHit {
-            member: member.member.clone(),
-            hit: hit(
-                &member.member.repository_id,
-                &member.member.source_scope,
-                &format!("src/{}.rs", line),
-                line,
-                score,
-                false,
-            ),
-            overlay_evidence: Vec::new(),
-            score,
-        }
-    }
-
-    fn edge(
-        edge_id: &str,
-        from_scope: &str,
-        to_scope: Option<&str>,
-        evidence_json: &str,
-        confidence: u16,
-    ) -> CodeRepositoryCrossEdge {
-        CodeRepositoryCrossEdge {
-            edge_id: edge_id.to_owned(),
-            set_id: "set-workspace".to_owned(),
-            from_source_scope: from_scope.to_owned(),
-            from_repository_id: "repo-from".to_owned(),
-            from_record_kind: "module_reference".to_owned(),
-            from_record_id: "import-1".to_owned(),
-            to_source_scope: to_scope.map(str::to_owned),
-            to_repository_id: to_scope.map(|_| "repo-to".to_owned()),
-            to_record_kind: "code_symbol_snapshot".to_owned(),
-            to_record_id: to_scope.map(|_| "symbol-1".to_owned()),
-            edge_kind: "imports".to_owned(),
-            resolution_state: "resolved".to_owned(),
-            confidence_basis_points: confidence,
-            confidence_tier: "explicit".to_owned(),
-            evidence_json: evidence_json.to_owned(),
-            created_at_ms: 10,
-        }
     }
 }

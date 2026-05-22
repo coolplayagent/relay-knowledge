@@ -13,6 +13,7 @@ use crate::{
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const EXTERNAL_IMPORT_GREP_DIAGNOSTIC: &str = "external dependency import is not indexed in the code graph; searched current repository source with internal grep fallback";
+const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
 
 pub(super) struct CodeGrepFallbackPlan {
     pub(super) commit: String,
@@ -108,7 +109,7 @@ pub(super) fn plan_code_grep_fallback(
         }
         CodeQueryKind::Imports => {
             let query = import_grep_query(&request.query)?;
-            if !results.is_empty() && !results_have_unresolved_import(results) {
+            if !results_have_unindexed_external_import(results) {
                 return None;
             }
             Some(CodeGrepFallbackPlan {
@@ -152,9 +153,10 @@ pub(super) fn append_code_grep_fallback(
         return fallback_diagnostic(plan, outcome.degraded_reason);
     }
     let score_bounds = ScoreBounds::from_results(results);
-    let fallback_score = grep_score(plan.kind, score_bounds);
+    let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
+        let fallback_score = source_grep_match_score(plan, &matched, base_fallback_score);
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
@@ -361,6 +363,135 @@ fn fallback_diagnostic(
     }
 }
 
+fn source_grep_match_score(
+    plan: &CodeGrepFallbackPlan,
+    matched: &SourceGrepMatch,
+    base_score: f64,
+) -> f64 {
+    let adjustment = match plan.kind {
+        SourceGrepKind::References => {
+            reference_source_grep_score_adjustment(&plan.query, &matched.excerpt)
+        }
+        SourceGrepKind::Definition | SourceGrepKind::Hybrid | SourceGrepKind::Imports => 0.0,
+    };
+
+    (base_score + adjustment).max(0.0)
+}
+
+fn reference_source_grep_score_adjustment(identity: &str, excerpt: &str) -> f64 {
+    if !simple_source_identifier(identity) {
+        return 0.0;
+    }
+    let line = excerpt.trim();
+    if line.is_empty() || line.starts_with("//") || line.starts_with('*') {
+        return 0.0;
+    }
+
+    if source_reference_line_declares_identity(line, identity) {
+        REFERENCE_SOURCE_DECLARATION_PENALTY
+    } else {
+        0.0
+    }
+}
+
+fn source_reference_line_declares_identity(line: &str, identity: &str) -> bool {
+    if source_line_defines_identity(line, identity) {
+        return true;
+    }
+
+    source_identifier_ranges(line, identity).any(|(start, end)| {
+        let before = line.get(..start).unwrap_or_default().trim_end();
+        let after = line.get(end..).unwrap_or_default().trim_start();
+        if before.ends_with('.') || before.ends_with("->") || identifier_is_assignment_value(before)
+        {
+            return false;
+        }
+        if after.starts_with('[') && array_declarator_has_initializer(after) {
+            return true;
+        }
+
+        declaration_prefix_before_identity(before)
+            && before.split_whitespace().last() != Some(identity)
+    })
+}
+
+fn source_identifier_ranges<'a>(
+    line: &'a str,
+    identity: &'a str,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    line.match_indices(identity).filter_map(|(start, _)| {
+        let end = start + identity.len();
+        let has_start_boundary = line.get(..start).is_some_and(|prefix| {
+            prefix
+                .chars()
+                .next_back()
+                .is_none_or(|character| !source_identifier_char(character))
+        });
+        let has_end_boundary = line.get(end..).is_some_and(|suffix| {
+            suffix
+                .chars()
+                .next()
+                .is_none_or(|character| !source_identifier_char(character))
+        });
+        (has_start_boundary && has_end_boundary).then_some((start, end))
+    })
+}
+
+fn declaration_prefix_before_identity(before: &str) -> bool {
+    let mut tokens = before.split_whitespace();
+    let Some(first_token) = tokens.next() else {
+        return false;
+    };
+    if statement_prefix_token(first_token) {
+        return false;
+    }
+    let token_count = before.split_whitespace().count();
+    token_count >= 1
+        && before
+            .chars()
+            .all(|character| !matches!(character, '=' | '+' | '-' | '*' | '/' | '%' | '?'))
+}
+
+fn statement_prefix_token(token: &str) -> bool {
+    matches!(
+        token.trim_matches(|character: char| !source_identifier_char(character)),
+        "return"
+            | "if"
+            | "for"
+            | "while"
+            | "switch"
+            | "case"
+            | "sizeof"
+            | "typeof"
+            | "alignof"
+            | "offsetof"
+            | "throw"
+            | "yield"
+            | "await"
+    )
+}
+
+fn array_declarator_has_initializer(after: &str) -> bool {
+    let Some(equals_index) = after.find('=') else {
+        return false;
+    };
+    !after
+        .get(..equals_index)
+        .is_some_and(|prefix| prefix.contains(')'))
+}
+
+fn identifier_is_assignment_value(before: &str) -> bool {
+    before
+        .chars()
+        .rev()
+        .find(|character| !character.is_whitespace())
+        .is_some_and(|character| character == '=')
+}
+
+fn source_identifier_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
 fn definition_source_candidate_paths(
     request: &CodeRetrievalRequest,
     results: &[CodeRetrievalHit],
@@ -458,14 +589,26 @@ fn import_grep_query(query: &str) -> Option<String> {
     definition_identity(trimmed)
 }
 
-fn results_have_unresolved_import(results: &[CodeRetrievalHit]) -> bool {
+fn results_have_unindexed_external_import(results: &[CodeRetrievalHit]) -> bool {
     results.iter().any(|hit| {
         hit.edge_kind.as_deref() == Some("import")
+            && hit.edge_resolution_state.as_deref() == Some("unresolved")
             && hit
-                .edge_resolution_state
+                .edge_target_hint
                 .as_deref()
-                .is_none_or(|state| state != "resolved")
+                .is_some_and(external_import_hint)
     })
+}
+
+fn external_import_hint(target_hint: &str) -> bool {
+    let target_hint = target_hint.trim();
+    !target_hint.is_empty()
+        && !target_hint.starts_with("./")
+        && !target_hint.starts_with("../")
+        && !target_hint.starts_with('/')
+        && !target_hint.starts_with("crate::")
+        && !target_hint.starts_with("self::")
+        && !target_hint.starts_with("super::")
 }
 
 fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
@@ -591,6 +734,7 @@ mod tests {
         let mut import_hit = hit("src/component.tsx", "import React from \"react\";");
         import_hit.edge_kind = Some("import".to_owned());
         import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("react".to_owned());
         import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
         let mut results = vec![import_hit];
         let plan = plan_code_grep_fallback(&status(), &request, &results)
@@ -625,14 +769,110 @@ mod tests {
     }
 
     #[test]
+    fn import_fallback_skips_empty_import_results() {
+        let request = request("react", CodeQueryKind::Imports, Vec::new());
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[]).is_none());
+    }
+
+    #[test]
     fn import_fallback_skips_resolved_import_graph_hits() {
         let request = request("crate::local", CodeQueryKind::Imports, Vec::new());
         let mut import_hit = hit("src/lib.rs", "use crate::local;");
         import_hit.edge_kind = Some("import".to_owned());
         import_hit.edge_resolution_state = Some("resolved".to_owned());
+        import_hit.edge_target_hint = Some("crate::local".to_owned());
         import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
 
         assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_ambiguous_import_graph_hits() {
+        let request = request("RetryPolicy", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/app.rs", "use app::RetryPolicy;");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("ambiguous".to_owned());
+        import_hit.edge_target_hint = Some("app::RetryPolicy".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn import_fallback_skips_local_unresolved_import_graph_hits() {
+        let request = request("crate::local", CodeQueryKind::Imports, Vec::new());
+        let mut import_hit = hit("src/lib.rs", "use crate::local;");
+        import_hit.edge_kind = Some("import".to_owned());
+        import_hit.edge_resolution_state = Some("unresolved".to_owned());
+        import_hit.edge_target_hint = Some("crate::local".to_owned());
+        import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+
+        assert!(plan_code_grep_fallback(&status(), &request, &[import_hit]).is_none());
+    }
+
+    #[test]
+    fn reference_grep_fallback_ranks_usage_before_array_declaration() {
+        let request = request("rk_pipeline", CodeQueryKind::References, Vec::new());
+        let mut results = vec![hit("src/pipeline.c", "int rk_dispatch(void);")];
+        let plan = CodeGrepFallbackPlan {
+            commit: "commit".to_owned(),
+            query: "rk_pipeline".to_owned(),
+            paths: Vec::new(),
+            path_filters: Vec::new(),
+            language_filters: vec!["c".to_owned()],
+            limit: 10,
+            kind: SourceGrepKind::References,
+            identity: None,
+            needs_scope_paths: false,
+        };
+        let outcome = SourceGrepOutcome {
+            matches: vec![
+                SourceGrepMatch {
+                    path: "src/pipeline.c".to_owned(),
+                    language_id: "c".to_owned(),
+                    excerpt: "static rk_stage_fn rk_pipeline[] = {".to_owned(),
+                    byte_range: RepositoryCodeRange { start: 10, end: 48 },
+                    line_range: RepositoryCodeRange { start: 4, end: 4 },
+                },
+                SourceGrepMatch {
+                    path: "src/pipeline.c".to_owned(),
+                    language_id: "c".to_owned(),
+                    excerpt: "total += rk_pipeline[index](dev);".to_owned(),
+                    byte_range: RepositoryCodeRange {
+                        start: 90,
+                        end: 123,
+                    },
+                    line_range: RepositoryCodeRange { start: 9, end: 9 },
+                },
+            ],
+            degraded_reason: Some("source fallback".to_owned()),
+        };
+
+        append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
+
+        let usage_rank = results
+            .iter()
+            .position(|hit| hit.excerpt.contains("rk_pipeline[index]"))
+            .expect("usage fallback should be returned");
+        let declaration_rank = results
+            .iter()
+            .position(|hit| hit.excerpt.contains("rk_pipeline[]"))
+            .expect("declaration fallback should be returned");
+        assert!(usage_rank < declaration_rank);
+        assert!(results[usage_rank].score > results[declaration_rank].score);
+    }
+
+    #[test]
+    fn reference_grep_fallback_keeps_assignment_values_at_base_score() {
+        assert_eq!(
+            reference_source_grep_score_adjustment("rk_driver_read", ".read = rk_driver_read,"),
+            0.0
+        );
+        assert_eq!(
+            reference_source_grep_score_adjustment("rk_driver_read", "return rk_driver_read;"),
+            0.0
+        );
     }
 
     fn request(
