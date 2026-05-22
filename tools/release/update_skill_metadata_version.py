@@ -16,6 +16,25 @@ MAX_DESCRIPTION_CHARS = 1024
 METADATA_HEADER = "metadata:"
 METADATA_VERSION_PREFIX = "  version:"
 YAML_NULL_VALUES = {"null", "Null", "NULL", "~"}
+DOUBLE_QUOTED_ESCAPES = {
+    "0": "\0",
+    "a": "\x07",
+    "b": "\b",
+    "t": "\t",
+    "n": "\n",
+    "v": "\x0b",
+    "f": "\f",
+    "r": "\r",
+    "e": "\x1b",
+    '"': '"',
+    "/": "/",
+    "\\": "\\",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": "\u2028",
+    "P": "\u2029",
+}
+DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS = {"x": 2, "u": 4, "U": 8}
 
 
 def validate_version(version: str) -> None:
@@ -57,19 +76,74 @@ def plain_scalar_without_comment(raw_value: str) -> str:
     return value
 
 
-def quoted_scalar(raw_value: str, quote: str) -> str:
-    escaped = False
-    for index, character in enumerate(raw_value[1:], start=1):
-        if quote == '"' and character == "\\" and not escaped:
-            escaped = True
-            continue
-        if character == quote and not escaped:
-            trailing = plain_scalar_without_comment(raw_value[index + 1 :])
-            if trailing:
-                raise ValueError("SKILL.md frontmatter description has invalid YAML text")
-            return raw_value[1:index]
-        escaped = False
+def verify_quoted_scalar_trailing(raw_value: str, index: int) -> None:
+    trailing = plain_scalar_without_comment(raw_value[index + 1 :])
+    if trailing:
+        raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+
+
+def single_quoted_scalar(raw_value: str) -> str:
+    parsed = []
+    index = 1
+    while index < len(raw_value):
+        character = raw_value[index]
+        if character == "'":
+            if index + 1 < len(raw_value) and raw_value[index + 1] == "'":
+                parsed.append("'")
+                index += 2
+                continue
+            verify_quoted_scalar_trailing(raw_value, index)
+            return "".join(parsed)
+        parsed.append(character)
+        index += 1
     raise ValueError("SKILL.md frontmatter description must be a single-line value")
+
+
+def double_quoted_escape(raw_value: str, index: int) -> tuple[str, int]:
+    if index + 1 >= len(raw_value):
+        raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+    escape = raw_value[index + 1]
+    if escape in DOUBLE_QUOTED_ESCAPES:
+        return DOUBLE_QUOTED_ESCAPES[escape], index + 2
+    if escape in DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS:
+        width = DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS[escape]
+        start = index + 2
+        end = start + width
+        codepoint = raw_value[start:end]
+        if len(codepoint) != width or not all(
+            character in "0123456789abcdefABCDEF" for character in codepoint
+        ):
+            raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+        try:
+            return chr(int(codepoint, 16)), end
+        except ValueError as error:
+            raise ValueError(
+                "SKILL.md frontmatter description has invalid YAML text"
+            ) from error
+    raise ValueError("SKILL.md frontmatter description has invalid YAML text")
+
+
+def double_quoted_scalar(raw_value: str) -> str:
+    parsed = []
+    index = 1
+    while index < len(raw_value):
+        character = raw_value[index]
+        if character == '"':
+            verify_quoted_scalar_trailing(raw_value, index)
+            return "".join(parsed)
+        if character == "\\":
+            decoded, index = double_quoted_escape(raw_value, index)
+            parsed.append(decoded)
+            continue
+        parsed.append(character)
+        index += 1
+    raise ValueError("SKILL.md frontmatter description must be a single-line value")
+
+
+def quoted_scalar(raw_value: str) -> str:
+    if raw_value[0] == "'":
+        return single_quoted_scalar(raw_value)
+    return double_quoted_scalar(raw_value)
 
 
 def single_line_yaml_description(raw_value: str, has_continuation: bool) -> str:
@@ -81,7 +155,7 @@ def single_line_yaml_description(raw_value: str, has_continuation: bool) -> str:
     if has_continuation:
         raise ValueError("SKILL.md frontmatter description must be a single-line value")
     if value[0] in {"'", '"'}:
-        description = quoted_scalar(value, value[0])
+        description = quoted_scalar(value)
     else:
         description = plain_scalar_without_comment(value)
     if not description or description in YAML_NULL_VALUES:
