@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update or verify SKILL.md frontmatter metadata.version."""
+"""Update or verify SKILL.md frontmatter metadata."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from pathlib import Path
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 FRONTMATTER_BOUNDARY = "---"
+DESCRIPTION_PREFIX = "description:"
+MAX_DESCRIPTION_CHARS = 1024
 METADATA_HEADER = "metadata:"
 METADATA_VERSION_PREFIX = "  version:"
 
@@ -36,6 +38,34 @@ def metadata_header_index(lines: list[str], end_index: int) -> int:
     raise ValueError("SKILL.md frontmatter is missing metadata")
 
 
+def frontmatter_description(lines: list[str], end_index: int) -> str:
+    description = None
+    for index in range(1, end_index):
+        line = lines[index]
+        if line.startswith(DESCRIPTION_PREFIX):
+            if description is not None:
+                raise ValueError("SKILL.md frontmatter has duplicate description fields")
+            description = line.split(":", 1)[1].strip()
+            if not description:
+                raise ValueError("SKILL.md frontmatter description must not be empty")
+            if description[0] in {"|", ">"}:
+                raise ValueError(
+                    "SKILL.md frontmatter description must be a single-line value"
+                )
+    if description is None:
+        raise ValueError("SKILL.md frontmatter is missing description")
+    return description
+
+
+def validate_description(path: Path, description: str) -> None:
+    description_chars = len(description)
+    if description_chars > MAX_DESCRIPTION_CHARS:
+        raise ValueError(
+            f"{path} description is {description_chars} characters; "
+            f"maximum is {MAX_DESCRIPTION_CHARS}"
+        )
+
+
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
     for index in range(metadata_index + 1, end_index):
         line = lines[index]
@@ -54,6 +84,12 @@ def read_metadata_version(path: Path) -> str | None:
     if version_index is None:
         return None
     return lines[version_index].split(":", 1)[1].strip()
+
+
+def check_frontmatter_description(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    end_index = frontmatter_end_index(lines)
+    validate_description(path, frontmatter_description(lines, end_index))
 
 
 def write_metadata_version(path: Path, version: str) -> None:
@@ -80,6 +116,11 @@ def check_metadata_version(path: Path, expected: str) -> None:
         raise ValueError(f"{path} metadata.version is {actual!r}; expected {expected!r}")
 
 
+def check_skill_metadata(path: Path, expected: str) -> None:
+    check_metadata_version(path, expected)
+    check_frontmatter_description(path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify without rewriting")
@@ -92,10 +133,10 @@ def main() -> int:
     args = parse_args()
     try:
         if args.check:
-            check_metadata_version(args.skill_md, args.version)
+            check_skill_metadata(args.skill_md, args.version)
         else:
             write_metadata_version(args.skill_md, args.version)
-            check_metadata_version(args.skill_md, args.version)
+            check_skill_metadata(args.skill_md, args.version)
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
