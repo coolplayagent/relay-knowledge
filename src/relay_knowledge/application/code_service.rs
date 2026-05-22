@@ -752,7 +752,7 @@ pub(crate) async fn apply_code_grep_fallback(
                     scoped_status.alias
                 ))
             })?;
-        let paths = store
+        let paths = match store
             .code_file_candidate_paths_for_scope(
                 source_scope.to_owned(),
                 plan.path_filters.clone(),
@@ -760,7 +760,14 @@ pub(crate) async fn apply_code_grep_fallback(
                 SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
             )
             .await
-            .map_err(storage_api_error)?;
+        {
+            Ok(paths) => paths,
+            Err(error) => {
+                return Ok(Some(format!(
+                    "ripgrep candidate path lookup unavailable: {error}"
+                )));
+            }
+        };
         plan.with_scope_paths(paths)
     } else {
         plan

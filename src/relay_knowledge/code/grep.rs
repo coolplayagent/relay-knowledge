@@ -206,6 +206,7 @@ fn run_ripgrep(root: &Path, query: &str, limit: usize) -> RipgrepRun {
             "--no-heading",
             "--color",
             "never",
+            "--hidden",
             "--max-columns",
             &max_columns,
             "--max-count",
@@ -317,9 +318,10 @@ fn parse_ripgrep_matches(
 fn match_from_json(data: &Value) -> Result<Option<SourceGrepMatch>, CodeIndexError> {
     let Some(path) = data
         .get("path")
-        .and_then(|path| path.get("text"))
-        .and_then(Value::as_str)
-        .map(normalize_ripgrep_path)
+        .map(json_text_or_bytes)
+        .transpose()?
+        .flatten()
+        .map(|path| normalize_ripgrep_path(&path))
     else {
         return Ok(None);
     };
@@ -335,9 +337,10 @@ fn match_from_json(data: &Value) -> Result<Option<SourceGrepMatch>, CodeIndexErr
         .unwrap_or(0);
     let excerpt = data
         .get("lines")
-        .and_then(|lines| lines.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
+        .map(json_text_or_bytes)
+        .transpose()?
+        .flatten()
+        .unwrap_or_default()
         .trim_end_matches(['\r', '\n'])
         .trim()
         .to_owned();
@@ -359,6 +362,88 @@ fn match_from_json(data: &Value) -> Result<Option<SourceGrepMatch>, CodeIndexErr
         byte_range,
         line_range,
     }))
+}
+
+fn json_text_or_bytes(value: &Value) -> Result<Option<String>, CodeIndexError> {
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return Ok(Some(text.to_owned()));
+    }
+    let Some(bytes) = value.get("bytes").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let decoded = decode_base64(bytes)?;
+
+    Ok(Some(String::from_utf8_lossy(&decoded).into_owned()))
+}
+
+fn decode_base64(encoded: &str) -> Result<Vec<u8>, CodeIndexError> {
+    let mut sextets = Vec::new();
+    let mut padding_count = 0usize;
+    for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+        if byte == b'=' {
+            padding_count += 1;
+            if padding_count > 2 {
+                return Err(CodeIndexError::InvalidInput(
+                    "ripgrep bytes field has invalid base64 padding".to_owned(),
+                ));
+            }
+            sextets.push(0);
+            continue;
+        }
+        if padding_count > 0 {
+            return Err(CodeIndexError::InvalidInput(
+                "ripgrep bytes field has non-padding data after base64 padding".to_owned(),
+            ));
+        }
+        let Some(value) = base64_value(byte) else {
+            return Err(CodeIndexError::InvalidInput(
+                "ripgrep bytes field contains invalid base64 data".to_owned(),
+            ));
+        };
+        sextets.push(value);
+    }
+    if sextets.is_empty() {
+        return Ok(Vec::new());
+    }
+    if sextets.len() % 4 != 0 {
+        return Err(CodeIndexError::InvalidInput(
+            "ripgrep bytes field has incomplete base64 data".to_owned(),
+        ));
+    }
+
+    let chunk_count = sextets.len() / 4;
+    let mut decoded = Vec::with_capacity(chunk_count * 3);
+    for (index, chunk) in sextets.chunks_exact(4).enumerate() {
+        let packed = ((chunk[0] as u32) << 18)
+            | ((chunk[1] as u32) << 12)
+            | ((chunk[2] as u32) << 6)
+            | (chunk[3] as u32);
+        let chunk_padding = if index + 1 == chunk_count {
+            padding_count
+        } else {
+            0
+        };
+        decoded.push((packed >> 16) as u8);
+        if chunk_padding < 2 {
+            decoded.push((packed >> 8) as u8);
+        }
+        if chunk_padding < 1 {
+            decoded.push(packed as u8);
+        }
+    }
+
+    Ok(decoded)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
 }
 
 fn first_submatch_range(data: &Value) -> Option<(u32, u32)> {
@@ -475,6 +560,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_ripgrep_json_bytes_fields() {
+        let output = br#"{"type":"match","data":{"path":{"bytes":"Li9zcmMvbGliLnJz"},"lines":{"bytes":"cHViIGZuIHRhcmdldCgpIHt9Cg=="},"line_number":7,"absolute_offset":42,"submatches":[{"match":{"text":"target"},"start":7,"end":13}]}}"#;
+
+        let matches = parse_ripgrep_matches(output, 10, |_| true).expect("json should parse");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, "src/lib.rs");
+        assert_eq!(matches[0].excerpt, "pub fn target() {}");
+        assert_eq!(matches[0].byte_range.start, 49);
+        assert_eq!(matches[0].byte_range.end, 55);
+    }
+
+    #[test]
     fn filters_ripgrep_matches_before_enforcing_limit() {
         let output = br#"{"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"return target();\n"},"line_number":3,"absolute_offset":20,"submatches":[{"match":{"text":"target"},"start":7,"end":13}]}}
 {"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"int target(void);\n"},"line_number":9,"absolute_offset":80,"submatches":[{"match":{"text":"target"},"start":4,"end":10}]}}"#;
@@ -487,6 +585,30 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line_range.start, 9);
         assert_eq!(matches[0].excerpt, "int target(void);");
+    }
+
+    #[test]
+    fn ripgrep_searches_hidden_materialized_paths() {
+        if Command::new("rg").arg("--version").output().is_err() {
+            return;
+        }
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        tree.write(
+            ".github/workflows/ci.yml",
+            b"# RK_HIDDEN_WORKFLOW_REFERENCE\nname: ci\n",
+        )
+        .expect("hidden path should be written");
+
+        let output = match run_ripgrep(&tree.root, "RK_HIDDEN_WORKFLOW_REFERENCE", 5) {
+            RipgrepRun::Output(output) => output,
+            RipgrepRun::Degraded(reason) => panic!("ripgrep should search hidden paths: {reason}"),
+        };
+        let matches = parse_ripgrep_matches(&output.stdout, 5, |_| true)
+            .expect("ripgrep output should parse");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, ".github/workflows/ci.yml");
+        assert!(matches[0].excerpt.contains("RK_HIDDEN_WORKFLOW_REFERENCE"));
     }
 
     #[test]
