@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779433139-reusable-search-document-buffers
+- 算法/架构：SQLite code indexing 的 `SearchDocumentInserter` 从每条 FTS 文档临时分配 `String` 和 symbol term `Vec`，改为 inserter 持有可复用内容缓冲与 symbol-term 缓冲；batch/finalize 的 symbol、chunk、call search-document 写入继续复用既有 prepared statement，snapshot 单文档 helper 保持原调用表面，所有路径共享同一内容拼接规则和同一 FTS5 表，只减少高频 search-document materialization 的堆分配与释放。
+- 不变量：不改变 parser facts、SQLite schema、FTS document 内容、identifier expansion、candidate windows、ranking/scoring、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 self-iteration harness；每次写入前清空缓冲，symbol term 仍排序去重，空字段过滤、path/language/freshness metadata、dedupe/top-k 和所有查询语义保持不变；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期降低 relay-teams、LevelDB、Temporal/OTel 等 fast performance workload 的 register/index 与 finalize call-search rebuild 中 allocator churn，改善 index/register p50/p95 并减少共享 SQLite writer 阶段的 CPU 抖动。风险是复用缓冲若未正确清空会污染下一条 FTS 文档；风险由 content/symbol-term clear、保持旧纯函数测试、增加复用泄漏单测和不改 SQL/FTS 内容控制。
+- 策略关联：建立在 accepted `20260518T214222Z` search-document content optimization、`manual-shared-finalize-symbol-cache-20260519` 以及 `run-1779234885` indexing/query candidate-window budgeting 上，把性能改动放在通用索引 materialization 层；刻意避免 latest rejected `run-1779282285` 的文档/fixture 大范围改动且补齐本文件算法说明，避免再次触发 `self_iteration_algorithm_documentation` gate。
 ## 候选优化说明：run-1779399365-repository-set-dependency-symbol-plan
 - 算法/架构：repository-set Hybrid 查询增加 priority-aware dependency member plan：最高优先级成员继续执行完整 Hybrid stack，以保留应用/样例用法、chunk flow、call/import/reference evidence；低优先级成员在查询包含至少两个 API-shaped identity（dotted/scoped/CamelCase）时先执行 bounded Symbol plan，并让 Symbol 查询复用既有 API identity direct-symbol lookup，用依赖仓的 API definition/symbol evidence 填充跨仓 top-k。若 symbol plan 覆盖不到至少两个 API identity，则立即回退到原完整 Hybrid 查询，避免只有弱符号噪声时剪掉真实用法。
 - 不变量：不改变 parser facts、SQLite schema、FTS MATCH、单仓默认 retrieval、candidate limit、ranking/scoring、overlay refresh、bridge support、member diversification、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness；只改变 repository-set 服务层的 member query kind arbitration，且保留原 path/language/freshness filters、overlay scoring、dedupe/top-k、stale/degraded metadata 和 fallback；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -968,45 +973,21 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779365756-to-run-1779366747 compacted
 - summary: accepted repository-set member diversification plus hybrid chunk anchor/designated-initializer scoring records were compacted on 2026-05-21 to keep this primary benchmark log under the 1000-line hard cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779365756.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779366747.patch`, reports, and progressive memory, with strategy details preserved above.
 
-## run-1779368858 compacted
-- summary: accepted source-declaration fallback for committed C declarations and designated-initializer scoring; score 0.916397 with protected floors foundational=0.947917, competitive=0.836538, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779368858.patch` and the matching report.
+## run-1779368858-to-run-1779395376 compacted
+- summary: accepted source fallback, hybrid body/API/proximity ranking, reference usage context, declaration/call/excerpt ranking, compact API-sequence ranking, operation-surface ranking, and pure Hybrid symbol-identity planning records were compacted on 2026-05-22 to keep this primary benchmark log under the 1000-line hard cap; detailed algorithms, metrics, risks, raw patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries, with strategy details preserved in the candidate sections above.
 
-## run-1779371550 compacted
-- summary: accepted source-definition-body hybrid ranking; score 0.923580 with protected floors foundational=0.947917, competitive=0.857372, semantic_vector=1.0, stability=1.0. Algorithm details, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779371550.patch` and reports.
+## run-1779399365 compacted
+- summary: accepted repository-set dependency symbol plan scored 0.968533 with foundational, competitive, semantic_vector, and stability floors at 1.0; full patch, metrics, and raw report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779399365.patch`, reports, and progressive memory.
 
-## run-1779373568 compacted
-- summary: accepted hybrid API identity symbol coverage; score 0.926903 with protected floors foundational=0.947917, competitive=0.875000, semantic_vector=1.0, stability=1.0. Algorithm details, invariants, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779373568.patch` and the matching report.
+## run-1779433139
 
-## run-1779375550 compacted
-- summary: accepted query-proximity hybrid ranking; score 0.933757 with protected floors foundational=0.947917, competitive=0.894231, semantic_vector=1.0, stability=1.0. Algorithm details, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779375550.patch` and the matching report.
-
-## run-1779377967 compacted
-- summary: accepted reference usage-context ranking; score 0.937815 with protected floors foundational=0.947917, competitive=0.926282, semantic_vector=1.0, stability=1.0. It improved C reference ranking while regressing `temporal_go_repo_set_worker_registration_flow`; full metrics remain under `.git/relay-knowledge-self-iteration/patches-v2/run-1779377967.patch` and the matching report.
-
-## run-1779380191 compacted
-- summary: accepted API identity facet weighting; score 0.938610 with protected floors foundational=0.947917, competitive=0.932692, semantic_vector=1.0, stability=1.0. Algorithm details, invariants, risks, and metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779380191.patch`, the matching report, and progressive memory.
-
-## run-1779381425-to-run-1779386490 compacted
-- summary: accepted declaration-surface ranking scored 0.952102, and accepted high-confidence inferred call-target ranking scored 0.956303; protected floors stayed foundational=1.0, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
-
-## run-1779387282 compacted
-- summary: accepted call ranking and excerpt improvements; score 0.960773 with protected floors foundational=1.0, competitive=0.975962, semantic_vector=1.0, stability=1.0. Full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779387282.patch`, the matching report, and progressive memory.
-
-## run-1779388874-to-run-1779390358 compacted
-- summary: accepted compact unique API-sequence ranking and operation-surface designated-initializer ranking reached `run-1779390358` score 0.966613 with foundational, competitive, semantic_vector, and stability floors at 1.0. Full algorithm notes, metrics, known degradations, raw patches, and reports remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779388874.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779390358.patch`, reports, and progressive memory.
-
-## run-1779395376 compacted
-- summary: accepted pure Hybrid symbol-identity plan scored 0.967269 with foundational, competitive, semantic_vector, and stability floors at 1.0; main gains were Temporal/LevelDB index/register/query metrics, while C/C++ fixture index/query and relay-teams index timings remained known regressions. Full patch, paths, metrics, and raw report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779395376.patch`, reports, and progressive memory.
-
-## run-1779399365
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779399365.patch`
-- score: 0.968533 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.825184, stability=1.000000)
-- cases: 43/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_plan.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`, `src/relay_knowledge/application/mod.rs`, `src/relay_knowledge/storage/sqlite/code_query_api_identities.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: metric:c_syntax_fixture_index_ms 1187.0->545.0; metric:c_syntax_fixture_register_index_ms 1772.0->1110.0; metric:c_syntax_fixture_query_p50_ms 1187.0->1129.0; metric:c_syntax_fixture_query_p95_ms 1493.0->1194.0; metric:cpp_syntax_fixture_index_ms 1407.0->1189.0; metric:cpp_syntax_fixture_register_index_ms 1953.0->1734.0; metric:leveldb_cpp_index_ms 1127.0->787.0; metric:leveldb_cpp_query_p50_ms 1248.0->1126.0
-- known degradations: metric:temporal_sdk_go_index_ms 929.0->969.0; metric:temporal_samples_go_index_ms 606.0->1252.0; metric:temporal_samples_go_register_index_ms 1277.0->1925.0; metric:cpp_syntax_fixture_query_p95_ms 1301.0->1355.0; metric:relay_teams_index_ms 1151.0->1312.0; metric:relay_teams_register_index_ms 1738.0->1878.0; metric:leveldb_cpp_register_index_ms 1673.0->1957.0
-- latency metrics: cargo_fmt_check_ms=1515ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=969ms; temporal_sdk_go_register_index_ms=1575ms; c_syntax_fixture_index_ms=545ms; c_syntax_fixture_register_index_ms=1110ms
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1779433139.patch`
+- score: 0.949367 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.718707, stability=1.000000)
+- cases: 52/52 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_search.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=2281ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=625ms; relay_teams_index_ms=171774ms; relay_teams_register_index_ms=173085ms; relay_teams_query_p50_ms=1192ms; relay_teams_query_p95_ms=1414ms
 
 Adopted optimization notes:
 

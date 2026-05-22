@@ -4,6 +4,8 @@ use crate::storage::StorageError;
 
 pub(crate) struct SearchDocumentInserter<'transaction> {
     statement: rusqlite::Statement<'transaction>,
+    content: String,
+    symbol_terms: Vec<String>,
 }
 
 impl<'transaction> SearchDocumentInserter<'transaction> {
@@ -19,7 +21,11 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
             ",
         )?;
 
-        Ok(Self { statement })
+        Ok(Self {
+            statement,
+            content: String::new(),
+            symbol_terms: Vec::new(),
+        })
     }
 
     pub(crate) fn insert<'a>(
@@ -31,15 +37,22 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
         language_id: &str,
         fields: impl IntoIterator<Item = &'a str>,
     ) -> Result<(), StorageError> {
-        insert_search_document_with_statement(
-            &mut self.statement,
+        search_document_content_into(
+            &mut self.content,
+            &mut self.symbol_terms,
+            document_kind,
+            fields,
+        );
+        self.statement.execute(params![
             source_scope,
             document_kind,
             record_id,
             path,
             language_id,
-            fields,
-        )
+            self.content.as_str()
+        ])?;
+
+        Ok(())
     }
 }
 
@@ -63,42 +76,34 @@ pub(super) fn insert_search_document<'a>(
     )
 }
 
-fn insert_search_document_with_statement<'a>(
-    statement: &mut rusqlite::Statement<'_>,
-    source_scope: &str,
-    document_kind: &str,
-    record_id: &str,
-    path: &str,
-    language_id: &str,
-    fields: impl IntoIterator<Item = &'a str>,
-) -> Result<(), StorageError> {
-    let content = search_document_content(document_kind, fields);
-    statement.execute(params![
-        source_scope,
-        document_kind,
-        record_id,
-        path,
-        language_id,
-        content
-    ])?;
-
-    Ok(())
-}
-
+#[cfg(test)]
 fn search_document_content<'a>(
     document_kind: &str,
     fields: impl IntoIterator<Item = &'a str>,
 ) -> String {
     let mut content = String::new();
-    let mut symbol_search_fields = 0usize;
     let mut symbol_terms = Vec::new();
+    search_document_content_into(&mut content, &mut symbol_terms, document_kind, fields);
+
+    content
+}
+
+fn search_document_content_into<'a>(
+    content: &mut String,
+    symbol_terms: &mut Vec<String>,
+    document_kind: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) {
+    content.clear();
+    symbol_terms.clear();
+    let mut symbol_search_fields = 0usize;
     for field in fields {
         if field.trim().is_empty() {
             continue;
         }
-        append_search_field(&mut content, field);
+        append_search_field(content, field);
         if document_kind == "symbol" && symbol_search_fields < 2 {
-            push_identifier_search_terms(field, &mut symbol_terms);
+            push_identifier_search_terms(field, symbol_terms);
         }
         symbol_search_fields += 1;
     }
@@ -106,12 +111,10 @@ fn search_document_content<'a>(
     if document_kind == "symbol" && !symbol_terms.is_empty() {
         symbol_terms.sort();
         symbol_terms.dedup();
-        for term in symbol_terms {
-            append_search_field(&mut content, &term);
+        for term in symbol_terms.iter() {
+            append_search_field(content, term);
         }
     }
-
-    content
 }
 
 fn append_search_field(content: &mut String, field: &str) {
@@ -165,7 +168,7 @@ fn push_camel_case_terms(token: &str, terms: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::search_document_content;
+    use super::{search_document_content, search_document_content_into};
 
     #[test]
     fn symbol_search_content_preserves_identifier_expansion() {
@@ -191,5 +194,25 @@ mod tests {
         let content = search_document_content("chunk", ["", "body text", "  ", "src/lib.rs"]);
 
         assert_eq!(content, "body text src/lib.rs");
+    }
+
+    #[test]
+    fn reusable_search_content_buffers_do_not_leak_previous_terms() {
+        let mut content = String::from("stale content");
+        let mut symbol_terms = vec!["stale".to_owned()];
+        search_document_content_into(
+            &mut content,
+            &mut symbol_terms,
+            "symbol",
+            ["GraphIndex", "relay_knowledge::GraphIndex"],
+        );
+        assert_eq!(
+            content,
+            "GraphIndex relay_knowledge::GraphIndex graph graphindex index knowledge relay relay_knowledge"
+        );
+
+        search_document_content_into(&mut content, &mut symbol_terms, "chunk", ["new chunk"]);
+        assert_eq!(content, "new chunk");
+        assert!(symbol_terms.is_empty());
     }
 }
