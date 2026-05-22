@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeChunkRecord,
+        CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
         RepositoryCodeSymbolRecord,
     },
@@ -110,6 +110,70 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
 
     assert_eq!(hits[0].path, "src/pipeline.cpp");
     assert!(hits[0].excerpt.contains("cache_alias::Cache"));
+    assert!(
+        hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)
+    );
+}
+
+#[tokio::test]
+async fn reference_excerpts_prefer_the_reference_line_inside_large_chunks() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("cache-file", "include/store/cache.hpp", "cpp")],
+        symbols: Vec::new(),
+        references: vec![reference_on_line(
+            "key-list-field-reference",
+            "cache-file",
+            "include/store/cache.hpp",
+            "KeyList",
+            None,
+            26,
+        )],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: vec![chunk(
+            "cache-class-chunk",
+            "cache-file",
+            "include/store/cache.hpp",
+            "class Cache {\n\
+             public:\n\
+                 using KeyList = std::vector<Key>;\n\
+             \n\
+                 explicit Cache(std::unique_ptr<Writer> writer);\n\
+                 void Insert(const Key& key);\n\
+                 const Key& Lookup(const Key& key) const;\n\
+             \n\
+              private:\n\
+                 std::unique_ptr<Writer> writer_;\n\
+                 KeyList keys_;\n\
+             };",
+            range(16, 27),
+        )],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("KeyList", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, "include/store/cache.hpp");
+    assert!(hits[0].excerpt.contains("KeyList keys_"));
+    assert!(!hits[0].excerpt.contains("using KeyList"));
 }
 
 #[tokio::test]

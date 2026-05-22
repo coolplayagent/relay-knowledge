@@ -662,7 +662,7 @@ fn search_chunks(
                         symbol_snapshot_id: row.symbol_snapshot_id,
                         canonical_symbol_id: row.canonical_symbol_id,
                         file_id: Some(row.file_id),
-                        retrieval_layers: chunk_layers(&row.parse_status),
+                        retrieval_layers: chunk_layers_for_request(request, &row.parse_status),
                         score,
                         excerpt: row.content,
                         degraded_reason: row.degraded_reason,
@@ -676,6 +676,21 @@ fn search_chunks(
             })
         })
         .collect())
+}
+
+fn chunk_layers_for_request(
+    request: &CodeRetrievalRequest,
+    parse_status: &str,
+) -> Vec<CodeRetrievalLayer> {
+    let mut layers = chunk_layers(parse_status);
+    if request.code_query_kind == CodeQueryKind::References
+        && SymbolIdentityQuery::from_query(&request.query).is_some()
+        && !layers.contains(&CodeRetrievalLayer::TextFallback)
+    {
+        layers.push(CodeRetrievalLayer::TextFallback);
+    }
+
+    layers
 }
 
 #[cfg(test)]

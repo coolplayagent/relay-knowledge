@@ -163,7 +163,20 @@ fn reference_rows_sql(predicate_sql: &str) -> String {
                      chunk.line_start DESC,
                      chunk.chunk_id ASC
                    LIMIT 1
-               ) AS source_excerpt
+               ) AS source_excerpt,
+               (
+                   SELECT chunk.line_start
+                   FROM code_repository_chunks chunk
+                   WHERE chunk.source_scope = r.source_scope
+                     AND chunk.path = r.path
+                     AND chunk.line_start <= r.line_start
+                     AND chunk.line_end >= r.line_start
+                   ORDER BY
+                     (chunk.line_end - chunk.line_start) ASC,
+                     chunk.line_start DESC,
+                     chunk.chunk_id ASC
+                   LIMIT 1
+               ) AS source_excerpt_line_start
         FROM code_repository_references r
         INNER JOIN code_repository_files f
             ON f.source_scope = r.source_scope AND f.path = r.path
@@ -200,6 +213,7 @@ fn row_to_reference(row: &Row<'_>) -> rusqlite::Result<ReferenceRow> {
         confidence_tier: row.get(13)?,
         target_canonical_symbol_id: row.get(14)?,
         source_excerpt: row.get(15)?,
+        source_excerpt_line_start: row.get(16)?,
     })
 }
 
@@ -229,11 +243,12 @@ fn reference_rows_to_hits(
                         .unwrap_or_default(),
                 ],
             );
+            let focused_source_excerpt = focused_reference_source_excerpt(&row);
             let score = base_score
                 + reference_usage_context_bonus(
                     base_score,
                     &row.name,
-                    row.source_excerpt.as_deref(),
+                    focused_source_excerpt.as_deref(),
                     request,
                 );
             (score > 0.0).then(|| {
@@ -250,7 +265,7 @@ fn reference_rows_to_hits(
                         retrieval_layers: vec![CodeRetrievalLayer::Reference],
                         score: score + 1.5,
                         excerpt: reference_excerpt(
-                            row.source_excerpt.as_deref(),
+                            focused_source_excerpt.as_deref(),
                             &row.kind,
                             &row.name,
                         ),
@@ -265,6 +280,23 @@ fn reference_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn focused_reference_source_excerpt(row: &ReferenceRow) -> Option<String> {
+    let source_excerpt = row.source_excerpt.as_deref()?;
+    let Some(line_start) = row.source_excerpt_line_start else {
+        return Some(source_excerpt.to_owned());
+    };
+    let offset = row.line_range.start.checked_sub(line_start)?;
+    let line = source_excerpt
+        .lines()
+        .nth(usize::try_from(offset).ok()?)?
+        .trim();
+    if line.is_empty() || identifier_ranges(line, &row.name).next().is_none() {
+        Some(source_excerpt.to_owned())
+    } else {
+        Some(line.to_owned())
+    }
 }
 
 pub(super) fn reference_usage_context_bonus(

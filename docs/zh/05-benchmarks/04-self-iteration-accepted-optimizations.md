@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779453521-line-aware-reference-evidence
+- 算法/架构：SQLite `references` 检索在读取覆盖 reference 行的最窄 chunk 时同时保留该 chunk 的起始行，并在 evidence projection 与 usage-context scoring 前把 source excerpt 聚焦到真实 reference 行；exact reference 的 parser-missed chunk recovery 结果即使来自 parsed 文件，也标记 `TextFallback` 层，表达这是 reference fact 缺失后的文本证据，而不是普通 Hybrid lexical evidence。
+- 不变量：不改变 parser facts、SQLite schema、FTS MATCH、candidate windows、identity fast path、symbol/call/import/chunk ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 字段或 self-iteration harness；line focus 只作用于已召回 reference row 的展示和 References-only usage bonus，fallback layer 标记只作用于 exact safe identity `References` chunk fallback，没有仓库、路径、case id、query 或 fixture 枚举。
+- 预期影响/风险：预期恢复 C++ type alias、namespace alias、C-family macro/comment fallback 等 exact reference cases 的 measured evidence，让 `KeyList keys_` 这类 field-use reference 不再被同一 class chunk 中更早的 alias declaration excerpt 覆盖，并让 parser-missed textual reference 明确携带 text-fallback source。风险是 reference excerpt 从大 chunk 首个匹配行变为 row line，少数用户看到的上下文更短；风险由最窄 chunk、line offset fallback、原 score/top-k/dedupe 和 focused tests 控制。
+- 策略关联：建立在 `run-1779318672` reference source excerpt、`run-1779377967` reference usage-context ranking 和最新 accepted `run-1779452982` 的 retrieval planner 优化上；避免继续做 API identity 局部调权，也避开可能加剧 C/C++ query p95 的全局 fanout 或 FTS window 调整。
 ## 候选优化说明：run-1779452982-covered-api-symbol-direct-plan
 - 算法：SQLite Symbol 检索先复用既有 multi-API identity direct-symbol probes；当 query 只由已抽取 API identity 的 scoped token/leaf token 组成、每个 identity 都有非饱和 direct hit 且 kind 为 `Symbol` 时，直接返回去重后的 identity hits，跳过 symbol FTS MATCH 与后续 FTS candidate scoring；query 含自然语言 filler、identity 覆盖不足或 direct name window 饱和时继续执行原 Symbol FTS。
 - 架构/不变量：变更限定在 `storage::sqlite` 的 symbol retrieval planner 和 API identity token matcher；不改变 parser facts、SQLite schema、FTS 文档写入、candidate limits、Hybrid/Definition/References/Calls/Imports/Chunk 查询、repo-set overlay/merge/fallback、semantic/vector read model、env/paths/net、CLI/API schema、安装发布或 self-iteration harness。closed-query 判定只接受 identity raw/leaf facets，不枚举仓库、路径、case id、query 字符串或 fixture。
@@ -980,29 +985,18 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779439043 compacted
 - summary: accepted code-search backfill marker scored 0.989255 with 52/52 cases passed and performance 0.940307; full patch, changed paths, metrics, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779439043.patch`, reports, and progressive memory.
 
-## run-1779452125
+## run-1779452125-to-run-1779452982 compacted
+- summary: accepted repository-set dependency API symbol query and covered API symbol direct plan records were compacted to keep this primary benchmark log under the 1000-line hard cap; latest accepted score was 0.962453 with foundational=1.0, competitive=0.916667, semantic_vector=1.0, stability=1.0, and performance=0.893258. Full raw metrics, changed paths, patches, reports, and progressive memory remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779452125.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779452982.patch`, reports, and memory summaries, with strategy details preserved in the candidate sections above.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779452125.patch`
-- score: 0.950907 (foundational=1.000000, competitive=0.916667, accuracy=0.958333, semantic_vector=1.000000, research_judge=n/a, performance=0.829111, stability=1.000000)
-- cases: 41/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_plan.rs`, `src/relay_knowledge/application/code_repository_set_service.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=1636ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=7066ms; self_iteration_cargo_check_ms=444ms; temporal_sdk_go_index_ms=29501ms; temporal_sdk_go_register_index_ms=29643ms; cpp_syntax_fixture_index_ms=1009ms; cpp_syntax_fixture_register_index_ms=1050ms
+## run-1779453521
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779452982
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779452982.patch`
-- score: 0.962453 (foundational=1.000000, competitive=0.916667, accuracy=0.958333, semantic_vector=1.000000, research_judge=n/a, performance=0.893258, stability=1.000000)
-- cases: 41/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_api_identities.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:score 0.950907->0.9624530629947737; score_component:performance 0.829111->0.8932577573783728; metric:cargo_fmt_check_ms 1636.0->1491.0; metric:cargo_build_debug_ms 7066.0->222.0; metric:self_iteration_cargo_check_ms 444.0->101.0; metric:temporal_sdk_go_index_ms 29501.0->445.0; metric:temporal_sdk_go_register_index_ms 29643.0->506.0; metric:temporal_samples_go_index_ms 5140.0->122.0
-- known degradations: metric:cpp_syntax_fixture_query_p50_ms 162.0->192.0; metric:c_syntax_fixture_query_p95_ms 241.0->289.0; metric:leveldb_cpp_query_p50_ms 163.0->202.0; metric:leveldb_cpp_query_p95_ms 685.0->870.0; metric:relay_teams_query_p95_ms 1589.0->1768.0
-- latency metrics: cargo_fmt_check_ms=1491ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_debug_ms=222ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=445ms; temporal_sdk_go_register_index_ms=506ms; temporal_samples_go_index_ms=122ms; temporal_samples_go_register_index_ms=183ms
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779453521.patch`
+- score: 0.973276 (foundational=1.000000, competitive=0.993590, accuracy=0.996795, semantic_vector=1.000000, research_judge=n/a, performance=0.859369, stability=1.000000)
+- cases: 43/43 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_reference_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_references.rs`, `src/relay_knowledge/storage/sqlite/code_query_rows.rs`
+- key improvements: score_component:score 0.962453->0.9732762009881235; score_component:competitive_capability 0.916667->0.9935897435897435; case:c_syntax_references_ripgrep_text_fallback false->true; case:cpp_syntax_references_nested_using_alias false->true; metric:c_syntax_fixture_index_ms 224.0->121.0; metric:c_syntax_fixture_register_index_ms 285.0->161.0; metric:cpp_syntax_fixture_index_ms 202.0->101.0; metric:cpp_syntax_fixture_query_p50_ms 192.0->163.0
+- known degradations: score_component:performance 0.893258->0.8593692077687773; metric:cargo_build_debug_ms 222.0->303.0; metric:temporal_sdk_go_index_ms 445.0->663.0; metric:temporal_sdk_go_register_index_ms 506.0->724.0; metric:c_syntax_fixture_query_p50_ms 161.0->242.0; metric:c_syntax_fixture_query_p95_ms 289.0->445.0; metric:temporal_go_workspace_repo_set_refresh_ms 746.0->786.0
+- latency metrics: cargo_fmt_check_ms=1494ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=121ms; temporal_sdk_go_index_ms=663ms; temporal_sdk_go_register_index_ms=724ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=182ms
 
 Adopted optimization notes:
 
