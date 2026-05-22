@@ -33,7 +33,7 @@ Code repository queries use AST-first cooperation with exact grep fallback. Defi
 
 FTS and grep candidate windows apply scope/path/language filters before bounded scoring. High fan-out caller/callee queries are truncated by edge score and line containment so one call edge is not multiplied across unrelated chunks.
 
-Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by storage-side candidate-path limits, candidate-file, match, line-length, and timeout budgets, and it searches indexed commit content rather than the dirty working tree. If `rg` is unavailable, times out, or exhausts its budget, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization.
+Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by storage-side candidate-path limits, candidate-file, match, line-length, and timeout budgets, and it searches indexed commit content rather than the dirty working tree. Oversized blobs are skipped without stopping later candidates that still fit the materialization budget, and definition fallback filters candidate lines before enforcing the returned-hit limit. If `rg` is unavailable, times out, or exhausts its budget, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization.
 
 Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
 
@@ -56,7 +56,7 @@ Impact output is not an absolute conclusion; it is a risk grouping with evidence
 
 - Query `foo_bar` can match `fooBar`, `FooBar`, and multipart symbol names, while typed edge queries stay narrower.
 - Caller/callee results point to chunks containing the call line.
-- Grep fallback hits are marked with lexical/text-fallback provenance and never include resolved edge confidence.
+- Grep fallback hits are marked with lexical/text-fallback provenance and never include resolved edge confidence; hybrid grep fallback fills result windows without outranking existing structured hits.
 - Impact output explains whether each result came from diff, call, reference, import, or test signals.
 - Benchmarks are not improved by enumerating known queries, paths, or symbols; improvements come from general ranking signals, index structures, or candidate pushdown.
 

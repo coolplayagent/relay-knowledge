@@ -21,6 +21,7 @@ pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
 const MAX_GREP_CANDIDATE_FILES: usize = SOURCE_GREP_CANDIDATE_FILE_LIMIT;
 const MAX_GREP_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GREP_LINE_BYTES: usize = 4096;
+const MAX_DEFINITION_MATCHES_PER_FILE: usize = 64;
 const RIPGREP_TIMEOUT: Duration = Duration::from_secs(3);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -87,7 +88,11 @@ pub(crate) fn source_grep_matches(
             degraded_reason,
         });
     }
-    let rg_output = run_ripgrep(&tree.root, &request.query, request.limit);
+    let rg_output = run_ripgrep(
+        &tree.root,
+        &request.query,
+        ripgrep_match_limit(request.kind, request.limit),
+    );
     let output = match rg_output {
         RipgrepRun::Output(output) => output,
         RipgrepRun::Degraded(reason) => {
@@ -97,7 +102,10 @@ pub(crate) fn source_grep_matches(
             });
         }
     };
-    let mut matches = match parse_ripgrep_matches(&output.stdout, request.limit) {
+    let matches = match parse_ripgrep_matches(&output.stdout, request.limit, |matched| {
+        request.kind != SourceGrepKind::Definition
+            || source_line_defines_identity(&matched.excerpt, &request.query)
+    }) {
         Ok(matches) => matches,
         Err(error) => {
             return Ok(SourceGrepOutcome {
@@ -106,9 +114,6 @@ pub(crate) fn source_grep_matches(
             });
         }
     };
-    if request.kind == SourceGrepKind::Definition {
-        matches.retain(|matched| source_line_defines_identity(&matched.excerpt, &request.query));
-    }
 
     Ok(SourceGrepOutcome {
         matches,
@@ -148,6 +153,16 @@ fn materialize_git_blobs(
     paths: &[String],
     tree: &mut TempSourceTree,
 ) -> Result<MaterializedFiles, CodeIndexError> {
+    materialize_git_blobs_with_budget(root, commit, paths, tree, MAX_GREP_BYTES)
+}
+
+fn materialize_git_blobs_with_budget(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+    tree: &mut TempSourceTree,
+    max_bytes: usize,
+) -> Result<MaterializedFiles, CodeIndexError> {
     let mut byte_count = 0usize;
     let mut file_count = 0usize;
     let mut exhausted = false;
@@ -156,9 +171,9 @@ fn materialize_git_blobs(
         let Ok(bytes) = git_bytes(root, ["show", &object]) else {
             continue;
         };
-        if byte_count.saturating_add(bytes.len()) > MAX_GREP_BYTES {
+        if byte_count.saturating_add(bytes.len()) > max_bytes {
             exhausted = true;
-            break;
+            continue;
         }
         tree.write(path, &bytes)?;
         byte_count += bytes.len();
@@ -169,6 +184,13 @@ fn materialize_git_blobs(
         file_count,
         degraded_reason: exhausted.then(|| "ripgrep materialized byte budget exhausted".to_owned()),
     })
+}
+
+fn ripgrep_match_limit(kind: SourceGrepKind, result_limit: usize) -> usize {
+    match kind {
+        SourceGrepKind::Definition => result_limit.max(MAX_DEFINITION_MATCHES_PER_FILE),
+        SourceGrepKind::References | SourceGrepKind::Hybrid => result_limit,
+    }
 }
 
 fn run_ripgrep(root: &Path, query: &str, limit: usize) -> RipgrepRun {
@@ -266,6 +288,7 @@ fn collect_pipe_reader(
 fn parse_ripgrep_matches(
     output: &[u8],
     limit: usize,
+    accepts: impl Fn(&SourceGrepMatch) -> bool,
 ) -> Result<Vec<SourceGrepMatch>, CodeIndexError> {
     let mut matches = Vec::new();
     for line in output.split(|byte| *byte == b'\n') {
@@ -280,7 +303,7 @@ fn parse_ripgrep_matches(
         let data = value.get("data").ok_or_else(|| {
             CodeIndexError::InvalidInput("ripgrep match data is missing".to_owned())
         })?;
-        if let Some(matched) = match_from_json(data)? {
+        if let Some(matched) = match_from_json(data)?.filter(|matched| accepts(matched)) {
             matches.push(matched);
             if matches.len() >= limit {
                 break;
@@ -440,7 +463,7 @@ mod tests {
     fn parses_ripgrep_json_match() {
         let output = br#"{"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"pub fn target() {}\n"},"line_number":7,"absolute_offset":42,"submatches":[{"match":{"text":"target"},"start":7,"end":13}]}}"#;
 
-        let matches = parse_ripgrep_matches(output, 10).expect("json should parse");
+        let matches = parse_ripgrep_matches(output, 10, |_| true).expect("json should parse");
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].path, "src/lib.rs");
@@ -449,6 +472,44 @@ mod tests {
         assert_eq!(matches[0].line_range.start, 7);
         assert_eq!(matches[0].byte_range.start, 49);
         assert_eq!(matches[0].byte_range.end, 55);
+    }
+
+    #[test]
+    fn filters_ripgrep_matches_before_enforcing_limit() {
+        let output = br#"{"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"return target();\n"},"line_number":3,"absolute_offset":20,"submatches":[{"match":{"text":"target"},"start":7,"end":13}]}}
+{"type":"match","data":{"path":{"text":"./src/lib.rs"},"lines":{"text":"int target(void);\n"},"line_number":9,"absolute_offset":80,"submatches":[{"match":{"text":"target"},"start":4,"end":10}]}}"#;
+
+        let matches = parse_ripgrep_matches(output, 1, |matched| {
+            source_line_defines_identity(&matched.excerpt, "target")
+        })
+        .expect("json should parse");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].line_range.start, 9);
+        assert_eq!(matches[0].excerpt, "int target(void);");
+    }
+
+    #[test]
+    fn materialization_skips_oversized_blob_and_keeps_later_candidates() {
+        let repo = TestRepo::create("grep-materialization-budget");
+        repo.write("large.txt", "abcdef");
+        repo.write("small.txt", "xy");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "budget fixture"]);
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        let paths = vec!["large.txt".to_owned(), "small.txt".to_owned()];
+
+        let materialized =
+            materialize_git_blobs_with_budget(&repo.root, "HEAD", &paths, &mut tree, 5)
+                .expect("materialization should succeed");
+
+        assert_eq!(materialized.file_count, 1);
+        assert!(materialized.degraded_reason.is_some());
+        assert!(!tree.root.join("large.txt").exists());
+        assert_eq!(
+            fs::read_to_string(tree.root.join("small.txt")).expect("small blob should exist"),
+            "xy"
+        );
     }
 
     #[test]
@@ -470,5 +531,55 @@ mod tests {
         let candidates = selected_candidate_paths(&request);
 
         assert_eq!(candidates.paths, ["src/lib.rs"]);
+    }
+
+    struct TestRepo {
+        root: PathBuf,
+    }
+
+    impl TestRepo {
+        fn create(name: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            let root = std::env::temp_dir().join(format!(
+                "relay-knowledge-{name}-{}-{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("repo directory should be created");
+            let repo = Self { root };
+            repo.git(["init"]);
+            repo.git(["config", "user.email", "relay@example.invalid"]);
+            repo.git(["config", "user.name", "Relay Test"]);
+            repo
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("parent directory should exist");
+            }
+            fs::write(path, content).expect("fixture file should be written");
+        }
+
+        fn git<const N: usize>(&self, args: [&str; N]) {
+            let output = Command::new("git")
+                .current_dir(&self.root)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }

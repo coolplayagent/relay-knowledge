@@ -133,7 +133,8 @@ pub(super) fn append_code_grep_fallback(
     if outcome.matches.is_empty() {
         return outcome.degraded_reason;
     }
-    let best_score = results.first().map_or(0.0, |hit| hit.score);
+    let score_bounds = ScoreBounds::from_results(results);
+    let fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
         if let Some(existing) = results.iter_mut().find(|hit| {
@@ -142,7 +143,7 @@ pub(super) fn append_code_grep_fallback(
                 && hit.excerpt == matched.excerpt
         }) {
             add_code_grep_layers(existing, plan.kind);
-            existing.score = existing.score.max(grep_score(plan.kind, best_score));
+            existing.score = existing.score.max(fallback_score);
             continue;
         }
         let path_metadata = metadata.get(&matched.path);
@@ -151,7 +152,7 @@ pub(super) fn append_code_grep_fallback(
             &matched,
             path_metadata,
             plan.kind,
-            best_score,
+            fallback_score,
             outcome.degraded_reason.clone(),
         ));
     }
@@ -246,7 +247,7 @@ fn code_grep_hit(
     matched: &SourceGrepMatch,
     path_metadata: Option<&HitPathMetadata>,
     kind: SourceGrepKind,
-    best_score: f64,
+    score: f64,
     degraded_reason: Option<String>,
 ) -> CodeRetrievalHit {
     let mut layers = vec![
@@ -288,16 +289,41 @@ fn code_grep_hit(
         edge_target_hint: None,
         edge_confidence_basis_points: None,
         edge_confidence_tier: None,
-        score: grep_score(kind, best_score),
+        score,
         excerpt: matched.excerpt.clone(),
     }
 }
 
-fn grep_score(kind: SourceGrepKind, best_score: f64) -> f64 {
+#[derive(Clone, Copy)]
+struct ScoreBounds {
+    best: Option<f64>,
+    lowest: Option<f64>,
+}
+
+impl ScoreBounds {
+    fn from_results(results: &[CodeRetrievalHit]) -> Self {
+        let mut bounds = Self {
+            best: None,
+            lowest: None,
+        };
+        for hit in results {
+            bounds.best = Some(bounds.best.map_or(hit.score, |best| best.max(hit.score)));
+            bounds.lowest = Some(
+                bounds
+                    .lowest
+                    .map_or(hit.score, |lowest| lowest.min(hit.score)),
+            );
+        }
+
+        bounds
+    }
+}
+
+fn grep_score(kind: SourceGrepKind, score_bounds: ScoreBounds) -> f64 {
     match kind {
-        SourceGrepKind::Definition => best_score + 3.5,
-        SourceGrepKind::References => best_score + 2.0,
-        SourceGrepKind::Hybrid => best_score + 1.0,
+        SourceGrepKind::Definition => score_bounds.best.unwrap_or(0.0) + 3.5,
+        SourceGrepKind::References => score_bounds.best.unwrap_or(0.0) + 2.0,
+        SourceGrepKind::Hybrid => score_bounds.lowest.map(|score| score - 0.25).unwrap_or(1.0),
     }
 }
 
@@ -470,6 +496,38 @@ mod tests {
         hit.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
 
         assert!(plan_code_grep_fallback(&status(), &request, &[hit]).is_none());
+    }
+
+    #[test]
+    fn hybrid_grep_fallback_fills_after_structured_hits() {
+        let request = request("rk_helper", CodeQueryKind::Hybrid, Vec::new());
+        let mut results = vec![hit("src/lib.c", "void structured_hit(void);")];
+        let plan = plan_code_grep_fallback(&status(), &request, &results)
+            .expect("partial hybrid results should plan fallback");
+        let outcome = SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/fallback.c".to_owned(),
+                language_id: "c".to_owned(),
+                excerpt: "rk_helper();".to_owned(),
+                byte_range: RepositoryCodeRange { start: 10, end: 19 },
+                line_range: RepositoryCodeRange { start: 4, end: 4 },
+            }],
+            degraded_reason: None,
+        };
+
+        append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
+
+        assert_eq!(results[0].path, "src/lib.c");
+        let fallback = results
+            .iter()
+            .find(|hit| hit.path == "src/fallback.c")
+            .expect("fallback hit should be appended");
+        assert!(fallback.score < results[0].score);
+        assert!(
+            fallback
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::TextFallback)
+        );
     }
 
     fn request(
