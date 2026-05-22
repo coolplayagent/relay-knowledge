@@ -20,7 +20,7 @@
 - GraphRAG 论文和产品实践共同指向 query router、local/global 检索、社区摘要、路径组织和增量刷新；盲目扩大 k-hop 或 top-k 会增加噪声和 token 成本。
 - 向量检索的高性能来自 HNSW、PQ/IVF、磁盘图索引、量化、过滤前置和多阶段重排；向量索引只能作为候选和排序信号，不能成为事实真源。
 - 全文与混合搜索的成熟模式是倒排索引、BM25/BM25F、trigram/posting list、RRF 和 phased ranking；不同召回器分数不可直接相加时，rank-based fusion 更稳。
-- 代码搜索的竞争力来自精确符号、trigram/regex、BM25、AST 结构、引用/调用/import 边、语言和路径过滤、版本 scope 与影响分析，而不是“代码 embedding”单一路径。
+- 代码搜索的竞争力来自精确符号、trigram/regex、BM25、AST 结构、引用/调用/import 边、有界 `ripgrep` 精确文本兜底、语言和路径过滤、版本 scope 与影响分析，而不是“代码 embedding”单一路径。
 - 本机文件高速检索必须把文件名/路径、metadata、内容和变更游标拆成独立 read model；Everything、Spotlight、Windows Search、plocate 和 ripgrep 是机制参考，不应成为 relay-knowledge 的运行依赖。
 - 大规模图和权限系统强调缓存、关系模型、因果一致性、权限过滤前置和低延迟检查；Context Pack 和文件/代码查询不能在最终截断后才做授权。
 - 高性能后台运行依赖 bounded queue、lease、dead-letter、replay、adaptive concurrency、timeout、cancellation、trace/metric/log 关联和明确的 overload 行为。
@@ -32,7 +32,7 @@
 | GraphRAG 与 Hybrid RAG | Microsoft GraphRAG/DRIFT、LightRAG、E^2GraphRAG、ROGRAG、Practical GraphRAG、PolyG、EA-GraphRAG | query mode 选择、局部/全局融合、实体-chunk 双向索引、增量构图、路径剪枝和结果验证。 |
 | 向量检索 | HNSW、FAISS、DiskANN、ScaNN、ACORN、Vespa constrained ANN | 图近邻、量化、磁盘驻留、过滤感知 ANN、target hits、召回率/延迟/内存权衡。 |
 | 全文与混合搜索 | Lucene BM25、Vespa hybrid/phased ranking、OpenSearch RRF、Azure AI Search RRF | 倒排索引、RRF、分阶段排序、过滤前置、可解释 rank contribution。 |
-| 代码搜索 | GitHub Code Search/Blackbird、Sourcegraph/Zoekt、Tree-sitter、ripgrep、persistent trigram index | trigram 候选、regex literal 提取、符号优先、AST chunk、ignore 规则、多线程遍历和版本化索引。 |
+| 代码搜索 | GitHub Code Search/Blackbird、Sourcegraph/Zoekt、Tree-sitter、ripgrep、persistent trigram index | trigram 候选、regex literal 提取、符号优先、AST chunk、有界 exact-text fallback、ignore 规则、多线程遍历和版本化索引。 |
 | 本机文件搜索 | Everything、Windows Search、Spotlight/FSEvents、Linux inotify/fanotify、plocate | 文件名和 metadata 优先、系统变更日志、posting list/trigram、权限可见性、游标溢出后重扫。 |
 | 图存储与权限图 | Facebook TAO/RAMP-TAO、Google Zanzibar | 关系图缓存、读多写少优化、权限关系前置、外部一致性和低延迟授权检查。 |
 | 存储与更新 | RocksDB/LSM、WAL、mutation log、materialized view | 写入批处理、后台 compaction、崩溃恢复、增量视图和热查询隔离。 |
@@ -71,7 +71,7 @@ normalize file query
 
 ## 5. 高性能算法落点
 
-- **候选收缩**: 用倒排表、trigram、path token、symbol name、scope/path/language filter 先把候选压到有界窗口，再做 expensive scoring。
+- **候选收缩**: 用倒排表、trigram、path token、symbol name、scope/path/language filter 先把候选压到有界窗口，再做 expensive scoring；代码 `ripgrep` 兜底也必须复用这个候选窗口，不能临时全仓扫描。
 - **混合融合**: 对 BM25、语义、向量、图路径、代码边和文件路径候选使用 RRF 或 phased ranking；只有同源同量纲分数才直接线性组合。
 - **路径剪枝**: 多跳图检索采用 query intent、schema path、edge confidence、时间范围和最大 token/edge/hop 预算，不做无界邻域扩展。
 - **增量优先**: Git diff、mutation log、file change cursor 和 source hash 驱动刷新；全量重扫只能作为 cold start、reconcile 或 cursor 失效后的受控操作。
@@ -86,6 +86,7 @@ normalize file query
 | P0 | 在架构和能力文档中把本机文件检索定义为 `local_file_path`、`local_file_metadata`、`local_file_content`、`local_file_change_cursor` 四层 read model。 | 文档说明文件名查询不依赖内容索引，所有文件查询返回 freshness/degraded reason。 |
 | P0 | 为代码、文件、图谱混合检索统一记录 candidate window、filter count、RRF contribution、truncation reason 和 stale lag。 | context pack 和 benchmark 文档有可观测字段和 p95/p99 指标。 |
 | P1 | 增加文件内容索引路线：文本 chunk BM25/trigram 优先，semantic/vector 作为可选后端，OCR/压缩包/大文件走 worker。 | 文件名查询和内容查询有独立延迟预算，内容索引失败不影响路径索引。 |
+| P1 | 将代码 `ripgrep` 兜底纳入检索 trace：记录触发原因、候选文件数、物化字节、timeout/budget degraded reason 和 `text_fallback` 排名贡献。 | definition/reference/hybrid 的 fallback 命中可解释，且不会压过 exact symbol 或 resolved edge。 |
 | P1 | 引入 query router：区分 exact term、conceptual、multi-hop、code symbol、file path、impact 和 temporal 查询。 | 每类查询有明确 retriever family、预算和降级规则。 |
 | P1 | 将 cold indexing、incremental update、no-op refresh、watcher lag、queue lag 纳入基准门禁。 | 基准章节记录目标、采集命令和回归阈值。 |
 | P2 | 评估平台 watcher 后端和 ANN 后端的可插拔实现。 | 后端能力缺失时可降级为 bounded rescan 或 local lexical read model。 |

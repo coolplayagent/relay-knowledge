@@ -11,7 +11,7 @@
 
 | 维度 | 结论 |
 | --- | --- |
-| 研究来源 | 以 Tree-sitter、Git、libgit2、GitHub code navigation、Codebase-Memory 和本仓库代码图经验为主。 |
+| 研究来源 | 以 Tree-sitter、Git、libgit2、GitHub code navigation、ripgrep、Codebase-Memory 和本仓库代码图经验为主。 |
 | 研究目标 | 把代码仓库检索从全文搜索升级为 Git snapshot、语法结构、符号/引用图和增量索引组合。 |
 | 关键竞争力 | 结构化代码事实、文件级增量、作用域授权、混合召回、影响分析和可恢复索引是面向 agent 的核心壁垒。 |
 | 场景与未来 | 面向大仓库理解、脏工作树查询、代码审查、影响报告、Agent 上下文打包和后续语言服务适配。 |
@@ -23,7 +23,7 @@
 1. tree-sitter 适合作为 v1 结构化解析基础。它能够为多语言源码生成具体语法树，支持增量解析、查询捕获、错误恢复和代码导航标签。
 2. Git 必须作为变更发现和快照的真实来源。`diff --name-status -z -M` 适合提交间更新，`status --porcelain=v2 -z` 适合工作树覆盖，commit-graph 的变更路径 Bloom 过滤器可辅助历史路径查询。
 3. 高性能来自文件级增量和索引局部刷新，而非每次全仓重建。核心流程是变更路径 -> 内容哈希跳过 -> 反向依赖 -> 有界重解析 -> 范围索引刷新。
-4. 查询层需要混合策略。符号、路径和错误码适合 BM25；概念性问题适合语义/向量检索；调用、引用、依赖和影响分析必须采用图扩展。
+4. 查询层需要混合策略。符号、路径和错误码适合 BM25；概念性问题适合语义/向量检索；调用、引用、依赖和影响分析必须采用图扩展；当结构化层有明确召回缺口时，`ripgrep` 只作为有界精确源码行兜底。
 5. v1 不应承诺编译器级语义解析。tree-sitter 能可靠抽取语法层定义和引用，但跨文件符号解析、动态语言调用解析、宏展开和类型推断需要后续语言服务或编译器 adapter 增强。
 
 ## 2. 资料来源
@@ -42,6 +42,7 @@
 | GitHub 代码导航文档 [R10] | GitHub 代码导航使用 tree-sitter，支持 definitions/references | 验证 tree-sitter tags 路线适合仓库级导航 |
 | Codebase-Memory 论文 [R11] | Tree-Sitter 代码图 + MCP，覆盖多语言、并行工作线程、调用图、影响分析 | 支持本项目面向 agent 的代码知识图谱方向 |
 | 本仓库能力参考 [R12] | code-review-graph 使用 tree-sitter、多语言、SQLite/FTS5、SHA-256 增量和影响分析 | 本规格继承可借鉴点，并补齐事件驱动、作用域和 QoS |
+| ripgrep 性能说明 [R13] | ripgrep 适合快速精确文本检索，但仍需要候选范围、超时和输出预算 | 作为 query-time 兜底层，而不是代码图或索引刷新替代品 |
 
 ## 3. Tree-sitter 能力分析
 
@@ -302,7 +303,18 @@ BM25 对这些代码问题很强:
 
 因此 v1 必须先保证 symbol/path/chunk/doc comment 的 BM25 字段质量。
 
-### 8.2 Semantic/vector 强项
+### 8.2 精确源码 grep 兜底强项
+
+有界 `ripgrep` 兜底适合这些代码问题:
+
+- AST query 或 capture 漏掉的精确定义行。
+- 引用层没有 resolved/reference edge，但源码中存在明确标识符使用。
+- hybrid 查询已经有结构化命中，但结果窗口仍需要少量精确源码补召。
+- 大小写、宏、typedef、声明形态或语言 query 演进导致的暂时召回缺口。
+
+风险是把文本匹配误当语义关系。因此 grep 兜底必须只在 indexed commit 的候选路径内运行，受 path/language/scope、候选文件数、物化字节数、行长度和 timeout 预算控制；命中只标记 `lexical`/`text_fallback` provenance，不返回 resolved edge confidence。
+
+### 8.3 Semantic/vector 强项
 
 semantic/vector 对这些问题有价值:
 
@@ -313,7 +325,7 @@ semantic/vector 对这些问题有价值:
 
 风险是相似但 scope 错误的结果。所有向量召回必须先过滤 scope 或在 ANN 后强制 scope post-filter，并在 metadata 中返回 index freshness。
 
-### 8.3 Graph expansion 强项
+### 8.4 Graph expansion 强项
 
 graph expansion 适合:
 
@@ -354,6 +366,7 @@ v1 最小可用能力:
 - 注册本地 Git 仓库。
 - 对 HEAD 快照全量构建主流语法注册表语言的定义/导入/代码块。
 - 使用 BM25 搜索 path/symbol/chunk。
+- 在 definition/reference/hybrid 的结构化召回有缺口时，使用有界 `ripgrep` 搜索 indexed commit 候选内容。
 - 支持 commit-to-commit 增量更新。
 - 返回作用域、提交、树、行范围、过时/降级元数据。
 
@@ -383,6 +396,7 @@ v1 不做:
 - changed files 到 fresh BM25 的延迟。
 - 变更块到向量刷新（vector fresh）的延迟。
 - 并发查询 p95/p99。
+- grep 兜底触发率、命中率、degraded reason 分布和对 structured hit 排名的影响。
 - 图影响遍历的 p95 和截断率。
 - 工作线程队列深度、CPU、内存、SQLite 事务时间。
 
@@ -400,3 +414,4 @@ v1 不做:
 - [R10] GitHub 文档，“在 GitHub 上浏览代码。” <https://docs.github.com/en/repositories/working-with-files/using-files/navigating-code-on-github>
 - [R11] Martin Vogel 等人，“Codebase-Memory：基于 Tree-Sitter 的知识图谱，用于通过 MCP 进行大语言模型代码探索。” <https://arxiv.org/abs/2603.27277>
 - [R12] `relay-knowledge` 本地调研，`docs/zh/03-architecture-specs/11-code-knowledge-graph-model.md`。
+- [R13] ripgrep 性能说明。<https://burntsushi.net/ripgrep/>

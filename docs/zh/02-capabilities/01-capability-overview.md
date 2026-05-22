@@ -27,7 +27,7 @@
 | GraphRAG | 只返回文本片段 | 返回带 source span、结构化事实、graph path、freshness 和 ranking explanation 的 context pack |
 | 检索 | BM25 或向量单一路径 | BM25、semantic、vector、图路径、代码结构和 RRF 融合 |
 | 新鲜度 | 索引状态不透明 | 每个 index cursor 绑定 scope、graph version、backend 和 stale reason |
-| 代码检索 | grep 或普通全文搜索 | Git snapshot、tree-sitter、symbol/reference/call/import/chunk 和 impact analysis |
+| 代码检索 | grep 或普通全文搜索 | Git snapshot、tree-sitter、symbol/reference/call/import/chunk、impact analysis 和有界精确文本兜底 |
 | Agent 接入 | 裸 tool 调用 | MCP/ACP 共享应用服务、scope policy、QoS、cancellation 和 audit |
 | 运维 | 本地命令堆叠 | worker、proposal、silent update、service definition、OTLP 和 Prometheus-ready diagnostics |
 
@@ -37,7 +37,7 @@
 
 ## 降级与诊断
 
-能力默认可降级：semantic/vector 可 disabled，代码解析失败可 text-only，index stale 可解释，外部 worker 不可用时可以保留 BM25 和图路径。降级状态必须进入响应 metadata，而不是静默丢失。
+能力默认可降级：semantic/vector 可 disabled，代码解析失败可 text-only，`ripgrep` 缺失只影响精确文本兜底，index stale 可解释，外部 worker 不可用时可以保留 BM25 和图路径。降级状态必须进入响应 metadata，而不是静默丢失。
 
 ## 关联架构章节
 

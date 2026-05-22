@@ -103,3 +103,4 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix B.2: Documentation Refresh Audit 2026-05-17](06-verification/02-documentation-refresh-audit-2026-05-17.md): documentation sync record for the code retrieval self-iteration commits.
 - [Appendix B.3: Documentation Refresh Audit 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
 - [Appendix B.4: relay-teams E2E Verification 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
+- [Appendix B.7: Grep Fallback Documentation Refresh Audit 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md): chapter sync record for code retrieval exact-text fallback.

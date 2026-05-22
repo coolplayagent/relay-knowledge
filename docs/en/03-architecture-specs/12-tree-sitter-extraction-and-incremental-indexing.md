@@ -12,7 +12,7 @@ Tree-sitter is the entry point for code structure, not a complete semantic analy
 
 ## 2. Language Registry
 
-Each language registration includes language id, file extensions, tree-sitter grammar, capture queries, comment rules, identifier segmentation, and fallback chunker. When grammar is missing, files still enter text chunk and BM25 paths.
+Each language registration includes language id, file extensions, tree-sitter grammar, capture queries, comment rules, identifier segmentation, and fallback chunker. When grammar is missing, files still enter text chunk and BM25 paths. Query-time `ripgrep` fallback is not a grammar substitute; it only adds exact-text evidence from indexed source candidates.
 
 ## 3. Capture Contract
 
@@ -47,9 +47,11 @@ Code indexing follows the shared principles behind Sourcegraph/Zoekt, GitHub Cod
 
 Cold full indexing, semantic embedding, cross-batch edge finalization, large-file skip/hash, and parser-heavy work belong behind background worker or maintenance boundaries and do not block query hot paths. Incremental indexing records changed file count, affected file count, parse throughput, write batch count, candidate windows, and stale lag so hidden full scans are visible.
 
+Query-time `ripgrep` fallback follows the same blocking-worker boundary as Git blob reads. It materializes only bounded candidate blobs, applies path/language/scope filters, and returns degraded reasons on timeout, candidate-file budget, or materialized-byte budget instead of turning a query hot path into a full repository scan.
+
 ## 7. Degradation Strategy
 
-Parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. Degradation appears in repo status, health, and context pack metadata.
+Parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. Degradation appears in repo status, health, and context pack metadata. Missing or failed `rg` is query-time exact-text fallback degradation and appears in code query response metadata, not index state.
 
 ## 8. Acceptance Criteria
 

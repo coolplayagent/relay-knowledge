@@ -22,6 +22,8 @@ relay-knowledge repo status core --format json
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。
 
+`definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界 `ripgrep` 兜底。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
+
 冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`repo status` 暴露 active task、checkpoint 进度和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。
 
 ## 竞争力特性
@@ -34,12 +36,13 @@ relay-knowledge repo status core --format json
 
 ## 降级与诊断
 
-Unsupported、非法 UTF-8、二进制或超大文件会降级为 text-only chunk。包含 error node 的 syntax tree 以 partial 状态索引，并记录 file diagnostic。
+Unsupported、非法 UTF-8、二进制或超大文件会降级为 text-only chunk。包含 error node 的 syntax tree 以 partial 状态索引，并记录 file diagnostic。`rg` 缺失、超时或候选预算耗尽只降级 query-time exact-text fallback，响应必须保留 `degraded_reason`，已有结构化命中仍然可用。
 
 ## 关联架构章节
 
 - [Source Scope 模型](../03-architecture-specs/04-source-scope-model.md)
 - [Tree-sitter 抽取与增量索引](../03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md)
+- [代码检索排序与影响分析](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
 
 ---
 

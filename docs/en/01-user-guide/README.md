@@ -14,7 +14,7 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 
 - Zero-configuration local SQLite graph storage, platform runtime directories, and deterministic semantic/vector read models.
 - Evidence ingest, three-layer GraphRAG retrieval, graph-only queries, index refresh, and freshness diagnostics.
-- Code repository graphs with tree-sitter indexing, symbol and relationship retrieval, incremental updates, worktree overlays, impact analysis, and reports.
+- Code repository graphs with tree-sitter indexing, symbol and relationship retrieval, bounded `ripgrep` exact-text fallback, incremental updates, worktree overlays, impact analysis, and reports.
 - Static Web workspace and same-origin operation execution for retrieval, ingest, repositories, indexes, providers, workers, proposals, audit, and service snapshots.
 - MCP Streamable HTTP, local ACP adapter, QoS, scope policy, cancellation, metrics, and audit.
 - Service-manager planning, service definition generation, silent-update operator state, and worker/proposal/audit operation entry points.
@@ -27,7 +27,7 @@ This book only covers paths that users can run, verify, and troubleshoot directl
 - [Chapter 2: CLI Basics](02-cli-basics.md): command syntax, output formats, freshness, and parser diagnostics.
 - [Chapter 3: CLI Command Reference](03-cli-command-reference.md): command overview, status diagnostics, setup profiles, and provider probe.
 - [Chapter 4: Knowledge Graph](04-knowledge-graph.md): evidence ingest, context pack query, graph inspection, multimodal evidence, and retrieval backend entry points.
-- [Chapter 5: Code Repository Graph Workflow](05-code-repository-graph-workflow.md): repository registration, code graph indexing, symbol and relationship queries, incremental updates, impact analysis, and reports.
+- [Chapter 5: Code Repository Graph Workflow](05-code-repository-graph-workflow.md): repository registration, code graph indexing, symbol and relationship queries, `ripgrep` fallback diagnostics, incremental updates, impact analysis, and reports.
 - [Chapter 6: Web Workspace](06-web-workspace.md): static assets, same-origin APIs, operation execution, browser integration tests, and safety boundaries.
 - [Chapter 7: MCP Agent Access](07-mcp-agent-access.md): MCP policy, sessions, tools/resources/prompts, and access boundaries.
 - [Chapter 8: ACP Local Adapter](08-acp-local-adapter.md): local ACP sessions, progress, cancellation, and context artifacts.

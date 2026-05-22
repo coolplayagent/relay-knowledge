@@ -22,6 +22,8 @@ relay-knowledge repo status core --format json
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy.
 
+`definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded `ripgrep` fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
+
 Cold full `repo index` returns a queued task handle and lets the background code-index worker perform parsing and SQLite writes under a lease. `repo status` exposes the active task, checkpoint progress, and retention summary; successful workers keep the active scope, the two latest completed scopes, and unfinished task scopes.
 
 ## Competitive Features
@@ -34,12 +36,13 @@ Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `cal
 
 ## Degradation and Diagnostics
 
-Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with error nodes are indexed as partial and record file diagnostics.
+Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with error nodes are indexed as partial and record file diagnostics. Missing `rg`, timeouts, or exhausted candidate budgets degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.
 
 ## Related Architecture Chapters
 
 - [Source Scope Model](../03-architecture-specs/04-source-scope-model.md)
 - [Tree-sitter Extraction and Incremental Indexing](../03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md)
+- [Code Retrieval Ranking and Impact Analysis](../03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md)
 
 ---
 

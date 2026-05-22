@@ -33,7 +33,7 @@
 
 FTS 和 grep candidate window 必须先应用 scope/path/language filter，再进入有界评分。高 fan-out caller/callee 查询需要按 edge score 和 line containment 截断，避免一条调用边被多个无关 chunk 放大。
 
-Ripgrep 兜底与 Git 快照读取一样运行在 blocking-worker 边界之后，并受存储侧候选路径上限、候选文件数、命中数、单行长度和 timeout 预算约束。它搜索已索引 commit 内容，而不是脏工作树。物化搜索树必须包含已索引的 dot-path 候选，JSON 解码必须同时接受 ripgrep 的 `text` 字段和 base64 `bytes` 字段。超大 blob 超出物化预算时只跳过当前候选，不阻断后续仍能装入预算的小文件；definition 兜底先按定义行过滤，再执行返回命中数上限。`rg` 不存在、超时、预算耗尽或存储后端无法提供有界候选路径时，查询仍保持有效，并通过 degraded reason 暴露诊断，不能绕过 freshness 或授权边界。
+Ripgrep 兜底与 Git 快照读取一样运行在 blocking-worker 边界之后，并受存储侧候选路径上限、候选文件数、命中数、单行长度和 timeout 预算约束。当前实现的兜底预算是最多 256 个候选文件、8 MiB 物化 blob、单行 4096 字节和 3 秒 `rg` timeout。它搜索已索引 commit 内容，而不是脏工作树。物化搜索树必须包含已索引的 dot-path 候选，JSON 解码必须同时接受 ripgrep 的 `text` 字段和 base64 `bytes` 字段。超大 blob 超出物化预算时只跳过当前候选，不阻断后续仍能装入预算的小文件；definition 兜底先按定义行过滤，再执行返回命中数上限。`rg` 不存在、超时、预算耗尽或存储后端无法提供有界候选路径时，查询仍保持有效，并通过 degraded reason 暴露诊断，不能绕过 freshness 或授权边界。
 
 候选窗口应输出可观测字段：每个 layer 的 pre-filter count、post-filter count、score count、truncation reason 和耗时。影响分析、caller/callee 和 import 查询必须随 changed path、seed symbol、module hint 和 edge confidence 扩展，而不是随完整 scope table size 扩展。
 
