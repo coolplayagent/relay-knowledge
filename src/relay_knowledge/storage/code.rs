@@ -218,6 +218,20 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn code_file_candidate_paths_for_scope(
+        &self,
+        source_scope: String,
+        _path_filters: Vec<String>,
+        _language_filters: Vec<String>,
+        _limit: usize,
+    ) -> StorageFuture<'_, Vec<String>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "bounded code file candidate paths for scope '{source_scope}' are unavailable"
+            )))
+        })
+    }
+
     fn apply_code_index_snapshot(
         &self,
         snapshot: CodeIndexSnapshot,

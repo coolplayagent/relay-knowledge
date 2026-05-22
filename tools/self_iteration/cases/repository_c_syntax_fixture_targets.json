@@ -70,6 +70,26 @@
       "case_group": "c_tree_sitter_syntax"
     },
     {
+      "id": "c_syntax_references_ripgrep_text_fallback",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "RK_TRACE_NOTE",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/driver_ops.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "src/driver_ops.c",
+          "excerpt_contains": "RK_TRACE_NOTE documents fallback-only macro text",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "c_tree_sitter_syntax"
+    },
+    {
       "id": "c_syntax_callers_function_pointer_read",
       "repository": "c_syntax_fixture",
       "kind": "callers",

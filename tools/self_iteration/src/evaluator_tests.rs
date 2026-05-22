@@ -336,6 +336,9 @@ mod tests {
             std::fs::read_to_string(root.join("cpp/src/pipeline.cpp")).expect("cpp source");
         let python_source = std::fs::read_to_string(root.join("python/syntax_service/service.py"))
             .expect("python source");
+        let python_operations_doc =
+            std::fs::read_to_string(root.join("python/docs/operations.md"))
+                .expect("python operations doc");
         let typescript_source =
             std::fs::read_to_string(root.join("typescript/src/provider.ts"))
                 .expect("typescript source");
@@ -352,6 +355,8 @@ mod tests {
         assert!(cpp_source.contains("cache_alias::Cache<std::string>"));
         assert!(python_source.contains("@traced_operation(\"dispatch\")"));
         assert!(python_source.contains("lambda value: value.strip()"));
+        assert!(python_operations_doc.contains("ServiceRunner class owns"));
+        assert!(python_operations_doc.contains("dispatch_event function normalizes"));
         assert!(typescript_source.contains("await import(\"./protocol\")"));
         assert!(typescript_source.contains("trimPayload(payload)"));
         assert!(go_source.contains("ctxalias \"context\""));

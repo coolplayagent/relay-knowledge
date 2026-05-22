@@ -40,6 +40,46 @@
       "case_group": "python_tree_sitter_syntax"
     },
     {
+      "id": "python_syntax_references_doc_mentions_service_runner_class",
+      "repository": "python_syntax_fixture",
+      "kind": "references",
+      "query": "ServiceRunner",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["docs/operations.md"],
+      "language_filters": ["unknown"],
+      "expected": [
+        {
+          "path": "docs/operations.md",
+          "excerpt_contains": "ServiceRunner class owns the async dispatch lifecycle",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "python_text_document_references"
+    },
+    {
+      "id": "python_syntax_references_doc_mentions_dispatch_event_function",
+      "repository": "python_syntax_fixture",
+      "kind": "references",
+      "query": "dispatch_event",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["docs/operations.md"],
+      "language_filters": ["unknown"],
+      "expected": [
+        {
+          "path": "docs/operations.md",
+          "excerpt_contains": "dispatch_event function normalizes payload text",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "python_text_document_references"
+    },
+    {
       "id": "python_syntax_imports_relative_errors",
       "repository": "python_syntax_fixture",
       "kind": "imports",

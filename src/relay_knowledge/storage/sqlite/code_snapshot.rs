@@ -63,6 +63,40 @@ pub(super) fn file_fingerprints_for_scope(
         .map_err(StorageError::from)
 }
 
+pub(super) fn file_candidate_paths_for_scope(
+    connection: &mut Connection,
+    source_scope: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let path_filter = path_filter_sql_for_column("path", path_filters);
+    let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let sql = format!(
+        "
+        SELECT path
+        FROM code_repository_files
+        WHERE source_scope = ?
+          {path_filter}
+          {language_filter}
+        ORDER BY path ASC
+        LIMIT ?
+        "
+    );
+    let mut values = vec![Value::Text(source_scope.to_owned())];
+    push_path_filter_values(&mut values, path_filters);
+    push_language_filter_values(&mut values, language_filters);
+    values.push(Value::Integer(limit as i64));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| row.get(0))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
 pub(super) fn apply_snapshot(
     connection: &mut Connection,
     snapshot: CodeIndexSnapshot,
@@ -251,6 +285,60 @@ pub(super) fn apply_snapshot(
             resource_budget: crate::domain::CodeIndexResourceBudget::default(),
         },
     })
+}
+
+fn path_filter_sql_for_column(column: &str, filters: &[String]) -> String {
+    let clauses = filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')"))
+        .collect::<Vec<_>>();
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND ({})", clauses.join(" OR "))
+    }
+}
+
+fn language_filter_sql_for_column(column: &str, filters: &[String]) -> String {
+    let clauses = filters
+        .iter()
+        .map(|_| format!("{column} = ?"))
+        .collect::<Vec<_>>();
+    if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("AND ({})", clauses.join(" OR "))
+    }
+}
+
+fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    for filter in filters
+        .iter()
+        .filter_map(|filter| normalized_sql_path_filter(filter))
+    {
+        values.push(Value::Text(filter.clone()));
+        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
+    }
+}
+
+fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) {
+    values.extend(filters.iter().cloned().map(Value::Text));
+}
+
+fn normalized_sql_path_filter(filter: &str) -> Option<String> {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+    (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
+}
+
+fn escape_sql_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn clone_active_scope_for_incremental(

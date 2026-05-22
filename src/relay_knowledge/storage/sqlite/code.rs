@@ -225,6 +225,24 @@ impl CodeRepositoryStore for SqliteGraphStore {
         })
     }
 
+    fn code_file_candidate_paths_for_scope(
+        &self,
+        source_scope: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+        limit: usize,
+    ) -> StorageFuture<'_, Vec<String>> {
+        self.run(move |connection| {
+            code_snapshot::file_candidate_paths_for_scope(
+                connection,
+                &source_scope,
+                &path_filters,
+                &language_filters,
+                limit,
+            )
+        })
+    }
+
     fn apply_code_index_snapshot(
         &self,
         snapshot: CodeIndexSnapshot,

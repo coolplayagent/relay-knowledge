@@ -9,10 +9,11 @@ use crate::{
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        CodeIndexError, build_index_snapshot, changed_paths_for_diff,
-        deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
-        prepare_full_index_plan, preview_repository_scope, register_repository,
-        resolve_repository_ref, resolve_repository_snapshot, source_declarations_for_identity,
+        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, build_index_snapshot,
+        changed_paths_for_diff, deleted_symbol_names_for_diff,
+        partition_changed_paths_for_selector, prepare_full_index_plan, preview_repository_scope,
+        register_repository, resolve_repository_ref, resolve_repository_snapshot,
+        source_declarations_for_identity, source_grep_matches,
     },
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
@@ -24,7 +25,7 @@ use crate::{
 
 use super::RelayKnowledgeService;
 use super::code_query_source_fallback::{
-    append_definition_source_fallback, plan_definition_source_fallback,
+    append_code_grep_fallback, append_definition_source_fallback, plan_code_grep_fallback,
 };
 
 const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
@@ -464,22 +465,13 @@ impl RelayKnowledgeService {
             .search_code(request.clone())
             .await
             .map_err(storage_api_error)?;
-        if let Some(plan) = plan_definition_source_fallback(&scoped_status, &request, &results) {
-            let registration = registration_from_status(&status);
-            let declarations = run_blocking_code(move || {
-                source_declarations_for_identity(
-                    &registration,
-                    &plan.commit,
-                    plan.paths,
-                    &plan.identity,
-                )
-            })
-            .await?;
-            append_definition_source_fallback(&scoped_status, &request, &mut results, declarations);
-        }
+        let fallback_degraded_reason =
+            apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
+                .await?;
         let degraded_reason = results
             .iter()
             .find_map(|hit| hit.degraded_reason.clone())
+            .or(fallback_degraded_reason)
             .or_else(|| scoped_status.degraded_reason.clone());
         let scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
@@ -738,6 +730,73 @@ async fn previous_fingerprints_for_index(
         .code_file_fingerprints_for_scope(source_scope)
         .await
         .map_err(storage_api_error)
+}
+
+pub(crate) async fn apply_code_grep_fallback(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    base_status: &CodeRepositoryStatus,
+    scoped_status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    results: &mut Vec<crate::domain::CodeRetrievalHit>,
+) -> Result<Option<String>, ApiError> {
+    let Some(plan) = plan_code_grep_fallback(scoped_status, request, results) else {
+        return Ok(None);
+    };
+    let plan = if plan.needs_scope_paths() {
+        let source_scope = scoped_status
+            .last_indexed_scope_id
+            .as_deref()
+            .ok_or_else(|| {
+                ApiError::invalid_argument(format!(
+                    "code repository '{}' does not have an indexed source scope",
+                    scoped_status.alias
+                ))
+            })?;
+        let paths = match store
+            .code_file_candidate_paths_for_scope(
+                source_scope.to_owned(),
+                plan.path_filters.clone(),
+                plan.language_filters.clone(),
+                SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),
+            )
+            .await
+        {
+            Ok(paths) => paths,
+            Err(error) => {
+                return Ok(Some(format!(
+                    "ripgrep candidate path lookup unavailable: {error}"
+                )));
+            }
+        };
+        plan.with_scope_paths(paths)
+    } else {
+        plan
+    };
+    let registration = registration_from_status(base_status);
+    let commit = plan.commit.clone();
+    let source_request = plan.source_request();
+    let outcome =
+        run_blocking_code(move || source_grep_matches(&registration, &commit, source_request))
+            .await?;
+    let had_matches = !outcome.matches.is_empty();
+    let fallback_degraded_reason =
+        append_code_grep_fallback(scoped_status, request, results, &plan, outcome);
+    if !had_matches
+        && plan.kind == crate::code::SourceGrepKind::Definition
+        && let Some(identity) = &plan.identity
+    {
+        let registration = registration_from_status(base_status);
+        let commit = plan.commit.clone();
+        let paths = plan.paths.clone();
+        let identity = identity.clone();
+        let declarations = run_blocking_code(move || {
+            source_declarations_for_identity(&registration, &commit, paths, &identity)
+        })
+        .await?;
+        append_definition_source_fallback(scoped_status, request, results, declarations);
+    }
+
+    Ok(fallback_degraded_reason)
 }
 
 async fn retrieval_request_at_indexed_ref(
