@@ -107,9 +107,10 @@ jobs:
           grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
           python3 tools/release/update_skill_metadata_version.py --check \
             skills/relay-knowledge-cli/SKILL.md "$manifest_version"
-          grep -q 'relay-knowledge version check --format json' skills/relay-knowledge-cli/SKILL.md
+          grep -q '"$RK_BIN" version check --format json' skills/relay-knowledge-cli/SKILL.md
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/SKILL.md
-          grep -q 'newest semver' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'Prefer the bundled `assets` binary' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'Version comparisons are diagnostic only' skills/relay-knowledge-cli/SKILL.md
           grep -q 'HTTPS_PROXY' skills/relay-knowledge-cli/references/cli-workflows.md
           grep -q 'repo query' skills/relay-knowledge-cli/SKILL.md
           grep -q 'Do not use this skill for MCP' skills/relay-knowledge-cli/SKILL.md
@@ -406,7 +407,7 @@ jobs:
 
           ## CLI Skill
 
-          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance, Linux x64 and Windows x64 binaries under `assets/`, and selects the newest semver version when both PATH and bundled binaries are available. It is intentionally separate from MCP protocol access.
+          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance plus Linux x64 and Windows x64 binaries under `assets/`; agents prefer the matching bundled asset when `version --format json` succeeds, and use PATH only as a fallback or when explicitly requested. It is intentionally separate from MCP protocol access.
 
           Registry maintainers can publish the same generated skill layout with:
 

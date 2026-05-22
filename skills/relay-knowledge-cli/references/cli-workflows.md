@@ -2,15 +2,21 @@
 
 ## Installation and Upgrade Checks
 
-Use the skill's bundled binary when it is the newest matching candidate for the
-current platform. Released skill packages include `assets/linux-x86_64/relay-knowledge`
-and `assets/windows-x86_64/relay-knowledge.exe`. Compare each usable candidate
-with `relay-knowledge version --format json`; choose the newest semver version,
-and prefer the `PATH` binary when versions match.
+Use the skill's bundled binary first for the current platform. Released skill
+packages include `assets/linux-x86_64/relay-knowledge` and
+`assets/windows-x86_64/relay-knowledge.exe`. If that asset exists, is
+executable, and `version --format json` succeeds, run the workflow commands
+through that resolved executable. The examples below keep the command as
+`relay-knowledge` for readability; when executing them, substitute the bundled
+asset path if it was selected. Use `PATH` only when the asset is absent,
+unusable, unsupported on the current OS or CPU, or explicitly requested by the
+user. Treat version comparisons as diagnostics, not as the default selection
+rule.
 
-Use a GitHub Release archive when the bundled asset is absent, unusable, or
-older than the requested published version. Before downloading, tell the user to
-configure proxy settings if their network needs them:
+Use a GitHub Release archive when the bundled asset is absent, unusable, or the
+user requested a specific published version that is not available in the skill
+assets. Before downloading, tell the user to configure proxy settings if their
+network needs them:
 
 ```bash
 export HTTPS_PROXY=http://proxy.example:8080
@@ -47,18 +53,18 @@ the runtime cache directory.
 
 ## Safe Agent Defaults
 
-- Resolve the executable before running workflow commands with the active
-  shell's executable lookup command: `command -v relay-knowledge` on POSIX,
-  `Get-Command relay-knowledge` in PowerShell, or `where.exe relay-knowledge`
-  in cmd.exe. Also check the matching bundled asset:
+- Resolve the executable before running workflow commands. Check the matching
+  bundled asset first:
   `assets/linux-x86_64/relay-knowledge` on Linux x64 or
-  `assets/windows-x86_64/relay-knowledge.exe` on Windows x64. Then run
-  `version --format json` for each candidate and select the newest semver
-  version; if the versions are equal, prefer `PATH`.
-  Use only published installs on `PATH`: a verified GitHub Release archive, or
-  `cargo install relay-knowledge` from crates.io when Cargo is the selected
-  published package channel. Do not use source-checkout build artifacts or
-  source builds as the installation path for this published skill.
+  `assets/windows-x86_64/relay-knowledge.exe` on Windows x64. If the bundled
+  asset passes `version --format json`, use it even when `PATH` has another
+  version. Fall back to `PATH` only when the asset cannot be used or the user
+  explicitly chooses the system install. Use only published installs on `PATH`:
+  a verified GitHub Release archive, or `cargo install relay-knowledge` from
+  crates.io when Cargo is the selected published package channel. Do not use
+  source-checkout build artifacts or source builds as the installation path for
+  this published skill. Command examples use `relay-knowledge` as shorthand for
+  the resolved executable.
 - Prefer `--format json` for commands whose output will be parsed.
 - Inspect `relay-knowledge help --format json` and command-specific help before
   exposing or automating a command.

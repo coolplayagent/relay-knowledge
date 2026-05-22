@@ -12,43 +12,59 @@ metadata:
 
 ## Workflow
 
-Use the compiled `relay-knowledge` binary as the control surface. Prefer JSON
-output for automation and read command metadata before issuing unfamiliar
-commands:
+Use the compiled `relay-knowledge` binary as the control surface. Resolve the
+executable before the first operation, keep that absolute path in a shell
+variable, and use the variable for every workflow command. Prefer JSON output
+for automation and read command metadata before issuing unfamiliar commands.
+
+Prefer the bundled `assets` binary for the current platform whenever it exists
+and `version --format json` succeeds. Released skill packages include Linux x64
+and Windows x64 binaries at `assets/linux-x86_64/relay-knowledge` and
+`assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
+only when the bundled asset is missing, not executable, fails its version check,
+has no matching OS or CPU architecture, or the user explicitly asks for the
+system-installed binary. Version comparisons are diagnostic only; do not choose
+a newer `PATH` binary over a working bundled asset by default.
+
+Use the command form that matches the active shell. On POSIX, resolve from the
+skill directory first and fall back to `PATH` only when the asset is unusable:
 
 ```bash
-relay-knowledge help --format json
-relay-knowledge help repo query --format json
-```
-
-Resolve the executable before the first operation by looking for the published
-`relay-knowledge` binary on `PATH` and for this skill's bundled asset binary
-for the current platform. Released skill packages include Linux x64 and Windows
-x64 binaries at `assets/linux-x86_64/relay-knowledge` and
-`assets/windows-x86_64/relay-knowledge.exe`.
-
-Use the command form that matches the active shell:
-
-```bash
-command -v relay-knowledge
-relay-knowledge version --format json
+asset_bin="/absolute/path/to/relay-knowledge-cli/assets/linux-x86_64/relay-knowledge"
+if [ -x "$asset_bin" ] && "$asset_bin" version --format json; then
+  RK_BIN="$asset_bin"
+else
+  RK_BIN="$(command -v relay-knowledge)"
+fi
+"$RK_BIN" version --format json
 ```
 
 ```powershell
-Get-Command relay-knowledge
-relay-knowledge version --format json
+$relayKnowledgeAsset = "C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe"
+$relayKnowledgeBin = $null
+if (Test-Path $relayKnowledgeAsset) {
+  & $relayKnowledgeAsset version --format json
+  if ($LASTEXITCODE -eq 0) { $relayKnowledgeBin = $relayKnowledgeAsset }
+}
+if (-not $relayKnowledgeBin) { $relayKnowledgeBin = (Get-Command relay-knowledge).Source }
+& $relayKnowledgeBin version --format json
 ```
 
 ```cmd
-where.exe relay-knowledge
-relay-knowledge version --format json
+set "RELAY_KNOWLEDGE_ASSET=C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe"
+if exist "%RELAY_KNOWLEDGE_ASSET%" "%RELAY_KNOWLEDGE_ASSET%" version --format json && set "RELAY_KNOWLEDGE_BIN=%RELAY_KNOWLEDGE_ASSET%"
+if not defined RELAY_KNOWLEDGE_BIN for /f "delims=" %i in ('where.exe relay-knowledge') do if not defined RELAY_KNOWLEDGE_BIN set "RELAY_KNOWLEDGE_BIN=%i"
+"%RELAY_KNOWLEDGE_BIN%" version --format json
 ```
 
-When both `PATH` and the bundled `assets` binary are available, run
-`version --format json` for each candidate and use the newest semver version.
-If the versions are equal, prefer the `PATH` binary so user-managed installs are
-respected. If the current OS or CPU architecture has no bundled asset, use only
-the published `PATH` install or install from a published channel.
+The command examples below use POSIX `"$RK_BIN"`. In PowerShell, invoke the
+same command path with `& $relayKnowledgeBin`; in cmd.exe, invoke it as
+`"%RELAY_KNOWLEDGE_BIN%"`.
+
+```bash
+"$RK_BIN" help --format json
+"$RK_BIN" help repo query --format json
+```
 
 Do not use source-checkout build artifacts or source builds as an installation
 path. This skill is intended to operate published installs only. If the binary
@@ -98,7 +114,7 @@ set "RELAY_KNOWLEDGE_VECTOR_BACKEND=local"
 ```
 
 If each command runs in a fresh shell or tool call, pass these environment
-variables inline on every `relay-knowledge` invocation rather than relying on a
+variables inline on every `"$RK_BIN"` invocation rather than relying on a
 previous `export` to persist. Prefer the tool's environment map when it is
 available. Otherwise choose one temporary absolute path for the scenario,
 substitute it into every command, and include the shell-specific assignments in
@@ -111,47 +127,46 @@ mkdir -p /tmp/relay-knowledge-skill-example && \
   RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-skill-example \
   RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local \
   RELAY_KNOWLEDGE_VECTOR_BACKEND=local \
-  relay-knowledge status --format json
+  "$RK_BIN" status --format json
 ```
 
 PowerShell per-command invocation:
 
 ```powershell
-$relayKnowledgeHome = Join-Path $env:TEMP "relay-knowledge-skill-example"; New-Item -ItemType Directory -Force -Path $relayKnowledgeHome | Out-Null; $env:RELAY_KNOWLEDGE_HOME = $relayKnowledgeHome; $env:RELAY_KNOWLEDGE_SEMANTIC_BACKEND = "local"; $env:RELAY_KNOWLEDGE_VECTOR_BACKEND = "local"; relay-knowledge status --format json
+$relayKnowledgeHome = Join-Path $env:TEMP "relay-knowledge-skill-example"; New-Item -ItemType Directory -Force -Path $relayKnowledgeHome | Out-Null; $env:RELAY_KNOWLEDGE_HOME = $relayKnowledgeHome; $env:RELAY_KNOWLEDGE_SEMANTIC_BACKEND = "local"; $env:RELAY_KNOWLEDGE_VECTOR_BACKEND = "local"; & $relayKnowledgeBin status --format json
 ```
 
 cmd.exe per-command invocation:
 
 ```cmd
-if not exist "%TEMP%\relay-knowledge-skill-example" mkdir "%TEMP%\relay-knowledge-skill-example" && set "RELAY_KNOWLEDGE_HOME=%TEMP%\relay-knowledge-skill-example" && set "RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local" && set "RELAY_KNOWLEDGE_VECTOR_BACKEND=local" && relay-knowledge status --format json
+if not exist "%TEMP%\relay-knowledge-skill-example" mkdir "%TEMP%\relay-knowledge-skill-example" && set "RELAY_KNOWLEDGE_HOME=%TEMP%\relay-knowledge-skill-example" && set "RELAY_KNOWLEDGE_SEMANTIC_BACKEND=local" && set "RELAY_KNOWLEDGE_VECTOR_BACKEND=local" && "%RELAY_KNOWLEDGE_BIN%" status --format json
 ```
 
 Remove the temporary directory after capturing the test result.
 
 ## Readiness
 
-Check whether the CLI exists, then inspect runtime configuration and live
-health:
+Check whether the resolved CLI works, then inspect runtime configuration and
+live health:
 
 ```bash
-command -v relay-knowledge
-relay-knowledge version
-relay-knowledge setup doctor --format json
-relay-knowledge health --format json
-relay-knowledge service doctor --format json
+"$RK_BIN" version
+"$RK_BIN" setup doctor --format json
+"$RK_BIN" health --format json
+"$RK_BIN" service doctor --format json
 ```
 
-On Windows, use `Get-Command relay-knowledge` in PowerShell or
-`where.exe relay-knowledge` in cmd.exe before running the same diagnostics.
+On Windows, run the same diagnostics through the resolved
+`$relayKnowledgeBin` or `%RELAY_KNOWLEDGE_BIN%` variable.
 
 Run live diagnostics with a command timeout when the host shell supports one,
 and report timeout as a diagnostic finding instead of waiting indefinitely. On
 Linux or hosts with GNU coreutils, `timeout` is acceptable:
 
 ```bash
-timeout 20s relay-knowledge health --format json
-timeout 20s relay-knowledge service doctor --format json
-timeout 20s relay-knowledge audit query --limit 50 --format json
+timeout 20s "$RK_BIN" health --format json
+timeout 20s "$RK_BIN" service doctor --format json
+timeout 20s "$RK_BIN" audit query --limit 50 --format json
 ```
 
 On default macOS shells where GNU `timeout` is not installed, use the command
@@ -159,7 +174,7 @@ runner's timeout setting if available. If only shell text is available, use a
 short POSIX watchdog for each diagnostic:
 
 ```bash
-relay-knowledge health --format json &
+"$RK_BIN" health --format json &
 relay_knowledge_pid=$!
 ( sleep 20; kill "$relay_knowledge_pid" 2>/dev/null ) &
 relay_knowledge_watchdog=$!
@@ -174,7 +189,8 @@ Cargo second:
 
 ```bash
 cargo install relay-knowledge
-relay-knowledge version check --format json
+RK_BIN="$(command -v relay-knowledge)"
+"$RK_BIN" version check --format json
 ```
 
 `version check` only reports available stable versions. It must not replace the
@@ -196,22 +212,22 @@ the target scope cannot be indexed, or the user needs raw text or regex
 matching instead of graph semantics.
 
 ```bash
-relay-knowledge repo register /path/to/repo \
+"$RK_BIN" repo register /path/to/repo \
   --alias core \
   --path src \
   --language rust \
   --format json
 
-relay-knowledge repo scope preview core --ref HEAD --format json
-relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo status core --format json
+"$RK_BIN" repo scope preview core --ref HEAD --format json
+"$RK_BIN" repo index core --ref HEAD --format json
+"$RK_BIN" repo status core --format json
 ```
 
 Use `repo status` after cold full indexing because initial indexing may return a
 durable background task handle. Query only an indexed ref:
 
 ```bash
-relay-knowledge repo query core \
+"$RK_BIN" repo query core \
   --query retry_policy \
   --kind hybrid \
   --ref HEAD \
@@ -226,9 +242,9 @@ and `imports` for import edges. For diff-aware work, index the head snapshot
 first and then run:
 
 ```bash
-relay-knowledge repo update core --base main --head HEAD --format json
-relay-knowledge repo impact core --base main --head HEAD --limit 100 --format json
-relay-knowledge repo report core --format markdown
+"$RK_BIN" repo update core --base main --head HEAD --format json
+"$RK_BIN" repo impact core --base main --head HEAD --limit 100 --format json
+"$RK_BIN" repo report core --format markdown
 ```
 
 ## Knowledge Graph
@@ -237,19 +253,19 @@ For non-code evidence, ingest scoped text, refresh derived indexes when needed,
 and query with freshness metadata:
 
 ```bash
-relay-knowledge ingest --source docs \
+"$RK_BIN" ingest --source docs \
   --content "Rust async services isolate blocking SQLite work" \
   --entity Rust \
   --format json
 
-relay-knowledge query SQLite \
+"$RK_BIN" query SQLite \
   --source docs \
   --freshness wait-until-fresh \
   --limit 10 \
   --format json
 
-relay-knowledge index refresh --kind bm25 --format json
-relay-knowledge graph inspect --format json
+"$RK_BIN" index refresh --kind bm25 --format json
+"$RK_BIN" graph inspect --format json
 ```
 
 ## Troubleshooting
@@ -259,11 +275,11 @@ stderr or text error exactly and avoid guessing hidden state. Run diagnostics
 in this order:
 
 ```bash
-relay-knowledge status --format json
-relay-knowledge setup doctor --format json
-relay-knowledge health --format json
-relay-knowledge service doctor --format json
-relay-knowledge audit query --limit 50 --format json
+"$RK_BIN" status --format json
+"$RK_BIN" setup doctor --format json
+"$RK_BIN" health --format json
+"$RK_BIN" service doctor --format json
+"$RK_BIN" audit query --limit 50 --format json
 ```
 
 For empty code results, verify `repo status`, the queried ref, path/language
