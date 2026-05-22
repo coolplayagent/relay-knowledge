@@ -59,7 +59,7 @@ async fn hybrid_deduplication_preserves_retrieval_layers() {
     let hits = store
         .search_code(
             crate::domain::CodeRetrievalRequest::new(
-                "target",
+                "target fn",
                 selector,
                 CodeQueryKind::Hybrid,
                 5,
