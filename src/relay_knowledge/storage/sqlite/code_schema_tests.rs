@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 use super::{
-    CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION,
+    CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION, SEARCH_BACKFILL_MIGRATION,
     code_schema_migration_applied, initialize_code_schema,
 };
 
@@ -206,6 +206,64 @@ fn skips_call_search_rebuild_after_signature_migration_marker() {
 }
 
 #[test]
+fn search_backfill_is_marked_after_one_legacy_pass() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_schema_migrations (name TEXT PRIMARY KEY);
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED,
+                document_kind UNINDEXED,
+                record_id UNINDEXED,
+                path UNINDEXED,
+                language_id UNINDEXED,
+                content
+            );
+            CREATE TABLE code_repository_symbols (
+                source_scope TEXT NOT NULL,
+                symbol_snapshot_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                doc_comment TEXT,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL
+            );
+            INSERT INTO code_repository_symbols (
+                source_scope, symbol_snapshot_id, path, language_id, name,
+                qualified_name, kind, signature, doc_comment, line_start, line_end
+            )
+            VALUES (
+                'scope', 'symbol-1', 'src/lib.rs', 'rust', 'LegacyThing',
+                'crate::LegacyThing', 'struct', 'struct LegacyThing', NULL, 1, 1
+            );
+            ",
+        )
+        .expect("legacy code search schema should initialize");
+
+    initialize_code_schema(&connection).expect("legacy search should backfill");
+    assert_eq!(search_row_count(&connection, "symbol-1"), 1);
+    assert!(
+        code_schema_migration_applied(&connection, SEARCH_BACKFILL_MIGRATION)
+            .expect("search backfill marker should load")
+    );
+
+    connection
+        .execute(
+            "DELETE FROM code_repository_search WHERE record_id = 'symbol-1'",
+            [],
+        )
+        .expect("sentinel search row should delete");
+    initialize_code_schema(&connection).expect("marked search backfill should skip");
+
+    assert_eq!(search_row_count(&connection, "symbol-1"), 0);
+}
+
+#[test]
 fn edge_language_backfill_is_marked_after_one_legacy_update() {
     let connection = Connection::open_in_memory().expect("database should open");
     connection
@@ -250,6 +308,20 @@ fn edge_language_backfill_is_marked_after_one_legacy_update() {
     initialize_code_schema(&connection).expect("marked edge language backfill should skip");
 
     assert_eq!(edge_search_language(&connection), "");
+}
+
+fn search_row_count(connection: &Connection, record_id: &str) -> i64 {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM code_repository_search
+            WHERE record_id = ?1
+            ",
+            [record_id],
+            |row| row.get(0),
+        )
+        .expect("search row count should load")
 }
 
 fn edge_search_language(connection: &Connection) -> String {

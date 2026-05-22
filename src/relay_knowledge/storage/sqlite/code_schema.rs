@@ -4,6 +4,7 @@ use crate::storage::StorageError;
 
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
+const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -389,7 +390,11 @@ fn backfill_code_repository_aliases(connection: &Connection) -> Result<(), Stora
 }
 
 fn backfill_code_repository_search(connection: &Connection) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, SEARCH_BACKFILL_MIGRATION)? {
+        return Ok(());
+    }
     if !code_repository_search_is_empty(connection)? {
+        mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
         return Ok(());
     }
     backfill_search_symbols(connection)?;
@@ -397,6 +402,7 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_imports(connection)?;
     backfill_search_calls(connection)?;
     backfill_search_chunks(connection)?;
+    mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
 
     Ok(())
 }
