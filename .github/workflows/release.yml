@@ -107,7 +107,7 @@ jobs:
           grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
           python3 tools/release/update_skill_metadata_version.py --check \
             skills/relay-knowledge-cli/SKILL.md "$manifest_version"
-          grep -q '"$RK_BIN" version check --format json' skills/relay-knowledge-cli/SKILL.md
+          grep -q 'relay-knowledge version check --format json' skills/relay-knowledge-cli/SKILL.md
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/SKILL.md
           grep -q 'Prefer the bundled `assets` binary' skills/relay-knowledge-cli/SKILL.md
           grep -q 'Version comparisons are diagnostic only' skills/relay-knowledge-cli/SKILL.md
