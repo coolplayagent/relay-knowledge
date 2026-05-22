@@ -2,7 +2,7 @@
 name: relay-knowledge-cli
 description: Use relay-knowledge through its local CLI when a user asks for a code map, codebase map, code knowledge graph, repository knowledge graph, multi-repository map, 代码地图, 代码知识图谱, 代码仓库地图, 多代码仓库地图, codebase exploration, repository indexing, code graph search, impact analysis, knowledge graph ingestion, or hybrid GraphRAG queries. The skill operates relay-knowledge by running CLI commands and parsing JSON output for repo registration, full and incremental indexing, repo-set cross-repo queries, setup diagnostics, installation checks, and upgrade checks. Do not use this skill for MCP server setup, MCP tools, ACP adapters, or protocol-level agent access.
 metadata:
-  version: 1.0.6
+  version: 1.0.7
   openclaw:
     skillKey: relay-knowledge-cli
     homepage: https://github.com/coolplayagent/relay-knowledge
