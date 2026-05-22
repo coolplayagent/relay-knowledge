@@ -33,7 +33,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 ## 降级与诊断
 
 Parser 或 query failure 只隔离到受影响文件，不会中止整个仓库 batch。未解析或歧义边不会伪装成确定调用。
-宽泛 regex、未解析边、parser degraded、stale code index、ripgrep 缺失、ripgrep timeout 和 ripgrep budget exhaustion 都必须在响应中可见；benchmark 提升不能依赖已知 path、query 或 symbol 特例。
+宽泛 regex、未解析边、parser degraded、stale code index、ripgrep 缺失、ripgrep timeout 和 ripgrep budget exhaustion 都必须在响应中可见；`text_fallback` 命中只能补齐召回窗口，不能压过已有 exact symbol 或 resolved edge。benchmark 提升不能依赖已知 path、query 或 symbol 特例。
 
 ## 关联架构章节
 

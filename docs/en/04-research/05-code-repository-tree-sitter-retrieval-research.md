@@ -19,7 +19,7 @@ This is the English documentation page for `04-research/05-code-repository-tree-
 
 | Dimension | Conclusion |
 | --- | --- |
-| Sources | Tree-sitter, Git, libgit2, GitHub code navigation, Codebase-Memory, and this repository's code-graph experience. |
+| Sources | Tree-sitter, Git, libgit2, GitHub code navigation, ripgrep, Codebase-Memory, and this repository's code-graph experience. |
 | Goal | Move repository retrieval from full-text search to a combination of Git snapshots, syntax structure, symbol/reference graphs, and incremental indexing. |
 | Competitive focus | Structured code facts, file-level incremental work, scope authorization, hybrid recall, impact analysis, and recoverable indexing are core agent-facing advantages. |
 | Scenarios and future | Targets large-repository understanding, dirty-worktree queries, code review, impact reports, agent context packing, and later language-service adapters. |
@@ -31,7 +31,7 @@ This is the English documentation page for `04-research/05-code-repository-tree-
 1. tree-sitter 适合作为 v1 结构化解析基础。它能为多语言源码生成 concrete syntax tree，支持增量解析、query capture、错误恢复和代码导航 tags。
 2. Git 必须作为变更发现和 snapshot 真源。`diff --name-status -z -M` 适合 commit-to-commit 更新，`status --porcelain=v2 -z` 适合 worktree overlay，commit-graph changed-path Bloom filters 可辅助历史路径查询。
 3. 高性能来自文件级增量和索引局部刷新，而不是每次全仓重建。核心路径是 changed paths -> content hash skip -> reverse dependents -> bounded reparse -> scoped index refresh。
-4. 查询层需要混合路线。符号、路径和错误码适合 BM25；概念性问题适合 semantic/vector；调用、引用、依赖和影响分析必须走 graph expansion。
+4. 查询层需要混合路线。符号、路径和错误码适合 BM25；概念性问题适合 semantic/vector；调用、引用、依赖和影响分析必须走 graph expansion；当结构化层有明确召回缺口时，`ripgrep` 只作为有界精确源码行兜底。
 5. v1 不应承诺编译器级语义解析。tree-sitter 能可靠抽取语法层定义和引用，但跨文件符号解析、动态语言调用解析、宏展开和类型推断需要后续语言服务或编译器 adapter 增强。
 
 ## 2. 资料来源
@@ -50,6 +50,7 @@ This is the English documentation page for `04-research/05-code-repository-tree-
 | GitHub code navigation docs [R10] | GitHub code navigation 使用 tree-sitter，支持 definitions/references | 验证 tree-sitter tags 路线适合仓库级导航 |
 | Codebase-Memory paper [R11] | Tree-Sitter 代码图 + MCP，覆盖多语言、parallel workers、call graph、impact analysis | 支持本项目面向 agent 的代码知识图谱方向 |
 | 本仓库 capability reference [R12] | code-review-graph 使用 tree-sitter、多语言、SQLite/FTS5、SHA-256 增量和影响分析 | 本规格继承可借鉴点，并补齐事件驱动、scope 和 QoS |
+| ripgrep performance notes [R13] | ripgrep 适合快速精确文本检索，但仍需要候选范围、超时和输出预算 | 作为 query-time 兜底层，而不是代码图或索引刷新替代品 |
 
 ## 3. Tree-sitter 能力分析
 
@@ -303,7 +304,18 @@ BM25 对这些代码问题很强:
 
 因此 v1 必须先保证 symbol/path/chunk/doc comment 的 BM25 字段质量。
 
-### 8.2 Semantic/vector 强项
+### 8.2 精确源码 grep 兜底强项
+
+有界 `ripgrep` 兜底适合这些代码问题:
+
+- AST query 或 capture 漏掉的精确定义行。
+- 引用层没有 resolved/reference edge，但源码中存在明确标识符使用。
+- hybrid 查询已经有结构化命中，但结果窗口仍需要少量精确源码补召。
+- 大小写、宏、typedef、声明形态或语言 query 演进导致的暂时召回缺口。
+
+风险是把文本匹配误当语义关系。因此 grep 兜底必须只在 indexed commit 的候选路径内运行，受 path/language/scope、候选文件数、物化字节数、行长度和 timeout 预算控制；命中只标记 `lexical`/`text_fallback` provenance，不返回 resolved edge confidence。
+
+### 8.3 Semantic/vector 强项
 
 semantic/vector 对这些问题有价值:
 
@@ -314,7 +326,7 @@ semantic/vector 对这些问题有价值:
 
 风险是相似但 scope 错误的结果。所有向量召回必须先过滤 scope 或在 ANN 后强制 scope post-filter，并在 metadata 中返回 index freshness。
 
-### 8.3 Graph expansion 强项
+### 8.4 Graph expansion 强项
 
 graph expansion 适合:
 
@@ -355,6 +367,7 @@ v1 最小可用能力:
 - 注册本地 Git 仓库。
 - 对 HEAD snapshot 全量构建主流 grammar registry 语言的 definitions/imports/chunks。
 - 使用 BM25 搜索 path/symbol/chunk。
+- 在 definition/reference/hybrid 的结构化召回有缺口时，使用有界 `ripgrep` 搜索 indexed commit 候选内容。
 - 支持 commit-to-commit 增量更新。
 - 返回 scope、commit、tree、line range、stale/degraded metadata。
 
@@ -384,6 +397,7 @@ v1 不做:
 - changed files 到 fresh BM25 的延迟。
 - changed chunks 到 vector fresh 的延迟。
 - 并发查询 p95/p99。
+- grep 兜底触发率、命中率、degraded reason 分布和对 structured hit 排名的影响。
 - graph impact traversal p95 和 truncation rate。
 - worker queue depth、CPU、内存、SQLite transaction time。
 
@@ -401,3 +415,4 @@ v1 不做:
 - [R10] GitHub Docs, "Navigating code on GitHub." <https://docs.github.com/en/repositories/working-with-files/using-files/navigating-code-on-github>
 - [R11] Martin Vogel et al., "Codebase-Memory: Tree-Sitter-Based Knowledge Graphs for LLM Code Exploration via MCP." <https://arxiv.org/abs/2603.27277>
 - [R12] `relay-knowledge` local research, `docs/zh/03-architecture-specs/11-code-knowledge-graph-model.md`.
+- [R13] ripgrep performance notes. <https://burntsushi.net/ripgrep/>

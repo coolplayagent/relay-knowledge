@@ -2,7 +2,7 @@
 
 [English](../../en/01-user-guide/05-code-repository-graph-workflow.md) | [中文](../../zh/01-user-guide/05-code-repository-graph-workflow.md)
 
-The code repository graph brings Git trees, files, symbols, references, calls, and imports into one retrieval surface. It is not simple file search; queries and impact analysis depend on indexed code graph snapshots.
+The code repository graph brings Git trees, files, symbols, references, calls, and imports into one retrieval surface. It is not simple file search; queries and impact analysis depend on indexed code graph snapshots. Exact-text grep is only a bounded fallback layer over indexed snapshots, used to fill source-line gaps that AST and FTS leave explicit.
 
 ## 5.1 Register a Repository
 
@@ -88,6 +88,10 @@ Results include repository id, alias, `scope_id`, requested ref, resolved commit
 Branches, tags, and `HEAD` first resolve to commit/tree. Multiple branches with the same tree hash reuse one scope, while the response keeps the requested ref for audit. After rebase or force-move, index the new head before querying; the query fails instead of returning old branch content.
 
 Symbol hits also include `canonical_symbol_id` for expressing logical symbol identity across snapshots. Reference, call, and import hits return `edge_kind`, `edge_resolution_state`, `edge_target_hint`, `edge_confidence_basis_points`, and `edge_confidence_tier`. Uniquely unresolved targets are marked `unresolved` or `ambiguous` instead of being written as certain calls.
+
+`definition`, `references`, and `hybrid` queries run AST/FTS first and `ripgrep` fallback last. The fallback starts only when the current structured results do not cover the requested identity or reference, or when a hybrid result window still has room. It searches candidate files from the indexed commit after path, language, and scope filtering; it does not directly scan the current dirty worktree. Fallback hits include at least `lexical` and `text_fallback` in `retrieval_layers`, and definition fallback may also include `definition`. They do not carry resolved edge confidence because they are source-text evidence only.
+
+If `rg` is missing, times out, or exhausts candidate-file or materialized-byte budgets, the query still returns existing code graph results and reports `ripgrep unavailable`, `ripgrep timeout`, or the budget reason through `degraded_reason`. Narrowing `--path` or `--language`, and confirming that the target ref is fresh, is usually more useful than raising `--limit`.
 
 ### Multi-Repository Repository Set Queries
 
@@ -189,6 +193,7 @@ When `repo query` returns no results, check in order:
 2. Whether query `--ref` matches the indexed snapshot.
 3. Whether requested `--path` and `--language` only narrow the registered scope.
 4. Whether `--kind` is too narrow; start with `--kind hybrid` when unsure.
-5. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
+5. Whether `degraded_reason` reports `ripgrep unavailable`, `ripgrep timeout`, or a grep fallback budget; structured hits remain usable while exact-text fallback is degraded.
+6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
 `repo impact` requires an indexed snapshot for `--head`. Run `repo index core --ref <head>` or `repo update core --base <base> --head <head>` before impact analysis.

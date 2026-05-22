@@ -93,3 +93,4 @@
 - [附录 B.4 relay-teams E2E 验证 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
 - [附录 B.5 relay-teams 代码图检索准确性测试 2026-05-15](06-verification/05-code-graph-retrieval-accuracy-relay-teams-2026-05-15.md)
 - [附录 B.6 Linux 代码图检索准确性测试 2026-05-15](06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
+- [附录 B.7 Grep 兜底文档刷新审计 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md)：代码检索 exact-text fallback 的章节同步记录。

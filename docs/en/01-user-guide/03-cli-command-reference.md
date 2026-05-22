@@ -113,6 +113,8 @@ relay-knowledge version check
 
 Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running.
 
+`repo query` runs `definition`, `references`, and `hybrid` queries through the indexed tree-sitter graph and SQLite FTS read model first. Only when those structured layers leave a specific recall gap does the query start bounded `ripgrep` fallback against the same indexed commit. JSON hits are marked with `retrieval_layers=["lexical","text_fallback"]`; definition fallback may also include `definition`. Missing `rg`, timeouts, or exhausted budgets degrade only the fallback layer and appear in `degraded_reason`; structured code graph results remain valid.
+
 ## 3.5 Read and Write Impact
 
 Status, health, help, setup doctor/profile, provider probe, version check, report, and audit query are diagnostic entry points and should not mutate graph facts. `version check` may only refresh the version-check cache under the runtime cache directory. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.

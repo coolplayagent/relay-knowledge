@@ -110,6 +110,8 @@ relay-knowledge version check
 
 冷启动 full `repo index` 会立即返回持久化任务 handle，并由 CLI 进程启动有界后台 worker。`service run` 会消费同一个 code-index 队列，用于已安装服务或前台服务模式。cold repository index 运行中可用 `repo status --format json` 查看 `active_task`、checkpoint 计数和 scope retention。
 
+`repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界 `ripgrep` 兜底；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。`rg` 缺失、超时或预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
+
 ## 3.5 读写影响
 
 状态、健康、帮助、setup doctor/profile、provider probe、version check、report 和 audit query 是诊断入口，不应修改图谱事实。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。

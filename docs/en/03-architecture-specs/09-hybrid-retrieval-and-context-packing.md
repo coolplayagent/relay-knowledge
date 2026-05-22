@@ -28,6 +28,8 @@ No retriever bypasses scope filters, authorization policy, or freshness policy.
 
 The query planner first classifies intent: exact term, conceptual, multi-hop, temporal, code symbol, impact, file path, file content, or mixed agent context. Each intent selects retriever families and budgets. For example, filename/path queries prefer `local_file_path` and metadata, while content questions enter `local_file_content`, BM25, or semantic/vector paths.
 
+For code intent, recall order is tree-sitter code graph, SQLite FTS/BM25, semantic/vector supplement, and only then bounded `ripgrep` exact-text fallback. `ripgrep` fallback inherits source scope, path/language filters, authorization, and freshness policy. It can produce source span evidence only; it cannot declare new graph edges or override edge confidence.
+
 ## 3. Fusion Model
 
 The baseline fusion uses weighted RRF:
@@ -64,6 +66,7 @@ Packing favors diversity and citability. Duplicate hits from the same parent evi
 - Exact-term, conceptual, multi-hop, temporal, and code-symbol queries have corresponding retriever signals.
 - Filename/path and file-content queries distinguish path, metadata, content, and change-cursor freshness.
 - Results explain item source, rank contribution, and freshness.
+- Code exact-text fallback hits preserve `text_fallback` provenance and return degraded reasons when `rg` is missing, times out, or exhausts budget.
 - Degraded backends produce explicit degradation metadata instead of silent absence.
 
 ---

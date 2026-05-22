@@ -27,7 +27,7 @@ The foundation is local graph storage, evidence writes, query, CLI, Web, and dia
 | GraphRAG | Returns text snippets only | Returns context packs with source spans, structured facts, graph paths, freshness, and ranking explanation |
 | Retrieval | BM25 or vector only | BM25, semantic, vector, graph paths, code structure, and RRF fusion |
 | Freshness | Opaque index state | Each cursor binds scope, graph version, backend, and stale reason |
-| Code retrieval | Grep or full-text search | Git snapshots, tree-sitter, symbols, references, calls, imports, chunks, and impact analysis |
+| Code retrieval | Grep or full-text search | Git snapshots, tree-sitter, symbols, references, calls, imports, chunks, impact analysis, and bounded exact-text fallback |
 | Agent access | Raw tool calls | MCP/ACP over shared services with scope policy, QoS, cancellation, and audit |
 | Operations | Command pile-up | Workers, proposals, silent updates, service definitions, OTLP, and Prometheus-ready diagnostics |
 
@@ -37,7 +37,7 @@ Common entry points include `status`, `ingest`, `query`, `repo register`, `repo 
 
 ## Degradation and Diagnostics
 
-Capabilities degrade explicitly: semantic/vector can be disabled, code parse failures become text-only, stale indexes are explainable, and unavailable external workers can leave BM25 and graph paths usable. Degradation enters response metadata instead of silently dropping capability.
+Capabilities degrade explicitly: semantic/vector can be disabled, code parse failures become text-only, missing `ripgrep` only affects exact-text fallback, stale indexes are explainable, and unavailable external workers can leave BM25 and graph paths usable. Degradation enters response metadata instead of silently dropping capability.
 
 ## Related Architecture Chapters
 

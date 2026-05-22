@@ -20,7 +20,7 @@
 - GraphRAG papers and products converge on query routers, local/global retrieval, community summaries, path organization, and incremental refresh. Unbounded k-hop expansion or larger top-k windows mostly increase noise and token cost.
 - High-performance vector retrieval depends on HNSW, PQ/IVF, disk-resident graph indexes, quantization, filter-aware search, and multi-stage reranking. Vector indexes are candidate and ranking signals, not fact sources.
 - Mature full-text and hybrid search combines inverted indexes, BM25/BM25F, trigram or posting-list indexes, RRF, and phased ranking. Rank-based fusion is safer when retriever scores are not calibrated to the same scale.
-- Competitive code search combines exact symbols, trigram/regex, BM25, AST structure, reference/call/import edges, language and path filters, revision scopes, and impact analysis instead of relying on code embeddings alone.
+- Competitive code search combines exact symbols, trigram/regex, BM25, AST structure, reference/call/import edges, bounded `ripgrep` exact-text fallback, language and path filters, revision scopes, and impact analysis instead of relying on code embeddings alone.
 - Fast local file retrieval must separate filename/path, metadata, content, and change cursors into independent read models. Everything, Spotlight, Windows Search, plocate, and ripgrep are mechanism references, not runtime dependencies.
 - Large graph and authorization systems emphasize caching, relationship models, causal ordering, front-loaded permission checks, and low-latency authorization. Context packs and file/code queries must not defer authorization until after final truncation.
 - High-performance resident operation requires bounded queues, leases, dead letters, replay, adaptive concurrency, timeouts, cancellation, correlated traces/metrics/logs, and explicit overload behavior.
@@ -32,7 +32,7 @@
 | GraphRAG and Hybrid RAG | Microsoft GraphRAG/DRIFT, LightRAG, E^2GraphRAG, ROGRAG, Practical GraphRAG, PolyG, EA-GraphRAG | Query-mode selection, local/global fusion, entity-chunk bidirectional indexes, incremental graph construction, path pruning, and result verification. |
 | Vector retrieval | HNSW, FAISS, DiskANN, ScaNN, ACORN, Vespa constrained ANN | Proximity graphs, quantization, disk residency, filter-aware ANN, target hits, and recall/latency/memory tradeoffs. |
 | Full-text and hybrid search | Lucene BM25, Vespa hybrid/phased ranking, OpenSearch RRF, Azure AI Search RRF | Inverted indexes, RRF, phased ranking, front-loaded filtering, and explainable rank contribution. |
-| Code search | GitHub Code Search/Blackbird, Sourcegraph/Zoekt, Tree-sitter, ripgrep, persistent trigram indexes | Trigram candidates, regex literal extraction, symbol priority, AST chunks, ignore rules, parallel traversal, and versioned indexes. |
+| Code search | GitHub Code Search/Blackbird, Sourcegraph/Zoekt, Tree-sitter, ripgrep, persistent trigram indexes | Trigram candidates, regex literal extraction, symbol priority, AST chunks, bounded exact-text fallback, ignore rules, parallel traversal, and versioned indexes. |
 | Local file search | Everything, Windows Search, Spotlight/FSEvents, Linux inotify/fanotify, plocate | Filename and metadata first, system change journals, posting lists and trigrams, permission visibility, and bounded rescans after cursor overflow. |
 | Graph storage and authorization graphs | Facebook TAO/RAMP-TAO, Google Zanzibar | Relationship-graph caching, read-heavy optimization, permission relations before retrieval, external consistency, and low-latency authorization checks. |
 | Storage and updates | RocksDB/LSM, WAL, mutation logs, materialized views | Batched writes, background compaction, crash recovery, incremental views, and hot-query isolation. |
@@ -71,7 +71,7 @@ Hard constraints:
 
 ## 5. High-Performance Algorithm Implications
 
-- **Candidate narrowing**: use inverted lists, trigrams, path tokens, symbol names, and scope/path/language filters to reduce candidates to bounded windows before expensive scoring.
+- **Candidate narrowing**: use inverted lists, trigrams, path tokens, symbol names, and scope/path/language filters to reduce candidates to bounded windows before expensive scoring. Code `ripgrep` fallback must reuse this bounded candidate window instead of starting an ad hoc full-repository scan.
 - **Hybrid fusion**: use RRF or phased ranking for BM25, semantic, vector, graph path, code edge, and file path candidates; only combine raw scores linearly when they share source and scale.
 - **Path pruning**: multi-hop graph retrieval uses query intent, schema paths, edge confidence, time range, and max token/edge/hop budgets instead of unbounded neighborhood expansion.
 - **Incremental first**: Git diffs, mutation logs, file change cursors, and source hashes drive refresh; full rescans are reserved for cold start, reconciliation, or invalid cursors.
@@ -86,6 +86,7 @@ Hard constraints:
 | P0 | Define local file retrieval as four read models: `local_file_path`, `local_file_metadata`, `local_file_content`, and `local_file_change_cursor`. | Docs state that filename queries do not depend on content indexes and every file query returns freshness or degraded reason. |
 | P0 | Record candidate window, filter count, RRF contribution, truncation reason, and stale lag for code, file, and graph hybrid retrieval. | Context pack and benchmark docs include observable fields and p95/p99 metrics. |
 | P1 | Add a file-content indexing route: text chunk BM25/trigram first, semantic/vector optional, OCR/archive/large-file processing through workers. | Filename and content queries have separate latency budgets; content failures do not affect path indexes. |
+| P1 | Include code `ripgrep` fallback in retrieval traces: trigger reason, candidate-file count, materialized bytes, timeout/budget degraded reason, and `text_fallback` rank contribution. | Definition/reference/hybrid fallback hits are explainable and do not outrank exact symbols or resolved edges. |
 | P1 | Introduce a query router for exact terms, conceptual questions, multi-hop, code symbols, file paths, impact, and temporal queries. | Each query class has explicit retriever families, budgets, and degradation behavior. |
 | P1 | Add cold indexing, incremental update, no-op refresh, watcher lag, and queue lag to benchmark gates. | Benchmark chapters record targets, collection commands, and regression thresholds. |
 | P2 | Evaluate pluggable platform watcher backends and ANN backends. | Missing backend capability degrades to bounded rescan or local lexical read models. |
