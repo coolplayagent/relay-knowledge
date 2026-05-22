@@ -1,4 +1,4 @@
-use rusqlite::{params, params_from_iter, types::Value};
+use rusqlite::{OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
@@ -34,6 +34,46 @@ pub(super) fn delete_path_index(
     path: &str,
 ) -> Result<(), StorageError> {
     delete_path_indexes(transaction, source_scope, [path])
+}
+
+pub(super) fn path_indexes_exist<'path>(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    paths: impl IntoIterator<Item = &'path str>,
+) -> Result<bool, StorageError> {
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort_unstable();
+    paths.dedup();
+    if paths.is_empty() {
+        return Ok(false);
+    }
+
+    for path_chunk in paths.chunks(MAX_PATH_DELETE_PATHS_PER_STATEMENT) {
+        let placeholders = std::iter::repeat_n("?", path_chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(path_chunk.len() + 1);
+        values.push(Value::Text(source_scope.to_owned()));
+        values.extend(
+            path_chunk
+                .iter()
+                .map(|path| Value::Text((*path).to_owned())),
+        );
+        let existing = transaction
+            .query_row(
+                &format!(
+                    "SELECT 1 FROM code_repository_files WHERE source_scope = ? AND path IN ({placeholders}) LIMIT 1"
+                ),
+                params_from_iter(values),
+                |_| Ok(()),
+            )
+            .optional()?;
+        if existing.is_some() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 pub(super) fn delete_path_indexes<'path>(
@@ -161,6 +201,14 @@ mod tests {
         }
 
         let transaction = connection.transaction().expect("transaction should open");
+        assert!(
+            path_indexes_exist(&transaction, "scope", ["src/a.rs", "src/b.rs"])
+                .expect("path existence should load")
+        );
+        assert!(
+            !path_indexes_exist(&transaction, "scope", ["src/missing.rs"])
+                .expect("missing path existence should load")
+        );
         delete_path_indexes(&transaction, "scope", ["src/a.rs", "src/b.rs", "src/a.rs"])
             .expect("paths should delete");
         transaction.commit().expect("transaction should commit");

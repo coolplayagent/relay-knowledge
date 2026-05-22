@@ -723,6 +723,56 @@ async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
     assert_eq!(status.symbol_count, 1);
 }
 
+#[tokio::test]
+async fn new_checkpoint_batch_replaces_colliding_path_rows() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:batch-path-collision";
+    let session = session_for_scope(source_scope, 2);
+    let path = "src/lib.rs";
+    let batch = |batch_index, file_id: &str, symbol_id: &str, name: &str| CodeIndexBatch {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        batch_index,
+        parsed_byte_count: 20,
+        files: vec![file(
+            source_scope,
+            file_id,
+            path,
+            "rust",
+            CodeParseStatus::Parsed,
+        )],
+        symbols: vec![symbol(source_scope, symbol_id, file_id, path, name, "rust")],
+        references: Vec::new(),
+        imports: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(batch(1, "first-file", "legacy-symbol", "legacy_handler"))
+        .await
+        .expect("first batch should persist");
+    store
+        .apply_code_index_batch(batch(2, "second-file", "current-symbol", "current_handler"))
+        .await
+        .expect("colliding new batch should replace path rows");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let old_hits = search(&store, "legacy_handler", CodeQueryKind::Symbol).await;
+    let new_hits = search(&store, "current_handler", CodeQueryKind::Symbol).await;
+
+    assert!(old_hits.is_empty());
+    assert_eq!(new_hits.len(), 1);
+    assert_eq!(new_hits[0].path, path);
+}
+
 async fn registered_store() -> SqliteGraphStore {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     store

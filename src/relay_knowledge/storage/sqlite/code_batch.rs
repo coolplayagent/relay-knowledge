@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    code_cleanup::{count_code_rows, delete_path_indexes, delete_scope_index},
+    code_cleanup::{count_code_rows, delete_path_indexes, delete_scope_index, path_indexes_exist},
     code_status,
 };
 
@@ -53,11 +53,8 @@ pub(super) fn apply_batch(
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
     let transaction = connection.transaction()?;
-    delete_path_indexes(
-        &transaction,
-        &batch.source_scope,
-        batch.files.iter().map(|file| file.path.as_str()),
-    )?;
+    let batch_is_new = checkpoint_batch_is_new(&transaction, &batch)?;
+    delete_batch_path_indexes_if_needed(&transaction, &batch, batch_is_new)?;
     insert_files(&transaction, &batch)?;
     insert_symbols(&transaction, &batch)?;
     let edge_search_languages =
@@ -70,10 +67,33 @@ pub(super) fn apply_batch(
     insert_imports(&transaction, &batch, edge_search_languages.as_ref())?;
     insert_chunks(&transaction, &batch)?;
     insert_diagnostics(&transaction, &batch)?;
-    update_checkpoint_after_batch(&transaction, &batch)?;
+    update_checkpoint_after_batch(&transaction, &batch, batch_is_new)?;
     transaction.commit()?;
 
     checkpoint_for_scope(connection, &batch.source_scope)
+}
+
+fn delete_batch_path_indexes_if_needed(
+    transaction: &Transaction<'_>,
+    batch: &CodeIndexBatch,
+    batch_is_new: bool,
+) -> Result<(), StorageError> {
+    let paths = batch
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    let should_delete = !batch_is_new
+        || path_indexes_exist(transaction, &batch.source_scope, paths.iter().copied())?;
+    if should_delete {
+        delete_path_indexes(transaction, &batch.source_scope, paths)?;
+    }
+
+    Ok(())
 }
 
 pub(super) fn finalize_session(
@@ -541,8 +561,8 @@ fn insert_diagnostics(
 fn update_checkpoint_after_batch(
     transaction: &Transaction<'_>,
     batch: &CodeIndexBatch,
+    batch_is_new: bool,
 ) -> Result<(), StorageError> {
-    let batch_is_new = checkpoint_batch_is_new(transaction, batch)?;
     let delta_files = if batch_is_new { batch.files.len() } else { 0 };
     let delta_symbols = if batch_is_new { batch.symbols.len() } else { 0 };
     let delta_references = if batch_is_new {
