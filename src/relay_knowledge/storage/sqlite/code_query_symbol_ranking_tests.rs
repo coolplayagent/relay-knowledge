@@ -144,6 +144,78 @@ async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor
 }
 
 #[tokio::test]
+async fn hybrid_symbols_rank_typed_function_values_above_broad_method_matches() {
+    let protocol_path = "src/protocol.ts";
+    let provider_path = "src/provider.ts";
+    let mut projector = symbol(
+        "trim-payload",
+        "protocol-file",
+        protocol_path,
+        "function",
+        "export const trimPayload: PayloadProjector<string> = (payload) => payload.trim()",
+        range(13, 13),
+    );
+    projector.name = "trimPayload".to_owned();
+    projector.qualified_name = "src::protocol::trimPayload".to_owned();
+    projector.canonical_symbol_id = "repo://repo/src::protocol::trimPayload".to_owned();
+    projector.language_id = "typescript".to_owned();
+    let mut record = symbol(
+        "provider-record",
+        "provider-file",
+        provider_path,
+        "method",
+        "record(payload: string): string {",
+        range(12, 14),
+    );
+    record.name = "record".to_owned();
+    record.qualified_name = "src::provider::ProviderRuntime.record".to_owned();
+    record.canonical_symbol_id = "repo://repo/src::provider::ProviderRuntime.record".to_owned();
+    record.language_id = "typescript".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file_with_language("protocol-file", protocol_path, "typescript"),
+            file_with_language("provider-file", provider_path, "typescript"),
+        ],
+        symbols: vec![record, projector],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "typed arrow payload projector trim provider record",
+            CodeQueryKind::Hybrid,
+        ))
+        .await
+        .expect("hybrid query should succeed");
+
+    assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("trim-payload"));
+    let projector_score = score_for_symbol(&hits, "trim-payload").expect("projector should match");
+    let record_score = score_for_symbol(&hits, "provider-record").expect("record should match");
+    assert!(
+        projector_score > record_score,
+        "typed function value should outrank broad provider method: {projector_score} <= {record_score}",
+    );
+}
+
+#[tokio::test]
 async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
     let mut benchmark = symbol(
         "benchmark-open",
@@ -348,12 +420,16 @@ fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequ
 }
 
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
+    file_with_language(file_id, path, "cpp")
+}
+
+fn file_with_language(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
-        language_id: "cpp".to_owned(),
+        language_id: language_id.to_owned(),
         blob_hash: format!("hash-{file_id}"),
         byte_len: 0,
         line_count: 1200,
