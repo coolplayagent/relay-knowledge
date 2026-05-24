@@ -22,6 +22,13 @@ pub(super) fn begin_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| begin_session_once(connection, &session))
+}
+
+fn begin_session_once(
+    connection: &mut Connection,
+    session: &CodeIndexSession,
+) -> Result<CodeIndexCheckpoint, StorageError> {
     if !session.full_replace {
         return Err(StorageError::InvalidInput(
             "checkpointed code indexing currently requires a full-replace session".to_owned(),
@@ -42,7 +49,7 @@ pub(super) fn begin_session(
         ",
         params![session.repository_id],
     )?;
-    insert_checkpoint(&transaction, &session, "indexing", None)?;
+    insert_checkpoint(&transaction, session, "indexing", None)?;
     transaction.commit()?;
 
     checkpoint_for_scope(connection, &session.source_scope)
@@ -52,22 +59,29 @@ pub(super) fn apply_batch(
     connection: &mut Connection,
     batch: CodeIndexBatch,
 ) -> Result<CodeIndexCheckpoint, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| apply_batch_once(connection, &batch))
+}
+
+fn apply_batch_once(
+    connection: &mut Connection,
+    batch: &CodeIndexBatch,
+) -> Result<CodeIndexCheckpoint, StorageError> {
     let transaction = connection.transaction()?;
-    let batch_is_new = checkpoint_batch_is_new(&transaction, &batch)?;
-    delete_batch_path_indexes_if_needed(&transaction, &batch, batch_is_new)?;
-    insert_files(&transaction, &batch)?;
-    insert_symbols(&transaction, &batch)?;
-    let edge_search_languages =
-        if should_materialize_intermediate_edge_search(&transaction, &batch)? {
-            Some(edge_file_languages_by_path(&transaction, &batch)?)
-        } else {
-            None
-        };
-    insert_references(&transaction, &batch, edge_search_languages.as_ref())?;
-    insert_imports(&transaction, &batch, edge_search_languages.as_ref())?;
-    insert_chunks(&transaction, &batch)?;
-    insert_diagnostics(&transaction, &batch)?;
-    update_checkpoint_after_batch(&transaction, &batch, batch_is_new)?;
+    let batch_is_new = checkpoint_batch_is_new(&transaction, batch)?;
+    delete_batch_path_indexes_if_needed(&transaction, batch, batch_is_new)?;
+    insert_files(&transaction, batch)?;
+    insert_symbols(&transaction, batch)?;
+    let materialize_edge_search = should_materialize_intermediate_edge_search(&transaction, batch)?;
+    let edge_search_languages = if materialize_edge_search {
+        Some(edge_file_languages_by_path(&transaction, batch)?)
+    } else {
+        None
+    };
+    insert_references(&transaction, batch, edge_search_languages.as_ref())?;
+    insert_imports(&transaction, batch, edge_search_languages.as_ref())?;
+    insert_chunks(&transaction, batch)?;
+    insert_diagnostics(&transaction, batch)?;
+    update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;
     transaction.commit()?;
 
     checkpoint_for_scope(connection, &batch.source_scope)
@@ -100,9 +114,16 @@ pub(super) fn finalize_session(
     connection: &mut Connection,
     session: CodeIndexSession,
 ) -> Result<crate::domain::CodeIndexSummary, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| finalize_session_once(connection, &session))
+}
+
+fn finalize_session_once(
+    connection: &mut Connection,
+    session: &CodeIndexSession,
+) -> Result<crate::domain::CodeIndexSummary, StorageError> {
     let transaction = connection.transaction()?;
     finalize::resolve_scope(&transaction, &session.source_scope, &session.repository_id)?;
-    update_repository_after_session(&transaction, &session)?;
+    update_repository_after_session(&transaction, session)?;
     mark_checkpoint_completed(&transaction, &session.source_scope)?;
     transaction.commit()?;
 
@@ -114,10 +135,10 @@ pub(super) fn finalize_session(
     let sqlite_write_count = count_scope_rows(connection, &session.source_scope)?;
 
     Ok(crate::domain::CodeIndexSummary {
-        repository_id: session.repository_id,
-        source_scope: session.source_scope,
-        resolved_commit_sha: session.resolved_commit_sha,
-        tree_hash: session.tree_hash,
+        repository_id: session.repository_id.clone(),
+        source_scope: session.source_scope.clone(),
+        resolved_commit_sha: session.resolved_commit_sha.clone(),
+        tree_hash: session.tree_hash.clone(),
         indexed_file_count: status.indexed_file_count,
         changed_path_count: session.changed_path_count,
         skipped_unchanged_count: session.skipped_unchanged_count,

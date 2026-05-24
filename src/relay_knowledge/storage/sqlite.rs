@@ -17,6 +17,7 @@ mod helpers;
 mod indexing;
 mod operations;
 mod retrieval;
+mod retry;
 mod schema_columns;
 mod schema_migration;
 mod store_impls;
@@ -97,6 +98,10 @@ fn configure_connection(connection: &Connection) -> Result<(), StorageError> {
 }
 
 fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
+    retry::retry_sqlite_transient(|| initialize_schema_once(connection))
+}
+
+fn initialize_schema_once(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
         PRAGMA foreign_keys = ON;

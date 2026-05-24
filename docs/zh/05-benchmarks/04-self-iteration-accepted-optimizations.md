@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779644421-sqlite-index-transient-retry
+- 算法/架构：SQLite 存储层新增共享的 transient retry boundary，按有界退避重试 `SQLITE_BUSY`/`SQLITE_LOCKED`、schema/table lock 和 FTS vtable transient constructor failure；持久化 schema 初始化与 checkpointed code full-index 的 begin/apply-batch/finalize 写事务复用该边界。code-index batch 不克隆大批量 parser 输出，重试时复用同一 batch 引用并依靠既有 checkpoint `batch_count`、path-index delete/insert 和 finalize rebuild 语义保持幂等。
+- 不变量：不改变 SQLite schema、parser facts、FTS 文档内容、candidate window、ranking 权重、source `text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只重试明确的 transient SQLite lock/vtable 错误，不吞掉 missing table、SQL 语法、validation、I/O 或持久数据错误；每次重试仍通过原事务边界、checkpoint、scope cleanup、dedupe/top-k 与 freshness/path/language filters。
+- 预期影响/风险：预期降低 full profile 并发 repo query、file index 与 repo index 交错时的 `database is locked` 硬失败，保护 TypeScript/Kotlin/JavaScript/Java 等 syntax fixture index gate 和大仓 checkpoint finalize 稳定性，同时避免通过放宽 case 或枚举语言 fixture 修复。风险是锁竞争真实持续时最多增加约 2.83s 有界等待，可能抬高少数 index/query p95；风险由短退避上限、错误分类白名单、事务幂等 checkpoint 设计和 targeted storage/code-batch tests 控制。
+- 策略关联：建立在 accepted `run-1779465105` 的 query-time SQLite transient retry 与 accepted `run-1779435315` checkpoint batch lifecycle 思路之上；避免 latest rejected `run-1779642784` 的 file-index 局部性能 tweak 造成 language fixture `database is locked` gate 失败，也避免 `run-1779641679` 扩大 code-batch finalize 工作量导致 Rust/Go/background gate 与性能退化的模式。
 ## 候选优化说明：run-1779626871-covered-fallback-admission-gates
 - 算法/架构：repository-set Hybrid 查询中，低优先级依赖成员先执行既有 API Symbol-first 计划；当该计划已经达到依赖 API identity coverage 阈值、因此不需要回退完整 Hybrid 召回时，成员 workflow 不再额外启动 source fallback admission，也不再为该成员预取仅 fallback 需要的 base repository status，而是把直接 graph Symbol evidence 交给后续 overlay evidence、bridge support、identity coverage、dedupe/diversity/top-k 合并。JS/TS parser 对已导出的 type/interface/class/function/构造值声明保留 `export ...` 外层 source range，并把同名同路径同起始行且 range 重叠的 value/function facts 合并为函数值 symbol，使 symbol chunk 自带可检索的公开 surface；单仓 Hybrid source-surface fallback 再通过 complete surface gate 判断当前结果集中是否已有任一结构化 Symbol/Definition/CallGraph hit 覆盖同一 identity 的完整定义或导出值/type surface（如 `export const name: Type = ...`、`export type Name<T> = ...`、函数/类/接口定义），已完整时不再为同一 identity 扫描当前源码刷新同一行。
 - 不变量：不改变 SQLite schema、FTS MATCH、candidate window、ranking 权重、external dependency diagnostic、`text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；parser 只扩大 JS/TS 已导出声明的 symbol byte/line range 到同一 `export_statement`，并只在同名、同路径、同起始行、range 重叠时合并 value/function facts，不新增 symbol 类别或跨文件边；fallback 只收紧 repository-set 依赖 Symbol plan 已满足覆盖时的 source fallback admission，以及 Hybrid source-surface 已完整时的 source refresh admission，没有仓库、路径、case id、查询字符串或 fixture 枚举；Imports/References/Callers/Definition、覆盖不足 Symbol plan、缺少 export/value/type surface 的 Hybrid hit 继续保留原 source fallback 路径。
@@ -930,6 +935,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.972908->0.9814465778455568; score_component:performance 0.849491->0.8969254324753153; metric:cargo_build_debug_ms 15782.0->223.0; metric:cpp_syntax_fixture_index_ms 181.0->40.0; metric:cpp_syntax_fixture_register_index_ms 242.0->101.0; metric:cpp_syntax_fixture_query_p95_ms 465.0->303.0; metric:relay_teams_query_p50_ms 202.0->167.0; metric:c_syntax_fixture_index_ms 222.0->124.0
 - known degradations: metric:temporal_sdk_go_index_ms 428.0->686.0; metric:temporal_sdk_go_register_index_ms 489.0->752.0; metric:relay_teams_index_ms 687.0->727.0; metric:relay_teams_register_index_ms 749.0->794.0; metric:relay_teams_query_p95_ms 586.0->629.0; metric:c_syntax_fixture_query_p50_ms 161.0->242.0; metric:leveldb_cpp_register_index_ms 263.0->303.0; metric:leveldb_cpp_query_p95_ms 203.0->304.0
 - latency metrics: cargo_fmt_check_ms=1574ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=223ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=686ms; temporal_sdk_go_register_index_ms=752ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=186ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779644421
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779644421.patch`
+- score: 0.884094 (foundational=0.908784, competitive=0.753324, accuracy=0.831054, semantic_vector=1.000000, research_judge=0.860000, performance=0.815574, stability=1.000000)
+- cases: 214/251 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite.rs`, `src/relay_knowledge/storage/sqlite/code_batch.rs`, `src/relay_knowledge/storage/sqlite/retry.rs`
+- key improvements: score_component:score 0.866459->0.884094314763636; score_component:foundational_capability 0.894531->0.9087837837837838; score_component:performance 0.788902->0.8155736174577234; score_component:stability 0.989362->1.0; score_component:research_judge 0.82->0.86; gate:typescript_syntax_fixture_index false->true; gate:javascript_syntax_fixture_index false->true; gate:kotlin_syntax_fixture_index false->true
+- known degradations: metric:python_syntax_fixture_index_ms 1310.0->1913.0; metric:python_syntax_fixture_register_index_ms 1492.0->1955.0; metric:ruby_syntax_fixture_index_ms 1512.0->2035.0; metric:ruby_syntax_fixture_register_index_ms 1594.0->2076.0; metric:php_syntax_fixture_index_ms 1473.0->1554.0; metric:opencode_typescript_query_p50_ms 524.0->704.0; metric:leveldb_cpp_query_p50_ms 404.0->727.0; metric:leveldb_cpp_query_p95_ms 4532.0->17776.0
+- latency metrics: cargo_fmt_check_ms=1634ms; self_iteration_cargo_fmt_check_ms=262ms; cargo_build_release_ms=85712ms; self_iteration_cargo_build_release_ms=142ms; cargo_clippy_ms=15450ms; cargo_test_ms=34380ms; self_iteration_cargo_clippy_ms=283ms; self_iteration_cargo_test_ms=202ms
 
 Adopted optimization notes:
 
