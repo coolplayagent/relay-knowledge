@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779604104-repository-set-hybrid-gating
+- 算法/架构：repository-set query 将每个 member 的 structured search、dependency Symbol plan fallback、repository status lookup 与 bounded source grep fallback 封装为独立 member workflow，并通过 `buffer_unordered` 以固定上限 4 并发推进；SQLite store 仍由既有单连接 mutex 串行化，blocking Git/ripgrep source fallback 继续在 worker 边界执行；Hybrid member 只在结构化 hit 数低于最终 set limit 时启动 source fallback；单仓 Hybrid storage planner 先运行 symbol+chunk，当至少 final limit 个结果中有不少于 3 个非 text-fallback chunk 命中 3-4 个查询序列项时，跳过 reference/call/import graph expansion；所有 member outcome 汇合后再统一执行 overlay evidence、bridge support bonus、dedupe、diversity 和 final top-k。
+- 不变量：不改变 parser facts、SQLite schema、candidate windows、source fallback 触发条件、external dependency diagnostic、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；每个 member 仍使用同一 freshness/path/language filters、per-member candidate limit、dependency fallback merge、grep materialization budgets 和 degraded-reason provenance，非 Hybrid 查询继续保留原 fallback 语义；Hybrid early-stop 只接受已索引 chunk 证据且排除 text_fallback 结果，并发受固定常量约束，不按 member 数无限扩张；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期降低 Temporal/OpenTelemetry 类 multi-repository workspace query p50/p95，尤其当 samples/app member 的 chunk 层已经完整覆盖工作流/API 序列时，查询不再继续扫描 reference/call/import FTS 与 source fallback；对 indexing、semantic/vector 和非 Hybrid 查询无直接影响。风险是少数 Hybrid 查询可能跳过能补强上下文的 graph edge 结果，且 member outcomes 到达顺序变为非确定性；风险由严格 chunk 覆盖门槛、text_fallback 排除、最终统一排序/去重、overlay scoring、degraded reason 去重、final set-limit gate 和非 Hybrid fallback 保留控制。
+- 策略关联：建立在 accepted `run-1779596855` repository-set symbol fallback merge 和 `run-1779602969` source grep/git throughput strategy 之上；避免最近 TypeScript external React import grep fallback 拒绝簇中的 parser/import-identity/evidence 语义改动，改为优化跨仓查询调度、Hybrid chunk-first planning 与 worker 边界。
 ## 候选优化说明：run-1779602969-batched-source-grep-blobs
 - 算法/架构：`code::grep` 的 source-text fallback 物化阶段先用 `git cat-file --batch-check` 取得 candidate blob size，在既有 8 MiB byte budget 内选择可读取路径，再复用索引管线已有的 `git cat-file --batch` 一次读取有界 blob 集合并写入临时搜索树；当 size preflight 或 blob batch 输出不可用、包含异常对象或数量不匹配时，回退到原逐路径 `git show` skip 语义，随后继续使用既有 `rg`/内部 scanner、Definition acceptor、dedupe/top-k 和 degraded reason 流程。
 - 不变量：不改变 parser facts、SQLite schema、FTS candidate window、source fallback 触发条件、external dependency diagnostic、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；仍只读取已索引 commit 的 safe candidate paths，batch 内容读取和临时树物化都受同一 materialized-byte budget 约束，继续执行 path/language/line-byte/result budgets，缺失 blob 只跳过对应 path，不证明 dependency library 已入图；没有仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -990,15 +995,18 @@ Adopted optimization notes:
 ## run-1779602603 compacted
 - summary: accepted TypeScript import-edge/source fallback recovery scored 0.970528 with foundational=1.0, competitive=0.988636, semantic_vector=1.0, stability=1.0, and performance=0.850156; full patch, changed paths, metrics, and report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779602603.patch`, reports, and progressive memory.
 
-## run-1779602969
+## run-1779602969 compacted
+- summary: accepted batched Git blob size/read source-grep optimization scored 0.971214 with foundational=1.0, competitive=0.988636, semantic_vector=1.0, stability=1.0, and performance=0.853969; full metrics, degradations, patch, and report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779602969.patch`, reports, and progressive memory.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779602969.patch`
-- score: 0.971214 (foundational=1.000000, competitive=0.988636, accuracy=0.994318, semantic_vector=1.000000, research_judge=n/a, performance=0.853969, stability=1.000000)
+## run-1779604104
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779604104.patch`
+- score: 0.974107 (foundational=1.000000, competitive=0.988636, accuracy=0.994318, semantic_vector=1.000000, research_judge=n/a, performance=0.870037, stability=1.000000)
 - cases: 51/51 passed
-- changed paths: `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/git.rs`, `src/relay_knowledge/code/grep.rs`
-- key improvements: metric:temporal_sdk_go_index_ms 604.0->545.0; metric:temporal_sdk_go_register_index_ms 665.0->618.0; metric:leveldb_cpp_index_ms 223.0->122.0; metric:leveldb_cpp_register_index_ms 286.0->183.0; metric:c_syntax_fixture_register_index_ms 262.0->203.0; metric:c_syntax_fixture_query_p50_ms 226.0->181.0; metric:c_syntax_fixture_query_p95_ms 710.0->308.0; metric:relay_teams_query_p95_ms 1937.0->808.0
-- known degradations: metric:cargo_fmt_check_ms 1536.0->1675.0; metric:cpp_syntax_fixture_query_p50_ms 182.0->222.0; metric:cpp_syntax_fixture_query_p95_ms 407.0->446.0; metric:relay_teams_index_ms 789.0->1050.0; metric:relay_teams_register_index_ms 850.0->1112.0; metric:typescript_syntax_fixture_index_ms 61.0->282.0; metric:typescript_syntax_fixture_register_index_ms 142.0->344.0; metric:temporal_go_workspace_repo_set_refresh_ms 746.0->786.0
-- latency metrics: cargo_fmt_check_ms=1675ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=243ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=545ms; temporal_sdk_go_register_index_ms=618ms; temporal_samples_go_index_ms=122ms; temporal_samples_go_register_index_ms=183ms
+- changed paths: `docs/zh/03-architecture-specs/13-code-retrieval-ranking-and-impact-analysis.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_service.rs`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
+- key improvements: score_component:performance 0.853969->0.8700366738763138; metric:c_syntax_fixture_index_ms 141.0->61.0; metric:c_syntax_fixture_register_index_ms 203.0->102.0; metric:c_syntax_fixture_query_p95_ms 308.0->227.0; metric:cpp_syntax_fixture_index_ms 202.0->61.0; metric:cpp_syntax_fixture_query_p50_ms 222.0->183.0; metric:cpp_syntax_fixture_query_p95_ms 446.0->382.0; metric:relay_teams_index_ms 1050.0->930.0
+- known degradations: metric:temporal_sdk_go_index_ms 545.0->586.0; metric:temporal_sdk_go_register_index_ms 618.0->647.0; metric:cpp_syntax_fixture_register_index_ms 264.0->303.0; metric:leveldb_cpp_index_ms 122.0->263.0; metric:leveldb_cpp_register_index_ms 183.0->324.0; metric:leveldb_cpp_query_p50_ms 143.0->183.0; metric:leveldb_cpp_query_p95_ms 223.0->362.0; metric:temporal_go_workspace_repo_set_refresh_ms 786.0->868.0
+- latency metrics: cargo_fmt_check_ms=1636ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=262ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=586ms; temporal_sdk_go_register_index_ms=647ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=182ms
 
 Adopted optimization notes:
 

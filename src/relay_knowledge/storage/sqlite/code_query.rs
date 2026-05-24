@@ -139,10 +139,19 @@ fn search_code_with_status(
     if definition_query_needs_chunk_fallback(request, &hits) {
         hits.extend(search_chunks(connection, status, request)?);
     }
-    if matches!(
-        request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::References
-    ) {
+    if request.code_query_kind == CodeQueryKind::Hybrid {
+        hits.extend(search_chunks(connection, status, request)?);
+        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
+            dedupe_sort_truncate(&mut hits, request.limit);
+            return Ok(hits);
+        }
+        hits.extend(search_references(connection, status, request)?);
+        hits.extend(search_calls(connection, status, request)?);
+        hits.extend(search_imports(connection, status, request)?);
+        dedupe_sort_truncate(&mut hits, request.limit);
+        return Ok(hits);
+    }
+    if request.code_query_kind == CodeQueryKind::References {
         hits.extend(search_references(connection, status, request)?);
     }
     if references_query_needs_chunk_fallback(request, &hits) {
@@ -150,18 +159,12 @@ fn search_code_with_status(
     }
     if matches!(
         request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::Callers | CodeQueryKind::Callees
+        CodeQueryKind::Callers | CodeQueryKind::Callees
     ) {
         hits.extend(search_calls(connection, status, request)?);
     }
-    if matches!(
-        request.code_query_kind,
-        CodeQueryKind::Hybrid | CodeQueryKind::Imports
-    ) {
+    if request.code_query_kind == CodeQueryKind::Imports {
         hits.extend(search_imports(connection, status, request)?);
-    }
-    if matches!(request.code_query_kind, CodeQueryKind::Hybrid) {
-        hits.extend(search_chunks(connection, status, request)?);
     }
     dedupe_sort_truncate(&mut hits, request.limit);
 
@@ -300,6 +303,55 @@ fn hybrid_symbol_hit_matches_identity(
     } else {
         canonical_symbol_leaf_matches(canonical_symbol_id, identity.leaf_name())
     }
+}
+
+fn hybrid_chunk_results_can_answer_without_graph_expansion(
+    request: &CodeRetrievalRequest,
+    hits: &[CodeRetrievalHit],
+) -> bool {
+    if request.code_query_kind != CodeQueryKind::Hybrid {
+        return false;
+    }
+    let terms = hybrid_sequence_terms(&request.query);
+    if terms.len() < 3 || hits.len() < request.limit.max(1) {
+        return false;
+    }
+    let required_matches = terms.len().clamp(3, 4);
+    let required_hits = request.limit.clamp(1, 3);
+    hits.iter()
+        .filter(|hit| {
+            hit.retrieval_layers.contains(&CodeRetrievalLayer::Lexical)
+                && !hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+                && hybrid_sequence_match_count(&hit.excerpt, &terms) >= required_matches
+        })
+        .take(required_hits)
+        .count()
+        >= required_hits
+}
+
+fn hybrid_sequence_terms(query: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for term in query_terms(query) {
+        if term.len() < 4 {
+            continue;
+        }
+        let term = term.to_ascii_lowercase();
+        if !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+
+    terms
+}
+
+fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {
+    let excerpt = excerpt.to_ascii_lowercase();
+    terms
+        .iter()
+        .filter(|term| excerpt.contains(term.as_str()))
+        .count()
 }
 
 fn line_starts_with_identifier(line: &str, identifier: &str) -> bool {
@@ -715,6 +767,10 @@ mod identity_tests;
 #[cfg(test)]
 #[path = "code_query_hybrid_symbol_planner_tests.rs"]
 mod hybrid_symbol_planner_tests;
+
+#[cfg(test)]
+#[path = "code_query_hybrid_chunk_gate_tests.rs"]
+mod hybrid_chunk_gate_tests;
 
 #[cfg(test)]
 #[path = "code_query_call_ranking_tests.rs"]
