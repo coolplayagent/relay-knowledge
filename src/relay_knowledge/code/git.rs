@@ -130,6 +130,54 @@ pub(super) fn git_batch_blobs(
     parse_cat_file_batch(paths, &output.stdout)
 }
 
+pub(super) fn git_batch_blob_sizes(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+) -> Result<Vec<Option<usize>>, CodeIndexError> {
+    if paths
+        .iter()
+        .any(|path| path.contains('\n') || path.contains('\r'))
+    {
+        return paths
+            .iter()
+            .map(|path| {
+                let object = format!("{commit}:{path}");
+                match git_bytes(root, ["cat-file", "-s", &object]) {
+                    Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()),
+                    Err(_) => Ok(None),
+                }
+            })
+            .collect();
+    }
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "--batch-check"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    {
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            CodeIndexError::InvalidInput("git cat-file stdin is unavailable".to_owned())
+        })?;
+        for path in paths {
+            writeln!(stdin, "{commit}:{path}")?;
+        }
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(CodeIndexError::Git {
+            args: vec!["cat-file".to_owned(), "--batch-check".to_owned()],
+            message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+
+    parse_cat_file_batch_sizes(paths, &output.stdout)
+}
+
 pub(super) fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
     let output = Command::new("git")
         .arg("-C")
@@ -189,4 +237,134 @@ fn parse_cat_file_batch(paths: &[String], bytes: &[u8]) -> Result<Vec<Vec<u8>>, 
     }
 
     Ok(blobs)
+}
+
+fn parse_cat_file_batch_sizes(
+    paths: &[String],
+    bytes: &[u8],
+) -> Result<Vec<Option<usize>>, CodeIndexError> {
+    let lines = bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() != paths.len() {
+        return Err(CodeIndexError::InvalidInput(
+            "git cat-file batch-check returned an unexpected row count".to_owned(),
+        ));
+    }
+
+    let mut sizes = Vec::with_capacity(paths.len());
+    for (path, line) in paths.iter().zip(lines) {
+        let header = String::from_utf8_lossy(line);
+        if header.ends_with(" missing") {
+            sizes.push(None);
+            continue;
+        }
+        let mut parts = header.split_whitespace();
+        let _object = parts.next();
+        let object_kind = parts.next();
+        let size = parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| {
+                CodeIndexError::InvalidInput(format!(
+                    "git cat-file batch-check size is invalid for {path}"
+                ))
+            })?;
+        sizes.push((object_kind == Some("blob")).then_some(size));
+    }
+
+    Ok(sizes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn batch_blob_sizes_report_missing_paths_without_failing_batch() {
+        let repo = TestRepo::create("batch-blob-sizes");
+        repo.write("src/alpha.rs", "pub fn alpha() {}\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "base"]);
+        let commit = repo.git_text(["rev-parse", "HEAD"]);
+
+        let sizes = git_batch_blob_sizes(
+            &repo.root,
+            &commit,
+            &["src/alpha.rs".to_owned(), "src/missing.rs".to_owned()],
+        )
+        .expect("batch blob sizes should load");
+
+        assert_eq!(sizes, vec![Some("pub fn alpha() {}\n".len()), None]);
+    }
+
+    struct TestRepo {
+        root: PathBuf,
+    }
+
+    impl TestRepo {
+        fn create(name: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            let root = std::env::temp_dir().join(format!(
+                "relay-knowledge-{name}-{}-{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("repo directory should be created");
+            let repo = Self { root };
+            repo.git(["init"]);
+            repo.git(["config", "user.email", "relay@example.invalid"]);
+            repo.git(["config", "user.name", "Relay Test"]);
+            repo
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("parent directory should exist");
+            }
+            fs::write(path, content).expect("fixture file should be written");
+        }
+
+        fn git<const N: usize>(&self, args: [&str; N]) {
+            let output = Command::new("git")
+                .current_dir(&self.root)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        fn git_text<const N: usize>(&self, args: [&str; N]) -> String {
+            let output = Command::new("git")
+                .current_dir(&self.root)
+                .args(args)
+                .output()
+                .expect("git should run");
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        }
+    }
+
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 }

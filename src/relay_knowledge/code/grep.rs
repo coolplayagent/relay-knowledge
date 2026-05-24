@@ -13,8 +13,10 @@ use serde_json::Value;
 use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange};
 
 use super::{
-    CodeIndexError, git::git_bytes, languages::language_id, safe_git_blob_path,
-    source_line_defines_identity,
+    CodeIndexError,
+    git::{git_batch_blob_sizes, git_batch_blobs, git_bytes},
+    languages::language_id,
+    safe_git_blob_path, source_line_defines_identity,
 };
 
 pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
@@ -201,6 +203,48 @@ fn materialize_git_blobs_with_budget(
     tree: &mut TempSourceTree,
     max_bytes: usize,
 ) -> Result<MaterializedFiles, CodeIndexError> {
+    if let Some(selection) = candidate_git_blob_selection(root, commit, paths, max_bytes) {
+        return materialize_selected_git_blobs(root, commit, selection, tree);
+    }
+
+    materialize_git_blobs_per_path(root, commit, paths, tree, max_bytes)
+}
+
+fn materialize_selected_git_blobs(
+    root: &Path,
+    commit: &str,
+    selection: BlobCandidateSelection,
+    tree: &mut TempSourceTree,
+) -> Result<MaterializedFiles, CodeIndexError> {
+    let mut file_count = 0usize;
+    for (path, bytes) in
+        selection
+            .paths
+            .iter()
+            .zip(candidate_git_blobs(root, commit, &selection.paths))
+    {
+        let Some(bytes) = bytes else {
+            continue;
+        };
+        tree.write(path, bytes.as_slice())?;
+        file_count += 1;
+    }
+
+    Ok(MaterializedFiles {
+        file_count,
+        degraded_reason: selection
+            .exhausted
+            .then(|| "ripgrep materialized byte budget exhausted".to_owned()),
+    })
+}
+
+fn materialize_git_blobs_per_path(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+    tree: &mut TempSourceTree,
+    max_bytes: usize,
+) -> Result<MaterializedFiles, CodeIndexError> {
     let mut byte_count = 0usize;
     let mut file_count = 0usize;
     let mut exhausted = false;
@@ -222,6 +266,56 @@ fn materialize_git_blobs_with_budget(
         file_count,
         degraded_reason: exhausted.then(|| "ripgrep materialized byte budget exhausted".to_owned()),
     })
+}
+
+struct BlobCandidateSelection {
+    paths: Vec<String>,
+    exhausted: bool,
+}
+
+fn candidate_git_blob_selection(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+    max_bytes: usize,
+) -> Option<BlobCandidateSelection> {
+    let sizes = git_batch_blob_sizes(root, commit, paths).ok()?;
+    if sizes.len() != paths.len() {
+        return None;
+    }
+
+    let mut selected_paths = Vec::new();
+    let mut byte_count = 0usize;
+    let mut exhausted = false;
+    for (path, size) in paths.iter().zip(sizes) {
+        let Some(size) = size else {
+            continue;
+        };
+        if byte_count.saturating_add(size) > max_bytes {
+            exhausted = true;
+            continue;
+        }
+        selected_paths.push(path.clone());
+        byte_count += size;
+    }
+
+    Some(BlobCandidateSelection {
+        paths: selected_paths,
+        exhausted,
+    })
+}
+
+fn candidate_git_blobs(root: &Path, commit: &str, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+    match git_batch_blobs(root, commit, paths) {
+        Ok(blobs) if blobs.len() == paths.len() => blobs.into_iter().map(Some).collect(),
+        _ => paths
+            .iter()
+            .map(|path| {
+                let object = format!("{commit}:{path}");
+                git_bytes(root, ["show", &object]).ok()
+            })
+            .collect(),
+    }
 }
 
 fn ripgrep_match_limit(kind: SourceGrepKind, result_limit: usize) -> usize {
