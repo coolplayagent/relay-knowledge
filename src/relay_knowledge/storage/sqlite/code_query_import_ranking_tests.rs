@@ -342,6 +342,60 @@ async fn path_import_queries_demote_test_importers_without_test_intent() {
     assert_eq!(hits[1].path, test_path);
 }
 
+#[tokio::test]
+async fn script_import_queries_match_shellcheck_source_context() {
+    let importer_path = "bin/install.sh";
+    let target_path = "lib/runtime.sh";
+    let mut source_import = import(
+        "bash-runtime-source",
+        "install-file",
+        importer_path,
+        "# shellcheck source=../lib/runtime.sh\n. \"$SCRIPT_DIR/../lib/runtime.sh\"",
+    );
+    source_import.target_hint = Some(target_path.to_owned());
+    source_import.resolution_state = "resolved".to_owned();
+    source_import.confidence_basis_points = 8_000;
+    source_import.confidence_tier = "inferred".to_owned();
+    source_import.line_range = range(3, 4);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("install-file", importer_path, "bash"),
+            file("runtime-file", target_path, "bash"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![source_import],
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("lib runtime source", CodeQueryKind::Imports))
+        .await
+        .expect("script import query should succeed");
+
+    assert_eq!(hits[0].path, importer_path);
+    assert!(
+        hits[0]
+            .excerpt
+            .contains(". \"$SCRIPT_DIR/../lib/runtime.sh\"")
+    );
+}
+
 fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> Option<f64> {
     hits.iter()
         .find(|hit| hit.path == path)

@@ -4,6 +4,7 @@ mod imports;
 mod java;
 mod python;
 mod references;
+mod script;
 mod symbols;
 mod typescript;
 
@@ -44,6 +45,15 @@ pub(super) fn resolve_import_targets(
                 None => None,
             },
             "typescript" | "tsx" => typescript::resolve_import(import, &context),
+            "bash" | "ruby" => match script::resolve_import(language_id, import, &context) {
+                Some((resolution, target_hint)) => {
+                    if let Some(target_hint) = target_hint {
+                        import.target_hint = Some(target_hint);
+                    }
+                    Some(resolution)
+                }
+                None => None,
+            },
             "c" | "cpp" => match cpp::resolve_import(import, &context) {
                 Some((resolution, target_hint)) => {
                     if let Some(target_hint) = target_hint {

@@ -31,6 +31,7 @@ pub(super) fn collect_imports(
         }
         push_children_reverse(node, &mut stack);
     }
+    imports.push_script_line_imports(language_id, content)?;
 
     Ok(imports.into_records())
 }
@@ -125,6 +126,134 @@ impl<'a> ImportCollector<'a> {
         });
 
         Ok(())
+    }
+
+    fn push_script_line_imports(
+        &mut self,
+        language_id: &str,
+        content: &str,
+    ) -> Result<(), CodeIndexError> {
+        for import in script_line_imports(language_id, content) {
+            self.push_record(import.module, &import.range)?;
+        }
+
+        Ok(())
+    }
+}
+
+struct ScriptLine<'a> {
+    number: usize,
+    byte_start: usize,
+    byte_end: usize,
+    text: &'a str,
+}
+
+struct ScriptLineImport {
+    module: String,
+    range: SyntaxRange,
+}
+
+fn script_line_imports(language_id: &str, content: &str) -> Vec<ScriptLineImport> {
+    match language_id {
+        "bash" => bash_line_imports(content),
+        "ruby" => ruby_line_imports(content),
+        _ => Vec::new(),
+    }
+}
+
+fn ruby_line_imports(content: &str) -> Vec<ScriptLineImport> {
+    source_lines(content)
+        .into_iter()
+        .filter_map(|line| {
+            let statement = line.text.trim();
+            ruby_import_statement(statement).then(|| ScriptLineImport {
+                module: statement.to_owned(),
+                range: line_range(&line, &line),
+            })
+        })
+        .collect()
+}
+
+fn ruby_import_statement(statement: &str) -> bool {
+    if statement.starts_with('#') || quoted_specifier(statement).is_none() {
+        return false;
+    }
+
+    ["require", "require_relative", "load"]
+        .iter()
+        .any(|keyword| script_keyword_statement(statement, keyword))
+}
+
+fn bash_line_imports(content: &str) -> Vec<ScriptLineImport> {
+    let lines = source_lines(content);
+    let mut imports = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let statement = line.text.trim();
+        if !bash_source_statement(statement) {
+            continue;
+        }
+        let previous = previous_shellcheck_source_comment(&lines, index);
+        let range_start = previous.unwrap_or(line);
+        let module = previous.map_or_else(
+            || statement.to_owned(),
+            |comment| format!("{}\n{}", comment.text.trim(), statement),
+        );
+        imports.push(ScriptLineImport {
+            module,
+            range: line_range(range_start, line),
+        });
+    }
+
+    imports
+}
+
+fn bash_source_statement(statement: &str) -> bool {
+    script_keyword_statement(statement, "source")
+        || statement
+            .strip_prefix('.')
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace) && !rest.trim().is_empty())
+}
+
+fn script_keyword_statement(statement: &str, keyword: &str) -> bool {
+    statement
+        .strip_prefix(keyword)
+        .is_some_and(|rest| rest.starts_with(char::is_whitespace) || rest.starts_with('('))
+}
+
+fn previous_shellcheck_source_comment<'a>(
+    lines: &'a [ScriptLine<'a>],
+    index: usize,
+) -> Option<&'a ScriptLine<'a>> {
+    let previous = index.checked_sub(1).and_then(|index| lines.get(index))?;
+    let text = previous.text.trim();
+
+    (text.starts_with("# shellcheck ") && text.contains("source=")).then_some(previous)
+}
+
+fn source_lines(content: &str) -> Vec<ScriptLine<'_>> {
+    let mut lines = Vec::new();
+    let mut byte_start = 0usize;
+    for (index, raw_line) in content.split_inclusive('\n').enumerate() {
+        let without_lf = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let text = without_lf.strip_suffix('\r').unwrap_or(without_lf);
+        lines.push(ScriptLine {
+            number: index + 1,
+            byte_start,
+            byte_end: byte_start + text.len(),
+            text,
+        });
+        byte_start += raw_line.len();
+    }
+
+    lines
+}
+
+fn line_range(start: &ScriptLine<'_>, end: &ScriptLine<'_>) -> SyntaxRange {
+    SyntaxRange {
+        byte_start: start.byte_start,
+        byte_end: end.byte_end,
+        line_start: start.number,
+        line_end: end.number,
     }
 }
 

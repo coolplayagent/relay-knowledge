@@ -323,6 +323,61 @@ var _ context.Context
 }
 
 #[test]
+fn ruby_require_relative_import_resolution_targets_local_files() {
+    let snapshot = parse_sources(&[
+        (
+            "lib/app/extensions.rb",
+            r#"
+module App
+  module Extensions
+  end
+end
+"#,
+        ),
+        (
+            "lib/app/controller.rb",
+            r#"
+require_relative "extensions"
+
+module App
+  class Controller
+    include Extensions
+  end
+end
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "require_relative \"extensions\"");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("lib/app/extensions.rb"));
+}
+
+#[test]
+fn bash_source_imports_preserve_shellcheck_context_and_resolve_targets() {
+    let snapshot = parse_sources(&[
+        ("lib/runtime.sh", "rk_runtime_dispatch() { :; }\n"),
+        (
+            "bin/install.sh",
+            r#"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/runtime.sh
+. "$SCRIPT_DIR/../lib/runtime.sh"
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, ". \"$SCRIPT_DIR/../lib/runtime.sh\"");
+
+    assert!(
+        import
+            .module
+            .contains("# shellcheck source=../lib/runtime.sh")
+    );
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(import.target_hint.as_deref(), Some("lib/runtime.sh"));
+}
+
+#[test]
 fn cpp_import_resolution_handles_local_includes_and_using_declarations() {
     let snapshot = parse_sources(&[
         (

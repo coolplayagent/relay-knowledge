@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779652179-script-import-edges
+- 算法/架构：parser 在 tree-sitter import captures 之外增加通用 script-line import extractor，把 Ruby `require`/`require_relative`/`load` 与 Bash `source`/`.` 命令写入同一 `CodeImportRecord` import graph；Bash 若紧邻 `# shellcheck source=...` 指令，则将指令与 source 命令合并为同一 import evidence，使检索同时保留真实 source 行与可搜索的 source annotation。import identity 层新增 Ruby/Bash local target resolver：Ruby 相对 require 按当前文件目录解析并补 `.rb`，普通 require 同时探测仓库根与 `lib/` load-path；Bash 优先使用 shellcheck source directive，其次使用可静态解析的 quoted/unquoted source target，并按当前脚本目录补 `.sh`/`.bash` 候选。
+- 不变量：不改变 SQLite schema、FTS MATCH 构造、ranking 权重、candidate window、call/reference/symbol facts、repo-set overlay、source `text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只索引行首 import-like script 语句，不解析任意字符串或执行 shell expansion；含 `$` 的 Bash source target 不做静态 target 证明，仍可作为 unresolved source-text evidence；无仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期恢复 Ruby/Bash syntax fixture 中脚本依赖边的 Imports 召回，并让多语言项目中脚本入口与本地库文件的关系进入 code graph，改善 import queries、hybrid dependency context 和 graph diagnostics；对索引吞吐影响为每个 Ruby/Bash 文件一次线性行扫描。风险是少数非导入用途的行首 `load`/`source` 被记录为 unresolved import，受 quoted/source-argument gate、stable import dedupe、target resolver 保守静态解析、focused parser resolution tests 和既有 top-k/ranking 约束。
+- 策略关联：建立在 accepted `run-1779644421` 的稳定性优先策略之上，但不触碰其 SQLite retry boundary；明确避开 latest rejected `run-1779650558` 的 symbol-ranking 局部 tweak 与 `research_judge` JSON/gate 失败模式，也避开 `run-1779648878` repository-set set handling 导致 research_judge regression 的模式，改为补齐通用 parser/import graph 事实。
 ## 候选优化说明：run-1779644421-sqlite-index-transient-retry
 - 算法/架构：SQLite 存储层新增共享的 transient retry boundary，按有界退避重试 `SQLITE_BUSY`/`SQLITE_LOCKED`、schema/table lock 和 FTS vtable transient constructor failure；持久化 schema 初始化与 checkpointed code full-index 的 begin/apply-batch/finalize 写事务复用该边界。code-index batch 不克隆大批量 parser 输出，重试时复用同一 batch 引用并依靠既有 checkpoint `batch_count`、path-index delete/insert 和 finalize rebuild 语义保持幂等。
 - 不变量：不改变 SQLite schema、parser facts、FTS 文档内容、candidate window、ranking 权重、source `text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只重试明确的 transient SQLite lock/vtable 错误，不吞掉 missing table、SQL 语法、validation、I/O 或持久数据错误；每次重试仍通过原事务边界、checkpoint、scope cleanup、dedupe/top-k 与 freshness/path/language filters。
@@ -949,6 +954,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.866459->0.884094314763636; score_component:foundational_capability 0.894531->0.9087837837837838; score_component:performance 0.788902->0.8155736174577234; score_component:stability 0.989362->1.0; score_component:research_judge 0.82->0.86; gate:typescript_syntax_fixture_index false->true; gate:javascript_syntax_fixture_index false->true; gate:kotlin_syntax_fixture_index false->true
 - known degradations: metric:python_syntax_fixture_index_ms 1310.0->1913.0; metric:python_syntax_fixture_register_index_ms 1492.0->1955.0; metric:ruby_syntax_fixture_index_ms 1512.0->2035.0; metric:ruby_syntax_fixture_register_index_ms 1594.0->2076.0; metric:php_syntax_fixture_index_ms 1473.0->1554.0; metric:opencode_typescript_query_p50_ms 524.0->704.0; metric:leveldb_cpp_query_p50_ms 404.0->727.0; metric:leveldb_cpp_query_p95_ms 4532.0->17776.0
 - latency metrics: cargo_fmt_check_ms=1634ms; self_iteration_cargo_fmt_check_ms=262ms; cargo_build_release_ms=85712ms; self_iteration_cargo_build_release_ms=142ms; cargo_clippy_ms=15450ms; cargo_test_ms=34380ms; self_iteration_cargo_clippy_ms=283ms; self_iteration_cargo_test_ms=202ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779652179
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779652179.patch`
+- score: 0.884525 (foundational=0.922297, competitive=0.759104, accuracy=0.840701, semantic_vector=1.000000, research_judge=0.860000, performance=0.796582, stability=1.000000)
+- cases: 216/251 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/identity/mod.rs`, `src/relay_knowledge/code/identity/script.rs`, `src/relay_knowledge/code/parser/imports.rs`, `src/relay_knowledge/code/parser_import_resolution_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_ranking_tests.rs`
+- key improvements: score_component:score 0.692099->0.8845254920334789; score_component:foundational_capability 0.908784->0.9222972972972973; score_component:competitive_capability 0.751879->0.7591040462427746; score_component:research_judge 0.0->0.86; gate:research_judge false->true; case:ruby_syntax_imports_require_relative_extensions false->true; case_rank:leveldb_cpp_inheritance_filter_policy_override_challenge null->5; case_score:leveldb_hybrid_recovery_manifest_full_scope 0.5->1.0
+- known degradations: score_component:performance 0.801698->0.7965817575444437; case_score:opencode_ts_implementation_data_migration_service_challenge 1.0->0.75; case_rank:opencode_ts_implementation_data_migration_service_challenge 1->2; case_rank:otel_go_repo_set_receiver_factory_create_logs 5->10; case_rank:otel_go_repo_set_filelog_component_type 6->null; metric:temporal_samples_go_index_ms 1634.0->3394.0; metric:temporal_samples_go_register_index_ms 1675.0->3435.0; metric:relay_teams_query_p50_ms 402.0->504.0
+- latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_release_ms=86811ms; self_iteration_cargo_build_release_ms=243ms; cargo_clippy_ms=363ms; cargo_test_ms=14775ms; self_iteration_cargo_clippy_ms=242ms; self_iteration_cargo_test_ms=161ms
 
 Adopted optimization notes:
 
