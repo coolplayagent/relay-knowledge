@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::domain::{
     CodeQueryKind, CodeRepositorySetMemberStatus, CodeRepositorySetQueryRequest, CodeRetrievalHit,
     CodeRetrievalLayer,
@@ -79,6 +81,82 @@ pub(super) fn dependency_symbol_plan_needs_hybrid_fallback(
 
     let identities = api_query_identity_leaves(&request.query);
     identity_symbol_hit_coverage(&identities, hits) < MIN_DEPENDENCY_SYMBOL_PLAN_IDENTITIES
+}
+
+pub(super) fn merge_dependency_symbol_fallback_hits(
+    symbol_hits: Vec<CodeRetrievalHit>,
+    fallback_hits: Vec<CodeRetrievalHit>,
+) -> Vec<CodeRetrievalHit> {
+    let mut merged =
+        BTreeMap::<(String, String, String, u32, u32, String), CodeRetrievalHit>::new();
+    for hit in fallback_hits.into_iter().chain(symbol_hits) {
+        let key = (
+            hit.repository_id.clone(),
+            hit.scope_id.clone(),
+            hit.path.clone(),
+            hit.line_range.start,
+            hit.line_range.end,
+            hit.excerpt.clone(),
+        );
+        match merged.get_mut(&key) {
+            Some(existing) => merge_duplicate_hit(existing, hit),
+            None => {
+                merged.insert(key, hit);
+            }
+        }
+    }
+
+    merged.into_values().collect()
+}
+
+fn merge_duplicate_hit(existing: &mut CodeRetrievalHit, candidate: CodeRetrievalHit) {
+    if candidate.score > existing.score {
+        let previous = std::mem::replace(existing, candidate);
+        merge_hit_metadata(existing, previous);
+    } else {
+        merge_hit_metadata(existing, candidate);
+    }
+}
+
+fn merge_hit_metadata(target: &mut CodeRetrievalHit, mut source: CodeRetrievalHit) {
+    for layer in source.retrieval_layers {
+        if !target.retrieval_layers.contains(&layer) {
+            target.retrieval_layers.push(layer);
+        }
+    }
+    for version in source.index_versions {
+        if !target.index_versions.contains(&version) {
+            target.index_versions.push(version);
+        }
+    }
+    target.stale |= source.stale;
+    if target.symbol_snapshot_id.is_none() {
+        target.symbol_snapshot_id = source.symbol_snapshot_id.take();
+    }
+    if target.canonical_symbol_id.is_none() {
+        target.canonical_symbol_id = source.canonical_symbol_id.take();
+    }
+    if target.file_id.is_none() {
+        target.file_id = source.file_id.take();
+    }
+    if target.degraded_reason.is_none() {
+        target.degraded_reason = source.degraded_reason.take();
+    }
+    if target.edge_kind.is_none() {
+        target.edge_kind = source.edge_kind.take();
+    }
+    if target.edge_resolution_state.is_none() {
+        target.edge_resolution_state = source.edge_resolution_state.take();
+    }
+    if target.edge_target_hint.is_none() {
+        target.edge_target_hint = source.edge_target_hint.take();
+    }
+    if target.edge_confidence_basis_points.is_none() {
+        target.edge_confidence_basis_points = source.edge_confidence_basis_points;
+    }
+    if target.edge_confidence_tier.is_none() {
+        target.edge_confidence_tier = source.edge_confidence_tier.take();
+    }
 }
 
 fn identity_symbol_hit_coverage(identities: &[String], hits: &[CodeRetrievalHit]) -> usize {
@@ -367,6 +445,38 @@ mod tests {
             CodeQueryKind::Hybrid,
             &[]
         ));
+    }
+
+    #[test]
+    fn dependency_symbol_fallback_merge_keeps_direct_api_surfaces() {
+        let fallback = symbol_hit(
+            "repo://repo:temporal/worker::worker::RegisterWorkflow",
+            "func RegisterWorkflow(workflow interface{})",
+        );
+        let direct = symbol_hit(
+            "repo://repo:temporal/worker::worker::InterruptCh",
+            "func InterruptCh() <-chan interface{}",
+        );
+        let mut duplicate_direct = fallback.clone();
+        duplicate_direct.score = fallback.score - 0.1;
+        duplicate_direct.retrieval_layers = vec![CodeRetrievalLayer::TextFallback];
+
+        let merged = merge_dependency_symbol_fallback_hits(
+            vec![direct.clone(), duplicate_direct],
+            vec![fallback.clone()],
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|hit| hit.excerpt == direct.excerpt));
+        assert!(merged.iter().any(|hit| {
+            hit.excerpt == fallback.excerpt && (hit.score - fallback.score).abs() < f64::EPSILON
+        }));
+        assert!(merged.iter().any(|hit| {
+            hit.excerpt == fallback.excerpt
+                && hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+        }));
     }
 
     fn member_status(

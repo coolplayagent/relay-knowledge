@@ -21,7 +21,8 @@ use std::path::PathBuf;
 use super::{
     RelayKnowledgeService,
     code_repository_set_plan::{
-        dependency_symbol_plan_needs_hybrid_fallback, repository_set_member_query_plan,
+        dependency_symbol_plan_needs_hybrid_fallback, merge_dependency_symbol_fallback_hits,
+        repository_set_member_query_plan,
     },
     code_repository_set_query::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
@@ -202,6 +203,7 @@ impl RelayKnowledgeService {
                 .map_err(storage_api_error)?;
             if dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_plan.kind, &hits)
             {
+                let symbol_plan_hits = hits;
                 let fallback_request = CodeRetrievalRequest::new(
                     request.query.clone(),
                     selector,
@@ -211,10 +213,11 @@ impl RelayKnowledgeService {
                 )
                 .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
                 active_request = fallback_request.clone();
-                hits = store
+                let fallback_hits = store
                     .search_code_scope(member.source_scope.clone(), fallback_request)
                     .await
                     .map_err(storage_api_error)?;
+                hits = merge_dependency_symbol_fallback_hits(symbol_plan_hits, fallback_hits);
             }
             let base_status = required_member_repository(&store, &member.repository_id).await?;
             let scoped_member_status =
