@@ -23,6 +23,25 @@ fn hybrid_chunk_gate_accepts_dense_multi_identity_chunks() {
 }
 
 #[test]
+fn hybrid_chunk_gate_accepts_collective_dense_coverage_before_limit_is_full() {
+    let request = hybrid_gate_request(
+        "tsx provider panel effect run provider envelope payload",
+        12,
+    );
+    let hits = vec![
+        chunk_gate_hit(
+            "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
+        ),
+        chunk_gate_hit("export { ProviderPanel } from './component';"),
+        chunk_gate_hit("return sendEnvelope(runtime, payload) from provider flow"),
+    ];
+
+    assert!(hybrid_chunk_results_can_answer_without_graph_expansion(
+        &request, &hits
+    ));
+}
+
+#[test]
 fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
     let request = hybrid_gate_request("RK_PIPELINE_NOTE", 1);
     assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
@@ -44,6 +63,19 @@ fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
     assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
         &sequence_request,
         &[fallback_hit, chunk_gate_hit("worker.New RegisterWorkflow")]
+    ));
+
+    let wide_request = hybrid_gate_request(
+        "tsx provider panel effect run provider envelope payload",
+        12,
+    );
+    assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
+        &wide_request,
+        &[
+            chunk_gate_hit("ProviderPanel renders provider payload"),
+            chunk_gate_hit("provider payload envelope"),
+            chunk_gate_hit("payload provider envelope"),
+        ]
     ));
 }
 

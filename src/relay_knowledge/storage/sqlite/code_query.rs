@@ -313,12 +313,13 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
         return false;
     }
     let terms = hybrid_sequence_terms(&request.query);
-    if terms.len() < 3 || hits.len() < request.limit.max(1) {
+    if terms.len() < 3 {
         return false;
     }
     let required_matches = terms.len().clamp(3, 4);
     let required_hits = request.limit.clamp(1, 3);
-    hits.iter()
+    let dense_chunk_hits = hits
+        .iter()
         .filter(|hit| {
             hit.retrieval_layers.contains(&CodeRetrievalLayer::Lexical)
                 && !hit
@@ -327,8 +328,49 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
                 && hybrid_sequence_match_count(&hit.excerpt, &terms) >= required_matches
         })
         .take(required_hits)
-        .count()
-        >= required_hits
+        .count();
+    if dense_chunk_hits >= required_hits {
+        return true;
+    }
+
+    hybrid_chunk_results_have_collective_dense_coverage(&terms, hits, required_hits)
+}
+
+fn hybrid_chunk_results_have_collective_dense_coverage(
+    terms: &[String],
+    hits: &[CodeRetrievalHit],
+    required_hits: usize,
+) -> bool {
+    let required_coverage = terms.len().saturating_mul(2).div_ceil(3).max(4);
+    let required_dense_matches = terms.len().clamp(3, 4);
+    let mut covered_terms = Vec::new();
+    let mut supporting_hits = 0usize;
+    let mut has_dense_hit = false;
+    for hit in hits {
+        if !hit.retrieval_layers.contains(&CodeRetrievalLayer::Lexical)
+            || hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::TextFallback)
+        {
+            continue;
+        }
+        let excerpt = hit.excerpt.to_ascii_lowercase();
+        let mut matched_terms = 0usize;
+        for term in terms {
+            if excerpt.contains(term.as_str()) {
+                matched_terms += 1;
+                if !covered_terms.contains(term) {
+                    covered_terms.push(term.clone());
+                }
+            }
+        }
+        if matched_terms >= 2 {
+            supporting_hits += 1;
+        }
+        has_dense_hit |= matched_terms >= required_dense_matches;
+    }
+
+    supporting_hits >= required_hits && has_dense_hit && covered_terms.len() >= required_coverage
 }
 
 fn hybrid_sequence_terms(query: &str) -> Vec<String> {
