@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-fast-grep-fallback-cases
+- 算法/架构：self-iteration prompt 明确区分产品运行时 `rg` 精确文本兜底与 agent 人工源码检查；当本机缺少 `rg` 时，Codex 应改用排除 VCS/build 目录的有界 `grep -RIn` 搜索继续分析。fast 默认覆盖的 C syntax fixture 新增多条 comment-only reference/hybrid grep fallback case，使 `text_fallback`、无 edge confidence 和源码证据语义在默认 profile 中持续被验证，不需要额外索引大仓。
+- 不变量：产品查询热路径仍只通过已有 bounded `rg` source fallback 搜索已索引 commit 内容；人工 `grep -RIn` 只用于 agent/维护者检查 workspace，不能绕过 scope、freshness、authorization 或结构化图证据排序。新增 case 使用生成式 C fixture，不枚举真实仓库路径、业务查询或依赖库内容；case 位于 fast 默认前 8 条普通查询窗口内，但不设为 hard guardrail，避免本机缺少 `rg` 时把工具缺失变成质量门禁失败。
+- 预期影响/风险：预期减少自迭代在缺少 ripgrep 的机器上停止探索的失败模式，并把 grep/text-fallback 回归前移到 fast workload。风险是 fast competitive case 数量略增、C fixture 索引内容多几行注释；风险由小型生成仓、现有 path/language filters、bounded query limit 和文档化工具边界控制。
+- 策略关联：延续 accepted bounded source fallback evidence 与 external dependency diagnostic 策略，但把验证面扩展到默认 fast workload 和 prompt 操作说明，避免通过放宽 case 或依赖本机工具偶然存在来通过评估。
 ## 候选优化说明：run-1779465105-hybrid-symbol-elision-with-bm25-query-retry
 - 算法/架构：Hybrid 单标识符查询在已有 Symbol/Definition 结果通过 canonical leaf 或 identifier 边界覆盖 query identity 时，不再启动应用层源码 grep fallback；同时 BM25 候选读取把 `graph_bm25` 的 transient vtable constructor/schema/table lock 错误放进有界 query retry，而不是只在 schema 初始化阶段重试。前者减少 exact API 查询的 scope path materialization 和 ripgrep worker work，后者保护同一检索请求继续使用 BM25、semantic/vector、graph evidence 与 code graph merge，不改变 SQLite schema、parser facts、FTS MATCH、candidate limit、repository-set fanout、env/paths/net 或 tools/self_iteration harness。
 - 不变量：Hybrid elision 只接受单 token safe identifier，并要求已有 Symbol/Definition layer；lexical-only、text_fallback、Definition、References、Imports、unresolved external import fallback 继续走原 bounded fallback；BM25 retry 只匹配明确 transient SQLite message，不吞掉 missing-table、invalid query 或非 SQLite storage errors；dedupe/top-k、path/language/freshness filters、semantic/vector read model、diagnostic fields 与 graph confidence semantics 保持不变；没有仓库名、路径名、case id、query 字符串或 fixture 枚举。
@@ -1005,4 +1010,3 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-

@@ -90,6 +90,66 @@
       "case_group": "c_tree_sitter_syntax"
     },
     {
+      "id": "c_syntax_references_header_comment_grep_text_fallback",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "RK_HEADER_CONTRACT_NOTE",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["include/driver_ops.h"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "include/driver_ops.h",
+          "excerpt_contains": "RK_HEADER_CONTRACT_NOTE keeps callback ownership searchable",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "c_grep_text_fallback"
+    },
+    {
+      "id": "c_syntax_hybrid_dispatch_comment_grep_text_fallback",
+      "repository": "c_syntax_fixture",
+      "kind": "hybrid",
+      "query": "RK_PIPELINE_NOTE",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/dispatch.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "src/dispatch.c",
+          "excerpt_contains": "RK_PIPELINE_NOTE records dispatch ordering",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "c_grep_text_fallback"
+    },
+    {
+      "id": "c_syntax_references_generated_table_comment_grep_text_fallback",
+      "repository": "c_syntax_fixture",
+      "kind": "references",
+      "query": "RK_STAGE_TABLE_NOTE",
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/generated_table.c"],
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "src/generated_table.c",
+          "excerpt_contains": "RK_STAGE_TABLE_NOTE documents generated stage rows",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "case_group": "c_grep_text_fallback"
+    },
+    {
       "id": "c_syntax_callers_function_pointer_read",
       "repository": "c_syntax_fixture",
       "kind": "callers",

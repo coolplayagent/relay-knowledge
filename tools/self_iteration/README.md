@@ -113,7 +113,10 @@ clippy, full test suite, local-file fixtures, or research judge by default.
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
 runs the semantic/vector guardrail query. The TypeScript fixture keeps the
-external-import grep fallback guardrail in the default fast loop. It reuses
+external-import grep fallback guardrail in the default fast loop. The C fixture
+also includes explicit grep/text-fallback cases early in its fast case window,
+so exact source-text recovery stays covered without indexing another large
+repository or making missing `rg` a hard quality-gate failure. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
 repeated registration and indexing cost. Score history is isolated by profile
 and category focus, so `fast --categories semantic_vector` compares only
@@ -153,7 +156,10 @@ limit.
 
 The prompt includes bounded run history, a direct synthesis of accepted and
 rejected patterns, progressive memory, and patch indexes so repeated rejections
-stay tied to recent evidence instead of retrying the same shape of patch.
+stay tied to recent evidence instead of retrying the same shape of patch. It
+also tells Codex to prefer `rg` for repository inspection and to fall back to
+bounded `grep -RIn` searches that exclude VCS and build directories when `rg`
+is not installed on the local machine.
 
 ## Unattended layered strategy
 
@@ -366,7 +372,9 @@ enumerating cases.
   the external-dependency grep fallback diagnostic: when an import target is
   unresolved because the dependency library is not indexed, the product searches
   only the current indexed repository source and returns `text_fallback`
-  evidence for LLM reasoning. Relationship targets
+  evidence for LLM reasoning. Fast C fixture guardrails also exercise exact
+  grep fallback for comment-only references and hybrid source-text hits in
+  headers, implementation files, and generated-table source. Relationship targets
   stay split into regression and challenge groups, with extended relationship
   files adding explicit implementation, alias, and inline callback/closure
   scenarios for Rust, Go, C, C++, Java, Python, JavaScript, and TypeScript.

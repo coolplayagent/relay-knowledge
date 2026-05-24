@@ -3,7 +3,7 @@
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
 > 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 编制日期: 2026-05-24
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -25,7 +25,7 @@
 
 Installer 或安装脚本支持：版本选择、安装目录选择、dry run、校验和验证、service definition 生成、失败回滚和 uninstall plan。默认不会把数据写入 release 解压目录。
 
-Ripgrep 是精确代码源码兜底的可选运行时增强依赖。安装器和打包诊断应检测 `PATH` 中是否存在 `rg`，并说明缺少它时代码图查询仍可工作，但精确兜底命中可能降级。
+Ripgrep 是精确代码源码兜底的可选运行时增强依赖。安装器和打包诊断应检测 `PATH` 中是否存在 `rg`，并说明缺少它时代码图查询仍可工作，但精确兜底命中可能降级。面向 agent 的 setup 说明可以提到缺少 `rg` 时使用有界 `grep -RIn` 做人工检查 fallback，但安装器不能把递归 `grep` 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 
 ## 4. 运行时状态
 

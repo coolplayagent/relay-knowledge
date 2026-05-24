@@ -3,7 +3,7 @@
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
 > Document version: 2.0
-> Date: 2026-05-17
+> Date: 2026-05-24
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -25,7 +25,7 @@ Installation and release are part of product architecture. Stable releases are v
 
 Installers or install scripts support version selection, install directory selection, dry run, checksum verification, service-definition generation, failure rollback, and uninstall plans. Runtime data is not written to release extraction directories by default.
 
-Ripgrep is an optional runtime enhancement for exact code-source fallback. Installers and packaged diagnostics should detect whether `rg` is on `PATH` and report that code graph queries still work without it, while exact fallback hits may be degraded.
+Ripgrep is an optional runtime enhancement for exact code-source fallback. Installers and packaged diagnostics should detect whether `rg` is on `PATH` and report that code graph queries still work without it, while exact fallback hits may be degraded. Agent-facing setup notes may mention bounded `grep -RIn` as a manual inspection fallback when `rg` is absent, but installers must not make recursive `grep` a service dependency or a replacement for indexed query behavior.
 
 ## 4. Runtime State
 
