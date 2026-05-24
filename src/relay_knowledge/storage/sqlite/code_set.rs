@@ -517,8 +517,13 @@ fn exports_for_members(
     connection: &mut Connection,
     members: &[CodeRepositorySetMemberStatus],
 ) -> Result<Vec<ExportTarget>, StorageError> {
+    let module_prefixes = manifest_module_prefixes_for_members(connection, members)?;
     let mut exports = Vec::new();
     for member in members {
+        let prefixes = module_prefixes
+            .get(&member.member.source_scope)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let mut file_statement = connection.prepare(
             "
             SELECT repository_id, source_scope, file_id, path
@@ -528,12 +533,14 @@ fn exports_for_members(
         )?;
         let file_rows = file_statement.query_map(params![member.member.source_scope], |row| {
             let path = row.get::<_, String>(3)?;
+            let mut keys = module_keys_for_path(&path);
+            extend_with_module_prefixes(&mut keys, prefixes);
             Ok(ExportTarget {
                 repository_id: row.get(0)?,
                 source_scope: row.get(1)?,
                 record_kind: "code_file".to_owned(),
                 record_id: row.get(2)?,
-                keys: module_keys_for_path(&path),
+                keys,
             })
         })?;
         exports.extend(file_rows.collect::<Result<Vec<_>, _>>()?);
@@ -551,6 +558,7 @@ fn exports_for_members(
                 let qualified_name = row.get::<_, String>(4)?;
                 let path = row.get::<_, String>(5)?;
                 let mut keys = module_keys_for_path(&path);
+                extend_with_module_prefixes(&mut keys, prefixes);
                 keys.insert(normalize_module_key(&name));
                 keys.insert(normalize_module_key(&qualified_name));
                 Ok(ExportTarget {
@@ -565,6 +573,61 @@ fn exports_for_members(
     }
 
     Ok(exports)
+}
+
+fn manifest_module_prefixes_for_members(
+    connection: &mut Connection,
+    members: &[CodeRepositorySetMemberStatus],
+) -> Result<BTreeMap<String, Vec<String>>, StorageError> {
+    let mut prefixes_by_scope = BTreeMap::new();
+    for member in members {
+        let mut statement = connection.prepare(
+            "
+            SELECT content
+            FROM code_repository_chunks
+            WHERE source_scope = ?1
+              AND path = 'go.mod'
+            ORDER BY chunk_id ASC
+            ",
+        )?;
+        let rows = statement.query_map(params![member.member.source_scope], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut prefixes = Vec::new();
+        for row in rows {
+            collect_go_module_prefixes(&row?, &mut prefixes);
+        }
+        if !prefixes.is_empty() {
+            prefixes_by_scope.insert(member.member.source_scope.clone(), prefixes);
+        }
+    }
+
+    Ok(prefixes_by_scope)
+}
+
+fn collect_go_module_prefixes(content: &str, prefixes: &mut Vec<String>) {
+    for line in content.lines() {
+        let Some(prefix) = go_module_prefix(line) else {
+            continue;
+        };
+        if !prefixes.contains(&prefix) {
+            prefixes.push(prefix);
+        }
+    }
+}
+
+fn go_module_prefix(line: &str) -> Option<String> {
+    let line = line.split("//").next()?.trim();
+    let module = line
+        .strip_prefix("module")
+        .filter(|rest| rest.starts_with(char::is_whitespace))?
+        .trim();
+    if module.is_empty() {
+        return None;
+    }
+    let normalized = normalize_module_key(module.trim_matches(['"', '\'', '`']));
+
+    (!normalized.is_empty() && normalized.contains('.')).then_some(normalized)
 }
 
 fn matching_exports(import: &ImportRecord, exports: &ExportIndex) -> Option<Vec<ExportTarget>> {
@@ -668,6 +731,20 @@ fn module_keys_for_path(path: &str) -> BTreeSet<String> {
         keys.insert(last.to_owned());
     }
     keys
+}
+
+fn extend_with_module_prefixes(keys: &mut BTreeSet<String>, prefixes: &[String]) {
+    let unprefixed = keys.iter().cloned().collect::<Vec<_>>();
+    for prefix in prefixes {
+        for key in &unprefixed {
+            keys.insert(format!("{prefix}.{key}"));
+            if let Some((parent, _)) = key.rsplit_once('.') {
+                if !parent.is_empty() {
+                    keys.insert(format!("{prefix}.{parent}"));
+                }
+            }
+        }
+    }
 }
 
 fn normalize_module_key(value: &str) -> String {

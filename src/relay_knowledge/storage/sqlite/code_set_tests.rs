@@ -475,6 +475,66 @@ async fn repository_set_overlay_refresh_requires_full_module_match_for_external_
 }
 
 #[tokio::test]
+async fn repository_set_overlay_refresh_matches_go_module_manifest_prefixes() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let summary = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "sdk", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-go-client",
+                "\"go.temporal.io/sdk/client\"",
+            )?;
+            insert_file(
+                connection,
+                "repo-b",
+                "scope-b",
+                "sdk-client-file",
+                "client/client.go",
+                "go",
+            )?;
+            insert_chunk(
+                connection,
+                "repo-b",
+                "scope-b",
+                "go-mod-chunk",
+                "go.mod",
+                "module go.temporal.io/sdk\n",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 20))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "sdk", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 30)
+        })
+        .await
+        .expect("overlay should refresh");
+
+    assert_eq!(summary.edge_count, 1);
+    assert_eq!(summary.resolved_edge_count, 1);
+
+    let edges = store
+        .run({
+            let set_id = summary.set_id.clone();
+            move |connection| code_set::cross_edges_for_set(connection, &set_id)
+        })
+        .await
+        .expect("edges should query");
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].resolution_state, "resolved");
+    assert_eq!(edges[0].to_record_kind, "code_file");
+    assert_eq!(edges[0].to_record_id.as_deref(), Some("sdk-client-file"));
+}
+
+#[tokio::test]
 async fn repository_set_alias_lookup_does_not_match_existing_set_ids() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let (first, colliding) = store
@@ -604,6 +664,56 @@ fn insert_repository_scope(
             source_scope,
             format!("file-{source_scope}"),
             format!("src/{alias}.rs"),
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_file(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    source_scope: &str,
+    file_id: &str,
+    path: &str,
+    language_id: &str,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "
+        INSERT INTO code_repository_files (
+            repository_id, source_scope, file_id, path, language_id, blob_hash,
+            byte_len, line_count, parse_status, degraded_reason
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, 'blob', 1, 1, 'parsed', NULL)
+        ",
+        params![repository_id, source_scope, file_id, path, language_id],
+    )?;
+    Ok(())
+}
+
+fn insert_chunk(
+    connection: &mut rusqlite::Connection,
+    repository_id: &str,
+    source_scope: &str,
+    chunk_id: &str,
+    path: &str,
+    content: &str,
+) -> Result<(), crate::storage::StorageError> {
+    connection.execute(
+        "
+        INSERT INTO code_repository_chunks (
+            repository_id, source_scope, chunk_id, file_id, path, language_id, content,
+            byte_start, byte_end, line_start, line_end, symbol_snapshot_id
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, 'unknown', ?6, 0, ?7, 1, 1, NULL)
+        ",
+        params![
+            repository_id,
+            source_scope,
+            chunk_id,
+            format!("file-{source_scope}"),
+            path,
+            content,
+            content.len() as u32,
         ],
     )?;
     Ok(())

@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779662884-go-module-prefix-overlay
+- 算法/架构：repository-set overlay refresh 读取已索引 `go.mod` 文本 chunk 中的 `module` 前缀，把目标仓库导出的文件 path key 扩展为 module-qualified key；跨仓 unresolved Go import（如域名模块路径）先通过精确 module-qualified key 命中目标仓库内部 package/file，再继续复用既有 cross-edge、overlay evidence、bridge support、dedupe/diversity/top-k 合并流程。文件 path key 同时补充父目录 key，使 package import 可匹配 package 目录下的文件候选。
+- 不变量：不改变 SQLite schema、单仓 code query、FTS MATCH、ranking 权重、parser facts、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只使用当前索引中已有 `go.mod` chunk，不读取工作区文件系统；只接受带点号的 Go module 前缀，继续跳过本地/相对 import 与已本仓 resolved import，无仓库名、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期改善 Temporal SDK、OpenTelemetry Collector 等多仓 Go workspace 中 `go.temporal.io/sdk/...`、`go.opentelemetry.io/collector/...` 这类模块 import 到目标仓内部 package/file 的 overlay evidence，提升 usage-definition bridge、member priority bonus 的解释性，并减少把跨仓关系误当普通 unresolved 外部库的情况；刷新成本为每个 member 一次有界 `go.mod` chunk 扫描。风险是同一 package 多文件时 edge 由 resolved 变为 ambiguous，但候选仍受同仓排除、module prefix gate、confidence tier、returned evidence pruning 和最终 top-k 控制。
+- 策略关联：建立在 accepted `run-1779604104` repository-set overlay/Hybrid gating 与 `run-1779652179` import graph 事实补齐策略之上；避免 latest rejected `run-1779661306`/`run-1779660072` 的 `code_query_support.rs` ranking 局部 tweak 与 research_judge regression 簇，改为提升跨仓 import graph overlay 的通用结构化证据。
 ## 候选优化说明：run-1779652179-script-import-edges
 - 算法/架构：parser 在 tree-sitter import captures 之外增加通用 script-line import extractor，把 Ruby `require`/`require_relative`/`load` 与 Bash `source`/`.` 命令写入同一 `CodeImportRecord` import graph；Bash 若紧邻 `# shellcheck source=...` 指令，则将指令与 source 命令合并为同一 import evidence，使检索同时保留真实 source 行与可搜索的 source annotation。import identity 层新增 Ruby/Bash local target resolver：Ruby 相对 require 按当前文件目录解析并补 `.rb`，普通 require 同时探测仓库根与 `lib/` load-path；Bash 优先使用 shellcheck source directive，其次使用可静态解析的 quoted/unquoted source target，并按当前脚本目录补 `.sh`/`.bash` 候选。
 - 不变量：不改变 SQLite schema、FTS MATCH 构造、ranking 权重、candidate window、call/reference/symbol facts、repo-set overlay、source `text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只索引行首 import-like script 语句，不解析任意字符串或执行 shell expansion；含 `$` 的 Bash source target 不做静态 target 证明，仍可作为 unresolved source-text evidence；无仓库、路径、case id、query 字符串或 fixture 枚举。
@@ -968,6 +973,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.692099->0.8845254920334789; score_component:foundational_capability 0.908784->0.9222972972972973; score_component:competitive_capability 0.751879->0.7591040462427746; score_component:research_judge 0.0->0.86; gate:research_judge false->true; case:ruby_syntax_imports_require_relative_extensions false->true; case_rank:leveldb_cpp_inheritance_filter_policy_override_challenge null->5; case_score:leveldb_hybrid_recovery_manifest_full_scope 0.5->1.0
 - known degradations: score_component:performance 0.801698->0.7965817575444437; case_score:opencode_ts_implementation_data_migration_service_challenge 1.0->0.75; case_rank:opencode_ts_implementation_data_migration_service_challenge 1->2; case_rank:otel_go_repo_set_receiver_factory_create_logs 5->10; case_rank:otel_go_repo_set_filelog_component_type 6->null; metric:temporal_samples_go_index_ms 1634.0->3394.0; metric:temporal_samples_go_register_index_ms 1675.0->3435.0; metric:relay_teams_query_p50_ms 402.0->504.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_release_ms=86811ms; self_iteration_cargo_build_release_ms=243ms; cargo_clippy_ms=363ms; cargo_test_ms=14775ms; self_iteration_cargo_clippy_ms=242ms; self_iteration_cargo_test_ms=161ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779662884
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779662884.patch`
+- score: 0.888382 (foundational=0.922297, competitive=0.759104, accuracy=0.840701, semantic_vector=1.000000, research_judge=0.860000, performance=0.822289, stability=1.000000)
+- cases: 216/251 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_set.rs`, `src/relay_knowledge/storage/sqlite/code_set_tests.rs`
+- key improvements: score_component:score 0.872638->0.8883815451024761; score_component:performance 0.775995->0.822288778004426; score_component:research_judge 0.82->0.86; case_rank:otel_go_repo_set_filelog_component_type null->7; case_score:research_judge 0.82->0.86; metric:cargo_fmt_check_ms 1776.0->1676.0; metric:temporal_samples_go_index_ms 1637.0->1575.0; metric:scala_syntax_fixture_index_ms 9032.0->564.0
+- known degradations: metric:self_iteration_cargo_build_release_ms 122.0->222.0; metric:self_iteration_cargo_clippy_ms 202.0->262.0; metric:swift_syntax_fixture_index_ms 887.0->928.0; metric:swift_syntax_fixture_register_index_ms 928.0->968.0; metric:relay_teams_query_p50_ms 282.0->465.0; metric:otel_collector_contrib_index_ms 370144.0->399267.0; metric:otel_collector_contrib_register_index_ms 370185.0->399348.0; metric:opencode_typescript_index_ms 37265.0->47417.0
+- latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_release_ms=87456ms; self_iteration_cargo_build_release_ms=222ms; cargo_clippy_ms=383ms; cargo_test_ms=14969ms; self_iteration_cargo_clippy_ms=262ms; self_iteration_cargo_test_ms=161ms
 
 Adopted optimization notes:
 
