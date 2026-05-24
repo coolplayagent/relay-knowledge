@@ -94,6 +94,8 @@ fn ranges_overlap(left_start: u32, left_end: u32, right_start: u32, right_end: u
 fn symbol_kinds_overlap(left: &str, right: &str) -> bool {
     left == right
         || (function_like_symbol_kind(left) && function_like_symbol_kind(right))
+        || (function_like_symbol_kind(left) && value_like_symbol_kind(right))
+        || (value_like_symbol_kind(left) && function_like_symbol_kind(right))
         || (type_like_symbol_kind(left) && type_like_symbol_kind(right))
         || matches!(
             (left, right),
@@ -113,6 +115,10 @@ fn function_like_symbol_kind(kind: &str) -> bool {
 
 fn type_like_symbol_kind(kind: &str) -> bool {
     matches!(kind, "class" | "interface" | "type")
+}
+
+fn value_like_symbol_kind(kind: &str) -> bool {
+    matches!(kind, "constant" | "variable")
 }
 
 fn symbol_preferred_over_existing(

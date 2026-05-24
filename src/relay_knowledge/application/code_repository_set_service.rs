@@ -415,7 +415,12 @@ async fn query_repository_set_member(
         .search_code_scope(member.source_scope.clone(), search_request)
         .await
         .map_err(storage_api_error)?;
-    if dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_plan.kind, &hits) {
+    let dependency_symbol_plan_needs_fallback =
+        dependency_symbol_plan_needs_hybrid_fallback(&request, member_query_plan.kind, &hits);
+    let dependency_symbol_plan_satisfied = request.code_query_kind == CodeQueryKind::Hybrid
+        && member_query_plan.kind == CodeQueryKind::Symbol
+        && !dependency_symbol_plan_needs_fallback;
+    if dependency_symbol_plan_needs_fallback {
         let symbol_plan_hits = hits;
         let fallback_request = CodeRetrievalRequest::new(
             request.query.clone(),
@@ -432,21 +437,26 @@ async fn query_repository_set_member(
             .map_err(storage_api_error)?;
         hits = merge_dependency_symbol_fallback_hits(symbol_plan_hits, fallback_hits);
     }
-    let base_status = required_member_repository(&store, &member.repository_id).await?;
-    let scoped_member_status = code_status_for_repository_set_member(&base_status, &member_status);
-    let degraded_reason =
-        if repository_set_member_source_fallback_needed(&request, &active_request, hits.len()) {
-            apply_code_grep_fallback(
-                &store,
-                &base_status,
-                &scoped_member_status,
-                &active_request,
-                &mut hits,
-            )
-            .await?
-        } else {
-            None
-        };
+    let degraded_reason = if repository_set_member_source_fallback_needed(
+        &request,
+        &active_request,
+        hits.len(),
+        dependency_symbol_plan_satisfied,
+    ) {
+        let base_status = required_member_repository(&store, &member.repository_id).await?;
+        let scoped_member_status =
+            code_status_for_repository_set_member(&base_status, &member_status);
+        apply_code_grep_fallback(
+            &store,
+            &base_status,
+            &scoped_member_status,
+            &active_request,
+            &mut hits,
+        )
+        .await?
+    } else {
+        None
+    };
 
     Ok(RepositorySetMemberQueryOutcome {
         member_status,
@@ -459,7 +469,12 @@ fn repository_set_member_source_fallback_needed(
     set_request: &CodeRepositorySetQueryRequest,
     active_request: &CodeRetrievalRequest,
     hit_count: usize,
+    dependency_symbol_plan_satisfied: bool,
 ) -> bool {
+    if dependency_symbol_plan_satisfied {
+        return false;
+    }
+
     active_request.code_query_kind != CodeQueryKind::Hybrid || hit_count < set_request.limit.max(1)
 }
 
@@ -813,17 +828,32 @@ mod tests {
         assert!(!repository_set_member_source_fallback_needed(
             &set_request,
             &hybrid_member_request,
-            2
+            2,
+            false
         ));
         assert!(repository_set_member_source_fallback_needed(
             &set_request,
             &hybrid_member_request,
-            1
+            1,
+            false
         ));
         assert!(repository_set_member_source_fallback_needed(
             &set_request,
             &member_retrieval_request(CodeQueryKind::Imports, 8),
-            8
+            8,
+            false
+        ));
+        assert!(!repository_set_member_source_fallback_needed(
+            &set_request,
+            &member_retrieval_request(CodeQueryKind::Symbol, 8),
+            2,
+            true
+        ));
+        assert!(repository_set_member_source_fallback_needed(
+            &set_request,
+            &member_retrieval_request(CodeQueryKind::Symbol, 8),
+            2,
+            false
         ));
     }
 

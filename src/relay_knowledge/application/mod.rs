@@ -1,6 +1,7 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
 mod code_query_source_fallback;
+mod code_query_source_surface;
 mod code_repository_set_identity_coverage;
 mod code_repository_set_lifecycle;
 mod code_repository_set_plan;

@@ -193,9 +193,10 @@ fn javascript_like_exported_value_definition(
     language_id: &str,
     node: Node<'_>,
 ) -> Option<(String, &'static str, SyntaxRange)> {
+    let export_statement = export_statement_ancestor(node);
     if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
         || node.kind() != "variable_declarator"
-        || export_statement_ancestor(node).is_none()
+        || export_statement.is_none()
     {
         return None;
     }
@@ -212,6 +213,7 @@ fn javascript_like_exported_value_definition(
         return None;
     }
 
+    let range = export_statement.map(syntax_range).unwrap_or(range);
     Some((name, "constant", range))
 }
 
@@ -329,8 +331,32 @@ fn generic_manual_definition(
 ) -> Option<(String, &'static str, SyntaxRange)> {
     let kind = language_nodes::definition_kind(language_id, node.kind())?;
     let name = node.child_by_field_name("name")?;
+    let range = javascript_like_exported_declaration_range(language_id, node)
+        .unwrap_or_else(|| syntax_range(node));
 
-    Some((node_text(content, name), kind, syntax_range(node)))
+    Some((node_text(content, name), kind, range))
+}
+
+fn javascript_like_exported_declaration_range(
+    language_id: &str,
+    node: Node<'_>,
+) -> Option<SyntaxRange> {
+    if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx") {
+        return None;
+    }
+    if !matches!(
+        node.kind(),
+        "class_declaration"
+            | "enum_declaration"
+            | "function_declaration"
+            | "generator_function_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration"
+    ) {
+        return None;
+    }
+
+    export_statement_ancestor(node).map(syntax_range)
 }
 
 fn manual_call(context: &FileParseContext<'_>, node: Node<'_>) -> Option<(String, SyntaxRange)> {

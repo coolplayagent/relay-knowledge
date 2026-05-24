@@ -54,6 +54,61 @@ export const routes = [state] satisfies Route[];
     assert_missing_symbols(&snapshot, ["localState"]);
 }
 
+#[test]
+fn typescript_exported_declarations_preserve_source_surface() {
+    let snapshot = parse_source_snapshot(
+        "src/protocol.ts",
+        br#"
+export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;
+
+export interface StreamTransport {
+    send(payload: string): Promise<void>;
+}
+
+export class ProviderPanel {
+    render(): void {}
+}
+
+export function makeProvider(): StreamTransport {
+    return { send: async () => undefined };
+}
+"#,
+    );
+
+    assert_symbol_signature_starts_with(
+        &snapshot,
+        "PayloadProjector",
+        "export type PayloadProjector",
+    );
+    assert_symbol_signature_starts_with(
+        &snapshot,
+        "StreamTransport",
+        "export interface StreamTransport",
+    );
+    assert_symbol_signature_starts_with(&snapshot, "ProviderPanel", "export class ProviderPanel");
+    assert_symbol_signature_starts_with(&snapshot, "makeProvider", "export function makeProvider");
+}
+
+#[test]
+fn typescript_exported_function_values_use_one_exported_symbol_surface() {
+    let snapshot = parse_source_snapshot(
+        "src/protocol.ts",
+        br#"
+export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;
+export const trimPayload: PayloadProjector<string> = (payload) => payload.trim();
+"#,
+    );
+    let symbols = snapshot
+        .symbols
+        .iter()
+        .filter(|symbol| symbol.name == "trimPayload")
+        .collect::<Vec<_>>();
+
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].kind, "function");
+    assert!(symbols[0].signature.starts_with("export const trimPayload"));
+}
+
 fn assert_exported_constant(snapshot: &CodeIndexSnapshot, name: &str, signature: &str) {
     let symbol = snapshot
         .symbols
@@ -69,6 +124,24 @@ fn assert_exported_constant(snapshot: &CodeIndexSnapshot, name: &str, signature:
             .iter()
             .any(|chunk| chunk.symbol_snapshot_id == Some(symbol.symbol_snapshot_id.clone())),
         "{name} should create a retrievable symbol chunk",
+    );
+}
+
+fn assert_symbol_signature_starts_with(
+    snapshot: &CodeIndexSnapshot,
+    name: &str,
+    expected_prefix: &str,
+) {
+    let symbol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == name)
+        .unwrap_or_else(|| panic!("{name} should be extracted as a symbol"));
+
+    assert!(
+        symbol.signature.starts_with(expected_prefix),
+        "{name} signature should start with {expected_prefix:?}, got {:?}",
+        symbol.signature
     );
 }
 

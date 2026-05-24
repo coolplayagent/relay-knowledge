@@ -11,6 +11,8 @@ use crate::{
     },
 };
 
+use super::code_query_source_surface::hit_has_complete_source_surface;
+
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
 const EXTERNAL_IMPORT_GREP_DIAGNOSTIC: &str = "external dependency import is not indexed in the code graph; searched current repository source with internal grep fallback";
@@ -614,6 +616,9 @@ fn hybrid_source_surface_fallback(
             && identity_terms.len() < query_terms.len()
             && identity_terms.iter().all(|term| query_terms.contains(term))
         {
+            if hybrid_results_have_complete_source_surface(results, &identity) {
+                continue;
+            }
             let term_count = identity_terms.len();
             let identity_len = identity.len();
             if best.as_ref().is_none_or(|(_, _, best_terms, best_len)| {
@@ -625,6 +630,15 @@ fn hybrid_source_surface_fallback(
     }
 
     best.map(|(identity, paths, _, _)| (identity, paths))
+}
+
+fn hybrid_results_have_complete_source_surface(
+    results: &[CodeRetrievalHit],
+    identity: &str,
+) -> bool {
+    results
+        .iter()
+        .any(|hit| hit_has_complete_source_surface(hit, identity))
 }
 
 fn hit_identity(hit: &CodeRetrievalHit) -> Option<String> {

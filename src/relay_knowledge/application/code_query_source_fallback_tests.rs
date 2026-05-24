@@ -167,6 +167,42 @@ fn hybrid_source_surface_fallback_refreshes_same_line_excerpt() {
 }
 
 #[test]
+fn hybrid_source_surface_fallback_skips_complete_exported_value_surfaces() {
+    let request = request(
+        "typed arrow payload projector trim provider record",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+    let mut result = hit(
+        "src/protocol.ts",
+        "export const trimPayload: PayloadProjector<string> = (payload) => payload.trim();",
+    );
+    result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    result.canonical_symbol_id = Some("repo://repo/src::protocol::trimPayload".to_owned());
+    let mut type_result = hit(
+        "src/protocol.ts",
+        "export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;",
+    );
+    type_result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    type_result.canonical_symbol_id =
+        Some("repo://repo/src::protocol::PayloadProjector".to_owned());
+    let mut contextual_type_result = hit("src/provider.ts", "PayloadProjector<string>");
+    contextual_type_result.retrieval_layers =
+        vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    contextual_type_result.canonical_symbol_id =
+        Some("repo://repo/src::protocol::PayloadProjector".to_owned());
+
+    assert!(
+        plan_code_grep_fallback(
+            &status(),
+            &request,
+            &[contextual_type_result, result, type_result]
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");
