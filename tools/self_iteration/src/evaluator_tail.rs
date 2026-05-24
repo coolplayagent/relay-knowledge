@@ -448,6 +448,7 @@ fn fast_repository_names() -> Vec<String> {
             vec![
                 "c_syntax_fixture".to_owned(),
                 "cpp_syntax_fixture".to_owned(),
+                "typescript_syntax_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),
                 "temporal_samples_go".to_owned(),
