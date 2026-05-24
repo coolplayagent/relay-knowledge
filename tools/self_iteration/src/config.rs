@@ -158,6 +158,12 @@ impl CategorySet {
         Ok(Self { categories })
     }
 
+    fn all() -> Self {
+        Self {
+            categories: EvaluationCategory::ALL.into_iter().collect(),
+        }
+    }
+
     pub fn contains(&self, category: EvaluationCategory) -> bool {
         self.categories.contains(&category)
     }
@@ -178,6 +184,16 @@ impl CategorySet {
 
     pub fn focus_key(&self) -> String {
         self.labels().join(",")
+    }
+
+    fn remove_all(&mut self, excluded: &Self) {
+        for category in &excluded.categories {
+            self.categories.remove(category);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.categories.is_empty()
     }
 }
 
@@ -236,6 +252,7 @@ impl Config {
     pub fn parse(args: Vec<String>) -> Result<Self, String> {
         let mut parser = Parser::new(args);
         let mode = parser.take_mode().unwrap_or(Mode::Loop);
+        let mut excluded_categories: Option<CategorySet> = None;
         let mut config = Self {
             mode,
             strategy: Strategy::Single,
@@ -320,6 +337,10 @@ impl Config {
                 "--categories" => {
                     config.categories = Some(CategorySet::parse(&parser.value("--categories")?)?);
                 }
+                "--exclude-categories" => {
+                    excluded_categories =
+                        Some(CategorySet::parse(&parser.value("--exclude-categories")?)?);
+                }
                 "--max-wall-clock-hours" => {
                     config.max_wall_clock_hours = positive_u64(&parser.value(&arg)?, &arg)?;
                 }
@@ -393,6 +414,10 @@ impl Config {
                 other if other.starts_with("--categories=") => {
                     config.categories = Some(CategorySet::parse(suffix(other, "--categories="))?);
                 }
+                other if other.starts_with("--exclude-categories=") => {
+                    excluded_categories =
+                        Some(CategorySet::parse(suffix(other, "--exclude-categories="))?);
+                }
                 other if other.starts_with("--max-wall-clock-hours=") => {
                     config.max_wall_clock_hours = positive_u64(
                         suffix(other, "--max-wall-clock-hours="),
@@ -414,8 +439,25 @@ impl Config {
                 other => return Err(format!("unexpected argument: {other}")),
             }
         }
+        apply_category_exclusions(&mut config, excluded_categories)?;
         Ok(config)
     }
+}
+
+fn apply_category_exclusions(
+    config: &mut Config,
+    excluded_categories: Option<CategorySet>,
+) -> Result<(), String> {
+    let Some(excluded) = excluded_categories else {
+        return Ok(());
+    };
+    let mut selected = config.categories.clone().unwrap_or_else(CategorySet::all);
+    selected.remove_all(&excluded);
+    if selected.is_empty() {
+        return Err("--exclude-categories removed all selected categories".to_owned());
+    }
+    config.categories = Some(selected);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -628,11 +670,97 @@ mod tests {
     }
 
     #[test]
+    fn excludes_categories_after_all_expansion() {
+        let config = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--categories=all".to_owned(),
+            "--exclude-categories=research_judge".to_owned(),
+        ])
+        .expect("config should parse");
+        let labels = config
+            .categories
+            .as_ref()
+            .expect("categories should be set")
+            .labels();
+
+        assert_eq!(
+            labels,
+            vec![
+                "foundational",
+                "competitive",
+                "semantic_vector",
+                "file_fixtures",
+                "repository_sets",
+                "performance"
+            ]
+        );
+        assert_eq!(
+            config.category_focus_key().as_deref(),
+            Some(
+                "foundational,competitive,semantic_vector,file_fixtures,repository_sets,performance"
+            )
+        );
+    }
+
+    #[test]
+    fn exclude_categories_without_focus_selects_all_remaining_categories() {
+        let config = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--exclude-categories".to_owned(),
+            "judge".to_owned(),
+        ])
+        .expect("config should parse");
+        let labels = config
+            .categories
+            .as_ref()
+            .expect("categories should be set")
+            .labels();
+
+        assert_eq!(
+            labels,
+            vec![
+                "foundational",
+                "competitive",
+                "semantic_vector",
+                "file_fixtures",
+                "repository_sets",
+                "performance"
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_excluding_all_selected_categories() {
+        let error = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--categories".to_owned(),
+            "research_judge".to_owned(),
+            "--exclude-categories".to_owned(),
+            "research_judge".to_owned(),
+        ])
+        .expect_err("empty selected categories should fail");
+
+        assert!(error.contains("removed all selected categories"));
+    }
+
+    #[test]
     fn rejects_invalid_focus_category() {
         let error = Config::parse(vec![
             "evaluate".to_owned(),
             "--categories".to_owned(),
             "semantic_vector,nope".to_owned(),
+        ])
+        .expect_err("invalid category should fail");
+
+        assert!(error.contains("invalid evaluation category"));
+    }
+
+    #[test]
+    fn rejects_invalid_excluded_category() {
+        let error = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--exclude-categories".to_owned(),
+            "nope".to_owned(),
         ])
         .expect_err("invalid category should fail");
 

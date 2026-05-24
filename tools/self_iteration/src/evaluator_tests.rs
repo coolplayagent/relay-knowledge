@@ -115,6 +115,28 @@ mod tests {
     }
 
     #[test]
+    fn excluded_research_judge_skips_judge_suite_in_full_all_selection() {
+        let config = Config::parse(vec![
+            "evaluate".to_owned(),
+            "--profile".to_owned(),
+            "full".to_owned(),
+            "--categories".to_owned(),
+            "all".to_owned(),
+            "--exclude-categories".to_owned(),
+            "research_judge".to_owned(),
+        ])
+        .expect("config should parse");
+        let selection = WorkloadSelection::new(&config);
+
+        assert!(selection.runs_repository_workload("full"));
+        assert!(selection.runs_repository_sets("full"));
+        assert!(selection.runs_file_fixtures("full"));
+        assert!(selection.runs_semantic_vector("full"));
+        assert!(!selection.runs_research_judge("full"));
+        assert_eq!(selection.skipped_suites("full"), vec!["research_judge"]);
+    }
+
+    #[test]
     fn focused_repository_cases_include_guardrails_and_selected_objective() {
         let categories = CategorySet::parse("competitive").expect("categories should parse");
         let cases = vec![

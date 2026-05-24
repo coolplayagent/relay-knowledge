@@ -143,7 +143,10 @@ semantic/vector suite plus repository and repo-set guardrails, while
 `--categories competitive` runs competitive repository cases plus the same
 guardrails. `--categories performance` keeps the performance-bearing repository,
 repo-set, semantic/vector, and file-fixture measurement workloads instead of
-collapsing to guardrails only.
+collapsing to guardrails only. Use `--exclude-categories` to subtract categories
+after `all` expansion; for example,
+`--categories all --exclude-categories research_judge` keeps the full focused
+workload but does not run the research judge suite.
 
 Concurrency defaults to `--jobs auto`, `--repo-jobs auto`, and `--query-jobs
 auto`. `auto` uses the local machine aggressively: the global command limiter
@@ -262,10 +265,12 @@ freshness/version evidence, and same-change documentation updates.
 Custom CLI commands receive the judge prompt on stdin by default. Command
 templates may also use `{workspace}`, `{prompt_file}`, or `{prompt}`
 placeholders. The harness requires either HTTP or CLI judges to return strict
-JSON. Set `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` to record `judge_skipped`; `off`,
-`disabled`, `skip`, and `false` are accepted as disable aliases. Explicit
-misconfiguration, malformed JSON, low confidence, low overall score, or low
-anti-fixture-special-casing score rejects the candidate.
+JSON. Set `RELAY_KNOWLEDGE_JUDGE_BACKEND=none` to keep the suite selected while
+recording `judge_skipped`; `off`, `disabled`, `skip`, and `false` are accepted
+as disable aliases. Use `--exclude-categories research_judge` when the suite
+itself should not run. Explicit misconfiguration, malformed JSON, low
+confidence, low overall score, or low anti-fixture-special-casing score rejects
+the candidate.
 
 Case objectives are continuous quality scores, not pass-rate counters. A passed case
 at rank 1 starts from `1.0`; a passed case at rank `N > 1` starts from
@@ -414,7 +419,7 @@ enumerating cases.
   indexing wall time after `repo register`, including batching, parser
   throughput, SQLite writes, finalize work, and incremental reuse.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
-- `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can be disabled with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`. Unsupported backend names fail the judge gate, and an explicit CLI judge command selects the CLI backend unless `RELAY_KNOWLEDGE_JUDGE_BACKEND` explicitly requests HTTP. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
+- `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can keep the suite selected while disabling the backend with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`; use `--exclude-categories research_judge` when the suite itself should not run. Unsupported backend names fail the judge gate, and an explicit CLI judge command selects the CLI backend unless `RELAY_KNOWLEDGE_JUDGE_BACKEND` explicitly requests HTTP. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.
 - `/opt/workspace/opencode` full `scope=all` indexing and TypeScript/TSX monorepo queries for symbols, references, overloaded functions, exported constants, TSX components, caller/callee edges, relative imports, `@/` and `~/` alias imports, HTTP recorder redaction flows, LLM protocol streaming flows, and negative symbol lookup. This target is intentionally import-heavy so the loop can evolve stable TypeScript import identities and duplicate-edge handling instead of only optimizing small fixtures.
 - `/opt/workspace/linux` full `scope=all` indexing in the `exhaustive` profile, covering symbols, functions, syscall-style macros, exported symbols, includes, references, callers, callees, mmap flow, and epoll/eventfd retrieval.
