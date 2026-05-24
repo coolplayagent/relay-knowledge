@@ -9,6 +9,9 @@ const MAX_COMPOUND_FTS_ALTERNATIVES: usize = 24;
 const MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS: usize = 4;
 const MAX_HYBRID_CHUNK_RECALL_TERMS: usize = 6;
 const MAX_HYBRID_CHUNK_RECALL_ANCHORS: usize = 3;
+const MIN_API_DENSE_HIGH_SIGNAL_TERMS: usize = 3;
+const MIN_HIGH_SIGNAL_TERM_PRIORITY: usize = 4;
+const MAX_API_DENSE_UNSTRUCTURED_TERMS: usize = 1;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -83,6 +86,10 @@ fn dedupe_terms(terms: Vec<String>) -> Vec<String> {
 }
 
 fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
+    if api_dense_hybrid_query(terms) {
+        return high_signal_hybrid_chunk_recall_terms(terms);
+    }
+
     let mut recall_terms = leading_hybrid_chunk_recall_anchors(terms);
     let mut ranked = terms
         .iter()
@@ -102,6 +109,63 @@ fn hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
         }
         if priority < 2 {
             continue;
+        }
+        push_case_insensitive_unique_term(&mut recall_terms, term);
+    }
+
+    recall_terms
+}
+
+fn api_dense_hybrid_query(terms: &[String]) -> bool {
+    let mut high_signal_terms = 0usize;
+    let mut has_structured_term = false;
+    for term in terms {
+        let structured = identifier_term_has_structure(term);
+        has_structured_term |= structured;
+        if hybrid_chunk_term_priority(term) >= MIN_HIGH_SIGNAL_TERM_PRIORITY {
+            high_signal_terms += 1;
+        }
+    }
+
+    has_structured_term && high_signal_terms >= MIN_API_DENSE_HIGH_SIGNAL_TERMS
+}
+
+fn high_signal_hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
+    let mut ranked = terms
+        .iter()
+        .enumerate()
+        .map(|(position, term)| {
+            (
+                identifier_term_has_structure(term),
+                hybrid_chunk_term_priority(term),
+                position,
+                term,
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(right.3))
+    });
+
+    let mut recall_terms = Vec::new();
+    let mut unstructured_terms = 0usize;
+    for (structured, priority, _, term) in ranked {
+        if recall_terms.len() >= MAX_HYBRID_CHUNK_RECALL_TERMS {
+            break;
+        }
+        if priority < MIN_HIGH_SIGNAL_TERM_PRIORITY {
+            continue;
+        }
+        if !structured {
+            if unstructured_terms >= MAX_API_DENSE_UNSTRUCTURED_TERMS {
+                continue;
+            }
+            unstructured_terms += 1;
         }
         push_case_insensitive_unique_term(&mut recall_terms, term);
     }
@@ -292,5 +356,31 @@ mod tests {
         for term in ["operation", "table", "read", "designated", "initializer"] {
             assert!(fts_query.contains(&format!("\"{term}\"")));
         }
+    }
+
+    #[test]
+    fn hybrid_chunk_fts_query_uses_high_signal_terms_for_api_dense_queries() {
+        let fts_query = hybrid_chunk_fts_match_query(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+        );
+
+        for term in ["RegisterWorkflow", "RegisterActivity", "InterruptCh"] {
+            assert!(fts_query.contains(&format!("\"{term}\"")));
+        }
+        for term in ["worker", "task", "queue"] {
+            assert!(!fts_query.contains(&format!("\"{term}\"")));
+        }
+    }
+
+    #[test]
+    fn hybrid_chunk_fts_query_limits_broad_context_terms_for_api_dense_queries() {
+        let fts_query = hybrid_chunk_fts_match_query(
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+        );
+
+        assert!(fts_query.contains("\"MustLoadDefaultClientOptions\""));
+        assert!(fts_query.contains("\"envconfig\""));
+        assert!(!fts_query.contains("\"workflow\""));
+        assert!(!fts_query.contains("\"client\""));
     }
 }

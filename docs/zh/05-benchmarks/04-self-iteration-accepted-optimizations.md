@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779610982-api-dense-hybrid-chunk-recall
+- 算法/架构：Hybrid chunk FTS planner 在长查询中先判断是否为 API-dense query：至少包含一个结构化 identifier（camelCase/Pascal compound 或 snake_case）且有不少于 3 个高信号 term。命中后，chunk recall 不再保留前置低专有度 lowercase anchors，而是优先使用结构化 API terms，并最多保留 1 个最高信号的 lowercase package/context term 生成 FTS OR 查询；纯 lowercase 的流程/概念查询、短查询和 API 信号不足的查询继续走原 leading-anchor planner。后置 Rust scorer、symbol/reference/call/import layers、repo-set member fanout、overlay evidence、source fallback、semantic/vector read model 与 SQLite schema 均不改变。
+- 不变量：不改变 parser facts、FTS 文档写入、candidate limit、path/language/freshness filters、source `text_fallback` 语义、external dependency diagnostic、env/paths/net、CLI/API 或 tools/self_iteration harness；API-dense 判定只使用 query token 的通用 identifier structure 与 term priority，没有仓库、路径、case id、query 字符串或 fixture 枚举；召回 term 数继续受 `MAX_HYBRID_CHUNK_RECALL_TERMS` 约束，非 chunk retrieval layers 保持完整兜底。
+- 预期影响/风险：预期降低 Temporal/OTel 这类 multi-repository workspace 的 Hybrid chunk FTS 扫描量，特别是 `worker/client/task/queue/workflow` 等宽泛词与多个 API identity 混合的查询，从而改善 repo-set query p50/p95 和单仓 Hybrid query p95；对 C/C++ syntax fixture 的纯 lowercase flow/designated-initializer 查询应保持原召回。风险是少数 API-dense 查询若只在多个宽泛 lowercase anchors 上命中文本 chunk，chunk 候选可能减少；风险由至少 3 个高信号 term 的门槛、1 个 lowercase backup term、完整后置 scorer、symbol/call/reference/import fallback layers、最终 dedupe/top-k 和 focused planner tests 控制。
+- 策略关联：建立在 accepted `run-1779604104` 的 repository-set Hybrid chunk-first gating 和 accepted `run-1779254116` 的 bounded chunk-anchor FTS planner 之上；避免 rejected `run-1779609104` 的 grep/text-fallback 语义改动路径，也避免继续做只影响单个 fixture 的局部 grep scorer tweak。
 ## 候选优化说明：run-1779608611-adaptive-index-parse-fanout
 - 算法/架构：checkpointed full-index pipeline 在每个 Git blob fetch batch 后，按本批文件数与 blob bytes 计算 parser worker fanout；小文件小字节批次直接串行解析，较大批次按 `files/worker` 与 `bytes/worker` 的较大值上界 worker 数，再受 OS available parallelism 与 batch size 限制。批次仍先通过既有 `git cat-file --batch` 读取、解析后按原 path 顺序重排并写入同一 `CodeIndexBatch`。
 - 不变量：不改变 parser facts、SnapshotBuild merge、SQLite schema、checkpoint session/cursor、resource budget、FTS 文档、query ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、安装发布或 tools/self_iteration harness；worker fanout 只由本批通用 work estimate 决定，没有仓库、路径、case id、query 字符串或 fixture 枚举；并行分支仍保持 deterministic path order、panic/error propagation、row/byte/file batch budgets 与 blocking worker 边界。
@@ -996,6 +1001,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.969079->0.9764225278196993; score_component:performance 0.842108->0.8829029323316626; metric:cargo_build_debug_ms 17805.0->284.0; metric:cpp_syntax_fixture_index_ms 121.0->61.0; metric:cpp_syntax_fixture_register_index_ms 182.0->122.0; metric:cpp_syntax_fixture_query_p50_ms 266.0->182.0; metric:cpp_syntax_fixture_query_p95_ms 446.0->406.0; metric:c_syntax_fixture_index_ms 222.0->121.0
 - known degradations: metric:c_syntax_fixture_register_index_ms 263.0->323.0; metric:leveldb_cpp_query_p95_ms 183.0->283.0; metric:relay_teams_index_ms 767.0->847.0; metric:relay_teams_register_index_ms 828.0->912.0; metric:temporal_go_workspace_repo_set_query_p50_ms 3110.0->3873.0; metric:temporal_go_workspace_repo_set_query_p95_ms 3110.0->3873.0; metric:semantic_vector_provider_probe_ms 344.0->384.0
 - latency metrics: cargo_fmt_check_ms=1656ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_debug_ms=284ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=486ms; temporal_sdk_go_register_index_ms=548ms; temporal_samples_go_index_ms=101ms; temporal_samples_go_register_index_ms=164ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779610982
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779610982.patch`
+- score: 0.974394 (foundational=1.000000, competitive=0.988636, accuracy=0.994318, semantic_vector=1.000000, research_judge=n/a, performance=0.871636, stability=1.000000)
+- cases: 51/51 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`
+- key improvements: score_component:score 0.958733->0.9743944956992834; score_component:competitive_capability 0.958333->0.9886363636363636; score_component:performance 0.834768->0.8716360872182412; score_component:stability 0.990566->1.0; gate:c_syntax_fixture_c_syntax_hybrid_dispatch_comment_grep_text_fallback false->true; case:c_syntax_hybrid_dispatch_comment_grep_text_fallback false->true; metric:cargo_fmt_check_ms 1695.0->1635.0; metric:cpp_syntax_fixture_index_ms 282.0->61.0
+- known degradations: metric:temporal_samples_go_index_ms 122.0->283.0; metric:temporal_samples_go_register_index_ms 185.0->347.0; metric:temporal_sdk_go_index_ms 525.0->747.0; metric:temporal_sdk_go_register_index_ms 588.0->811.0; metric:c_syntax_fixture_index_ms 122.0->202.0; metric:c_syntax_fixture_register_index_ms 184.0->263.0
+- latency metrics: cargo_fmt_check_ms=1635ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=303ms; self_iteration_cargo_check_ms=122ms; temporal_samples_go_index_ms=283ms; temporal_samples_go_register_index_ms=347ms; cpp_syntax_fixture_index_ms=61ms; cpp_syntax_fixture_register_index_ms=122ms
 
 Adopted optimization notes:
 
