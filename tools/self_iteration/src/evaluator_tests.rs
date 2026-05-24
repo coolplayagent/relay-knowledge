@@ -277,6 +277,54 @@ mod tests {
     }
 
     #[test]
+    fn fast_default_repositories_include_typescript_import_grep_fixture() {
+        if std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS").is_ok() {
+            return;
+        }
+
+        let names = fast_repository_names();
+
+        assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
+    }
+
+    #[test]
+    fn fast_preserves_typescript_import_grep_guardrail_case() {
+        let cases = vec![
+            serde_json::json!({"id": "regular_a", "kind": "definition"}),
+            serde_json::json!({
+                "id": "typescript_syntax_external_react_import_grep_fallback",
+                "repository": "typescript_syntax_fixture",
+                "kind": "imports",
+                "query": "react",
+                "guardrail": true,
+                "expected": [{
+                    "path": "src/component.tsx",
+                    "retrieval_layer": "text_fallback"
+                }],
+                "degraded_reason_contains": "external dependency import is not indexed"
+            }),
+        ];
+
+        let selected = select_repository_cases_for_profile("fast", None, cases);
+        let case = selected
+            .iter()
+            .find(|case| {
+                string_or(case, "id", "")
+                    == "typescript_syntax_external_react_import_grep_fallback"
+            })
+            .expect("fast should preserve the import grep fallback guardrail");
+        let expected = array_field(case, "expected");
+
+        assert_eq!(string_or(case, "kind", ""), "imports");
+        assert_eq!(string_or(&expected[0], "retrieval_layer", ""), "text_fallback");
+        assert_eq!(
+            string_or(case, "degraded_reason_contains", ""),
+            "external dependency import is not indexed"
+        );
+        assert!(case.get("guardrail").and_then(Value::as_bool).unwrap_or(false));
+    }
+
+    #[test]
     fn semantic_vector_selection_uses_guardrail_for_fast_default() {
         let suite = serde_json::json!({
             "query_cases": [
