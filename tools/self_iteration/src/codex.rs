@@ -148,6 +148,9 @@ Constraints:
   repository source. Treat `text_fallback` results and the external dependency diagnostic
   as source-text evidence, not as proof that the dependency library itself is
   indexed in the code graph.
+- For your own codebase inspection, prefer `rg`. If this machine does not
+  have `rg`, use bounded `grep -RIn` searches with excluded build and VCS
+  directories instead of stopping exploration or weakening the search.
 
 Workspace: {workspace}
 Evaluation profile: {profile}
@@ -235,6 +238,9 @@ Goal:
   source and report `text_fallback` plus an external dependency diagnostic. Use
   that as local source-text evidence only; do not infer that the external
   dependency library has been indexed.
+- For your own codebase inspection, prefer `rg`. If `rg` is unavailable on
+  this machine, use bounded `grep -RIn` searches with excluded build and VCS
+  directories so source search still completes.
 
 Baseline:
 - Latest scored run: {latest_summary}
@@ -517,6 +523,8 @@ mod tests {
         assert!(prompt.contains("external dependency target remains unresolved"));
         assert!(prompt.contains("dependency diagnostic"));
         assert!(prompt.contains("source-text evidence"));
+        assert!(prompt.contains("If this machine does not"));
+        assert!(prompt.contains("grep -RIn"));
     }
 
     #[test]
@@ -539,6 +547,8 @@ mod tests {
         assert!(prompt.contains("external dependency diagnostic"));
         assert!(prompt.contains("dependency library"));
         assert!(prompt.contains("text_fallback"));
+        assert!(prompt.contains("If `rg` is unavailable"));
+        assert!(prompt.contains("grep -RIn"));
     }
 
     fn temp_workspace(prefix: &str) -> std::path::PathBuf {

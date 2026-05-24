@@ -845,6 +845,7 @@ struct rk_driver_ops {
     void (*close)(struct rk_device *dev);
 };
 
+// RK_HEADER_CONTRACT_NOTE keeps callback ownership searchable when parsers miss comments.
 int rk_driver_open(struct rk_device *dev);
 int rk_driver_read(struct rk_device *dev, char *buffer, size_t length);
 void rk_driver_close(struct rk_device *dev);
@@ -962,6 +963,8 @@ int rk_run_pipeline(struct rk_device *dev)
     }
     return total;
 }
+
+// RK_PIPELINE_NOTE records dispatch ordering for exact source-text fallback.
 "#;
 
 const C_GENERATED_TABLE_C: &str = r#"#include "driver_ops.h"
@@ -978,6 +981,7 @@ static const char *rk_stage_names[] = {
     RK_STAGE_ROW(READ),
 };
 
+// RK_STAGE_TABLE_NOTE documents generated stage rows for grep fallback recall.
 static const struct rk_table_row rk_rows[] = {
     [RK_STAGE_READ] = {
         .name = "read",
