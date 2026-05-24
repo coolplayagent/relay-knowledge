@@ -1,6 +1,11 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779596127-internal-source-grep-fallback
+- 算法/架构：`code::grep` 在已按 scope/path/language/materialized-byte budget 选出候选并发现 `rg` 二进制不可用时，改用同一临时源码树上的 Rust fixed-string line scanner 生成 `SourceGrepMatch`；scanner 复用原 limit、line-byte cap、Definition identity acceptor、blocking worker 边界和 `text_fallback` evidence 投影，不改变 parser、SQLite schema、repository-set fanout、semantic/vector read model、env/paths/net 或 self-iteration harness。
+- 不变量：内部 scanner 只在 `ripgrep unavailable` 启动，不吞掉 timeout、非零退出、JSON parse 等其他 degraded reason；仍只读取已索引 commit 的 safe git blob materialization，继续执行 path/language filters、candidate file/byte budgets、line byte cap、dedupe/top-k、external dependency diagnostic 和无 edge confidence 的 source-text semantics；没有仓库、路径、case id、query 字符串或 fixture 枚举。
+- 预期影响/风险：预期修复 fast 环境缺少产品运行时 `rg` 时 TypeScript external import 与 C comment reference fallback 只返回 graph/diagnostic 而缺少 `text_fallback` hit 的稳定性问题，并减少工具安装差异导致的 guardrail 抖动。风险是 `rg` 缺失时 Rust scanner 的匹配行为只覆盖 fixed-string 单行命中且不支持 ripgrep 的全部策略；风险由只在 unavailable 分支启用、相同 budgets、line cap 和 focused scanner tests 控制。
+- 策略关联：建立在 accepted bounded source fallback evidence 与 `run-1779463498` unresolved external import diagnostic/path narrowing 上；明确避免最近 `guardrail_case_typescript_syntax_external_react_import_grep_fallback` 重复拒绝中继续调整 TypeScript parser 或 import candidate paths，而是修复通用 source fallback runtime dependency。
 ## 候选优化说明：manual-fast-grep-fallback-cases
 - 算法/架构：self-iteration prompt 明确区分产品运行时 `rg` 精确文本兜底与 agent 人工源码检查；当本机缺少 `rg` 时，Codex 应改用排除 VCS/build 目录的有界 `grep -RIn` 搜索继续分析。fast 默认覆盖的 C syntax fixture 新增多条 comment-only reference/hybrid grep fallback case，使 `text_fallback`、无 edge confidence 和源码证据语义在默认 profile 中持续被验证，不需要额外索引大仓。
 - 不变量：产品查询热路径仍只通过已有 bounded `rg` source fallback 搜索已索引 commit 内容；人工 `grep -RIn` 只用于 agent/维护者检查 workspace，不能绕过 scope、freshness、authorization 或结构化图证据排序。新增 case 使用生成式 C fixture，不枚举真实仓库路径、业务查询或依赖库内容；case 位于 fast 默认前 8 条普通查询窗口内，但不设为 hard guardrail，避免本机缺少 `rg` 时把工具缺失变成质量门禁失败。
@@ -954,17 +959,11 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 - summary: older accepted finalize, call-site, type-relationship, function-flow, header-declaration, and import-usage ranking notes were compacted to keep this primary log under the 1000-line hard cap; raw details remain in their patch/report artifacts and the archive document.
 ## 20260519T050321Z compacted
 - summary: parser manual extraction candidate scored 0.885665 with 98/104 cases passed; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch` and historical reports.
-
 ## 20260519T-run-1779223761-to-run-1779240531 compacted
 - summary: Rust v2 harness migration, bounded SQLite schema maintenance, compact high-coverage hybrid chunks, history synthesis, and assigned-result caller ranking were compacted on 20260520 to keep this primary benchmark log under the repository line cap. Raw patch/report details remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
 
-## run-1779242800-to-run-1779245204 compacted
-- summary: accepted indexed overlay evidence, origin-file evidence, repository-set bridge support, and caller named-slot ranking records were compacted to keep this primary log under the line cap; full raw metrics remain in `.git/relay-knowledge-self-iteration/reports-v2/` and patch artifacts.
-
-## run-1779249648-to-run-1779266107 compacted
-- summary: accepted streamed call-search finalize, hybrid chunk anchor FTS, symbol identity fast path, edge language marker, repository-set fanout retry, export-key index, and caller callee identity fast path entries were compacted to keep this primary benchmark log under the 1000-line hard cap; full patch/report artifacts remain under `.git/relay-knowledge-self-iteration/patches-v2/` and `reports-v2/`, with strategy details preserved in the candidate sections above.
-## self-iteration dynamic category guardrails candidate compacted
-- summary: category-focus selection and explicit guardrail-gate notes are compacted here; details remain in the harness history, patch, report artifacts, and progressive memory summaries.
+## run-1779242800-to-run-1779266107 compacted
+- summary: accepted overlay evidence, repository-set bridge support, caller ranking, streamed call-search finalize, hybrid chunk anchor FTS, symbol identity fast path, edge language marker, repository-set fanout retry, export-key index, caller/callee identity fast path, and dynamic category guardrails are compacted to keep this primary log under the line cap; full raw metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory.
 
 ## run-1779279305-to-run-1779289571171823700 compacted
 - summary: returned overlay pruning, vector lexical coverage tie-break, derived cursor streaming, and exact-path symbol/chunk ranking accepted records were compacted on 2026-05-20 to keep this primary benchmark log under the repository line cap; strategy details remain in the candidate sections above and raw metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
@@ -997,16 +996,20 @@ ed(); +        call.confidence_basis_points = 8_000; +        call.confidence_ti
 ## run-1779439043-to-run-1779463498 compacted
 - summary: accepted code-search backfill marker, repository-set dependency API symbol query/direct plan, line-aware reference evidence, repository-set API identity coverage/declaration demotion, and bounded external import fallback records are compacted to keep this primary benchmark log under the 1000-line hard cap. Latest accepted in this range was `run-1779463498` with score 0.969160 and foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full raw metrics, changed paths, adopted notes, patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries, with strategy details preserved in candidate sections above.
 
-## run-1779465105
+## run-1779465105 compacted
+- summary: accepted hybrid symbol elision with BM25 query retry scored 0.976355 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full metrics, patch, changed paths, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779465105.patch`, reports, and progressive memory, with strategy details preserved in the candidate section above.
 
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779465105.patch`
-- score: 0.976355 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.868639, stability=1.000000)
-- cases: 43/43 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_query_source_fallback.rs`, `src/relay_knowledge/application/code_query_source_fallback_tests.rs`, `src/relay_knowledge/storage/sqlite/retrieval.rs`, `src/relay_knowledge/storage/sqlite/retrieval/bm25.rs`, `src/relay_knowledge/storage/sqlite/retrieval/tests.rs`
-- key improvements: score_component:competitive_capability 0.961538->1.0; score_component:stability 0.988889->1.0; gate:cpp_syntax_fixture_cpp_syntax_callers_writer_append_virtual_dispatch false->true; case:cpp_syntax_callers_writer_append_virtual_dispatch false->true; metric:cargo_fmt_check_ms 2176.0->1775.0; metric:self_iteration_cargo_fmt_check_ms 343.0->303.0; metric:cpp_syntax_fixture_index_ms 242.0->60.0; metric:cpp_syntax_fixture_register_index_ms 303.0->121.0
-- known degradations: score_component:performance 0.918137->0.8686393666644389; metric:cargo_build_debug_ms 263.0->302.0; metric:temporal_sdk_go_index_ms 525.0->566.0; metric:temporal_sdk_go_register_index_ms 586.0->627.0; metric:temporal_samples_go_index_ms 122.0->201.0; metric:temporal_samples_go_register_index_ms 183.0->282.0; metric:cpp_syntax_fixture_query_p50_ms 141.0->202.0; metric:cpp_syntax_fixture_query_p95_ms 243.0->322.0
-- latency metrics: cargo_fmt_check_ms=1775ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=302ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=566ms; temporal_sdk_go_register_index_ms=627ms; temporal_samples_go_index_ms=201ms; temporal_samples_go_register_index_ms=282ms
+## run-1779596127
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779596127.patch`
+- score: 0.940592 (foundational=1.000000, competitive=0.909091, accuracy=0.954545, semantic_vector=1.000000, research_judge=n/a, performance=0.781066, stability=1.000000)
+- cases: 48/51 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/grep.rs`
+- key improvements: score_component:score 0.926517->0.9405918034861771; score_component:competitive_capability 0.818182->0.9090909090909091; score_component:stability 0.990566->1.0; gate:guardrail_case_typescript_syntax_external_react_import_grep_fallback false->true; case:c_syntax_references_generated_table_comment_grep_text_fallback false->true; case:c_syntax_references_header_comment_grep_text_fallback false->true; case:c_syntax_hybrid_dispatch_comment_grep_text_fallback false->true; case:typescript_syntax_external_react_import_grep_fallback false->true
+- known degradations: score_component:performance 0.827086->0.7810655749232057; case:typescript_syntax_references_dynamic_import true->false; case:typescript_syntax_imports_type_and_runtime_protocol true->false; case_rank:typescript_syntax_hybrid_typed_arrow_projector 6->null; metric:cargo_fmt_check_ms 2076.0->2196.0; metric:temporal_samples_go_index_ms 101.0->182.0; metric:temporal_samples_go_register_index_ms 163.0->223.0; metric:leveldb_cpp_query_p50_ms 141.0->182.0
+- latency metrics: cargo_fmt_check_ms=2196ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=122ms; temporal_samples_go_index_ms=182ms; temporal_samples_go_register_index_ms=223ms; leveldb_cpp_index_ms=202ms; leveldb_cpp_register_index_ms=263ms
 
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+

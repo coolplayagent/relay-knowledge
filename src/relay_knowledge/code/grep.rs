@@ -24,6 +24,7 @@ const MAX_GREP_LINE_BYTES: usize = 4096;
 const MAX_DEFINITION_MATCHES_PER_FILE: usize = 64;
 const RIPGREP_TIMEOUT: Duration = Duration::from_secs(3);
 const RIPGREP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const RIPGREP_UNAVAILABLE: &str = "ripgrep unavailable";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceGrepKind {
@@ -94,8 +95,45 @@ pub(crate) fn source_grep_matches(
         &request.query,
         ripgrep_match_limit(request.kind, request.limit),
     );
-    let output = match rg_output {
-        RipgrepRun::Output(output) => output,
+    source_grep_matches_from_materialized_tree(
+        &tree.root,
+        &candidates.paths,
+        &request,
+        degraded_reason,
+        rg_output,
+    )
+}
+
+fn source_grep_matches_from_materialized_tree(
+    root: &Path,
+    paths: &[String],
+    request: &SourceGrepRequest,
+    mut degraded_reason: Option<String>,
+    rg_output: RipgrepRun,
+) -> Result<SourceGrepOutcome, CodeIndexError> {
+    let matches = match rg_output {
+        RipgrepRun::Output(output) => {
+            match parse_ripgrep_matches(&output.stdout, request.limit, |matched| {
+                source_grep_accepts(request.kind, &request.query, matched)
+            }) {
+                Ok(matches) => matches,
+                Err(error) => {
+                    return Ok(SourceGrepOutcome {
+                        matches: Vec::new(),
+                        degraded_reason: Some(format!("ripgrep output parse failed: {error}")),
+                    });
+                }
+            }
+        }
+        RipgrepRun::Degraded(reason) if reason == RIPGREP_UNAVAILABLE => {
+            degraded_reason = append_degraded_reason(
+                degraded_reason,
+                format!("{RIPGREP_UNAVAILABLE}; internal fixed-string scanner fallback"),
+            );
+            internal_source_grep_matches(root, paths, request, |matched| {
+                source_grep_accepts(request.kind, &request.query, matched)
+            })?
+        }
         RipgrepRun::Degraded(reason) => {
             return Ok(SourceGrepOutcome {
                 matches: Vec::new(),
@@ -103,22 +141,21 @@ pub(crate) fn source_grep_matches(
             });
         }
     };
-    let matches = match parse_ripgrep_matches(&output.stdout, request.limit, |matched| {
-        request.kind != SourceGrepKind::Definition
-            || source_line_defines_identity(&matched.excerpt, &request.query)
-    }) {
-        Ok(matches) => matches,
-        Err(error) => {
-            return Ok(SourceGrepOutcome {
-                matches: Vec::new(),
-                degraded_reason: Some(format!("ripgrep output parse failed: {error}")),
-            });
-        }
-    };
 
     Ok(SourceGrepOutcome {
         matches,
         degraded_reason,
+    })
+}
+
+fn source_grep_accepts(kind: SourceGrepKind, query: &str, matched: &SourceGrepMatch) -> bool {
+    kind != SourceGrepKind::Definition || source_line_defines_identity(&matched.excerpt, query)
+}
+
+fn append_degraded_reason(existing: Option<String>, reason: String) -> Option<String> {
+    Some(match existing {
+        Some(existing) if !existing.is_empty() => format!("{existing}; {reason}"),
+        _ => reason,
     })
 }
 
@@ -196,6 +233,95 @@ fn ripgrep_match_limit(kind: SourceGrepKind, result_limit: usize) -> usize {
     }
 }
 
+fn internal_source_grep_matches(
+    root: &Path,
+    paths: &[String],
+    request: &SourceGrepRequest,
+    accepts: impl Fn(&SourceGrepMatch) -> bool,
+) -> Result<Vec<SourceGrepMatch>, CodeIndexError> {
+    let query = request.query.as_bytes();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut matches = Vec::new();
+    for path in paths {
+        if matches.len() >= request.limit {
+            break;
+        }
+        let Ok(bytes) = fs::read(root.join(path)) else {
+            continue;
+        };
+        push_internal_file_matches(path, &bytes, query, request.limit, &accepts, &mut matches)?;
+    }
+
+    Ok(matches)
+}
+
+fn push_internal_file_matches(
+    path: &str,
+    bytes: &[u8],
+    query: &[u8],
+    limit: usize,
+    accepts: &impl Fn(&SourceGrepMatch) -> bool,
+    matches: &mut Vec<SourceGrepMatch>,
+) -> Result<(), CodeIndexError> {
+    let mut line_start = 0usize;
+    let mut line_number = 1usize;
+    while line_start < bytes.len() && matches.len() < limit {
+        let line_end = bytes[line_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |offset| line_start + offset);
+        let line = &bytes[line_start..line_end];
+        if line.len() <= MAX_GREP_LINE_BYTES {
+            if let Some(match_start) = find_bytes(line, query) {
+                let match_end = match_start + query.len();
+                let byte_range = RepositoryCodeRange::new(
+                    "byte_range",
+                    line_start + match_start,
+                    line_start + match_end,
+                )
+                .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+                let line_range =
+                    RepositoryCodeRange::new("line_range", line_number, line_number)
+                        .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+                let excerpt = String::from_utf8_lossy(line)
+                    .trim_end_matches('\r')
+                    .trim()
+                    .to_owned();
+                let matched = SourceGrepMatch {
+                    path: path.to_owned(),
+                    language_id: language_id(path).unwrap_or("unknown").to_owned(),
+                    excerpt,
+                    byte_range,
+                    line_range,
+                };
+                if accepts(&matched) {
+                    matches.push(matched);
+                }
+            }
+        }
+        line_start = if line_end < bytes.len() {
+            line_end + 1
+        } else {
+            bytes.len()
+        };
+        line_number += 1;
+    }
+
+    Ok(())
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
 fn run_ripgrep(root: &Path, query: &str, limit: usize) -> RipgrepRun {
     let max_columns = MAX_GREP_LINE_BYTES.to_string();
     let max_count = limit.to_string();
@@ -224,7 +350,7 @@ fn run_ripgrep(root: &Path, query: &str, limit: usize) -> RipgrepRun {
     {
         Ok(child) => child,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return RipgrepRun::Degraded("ripgrep unavailable".to_owned());
+            return RipgrepRun::Degraded(RIPGREP_UNAVAILABLE.to_owned());
         }
         Err(error) => return RipgrepRun::Degraded(format!("ripgrep failed to start: {error}")),
     };
@@ -612,6 +738,68 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].path, ".github/workflows/ci.yml");
         assert!(matches[0].excerpt.contains("RK_HIDDEN_WORKFLOW_REFERENCE"));
+    }
+
+    #[test]
+    fn internal_scanner_searches_materialized_paths_without_ripgrep() {
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        tree.write(
+            ".github/workflows/ci.yml",
+            b"# RK_INTERNAL_SCANNER_REFERENCE\nname: ci\n",
+        )
+        .expect("hidden path should be written");
+        let request = SourceGrepRequest {
+            query: "RK_INTERNAL_SCANNER_REFERENCE".to_owned(),
+            paths: vec![".github/workflows/ci.yml".to_owned()],
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            limit: 5,
+            kind: SourceGrepKind::References,
+        };
+
+        let matches = internal_source_grep_matches(&tree.root, &request.paths, &request, |_| true)
+            .expect("internal scanner should read materialized files");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, ".github/workflows/ci.yml");
+        assert_eq!(matches[0].line_range.start, 1);
+        assert_eq!(matches[0].byte_range.start, 2);
+        assert!(matches[0].excerpt.contains("RK_INTERNAL_SCANNER_REFERENCE"));
+    }
+
+    #[test]
+    fn unavailable_ripgrep_uses_internal_scanner_outcome() {
+        let mut tree = TempSourceTree::create().expect("temp tree should be created");
+        tree.write("src/component.tsx", b"import React from \"react\";\n")
+            .expect("source path should be written");
+        let request = SourceGrepRequest {
+            query: "react".to_owned(),
+            paths: vec!["src/component.tsx".to_owned()],
+            path_filters: Vec::new(),
+            language_filters: vec!["tsx".to_owned()],
+            limit: 10,
+            kind: SourceGrepKind::Imports,
+        };
+
+        let outcome = source_grep_matches_from_materialized_tree(
+            &tree.root,
+            &request.paths,
+            &request,
+            None,
+            RipgrepRun::Degraded(RIPGREP_UNAVAILABLE.to_owned()),
+        )
+        .expect("unavailable ripgrep should fall back to the internal scanner");
+
+        assert_eq!(outcome.matches.len(), 1);
+        assert_eq!(outcome.matches[0].path, "src/component.tsx");
+        assert_eq!(outcome.matches[0].language_id, "tsx");
+        assert_eq!(outcome.matches[0].excerpt, "import React from \"react\";");
+        assert!(
+            outcome
+                .degraded_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("internal fixed-string scanner fallback"))
+        );
     }
 
     #[test]
