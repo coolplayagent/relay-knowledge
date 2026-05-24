@@ -41,6 +41,8 @@ Incremental indexing first narrows the work set:
 3. Expand affected files through reverse dependencies and import/call/reference edges.
 4. Refresh only affected code facts, chunks, and index families.
 
+Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. The query layer may use the hint inside the same scope to trigger bounded `rg` fallback.
+
 ## 6. High-Performance Boundaries
 
 Code indexing follows the shared principles behind Sourcegraph/Zoekt, GitHub Code Search, ripgrep, and Tree-sitter based systems: narrow candidates through path, language, trigram, symbol name, and blob hash before AST capture, edge resolution, or semantic/vector refresh. AST chunks should follow function, type, module, documentation comment, and import-block boundaries; fallback text chunks take over only when structural parsing is unavailable.
