@@ -77,6 +77,90 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
 }
 
 #[tokio::test]
+async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_edges() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:typescript-re-export-finalize";
+    let session = session_for_scope(source_scope, 2);
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "protocol-file", "src/protocol.ts")],
+            symbols: vec![symbol(
+                source_scope,
+                "runtime-client-symbol",
+                "protocol-file",
+                "src/protocol.ts",
+                "RuntimeClient",
+            )],
+            references: Vec::new(),
+            imports: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("target batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "index-file", "src/app/index.ts")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![
+                import(
+                    source_scope,
+                    "protocol-re-export",
+                    "index-file",
+                    "src/app/index.ts",
+                    "export type { RuntimeClient } from \"../protocol\";",
+                ),
+                import(
+                    source_scope,
+                    "protocol-dynamic-import",
+                    "index-file",
+                    "src/app/index.ts",
+                    "await import(\"../protocol\")",
+                ),
+            ],
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("import batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "../protocol", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|hit| {
+        hit.path == "src/app/index.ts"
+            && hit.edge_resolution_state.as_deref() == Some("resolved")
+            && hit.edge_target_hint.as_deref() == Some("src/protocol.ts")
+    }));
+    assert!(
+        hits.iter()
+            .any(|hit| hit.excerpt.contains("export type { RuntimeClient }"))
+    );
+    assert!(
+        hits.iter()
+            .any(|hit| hit.excerpt.contains("await import(\"../protocol\")"))
+    );
+}
+
+#[tokio::test]
 async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:typescript-imported-reference-finalize";

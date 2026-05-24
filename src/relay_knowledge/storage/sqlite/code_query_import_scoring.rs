@@ -27,6 +27,26 @@ pub(super) fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
     }
 }
 
+pub(super) fn import_statement_shape_bonus(
+    base_score: f64,
+    query: &str,
+    module: &str,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || !query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let module = module.trim_start();
+    if query_looks_like_bare_import(query) {
+        return import_expression_or_side_effect_bonus(module);
+    }
+    if module.starts_with("import ") && module.contains(" from ") {
+        0.25
+    } else {
+        0.0
+    }
+}
+
 pub(super) fn import_public_dependency_surface_bonus(
     base_score: f64,
     query: &str,
@@ -217,6 +237,43 @@ fn query_contains_file_extension(query: &str) -> bool {
     })
 }
 
+fn query_looks_like_bare_import(query: &str) -> bool {
+    let query = query.trim();
+    query.starts_with("import ")
+        && !query.contains(" from ")
+        && !query.contains('{')
+        && quoted_import_specifier(query).is_some()
+}
+
+fn import_expression_or_side_effect_bonus(module: &str) -> f64 {
+    if module.contains("import(")
+        || module.starts_with("import \"")
+        || module.starts_with("import '")
+    {
+        0.65
+    } else {
+        0.0
+    }
+}
+
+fn quoted_import_specifier(value: &str) -> Option<&str> {
+    for quote in ['"', '\''] {
+        let Some(start) = value.find(quote) else {
+            continue;
+        };
+        let after_start = value.get(start + quote.len_utf8()..)?;
+        let Some(end) = after_start.find(quote) else {
+            continue;
+        };
+        let specifier = after_start.get(..end)?;
+        if !specifier.trim().is_empty() {
+            return Some(specifier);
+        }
+    }
+
+    None
+}
+
 fn file_extension_is_path_like(extension: &str) -> bool {
     matches!(
         extension.to_ascii_lowercase().as_str(),
@@ -373,6 +430,50 @@ mod tests {
         assert!(import_line_priority(3.0, 10, "./redaction") > 0.0);
         assert!(import_line_priority(3.0, 10, "shared.ts") > 0.0);
         assert_eq!(import_line_priority(0.0, 1, "linux/debugfs.h"), 0.0);
+    }
+
+    #[test]
+    fn import_statement_shape_bonus_prefers_direct_imports_for_path_queries() {
+        assert_eq!(
+            import_statement_shape_bonus(
+                2.0,
+                "./protocol",
+                "export type { StreamEnvelope } from \"./protocol\";",
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+        assert_eq!(
+            import_statement_shape_bonus(
+                2.0,
+                "./protocol",
+                "import type { StreamEnvelope } from \"./protocol\";",
+                CodeQueryKind::Imports,
+            ),
+            0.25
+        );
+    }
+
+    #[test]
+    fn import_statement_shape_bonus_matches_bare_import_queries_to_dynamic_imports() {
+        assert_eq!(
+            import_statement_shape_bonus(
+                2.0,
+                "import \"./protocol\"",
+                "import { sendEnvelope } from \"./protocol\";",
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+        assert_eq!(
+            import_statement_shape_bonus(
+                2.0,
+                "import \"./protocol\"",
+                "await import(\"./protocol\")",
+                CodeQueryKind::Imports,
+            ),
+            0.65
+        );
     }
 
     #[test]

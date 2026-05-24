@@ -366,7 +366,7 @@ fn term_mentions_example_or_sample(term: &str) -> bool {
         .any(|part| term_is_example_or_sample(part))
 }
 
-fn path_looks_like_test_or_benchmark(path: &str) -> bool {
+pub(super) fn path_looks_like_test_or_benchmark(path: &str) -> bool {
     let lower_path = path.to_ascii_lowercase();
     lower_path
         .split('/')

@@ -161,6 +161,7 @@ export function buildRequest(): string {
             r#"
 import { sleep } from "./sleep";
 import { buildRequest } from "./utils";
+export { sleep as exportedSleep } from "./sleep";
 
 export function retryPolicy(): void {
     sleep();
@@ -172,6 +173,11 @@ export function retryPolicy(): void {
 
     assert_import_state(&snapshot, "./sleep", "resolved");
     assert_import_state(&snapshot, "./utils", "resolved");
+    assert_import_state(
+        &snapshot,
+        "export { sleep as exportedSleep } from \"./sleep\"",
+        "resolved",
+    );
 }
 
 #[test]
@@ -232,12 +238,12 @@ export async function loadLazy() {
     assert!(
         loader_imports
             .iter()
-            .any(|import| import.module == "import \"./lazy/alpha\"")
+            .any(|import| import.module == "import(\"./lazy/alpha\")")
     );
     assert!(
         loader_imports
             .iter()
-            .any(|import| import.module == "import \"./lazy/beta\"")
+            .any(|import| import.module == "import(\"./lazy/beta\")")
     );
     assert!(
         !loader_imports

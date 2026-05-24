@@ -114,7 +114,7 @@ fn javascript_like_function_value_definition(
         return None;
     }
 
-    Some((name, "function", syntax_range(node)))
+    Some((name, "function", javascript_like_function_value_range(node)))
 }
 
 fn javascript_like_function_value(owner: Node<'_>, value: Node<'_>) -> bool {
@@ -166,6 +166,28 @@ fn javascript_like_function_node(node: Node<'_>) -> bool {
     )
 }
 
+fn javascript_like_function_value_range(node: Node<'_>) -> SyntaxRange {
+    exported_variable_declaration(node)
+        .map(syntax_range)
+        .unwrap_or_else(|| syntax_range(node))
+}
+
+fn exported_variable_declaration(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() != "variable_declarator" {
+        return None;
+    }
+    let declaration = node.parent()?;
+    if !matches!(
+        declaration.kind(),
+        "lexical_declaration" | "variable_declaration"
+    ) {
+        return None;
+    }
+    declaration
+        .parent()
+        .filter(|parent| parent.kind() == "export_statement")
+}
+
 fn javascript_like_exported_value_definition(
     content: &str,
     language_id: &str,
@@ -173,7 +195,7 @@ fn javascript_like_exported_value_definition(
 ) -> Option<(String, &'static str, SyntaxRange)> {
     if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
         || node.kind() != "variable_declarator"
-        || !has_export_statement_ancestor(node)
+        || export_statement_ancestor(node).is_none()
     {
         return None;
     }
@@ -230,18 +252,16 @@ fn unwrap_javascript_like_expression(mut node: Node<'_>) -> Node<'_> {
     node
 }
 
-fn has_export_statement_ancestor(mut node: Node<'_>) -> bool {
+fn export_statement_ancestor(mut node: Node<'_>) -> Option<Node<'_>> {
     for _ in 0..4 {
-        let Some(parent) = node.parent() else {
-            return false;
-        };
+        let parent = node.parent()?;
         if parent.kind() == "export_statement" {
-            return true;
+            return Some(parent);
         }
         node = parent;
     }
 
-    false
+    None
 }
 
 fn function_value_node(node: Node<'_>) -> Option<Node<'_>> {

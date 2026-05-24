@@ -36,23 +36,66 @@ struct TypeScriptImportRequest {
 impl TypeScriptImportRequest {
     fn parse(import_path: &str, statement: &str) -> Option<Self> {
         let statement = statement.trim().trim_end_matches(';').trim();
-        let body = statement.strip_prefix("import ")?;
+        if let Some(specifier) = dynamic_import_specifier(statement) {
+            return Some(Self::for_specifier(import_path, specifier, Vec::new()));
+        }
+        if let Some(body) = statement.strip_prefix("import ") {
+            return Self::parse_import_body(import_path, body);
+        }
+        if let Some(body) = statement.strip_prefix("export ") {
+            return Self::parse_export_body(import_path, body);
+        }
+
+        None
+    }
+
+    fn parse_import_body(import_path: &str, body: &str) -> Option<Self> {
         if !body.contains(" from ") {
             let specifier = parse_quoted_specifier(body)?;
-            return Some(Self {
-                module_paths: relative_module_candidates(import_path, specifier),
-                imported_names: Vec::new(),
-            });
+            return Some(Self::for_specifier(import_path, specifier, Vec::new()));
         }
 
         let (imports, module) = body.rsplit_once(" from ")?;
         let specifier = parse_quoted_specifier(module)?;
 
-        Some(Self {
-            module_paths: relative_module_candidates(import_path, specifier),
-            imported_names: parse_named_imports(imports),
-        })
+        Some(Self::for_specifier(
+            import_path,
+            specifier,
+            parse_named_imports(imports),
+        ))
     }
+
+    fn parse_export_body(import_path: &str, body: &str) -> Option<Self> {
+        let body = body.trim().strip_prefix("type ").unwrap_or(body.trim());
+        let (exports, module) = body.rsplit_once(" from ")?;
+        let specifier = parse_quoted_specifier(module)?;
+
+        Some(Self::for_specifier(
+            import_path,
+            specifier,
+            parse_named_imports(exports),
+        ))
+    }
+
+    fn for_specifier(import_path: &str, specifier: &str, imported_names: Vec<String>) -> Self {
+        Self {
+            module_paths: relative_module_candidates(import_path, specifier),
+            imported_names,
+        }
+    }
+}
+
+fn dynamic_import_specifier(statement: &str) -> Option<&str> {
+    let expression = statement
+        .trim()
+        .strip_prefix("await ")
+        .unwrap_or(statement.trim())
+        .trim();
+    let arguments = expression.strip_prefix("import")?.trim_start();
+    arguments
+        .starts_with('(')
+        .then(|| parse_quoted_specifier(arguments))
+        .flatten()
 }
 
 fn parse_named_imports(imports: &str) -> Vec<String> {

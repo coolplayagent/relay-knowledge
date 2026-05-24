@@ -93,6 +93,80 @@ fn hybrid_grep_fallback_uses_text_fallback_for_non_symbol_coverage() {
 }
 
 #[test]
+fn hybrid_source_surface_fallback_refreshes_same_line_excerpt() {
+    let request = request(
+        "typed arrow payload projector trim provider record",
+        CodeQueryKind::Hybrid,
+        Vec::new(),
+    );
+    let mut result = hit(
+        "src/protocol.ts",
+        "trimPayload: PayloadProjector<string> = (payload) => payload.trim()",
+    );
+    result.line_range = RepositoryCodeRange { start: 13, end: 13 };
+    result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    result.canonical_symbol_id = Some("repo://repo/src::protocol::trimPayload".to_owned());
+    let mut type_result = hit(
+        "src/protocol.ts",
+        "type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;",
+    );
+    type_result.line_range = RepositoryCodeRange { start: 11, end: 11 };
+    type_result.retrieval_layers = vec![CodeRetrievalLayer::Symbol, CodeRetrievalLayer::Definition];
+    type_result.canonical_symbol_id =
+        Some("repo://repo/src::protocol::PayloadProjector".to_owned());
+    let plan = plan_code_grep_fallback(&status(), &request, &[result.clone(), type_result.clone()])
+        .expect("hybrid API surface should plan same-file source refresh");
+    let mut results = vec![result, type_result];
+
+    assert_eq!(plan.query, "PayloadProjector");
+    assert_eq!(plan.paths, ["src/protocol.ts"]);
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/protocol.ts".to_owned(),
+                language_id: "typescript".to_owned(),
+                excerpt:
+                    "export const trimPayload: PayloadProjector<string> = (payload) => payload.trim();"
+                        .to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 82 },
+                line_range: RepositoryCodeRange { start: 13, end: 13 },
+            }, SourceGrepMatch {
+                path: "src/protocol.ts".to_owned(),
+                language_id: "typescript".to_owned(),
+                excerpt:
+                    "export type PayloadProjector<TPayload> = (payload: TPayload) => TPayload;"
+                        .to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 73 },
+                line_range: RepositoryCodeRange { start: 11, end: 11 },
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert_eq!(results.len(), 2);
+    assert!(
+        results
+            .iter()
+            .any(|hit| hit.excerpt.starts_with("export const trimPayload"))
+    );
+    assert!(
+        results
+            .iter()
+            .any(|hit| hit.excerpt.starts_with("export type PayloadProjector"))
+    );
+    assert!(
+        results[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::TextFallback)
+    );
+}
+
+#[test]
 fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");
@@ -156,6 +230,52 @@ fn import_fallback_searches_only_matching_unresolved_external_import_paths() {
     assert_eq!(plan.query, "react");
     assert_eq!(plan.paths, ["src/component.tsx", "src/nested/panel.tsx"]);
     assert!(!plan.needs_scope_paths());
+}
+
+#[test]
+fn import_fallback_scans_scope_for_relative_module_queries() {
+    let request = request("import \"./protocol\"", CodeQueryKind::Imports, Vec::new());
+    let mut import_hit = hit(
+        "src/provider.ts",
+        "import { sendEnvelope } from \"./protocol\";",
+    );
+    import_hit.edge_kind = Some("import".to_owned());
+    import_hit.edge_resolution_state = Some("resolved".to_owned());
+    import_hit.edge_target_hint = Some("src/protocol.ts".to_owned());
+    import_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+    let mut results = vec![import_hit];
+
+    let plan = plan_code_grep_fallback(&status(), &request, &results)
+        .expect("relative import queries should scan indexed source text");
+
+    assert_eq!(plan.query, "./protocol");
+    assert!(plan.paths.is_empty());
+    assert!(plan.needs_scope_paths());
+
+    let reason = append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/index.ts".to_owned(),
+                language_id: "typescript".to_owned(),
+                excerpt: "export type { StreamEnvelope } from \"./protocol\";".to_owned(),
+                byte_range: RepositoryCodeRange { start: 0, end: 47 },
+                line_range: RepositoryCodeRange { start: 1, end: 1 },
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert!(reason.is_none());
+    assert!(results.iter().any(|hit| {
+        hit.path == "src/index.ts"
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::TextFallback)
+    }));
 }
 
 #[test]

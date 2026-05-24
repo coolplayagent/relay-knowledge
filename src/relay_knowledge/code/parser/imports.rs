@@ -23,6 +23,9 @@ pub(super) fn collect_imports(
     while let Some(node) = stack.pop() {
         if let Some((module, range)) = javascript_like_dynamic_import(language_id, content, node) {
             imports.push_record(module, &range)?;
+        } else if let Some((module, range)) = javascript_like_re_export(language_id, content, node)
+        {
+            imports.push_record(module, &range)?;
         } else if is_import_node(language_id, node) {
             imports.push_records(language_id, content, node)?;
         }
@@ -139,10 +142,22 @@ fn javascript_like_dynamic_import(
     if function.kind() != "import" {
         return None;
     }
-    let arguments = node.child_by_field_name("arguments")?;
-    let specifier = first_direct_string_argument(content, arguments)?;
+    first_direct_string_argument(content, node.child_by_field_name("arguments")?)?;
+    let source = javascript_like_dynamic_import_source(content, node);
 
-    Some((format!("import {specifier}"), syntax_range(node)))
+    Some(source)
+}
+
+fn javascript_like_dynamic_import_source(content: &str, node: Node<'_>) -> (String, SyntaxRange) {
+    let source_node = node
+        .parent()
+        .filter(|parent| parent.kind() == "await_expression")
+        .unwrap_or(node);
+
+    (
+        compact_whitespace(&node_text(content, source_node)),
+        syntax_range(source_node),
+    )
 }
 
 fn first_direct_string_argument(content: &str, arguments: Node<'_>) -> Option<String> {
@@ -158,6 +173,46 @@ fn first_direct_string_argument(content: &str, arguments: Node<'_>) -> Option<St
     }
 
     None
+}
+
+fn javascript_like_re_export(
+    language_id: &str,
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, SyntaxRange)> {
+    if !matches!(language_id, "javascript" | "jsx" | "typescript" | "tsx")
+        || node.kind() != "export_statement"
+    {
+        return None;
+    }
+    let statement = compact_whitespace(&node_text(content, node));
+    if !javascript_like_export_has_module_specifier(&statement) {
+        return None;
+    }
+
+    Some((statement, syntax_range(node)))
+}
+
+fn javascript_like_export_has_module_specifier(statement: &str) -> bool {
+    let Some(body) = statement
+        .trim()
+        .trim_end_matches(';')
+        .trim()
+        .strip_prefix("export ")
+    else {
+        return false;
+    };
+    body.rsplit_once(" from ")
+        .is_some_and(|(_, module)| quoted_specifier(module).is_some())
+}
+
+fn quoted_specifier(statement: &str) -> Option<&str> {
+    let start = statement.find(['"', '\''])?;
+    let quote = statement.as_bytes()[start] as char;
+    let rest = &statement[start + 1..];
+    let end = rest.find(quote)?;
+
+    Some(&rest[..end])
 }
 
 fn go_import_specs(import_declaration: &str) -> Vec<String> {

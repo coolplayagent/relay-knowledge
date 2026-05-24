@@ -15,8 +15,8 @@ use super::{
     },
     code_query_line_ranges::{SYMBOL_CONTEXT_PREAMBLE_MAX_LINES, symbol_result_line_range},
     code_query_path_ranking::{
-        query_mentions_test_or_benchmark, symbol_declaration_surface_path_bonus,
-        symbol_test_path_penalty,
+        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+        symbol_declaration_surface_path_bonus, symbol_test_path_penalty,
     },
     code_query_rows::SymbolRow,
     code_query_support::*,
@@ -318,9 +318,11 @@ fn symbol_rows_to_hits(
     let score_query = ScoreQuery::new(query);
     let exact_identity = SymbolIdentityQuery::from_query(query);
     let query_has_test_intent = query_mentions_test_or_benchmark(query);
+    let drop_test_symbols = should_drop_test_symbols(status, request, &rows, query_has_test_intent);
 
     rows.into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
+        .filter(|row| !drop_test_symbols || !path_looks_like_test_or_benchmark(&row.path))
         .filter_map(|row| {
             let score = score_query.score([
                 row.name.as_str(),
@@ -386,6 +388,23 @@ fn symbol_rows_to_hits(
             })
         })
         .collect()
+}
+
+fn should_drop_test_symbols(
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    rows: &[SymbolRow],
+    query_has_test_intent: bool,
+) -> bool {
+    !query_has_test_intent
+        && matches!(
+            request.code_query_kind,
+            CodeQueryKind::Definition | CodeQueryKind::Symbol
+        )
+        && rows.iter().any(|row| {
+            selected_row(&row.path, &row.language_id, status, request)
+                && !path_looks_like_test_or_benchmark(&row.path)
+        })
 }
 
 fn type_symbol_identity_bonus(

@@ -204,6 +204,66 @@ async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
 }
 
 #[tokio::test]
+async fn definition_queries_drop_test_symbols_when_production_alternatives_exist() {
+    let production_path = "src/cache.cpp";
+    let test_path = "tests/fake_cache.cpp";
+    let mut production = symbol(
+        "production-insert",
+        "production-file",
+        production_path,
+        "method",
+        "void Cache<Key>::Insert(const Key& key) {",
+        range(11, 15),
+    );
+    production.name = "Insert".to_owned();
+    production.qualified_name = "rk::store::Cache::Insert".to_owned();
+    let mut fake = symbol(
+        "fake-insert",
+        "fake-file",
+        test_path,
+        "method",
+        "void Insert(const std::string& key) {",
+        range(7, 10),
+    );
+    fake.name = "Insert".to_owned();
+    fake.qualified_name = "rk::store::test::FakeCache::Insert".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("production-file", production_path),
+            file("fake-file", test_path),
+        ],
+        symbols: vec![production, fake],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("Insert", CodeQueryKind::Definition))
+        .await
+        .expect("definition query should succeed");
+
+    assert!(hits.iter().any(|hit| hit.path == production_path));
+    assert!(!hits.iter().any(|hit| hit.path == test_path));
+}
+
+#[tokio::test]
 async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
     let target_path = "src/runtime/config.rs";
     let noise_path = "aaa/noise.rs";

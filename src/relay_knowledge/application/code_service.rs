@@ -19,6 +19,7 @@ use crate::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
         CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
         CodeRetrievalRequest, FreshnessPolicy,
+        code_snapshot_expected_scope_id as expected_scope_id,
     },
     storage::{CodeImpactChanges, StorageError},
 };
@@ -327,6 +328,12 @@ impl RelayKnowledgeService {
             &status.language_filters,
             &request.repository.language_filters,
         );
+        let expected_source_scope = expected_scope_id(
+            &status.repository_id,
+            &tree_hash,
+            &path_filters,
+            &language_filters,
+        );
         let scoped_status = store
             .code_repository_scope_status(
                 request.repository.repository.clone(),
@@ -339,7 +346,12 @@ impl RelayKnowledgeService {
         let Some(scoped_status) = scoped_status else {
             return Ok(None);
         };
-        if scoped_status.stale || scoped_status.tree_hash.as_deref() != Some(tree_hash.as_str()) {
+        if scoped_status.stale
+            || scoped_status.tree_hash.as_deref() != Some(tree_hash.as_str())
+            || expected_source_scope.as_deref().is_some_and(|expected| {
+                scoped_status.last_indexed_scope_id.as_deref() != Some(expected)
+            })
+        {
             return Ok(None);
         }
         let graph_version = store
@@ -551,7 +563,6 @@ impl RelayKnowledgeService {
         })
     }
 
-    /// Returns the current code repository index status.
     pub async fn code_repository_status(
         &self,
         selector: CodeRepositorySelector,
@@ -594,7 +605,6 @@ impl RelayKnowledgeService {
         })
     }
 
-    /// Checks whether a repository selector resolves to a registered code source.
     pub(crate) async fn code_repository_is_registered(
         &self,
         repository: String,

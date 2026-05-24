@@ -109,9 +109,14 @@ pub(super) fn plan_code_grep_fallback(
             })
         }
         CodeQueryKind::Imports => {
-            let query = import_grep_query(results)?;
-            let paths = import_grep_candidate_paths(results, &query);
-            let needs_scope_paths = paths.is_empty();
+            let query = import_grep_query(request, results)?;
+            let local_relative_query = relative_path_import_specifier(&query);
+            let paths = if local_relative_query {
+                Vec::new()
+            } else {
+                import_grep_candidate_paths(results, &query)
+            };
+            let needs_scope_paths = local_relative_query || paths.is_empty();
             Some(CodeGrepFallbackPlan {
                 commit,
                 query,
@@ -124,7 +129,23 @@ pub(super) fn plan_code_grep_fallback(
                 needs_scope_paths,
             })
         }
-        CodeQueryKind::Hybrid if results.len() < request.limit => {
+        CodeQueryKind::Hybrid => {
+            if let Some((identity, paths)) = hybrid_source_surface_fallback(request, results) {
+                return Some(CodeGrepFallbackPlan {
+                    commit,
+                    query: identity,
+                    paths,
+                    path_filters,
+                    language_filters,
+                    limit: request.limit,
+                    kind: SourceGrepKind::Hybrid,
+                    identity: None,
+                    needs_scope_paths: false,
+                });
+            }
+            if results.len() >= request.limit {
+                return None;
+            }
             let identity = source_grep_identity(&request.query)?;
             if hybrid_results_cover_identity(results, &identity) {
                 return None;
@@ -163,9 +184,16 @@ pub(super) fn append_code_grep_fallback(
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
-                && hit.excerpt == matched.excerpt
+                && (hit.excerpt == matched.excerpt
+                    || (plan.kind == SourceGrepKind::Hybrid && hit_allows_source_refresh(hit)))
         }) {
             add_code_grep_layers(existing, plan.kind);
+            if plan.kind == SourceGrepKind::Hybrid
+                && hit_allows_source_refresh(existing)
+                && hit_source_line_is_better(existing, &matched)
+            {
+                existing.excerpt = matched.excerpt.clone();
+            }
             existing.score = existing.score.max(fallback_score);
             continue;
         }
@@ -356,11 +384,12 @@ fn fallback_diagnostic(
     plan: &CodeGrepFallbackPlan,
     degraded_reason: Option<String>,
 ) -> Option<String> {
+    let external_import_fallback =
+        plan.kind == SourceGrepKind::Imports && !local_import_specifier(&plan.query);
     let Some(reason) = degraded_reason else {
-        return (plan.kind == SourceGrepKind::Imports)
-            .then(|| EXTERNAL_IMPORT_GREP_DIAGNOSTIC.to_owned());
+        return external_import_fallback.then(|| EXTERNAL_IMPORT_GREP_DIAGNOSTIC.to_owned());
     };
-    if plan.kind == SourceGrepKind::Imports {
+    if external_import_fallback {
         Some(format!("{EXTERNAL_IMPORT_GREP_DIAGNOSTIC}; {reason}"))
     } else {
         Some(reason)
@@ -380,6 +409,22 @@ fn source_grep_match_score(
     };
 
     (base_score + adjustment).max(0.0)
+}
+
+fn hit_source_line_is_better(hit: &CodeRetrievalHit, matched: &SourceGrepMatch) -> bool {
+    matched.excerpt.len() > hit.excerpt.len()
+        || (matched.excerpt.contains("export ") && !hit.excerpt.contains("export "))
+}
+
+fn hit_allows_source_refresh(hit: &CodeRetrievalHit) -> bool {
+    hit.retrieval_layers.iter().any(|layer| {
+        matches!(
+            layer,
+            CodeRetrievalLayer::Symbol
+                | CodeRetrievalLayer::Definition
+                | CodeRetrievalLayer::CallGraph
+        )
+    })
 }
 
 fn reference_source_grep_score_adjustment(identity: &str, excerpt: &str) -> f64 {
@@ -543,6 +588,97 @@ fn hybrid_results_cover_identity(results: &[CodeRetrievalHit], identity: &str) -
     })
 }
 
+fn hybrid_source_surface_fallback(
+    request: &CodeRetrievalRequest,
+    results: &[CodeRetrievalHit],
+) -> Option<(String, Vec<String>)> {
+    let query_terms = identifier_terms(&request.query);
+    if query_terms.len() < 2 {
+        return None;
+    }
+    let mut best: Option<(String, Vec<String>, usize, usize)> = None;
+    for hit in results {
+        if !hit.retrieval_layers.iter().any(|layer| {
+            matches!(
+                layer,
+                CodeRetrievalLayer::Symbol
+                    | CodeRetrievalLayer::Definition
+                    | CodeRetrievalLayer::CallGraph
+            )
+        }) {
+            continue;
+        }
+        let identity = hit_identity(hit)?;
+        let identity_terms = identifier_terms(&identity);
+        if identity_terms.len() >= 2
+            && identity_terms.len() < query_terms.len()
+            && identity_terms.iter().all(|term| query_terms.contains(term))
+        {
+            let term_count = identity_terms.len();
+            let identity_len = identity.len();
+            if best.as_ref().is_none_or(|(_, _, best_terms, best_len)| {
+                (term_count, identity_len) > (*best_terms, *best_len)
+            }) {
+                best = Some((identity, vec![hit.path.clone()], term_count, identity_len));
+            }
+        }
+    }
+
+    best.map(|(identity, paths, _, _)| (identity, paths))
+}
+
+fn hit_identity(hit: &CodeRetrievalHit) -> Option<String> {
+    hit.canonical_symbol_id
+        .as_deref()
+        .and_then(|symbol_id| {
+            symbol_id
+                .rsplit(|character: char| !source_identifier_char(character))
+                .find(|term| !term.is_empty())
+        })
+        .or_else(|| {
+            hit.excerpt
+                .split(|character: char| !source_identifier_char(character))
+                .find(|term| simple_source_identifier(term))
+        })
+        .map(str::to_owned)
+}
+
+fn identifier_terms(value: &str) -> BTreeSet<String> {
+    let mut terms = BTreeSet::new();
+    for token in value.split(|character: char| !source_identifier_char(character)) {
+        if token.is_empty() {
+            continue;
+        }
+        for term in split_identifier_token(token) {
+            if term.len() > 1 {
+                terms.insert(term.to_ascii_lowercase());
+            }
+        }
+    }
+
+    terms
+}
+
+fn split_identifier_token(token: &str) -> Vec<&str> {
+    let mut terms = Vec::new();
+    let mut start = 0usize;
+    let mut previous_lowercase = false;
+    for (index, character) in token.char_indices() {
+        let boundary = index > start
+            && (character == '_' || (character.is_ascii_uppercase() && previous_lowercase));
+        if boundary {
+            terms.push(token[start..index].trim_matches('_'));
+            start = index + usize::from(character == '_');
+        }
+        previous_lowercase = character.is_ascii_lowercase() || character.is_ascii_digit();
+    }
+    if start < token.len() {
+        terms.push(token[start..].trim_matches('_'));
+    }
+
+    terms.into_iter().filter(|term| !term.is_empty()).collect()
+}
+
 fn canonical_symbol_leaf_matches(canonical_symbol_id: &str, identity: &str) -> bool {
     canonical_symbol_id
         .rsplit(|character: char| !source_identifier_char(character))
@@ -607,8 +743,11 @@ fn source_grep_identity(query: &str) -> Option<String> {
     (query.split_whitespace().count() == 1).then_some(identity)
 }
 
-fn import_grep_query(results: &[CodeRetrievalHit]) -> Option<String> {
-    results
+fn import_grep_query(
+    request: &CodeRetrievalRequest,
+    results: &[CodeRetrievalHit],
+) -> Option<String> {
+    if let Some(query) = results
         .iter()
         .find_map(unindexed_external_import_specifier)
         .and_then(|specifier| {
@@ -618,6 +757,22 @@ fn import_grep_query(results: &[CodeRetrievalHit]) -> Option<String> {
                 definition_identity(&specifier)
             }
         })
+    {
+        return Some(query);
+    }
+
+    local_relative_import_query(request, results)
+}
+
+fn local_relative_import_query(
+    request: &CodeRetrievalRequest,
+    results: &[CodeRetrievalHit],
+) -> Option<String> {
+    if results.is_empty() || results.len() >= request.limit {
+        return None;
+    }
+    let specifier = import_specifier(&request.query)?;
+    (specifier.len() <= 128 && relative_path_import_specifier(&specifier)).then_some(specifier)
 }
 
 fn import_grep_candidate_paths(results: &[CodeRetrievalHit], specifier: &str) -> Vec<String> {
@@ -716,6 +871,11 @@ fn local_import_specifier(specifier: &str) -> bool {
         || specifier.starts_with("crate::")
         || specifier.starts_with("self::")
         || specifier.starts_with("super::")
+}
+
+fn relative_path_import_specifier(specifier: &str) -> bool {
+    let specifier = specifier.trim();
+    specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/')
 }
 
 fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {

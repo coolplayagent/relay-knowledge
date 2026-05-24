@@ -4,6 +4,8 @@ use super::{
     CodeParseStatus, CodeParseStatusCounts, DomainError, FreshnessPolicy, error::required_text,
 };
 
+const JAVASCRIPT_LIKE_CODE_FACT_VERSION: &str = "js-ts-import-edges-v1";
+
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(
     repository_id: &str,
@@ -17,8 +19,30 @@ pub fn code_snapshot_scope_id(
     append_hash_part(&mut input, tree_hash);
     append_hash_list(&mut input, path_filters);
     append_hash_list(&mut input, language_filters);
+    if code_snapshot_scope_uses_fact_version(language_filters) {
+        append_hash_part(&mut input, JAVASCRIPT_LIKE_CODE_FACT_VERSION);
+    }
 
     format!("git_snapshot:{:016x}", stable_hash64(&input))
+}
+
+pub fn code_snapshot_expected_scope_id(
+    repository_id: &str,
+    tree_hash: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Option<String> {
+    code_snapshot_scope_uses_fact_version(language_filters)
+        .then(|| code_snapshot_scope_id(repository_id, tree_hash, path_filters, language_filters))
+}
+
+pub fn code_snapshot_scope_uses_fact_version(language_filters: &[String]) -> bool {
+    language_filters.iter().any(|language| {
+        matches!(
+            language.as_str(),
+            "javascript" | "jsx" | "typescript" | "tsx"
+        )
+    })
 }
 
 /// Inclusive byte or line range for repository code index rows.

@@ -632,6 +632,16 @@ handlers[dynamicName] = async (request: W3ConnectorSaveRequest): Promise<void> =
         assert_eq!(symbol.kind, "function");
         assert!(symbol.signature.contains("W3ConnectorSaveRequest"));
     }
+    let exported = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "saveW3Connector")
+        .expect("exported function value should be extracted");
+    assert!(
+        exported
+            .signature
+            .starts_with("export const saveW3Connector")
+    );
     assert!(
         !snapshot
             .symbols
@@ -724,7 +734,7 @@ export function runtimeRoot(): string {
             .count(),
         2
     );
-    assert!(modules.contains(&"import \"./dev\""));
+    assert!(modules.contains(&"await import(\"./dev\")"));
     assert!(!modules.contains(&"import"));
     assert!(
         !modules
