@@ -41,6 +41,8 @@ resolve snapshot
 3. 用反向依赖和 import/call/reference edge 扩散 affected files。
 4. 只刷新受影响的 code facts、chunks 和 index families。
 
+Import 依赖扩散必须优先使用已索引代码地图和版本化 import edge。若 import 指向的外部依赖或跨仓库目标没有代码地图，索引器只记录 unresolved target hint、resolution reason 和受影响的本仓库事实，不为了补齐该依赖而触发未授权全仓扫描；查询层可在同一 scope 内用该 hint 触发受限 `rg` 兜底。
+
 ## 6. 高性能边界
 
 代码索引采用 Sourcegraph/Zoekt、GitHub Code Search、ripgrep 和 Tree-sitter 类系统的共同原则：先用路径、语言、trigram、symbol name 和 blob hash 缩小候选，再做 AST capture、edge resolution 和语义/向量刷新。AST chunk 应沿函数、类型、模块、doc comment 和 import block 边界切分；fallback text chunk 只在结构解析不可用时接管。
