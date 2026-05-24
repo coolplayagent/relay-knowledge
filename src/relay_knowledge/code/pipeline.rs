@@ -15,6 +15,10 @@ use super::{
 };
 
 const GIT_BLOB_FETCH_GROUP: usize = CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
+const MIN_PARALLEL_PARSE_FILES: usize = 12;
+const MIN_PARALLEL_PARSE_BYTES: usize = 256 * 1024;
+const TARGET_PARSE_FILES_PER_WORKER: usize = 16;
+const TARGET_PARSE_BYTES_PER_WORKER: usize = 512 * 1024;
 
 /// Blocking plan for a checkpointed full repository index.
 #[derive(Debug, Clone)]
@@ -127,7 +131,7 @@ fn parse_fetched_files(
     paths: &[String],
     blobs: &[Vec<u8>],
 ) -> Result<Vec<SnapshotBuild>, CodeIndexError> {
-    let worker_count = worker_count(paths.len());
+    let worker_count = worker_count(paths.len(), total_blob_bytes(blobs));
     if paths.len() <= 1 || worker_count <= 1 {
         return paths
             .iter()
@@ -195,11 +199,29 @@ fn parse_worker_stride(
     Ok(parsed)
 }
 
-fn worker_count(item_count: usize) -> usize {
+fn total_blob_bytes(blobs: &[Vec<u8>]) -> usize {
+    blobs
+        .iter()
+        .fold(0usize, |total, blob| total.saturating_add(blob.len()))
+}
+
+fn worker_count(item_count: usize, total_bytes: usize) -> usize {
+    if item_count == 0 {
+        return 0;
+    }
+    if item_count < MIN_PARALLEL_PARSE_FILES && total_bytes < MIN_PARALLEL_PARSE_BYTES {
+        return 1;
+    }
+    let desired_workers = item_count
+        .div_ceil(TARGET_PARSE_FILES_PER_WORKER)
+        .max(total_bytes.div_ceil(TARGET_PARSE_BYTES_PER_WORKER))
+        .max(1);
+
     thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1)
         .min(item_count)
+        .min(desired_workers)
 }
 
 /// Prepares a full repository index as a bounded, checkpointable batch plan.
@@ -297,4 +319,35 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     }
 
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_worker_count_keeps_tiny_batches_serial() {
+        assert_eq!(worker_count(7, 32 * 1024), 1);
+    }
+
+    #[test]
+    fn parser_worker_count_scales_with_bounded_batch_work() {
+        let available = thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+        let workers = worker_count(96, 4 * 1024 * 1024);
+
+        assert_eq!(workers, available.min(8).min(96));
+        assert!(workers >= 1);
+    }
+
+    #[test]
+    fn parser_worker_count_caps_thread_fanout_for_small_byte_batches() {
+        let available = thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+        let workers = worker_count(40, 128 * 1024);
+
+        assert_eq!(workers, available.min(3).min(40));
+    }
 }
