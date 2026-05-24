@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779664778-path-aware-go-module-overlay
+- 算法/架构：repository-set overlay refresh 把 Go manifest discovery 从仅根目录 `go.mod` 扩展为所有已索引 `**/go.mod` chunk，并保存 manifest 目录到 module 前缀的映射；导出文件/符号按相对 manifest 目录生成 module-qualified package/file keys，使 nested-module monorepo 中 `go.opentelemetry.io/collector/component`、`.../receiver` 这类 import 可通过当前索引的源码事实解析到对应仓库 package surface。
+- 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、ranking 权重、query fanout、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；仍只读取已索引 chunk，不访问工作区文件系统，仍要求带点号 module 前缀并跳过本地/相对/已解析 import。预期改善 OpenTelemetry/Temporal 这类 Go multi-module repository-set overlay evidence 与跨仓 usage-definition bridge；风险是同一 nested package 多文件会从 unresolved 变 ambiguous，且 manifest 扫描多覆盖若干 `go.mod` chunk，受 source_scope 排除、package-key exact-first、go.mod 文件不作为 package target、candidate dedupe/top-k 和 focused overlay tests 控制。
+- 策略关联：建立在 accepted `run-1779662884` root Go module-prefix overlay 与 repository-set export-key index 策略之上；明确避开 rejected `run-1779661306`/`run-1779660072` 的 `code_query_support.rs` ranking 局部 tweak 和 research_judge regression 簇，改为补齐跨仓 overlay 的通用 manifest/path 结构。
 ## 候选优化说明：run-1779662884-go-module-prefix-overlay
 - 算法/架构：repository-set overlay refresh 读取已索引 `go.mod` 文本 chunk 中的 `module` 前缀，把目标仓库导出的文件 path key 扩展为 module-qualified key；跨仓 unresolved Go import（如域名模块路径）先通过精确 module-qualified key 命中目标仓库内部 package/file，再继续复用既有 cross-edge、overlay evidence、bridge support、dedupe/diversity/top-k 合并流程。文件 path key 同时补充父目录 key，使 package import 可匹配 package 目录下的文件候选。
 - 不变量：不改变 SQLite schema、单仓 code query、FTS MATCH、ranking 权重、parser facts、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或 tools/self_iteration harness；只使用当前索引中已有 `go.mod` chunk，不读取工作区文件系统；只接受带点号的 Go module 前缀，继续跳过本地/相对 import 与已本仓 resolved import，无仓库名、路径、case id、query 字符串或 fixture 枚举。
@@ -987,6 +991,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.872638->0.8883815451024761; score_component:performance 0.775995->0.822288778004426; score_component:research_judge 0.82->0.86; case_rank:otel_go_repo_set_filelog_component_type null->7; case_score:research_judge 0.82->0.86; metric:cargo_fmt_check_ms 1776.0->1676.0; metric:temporal_samples_go_index_ms 1637.0->1575.0; metric:scala_syntax_fixture_index_ms 9032.0->564.0
 - known degradations: metric:self_iteration_cargo_build_release_ms 122.0->222.0; metric:self_iteration_cargo_clippy_ms 202.0->262.0; metric:swift_syntax_fixture_index_ms 887.0->928.0; metric:swift_syntax_fixture_register_index_ms 928.0->968.0; metric:relay_teams_query_p50_ms 282.0->465.0; metric:otel_collector_contrib_index_ms 370144.0->399267.0; metric:otel_collector_contrib_register_index_ms 370185.0->399348.0; metric:opencode_typescript_index_ms 37265.0->47417.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_release_ms=87456ms; self_iteration_cargo_build_release_ms=222ms; cargo_clippy_ms=383ms; cargo_test_ms=14969ms; self_iteration_cargo_clippy_ms=262ms; self_iteration_cargo_test_ms=161ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779664778
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779664778.patch`
+- score: 0.894857 (foundational=0.922297, competitive=0.759104, accuracy=0.840701, semantic_vector=1.000000, research_judge=n/a, performance=0.805269, stability=1.000000)
+- cases: 215/250 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_set.rs`, `src/relay_knowledge/storage/sqlite/code_set/manifest.rs`, `src/relay_knowledge/storage/sqlite/code_set_tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=1877ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_release_ms=94238ms; self_iteration_cargo_build_release_ms=13032ms; cargo_clippy_ms=383ms; cargo_test_ms=15590ms; self_iteration_cargo_clippy_ms=283ms; self_iteration_cargo_test_ms=181ms
 
 Adopted optimization notes:
 

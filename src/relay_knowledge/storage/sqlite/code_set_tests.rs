@@ -535,6 +535,73 @@ async fn repository_set_overlay_refresh_matches_go_module_manifest_prefixes() {
 }
 
 #[tokio::test]
+async fn repository_set_overlay_refresh_matches_nested_go_module_manifest_prefixes() {
+    let store = SqliteGraphStore::open_in_memory().expect("store should open");
+    let summary = store
+        .run(|connection| {
+            insert_repository_scope(connection, "repo-a", "app", "scope-a", "tree-a", false)?;
+            insert_repository_scope(connection, "repo-b", "otel", "scope-b", "tree-b", false)?;
+            insert_import(
+                connection,
+                "repo-a",
+                "scope-a",
+                "import-component",
+                "\"go.opentelemetry.io/collector/component\"",
+            )?;
+            insert_file(
+                connection,
+                "repo-b",
+                "scope-b",
+                "component-go-mod",
+                "component/go.mod",
+                "unknown",
+            )?;
+            insert_file(
+                connection,
+                "repo-b",
+                "scope-b",
+                "component-file",
+                "component/identifiable.go",
+                "go",
+            )?;
+            insert_chunk(
+                connection,
+                "repo-b",
+                "scope-b",
+                "component-go-mod-chunk",
+                "component/go.mod",
+                "module go.opentelemetry.io/collector/component\n",
+            )?;
+            code_set::create_set(connection, set_seed("workspace", 20))?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-a", "app", "scope-a", 0),
+            )?;
+            code_set::add_member(
+                connection,
+                member_seed("workspace", "repo-b", "otel", "scope-b", 0),
+            )?;
+            code_set::refresh_overlay(connection, "workspace", 30)
+        })
+        .await
+        .expect("overlay should refresh");
+
+    assert_eq!(summary.edge_count, 1);
+    assert_eq!(summary.resolved_edge_count, 1);
+
+    let edges = store
+        .run({
+            let set_id = summary.set_id.clone();
+            move |connection| code_set::cross_edges_for_set(connection, &set_id)
+        })
+        .await
+        .expect("edges should query");
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].resolution_state, "resolved");
+    assert_eq!(edges[0].to_record_id.as_deref(), Some("component-file"));
+}
+
+#[tokio::test]
 async fn repository_set_alias_lookup_does_not_match_existing_set_ids() {
     let store = SqliteGraphStore::open_in_memory().expect("store should open");
     let (first, colliding) = store
