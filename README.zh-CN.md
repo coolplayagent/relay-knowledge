@@ -135,10 +135,12 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 ```
 
 自迭代 harness 默认只执行轻量 fast 门禁；完整 profile 的产品与 harness 质量检查会按依赖阶段并行执行，`--jobs auto` 默认使用本机 CPU 数。
+默认 `fast` profile 还包含 targeted `code_index_recovery_cases`，用来在不跑 exhaustive 大仓 workload 的情况下持续验证 code-index 过期租约恢复、旧 worker 完成拒绝、dead-letter 和 checkpoint 续租。
 
 二进制启动 Tokio 运行时；从 CLI 边界向内，所有核心能力均通过共享应用服务的异步入口暴露。SQLite 存储通过存储边界打开，阻塞数据库操作被隔离到 Tokio 阻塞工作线程中。
 
 存储契约包含 v1 代码图数据面：tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；不支持或降级的文件会回退为文本代码块。C/C++ 宏密集文件如果 error node 局限在宏、预处理器或已识别 decorator 声明区域，decorator 类型体仍保持声明形态，并且仍能抽取可靠结构化事实，会被保守恢复为 parsed。代码仓库 full index 使用受资源预算约束的 SQLite 批次和持久 checkpoint；大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle；CLI 会启动有界单次 worker，`service run` 则用同一队列上的单个仓库索引 worker 消费任务。`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照；已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
+Code-index task lease 绑定 attempt：过期 running lease 会在 claim/status 路径前恢复为 retry 或 dead-letter，旧 worker 不能完成或失败已经被新 worker 接管的 task，活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后以及完成 task 前续租。未实现可选 lease recovery/renewal hook 的 store 会把这些 hook 当作 no-op，以保持 status 和 indexing 读路径兼容。JSON status 中的 checkpoint 会暴露 `updated_at_ms`，便于区分慢速推进和真正卡住。
 
 代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用和导入命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析或有歧义的边误报为确定调用。
 

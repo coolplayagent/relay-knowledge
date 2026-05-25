@@ -7,7 +7,8 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositoryStore,
+        CodeScopeRetentionRequest, SqliteGraphStore,
     },
 };
 
@@ -212,6 +213,52 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
         .expect("expired lease should reclaim");
     assert_eq!(reclaimed.attempt_count, 2);
     assert_eq!(reclaimed.lease_owner.as_deref(), Some("worker-b"));
+    assert_eq!(reclaimed.last_error_kind.as_deref(), Some("lease_expired"));
+    assert_eq!(
+        reclaimed.last_error_message.as_deref(),
+        Some("code index task lease expired")
+    );
+
+    let stale_complete = store
+        .run({
+            let task_id = queued.task_id.clone();
+            move |connection| {
+                code_tasks::complete_task(
+                    connection,
+                    CodeIndexTaskCompletion {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        now_ms: 32,
+                    },
+                )
+            }
+        })
+        .await
+        .expect_err("stale worker should not complete reclaimed task");
+    let stale_failure = store
+        .run({
+            let task_id = queued.task_id.clone();
+            move |connection| {
+                code_tasks::fail_task(
+                    connection,
+                    CodeIndexTaskFailure {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        error_kind: "late_worker".to_owned(),
+                        error_message: "late failure".to_owned(),
+                        retry_backoff_ms: 30,
+                        max_attempts: 3,
+                        now_ms: 32,
+                    },
+                )
+            }
+        })
+        .await
+        .expect_err("stale worker should not fail reclaimed task");
+    assert!(stale_complete.to_string().contains("active lease"));
+    assert!(stale_failure.to_string().contains("active lease"));
 
     let retrying = store
         .run({
@@ -293,7 +340,7 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
                         error_message: "still failing".to_owned(),
                         retry_backoff_ms: 30,
                         max_attempts: 3,
-                        now_ms: 80,
+                        now_ms: 79,
                     },
                 )
             }
@@ -349,6 +396,143 @@ async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
         .await
         .expect_err("malformed JSON should fail decoding");
     assert!(!malformed_task.to_string().is_empty());
+}
+
+#[tokio::test]
+async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
+    let store = registered_store().await;
+    let queued = store
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-renew", "scope-renew", 10)))
+        .await
+        .expect("task should queue");
+    for request in [
+        CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id.clone()),
+            lease_owner: "  ".to_owned(),
+            lease_duration_ms: 10,
+            max_attempts: 3,
+            now_ms: 20,
+        },
+        CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id.clone()),
+            lease_owner: "worker".to_owned(),
+            lease_duration_ms: 0,
+            max_attempts: 3,
+            now_ms: 20,
+        },
+        CodeIndexTaskClaimRequest {
+            task_id: Some(queued.task_id.clone()),
+            lease_owner: "worker".to_owned(),
+            lease_duration_ms: 10,
+            max_attempts: 0,
+            now_ms: 20,
+        },
+    ] {
+        store
+            .run(move |connection| code_tasks::claim_task(connection, request))
+            .await
+            .expect_err("invalid claim should fail");
+    }
+
+    let running = store
+        .run({
+            let task_id = queued.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-a".to_owned(),
+                        lease_duration_ms: 10,
+                        max_attempts: 2,
+                        now_ms: 20,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("claim should load")
+        .expect("task should claim");
+
+    let renewed = store
+        .run({
+            let task_id = running.task_id.clone();
+            move |connection| {
+                code_tasks::renew_task_lease(
+                    connection,
+                    CodeIndexTaskLeaseRenewal {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        lease_duration_ms: 50,
+                        now_ms: 25,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("active lease should renew");
+    assert_eq!(renewed.lease_expires_at_ms, Some(75));
+    let stale_renew = store
+        .run({
+            let task_id = running.task_id.clone();
+            move |connection| {
+                code_tasks::renew_task_lease(
+                    connection,
+                    CodeIndexTaskLeaseRenewal {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        lease_duration_ms: 10,
+                        now_ms: 75,
+                    },
+                )
+            }
+        })
+        .await
+        .expect_err("expired lease should not renew");
+    assert!(stale_renew.to_string().contains("active lease"));
+
+    store
+        .run(|connection| code_tasks::recover_expired_task_leases(connection, 76, 2))
+        .await
+        .expect("expired lease should recover");
+    let recovered = store
+        .run({
+            let task_id = running.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-b".to_owned(),
+                        lease_duration_ms: 10,
+                        max_attempts: 2,
+                        now_ms: 76,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("recovered task should load")
+        .expect("recovered task should claim");
+    assert_eq!(recovered.attempt_count, 2);
+    assert_eq!(recovered.last_error_kind.as_deref(), Some("lease_expired"));
+
+    store
+        .run(|connection| code_tasks::recover_expired_task_leases(connection, 87, 2))
+        .await
+        .expect("expired terminal lease should recover");
+    let dead = store
+        .run({
+            let task_id = recovered.task_id.clone();
+            move |connection| code_tasks::task_by_id(connection, &task_id)
+        })
+        .await
+        .expect("dead task should load")
+        .expect("dead task should exist");
+    assert_eq!(dead.state, CodeIndexTaskState::DeadLetter);
+    assert!(dead.lease_owner.is_none());
 }
 
 #[tokio::test]

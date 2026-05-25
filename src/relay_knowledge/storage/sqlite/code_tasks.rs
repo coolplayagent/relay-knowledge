@@ -9,7 +9,7 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskSeed, CodeScopeRetentionRequest, StorageError,
+        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeScopeRetentionRequest, StorageError,
     },
 };
 
@@ -86,7 +86,13 @@ pub(super) fn claim_task(
     connection: &mut Connection,
     request: CodeIndexTaskClaimRequest,
 ) -> Result<Option<CodeIndexTaskRecord>, StorageError> {
+    let lease_owner = validate_claim_request(
+        &request.lease_owner,
+        request.lease_duration_ms,
+        request.max_attempts,
+    )?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    recover_expired_leases(&transaction, request.now_ms, request.max_attempts)?;
     let task_id = if let Some(task_id) = request.task_id {
         transaction
             .query_row(
@@ -96,10 +102,7 @@ pub(super) fn claim_task(
                 WHERE task_id = ?1
                   AND next_retry_at_ms <= ?2
                   AND attempt_count < ?3
-                  AND (
-                    state IN ('queued', 'retrying')
-                    OR (state = 'running' AND lease_expires_at_ms <= ?2)
-                  )
+                  AND state IN ('queued', 'retrying')
                 ",
                 params![task_id, request.now_ms, request.max_attempts],
                 |row| row.get::<_, String>(0),
@@ -113,10 +116,7 @@ pub(super) fn claim_task(
                 FROM code_repository_index_tasks
                 WHERE next_retry_at_ms <= ?1
                   AND attempt_count < ?2
-                  AND (
-                    state IN ('queued', 'retrying')
-                    OR (state = 'running' AND lease_expires_at_ms <= ?1)
-                  )
+                  AND state IN ('queued', 'retrying')
                 ORDER BY created_at_ms ASC, task_id ASC
                 LIMIT 1
                 ",
@@ -148,7 +148,7 @@ pub(super) fn claim_task(
         ",
         params![
             &task_id,
-            &request.lease_owner,
+            lease_owner,
             request.now_ms.saturating_add(request.lease_duration_ms),
             request.now_ms,
             request.max_attempts,
@@ -165,10 +165,48 @@ pub(super) fn claim_task(
     Ok(Some(task))
 }
 
+pub(super) fn renew_task_lease(
+    connection: &mut Connection,
+    request: CodeIndexTaskLeaseRenewal,
+) -> Result<CodeIndexTaskRecord, StorageError> {
+    let lease_owner = validate_lease_owner(&request.lease_owner)?;
+    if request.lease_duration_ms == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task lease duration must be greater than zero".to_owned(),
+        ));
+    }
+    let changed = connection.execute(
+        "
+        UPDATE code_repository_index_tasks
+        SET lease_expires_at_ms = ?4,
+            updated_at_ms = ?5
+        WHERE task_id = ?1
+          AND state = 'running'
+          AND lease_owner = ?2
+          AND attempt_count = ?3
+          AND lease_expires_at_ms > ?5
+        ",
+        params![
+            request.task_id,
+            lease_owner,
+            request.attempt_count,
+            request.now_ms.saturating_add(request.lease_duration_ms),
+            request.now_ms,
+        ],
+    )?;
+    if changed == 0 {
+        return Err(inactive_lease_error(&request.task_id));
+    }
+
+    task_by_id(connection, &request.task_id)?
+        .ok_or_else(|| StorageError::InvalidInput("renewed code index task is missing".to_owned()))
+}
+
 pub(super) fn complete_task(
     connection: &mut Connection,
     request: CodeIndexTaskCompletion,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
+    let lease_owner = validate_lease_owner(&request.lease_owner)?;
     let changed = connection.execute(
         "
         UPDATE code_repository_index_tasks
@@ -178,19 +216,21 @@ pub(super) fn complete_task(
             last_error_kind = NULL,
             last_error_message = NULL,
             updated_at_ms = ?4
-        WHERE task_id = ?1 AND lease_owner = ?2 AND attempt_count = ?3
+        WHERE task_id = ?1
+          AND state = 'running'
+          AND lease_owner = ?2
+          AND attempt_count = ?3
+          AND lease_expires_at_ms > ?4
         ",
         params![
             request.task_id,
-            request.lease_owner,
+            lease_owner,
             request.attempt_count,
             request.now_ms,
         ],
     )?;
     if changed == 0 {
-        return Err(StorageError::InvalidInput(
-            "code index task lease is no longer active".to_owned(),
-        ));
+        return Err(inactive_lease_error(&request.task_id));
     }
 
     task_by_id(connection, &request.task_id)?.ok_or_else(|| {
@@ -202,6 +242,12 @@ pub(super) fn fail_task(
     connection: &mut Connection,
     request: CodeIndexTaskFailure,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
+    let lease_owner = validate_lease_owner(&request.lease_owner)?;
+    if request.max_attempts == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task max attempts must be greater than zero".to_owned(),
+        ));
+    }
     let next_state = if request.attempt_count >= request.max_attempts {
         CodeIndexTaskState::DeadLetter
     } else {
@@ -217,11 +263,15 @@ pub(super) fn fail_task(
             last_error_kind = ?6,
             last_error_message = ?7,
             updated_at_ms = ?8
-        WHERE task_id = ?1 AND lease_owner = ?2 AND attempt_count = ?3
+        WHERE task_id = ?1
+          AND state = 'running'
+          AND lease_owner = ?2
+          AND attempt_count = ?3
+          AND lease_expires_at_ms > ?8
         ",
         params![
             request.task_id,
-            request.lease_owner,
+            lease_owner,
             request.attempt_count,
             next_state.as_str(),
             request.now_ms.saturating_add(request.retry_backoff_ms),
@@ -231,9 +281,7 @@ pub(super) fn fail_task(
         ],
     )?;
     if changed == 0 {
-        return Err(StorageError::InvalidInput(
-            "code index task lease is no longer active".to_owned(),
-        ));
+        return Err(inactive_lease_error(&request.task_id));
     }
 
     task_by_id(connection, &request.task_id)?
@@ -274,7 +322,8 @@ pub(super) fn checkpoint(
             "
             SELECT repository_id, source_scope, state, total_path_count, parsed_file_count,
                    committed_file_count, committed_symbol_count, committed_reference_count,
-                   committed_chunk_count, batch_count, last_path, resource_budget_json
+                   committed_chunk_count, batch_count, last_path, resource_budget_json,
+                   updated_at_ms
             FROM code_repository_index_checkpoints
             WHERE source_scope = ?1
             ",
@@ -283,6 +332,19 @@ pub(super) fn checkpoint(
         )
         .optional()
         .map_err(StorageError::from)
+}
+
+pub(super) fn recover_expired_task_leases(
+    connection: &mut Connection,
+    now_ms: u64,
+    max_attempts: u32,
+) -> Result<(), StorageError> {
+    if max_attempts == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task max attempts must be greater than zero".to_owned(),
+        ));
+    }
+    recover_expired_leases(connection, now_ms, max_attempts)
 }
 
 pub(super) fn retention_status(
@@ -328,6 +390,65 @@ fn task_by_fingerprint(
         )
         .optional()
         .map_err(StorageError::from)
+}
+
+fn validate_claim_request(
+    lease_owner: &str,
+    lease_duration_ms: u64,
+    max_attempts: u32,
+) -> Result<&str, StorageError> {
+    let lease_owner = validate_lease_owner(lease_owner)?;
+    if lease_duration_ms == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task lease duration must be greater than zero".to_owned(),
+        ));
+    }
+    if max_attempts == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task max attempts must be greater than zero".to_owned(),
+        ));
+    }
+
+    Ok(lease_owner)
+}
+
+fn validate_lease_owner(lease_owner: &str) -> Result<&str, StorageError> {
+    let lease_owner = lease_owner.trim();
+    if lease_owner.is_empty() {
+        return Err(StorageError::InvalidInput(
+            "code index task lease owner must not be empty".to_owned(),
+        ));
+    }
+
+    Ok(lease_owner)
+}
+
+fn recover_expired_leases(
+    connection: &Connection,
+    now_ms: u64,
+    max_attempts: u32,
+) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        UPDATE code_repository_index_tasks
+        SET state = CASE
+                WHEN attempt_count >= ?2 THEN 'dead_letter'
+                ELSE 'retrying'
+            END,
+            lease_owner = NULL,
+            lease_expires_at_ms = NULL,
+            next_retry_at_ms = ?1,
+            last_error_kind = 'lease_expired',
+            last_error_message = 'code index task lease expired',
+            updated_at_ms = ?1
+        WHERE state = 'running'
+          AND lease_expires_at_ms IS NOT NULL
+          AND lease_expires_at_ms <= ?1
+        ",
+        params![now_ms, max_attempts],
+    )?;
+
+    Ok(())
 }
 
 fn retention_summary(
@@ -538,6 +659,7 @@ fn checkpoint_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexCheckpoint> {
         batch_count: row.get(9)?,
         last_path: row.get(10)?,
         resource_budget,
+        updated_at_ms: row.get(12)?,
     })
 }
 
@@ -549,6 +671,12 @@ fn parse_task_state(value: &str, column: usize) -> rusqlite::Result<CodeIndexTas
             Box::new(error),
         )
     })
+}
+
+fn inactive_lease_error(task_id: &str) -> StorageError {
+    StorageError::InvalidInput(format!(
+        "code index task '{task_id}' is not held by an active lease"
+    ))
 }
 
 fn json<T: serde::Serialize>(value: &T) -> Result<String, StorageError> {

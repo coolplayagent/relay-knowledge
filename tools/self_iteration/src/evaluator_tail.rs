@@ -41,17 +41,24 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 ["cargo", "build", "--bin", "relay-knowledge"],
                 600,
             )]),
-            QualityGateStage::Parallel(vec![quality_gate(
-                "self_iteration_cargo_check",
-                [
-                    "cargo",
-                    "check",
-                    "--manifest-path",
-                    "tools/self_iteration/Cargo.toml",
-                    "--all-targets",
-                ],
-                180,
-            )]),
+            QualityGateStage::Parallel(vec![
+                quality_gate(
+                    "self_iteration_cargo_check",
+                    [
+                        "cargo",
+                        "check",
+                        "--manifest-path",
+                        "tools/self_iteration/Cargo.toml",
+                        "--all-targets",
+                    ],
+                    180,
+                ),
+                quality_gate(
+                    "code_index_recovery_cases",
+                    ["cargo", "test", "--all-targets", "code_index_task_"],
+                    300,
+                ),
+            ]),
         ];
     }
     vec![
@@ -168,6 +175,7 @@ fn quality_gate<const N: usize>(
 fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_debug" => Some(90_000.0),
+        "code_index_recovery_cases" => Some(60_000.0),
         "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),
