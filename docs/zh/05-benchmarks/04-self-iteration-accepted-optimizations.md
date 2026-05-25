@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-nonstandard-source-layout
+- 算法/架构：代码索引新增 source-root layout 归一化层，import/module 解析不再只剥离顶层 `src/`，同时识别 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 与嵌套 JVM source root；TypeScript bare specifier 仅在索引中存在本地模块候选时解析，C/C++ include roots 支持非标准 `include/` 片段。self-iteration 新增 `nonstandard_layout_fixture` 并加入 fast 默认仓库，用 guardrail case 覆盖 Python、TypeScript、Go、Java、C++、Swift 的非 `src/` 源码。
+- 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、candidate window、ranking 权重、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或安装发布；普通 `vendor/`、`third_party/` 仍默认排除并需要显式 path filter opt in。预期解决 Issue #146 中非标准目录源码漏检和跨文件关系解析不足；风险是本地 bare module 或 include root 更容易被识别为本仓目标，受本地模块存在性、path/language filter、ambiguous resolution、vendor 边界单测和 fast guardrail 控制。
+- 策略关联：延续既有外部依赖 diagnostic 与 source fallback 边界，不枚举真实用户仓库、路径或 query；把评估压力放入默认 fast，避免未来优化退回 `src/` 专用假设。
 ## 候选优化说明：run-1779697627-strict-api-dense-hybrid-chunk-pass
 - 算法/架构：Hybrid chunk retrieval 对包含多个结构化 API anchor 的 API-dense query 先执行一次严格 AND-style FTS pass，只读取有界小候选窗口；只有这些 indexed lexical chunk 已满足既有 dense/collective chunk gate 时才直接返回并跳过 broad OR chunk recall 与后续 graph expansion，否则无条件回落到原 `hybrid_chunk_fts_match_query`、candidate window、scorer、reference/call/import layers、source fallback、repo-set merge、semantic/vector read model 和 tools/self_iteration harness。
 - 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS 文档、ranking 权重、`text_fallback` 语义、external dependency diagnostic、env/paths/net、CLI/API 或安装发布；严格 pass 只接受至少 2 个 camel/Pascal/snake structured high-signal terms，候选数按 final limit clamp 到 40-180，且必须复用现有 non-`text_fallback` dense chunk gate 才能早停。预期降低 Temporal/OTel app-member 多 API flow 查询的 chunk row materialization、Rust scoring 与 graph expansion 成本，保留 C/C++ comment fallback 和单 API query 的原路径；风险是 strict pass 多一次小 FTS read 后仍回落 broad path，受 structured-term gate、dense gate、fallback path、focused tests 和 cached Temporal query check 控制。
@@ -980,31 +984,5 @@ Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
-## run-1779694672
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779694672.patch`
-- score: 0.982871 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.904840, stability=1.000000)
-- cases: 60/60 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository_set_query.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=1978ms; self_iteration_cargo_fmt_check_ms=343ms; cargo_build_debug_ms=324ms; self_iteration_cargo_check_ms=1151ms; temporal_samples_go_index_ms=202ms; temporal_samples_go_register_index_ms=263ms; leveldb_cpp_index_ms=202ms; leveldb_cpp_register_index_ms=264ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779697627
-
-- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779697627.patch`
-- score: 0.980546 (foundational=1.000000, competitive=1.000000, accuracy=1.000000, semantic_vector=1.000000, research_judge=n/a, performance=0.891923, stability=1.000000)
-- cases: 60/60 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
-- key improvements: score_component:score 0.969095->0.9805462280712477; score_component:competitive_capability 0.975->1.0; score_component:performance 0.870731->0.8919234892847092; score_component:stability 0.991453->1.0; gate:c_syntax_fixture_c_syntax_hybrid_dispatch_comment_grep_text_fallback false->true; case:c_syntax_hybrid_dispatch_comment_grep_text_fallback false->true; metric:c_syntax_fixture_register_index_ms 306.0->182.0; metric:c_syntax_fixture_query_p50_ms 242.0->202.0
-- known degradations: metric:leveldb_cpp_index_ms 182.0->262.0; metric:leveldb_cpp_register_index_ms 243.0->303.0; metric:typescript_syntax_fixture_index_ms 143.0->222.0; metric:typescript_syntax_fixture_register_index_ms 224.0->283.0; metric:relay_teams_query_p95_ms 947.0->1030.0; metric:local_noise_file_index_ms 969.0->1629.0
-- latency metrics: cargo_fmt_check_ms=1953ms; self_iteration_cargo_fmt_check_ms=323ms; cargo_build_debug_ms=323ms; self_iteration_cargo_check_ms=122ms; temporal_sdk_go_index_ms=848ms; temporal_sdk_go_register_index_ms=911ms; temporal_samples_go_index_ms=162ms; temporal_samples_go_register_index_ms=227ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
+## run-1779694672-to-run-1779697627 compacted
+- summary: accepted ambiguous overlay priority and strict API-dense Hybrid chunk pass records are compacted here to keep this primary benchmark log under the hard line cap. Latest accepted `run-1779694672` scored 0.982871 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full patches, metrics, changed paths, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries.

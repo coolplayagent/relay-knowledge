@@ -1,0 +1,117 @@
+{
+  "repositories": {
+    "nonstandard_layout_fixture": {
+      "generated_fixture": "nonstandard_layout_v1",
+      "alias": "nonstandard-layout-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "nonstandard_layout_python_external_deps_symbol",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "symbol",
+      "query": "ExternalPythonSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["external_deps/python_sdk"],
+      "language_filters": ["python"],
+      "expected": [{"path": "external_deps/python_sdk/session_client.py", "excerpt_contains": "class ExternalPythonSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_typescript_external_deps_definition",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "definition",
+      "query": "ExternalTypeScriptSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["external_deps/ts_sdk"],
+      "language_filters": ["typescript"],
+      "expected": [{"path": "external_deps/ts_sdk/sessionClient.ts", "excerpt_contains": "class ExternalTypeScriptSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_go_plugin_symbol",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "symbol",
+      "query": "ExternalGoSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["plugins/example.com/nonstandard/session"],
+      "language_filters": ["go"],
+      "expected": [{"path": "plugins/example.com/nonstandard/session/client.go", "excerpt_contains": "ExternalGoSessionClient interface"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_java_modules_definition",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "definition",
+      "query": "ExternalJavaSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["modules/java_sdk"],
+      "language_filters": ["java"],
+      "expected": [{"path": "modules/java_sdk/src/main/java/example/ExternalJavaSessionClient.java", "excerpt_contains": "class ExternalJavaSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_cpp_external_include_import",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "imports",
+      "query": "external_session_client.hpp",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 3,
+      "language_filters": ["cpp"],
+      "expected": [{"path": "external_deps/cpp_sdk/session_client.cpp", "excerpt_contains": "#include <external_session_client.hpp>"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_swift_sources_symbol",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "symbol",
+      "query": "ExternalSwiftSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["Sources/SwiftSdk"],
+      "language_filters": ["swift"],
+      "expected": [{"path": "Sources/SwiftSdk/ExternalSwiftSessionClient.swift", "excerpt_contains": "class ExternalSwiftSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_hybrid_application_external_session_flow",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "hybrid",
+      "query": "external session workflow TypeScript client openExternalSession",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 12,
+      "max_rank": 4,
+      "language_filters": ["typescript"],
+      "expected": [{"path": "src/application.ts", "excerpt_contains": "new ExternalTypeScriptSessionClient"}],
+      "expected_all": [
+        {"path": "external_deps/ts_sdk/sessionClient.ts", "excerpt_contains": "openExternalSession(payload: string)"}
+      ],
+      "case_group": "nonstandard_source_layout"
+    }
+  ]
+}
