@@ -142,6 +142,38 @@ async fn candidate_paths_for_query_scope_deduplicates_before_limit() {
     assert!(paths.iter().any(|path| path == "zzz/target.rs"));
 }
 
+#[tokio::test]
+async fn candidate_paths_for_query_scope_falls_back_when_search_table_unavailable() {
+    let snapshot = snapshot_with_chunk_status(
+        "repo",
+        "zzz/target.rs",
+        "fn late_budget_target() { /* RK_LATE_BUDGET_NOTE */ }",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    let store = store_with_repository_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let paths = store
+        .code_file_candidate_paths_for_query_scope(
+            TEST_SOURCE_SCOPE.to_owned(),
+            "RK_LATE_BUDGET_NOTE".to_owned(),
+            vec!["zzz".to_owned()],
+            vec!["rust".to_owned()],
+            1,
+        )
+        .await
+        .expect("scope fallback should load candidate paths");
+
+    assert_eq!(paths, ["zzz/target.rs"]);
+}
+
 #[test]
 fn candidate_path_query_keeps_discriminative_suffix_terms() {
     let fts_query =

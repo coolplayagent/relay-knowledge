@@ -107,14 +107,18 @@ pub(super) fn file_candidate_paths_for_query_scope(
     language_filters: &[String],
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
-    let paths = file_candidate_paths_from_search(
+    let paths = match file_candidate_paths_from_search(
         connection,
         source_scope,
         query,
         path_filters,
         language_filters,
         limit,
-    )?;
+    ) {
+        Ok(paths) => paths,
+        Err(error) if candidate_path_search_can_use_scope_fallback(&error) => Vec::new(),
+        Err(error) => return Err(error),
+    };
     if !paths.is_empty() {
         return Ok(paths);
     }
@@ -166,6 +170,16 @@ fn file_candidate_paths_from_search(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn candidate_path_search_can_use_scope_fallback(error: &StorageError) -> bool {
+    let StorageError::Sqlite(error) = error else {
+        return false;
+    };
+    let message = error.to_string();
+    message.contains("vtable constructor failed: code_repository_search")
+        || message.contains("no such table: code_repository_search")
+        || message.contains("no such module: fts5")
 }
 
 pub(super) fn candidate_path_fts_query(query: &str) -> Option<String> {
