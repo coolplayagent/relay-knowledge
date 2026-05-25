@@ -17,7 +17,7 @@ pub(super) fn resolve_references(
     if index.is_empty() {
         return Ok(());
     }
-    let references = load_unresolved_call_references(transaction, source_scope)?;
+    let references = load_call_references(transaction, source_scope)?;
     if references.is_empty() {
         return Ok(());
     }
@@ -46,6 +46,9 @@ pub(super) fn resolve_references(
                 ])?;
             }
             TargetResolution::Ambiguous(target_hint) => {
+                if index.should_keep_existing_resolution(&reference) {
+                    continue;
+                }
                 update.execute(params![
                     source_scope,
                     reference.reference_id,
@@ -56,7 +59,20 @@ pub(super) fn resolve_references(
                     "ambiguous"
                 ])?;
             }
-            TargetResolution::Unresolved => {}
+            TargetResolution::Unresolved => {
+                if index.should_keep_existing_resolution(&reference) {
+                    continue;
+                }
+                update.execute(params![
+                    source_scope,
+                    reference.reference_id,
+                    Option::<String>::None,
+                    reference.name,
+                    "unresolved",
+                    2_500_u16,
+                    "ambiguous"
+                ])?;
+            }
         }
     }
 
@@ -65,6 +81,7 @@ pub(super) fn resolve_references(
 
 struct CallTargetIndex {
     by_name: BTreeMap<String, Vec<CallTargetSymbol>>,
+    by_snapshot_id: BTreeMap<String, CallTargetSymbol>,
 }
 
 #[derive(Clone)]
@@ -78,6 +95,9 @@ struct CallReference {
     reference_id: String,
     path: String,
     name: String,
+    target_symbol_snapshot_id: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
 }
 
 enum TargetResolution {
@@ -105,31 +125,54 @@ impl CallTargetIndex {
             Ok((name, symbol))
         })?;
         let mut by_name = BTreeMap::<String, Vec<CallTargetSymbol>>::new();
+        let mut by_snapshot_id = BTreeMap::<String, CallTargetSymbol>::new();
         for row in rows {
             let (name, symbol) = row?;
+            by_snapshot_id.insert(symbol.symbol_snapshot_id.clone(), symbol.clone());
             by_name.entry(name).or_default().push(symbol);
         }
 
-        Ok(Self { by_name })
+        Ok(Self {
+            by_name,
+            by_snapshot_id,
+        })
     }
 
     fn is_empty(&self) -> bool {
         self.by_name.is_empty()
     }
 
+    fn should_keep_existing_resolution(&self, reference: &CallReference) -> bool {
+        reference.resolution_state == "resolved"
+            && reference.confidence_basis_points > 8_000
+            && reference
+                .target_symbol_snapshot_id
+                .as_deref()
+                .and_then(|symbol_id| self.by_snapshot_id.get(symbol_id))
+                .is_some_and(|symbol| callable_target_symbol_kind(&symbol.kind))
+    }
+
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
+        let mut deferred_resolution = None;
         let mut ambiguous_target_hint = None;
         for candidate in call_target_name_candidates(name, reference_path) {
             let target_hint = call_target_hint(name, &candidate);
             match self.resolve_candidate(&candidate, reference_path) {
                 TargetResolution::Unresolved => {}
                 TargetResolution::Resolved(symbol, _) => {
-                    return TargetResolution::Resolved(symbol, target_hint);
+                    if callable_definition_symbol_kind(&symbol.kind) {
+                        return TargetResolution::Resolved(symbol, target_hint);
+                    }
+                    deferred_resolution.get_or_insert((symbol, target_hint));
                 }
                 TargetResolution::Ambiguous(_) => {
                     ambiguous_target_hint.get_or_insert(target_hint);
                 }
             }
+        }
+
+        if let Some((symbol, target_hint)) = deferred_resolution {
+            return TargetResolution::Resolved(symbol, target_hint);
         }
 
         ambiguous_target_hint.map_or(TargetResolution::Unresolved, TargetResolution::Ambiguous)
@@ -202,17 +245,17 @@ fn unique_preferred_callable(symbols: &[CallTargetSymbol]) -> Option<CallTargetS
     }
 }
 
-fn load_unresolved_call_references(
+fn load_call_references(
     transaction: &Transaction<'_>,
     source_scope: &str,
 ) -> Result<Vec<CallReference>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT reference_id, path, name
+        SELECT reference_id, path, name, target_symbol_snapshot_id, resolution_state,
+               confidence_basis_points
         FROM code_repository_references
         WHERE source_scope = ?1
           AND kind = 'call'
-          AND resolution_state != 'resolved'
         ",
     )?;
     let rows = statement.query_map(params![source_scope], |row| {
@@ -220,6 +263,9 @@ fn load_unresolved_call_references(
             reference_id: row.get(0)?,
             path: row.get(1)?,
             name: row.get(2)?,
+            target_symbol_snapshot_id: row.get(3)?,
+            resolution_state: row.get(4)?,
+            confidence_basis_points: row.get(5)?,
         })
     })?;
 
