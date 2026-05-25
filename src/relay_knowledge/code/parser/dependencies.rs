@@ -803,8 +803,28 @@ fn package_lock_package_name(path: &str, package: &Value) -> Option<String> {
     package
         .get("name")
         .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
         .map(str::to_owned)
-        .or_else(|| path.strip_prefix("node_modules/").map(str::to_owned))
+        .or_else(|| package_lock_package_name_from_path(path))
+}
+
+fn package_lock_package_name_from_path(path: &str) -> Option<String> {
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let mut package_name = None;
+    while let Some(segment) = segments.next() {
+        if segment != "node_modules" {
+            continue;
+        }
+        let Some(first) = segments.next() else {
+            continue;
+        };
+        package_name = if first.starts_with('@') {
+            segments.next().map(|name| format!("{first}/{name}"))
+        } else {
+            Some(first.to_owned())
+        };
+    }
+    package_name
 }
 
 fn line_containing_json_key(content: &str, key: &str) -> Option<usize> {

@@ -1,6 +1,6 @@
 use super::{
     CodeIndexResourceBudget, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
-    FreshnessPolicy, RepositoryCodeRange, code_snapshot_scope_id,
+    FreshnessPolicy, RepositoryCodeRange, code_snapshot_expected_scope_id, code_snapshot_scope_id,
 };
 
 #[test]
@@ -43,6 +43,15 @@ fn snapshot_scope_id_tracks_tree_and_filters() {
     assert_eq!(scope, same);
     assert_ne!(scope, different_tree);
     assert!(scope.starts_with("git_snapshot:"));
+}
+
+#[test]
+fn expected_snapshot_scope_id_is_checked_for_unfiltered_repositories() {
+    let scope = code_snapshot_scope_id("repo-1", "tree-a", &[], &[]);
+    let expected = code_snapshot_expected_scope_id("repo-1", "tree-a", &[], &[])
+        .expect("all repository snapshots should carry a fact version");
+
+    assert_eq!(expected, scope);
 }
 
 #[test]

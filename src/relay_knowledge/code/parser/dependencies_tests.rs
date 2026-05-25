@@ -58,15 +58,28 @@ fn recurses_package_lock_v1_dependencies() {
 fn extracts_package_lock_v2_packages() {
     let dependencies = collect(
         "package-lock.json",
-        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"}}}"#,
+        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"},"node_modules/a/node_modules/b":{"version":"2.0.0"},"node_modules/a/node_modules/@scope/transitive":{"version":"3.0.0"}}}"#,
     );
 
     assert_dependency(&dependencies, "react", "locked", None, Some("18.2.0"));
     assert_dependency(&dependencies, "@scope/pkg", "locked", None, Some("1.2.3"));
+    assert_dependency(&dependencies, "b", "locked", None, Some("2.0.0"));
+    assert_dependency(
+        &dependencies,
+        "@scope/transitive",
+        "locked",
+        None,
+        Some("3.0.0"),
+    );
     assert!(
         !dependencies
             .iter()
             .any(|dependency| dependency.package_name == "root")
+    );
+    assert!(
+        !dependencies
+            .iter()
+            .any(|dependency| dependency.package_name == "a/node_modules/b")
     );
 }
 
