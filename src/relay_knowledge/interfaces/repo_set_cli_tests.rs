@@ -55,6 +55,10 @@ fn parses_repo_set_commands_and_validation_errors() {
         }
     );
     assert_eq!(
+        parse_query_kind("sbom").expect("sbom query kind should parse"),
+        CodeQueryKind::Sbom
+    );
+    assert_eq!(
         parse_repo_set(&[
             "remove".to_owned(),
             "workspace".to_owned(),

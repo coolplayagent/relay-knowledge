@@ -128,6 +128,27 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_dependencies (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            dependency_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            language_id TEXT NOT NULL,
+            ecosystem TEXT NOT NULL,
+            package_name TEXT NOT NULL,
+            requirement TEXT,
+            resolved_version TEXT,
+            dependency_group TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            is_lockfile INTEGER NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            excerpt TEXT NOT NULL,
+            PRIMARY KEY (source_scope, dependency_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS code_repository_calls (
             repository_id TEXT NOT NULL,
             source_scope TEXT NOT NULL,
@@ -368,6 +389,10 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup
             ON code_repository_imports(source_scope, target_hint, path);
+        CREATE INDEX IF NOT EXISTS code_repository_dependencies_lookup
+            ON code_repository_dependencies(source_scope, ecosystem, package_name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_dependencies_group_lookup
+            ON code_repository_dependencies(source_scope, dependency_group, path);
         CREATE INDEX IF NOT EXISTS code_repository_chunks_lookup
             ON code_repository_chunks(source_scope, path);
         CREATE INDEX IF NOT EXISTS code_repository_chunks_symbol_lookup
@@ -425,6 +450,7 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_symbols(connection)?;
     backfill_search_references(connection)?;
     backfill_search_imports(connection)?;
+    backfill_search_dependencies(connection)?;
     backfill_search_feature_flags(connection)?;
     backfill_search_calls(connection)?;
     backfill_search_chunks(connection)?;
@@ -530,6 +556,43 @@ fn backfill_search_imports(connection: &Connection) -> Result<(), StorageError> 
         LEFT JOIN code_repository_files file
           ON file.source_scope = import.source_scope
          AND file.path = import.path
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_dependencies(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_dependencies",
+        &[
+            "source_scope",
+            "dependency_id",
+            "path",
+            "language_id",
+            "ecosystem",
+            "package_name",
+            "requirement",
+            "resolved_version",
+            "dependency_group",
+            "source_kind",
+            "excerpt",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'dependency', dependency_id, path, language_id,
+               ecosystem || ' ' || package_name || ' ' || coalesce(requirement, '') || ' ' ||
+               coalesce(resolved_version, '') || ' ' || dependency_group || ' ' ||
+               source_kind || ' ' || excerpt || ' ' || path
+        FROM code_repository_dependencies
         ",
         [],
     )?;

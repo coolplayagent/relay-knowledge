@@ -819,6 +819,7 @@ pub(super) enum CandidateLayer {
     Reference,
     Call,
     Import,
+    Sbom,
     Chunk,
 }
 
@@ -837,6 +838,7 @@ pub(super) fn candidate_limit(request: &CodeRetrievalRequest, layer: CandidateLa
         }
         CandidateLayer::Call => (40, 250, 800),
         CandidateLayer::Import => (35, 200, 700),
+        CandidateLayer::Sbom => (35, 200, 700),
         CandidateLayer::Chunk => (45, 300, 900),
     };
 

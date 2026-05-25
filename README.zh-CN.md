@@ -140,9 +140,9 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 
 存储契约包含 v1 代码图数据面：tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；不支持或降级的文件会回退为文本代码块。代码仓库 full index 使用受资源预算约束的 SQLite 批次和持久 checkpoint；大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle；CLI 会启动有界单次 worker，`service run` 则用同一队列上的单个仓库索引 worker 消费任务。`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照；已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
 
-代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用和导入命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析或有歧义的边误报为确定调用。
+代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用、导入和 SBOM 依赖命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析、有歧义、声明型或锁定型边误报为确定调用。
 
-代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。Call excerpt 通过 `source_scope + symbol_snapshot_id` chunk lookup 与调用行包含条件定位，避免高 fan-out caller/callee 查询把一条 call edge 放大成多个无关 chunk 候选。代码仓库查询还会使用可选 ripgrep 兜底恢复精确源码文本：AST 和已索引词法层先执行，当 definition/reference/hybrid 存在具体召回缺口，或 import 指向未作为代码图 target 索引的 unresolved external dependency 时，再用有界 `rg` 搜索已索引 commit 内容。外部依赖兜底使用 unresolved target hint 而非任意用户查询文本，排序低于结构化 import-graph 证据，并标记 `text_fallback` 与诊断，提醒 agent 这是当前仓库源码证据，不是依赖库图谱证据。`rg` 缺失或超时只降级兜底层；结构化代码图结果仍可用，并会返回诊断信息。人工 agent 或维护者检查源码时优先使用 `rg`；如果本机未安装，可用排除 VCS 和 build 目录的有界 `grep -RIn` 继续搜索，不能因为缺少 ripgrep 就停止源码分析。
+代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。`repo query --kind sbom` 会返回索引期从 Cargo、npm、Go、Python、Maven BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它不会执行包管理器、访问 registry，也不提供漏洞或许可证分析。Call excerpt 通过 `source_scope + symbol_snapshot_id` chunk lookup 与调用行包含条件定位，避免高 fan-out caller/callee 查询把一条 call edge 放大成多个无关 chunk 候选。代码仓库查询还会使用可选 ripgrep 兜底恢复精确源码文本：AST 和已索引词法层先执行，当 definition/reference/hybrid 存在具体召回缺口，或 import 指向未作为代码图 target 索引的 unresolved external dependency 时，再用有界 `rg` 搜索已索引 commit 内容。外部依赖兜底使用 unresolved target hint 而非任意用户查询文本，排序低于结构化 import-graph 证据，并标记 `text_fallback` 与诊断，提醒 agent 这是当前仓库源码证据，不是依赖库图谱证据。`rg` 缺失或超时只降级兜底层；结构化代码图结果仍可用，并会返回诊断信息。人工 agent 或维护者检查源码时优先使用 `rg`；如果本机未安装，可用排除 VCS 和 build 目录的有界 `grep -RIn` 继续搜索，不能因为缺少 ripgrep 就停止源码分析。
 
 混合检索使用基于 SQLite 的 BM25、本地语义令牌签名、本地哈希向量近似最近邻、可配置的外部语义/向量后端元数据、图证据回退、schema 指导路径遍历、时间事件检索、社区摘要和代码图文档。候选结果先通过互惠排名融合，再在最终截断前执行确定性本地 rerank，最终返回包含检索器来源、排序和 rerank 解释、实体、来源范围、结构化图事实、直接图路径证据、代码工件、后端可用性、新鲜度、截断和预算元数据的上下文包。BM25 读模型会为实体标签和代码符号索引生成词汇别名，但不会将这些别名作为规范标签返回。
 
@@ -165,6 +165,7 @@ relay-knowledge repo register /path/to/repo --alias core --path src --language r
 relay-knowledge repo index core --ref main --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo feature-flags core --query checkout --ref HEAD --format json
 relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json

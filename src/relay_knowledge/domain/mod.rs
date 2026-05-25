@@ -1,8 +1,11 @@
 //! Pure domain model types.
 
 mod code;
+mod code_dependency;
 mod code_repository;
 mod code_repository_set;
+#[cfg(test)]
+mod code_repository_tests;
 mod entity;
 mod error;
 mod graph_version;
@@ -18,6 +21,7 @@ pub use code::{
     CodeGraphCommitReceipt, CodeParseStatus, CodeParseStatusCounts, CodeRange, CodeReferenceFields,
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
 };
+pub use code_dependency::CodeDependencyRecord;
 pub use code_repository::{
     CodeCallRecord, CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest,
     CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,

@@ -116,10 +116,13 @@ cases, keeps 2 cross-repository threshold cases from the
 The TypeScript fixture keeps the external-import grep fallback guardrail in the
 default fast loop, and the nonstandard layout fixture keeps Python, TypeScript,
 Go, Java, C++, and Swift sources outside a top-level `src/` covered by fast
-guardrails. The C fixture also includes explicit grep/text-fallback cases early
-in its fast case window, so exact source-text recovery stays covered without
-indexing another large repository or making missing `rg` a hard quality-gate
-failure. It reuses
+guardrails. The same nonstandard layout fixture also carries fast guardrails for
+`repo query --kind sbom` over Cargo, npm, Go, Python, Maven BOM, Gradle, and
+Conan manifest or lock files, so dependency-inventory regressions are rejected
+by the default loop. The C fixture also includes explicit grep/text-fallback
+cases early in its fast case window, so exact source-text recovery stays covered
+without indexing another large repository or making missing `rg` a hard
+quality-gate failure. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
 repeated registration and indexing cost. Score history is isolated by profile
 and category focus, so `fast --categories semantic_vector` compares only

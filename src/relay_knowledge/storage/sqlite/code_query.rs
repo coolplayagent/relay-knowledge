@@ -38,6 +38,8 @@ mod code_query_proximity_scoring;
 mod code_query_references;
 #[path = "code_query_rows.rs"]
 mod code_query_rows;
+#[path = "code_query_sbom.rs"]
+mod code_query_sbom;
 #[path = "code_query_support.rs"]
 mod code_query_support;
 #[path = "code_query_symbols.rs"]
@@ -88,6 +90,7 @@ use code_query_prepare::{prepare_code_search_statement, retry_code_search_operat
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
 use code_query_rows::{ChunkRow, ImportRow};
+use code_query_sbom::search_sbom;
 use code_query_support::*;
 use code_query_symbols::search_symbols;
 
@@ -128,6 +131,9 @@ fn search_code_with_status(
         return Err(StorageError::InvalidInput(
             "impact query kind requires repo impact with base/head refs".to_owned(),
         ));
+    }
+    if request.code_query_kind == CodeQueryKind::Sbom {
+        return search_sbom(connection, status, request);
     }
     let mut hits = Vec::new();
     if matches!(

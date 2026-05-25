@@ -16,6 +16,7 @@ Code repository basics let users register Git repositories as first-class source
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 ```
@@ -40,7 +41,7 @@ explicitly opts in with a path filter.
 
 ## Command/API Entry Points
 
-Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, and `imports`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together.
+Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `sbom`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together. `--kind sbom` searches dependency inventory facts extracted at index time from Cargo, npm, Go, Python, Maven BOM, Gradle, and Conan manifest or lock files; it is local inventory, not package-manager execution, transitive resolution, vulnerability analysis, or license compliance.
 
 `repo feature-flags` is a separate read-only entry point for enumerating or filtering configuration-driven feature-flag graph facts in an indexed scope. It returns flags grouped with configuration sources and `defines_config`, `reads_config`, and `guards_code` relationships instead of adding feature flags as a normal `repo query --kind` value.
 

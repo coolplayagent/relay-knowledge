@@ -375,7 +375,7 @@ impl fmt::Display for CliError {
             ),
             Self::InvalidCodeQueryKind(value) => write!(
                 formatter,
-                "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, or imports"
+                "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, imports, or sbom"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,

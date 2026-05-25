@@ -754,6 +754,10 @@ fn payload_validation_reports_actionable_errors() {
         "unsupported freshness 'now'"
     );
     assert_eq!(
+        parse_code_query_kind("sbom").expect("sbom query kind should parse"),
+        CodeQueryKind::Sbom
+    );
+    assert_eq!(
         parse_code_query_kind("impact")
             .expect_err("unsupported web query kind")
             .message,

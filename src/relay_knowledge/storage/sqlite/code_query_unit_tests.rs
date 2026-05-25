@@ -901,6 +901,7 @@ fn code_query_snapshot(
         references: Vec::new(),
         imports: Vec::new(),
         calls,
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),

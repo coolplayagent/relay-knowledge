@@ -16,6 +16,7 @@
 relay-knowledge repo register /path/to/repo --alias core --path src --language rust
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 ```
@@ -39,7 +40,7 @@ path filter 显式 opt in。
 
 ## 命令/API 入口
 
-窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。
+窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。`--kind sbom` 检索索引期从 Cargo、npm、Go、Python、Maven BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它是本地 inventory，不执行包管理器、不解析传递依赖，也不做漏洞或许可证合规分析。
 
 `repo feature-flags` 是独立只读入口，用于枚举或过滤 indexed scope 内的配置驱动特性开关图。它返回按开关分组的配置来源和 `defines_config`、`reads_config`、`guards_code` 关系，而不是把 feature flag 作为普通 `repo query --kind` 值。
 

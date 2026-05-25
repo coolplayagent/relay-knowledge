@@ -755,6 +755,7 @@ fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, WebError> {
         "callers" => Ok(CodeQueryKind::Callers),
         "callees" => Ok(CodeQueryKind::Callees),
         "imports" => Ok(CodeQueryKind::Imports),
+        "sbom" => Ok(CodeQueryKind::Sbom),
         other => Err(WebError::bad_request(format!(
             "unsupported code query kind '{other}'"
         ))),

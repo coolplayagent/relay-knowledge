@@ -33,6 +33,7 @@ pub(super) fn repo_set() -> CliCommandSpec {
                     "callers",
                     "callees",
                     "imports",
+                    "sbom",
                 ],
             ),
             opt(

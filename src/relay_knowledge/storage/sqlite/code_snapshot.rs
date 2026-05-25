@@ -275,6 +275,7 @@ pub(super) fn apply_snapshot(
                 .saturating_add(snapshot.symbols.len())
                 .saturating_add(snapshot.references.len())
                 .saturating_add(snapshot.imports.len())
+                .saturating_add(snapshot.dependencies.len())
                 .saturating_add(snapshot.calls.len())
                 .saturating_add(snapshot.feature_flags.len())
                 .saturating_add(snapshot.chunks.len())
@@ -432,6 +433,13 @@ fn clone_active_scope_for_incremental(
         transaction,
         "code_repository_imports",
         "repository_id, source_scope, import_id, file_id, path, module, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_dependencies",
+        "repository_id, source_scope, dependency_id, file_id, path, language_id, ecosystem, package_name, requirement, resolved_version, dependency_group, source_kind, is_lockfile, line_start, line_end, excerpt",
         &previous_scope,
         &snapshot.source_scope,
     )?;
@@ -604,6 +612,10 @@ fn insert_imports_calls_chunks_diagnostics(
             ],
         )?;
     }
+    super::code_batch::dependencies::insert_dependency_records(
+        transaction,
+        &snapshot.dependencies,
+    )?;
     for chunk in &snapshot.chunks {
         transaction.execute(
             "
