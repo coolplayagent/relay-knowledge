@@ -20,8 +20,8 @@ use super::{
     },
     code_query_rows::SymbolRow,
     code_query_support::*,
-    dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement, required_scope,
-    selected_row,
+    code_search_plannable_outage_reason, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
+    prepare_code_search_statement, required_scope, selected_row,
 };
 
 struct SymbolIdentityRows {
@@ -92,12 +92,28 @@ pub(super) fn search_symbols(
         return Ok(hits);
     }
 
-    let mut hits = symbol_rows_to_hits(
-        status,
-        request,
-        search_symbol_fts_rows(connection, status, request)?,
-        &api_identities,
-    );
+    let symbol_fts_rows = match search_symbol_fts_rows(connection, status, request) {
+        Ok(rows) => rows,
+        Err(error) => {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+                return Err(error);
+            };
+            let mut hits = identity_hits;
+            hits.extend(symbol_rows_to_hits(
+                status,
+                request,
+                api_identity_rows.rows,
+                &api_identities,
+            ));
+            if hits.is_empty() {
+                return Err(error);
+            }
+            mark_hits_degraded(&mut hits, &reason);
+            dedupe_sort_truncate(&mut hits, request.limit);
+            return Ok(hits);
+        }
+    };
+    let mut hits = symbol_rows_to_hits(status, request, symbol_fts_rows, &api_identities);
     hits.extend(identity_hits);
     hits.extend(symbol_rows_to_hits(
         status,

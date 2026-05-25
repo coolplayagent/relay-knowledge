@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_preserves_grep_guardrail_cases() {
+    fn fast_preserves_grep_and_external_import_guardrail_cases() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),
             serde_json::json!({
@@ -343,7 +343,7 @@ mod tests {
                     "path": "src/component.tsx",
                     "retrieval_layer": "text_fallback"
                 }],
-                "degraded_reason_contains": "external dependency import is not indexed"
+                "degraded_reason": null
             }),
             serde_json::json!({
                 "id": "grep_budget_reference_late_comment_after_scope_budget",
@@ -371,10 +371,7 @@ mod tests {
 
         assert_eq!(string_or(case, "kind", ""), "imports");
         assert_eq!(string_or(&expected[0], "retrieval_layer", ""), "text_fallback");
-        assert_eq!(
-            string_or(case, "degraded_reason_contains", ""),
-            "external dependency import is not indexed"
-        );
+        assert!(case.get("degraded_reason").is_some_and(Value::is_null));
         assert!(case.get("guardrail").and_then(Value::as_bool).unwrap_or(false));
         assert!(selected.iter().any(|case| {
             string_or(case, "id", "") == "grep_budget_reference_late_comment_after_scope_budget"
@@ -441,8 +438,15 @@ mod tests {
         create_generated_repository_files(&root.join("nonstandard"), "nonstandard_layout_v1")
             .expect("nonstandard fixture should write");
 
+        assert!(!root.join("c/.relay-knowledge-fixture-version").exists());
+        assert!(!root.join("typescript/.relay-knowledge-fixture-version").exists());
         let c_source =
             std::fs::read_to_string(root.join("c/src/driver_ops.c")).expect("c source");
+        let c_macro_source =
+            std::fs::read_to_string(root.join("c/src/http_macro_module.c")).expect("c macro source");
+        let cpp_exported_source =
+            std::fs::read_to_string(root.join("cpp/include/store/exported_module.hpp"))
+                .expect("cpp exported source");
         let cpp_source =
             std::fs::read_to_string(root.join("cpp/src/pipeline.cpp")).expect("cpp source");
         let python_source = std::fs::read_to_string(root.join("python/syntax_service/service.py"))
@@ -470,6 +474,10 @@ mod tests {
         .expect("nonstandard C++ source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
+        assert!(c_macro_source.contains("RK_HTTP_HANDLER(rk_http_access_handler)"));
+        assert!(c_macro_source.contains("#include <openssl/ssl.h>"));
+        assert!(cpp_exported_source.contains("RK_STORE_API class HttpModule final"));
+        assert!(cpp_exported_source.contains("#include <boost/asio.hpp>"));
         assert!(cpp_source.contains("auto append_event = [&cache, &pipeline]"));
         assert!(cpp_source.contains("cache_alias::Cache<std::string>"));
         assert!(python_source.contains("@traced_operation(\"dispatch\")"));
@@ -636,7 +644,7 @@ mod tests {
     fn repository_case_enforces_payload_constraints() {
         let case = serde_json::json!({
             "id": "repo_constraints",
-            "degraded_reason_contains": "external dependency import",
+            "degraded_reason_contains": "budget",
             "expected": [{"path": "src/component.tsx", "retrieval_layer": "text_fallback"}]
         });
         let result = CommandResult {
@@ -650,7 +658,7 @@ mod tests {
                     "retrieval_layers": ["lexical", "text_fallback"],
                     "excerpt": "import React from \"react\";"
                 }],
-                "degraded_reason": "external dependency import is not indexed in the code graph"
+                "degraded_reason": "ripgrep materialized-byte budget exhausted"
             })
             .to_string(),
             stderr: String::new(),

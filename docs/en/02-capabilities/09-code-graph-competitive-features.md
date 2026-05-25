@@ -33,7 +33,7 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --ref
 ## Degradation and Diagnostics
 
 Parser or query failure is isolated to affected files and does not abort the entire repository batch. Unresolved or ambiguous edges are not presented as certain calls.
-Broad regex matches, unresolved edges, parser degradation, stale code indexes, missing ripgrep, ripgrep timeouts, and ripgrep budget exhaustion are visible in responses. `text_fallback` hits can fill recall windows but must not outrank exact symbols or resolved edges. Benchmark improvements must not rely on known path, query, or symbol special cases.
+Broad regex matches, unresolved or ambiguous edges, parser degradation, stale code indexes, missing ripgrep, ripgrep timeouts, and ripgrep budget exhaustion are visible in responses. Unresolved external dependency edges are coverage metadata and are not degradation by themselves. `text_fallback` hits can fill recall windows but must not outrank exact symbols or resolved edges. Benchmark improvements must not rely on known path, query, or symbol special cases.
 
 ## Related Architecture Chapters
 

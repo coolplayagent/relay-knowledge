@@ -10,8 +10,9 @@ use crate::{
 
 use super::{
     HitParts, code_query_excerpts::reference_excerpt, code_query_rows::ReferenceRow,
-    code_query_support::*, dedupe_sort_truncate, hit_from_parts, prepare_code_search_statement,
-    required_scope, selected_row,
+    code_query_support::*, code_search_plannable_outage_reason, dedupe_sort_truncate,
+    hit_from_parts, mark_hits_degraded, prepare_code_search_statement, required_scope,
+    selected_row,
 };
 
 const REFERENCE_ASSIGNMENT_USAGE_BONUS: f64 = 1.4;
@@ -59,11 +60,21 @@ pub(super) fn search_references(
         }
     }
 
-    let mut hits = reference_rows_to_hits(
-        status,
-        request,
-        search_reference_fts_rows(connection, status, request)?,
-    );
+    let reference_fts_rows = match search_reference_fts_rows(connection, status, request) {
+        Ok(rows) => rows,
+        Err(error) => {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+                return Err(error);
+            };
+            if identity_hits.is_empty() {
+                return Err(error);
+            }
+            mark_hits_degraded(&mut identity_hits, &reason);
+            dedupe_sort_truncate(&mut identity_hits, request.limit);
+            return Ok(identity_hits);
+        }
+    };
+    let mut hits = reference_rows_to_hits(status, request, reference_fts_rows);
     hits.extend(identity_hits);
 
     Ok(hits)

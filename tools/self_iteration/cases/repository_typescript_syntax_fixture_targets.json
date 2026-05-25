@@ -70,7 +70,7 @@
         "excerpt_contains": "import React from \"react\"",
         "retrieval_layer": "text_fallback"
       }],
-      "degraded_reason_contains": "external dependency import is not indexed",
+      "degraded_reason": null,
       "case_group": "typescript_tree_sitter_syntax"
     },
     {
