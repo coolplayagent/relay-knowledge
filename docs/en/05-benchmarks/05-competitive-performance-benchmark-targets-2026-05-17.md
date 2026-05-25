@@ -9,7 +9,7 @@ This page turns competitive and high-performance research into the metrics futur
 | Scenario | Metrics |
 | --- | --- |
 | Hybrid graph QA | Recall@k, MRR, negative rejection, stale rejection, graph path coverage, context pack token budget. |
-| Code retrieval | Exact symbol rank, caller/callee rank, import/reference resolution rate, grep fallback recall/provenance, false positive count, impact precision, query p50/p95/p99. |
+| Code retrieval | Exact symbol rank, caller/callee rank, import/reference resolution rate, source fallback recall/provenance, false positive count, impact precision, query p50/p95/p99. |
 | Local file retrieval | Filename/path query p50/p95/p99, content query p50/p95/p99, permission-filter cost, candidate window size, stale/degraded rate. |
 
 ## 2. Indexing Performance Metrics
@@ -41,7 +41,7 @@ Retrieval traces and benchmark output should record:
 
 - Retriever family, candidate count, post-filter count, RRF rank contribution, rerank score, and truncation reason.
 - Scope, authorization root, index cursor, graph/file/code version, stale lag, and degraded reason.
-- Code grep fallback trigger reason, candidate-file count, materialized bytes, `text_fallback` hit count, and timeout/budget reason.
+- Code source fallback trigger reason, candidate-file count, materialized bytes, `text_fallback` hit count, and candidate/budget degraded reason.
 - Query latency breakdown: normalize, filter, candidate recall, scoring, graph expansion, context packing, and storage IO.
 - Worker latency breakdown: enqueue, lease wait, scan/parse/extract, write batch, cursor commit, and reconcile.
 
@@ -49,7 +49,7 @@ Retrieval traces and benchmark output should record:
 
 - Do not solve quality failures by enumerating benchmark queries, paths, symbols, or fixture names.
 - Performance improvements must explain a general mechanism such as candidate pushdown, index structure, batching, cache, incremental update, or concurrency boundary.
-- Grep fallback is only bounded exact-text recovery; missing `rg`, timeouts, and exhausted budgets must record degraded reasons and must not bypass structured ranking or scope authorization.
+- Source fallback is only bounded exact-text recovery; candidate lookup failures and exhausted budgets must record degraded reasons and must not bypass structured ranking or scope authorization.
 - Filename and content queries need separate budgets; content indexing failures must not slow file location.
 - Every metric must be reproducible from CLI, Web, or the benchmark harness and record commands, environment variables, and data versions.
 

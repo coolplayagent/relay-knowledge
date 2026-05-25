@@ -26,7 +26,7 @@
 
 Installer 或安装脚本支持：版本选择、安装目录选择、dry run、校验和验证、service definition 生成、失败回滚和 uninstall plan。默认不会把数据写入 release 解压目录。
 
-Ripgrep 是精确代码源码兜底的可选运行时增强依赖。安装器和打包诊断应检测 `PATH` 中是否存在 `rg`，并说明缺少它时代码图查询仍可工作，但精确兜底命中可能降级。面向 agent 的 setup 说明可以提到缺少 `rg` 时使用有界 `grep -RIn` 做人工检查 fallback，但安装器不能把递归 `grep` 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
+精确代码源码兜底由产品内部实现，运行时不能依赖 `rg`。面向 agent 的 setup 说明可以提到使用有界 `rg` 或 `grep -RIn` 做人工检查工具，但安装器不能把递归 grep 作为 service 依赖，也不能把它当成已索引查询行为的替代品。
 
 ## 4. 运行时状态
 

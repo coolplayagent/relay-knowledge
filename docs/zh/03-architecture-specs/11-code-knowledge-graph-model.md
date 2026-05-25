@@ -28,7 +28,7 @@
 
 代码边包括：defines、references、calls、imports、implements、overrides、contains、documents、changed_by、tested_by、affects、defines_config、reads_config 和 guards_code。每条边必须有 resolution state：resolved、unresolved、ambiguous 或 inferred。
 
-`imports` 边是依赖集合的首要结构来源。依赖解析必须先从 import/include/module import 事实和已索引代码地图中获取目标；当依赖目标没有代码地图或代码图索引时，系统保留 unresolved target hint，允许查询时使用有界 `rg` 精确文本兜底补充当前仓库源码证据。兜底命中不能创建依赖图事实，不能把边标记为 resolved，也不能伪装成依赖库自身的代码地图证据。
+`imports` 边是依赖集合的首要结构来源。依赖解析必须先从 import/include/module import 事实和已索引代码地图中获取目标；当依赖目标没有代码地图或代码图索引时，系统保留 unresolved target hint，允许查询时使用有界内部 exact-text source fallback 补充当前仓库源码证据。兜底命中不能创建依赖图事实，不能把边标记为 resolved，也不能伪装成依赖库自身的代码地图证据。
 
 `FeatureFlag` v1 只覆盖配置驱动开关：环境变量读取、常见 config/settings key 读取、布尔配置声明，以及这些读取参与条件表达式时产生的 guarded-code 关系。索引器可以把文件中的配置声明标记为 `defines_config`，把普通读取标记为 `reads_config`，把条件上下文标记为 `guards_code`。查询必须读取版本化图事实和 FTS 文档，不能为了列出全仓库开关在查询热路径递归扫描源码。
 

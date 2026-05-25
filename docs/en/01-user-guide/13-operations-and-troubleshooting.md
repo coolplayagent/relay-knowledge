@@ -70,7 +70,7 @@ MCP HTTP 404: common causes are unknown, expired, or retired session IDs. Run in
 
 `repo impact` reports missing head snapshot: index or update the target head before impact analysis.
 
-`repo query` reports `ripgrep unavailable`, `ripgrep timeout`, or `ripgrep ... budget exhausted`: only the exact-text fallback layer is degraded. Tree-sitter code graph and SQLite FTS results remain usable. First confirm that `rg --version` works locally. For timeouts or exhausted budgets, narrow `--path`, `--language`, `--ref`, or the registered scope, then use `repo status --format json` to confirm that the target snapshot is fresh.
+`repo query` reports a source fallback candidate or budget degraded reason: only the exact-text fallback layer is degraded. Tree-sitter code graph and SQLite FTS results remain usable. Narrow `--path`, `--language`, `--ref`, or the registered scope, then use `repo status --format json` to confirm that the target snapshot is fresh.
 
 ## 13.4 Isolated Reproduction
 

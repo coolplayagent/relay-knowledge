@@ -9,7 +9,7 @@
 | 场景 | 指标 |
 | --- | --- |
 | 混合图谱问答 | Recall@k、MRR、negative rejection、stale rejection、graph path coverage、context pack token budget。 |
-| 代码检索 | exact symbol rank、caller/callee rank、import/reference resolution rate、grep fallback recall/provenance、false positive count、impact precision、query p50/p95/p99。 |
+| 代码检索 | exact symbol rank、caller/callee rank、import/reference resolution rate、source fallback recall/provenance、false positive count、impact precision、query p50/p95/p99。 |
 | 本机文件检索 | filename/path query p50/p95/p99、content query p50/p95/p99、permission-filter cost、candidate window size、stale/degraded rate。 |
 
 ## 2. 索引性能指标
@@ -41,7 +41,7 @@
 
 - retriever family、candidate count、post-filter count、RRF rank contribution、rerank score、truncation reason。
 - scope、authorization root、index cursor、graph/file/code version、stale lag、degraded reason。
-- code grep fallback trigger reason、candidate file count、materialized bytes、`text_fallback` hit count、timeout/budget reason。
+- code source fallback trigger reason、candidate file count、materialized bytes、`text_fallback` hit count、candidate/budget degraded reason。
 - query latency breakdown: normalize、filter、candidate recall、scoring、graph expansion、context packing、storage IO。
 - worker latency breakdown: enqueue、lease wait、scan/parse/extract、write batch、cursor commit、reconcile。
 
@@ -49,7 +49,7 @@
 
 - 不通过枚举 benchmark query、path、symbol 或 fixture 名称解决质量问题。
 - 性能优化必须能解释通用机制，例如候选下推、索引结构、批处理、缓存、增量更新或并发边界。
-- grep 兜底只能作为有界 exact-text recovery；`rg` 缺失、超时或预算耗尽时必须记录 degraded reason，不能绕过结构化排序和 scope 授权。
+- source fallback 只能作为有界 exact-text recovery；候选查询失败或预算耗尽时必须记录 degraded reason，不能绕过结构化排序和 scope 授权。
 - 文件名查询和内容查询分开设预算；内容索引失败不得拖累文件定位。
 - 所有指标必须能在 CLI、Web 或 benchmark harness 中复现，并记录命令、环境变量和数据版本。
 

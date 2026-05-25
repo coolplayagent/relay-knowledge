@@ -37,7 +37,7 @@
 
 ## 降级与诊断
 
-能力默认可降级：semantic/vector 可 disabled，代码解析失败可 text-only，`ripgrep` 缺失只影响精确文本兜底，index stale 可解释，外部 worker 不可用时可以保留 BM25 和图路径。降级状态必须进入响应 metadata，而不是静默丢失。
+能力默认可降级：semantic/vector 可 disabled，代码解析失败可 text-only，source fallback 预算问题只影响精确文本兜底，index stale 可解释，外部 worker 不可用时可以保留 BM25 和图路径。降级状态必须进入响应 metadata，而不是静默丢失。
 
 ## 关联架构章节
 
