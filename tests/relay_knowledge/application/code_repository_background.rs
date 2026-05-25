@@ -14,7 +14,7 @@ use relay_knowledge::{
         CodeRetrievalRequest, FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::SqliteGraphStore,
+    storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, KnowledgeStore, SqliteGraphStore},
 };
 
 #[tokio::test]
@@ -190,6 +190,55 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
     assert!(old.message.contains("no index for ref"));
 }
 
+#[tokio::test]
+async fn repository_status_recovers_expired_code_index_task_lease() {
+    let repo = FixtureRepo::create("code-background-expired-lease");
+    repo.write("src/lib.rs", "pub fn recover_stuck_index() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(store.clone()).await;
+    register_fixture_repo(&service, &repo, "register-expired-lease").await;
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-expired-lease"),
+        )
+        .await
+        .expect("cold index should queue");
+    let task = started.task.expect("cold start should return task");
+    let running = store
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(task.task_id.clone()),
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 1,
+            max_attempts: 3,
+            now_ms: task.next_retry_at_ms,
+        })
+        .await
+        .expect("task should claim")
+        .expect("task should be running");
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+    let status = service
+        .code_repository_status(selector("fixture", "HEAD"), context("status-expired-lease"))
+        .await
+        .expect("status should recover expired task");
+    let active = status
+        .active_task
+        .expect("recovered task should remain active");
+
+    assert_eq!(active.task_id, running.task_id);
+    assert_eq!(active.state, CodeIndexTaskState::Retrying);
+    assert!(active.lease_owner.is_none());
+    assert_eq!(active.last_error_kind.as_deref(), Some("lease_expired"));
+    assert!(status.checkpoint.is_none());
+}
+
 async fn query(
     service: &RelayKnowledgeService,
     query: &str,
@@ -249,6 +298,13 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
+    service_with_store(Arc::new(
+        SqliteGraphStore::open_in_memory().expect("store should open"),
+    ))
+    .await
+}
+
+async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -261,7 +317,6 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     RelayKnowledgeService::with_store(runtime, store)
 }

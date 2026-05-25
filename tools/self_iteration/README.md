@@ -105,9 +105,13 @@ expand linearly into the LLM context.
 
 The default profile is `fast`. It runs product and harness `fmt --check`, checks
 that the release workflow still enforces the glibc 2.31 Linux GNU baseline, then
-runs a product debug build plus harness `cargo check`, and evaluates with
+runs a product debug build, harness `cargo check`, and the targeted
+`code_index_recovery_cases` gate before evaluating with
 `target/debug/relay-knowledge`. It does not run the product release build, full
 clippy, full test suite, local-file fixtures, or research judge by default.
+The code-index recovery gate covers expired task lease recovery, stale worker
+completion rejection, attempt-budget dead-lettering, and checkpoint-batch lease
+renewal without indexing exhaustive large repositories.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
 `nonstandard_layout_fixture`, `relay_teams`, `leveldb_cpp`,

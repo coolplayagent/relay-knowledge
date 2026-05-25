@@ -992,3 +992,9 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - optimization: lock Linux GNU release and skill asset binaries to a glibc 2.31 ABI ceiling, and add a fast self-iteration policy gate that self-tests the checker and verifies release workflow coverage.
 - invariant: no retrieval scoring, parser, storage schema, runtime state, CLI JSON, or network behavior changes; the guard fails only release/packaging policy when a Linux GNU binary or workflow can reintroduce a higher GLIBC dependency.
 - expected impact: issue #156-style Ubuntu 20.04/GLIBC_2.31 startup regressions are caught before release or skill packaging, while fast self-iteration stays lightweight because it validates policy rather than building release artifacts.
+
+## manual-code-index-lease-recovery-2026-05-26
+- changed paths: `src/relay_knowledge/application/code_service.rs`, `src/relay_knowledge/storage/sqlite/code_tasks.rs`, `tools/self_iteration/src/evaluator_tail.rs`, recovery docs
+- optimization: make code-index task leases attempt-scoped and recoverable, renew active leases after each checkpoint batch, expose checkpoint `updated_at_ms`, and add fast `code_index_recovery_cases`.
+- invariant: no parser facts, ranking, FTS documents, source scopes, repo-set overlay semantics, release artifacts, or query hot-path behavior change; recovery only changes background task lifecycle and diagnostics.
+- expected impact: issue #161-style stuck large-repository indexing now retries or dead-letters instead of holding an expired running lease, while active long indexes keep their lease alive as checkpoints advance.

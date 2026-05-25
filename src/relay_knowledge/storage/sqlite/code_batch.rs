@@ -805,7 +805,8 @@ fn checkpoint_for_scope(
             "
             SELECT repository_id, source_scope, state, total_path_count, parsed_file_count,
                    committed_file_count, committed_symbol_count, committed_reference_count,
-                   committed_chunk_count, batch_count, last_path, resource_budget_json
+                   committed_chunk_count, batch_count, last_path, resource_budget_json,
+                   updated_at_ms
             FROM code_repository_index_checkpoints
             WHERE source_scope = ?1
             ",
@@ -832,6 +833,7 @@ fn checkpoint_for_scope(
                     batch_count: row.get(9)?,
                     last_path: row.get(10)?,
                     resource_budget,
+                    updated_at_ms: row.get(12)?,
                 })
             },
         )

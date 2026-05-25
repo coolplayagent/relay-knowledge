@@ -630,6 +630,7 @@ pub struct CodeIndexCheckpoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_path: Option<String>,
     pub resource_budget: CodeIndexResourceBudget,
+    pub updated_at_ms: u64,
 }
 
 /// Persistent lifecycle for background code repository index tasks.
