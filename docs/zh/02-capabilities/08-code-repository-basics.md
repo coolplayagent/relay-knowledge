@@ -39,7 +39,7 @@ path filter 显式 opt in。
 
 ## 命令/API 入口
 
-窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。
+窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。调用图检索会对跨语言调用目标做规范化：C/C++ 互调、Go cgo 的 `C.*` 调用和 Rust FFI/bindings 路径会解析到同仓库里的 C/C++ 符号；当 header 声明和实现同名时，唯一实现优先作为 resolved call target。
 
 `repo feature-flags` 是独立只读入口，用于枚举或过滤 indexed scope 内的配置驱动特性开关图。它返回按开关分组的配置来源和 `defines_config`、`reads_config`、`guards_code` 关系，而不是把 feature flag 作为普通 `repo query --kind` 值。
 

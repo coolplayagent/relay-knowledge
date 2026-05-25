@@ -40,7 +40,7 @@ explicitly opts in with a path filter.
 
 ## Command/API Entry Points
 
-Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, and `imports`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together.
+Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, and `imports`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together. Call-graph retrieval normalizes cross-language targets: C/C++ calls, Go cgo `C.*` calls, and Rust FFI/bindings paths resolve to C/C++ symbols in the same repository; when a header declaration and implementation share a name, the unique implementation is preferred as the resolved call target.
 
 `repo feature-flags` is a separate read-only entry point for enumerating or filtering configuration-driven feature-flag graph facts in an indexed scope. It returns flags grouped with configuration sources and `defines_config`, `reads_config`, and `guards_code` relationships instead of adding feature flags as a normal `repo query --kind` value.
 
