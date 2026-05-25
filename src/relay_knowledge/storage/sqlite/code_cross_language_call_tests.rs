@@ -136,6 +136,7 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                 ),
             ],
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
