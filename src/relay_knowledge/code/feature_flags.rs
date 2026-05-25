@@ -48,15 +48,19 @@ pub(crate) fn extract_feature_flags(
     let mut comment_state = CommentState::default();
     for (line_index, segment) in input.content.split_inclusive('\n').enumerate() {
         let line = segment.trim_end_matches('\n').trim_end_matches('\r');
+        let Some(scan_line) = comment_state.scan_line(line, &input) else {
+            byte_start = byte_start.saturating_add(segment.len());
+            continue;
+        };
         collect_line_records(
             &mut records,
             LineContext {
                 input: &input,
                 line,
+                scan_line: &scan_line,
                 line_number: line_index.saturating_add(1),
                 byte_start,
                 config_file,
-                skip_for_comment: comment_state.skip_line(line, &input),
             },
         )?;
         byte_start = byte_start.saturating_add(segment.len());
@@ -73,32 +77,28 @@ pub(crate) fn extract_feature_flags(
 struct LineContext<'a, 'input> {
     input: &'a FeatureFlagFileInput<'input>,
     line: &'a str,
+    scan_line: &'a str,
     line_number: usize,
     byte_start: usize,
     config_file: bool,
-    skip_for_comment: bool,
 }
 
 fn collect_line_records(
     records: &mut Vec<CodeFeatureFlagRecord>,
     context: LineContext<'_, '_>,
 ) -> Result<(), DomainError> {
-    if context.skip_for_comment {
-        return Ok(());
-    }
-
     let mut line_records = Vec::new();
-    for key in preprocessor_flag_keys(context.line, context.input.language_id) {
+    for key in preprocessor_flag_keys(context.scan_line, context.input.language_id) {
         line_records.push(("preprocessor_symbol", key, "guards_code"));
     }
-    for key in env_keys(context.line) {
-        line_records.push(("env_var", key, usage_edge_kind(context.line)));
+    for key in env_keys(context.scan_line) {
+        line_records.push(("env_var", key, usage_edge_kind(context.scan_line)));
     }
-    for key in config_read_keys(context.line) {
-        line_records.push(("config_key", key, usage_edge_kind(context.line)));
+    for key in config_read_keys(context.scan_line) {
+        line_records.push(("config_key", key, usage_edge_kind(context.scan_line)));
     }
     if context.config_file
-        && let Some(key) = boolean_config_key(context.line)
+        && let Some(key) = boolean_config_key(context.scan_line)
     {
         line_records.push(("config_key", key, "defines_config"));
     }
@@ -181,27 +181,84 @@ fn feature_flag_record(
 
 #[derive(Default)]
 struct CommentState {
-    in_block_comment: bool,
+    block_depth: usize,
 }
 
 impl CommentState {
-    fn skip_line(&mut self, line: &str, input: &FeatureFlagFileInput<'_>) -> bool {
+    fn scan_line(&mut self, line: &str, input: &FeatureFlagFileInput<'_>) -> Option<String> {
         let trimmed = line.trim_start();
-        if self.in_block_comment {
-            if trimmed.contains("*/") {
-                self.in_block_comment = false;
-            }
-            return true;
-        }
-        if trimmed.starts_with("/*") {
-            self.in_block_comment = !trimmed.contains("*/");
-            return true;
+        if self.block_depth == 0 && trimmed.starts_with('*') {
+            return None;
         }
 
-        trimmed.starts_with("//")
-            || trimmed.starts_with('*')
-            || (trimmed.starts_with('#') && hash_starts_comment(input))
+        let mut scan_line = String::new();
+        let hash_comment = hash_starts_comment(input);
+        let nested_blocks = nested_block_comments(input.language_id);
+        let mut quote = None;
+        let mut escaped = false;
+        let mut index = 0usize;
+
+        while index < line.len() {
+            let rest = &line[index..];
+            if self.block_depth > 0 {
+                if nested_blocks && rest.starts_with("/*") {
+                    self.block_depth = self.block_depth.saturating_add(1);
+                    index = index.saturating_add(2);
+                    continue;
+                }
+                if rest.starts_with("*/") {
+                    self.block_depth = self.block_depth.saturating_sub(1);
+                    index = index.saturating_add(2);
+                    continue;
+                }
+                let Some(character) = rest.chars().next() else {
+                    break;
+                };
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+
+            let Some(character) = rest.chars().next() else {
+                break;
+            };
+            if let Some(quote_character) = quote {
+                scan_line.push(character);
+                if escaped {
+                    escaped = false;
+                } else if character == '\\' {
+                    escaped = true;
+                } else if character == quote_character {
+                    quote = None;
+                }
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+
+            if character == '"' || character == '\'' {
+                quote = Some(character);
+                scan_line.push(character);
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if rest.starts_with("/*") {
+                self.block_depth = 1;
+                index = index.saturating_add(2);
+                continue;
+            }
+            if rest.starts_with("//") || (hash_comment && character == '#') {
+                break;
+            }
+
+            scan_line.push(character);
+            index = index.saturating_add(character.len_utf8());
+        }
+
+        (!scan_line.trim().is_empty()).then_some(scan_line)
     }
+}
+
+fn nested_block_comments(language_id: &str) -> bool {
+    language_id == "rust"
 }
 
 fn hash_starts_comment(input: &FeatureFlagFileInput<'_>) -> bool {
@@ -252,6 +309,8 @@ fn preprocessor_flag_keys(line: &str, language_id: &str) -> Vec<String> {
         remainder
     } else if let Some(remainder) = trimmed.strip_prefix("#ifndef") {
         remainder
+    } else if let Some(remainder) = trimmed.strip_prefix("#elif") {
+        remainder
     } else if let Some(remainder) = trimmed.strip_prefix("#if") {
         remainder
     } else {
@@ -259,49 +318,28 @@ fn preprocessor_flag_keys(line: &str, language_id: &str) -> Vec<String> {
     };
 
     let mut keys = Vec::new();
-    collect_defined_preprocessor_keys(remainder, &mut keys);
-    if let Some(key) = first_preprocessor_identifier(remainder) {
-        push_unique(&mut keys, key);
-    }
+    collect_preprocessor_identifiers(remainder, &mut keys);
 
     keys
 }
 
-fn collect_defined_preprocessor_keys(value: &str, keys: &mut Vec<String>) {
-    let mut start = 0usize;
-    while let Some(relative_index) = value[start..].find("defined") {
-        let defined_start = start + relative_index + "defined".len();
-        let after_defined = value[defined_start..].trim_start();
-        let candidate = if let Some(remainder) = after_defined.strip_prefix('(') {
-            remainder
-                .split_once(')')
-                .map(|(identifier, _)| identifier.trim())
-        } else {
-            Some(
-                after_defined
-                    .split(|character: char| {
-                        !(character.is_ascii_alphanumeric() || character == '_')
-                    })
-                    .next()
-                    .unwrap_or_default(),
-            )
-        };
-        if let Some(identifier) = candidate
-            && valid_preprocessor_key(identifier)
-        {
-            push_unique(keys, identifier.to_owned());
+fn collect_preprocessor_identifiers(value: &str, keys: &mut Vec<String>) {
+    let mut current = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            current.push(character);
+            continue;
         }
-        start = defined_start.saturating_add(1);
+        push_preprocessor_identifier(keys, &mut current);
     }
+    push_preprocessor_identifier(keys, &mut current);
 }
 
-fn first_preprocessor_identifier(value: &str) -> Option<String> {
-    let identifier = value
-        .trim_start()
-        .trim_start_matches('(')
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .find(|part| !part.is_empty())?;
-    valid_preprocessor_key(identifier).then(|| identifier.to_owned())
+fn push_preprocessor_identifier(keys: &mut Vec<String>, current: &mut String) {
+    if valid_preprocessor_key(current) {
+        push_unique(keys, current.clone());
+    }
+    current.clear();
 }
 
 fn valid_preprocessor_key(key: &str) -> bool {
@@ -310,7 +348,10 @@ fn valid_preprocessor_key(key: &str) -> bool {
             .chars()
             .next()
             .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        && !matches!(key, "defined" | "if" | "ifdef" | "ifndef")
+        && !matches!(
+            key,
+            "defined" | "if" | "ifdef" | "ifndef" | "elif" | "true" | "false"
+        )
 }
 
 fn collect_quoted_arguments(line: &str, pattern: &str, keys: &mut Vec<String>) {
@@ -518,6 +559,28 @@ mod tests {
     }
 
     #[test]
+    fn ignores_inline_comment_feature_flag_examples() {
+        let records = extract_feature_flags(input(
+            "let _ = 1; // config.get_bool(\"commented\")\nlet _ = 2; /* std::env::var(\"BLOCKED\") */\nif config.get_bool(\"live\") {}\n",
+        ))
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
+    fn keeps_nested_rust_block_comments_active() {
+        let records = extract_feature_flags(input(
+            "/*\n/*\nstd::env::var(\"INNER_COMMENT\")\n*/\nstd::env::var(\"OUTER_COMMENT\")\n*/\nif config.get_bool(\"live\") {}\n",
+        ))
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
     fn extracts_preprocessor_feature_gates() {
         let records = extract_feature_flags(FeatureFlagFileInput {
             repository_id: "repo",
@@ -543,6 +606,26 @@ mod tests {
                 .iter()
                 .any(|record| record.source_key == "FEATURE_Z")
         );
+    }
+
+    #[test]
+    fn extracts_elif_and_all_preprocessor_expression_symbols() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "src/lib.c",
+            language_id: "c",
+            content: "#if FEATURE_A && FEATURE_B\n#elif FEATURE_C || defined(FEATURE_D)\n#endif\n",
+        })
+        .expect("feature flag records should extract");
+
+        for source_key in ["FEATURE_A", "FEATURE_B", "FEATURE_C", "FEATURE_D"] {
+            assert!(
+                records.iter().any(|record| record.source_key == source_key),
+                "{source_key} should be extracted"
+            );
+        }
     }
 
     #[test]
