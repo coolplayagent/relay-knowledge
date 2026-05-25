@@ -41,6 +41,36 @@
       "case_group": "c_tree_sitter_syntax"
     },
     {
+      "id": "c_syntax_definition_macro_generated_http_handler",
+      "repository": "c_syntax_fixture",
+      "kind": "definition",
+      "query": "rk_http_access_handler",
+      "guardrail": true,
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["src/http_macro_module.c"],
+      "language_filters": ["c"],
+      "degraded_reason": null,
+      "expected": [{"path": "src/http_macro_module.c", "excerpt_contains": "RK_HTTP_HANDLER(rk_http_access_handler)", "retrieval_layer": "definition"}],
+      "case_group": "c_macro_recovery"
+    },
+    {
+      "id": "c_syntax_imports_unindexed_external_header_non_degraded",
+      "repository": "c_syntax_fixture",
+      "kind": "imports",
+      "query": "openssl/ssl.h",
+      "guardrail": true,
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["src/http_macro_module.c"],
+      "language_filters": ["c"],
+      "degraded_reason": null,
+      "expected": [{"path": "src/http_macro_module.c", "excerpt_contains": "#include <openssl/ssl.h>", "edge_resolution_state": "unresolved", "edge_target_hint": "openssl/ssl.h", "retrieval_layer": "import_graph"}],
+      "case_group": "dependency_coverage_gap"
+    },
+    {
       "id": "c_syntax_definition_function_pointer_typedef",
       "repository": "c_syntax_fixture",
       "kind": "definition",

@@ -25,8 +25,8 @@ The evaluator creates two small git repositories under the evaluation home, comm
 
 | Repository key | Fixture version | Syntax focus | Fast profile |
 | --- | --- | --- | --- |
-| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedefs, operation tables, designated initializers, compound initializers, function-like macros, token paste, local includes, callback dispatch, negative symbols | Yes |
-| `cpp_syntax_fixture` | `cpp_syntax_v1` | namespaces, template classes, out-of-line template methods, virtual overrides, overloaded operators, lambda captures, namespace aliases, using aliases, header/source split, test fake demotion | Yes |
+| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedefs, operation tables, designated initializers, compound initializers, function-like macros, token paste, macro-generated handlers, local and unresolved external includes, callback dispatch, negative symbols | Yes |
+| `cpp_syntax_fixture` | `cpp_syntax_v1` | namespaces, template classes, out-of-line template methods, virtual overrides, overloaded operators, lambda captures, namespace aliases, using aliases, export-macro-decorated classes, unresolved external includes, header/source split, test fake demotion | Yes |
 
 The fixture sources are generated from constants in `tools/self_iteration/src/evaluator_tail.rs`; the git author and committer dates are fixed so the generated commits are repeatable for unchanged content.
 
@@ -37,18 +37,20 @@ C has no native lambda syntax, so its fixture intentionally uses function pointe
 C cases live in `tools/self_iteration/cases/repository_c_syntax_fixture_targets.json` and cover:
 
 - `symbol`/`definition`: `struct rk_driver_ops`, `rk_driver_read`, and `rk_read_fn`.
+- Recoverable C macro definitions: `RK_HTTP_HANDLER(rk_http_access_handler)` must be extracted as a definition without marking the file partial.
 - `references`: `.read = rk_driver_read`, `rk_pipeline[index](dev)`, and `RK_TRACE_VALUE(dev->fd)`.
 - `callers`/`callees`: function pointer dispatch, operation-table callbacks, and dispatch call sequences.
-- `imports`: `#include "driver_ops.h"`.
+- `imports`: local `#include "driver_ops.h"` and unresolved external `#include <openssl/ssl.h>` with no `degraded_reason`.
 - `hybrid`: operation table, callback dispatch, and compound designator evidence.
 - `negative`/`forbidden`: missing handler empty results and macro/test fake demotion.
 
 C++ cases live in `tools/self_iteration/cases/repository_cpp_syntax_fixture_targets.json` and cover:
 
 - `symbol`/`definition`: `Cache` template class, `Cache<Key>::Insert`, `RecordingWriter::Append`, and `Pipeline::operator()`.
+- Recoverable C++ decorated definitions: `RK_STORE_API class HttpModule final` must extract `HttpModule` without marking the file partial.
 - `references`: nested `using KeyList` and namespace alias `cache_alias`.
 - `callers`/`callees`: virtual `Append` dispatch and lambda capture sequences with `cache.Insert` plus `pipeline(event)`.
-- `imports`: `#include "store/cache.hpp"`.
+- `imports`: local `#include "store/cache.hpp"` and unresolved external `#include <boost/asio.hpp>` with no `degraded_reason`.
 - `hybrid`: template cache, out-of-line method, and lambda pipeline evidence.
 - `negative`/`forbidden`: missing policy empty results and `tests/fake_cache.cpp` demotion.
 

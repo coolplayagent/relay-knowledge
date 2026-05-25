@@ -42,6 +42,36 @@
       "case_group": "cpp_tree_sitter_syntax"
     },
     {
+      "id": "cpp_syntax_definition_macro_decorated_http_module",
+      "repository": "cpp_syntax_fixture",
+      "kind": "definition",
+      "query": "HttpModule",
+      "guardrail": true,
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 3,
+      "path_filters": ["include/store/exported_module.hpp"],
+      "language_filters": ["cpp"],
+      "degraded_reason": null,
+      "expected": [{"path": "include/store/exported_module.hpp", "excerpt_contains": "RK_STORE_API class HttpModule final", "retrieval_layer": "definition"}],
+      "case_group": "cpp_macro_recovery"
+    },
+    {
+      "id": "cpp_syntax_imports_unindexed_external_boost_non_degraded",
+      "repository": "cpp_syntax_fixture",
+      "kind": "imports",
+      "query": "boost/asio.hpp",
+      "guardrail": true,
+      "objective": "competitive_capability",
+      "limit": 10,
+      "max_rank": 4,
+      "path_filters": ["include/store/exported_module.hpp"],
+      "language_filters": ["cpp"],
+      "degraded_reason": null,
+      "expected": [{"path": "include/store/exported_module.hpp", "excerpt_contains": "#include <boost/asio.hpp>", "edge_resolution_state": "unresolved", "edge_target_hint": "boost/asio.hpp", "retrieval_layer": "import_graph"}],
+      "case_group": "dependency_coverage_gap"
+    },
+    {
       "id": "cpp_syntax_definition_recording_writer_override",
       "repository": "cpp_syntax_fixture",
       "kind": "definition",

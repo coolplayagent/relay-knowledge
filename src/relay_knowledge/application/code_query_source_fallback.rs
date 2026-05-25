@@ -15,7 +15,6 @@ use super::code_query_source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
-const EXTERNAL_IMPORT_GREP_DIAGNOSTIC: &str = "external dependency import is not indexed in the code graph; searched current repository source with internal grep fallback";
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
 
 pub(super) struct CodeGrepFallbackPlan {
@@ -388,11 +387,11 @@ fn fallback_diagnostic(
 ) -> Option<String> {
     let external_import_fallback =
         plan.kind == SourceGrepKind::Imports && !local_import_specifier(&plan.query);
-    let Some(reason) = degraded_reason else {
-        return external_import_fallback.then(|| EXTERNAL_IMPORT_GREP_DIAGNOSTIC.to_owned());
-    };
+    let reason = degraded_reason?;
     if external_import_fallback {
-        Some(format!("{EXTERNAL_IMPORT_GREP_DIAGNOSTIC}; {reason}"))
+        Some(format!(
+            "ripgrep fallback for unresolved external import failed: {reason}"
+        ))
     } else {
         Some(reason)
     }
@@ -736,6 +735,7 @@ fn results_define_identity(results: &[CodeRetrievalHit], identity: &str) -> bool
 }
 
 fn definition_identity(query: &str) -> Option<String> {
+    let mut identity = None;
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
             continue;
@@ -745,11 +745,11 @@ fn definition_identity(query: &str) -> Option<String> {
             .filter(|term| !term.is_empty())
             .collect::<Vec<_>>();
         if let Some(term) = terms.last().filter(|term| simple_source_identifier(term)) {
-            return Some((*term).to_owned());
+            identity = Some((*term).to_owned());
         }
     }
 
-    None
+    identity
 }
 
 fn source_grep_identity(query: &str) -> Option<String> {

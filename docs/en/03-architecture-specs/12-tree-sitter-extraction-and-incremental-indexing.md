@@ -8,7 +8,7 @@
 
 ## 1. Design Conclusion
 
-Tree-sitter is the entry point for code structure, not a complete semantic analyzer. The architecture connects grammar registration, query capture, error degradation, incremental candidate narrowing, and index refresh into a recoverable pipeline. Unsupported languages or parse errors degrade local capability only and do not break retrieval.
+Tree-sitter is the entry point for code structure, not a complete semantic analyzer. The architecture connects grammar registration, query capture, error degradation, incremental candidate narrowing, and index refresh into a recoverable pipeline. Unsupported languages or unrecoverable parse errors degrade local capability only and do not break retrieval; recoverable C/C++ macro, preprocessor, and decorator parse errors should keep structured facts available when extraction remains reliable.
 
 ## 2. Language Registry
 
@@ -41,7 +41,7 @@ Incremental indexing first narrows the work set:
 3. Expand affected files through reverse dependencies and import/call/reference edges.
 4. Refresh only affected code facts, chunks, and index families.
 
-Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. The query layer may use the hint inside the same scope to trigger bounded `rg` fallback.
+Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. This coverage gap is not parser, file, scope, or response degradation. The query layer may use the hint inside the same scope to trigger bounded `rg` fallback.
 
 Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
 
@@ -55,7 +55,7 @@ Query-time grep fallback follows the same blocking-worker boundary as Git blob r
 
 ## 7. Degradation Strategy
 
-Parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. Degradation appears in repo status, health, and context pack metadata. Missing or failed `rg` is query-time exact-text fallback degradation and appears in code query response metadata, not index state. Manual `grep` fallback for agent inspection is documented operational behavior and must not be reported as product index health.
+Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. C/C++ files with error nodes limited to macro expansion, bounded preprocessor directives, or decorator-like export macros may be recorded as parsed when symbol, reference, or import extraction succeeds. Degradation appears in repo status, health, and context pack metadata. Missing external dependency source remains unresolved edge metadata rather than `degraded_reason`. Missing or failed `rg` is query-time exact-text fallback degradation and appears in code query response metadata, not index state. Manual `grep` fallback for agent inspection is documented operational behavior and must not be reported as product index health.
 
 ## 8. Acceptance Criteria
 

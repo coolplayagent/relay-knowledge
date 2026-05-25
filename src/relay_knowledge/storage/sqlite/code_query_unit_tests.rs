@@ -3,7 +3,7 @@ use crate::{
     domain::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
         CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeSymbolRecord,
+        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
     storage::code::CodeRepositoryStore,
@@ -122,6 +122,91 @@ fn candidate_limits_are_layer_aware_and_bounded_for_repo_set_fanout() {
         candidate_limit(&direct_call_request, CandidateLayer::Call),
         1000
     );
+}
+
+#[test]
+fn plannable_search_outage_returns_existing_partial_hits() {
+    let request = code_search_request("rk_handler", CodeQueryKind::Hybrid);
+    let mut hits = vec![partial_code_hit(
+        "src/lib.rs",
+        CodeRetrievalLayer::Symbol,
+        4.0,
+    )];
+
+    let partial_hits = append_hits_or_return_partial_on_search_outage(
+        &mut hits,
+        &request,
+        Err(code_search_unavailable_error()),
+    )
+    .expect("plannable read-model outage should return partial hits")
+    .expect("partial hits should be available");
+
+    assert!(hits.is_empty());
+    assert_eq!(partial_hits.len(), 1);
+    assert_eq!(partial_hits[0].path, "src/lib.rs");
+    assert!(
+        partial_hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Symbol)
+    );
+    assert_read_model_degraded(&partial_hits[0]);
+}
+
+#[test]
+fn non_plannable_search_outage_propagates_instead_of_returning_partial_hits() {
+    let request = code_search_request("find rk_handler", CodeQueryKind::Hybrid);
+    let mut hits = vec![partial_code_hit(
+        "src/lib.rs",
+        CodeRetrievalLayer::Symbol,
+        4.0,
+    )];
+
+    let result = append_hits_or_return_partial_on_search_outage(
+        &mut hits,
+        &request,
+        Err(code_search_unavailable_error()),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(hits.len(), 1);
+    assert!(hits[0].degraded_reason.is_none());
+}
+
+#[tokio::test]
+async fn reference_identity_hits_report_read_model_outage_when_fts_unavailable() {
+    let mut snapshot = code_query_snapshot(
+        vec![code_query_file("reference-file", "src/lib.rs", "rust")],
+        Vec::new(),
+        Vec::new(),
+    );
+    snapshot.references.push(code_query_reference(
+        "reference-foo",
+        "reference-file",
+        "src/lib.rs",
+        "foo",
+    ));
+    let store = store_with_case_intent_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let hits = store
+        .search_code(code_search_request("foo", CodeQueryKind::References))
+        .await
+        .expect("reference identity hits should survive FTS outage");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/lib.rs");
+    assert!(
+        hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Reference)
+    );
+    assert_read_model_degraded(&hits[0]);
 }
 
 #[test]
@@ -850,6 +935,49 @@ fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest
         .expect("request should be valid")
 }
 
+fn code_search_unavailable_error() -> StorageError {
+    StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some("no such table: code_repository_search".to_owned()),
+    ))
+}
+
+fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRetrievalHit {
+    CodeRetrievalHit {
+        repository_id: "repo".to_owned(),
+        scope_id: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path: path.to_owned(),
+        language_id: "rust".to_owned(),
+        byte_range: code_query_range(0, 10),
+        line_range: code_query_range(1, 1),
+        symbol_snapshot_id: Some("symbol".to_owned()),
+        canonical_symbol_id: Some(format!("repo://repo/{}", path.replace('/', "::"))),
+        file_id: Some("file".to_owned()),
+        retrieval_layers: vec![layer],
+        index_versions: vec!["code:commit".to_owned()],
+        stale: false,
+        degraded_reason: None,
+        edge_kind: None,
+        edge_resolution_state: None,
+        edge_target_hint: None,
+        edge_confidence_basis_points: None,
+        edge_confidence_tier: None,
+        score,
+        excerpt: "fn rk_handler() {}".to_owned(),
+    }
+}
+
+fn assert_read_model_degraded(hit: &CodeRetrievalHit) {
+    let reason = hit
+        .degraded_reason
+        .as_deref()
+        .expect("partial hit should report read-model degradation");
+    assert!(reason.contains("code search read model unavailable"));
+    assert!(reason.contains("code_repository_search"));
+}
+
 fn candidate_limit_request(limit: usize) -> CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should be valid");
@@ -942,6 +1070,30 @@ fn code_query_symbol(
         signature: format!("def {name}():"),
         doc_comment: None,
         byte_range: code_query_range(0, 1),
+        line_range: code_query_range(1, 1),
+    }
+}
+
+fn code_query_reference(
+    reference_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+) -> RepositoryCodeReferenceRecord {
+    RepositoryCodeReferenceRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        reference_id: reference_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        name: name.to_owned(),
+        kind: "read".to_owned(),
+        target_symbol_snapshot_id: None,
+        target_hint: Some(name.to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 2_500,
+        confidence_tier: "ambiguous".to_owned(),
+        byte_range: code_query_range(0, 3),
         line_range: code_query_range(1, 1),
     }
 }
