@@ -37,6 +37,8 @@ use syntax::{extract_tag_captures_safely, parse_tree_safely};
 use text::MAX_TEXT_FILE_BYTES;
 use text::{count_lines, validate_text_content};
 
+const MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES: usize = 120;
+
 pub(in crate::code) fn parse_indexed_file(
     build: &mut SnapshotBuild,
     path: &str,
@@ -312,14 +314,59 @@ fn syntax_error_node(node: Node<'_>) -> bool {
 
 fn recoverable_c_family_error(content: &str, node: Node<'_>) -> bool {
     let range = nodes::syntax_range(node);
+    if recoverable_missing_declarator_after_decorated_type(content, node) {
+        return true;
+    }
     if range.line_end.saturating_sub(range.line_start) > 2 {
-        return false;
+        return recoverable_decorated_type_error(content, node, &range);
     }
     if recoverable_preprocessor_error(content, node, &range) {
         return true;
     }
 
     source_line(content, range.line_start).is_some_and(recoverable_c_family_error_line)
+}
+
+fn recoverable_decorated_type_error(
+    content: &str,
+    node: Node<'_>,
+    range: &nodes::SyntaxRange,
+) -> bool {
+    if range.line_end.saturating_sub(range.line_start) > MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES
+    {
+        return false;
+    }
+    if !source_line(content, range.line_start).is_some_and(c_family_decorated_type_line) {
+        return false;
+    }
+
+    content
+        .get(node.start_byte()..node.end_byte())
+        .is_some_and(|text| {
+            let trimmed = text.trim_end();
+            trimmed.contains('{') && (trimmed.ends_with("};") || trimmed.ends_with('}'))
+        })
+}
+
+fn recoverable_missing_declarator_after_decorated_type(content: &str, node: Node<'_>) -> bool {
+    if !node.is_missing() || node.kind() != "identifier" {
+        return false;
+    }
+    let Some(parent) = node
+        .parent()
+        .filter(|parent| parent.kind() == "declaration")
+    else {
+        return false;
+    };
+    content
+        .get(parent.start_byte()..parent.end_byte())
+        .is_some_and(|text| {
+            text.lines()
+                .find(|line| !line.trim().is_empty())
+                .is_some_and(c_family_decorated_type_line)
+                && text.contains('{')
+                && text.trim_end().ends_with("};")
+        })
 }
 
 fn recoverable_preprocessor_error(
@@ -391,14 +438,33 @@ fn c_family_decorated_type_line(trimmed: &str) -> bool {
         .collect::<Vec<_>>();
     tokens.iter().enumerate().any(|(index, token)| {
         matches!(*token, "class" | "struct" | "enum" | "union")
-            && (index
-                .checked_sub(1)
-                .and_then(|previous| tokens.get(previous))
-                .is_some_and(|candidate| c_family_known_decorator_token(candidate))
-                || tokens
-                    .get(index + 1)
-                    .is_some_and(|candidate| c_family_known_decorator_token(candidate)))
+            && (c_family_decorator_before_type(&tokens, index)
+                || c_family_decorator_after_type(&tokens, index))
     })
+}
+
+fn c_family_decorator_before_type(tokens: &[&str], index: usize) -> bool {
+    let mut cursor = index;
+    while let Some(previous_index) = cursor.checked_sub(1) {
+        let Some(previous) = tokens.get(previous_index) else {
+            return false;
+        };
+        if c_family_known_decorator_token(previous) {
+            return true;
+        }
+        if !c_family_decorator_payload_token(previous) {
+            return false;
+        }
+        cursor = previous_index;
+    }
+
+    false
+}
+
+fn c_family_decorator_after_type(tokens: &[&str], index: usize) -> bool {
+    tokens
+        .get(index + 1)
+        .is_some_and(|candidate| c_family_known_decorator_token(candidate))
 }
 
 fn c_family_known_decorator_token(token: &str) -> bool {
@@ -406,6 +472,13 @@ fn c_family_known_decorator_token(token: &str) -> bool {
         || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
+}
+
+fn c_family_decorator_payload_token(token: &str) -> bool {
+    matches!(
+        token,
+        "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
+    )
 }
 
 fn c_family_macro_name(token: &str) -> bool {
@@ -502,6 +575,10 @@ mod identity_tests;
 #[cfg(test)]
 #[path = "parser_c_tests.rs"]
 mod c_tests;
+
+#[cfg(test)]
+#[path = "parser_review_tests.rs"]
+mod review_tests;
 
 #[cfg(test)]
 #[path = "parser_import_resolution_tests.rs"]

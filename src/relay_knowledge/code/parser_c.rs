@@ -210,6 +210,12 @@ fn definition_like_macro_name(name: &str) -> bool {
     if tokens.is_empty() || !uppercase_macro_token(name) {
         return false;
     }
+    if tokens
+        .iter()
+        .any(|token| matches!(*token, "REGISTER" | "UNREGISTER"))
+    {
+        return false;
+    }
 
     tokens
         .iter()
@@ -227,12 +233,7 @@ fn macro_generated_function_name(
     macro_name: &str,
 ) -> Option<String> {
     let argument_groups = macro_argument_groups(content, arguments);
-    if declaration_style_macro_name(macro_name)
-        && argument_groups.len() > 1
-        && argument_groups
-            .first()
-            .is_some_and(macro_argument_looks_like_type)
-    {
+    if declaration_style_macro_starts_with_return_type(macro_name, &argument_groups) {
         return argument_groups
             .iter()
             .skip(1)
@@ -245,32 +246,101 @@ fn macro_generated_function_name(
 }
 
 fn macro_argument_groups(content: &str, arguments: Node<'_>) -> Vec<MacroArgument> {
-    let mut cursor = arguments.walk();
-    arguments
-        .named_children(&mut cursor)
-        .map(|argument| {
-            let mut identifiers = Vec::new();
-            collect_macro_argument_identifiers(content, argument, &mut identifiers);
-            MacroArgument {
-                text: node_text(content, argument),
-                identifiers,
-            }
+    let text = node_text(content, arguments);
+    macro_argument_text_slots(&text)
+        .into_iter()
+        .map(|argument| MacroArgument {
+            text: argument.to_owned(),
+            identifiers: macro_argument_text_identifiers(argument),
         })
         .collect()
 }
 
-fn collect_macro_argument_identifiers(
-    content: &str,
-    argument: Node<'_>,
-    identifiers: &mut Vec<String>,
-) {
-    let mut stack = vec![argument];
-    while let Some(node) = stack.pop() {
-        if matches!(node.kind(), "identifier" | "type_identifier") {
-            identifiers.push(node_text(content, node));
+fn macro_argument_text_slots(text: &str) -> Vec<&str> {
+    let inner = text
+        .trim()
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(')'))
+        .unwrap_or(text);
+    let mut slots = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    for (index, character) in inner.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                slots.push(inner[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let tail = inner[start..].trim();
+    if !tail.is_empty() {
+        slots.push(tail);
+    }
+
+    slots
+}
+
+fn declaration_style_macro_starts_with_return_type(
+    macro_name: &str,
+    argument_groups: &[MacroArgument],
+) -> bool {
+    if !declaration_style_macro_name(macro_name) || argument_groups.len() <= 1 {
+        return false;
+    }
+    let Some(return_type) = argument_groups.first() else {
+        return false;
+    };
+    let Some(symbol_argument) = argument_groups.get(1) else {
+        return false;
+    };
+
+    macro_argument_looks_like_type(return_type)
+        || (macro_argument_looks_like_custom_return_type(return_type)
+            && macro_argument_symbol_candidate(symbol_argument).is_some()
+            && !macro_argument_looks_like_type(symbol_argument))
+}
+
+fn macro_argument_text_identifiers(argument: &str) -> Vec<String> {
+    let mut identifiers = Vec::new();
+    let mut start = None;
+    for (index, character) in argument.char_indices() {
+        if character == '_' || character.is_ascii_alphanumeric() {
+            start.get_or_insert(index);
             continue;
         }
-        push_children_reverse(node, &mut stack);
+        if let Some(identifier_start) = start.take() {
+            push_macro_argument_identifier(argument, identifier_start, index, &mut identifiers);
+        }
+    }
+    if let Some(identifier_start) = start {
+        push_macro_argument_identifier(
+            argument,
+            identifier_start,
+            argument.len(),
+            &mut identifiers,
+        );
+    }
+
+    identifiers
+}
+
+fn push_macro_argument_identifier(
+    argument: &str,
+    start: usize,
+    end: usize,
+    identifiers: &mut Vec<String>,
+) {
+    let identifier = &argument[start..end];
+    if identifier
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+    {
+        identifiers.push(identifier.to_owned());
     }
 }
 
@@ -295,13 +365,15 @@ fn macro_argument_looks_like_type(argument: &MacroArgument) -> bool {
         || argument
             .identifiers
             .iter()
-            .any(|name| c_macro_type_argument(name) || c_macro_custom_type_argument(name))
+            .any(|name| c_macro_type_argument(name))
 }
 
-fn c_macro_custom_type_argument(name: &str) -> bool {
-    name.chars()
-        .next()
-        .is_some_and(|character| character.is_ascii_uppercase())
+fn macro_argument_looks_like_custom_return_type(argument: &MacroArgument) -> bool {
+    argument.identifiers.len() == 1
+        && argument.identifiers[0]
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase())
 }
 
 fn macro_argument_symbol_candidate(argument: &MacroArgument) -> Option<String> {

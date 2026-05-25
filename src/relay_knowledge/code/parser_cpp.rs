@@ -17,8 +17,15 @@ pub(super) fn manual_definitions(
         "declaration" => decorated_cpp_declaration_type_symbol(content, node)
             .map(|symbol| vec![symbol])
             .unwrap_or_default(),
+        "ERROR" if decorated_declaration_head_starts_with_type_definition(content, node) => {
+            decorated_cpp_type_symbol(content, node)
+                .map(|symbol| vec![symbol])
+                .unwrap_or_default()
+        }
         "function_definition"
-            if decorated_declaration_head_starts_with_type_definition(content, node) =>
+            if (node.child_by_field_name("declarator").is_none()
+                || decorated_declaration_head_has_type_prefix(content, node))
+                && decorated_declaration_head_starts_with_type_definition(content, node) =>
         {
             decorated_cpp_type_symbol(content, node)
                 .map(|symbol| vec![symbol])
@@ -85,14 +92,33 @@ fn decorated_declaration_head_starts_with_type_definition(content: &str, node: N
         .next()
         .unwrap_or(text.as_str())
         .trim();
-    let tokens = head
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| !token.is_empty());
-    for token in tokens {
-        if cpp_type_intro_keyword(token) {
+    for token in cpp_head_tokens(head) {
+        if cpp_type_intro_keyword(token.text) {
             return true;
         }
-        if cpp_declaration_prefix_token(token) {
+        if cpp_declaration_prefix_token(token.text) {
+            continue;
+        }
+        return false;
+    }
+
+    false
+}
+
+fn decorated_declaration_head_has_type_prefix(content: &str, node: Node<'_>) -> bool {
+    let text = node_text(content, node);
+    let head = text
+        .split(['{', ';'])
+        .next()
+        .unwrap_or(text.as_str())
+        .trim();
+    let mut saw_prefix = false;
+    for token in cpp_head_tokens(head) {
+        if cpp_type_intro_keyword(token.text) {
+            return saw_prefix;
+        }
+        if cpp_declaration_prefix_token(token.text) {
+            saw_prefix = true;
             continue;
         }
         return false;
@@ -111,37 +137,116 @@ fn decorated_cpp_type_symbol(
         .next()
         .unwrap_or(text.as_str())
         .trim();
-    let mut tokens = head
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| !token.is_empty());
-    while let Some(token) = tokens.next() {
-        let kind = match token {
+    let tokens = cpp_head_tokens(head);
+    for (index, token) in tokens.iter().enumerate() {
+        let kind = match token.text {
             "class" => "class",
             "struct" | "union" | "enum" => "type",
             _ => continue,
         };
-        let remaining = tokens.collect::<Vec<_>>();
-        let name = cpp_type_name_after_intro(&remaining)?;
+        let name = cpp_type_name_after_intro(head, &tokens[index + 1..])?;
         return Some((name.to_owned(), kind, syntax_range(node)));
     }
 
     None
 }
 
-fn cpp_type_name_after_intro<'token>(tokens: &[&'token str]) -> Option<&'token str> {
-    tokens.iter().enumerate().find_map(|(index, token)| {
-        if !cpp_type_name_candidate(token) {
-            return None;
+#[derive(Clone, Copy)]
+struct CppHeadToken<'text> {
+    text: &'text str,
+    start: usize,
+    end: usize,
+}
+
+fn cpp_head_tokens(head: &str) -> Vec<CppHeadToken<'_>> {
+    let mut tokens = Vec::new();
+    let mut token_start = None;
+    for (index, character) in head.char_indices() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            token_start.get_or_insert(index);
+            continue;
         }
-        if cpp_decorator_like_type_prefix(token)
-            && tokens[index + 1..]
-                .iter()
-                .any(|candidate| cpp_type_name_candidate(candidate))
+        if let Some(start) = token_start.take() {
+            tokens.push(CppHeadToken {
+                text: &head[start..index],
+                start,
+                end: index,
+            });
+        }
+    }
+    if let Some(start) = token_start {
+        tokens.push(CppHeadToken {
+            text: &head[start..],
+            start,
+            end: head.len(),
+        });
+    }
+
+    tokens
+}
+
+fn cpp_type_name_after_intro<'text>(
+    head: &'text str,
+    tokens: &[CppHeadToken<'text>],
+) -> Option<&'text str> {
+    let mut index = cpp_skip_type_name_prefix(tokens);
+    while tokens
+        .get(index)
+        .is_some_and(|token| matches!(token.text, "class" | "struct"))
+    {
+        index += 1;
+    }
+
+    let mut name = *tokens.get(index)?;
+    if !cpp_type_name_candidate(name.text) {
+        return None;
+    }
+
+    while let Some(next) = tokens.get(index + 1) {
+        if !cpp_type_name_candidate(next.text) || !cpp_tokens_joined_by_qualifier(head, name, *next)
         {
-            return None;
+            break;
         }
-        Some(*token)
-    })
+        name = *next;
+        index += 1;
+    }
+
+    Some(name.text)
+}
+
+fn cpp_skip_type_name_prefix(tokens: &[CppHeadToken<'_>]) -> usize {
+    let mut index = 0;
+    while let Some(token) = tokens.get(index) {
+        if cpp_type_name_decorator_prefix(token.text) {
+            index += 1;
+            while tokens
+                .get(index)
+                .is_some_and(|payload| cpp_decorator_payload_token(payload.text))
+            {
+                index += 1;
+            }
+            continue;
+        }
+        if cpp_decorator_payload_token(token.text) {
+            index += 1;
+            continue;
+        }
+        break;
+    }
+
+    index
+}
+
+fn cpp_tokens_joined_by_qualifier(
+    head: &str,
+    left: CppHeadToken<'_>,
+    right: CppHeadToken<'_>,
+) -> bool {
+    let separator = &head[left.end..right.start];
+    separator.contains("::")
+        && separator
+            .chars()
+            .all(|character| character == ':' || character.is_ascii_whitespace())
 }
 
 fn cpp_type_name_candidate(token: &str) -> bool {
@@ -164,6 +269,7 @@ fn cpp_type_intro_keyword(token: &str) -> bool {
 
 fn cpp_declaration_prefix_token(token: &str) -> bool {
     cpp_decorator_token(token)
+        || cpp_decorator_payload_token(token)
         || matches!(
             token,
             "alignas"
@@ -179,12 +285,18 @@ fn cpp_declaration_prefix_token(token: &str) -> bool {
         )
 }
 
-fn cpp_decorator_like_type_prefix(token: &str) -> bool {
-    cpp_decorator_token(token)
-        || matches!(
-            token,
-            "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
-        )
+fn cpp_type_name_decorator_prefix(token: &str) -> bool {
+    token.starts_with("__")
+        || token.ends_with("_API")
+        || token.ends_with("_EXPORT")
+        || token.ends_with("_EXPORTS")
+}
+
+fn cpp_decorator_payload_token(token: &str) -> bool {
+    matches!(
+        token,
+        "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
+    )
 }
 
 fn cpp_keyword_token(token: &str) -> bool {

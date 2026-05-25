@@ -50,6 +50,7 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
                 "class_specifier"
                     | "declaration"
                     | "enum_specifier"
+                    | "ERROR"
                     | "function_definition"
                     | "struct_specifier"
                     | "union_specifier"
