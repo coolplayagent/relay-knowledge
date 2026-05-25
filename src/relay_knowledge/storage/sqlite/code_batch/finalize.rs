@@ -11,6 +11,8 @@ use crate::{
     storage::StorageError,
 };
 
+#[path = "finalize_call_targets.rs"]
+mod call_targets;
 #[path = "finalize_files.rs"]
 mod files;
 #[path = "finalize_go_imports.rs"]
@@ -40,6 +42,7 @@ pub(super) fn resolve_scope(
         &mut symbol_cache,
     )?;
     imported_references::resolve_references(transaction, source_scope, &mut symbol_cache)?;
+    call_targets::resolve_references(transaction, source_scope)?;
     search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
     rebuild_calls(
         transaction,
@@ -295,6 +298,10 @@ fn rebuild_calls(
             .target_symbol_snapshot_id
             .as_deref()
             .and_then(|symbol_id| by_symbol_id.get(symbol_id).copied());
+        let callee_name = callee
+            .map(|symbol| symbol.name.as_str())
+            .or(reference.target_hint.as_deref())
+            .unwrap_or(reference.name.as_str());
         let call_id = stable_id(
             "call",
             [
@@ -315,7 +322,7 @@ fn rebuild_calls(
             caller.map(|symbol| symbol.symbol_snapshot_id.as_str()),
             caller.map(|symbol| symbol.name.as_str()),
             reference.target_symbol_snapshot_id.as_deref(),
-            reference.name.as_str(),
+            callee_name,
             reference.target_hint.as_deref(),
             reference.resolution_state.as_str(),
             reference.confidence_basis_points,
@@ -334,7 +341,7 @@ fn rebuild_calls(
                     .map(String::as_str)
                     .unwrap_or_default(),
                 caller_name: caller.map(|symbol| symbol.name.as_str()),
-                callee_name: &reference.name,
+                callee_name,
                 target_hint: reference.target_hint.as_deref(),
                 caller_signature: caller.map(|symbol| symbol.signature.as_str()),
                 callee_signature: callee.map(|symbol| symbol.signature.as_str()),

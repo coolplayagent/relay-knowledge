@@ -12,6 +12,7 @@
     "cases/repository_bash_targets.json",
     "cases/repository_c_targets.json",
     "cases/repository_c_syntax_fixture_targets.json",
+    "cases/repository_cross_language_syntax_fixture_targets.json",
     "cases/repository_csharp_syntax_fixture_targets.json",
     "cases/repository_csharp_targets.json",
     "cases/repository_cpp_targets.json",
