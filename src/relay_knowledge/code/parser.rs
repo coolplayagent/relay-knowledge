@@ -311,21 +311,37 @@ fn syntax_error_node(node: Node<'_>) -> bool {
 }
 
 fn recoverable_c_family_error(content: &str, node: Node<'_>) -> bool {
-    if has_preprocessor_ancestor(node) {
-        return true;
-    }
     let range = nodes::syntax_range(node);
     if range.line_end.saturating_sub(range.line_start) > 2 {
         return false;
+    }
+    if recoverable_preprocessor_error(content, node, &range) {
+        return true;
     }
 
     source_line(content, range.line_start).is_some_and(recoverable_c_family_error_line)
 }
 
-fn has_preprocessor_ancestor(mut node: Node<'_>) -> bool {
+fn recoverable_preprocessor_error(
+    content: &str,
+    mut node: Node<'_>,
+    range: &nodes::SyntaxRange,
+) -> bool {
+    let line_starts_with_directive = source_line(content, range.line_start)
+        .is_some_and(|line| line.trim_start().starts_with('#'));
     loop {
         if node.kind().starts_with("preproc") {
-            return true;
+            if matches!(
+                node.kind(),
+                "preproc_def" | "preproc_function_def" | "preproc_include" | "preproc_call"
+            ) {
+                let preprocessor_range = nodes::syntax_range(node);
+                return preprocessor_range
+                    .line_end
+                    .saturating_sub(preprocessor_range.line_start)
+                    <= 2;
+            }
+            return line_starts_with_directive;
         }
         let Some(parent) = node.parent() else {
             return false;
@@ -356,10 +372,7 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
         return true;
     }
     if c_family_decorated_type_line(trimmed) {
-        return trimmed
-            .split_whitespace()
-            .next()
-            .is_some_and(c_family_decorator_token);
+        return true;
     }
 
     let Some(token) = trimmed
@@ -372,8 +385,19 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
 }
 
 fn c_family_decorated_type_line(trimmed: &str) -> bool {
-    ["class", "struct", "enum", "union"].iter().any(|keyword| {
-        trimmed.starts_with(&format!("{keyword} ")) || trimmed.contains(&format!(" {keyword} "))
+    let tokens = trimmed
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    tokens.iter().enumerate().any(|(index, token)| {
+        matches!(*token, "class" | "struct" | "enum" | "union")
+            && (index
+                .checked_sub(1)
+                .and_then(|previous| tokens.get(previous))
+                .is_some_and(|candidate| c_family_decorator_token(candidate))
+                || tokens
+                    .get(index + 1)
+                    .is_some_and(|candidate| c_family_decorator_token(candidate)))
     })
 }
 

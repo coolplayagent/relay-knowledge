@@ -120,11 +120,28 @@ fn decorated_cpp_type_symbol(
             "struct" | "union" | "enum" => "type",
             _ => continue,
         };
-        let name = tokens.find(|candidate| cpp_type_name_candidate(candidate))?;
+        let remaining = tokens.collect::<Vec<_>>();
+        let name = cpp_type_name_after_intro(&remaining)?;
         return Some((name.to_owned(), kind, syntax_range(node)));
     }
 
     None
+}
+
+fn cpp_type_name_after_intro<'token>(tokens: &[&'token str]) -> Option<&'token str> {
+    tokens.iter().enumerate().find_map(|(index, token)| {
+        if !cpp_type_name_candidate(token) {
+            return None;
+        }
+        if cpp_decorator_like_type_prefix(token)
+            && tokens[index + 1..]
+                .iter()
+                .any(|candidate| cpp_type_name_candidate(candidate))
+        {
+            return None;
+        }
+        Some(*token)
+    })
 }
 
 fn cpp_type_name_candidate(token: &str) -> bool {
@@ -132,9 +149,6 @@ fn cpp_type_name_candidate(token: &str) -> bool {
         return false;
     }
     if cpp_builtin_type_token(token) {
-        return false;
-    }
-    if cpp_decorator_token(token) {
         return false;
     }
     let mut characters = token.chars();
@@ -162,6 +176,14 @@ fn cpp_declaration_prefix_token(token: &str) -> bool {
                 | "template"
                 | "typename"
                 | "using"
+        )
+}
+
+fn cpp_decorator_like_type_prefix(token: &str) -> bool {
+    cpp_decorator_token(token)
+        || matches!(
+            token,
+            "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
         )
 }
 
@@ -222,9 +244,9 @@ fn cpp_decorator_token(token: &str) -> bool {
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
         || (token.chars().any(|character| character == '_')
-            && token
-                .chars()
-                .all(|character| character == '_' || character.is_ascii_uppercase()))
+            && token.chars().all(|character| {
+                character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+            }))
 }
 
 fn declarator_name(content: &str, node: Node<'_>) -> Option<String> {

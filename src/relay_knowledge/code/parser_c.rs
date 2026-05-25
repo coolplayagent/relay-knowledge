@@ -144,7 +144,7 @@ fn decorated_cpp_class_symbol(
 }
 
 fn cpp_class_name_candidate(token: &str) -> bool {
-    if token.is_empty() || matches!(token, "final") || cpp_decorator_token(token) {
+    if token.is_empty() || matches!(token, "final") {
         return false;
     }
     let mut characters = token.chars();
@@ -152,17 +152,6 @@ fn cpp_class_name_candidate(token: &str) -> bool {
         .next()
         .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
         && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
-}
-
-fn cpp_decorator_token(token: &str) -> bool {
-    token.starts_with("__")
-        || token.ends_with("_API")
-        || token.ends_with("_EXPORT")
-        || token.ends_with("_EXPORTS")
-        || (token.chars().any(|character| character == '_')
-            && token
-                .chars()
-                .all(|character| character == '_' || character.is_ascii_uppercase()))
 }
 
 fn syscall_macro_definition(
@@ -205,7 +194,7 @@ fn macro_generated_function_definition(
         return None;
     }
     let arguments = call.child_by_field_name("arguments")?;
-    let name = macro_generated_function_name(content, arguments)?;
+    let name = macro_generated_function_name(content, arguments, &macro_name)?;
 
     Some((name, "function", syntax_range(call)))
 }
@@ -227,22 +216,102 @@ fn definition_like_macro_name(name: &str) -> bool {
         .any(|token| matches!(*token, "HANDLER" | "FUNCTION" | "METHOD" | "CALLBACK"))
 }
 
-fn macro_generated_function_name(content: &str, arguments: Node<'_>) -> Option<String> {
-    let mut stack = vec![arguments];
-    while let Some(node) = stack.pop() {
-        if node.kind() == "identifier" {
-            let name = node_text(content, node);
-            if data_symbol_name(&name)
-                && !uppercase_macro_token(&name)
-                && !c_macro_type_argument(&name)
-            {
-                return Some(name);
+struct MacroArgument {
+    text: String,
+    identifiers: Vec<String>,
+}
+
+fn macro_generated_function_name(
+    content: &str,
+    arguments: Node<'_>,
+    macro_name: &str,
+) -> Option<String> {
+    let argument_groups = macro_argument_groups(content, arguments);
+    if declaration_style_macro_name(macro_name)
+        && argument_groups.len() > 1
+        && argument_groups
+            .first()
+            .is_some_and(macro_argument_looks_like_type)
+    {
+        return argument_groups
+            .iter()
+            .skip(1)
+            .find_map(macro_argument_symbol_candidate);
+    }
+
+    argument_groups
+        .iter()
+        .find_map(macro_argument_symbol_candidate)
+}
+
+fn macro_argument_groups(content: &str, arguments: Node<'_>) -> Vec<MacroArgument> {
+    let mut cursor = arguments.walk();
+    arguments
+        .named_children(&mut cursor)
+        .map(|argument| {
+            let mut identifiers = Vec::new();
+            collect_macro_argument_identifiers(content, argument, &mut identifiers);
+            MacroArgument {
+                text: node_text(content, argument),
+                identifiers,
             }
+        })
+        .collect()
+}
+
+fn collect_macro_argument_identifiers(
+    content: &str,
+    argument: Node<'_>,
+    identifiers: &mut Vec<String>,
+) {
+    let mut stack = vec![argument];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "identifier" | "type_identifier") {
+            identifiers.push(node_text(content, node));
+            continue;
         }
         push_children_reverse(node, &mut stack);
     }
+}
 
-    None
+fn declaration_style_macro_name(name: &str) -> bool {
+    let tokens = name
+        .split('_')
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    tokens.iter().any(|token| matches!(*token, "DECLARE"))
+        && tokens
+            .iter()
+            .any(|token| matches!(*token, "FUNCTION" | "METHOD" | "CALLBACK"))
+}
+
+fn macro_argument_looks_like_type(argument: &MacroArgument) -> bool {
+    let trimmed = argument.text.trim();
+    trimmed.contains('*')
+        || trimmed.contains("struct ")
+        || trimmed.contains("union ")
+        || trimmed.contains("enum ")
+        || c_macro_type_argument(trimmed)
+        || argument
+            .identifiers
+            .iter()
+            .any(|name| c_macro_type_argument(name) || c_macro_custom_type_argument(name))
+}
+
+fn c_macro_custom_type_argument(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+}
+
+fn macro_argument_symbol_candidate(argument: &MacroArgument) -> Option<String> {
+    argument
+        .identifiers
+        .iter()
+        .find(|name| {
+            data_symbol_name(name) && !uppercase_macro_token(name) && !c_macro_type_argument(name)
+        })
+        .cloned()
 }
 
 fn c_macro_type_argument(name: &str) -> bool {

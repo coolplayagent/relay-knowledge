@@ -46,7 +46,7 @@ Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `cal
 
 ## Degradation and Diagnostics
 
-Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with unrecoverable error nodes are indexed as partial and record file diagnostics; C/C++ macro-heavy files may remain parsed when errors are isolated to macro, preprocessor, or decorator regions and reliable symbols/imports/chunks are still extracted. Missing external dependency source is exposed as unresolved edge coverage metadata, not `degraded_reason`. Missing `rg`, timeouts, or exhausted candidate budgets degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.
+Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with unrecoverable error nodes are indexed as partial and record file diagnostics; C/C++ macro-heavy files may remain parsed when errors are isolated to macro expansions, bounded preprocessor directives, or decorator-bearing declarations and reliable symbols, references, or imports are still extracted. Missing external dependency source is exposed as unresolved edge coverage metadata, not `degraded_reason`. Missing `rg`, timeouts, or exhausted candidate budgets degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.
 
 ## Related Architecture Chapters
 

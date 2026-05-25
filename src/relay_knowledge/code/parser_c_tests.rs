@@ -127,10 +127,11 @@ fn c_macro_generated_function_recovery_skips_data_macros_and_type_arguments() {
     let snapshot = parse_source_snapshot(
         "src/macro_declarations.c",
         br#"
-DEFINE_MUTEX(lock);
-DEFINE_PER_CPU(int, cpu_counter);
-DECLARE_FUNCTION(int, rk_macro_handler, void);
-"#,
+	DEFINE_MUTEX(lock);
+	DEFINE_PER_CPU(int, cpu_counter);
+	DECLARE_FUNCTION(int, rk_macro_handler, void);
+	DECLARE_FUNCTION(Result, rk_result_handler, void);
+	"#,
     );
 
     assert!(
@@ -154,6 +155,21 @@ DECLARE_FUNCTION(int, rk_macro_handler, void);
             .any(|symbol| symbol.kind == "function" && symbol.name == "rk_macro_handler"),
         "declaration-style function macros should expose the real symbol name: {:?}",
         snapshot.symbols
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "rk_result_handler"),
+        "custom return types should not be indexed instead of the macro function name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "Result"),
+        "custom return-type arguments should not become macro function symbols"
     );
 }
 
@@ -189,6 +205,29 @@ int broken_value = ;
 }
 
 #[test]
+fn c_preprocessor_branch_syntax_errors_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/configured.c",
+        br#"
+int valid_symbol(void) { return 1; }
+
+#if FEATURE_ENABLED
+int broken_value = ;
+#endif
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes")),
+        "broken code inside a preprocessor branch should still surface parse diagnostics"
+    );
+}
+
+#[test]
 fn cpp_macro_decorated_classes_can_recover_as_parsed() {
     let snapshot = parse_source_snapshot(
         "include/http_module.hpp",
@@ -215,6 +254,61 @@ RK_CPP_API class HttpModule final : public BaseModule {
             .any(|symbol| symbol.name == "HttpModule" && symbol.kind == "class"),
         "macro-decorated class should expose the real class name: {:?}",
         snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_post_keyword_decorators_and_uppercase_type_names_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/exported.hpp",
+        br#"
+class __declspec(dllexport) HTTP_MODULE final {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HTTP_MODULE" && symbol.kind == "class"),
+        "post-keyword decorators should not hide uppercase snake-case type names: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_digit_decorated_type_recovery_accepts_uppercase_type_names() {
+    let snapshot = parse_source_snapshot(
+        "include/http_module.hpp",
+        br#"
+#define RK2_API __attribute__((visibility("default")))
+
+RK2_API class HTTP_MODULE final {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HTTP_MODULE" && symbol.kind == "class"),
+        "digit-suffixed decorator macros should still recover the real type name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "RK2_API" && symbol.kind == "class"),
+        "decorator tokens should not replace the real C++ type name"
     );
 }
 

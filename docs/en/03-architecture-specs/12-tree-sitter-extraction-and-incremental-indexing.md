@@ -55,7 +55,7 @@ Query-time grep fallback follows the same blocking-worker boundary as Git blob r
 
 ## 7. Degradation Strategy
 
-Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. C/C++ files with error nodes limited to macro expansion, preprocessor directives, or decorator-like export macros may be recorded as parsed when symbol, import, and chunk extraction succeeds. Degradation appears in repo status, health, and context pack metadata. Missing external dependency source remains unresolved edge metadata rather than `degraded_reason`. Missing or failed `rg` is query-time exact-text fallback degradation and appears in code query response metadata, not index state. Manual `grep` fallback for agent inspection is documented operational behavior and must not be reported as product index health.
+Unrecoverable parse errors, grammar panics, capture mismatches, and unsupported languages produce parse-status diagnostics and fall back to text chunks. C/C++ files with error nodes limited to macro expansion, bounded preprocessor directives, or decorator-like export macros may be recorded as parsed when symbol, reference, or import extraction succeeds. Degradation appears in repo status, health, and context pack metadata. Missing external dependency source remains unresolved edge metadata rather than `degraded_reason`. Missing or failed `rg` is query-time exact-text fallback degradation and appears in code query response metadata, not index state. Manual `grep` fallback for agent inspection is documented operational behavior and must not be reported as product index health.
 
 ## 8. Acceptance Criteria
 
