@@ -89,6 +89,24 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     range(8, 11),
                 ),
                 symbol(
+                    "rust-ffi-declaration-a",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::rk_c_decode",
+                    "rust",
+                    "function_declaration",
+                    range(4, 4),
+                ),
+                symbol(
+                    "rust-ffi-declaration-b",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::rk_c_decode",
+                    "rust",
+                    "function_declaration",
+                    range(5, 5),
+                ),
+                symbol(
                     "c-connect",
                     "c-file",
                     "src/c_entry.c",
@@ -96,6 +114,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "c",
                     "function",
                     range(13, 15),
+                ),
+                symbol(
+                    "constant-not-callable",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "not_callable_target",
+                    "rust",
+                    "constant",
+                    range(16, 16),
                 ),
             ],
             references: vec![
@@ -140,6 +167,27 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "crates/rust_bridge/src/lib.rs",
                     "module::sys::connect",
                     range(13, 13),
+                ),
+                reference(
+                    "rust-c-member-connect",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "C.connect",
+                    range(14, 14),
+                ),
+                reference(
+                    "go-object-c-connect",
+                    "go-file",
+                    "bridge/go_bridge.go",
+                    "obj.C.connect",
+                    range(13, 13),
+                ),
+                reference(
+                    "rust-ffi-non-callable",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::not_callable_target",
+                    range(17, 17),
                 ),
             ],
             imports: Vec::new(),
@@ -209,6 +257,21 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
         module_sys_connect.2.as_deref(),
         Some("module::sys::connect")
     );
+
+    let rust_c_connect = reference_resolution(&store, "rust-c-member-connect").await;
+    assert_eq!(rust_c_connect.0, "unresolved");
+    assert_eq!(rust_c_connect.1, None);
+    assert_eq!(rust_c_connect.2.as_deref(), Some("C.connect"));
+
+    let go_object_c_connect = reference_resolution(&store, "go-object-c-connect").await;
+    assert_eq!(go_object_c_connect.0, "unresolved");
+    assert_eq!(go_object_c_connect.1, None);
+    assert_eq!(go_object_c_connect.2.as_deref(), Some("obj.C.connect"));
+
+    let non_callable = reference_resolution(&store, "rust-ffi-non-callable").await;
+    assert_eq!(non_callable.0, "unresolved");
+    assert_eq!(non_callable.1, None);
+    assert_eq!(non_callable.2.as_deref(), Some("ffi::not_callable_target"));
 }
 
 async fn registered_store() -> SqliteGraphStore {
