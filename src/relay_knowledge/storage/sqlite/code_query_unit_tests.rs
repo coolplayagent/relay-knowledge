@@ -125,6 +125,52 @@ fn candidate_limits_are_layer_aware_and_bounded_for_repo_set_fanout() {
 }
 
 #[test]
+fn plannable_search_outage_returns_existing_partial_hits() {
+    let request = code_search_request("rk_handler", CodeQueryKind::Hybrid);
+    let mut hits = vec![partial_code_hit(
+        "src/lib.rs",
+        CodeRetrievalLayer::Symbol,
+        4.0,
+    )];
+
+    let partial_hits = append_hits_or_return_partial_on_search_outage(
+        &mut hits,
+        &request,
+        Err(code_search_unavailable_error()),
+    )
+    .expect("plannable read-model outage should return partial hits")
+    .expect("partial hits should be available");
+
+    assert!(hits.is_empty());
+    assert_eq!(partial_hits.len(), 1);
+    assert_eq!(partial_hits[0].path, "src/lib.rs");
+    assert!(
+        partial_hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::Symbol)
+    );
+}
+
+#[test]
+fn non_plannable_search_outage_propagates_instead_of_returning_partial_hits() {
+    let request = code_search_request("find rk_handler", CodeQueryKind::Hybrid);
+    let mut hits = vec![partial_code_hit(
+        "src/lib.rs",
+        CodeRetrievalLayer::Symbol,
+        4.0,
+    )];
+
+    let result = append_hits_or_return_partial_on_search_outage(
+        &mut hits,
+        &request,
+        Err(code_search_unavailable_error()),
+    );
+
+    assert!(result.is_err());
+    assert_eq!(hits.len(), 1);
+}
+
+#[test]
 fn score_text_matches_identifier_parts_inside_snake_case_names() {
     let score = score_text(
         "archive output directory",
@@ -848,6 +894,40 @@ fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest
 
     CodeRetrievalRequest::new(query, selector, kind, 10, FreshnessPolicy::AllowStale)
         .expect("request should be valid")
+}
+
+fn code_search_unavailable_error() -> StorageError {
+    StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some("no such table: code_repository_search".to_owned()),
+    ))
+}
+
+fn partial_code_hit(path: &str, layer: CodeRetrievalLayer, score: f64) -> CodeRetrievalHit {
+    CodeRetrievalHit {
+        repository_id: "repo".to_owned(),
+        scope_id: CASE_INTENT_SOURCE_SCOPE.to_owned(),
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path: path.to_owned(),
+        language_id: "rust".to_owned(),
+        byte_range: code_query_range(0, 10),
+        line_range: code_query_range(1, 1),
+        symbol_snapshot_id: Some("symbol".to_owned()),
+        canonical_symbol_id: Some(format!("repo://repo/{}", path.replace('/', "::"))),
+        file_id: Some("file".to_owned()),
+        retrieval_layers: vec![layer],
+        index_versions: vec!["code:commit".to_owned()],
+        stale: false,
+        degraded_reason: None,
+        edge_kind: None,
+        edge_resolution_state: None,
+        edge_target_hint: None,
+        edge_confidence_basis_points: None,
+        edge_confidence_tier: None,
+        score,
+        excerpt: "fn rk_handler() {}".to_owned(),
+    }
 }
 
 fn candidate_limit_request(limit: usize) -> CodeRetrievalRequest {

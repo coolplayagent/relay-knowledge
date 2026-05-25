@@ -152,17 +152,42 @@ fn search_code_with_status(
         }
     }
     if definition_query_needs_chunk_fallback(request, &hits) {
-        hits.extend(search_chunks(connection, status, request)?);
+        let chunk_hits = search_chunks(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
+        {
+            return Ok(partial_hits);
+        }
     }
     if request.code_query_kind == CodeQueryKind::Hybrid {
-        hits.extend(search_chunks(connection, status, request)?);
+        let chunk_hits = search_chunks(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
+        {
+            return Ok(partial_hits);
+        }
         if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
             return Ok(hits);
         }
-        hits.extend(search_references(connection, status, request)?);
-        hits.extend(search_calls(connection, status, request)?);
-        hits.extend(search_imports(connection, status, request)?);
+        let reference_hits = search_references(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, reference_hits)?
+        {
+            return Ok(partial_hits);
+        }
+        let call_hits = search_calls(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, call_hits)?
+        {
+            return Ok(partial_hits);
+        }
+        let import_hits = search_imports(connection, status, request);
+        if let Some(partial_hits) =
+            append_hits_or_return_partial_on_search_outage(&mut hits, request, import_hits)?
+        {
+            return Ok(partial_hits);
+        }
         dedupe_sort_truncate(&mut hits, request.limit);
         return Ok(hits);
     }
@@ -184,6 +209,26 @@ fn search_code_with_status(
     dedupe_sort_truncate(&mut hits, request.limit);
 
     Ok(hits)
+}
+
+fn append_hits_or_return_partial_on_search_outage(
+    hits: &mut Vec<CodeRetrievalHit>,
+    request: &CodeRetrievalRequest,
+    layer_hits: Result<Vec<CodeRetrievalHit>, StorageError>,
+) -> Result<Option<Vec<CodeRetrievalHit>>, StorageError> {
+    match layer_hits {
+        Ok(layer_hits) => {
+            hits.extend(layer_hits);
+            Ok(None)
+        }
+        Err(error)
+            if !hits.is_empty() && code_search_error_can_use_empty_results(request, &error) =>
+        {
+            dedupe_sort_truncate(hits, request.limit);
+            Ok(Some(std::mem::take(hits)))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn definition_query_needs_chunk_fallback(
