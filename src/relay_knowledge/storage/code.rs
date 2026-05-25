@@ -232,6 +232,22 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn code_file_candidate_paths_for_query_scope(
+        &self,
+        source_scope: String,
+        _query: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+        limit: usize,
+    ) -> StorageFuture<'_, Vec<String>> {
+        self.code_file_candidate_paths_for_scope(
+            source_scope,
+            path_filters,
+            language_filters,
+            limit,
+        )
+    }
+
     fn apply_code_index_snapshot(
         &self,
         snapshot: CodeIndexSnapshot,
