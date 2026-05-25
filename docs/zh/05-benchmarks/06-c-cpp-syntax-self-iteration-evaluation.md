@@ -24,8 +24,8 @@
 
 | Repository key | Fixture version | 重点语法 | Fast profile |
 | --- | --- | --- | --- |
-| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedef、operation table、designated initializer、compound initializer、function-like macro、token paste、local include、callback dispatch、negative symbol | 是 |
-| `cpp_syntax_fixture` | `cpp_syntax_v1` | namespace、template class、out-of-line template method、virtual override、operator overload、lambda capture、namespace alias、using alias、header/source split、test fake demotion | 是 |
+| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedef、operation table、designated initializer、compound initializer、function-like macro、token paste、macro-generated handler、local 和 unresolved external include、callback dispatch、negative symbol | 是 |
+| `cpp_syntax_fixture` | `cpp_syntax_v1` | namespace、template class、out-of-line template method、virtual override、operator overload、lambda capture、namespace alias、using alias、export-macro-decorated class、unresolved external include、header/source split、test fake demotion | 是 |
 
 这些 fixture 的源文件由 `tools/self_iteration/src/evaluator_tail.rs` 中的常量生成；生成仓库使用固定 git author/committer date，保证内容相同情况下 commit 可重复。
 
@@ -36,18 +36,20 @@ C 没有原生 lambda 语法，因此 fixture 明确使用 function pointer type
 新增 C case 位于 `tools/self_iteration/cases/repository_c_syntax_fixture_targets.json`，覆盖：
 
 - `symbol`/`definition`: `struct rk_driver_ops`、`rk_driver_read`、`rk_read_fn`。
+- 可恢复 C macro definition：`RK_HTTP_HANDLER(rk_http_access_handler)` 必须抽取为 definition，且文件不标为 partial。
 - `references`: `.read = rk_driver_read`、`rk_pipeline[index](dev)`、`RK_TRACE_VALUE(dev->fd)`。
 - `callers`/`callees`: function pointer dispatch、operation table read callback、dispatch 调用序列。
-- `imports`: `#include "driver_ops.h"`。
+- `imports`: 本地 `#include "driver_ops.h"` 和 unresolved external `#include <openssl/ssl.h>`，且不设置 `degraded_reason`。
 - `hybrid`: operation table + callback dispatch + compound designator 组合召回。
 - `negative`/`forbidden`: missing handler 空结果、macro definition 或 fake test stub 不应压过真实代码。
 
 新增 C++ case 位于 `tools/self_iteration/cases/repository_cpp_syntax_fixture_targets.json`，覆盖：
 
 - `symbol`/`definition`: `Cache` template class、`Cache<Key>::Insert`、`RecordingWriter::Append`、`Pipeline::operator()`。
+- 可恢复 C++ decorated definition：`RK_STORE_API class HttpModule final` 必须抽取 `HttpModule`，且文件不标为 partial。
 - `references`: nested `using KeyList`、namespace alias `cache_alias`。
 - `callers`/`callees`: virtual `Append` dispatch、lambda capture 中的 `cache.Insert` 和 `pipeline(event)` 调用序列。
-- `imports`: `#include "store/cache.hpp"`。
+- `imports`: 本地 `#include "store/cache.hpp"` 和 unresolved external `#include <boost/asio.hpp>`，且不设置 `degraded_reason`。
 - `hybrid`: template cache、out-of-line method、lambda pipeline 的多证据召回。
 - `negative`/`forbidden`: missing policy 空结果、`tests/fake_cache.cpp` 不能压过 production template method。
 

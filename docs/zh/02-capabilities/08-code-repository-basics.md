@@ -45,7 +45,7 @@ path filter 显式 opt in。
 
 ## 降级与诊断
 
-Unsupported、非法 UTF-8、二进制或超大文件会降级为 text-only chunk。包含 error node 的 syntax tree 以 partial 状态索引，并记录 file diagnostic。`rg` 缺失、超时或候选预算耗尽只降级 query-time exact-text fallback，响应必须保留 `degraded_reason`，已有结构化命中仍然可用。
+Unsupported、非法 UTF-8、二进制或超大文件会降级为 text-only chunk。包含不可恢复 error node 的 syntax tree 以 partial 状态索引，并记录 file diagnostic；C/C++ 宏密集文件如果 error node 局限在 macro、preprocessor 或 decorator 区域，且仍能抽取可靠 symbol/import/chunk，可以保持 parsed。外部依赖源码缺失只作为 unresolved edge coverage metadata 暴露，不写入 `degraded_reason`。`rg` 缺失、超时或候选预算耗尽只降级 query-time exact-text fallback，响应必须保留 `degraded_reason`，已有结构化命中仍然可用。
 
 ## 关联架构章节
 
