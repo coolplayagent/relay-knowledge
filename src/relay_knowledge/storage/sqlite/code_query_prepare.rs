@@ -64,7 +64,7 @@ fn code_query_can_plan_source_fallback(request: &CodeRetrievalRequest) -> bool {
 }
 
 fn code_query_definition_identity(query: &str) -> Option<&str> {
-    let mut identity = None;
+    let mut identities = Vec::new();
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
             continue;
@@ -77,11 +77,18 @@ fn code_query_definition_identity(query: &str) -> Option<&str> {
             .last()
             .filter(|term| code_query_single_identifier(term))
         {
-            identity = Some(*term);
+            identities.push(*term);
         }
     }
 
-    identity
+    if identities.len() == 1 {
+        return identities.into_iter().next();
+    }
+
+    identities
+        .into_iter()
+        .rev()
+        .find(|term| !code_query_definition_prose_term(term))
 }
 
 fn code_query_source_identifier(query: &str) -> Option<&str> {
@@ -133,6 +140,39 @@ fn code_search_prepare_error_message_is_retryable(message: &str) -> bool {
     message.contains("vtable constructor failed: code_repository_search")
         || message.contains("database schema is locked")
         || message.contains("database is locked")
+}
+
+fn code_query_definition_prose_term(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "code"
+            | "class"
+            | "declaration"
+            | "declarations"
+            | "define"
+            | "definition"
+            | "definitions"
+            | "enum"
+            | "find"
+            | "for"
+            | "function"
+            | "implementation"
+            | "impl"
+            | "is"
+            | "locate"
+            | "method"
+            | "of"
+            | "search"
+            | "show"
+            | "source"
+            | "struct"
+            | "symbol"
+            | "the"
+            | "type"
+            | "union"
+            | "where"
+    )
 }
 
 fn code_search_read_model_unavailable_message(message: &str) -> bool {
@@ -244,6 +284,15 @@ mod tests {
             code_query_definition_identity("show service::rk_handler"),
             Some("rk_handler")
         );
+        assert_eq!(
+            code_query_definition_identity("find rk_handler definition"),
+            Some("rk_handler")
+        );
+        assert_eq!(
+            code_query_definition_identity("definition of service::rk_handler"),
+            Some("rk_handler")
+        );
+        assert_eq!(code_query_definition_identity("find definition"), None);
         assert_eq!(code_query_definition_identity("src/rk_handler.rs"), None);
     }
 

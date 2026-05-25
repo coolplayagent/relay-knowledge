@@ -92,9 +92,13 @@ fn decorated_declaration_head_starts_with_type_definition(content: &str, node: N
         .next()
         .unwrap_or(text.as_str())
         .trim();
-    for token in cpp_head_tokens(head) {
+    let tokens = cpp_head_tokens(head);
+    for (index, token) in tokens.iter().enumerate() {
         if cpp_type_intro_keyword(token.text) {
-            return true;
+            let Some(name) = cpp_type_name_after_intro_token(head, &tokens[index + 1..]) else {
+                return false;
+            };
+            return cpp_type_body_tail(head.get(name.end..).unwrap_or_default());
         }
         if cpp_declaration_prefix_token(token.text) {
             continue;
@@ -103,6 +107,31 @@ fn decorated_declaration_head_starts_with_type_definition(content: &str, node: N
     }
 
     false
+}
+
+fn cpp_type_body_tail(tail: &str) -> bool {
+    let tail = tail.trim();
+    if tail.is_empty() {
+        return true;
+    }
+    if tail.contains('(') || tail.contains('=') {
+        return false;
+    }
+
+    let (before_base_list, base_list) = tail.split_once(':').unwrap_or((tail, ""));
+    cpp_type_body_suffix_tokens(before_base_list)
+        && (base_list.is_empty()
+            || (!base_list.contains('=') && !cpp_head_tokens(base_list).is_empty()))
+}
+
+fn cpp_type_body_suffix_tokens(tail: &str) -> bool {
+    cpp_head_tokens(tail).iter().all(|token| {
+        cpp_type_body_suffix_token(token.text) || cpp_declaration_prefix_token(token.text)
+    })
+}
+
+fn cpp_type_body_suffix_token(token: &str) -> bool {
+    matches!(token, "abstract" | "final" | "sealed")
 }
 
 fn decorated_declaration_head_declares_function(content: &str, node: Node<'_>) -> bool {

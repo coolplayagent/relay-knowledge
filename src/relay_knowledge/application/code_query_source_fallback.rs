@@ -735,7 +735,7 @@ fn results_define_identity(results: &[CodeRetrievalHit], identity: &str) -> bool
 }
 
 fn definition_identity(query: &str) -> Option<String> {
-    let mut identity = None;
+    let mut identities = Vec::new();
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
             continue;
@@ -745,16 +745,58 @@ fn definition_identity(query: &str) -> Option<String> {
             .filter(|term| !term.is_empty())
             .collect::<Vec<_>>();
         if let Some(term) = terms.last().filter(|term| simple_source_identifier(term)) {
-            identity = Some((*term).to_owned());
+            identities.push(*term);
         }
     }
 
-    identity
+    let identity = if identities.len() == 1 {
+        identities.into_iter().next()
+    } else {
+        identities
+            .into_iter()
+            .rev()
+            .find(|term| !definition_prose_term(term))
+    }?;
+
+    Some(identity.to_owned())
 }
 
 fn source_grep_identity(query: &str) -> Option<String> {
     let identity = definition_identity(query)?;
     (query.split_whitespace().count() == 1).then_some(identity)
+}
+
+fn definition_prose_term(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "code"
+            | "class"
+            | "declaration"
+            | "declarations"
+            | "define"
+            | "definition"
+            | "definitions"
+            | "enum"
+            | "find"
+            | "for"
+            | "function"
+            | "implementation"
+            | "impl"
+            | "is"
+            | "locate"
+            | "method"
+            | "of"
+            | "search"
+            | "show"
+            | "source"
+            | "struct"
+            | "symbol"
+            | "the"
+            | "type"
+            | "union"
+            | "where"
+    )
 }
 
 fn import_grep_query(

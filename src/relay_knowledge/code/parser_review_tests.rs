@@ -115,6 +115,25 @@ RK_API class FactoryResult make_factory_result()
 }
 
 #[test]
+fn cpp_manual_recovery_ignores_braced_elaborated_object_initializers() {
+    let content = "class Widget instance{};";
+    let language = detect_language("src/object_initializer.cpp").expect("C++ should be configured");
+    let parsed = parse_tree(language, content).expect("C++ should parse");
+    let declaration_node = first_node_of_kind(parsed.root_node(), "declaration")
+        .expect("object initializer declaration should be present");
+
+    let manual = manual_definitions(content, language.id, declaration_node);
+
+    assert!(
+        !manual
+            .iter()
+            .any(|(name, kind, _)| name == "Widget" && *kind == "class"),
+        "braced object initializers should not become recovered type definitions: {:?}",
+        manual
+    );
+}
+
+#[test]
 fn cpp_decorated_type_recovery_rejects_broken_member_bodies() {
     let snapshot = parse_source_snapshot(
         "include/broken_exported.hpp",
@@ -139,6 +158,36 @@ __declspec(dllexport) class BrokenWidget {
             .iter()
             .any(|diagnostic| diagnostic.message.contains("error nodes")),
         "unrecoverable decorated type bodies should report parser diagnostics"
+    );
+}
+
+#[test]
+fn cpp_decorated_type_recovery_rejects_broken_nested_method_statements() {
+    let snapshot = parse_source_snapshot(
+        "include/broken_method_body.hpp",
+        br#"
+__declspec(dllexport) class BrokenWidget {
+ public:
+    void Run() {
+        foo(,);
+    }
+};
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "broken nested method statements should keep diagnostics visible: symbols={:?}; diagnostics={:?}",
+        snapshot.symbols,
+        snapshot.diagnostics
+    );
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes")),
+        "unrecoverable method body syntax should report parser diagnostics"
     );
 }
 

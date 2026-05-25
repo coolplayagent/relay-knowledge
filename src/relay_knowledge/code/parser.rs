@@ -391,7 +391,11 @@ fn decorated_type_error_body_is_declaration_like(text: &str) -> bool {
 }
 
 fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
-    if !line_has_balanced_delimiters(line) || line.contains("=;") || line.contains("= ;") {
+    if !line_has_balanced_delimiters(line)
+        || line_has_empty_argument_slot(line)
+        || line.contains("=;")
+        || line.contains("= ;")
+    {
         return false;
     }
     if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {
@@ -402,6 +406,18 @@ fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: i
     }
 
     line.ends_with(';') || line.ends_with('{') || line.starts_with('}')
+}
+
+fn line_has_empty_argument_slot(line: &str) -> bool {
+    let compact = line
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .collect::<String>();
+    compact.contains("(,")
+        || compact.contains("[,")
+        || compact.contains(",,")
+        || compact.contains(",)")
+        || compact.contains(",]")
 }
 
 fn decorated_type_error_body_top_level_statement(line: &str) -> bool {
