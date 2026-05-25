@@ -30,14 +30,22 @@ pub(super) fn code_search_error_can_use_empty_results(
     request: &CodeRetrievalRequest,
     error: &StorageError,
 ) -> bool {
+    code_search_plannable_outage_reason(request, error).is_some()
+}
+
+pub(super) fn code_search_plannable_outage_reason(
+    request: &CodeRetrievalRequest,
+    error: &StorageError,
+) -> Option<String> {
     if !code_query_can_plan_source_fallback(request) {
-        return false;
+        return None;
     }
     match error {
         StorageError::Sqlite(error) => {
             code_search_read_model_unavailable_message(&error.to_string())
+                .then(|| format!("code search read model unavailable: {error}"))
         }
-        _ => false,
+        _ => None,
     }
 }
 

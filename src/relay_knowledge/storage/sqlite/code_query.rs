@@ -56,8 +56,8 @@ const MAX_CANDIDATE_BIND_VALUES: usize = 900;
 
 use super::code_query_hits::selected_row;
 pub(super) use super::code_query_hits::{
-    HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, required_repository,
-    required_scope,
+    HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
+    required_repository, required_scope,
 };
 #[cfg(test)]
 use super::code_query_scope::path_matches_filter;
@@ -85,8 +85,8 @@ use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
 };
 use code_query_prepare::{
-    code_search_error_can_use_empty_results, prepare_code_search_statement,
-    retry_code_search_operation,
+    code_search_error_can_use_empty_results, code_search_plannable_outage_reason,
+    prepare_code_search_statement, retry_code_search_operation,
 };
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
@@ -221,9 +221,11 @@ fn append_hits_or_return_partial_on_search_outage(
             hits.extend(layer_hits);
             Ok(None)
         }
-        Err(error)
-            if !hits.is_empty() && code_search_error_can_use_empty_results(request, &error) =>
-        {
+        Err(error) if !hits.is_empty() => {
+            let Some(reason) = code_search_plannable_outage_reason(request, &error) else {
+                return Err(error);
+            };
+            mark_hits_degraded(hits, &reason);
             dedupe_sort_truncate(hits, request.limit);
             Ok(Some(std::mem::take(hits)))
         }
