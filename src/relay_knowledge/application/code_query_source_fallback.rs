@@ -735,6 +735,7 @@ fn results_define_identity(results: &[CodeRetrievalHit], identity: &str) -> bool
 }
 
 fn definition_identity(query: &str) -> Option<String> {
+    let mut identity = None;
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
             continue;
@@ -744,11 +745,11 @@ fn definition_identity(query: &str) -> Option<String> {
             .filter(|term| !term.is_empty())
             .collect::<Vec<_>>();
         if let Some(term) = terms.last().filter(|term| simple_source_identifier(term)) {
-            return Some((*term).to_owned());
+            identity = Some((*term).to_owned());
         }
     }
 
-    None
+    identity
 }
 
 fn source_grep_identity(query: &str) -> Option<String> {

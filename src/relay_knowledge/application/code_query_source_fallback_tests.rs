@@ -22,6 +22,21 @@ fn fallback_plan_uses_contextual_hits_and_exact_file_filters() {
 }
 
 #[test]
+fn fallback_plan_uses_definition_query_target_not_command_word() {
+    let request = request("find rk_read_fn", CodeQueryKind::Definition, Vec::new());
+    let hit = hit(
+        "include/driver_ops.h",
+        "struct rk_driver_ops {\n    rk_read_fn read;\n}",
+    );
+
+    let plan = plan_code_grep_fallback(&status(), &request, &[hit])
+        .expect("natural-language definition query should plan fallback");
+
+    assert_eq!(plan.identity.as_deref(), Some("rk_read_fn"));
+    assert_eq!(plan.query, "rk_read_fn");
+}
+
+#[test]
 fn fallback_plan_skips_results_with_exact_declaration() {
     let request = request("rk_read_fn", CodeQueryKind::Definition, Vec::new());
     let mut hit = hit(

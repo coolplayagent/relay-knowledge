@@ -56,6 +56,7 @@ fn code_query_can_plan_source_fallback(request: &CodeRetrievalRequest) -> bool {
 }
 
 fn code_query_definition_identity(query: &str) -> Option<&str> {
+    let mut identity = None;
     for raw_token in query.split_whitespace().map(str::trim) {
         if raw_token.contains('/') || raw_token.contains('\\') {
             continue;
@@ -68,11 +69,11 @@ fn code_query_definition_identity(query: &str) -> Option<&str> {
             .last()
             .filter(|term| code_query_single_identifier(term))
         {
-            return Some(*term);
+            identity = Some(*term);
         }
     }
 
-    None
+    identity
 }
 
 fn code_query_source_identifier(query: &str) -> Option<&str> {
@@ -135,8 +136,8 @@ fn code_search_read_model_unavailable_message(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        code_search_error_can_use_empty_results, code_search_prepare_error_message_is_retryable,
-        code_search_storage_error_is_retryable,
+        code_query_definition_identity, code_search_error_can_use_empty_results,
+        code_search_prepare_error_message_is_retryable, code_search_storage_error_is_retryable,
     };
     use crate::{
         domain::{CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy},
@@ -223,6 +224,19 @@ mod tests {
             &request("find rk_handler", CodeQueryKind::Hybrid),
             &error
         ));
+    }
+
+    #[test]
+    fn definition_fallback_identity_uses_query_target() {
+        assert_eq!(
+            code_query_definition_identity("find rk_handler"),
+            Some("rk_handler")
+        );
+        assert_eq!(
+            code_query_definition_identity("show service::rk_handler"),
+            Some("rk_handler")
+        );
+        assert_eq!(code_query_definition_identity("src/rk_handler.rs"), None);
     }
 
     fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
