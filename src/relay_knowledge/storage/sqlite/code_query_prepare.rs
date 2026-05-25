@@ -2,7 +2,10 @@ use std::{thread, time::Duration};
 
 use rusqlite::{Connection, Statement};
 
-use crate::{domain::CodeQueryKind, storage::StorageError};
+use crate::{
+    domain::{CodeQueryKind, CodeRetrievalRequest},
+    storage::StorageError,
+};
 
 const CODE_SEARCH_PREPARE_RETRY_DELAYS_MS: [u64; 3] = [4, 12, 36];
 const CODE_SEARCH_OPERATION_RETRY_DELAYS_MS: [u64; 4] = [10, 30, 90, 270];
@@ -24,10 +27,10 @@ pub(super) fn retry_code_search_operation<T>(
 }
 
 pub(super) fn code_search_error_can_use_empty_results(
-    kind: CodeQueryKind,
+    request: &CodeRetrievalRequest,
     error: &StorageError,
 ) -> bool {
-    if !code_query_kind_has_source_fallback(kind) {
+    if !code_query_can_plan_source_fallback(request) {
         return false;
     }
     match error {
@@ -38,14 +41,55 @@ pub(super) fn code_search_error_can_use_empty_results(
     }
 }
 
-fn code_query_kind_has_source_fallback(kind: CodeQueryKind) -> bool {
-    matches!(
-        kind,
-        CodeQueryKind::Definition
-            | CodeQueryKind::References
-            | CodeQueryKind::Imports
-            | CodeQueryKind::Hybrid
-    )
+fn code_query_can_plan_source_fallback(request: &CodeRetrievalRequest) -> bool {
+    match request.code_query_kind {
+        CodeQueryKind::Definition => code_query_definition_identity(&request.query).is_some(),
+        CodeQueryKind::References | CodeQueryKind::Hybrid => {
+            code_query_source_identifier(&request.query).is_some()
+        }
+        CodeQueryKind::Symbol
+        | CodeQueryKind::Imports
+        | CodeQueryKind::Callers
+        | CodeQueryKind::Callees
+        | CodeQueryKind::Impact => false,
+    }
+}
+
+fn code_query_definition_identity(query: &str) -> Option<&str> {
+    for raw_token in query.split_whitespace().map(str::trim) {
+        if raw_token.contains('/') || raw_token.contains('\\') {
+            continue;
+        }
+        let terms = raw_token
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .filter(|term| !term.is_empty())
+            .collect::<Vec<_>>();
+        if let Some(term) = terms
+            .last()
+            .filter(|term| code_query_single_identifier(term))
+        {
+            return Some(*term);
+        }
+    }
+
+    None
+}
+
+fn code_query_source_identifier(query: &str) -> Option<&str> {
+    let identity = code_query_definition_identity(query)?;
+    (query.split_whitespace().count() == 1).then_some(identity)
+}
+
+fn code_query_single_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
 
 pub(super) fn prepare_code_search_statement<'connection>(
@@ -91,10 +135,13 @@ fn code_search_read_model_unavailable_message(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        code_query_kind_has_source_fallback, code_search_error_can_use_empty_results,
-        code_search_prepare_error_message_is_retryable, code_search_storage_error_is_retryable,
+        code_search_error_can_use_empty_results, code_search_prepare_error_message_is_retryable,
+        code_search_storage_error_is_retryable,
     };
-    use crate::{domain::CodeQueryKind, storage::StorageError};
+    use crate::{
+        domain::{CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy},
+        storage::StorageError,
+    };
 
     #[test]
     fn code_search_prepare_retry_is_limited_to_transient_search_open_errors() {
@@ -119,21 +166,28 @@ mod tests {
     #[test]
     fn unavailable_code_search_read_model_can_fall_back_to_empty_results() {
         assert!(code_search_error_can_use_empty_results(
-            CodeQueryKind::Definition,
+            &request("find rk_handler", CodeQueryKind::Definition),
             &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                 Some("no such table: code_repository_search".to_owned()),
             ))
         ));
         assert!(code_search_error_can_use_empty_results(
-            CodeQueryKind::Hybrid,
+            &request("rk_handler", CodeQueryKind::Hybrid),
+            &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some("no such module: fts5".to_owned()),
+            ))
+        ));
+        assert!(code_search_error_can_use_empty_results(
+            &request("rk_handler", CodeQueryKind::References),
             &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                 Some("no such module: fts5".to_owned()),
             ))
         ));
         assert!(!code_search_error_can_use_empty_results(
-            CodeQueryKind::Definition,
+            &request("find rk_handler", CodeQueryKind::Definition),
             &StorageError::InvalidInput("no such table: code_repository_search".to_owned())
         ));
     }
@@ -145,21 +199,40 @@ mod tests {
             Some("no such module: fts5".to_owned()),
         ));
 
-        assert!(code_query_kind_has_source_fallback(
-            CodeQueryKind::References
-        ));
-        assert!(!code_query_kind_has_source_fallback(CodeQueryKind::Symbol));
         assert!(!code_search_error_can_use_empty_results(
-            CodeQueryKind::Symbol,
+            &request("rk_handler", CodeQueryKind::Symbol),
             &error
         ));
         assert!(!code_search_error_can_use_empty_results(
-            CodeQueryKind::Callers,
+            &request("rk_handler", CodeQueryKind::Callers),
             &error
         ));
         assert!(!code_search_error_can_use_empty_results(
-            CodeQueryKind::Callees,
+            &request("rk_handler", CodeQueryKind::Callees),
             &error
         ));
+        assert!(!code_search_error_can_use_empty_results(
+            &request("rk_handler", CodeQueryKind::Imports),
+            &error
+        ));
+        assert!(!code_search_error_can_use_empty_results(
+            &request("src/rk_handler.rs", CodeQueryKind::Definition),
+            &error
+        ));
+        assert!(!code_search_error_can_use_empty_results(
+            &request("find rk_handler", CodeQueryKind::Hybrid),
+            &error
+        ));
+    }
+
+    fn request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
+        CodeRetrievalRequest::new(
+            query,
+            CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new()).unwrap(),
+            kind,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .unwrap()
     }
 }

@@ -107,7 +107,7 @@ pub(super) fn file_candidate_paths_for_query_scope(
     language_filters: &[String],
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
-    let paths = match file_candidate_paths_from_search(
+    match file_candidate_paths_from_search(
         connection,
         source_scope,
         query,
@@ -115,21 +115,31 @@ pub(super) fn file_candidate_paths_for_query_scope(
         language_filters,
         limit,
     ) {
-        Ok(paths) => paths,
-        Err(error) if candidate_path_search_can_use_scope_fallback(&error) => Vec::new(),
-        Err(error) => return Err(error),
-    };
-    if !paths.is_empty() {
-        return Ok(paths);
-    }
+        Ok(paths) if !paths.is_empty() => Ok(paths),
+        Ok(_) => file_candidate_paths_for_scope(
+            connection,
+            source_scope,
+            path_filters,
+            language_filters,
+            limit,
+        ),
+        Err(error) if candidate_path_search_can_use_scope_fallback(&error) => {
+            let paths = file_candidate_paths_from_indexed_content(
+                connection,
+                source_scope,
+                query,
+                path_filters,
+                language_filters,
+                limit,
+            )?;
+            if paths.is_empty() {
+                return Err(error);
+            }
 
-    file_candidate_paths_for_scope(
-        connection,
-        source_scope,
-        path_filters,
-        language_filters,
-        limit,
-    )
+            Ok(paths)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn file_candidate_paths_from_search(
@@ -170,6 +180,76 @@ fn file_candidate_paths_from_search(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+fn file_candidate_paths_from_indexed_content(
+    connection: &mut Connection,
+    source_scope: &str,
+    query: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let terms = candidate_path_fts_terms(query)
+        .into_iter()
+        .map(|term| term.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let path_filter = path_filter_sql_for_column("f.path", path_filters);
+    let language_filter = language_filter_sql_for_column("f.language_id", language_filters);
+    let term_filter = terms
+        .iter()
+        .map(|_| "(instr(lower(f.path), ?) > 0 OR instr(lower(COALESCE(c.content, '')), ?) > 0)")
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let term_score = terms
+        .iter()
+        .map(|_| {
+            "MAX(CASE WHEN instr(lower(f.path), ?) > 0 THEN 4 ELSE 0 END) \
+             + SUM(CASE WHEN instr(lower(COALESCE(c.content, '')), ?) > 0 THEN 1 ELSE 0 END)"
+        })
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let sql = format!(
+        "
+        SELECT f.path
+        FROM code_repository_files f
+        LEFT JOIN code_repository_chunks c
+          ON c.source_scope = f.source_scope
+         AND c.path = f.path
+        WHERE f.source_scope = ?
+          {path_filter}
+          {language_filter}
+          AND ({term_filter})
+        GROUP BY f.path
+        ORDER BY ({term_score}) DESC, f.path ASC
+        LIMIT ?
+        "
+    );
+    let mut values = vec![Value::Text(source_scope.to_owned())];
+    push_path_filter_values(&mut values, path_filters);
+    push_language_filter_values(&mut values, language_filters);
+    push_candidate_path_term_values(&mut values, &terms);
+    push_candidate_path_term_values(&mut values, &terms);
+    values.push(Value::Integer(limit as i64));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| row.get(0))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+fn push_candidate_path_term_values(values: &mut Vec<Value>, terms: &[String]) {
+    for term in terms {
+        values.push(Value::Text(term.clone()));
+        values.push(Value::Text(term.clone()));
+    }
 }
 
 fn candidate_path_search_can_use_scope_fallback(error: &StorageError) -> bool {

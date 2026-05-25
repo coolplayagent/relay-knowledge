@@ -145,13 +145,27 @@ async fn candidate_paths_for_query_scope_deduplicates_before_limit() {
 
 #[tokio::test]
 async fn candidate_paths_for_query_scope_falls_back_when_search_table_unavailable() {
-    let snapshot = snapshot_with_chunk_status(
+    let mut snapshot = snapshot_with_chunk_status(
         "repo",
         "zzz/target.rs",
         "fn late_budget_target() { /* RK_LATE_BUDGET_NOTE */ }",
         CodeParseStatus::Parsed,
         None,
     );
+    for index in 0..300 {
+        let file_id = format!("noise-{index:03}");
+        let path = format!("src/noise_{index:03}.rs");
+        snapshot
+            .files
+            .push(file(&file_id, &path, "rust", CodeParseStatus::Parsed, None));
+        snapshot.chunks.push(chunk(
+            &format!("noise-chunk-{index:03}"),
+            &file_id,
+            &path,
+            &format!("fn noise_{index:03}() {{}}"),
+            None,
+        ));
+    }
     let store = store_with_repository_snapshot(snapshot).await;
     store
         .run(|connection| {
@@ -165,18 +179,54 @@ async fn candidate_paths_for_query_scope_falls_back_when_search_table_unavailabl
         .code_file_candidate_paths_for_query_scope(
             TEST_SOURCE_SCOPE.to_owned(),
             "RK_LATE_BUDGET_NOTE".to_owned(),
-            vec!["zzz".to_owned()],
+            Vec::new(),
             vec!["rust".to_owned()],
             1,
         )
         .await
-        .expect("scope fallback should load candidate paths");
+        .expect("query-aware content fallback should load candidate paths");
 
     assert_eq!(paths, ["zzz/target.rs"]);
 }
 
 #[tokio::test]
-async fn code_search_returns_empty_when_search_read_model_unavailable() {
+async fn candidate_paths_for_query_scope_reports_unavailable_search_without_query_candidates() {
+    let snapshot = snapshot_with_chunk_status(
+        "repo",
+        "zzz/target.rs",
+        "fn unrelated_target() {}",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    let store = store_with_repository_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let error = store
+        .code_file_candidate_paths_for_query_scope(
+            TEST_SOURCE_SCOPE.to_owned(),
+            "RK_LATE_BUDGET_NOTE".to_owned(),
+            Vec::new(),
+            vec!["rust".to_owned()],
+            1,
+        )
+        .await
+        .expect_err("missing query-aware candidates should report unavailable search");
+    let message = error.to_string();
+
+    assert!(
+        message.contains("code_repository_search"),
+        "unexpected error: {message}"
+    );
+}
+
+#[tokio::test]
+async fn code_search_returns_empty_for_plannable_fallback_when_search_read_model_unavailable() {
     let snapshot = snapshot_with_chunk_status(
         "repo",
         "src/lib.rs",
@@ -192,15 +242,7 @@ async fn code_search_returns_empty_when_search_read_model_unavailable() {
         })
         .await
         .expect("search table should be removable");
-    let request = CodeRetrievalRequest::new(
-        "rk_search_unavailable_note",
-        CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), vec!["rust".to_owned()])
-            .expect("selector should validate"),
-        CodeQueryKind::Hybrid,
-        10,
-        FreshnessPolicy::AllowStale,
-    )
-    .expect("request should validate");
+    let request = code_search_request("rk_search_unavailable_note", CodeQueryKind::Hybrid);
 
     let hits = store
         .search_code_scope(TEST_SOURCE_SCOPE.to_owned(), request)
@@ -210,6 +252,37 @@ async fn code_search_returns_empty_when_search_read_model_unavailable() {
     assert!(
         hits.is_empty(),
         "structured FTS layer should empty out so application fallback can continue: {hits:?}"
+    );
+}
+
+#[tokio::test]
+async fn code_search_reports_import_search_read_model_unavailable() {
+    let snapshot = snapshot_with_chunk_status(
+        "repo",
+        "src/lib.rs",
+        "fn rk_search_unavailable_note() {}",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    let store = store_with_repository_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+    let request = code_search_request("rk_search_unavailable_note", CodeQueryKind::Imports);
+
+    let error = store
+        .search_code_scope(TEST_SOURCE_SCOPE.to_owned(), request)
+        .await
+        .expect_err("import query should report unavailable FTS read model");
+    let message = error.to_string();
+
+    assert!(
+        message.contains("code_repository_search"),
+        "unexpected error: {message}"
     );
 }
 
@@ -319,4 +392,16 @@ fn chunk(
         line_range: RepositoryCodeRange { start: 1, end: 1 },
         symbol_snapshot_id: symbol_snapshot_id.map(str::to_owned),
     }
+}
+
+fn code_search_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
+    CodeRetrievalRequest::new(
+        query,
+        CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate"),
+        kind,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate")
 }
