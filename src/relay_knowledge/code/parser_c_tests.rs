@@ -290,6 +290,76 @@ int Parse(enum Direction direction);
 }
 
 #[test]
+fn cpp_manual_type_recovery_rejects_builtin_specifier_candidates() {
+    let content = "struct { int value; } node;";
+    let language = detect_language("src/anonymous.cpp").expect("C++ should be configured");
+    let parsed = parse_tree(language, content).expect("C++ should parse");
+    let declaration_node = first_node_of_kind(parsed.root_node(), "declaration")
+        .expect("anonymous struct declaration should be present");
+    let manual = manual_definitions(content, language.id, declaration_node);
+
+    assert!(
+        !manual
+            .iter()
+            .any(|(name, kind, _)| name == "int" && *kind == "type"),
+        "builtin specifiers should not become recovered type symbols: {:?}",
+        manual
+    );
+}
+
+#[test]
+fn cpp_union_specifiers_are_manual_definition_candidates() {
+    let snapshot = parse_source_snapshot(
+        "src/payload.cpp",
+        br#"
+union Payload {
+    int value;
+};
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Payload" && symbol.kind == "type"),
+        "union_specifier traversal should recover union type symbols: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_decorated_enum_union_errors_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/modes.hpp",
+        br#"
+#define RK2_API __attribute__((visibility("default")))
+
+RK2_API enum Mode {
+    Fast,
+    Slow,
+};
+
+RK2_API union Payload {
+    int value;
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    for name in ["Mode", "Payload"] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == name && symbol.kind == "type"),
+            "{name} should be recovered from decorated enum/union syntax: {:?}",
+            snapshot.symbols
+        );
+    }
+}
+
+#[test]
 fn cpp_explicit_template_instantiations_can_recover_as_parsed() {
     let snapshot = parse_source_snapshot(
         "src/cache.cpp",

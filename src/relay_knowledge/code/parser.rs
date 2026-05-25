@@ -355,8 +355,7 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
     {
         return true;
     }
-    if trimmed.contains(" class ") || trimmed.contains(" struct ") || trimmed.starts_with("class ")
-    {
+    if c_family_decorated_type_line(trimmed) {
         return trimmed
             .split_whitespace()
             .next()
@@ -372,14 +371,23 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
     c_family_macro_name(token) && trimmed.contains('(')
 }
 
+fn c_family_decorated_type_line(trimmed: &str) -> bool {
+    ["class", "struct", "enum", "union"].iter().any(|keyword| {
+        trimmed.starts_with(&format!("{keyword} ")) || trimmed.contains(&format!(" {keyword} "))
+    })
+}
+
 fn c_family_decorator_token(token: &str) -> bool {
     token.starts_with("__")
         || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
-        || token
+        || (token
             .chars()
-            .all(|character| character == '_' || character.is_ascii_uppercase())
+            .any(|character| character == '_' || character.is_ascii_uppercase())
+            && token.chars().all(|character| {
+                character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+            }))
 }
 
 fn c_family_macro_name(token: &str) -> bool {

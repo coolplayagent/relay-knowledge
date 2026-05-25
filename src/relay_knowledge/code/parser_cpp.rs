@@ -131,6 +131,9 @@ fn cpp_type_name_candidate(token: &str) -> bool {
     if cpp_keyword_token(token) {
         return false;
     }
+    if cpp_builtin_type_token(token) {
+        return false;
+    }
     if cpp_decorator_token(token) {
         return false;
     }
@@ -189,6 +192,27 @@ fn cpp_keyword_token(token: &str) -> bool {
             | "using"
             | "virtual"
             | "volatile"
+    )
+}
+
+fn cpp_builtin_type_token(token: &str) -> bool {
+    matches!(
+        token,
+        "auto"
+            | "bool"
+            | "char"
+            | "char8_t"
+            | "char16_t"
+            | "char32_t"
+            | "double"
+            | "float"
+            | "int"
+            | "long"
+            | "short"
+            | "signed"
+            | "unsigned"
+            | "void"
+            | "wchar_t"
     )
 }
 

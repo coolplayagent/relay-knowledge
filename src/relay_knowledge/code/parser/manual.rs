@@ -47,7 +47,12 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
         "cpp" => {
             matches!(
                 node_kind,
-                "class_specifier" | "declaration" | "function_definition" | "struct_specifier"
+                "class_specifier"
+                    | "declaration"
+                    | "enum_specifier"
+                    | "function_definition"
+                    | "struct_specifier"
+                    | "union_specifier"
             ) || language_nodes::definition_kind(language_id, node_kind).is_some()
         }
         "javascript" | "jsx" | "typescript" | "tsx" => {
