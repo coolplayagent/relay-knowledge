@@ -124,6 +124,11 @@ impl SnapshotBuild {
                     })
                     .unwrap_or((None, None));
 
+                let callee_name = reference
+                    .target_hint
+                    .clone()
+                    .unwrap_or_else(|| reference.name.clone());
+
                 CodeCallRecord {
                     repository_id: reference.repository_id.clone(),
                     source_scope: reference.source_scope.clone(),
@@ -143,7 +148,7 @@ impl SnapshotBuild {
                     caller_symbol_snapshot_id,
                     caller_name,
                     callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
-                    callee_name: reference.name.clone(),
+                    callee_name,
                     target_hint: reference.target_hint.clone(),
                     resolution_state: reference.resolution_state.clone(),
                     confidence_basis_points: reference.confidence_basis_points,

@@ -434,6 +434,99 @@ void load_driver(void) {
 }
 
 #[test]
+fn cross_language_calls_preserve_ffi_targets_for_call_graph_resolution() {
+    let snapshot = parse_sources(&[
+        (
+            "include/rk_bridge.h",
+            r#"
+int rk_c_decode(const char *payload);
+int rk_cpp_score(const char *payload);
+"#,
+        ),
+        (
+            "src/c_entry.c",
+            r#"
+#include "rk_bridge.h"
+
+int rk_c_decode(const char *payload) {
+    return payload[0];
+}
+
+int rk_c_entry_process(const char *payload) {
+    return rk_cpp_score(payload);
+}
+"#,
+        ),
+        (
+            "src/cpp_bridge.cpp",
+            r#"
+#include "rk_bridge.h"
+
+extern "C" int rk_cpp_score(const char *payload) {
+    return rk_c_decode(payload);
+}
+"#,
+        ),
+        (
+            "bridge/go_bridge.go",
+            r#"
+package bridge
+
+/*
+#include "rk_bridge.h"
+*/
+import "C"
+
+func RunCgoBridge(payload *C.char) int {
+    return int(C.rk_c_decode(payload))
+}
+"#,
+        ),
+        (
+            "crates/rust_bridge/src/lib.rs",
+            r#"
+mod ffi {
+    unsafe extern "C" {
+        pub fn rk_c_decode(payload: *const i8) -> i32;
+    }
+}
+
+pub fn run_rust_bridge(payload: *const i8) -> i32 {
+    unsafe { ffi::rk_c_decode(payload) }
+}
+"#,
+        ),
+    ]);
+    let call_names = snapshot
+        .references
+        .iter()
+        .filter(|reference| reference.kind == "call")
+        .map(|reference| reference.name.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert!(call_names.contains("rk_cpp_score"));
+    assert!(call_names.contains("rk_c_decode"));
+    assert!(
+        call_names.contains("C.rk_c_decode") || call_names.contains("rk_c_decode"),
+        "Go cgo call should keep a resolvable C target"
+    );
+    assert!(
+        call_names.contains("ffi::rk_c_decode") || call_names.contains("rk_c_decode"),
+        "Rust FFI call should keep a resolvable C target"
+    );
+    assert!(snapshot.calls.iter().any(|call| {
+        call.path == "bridge/go_bridge.go"
+            && call.callee_name == "rk_c_decode"
+            && call.resolution_state == "resolved"
+    }));
+    assert!(snapshot.calls.iter().any(|call| {
+        call.path == "crates/rust_bridge/src/lib.rs"
+            && call.callee_name == "rk_c_decode"
+            && call.resolution_state == "resolved"
+    }));
+}
+
+#[test]
 fn quoted_include_resolution_preserves_source_directory_precedence() {
     let snapshot = parse_sources(&[
         (

@@ -62,6 +62,10 @@ mod code_batch_finalize_tests;
 mod code_batch_finalize_typescript_tests;
 
 #[cfg(test)]
+#[path = "code_cross_language_call_tests.rs"]
+mod code_cross_language_call_tests;
+
+#[cfg(test)]
 #[path = "code_batch_search_tests.rs"]
 mod code_batch_search_tests;
 
