@@ -57,6 +57,9 @@ pub(super) fn go_module_candidates(path: &str) -> Vec<String> {
     if let Some(stripped) = path.strip_prefix("staging/src/") {
         push_candidate(&mut candidates, stripped.to_owned());
     }
+    if let Some(stripped) = path.strip_prefix("vendor/") {
+        push_candidate(&mut candidates, stripped.to_owned());
+    }
 
     candidates
 }
@@ -77,7 +80,11 @@ pub(super) fn c_family_module_candidates(path: &str) -> Vec<String> {
 
 pub(super) fn normalized_module_candidates(path: &str) -> Vec<String> {
     let path = normalize_layout_path(path).trim_start_matches("./");
-    source_module_candidates(path)
+    if path.is_empty() {
+        Vec::new()
+    } else {
+        vec![path.to_owned()]
+    }
 }
 
 fn stripped_source_roots(path: &str) -> Vec<&str> {
@@ -158,6 +165,26 @@ mod tests {
         assert_eq!(
             source_module_candidates("third_party/pkg/foo.py"),
             vec!["third_party/pkg/foo.py".to_owned()]
+        );
+    }
+
+    #[test]
+    fn go_module_candidates_preserve_vendor_import_keys() {
+        assert!(
+            go_module_candidates("vendor/k8s.io/client-go/informers/factory.go")
+                .contains(&"k8s.io/client-go/informers/factory.go".to_owned())
+        );
+    }
+
+    #[test]
+    fn normalized_module_candidates_do_not_strip_import_specifier_roots() {
+        assert_eq!(
+            normalized_module_candidates("lib/foo.ts"),
+            vec!["lib/foo.ts".to_owned()]
+        );
+        assert_eq!(
+            normalized_module_candidates("./packages/foo.ts"),
+            vec!["packages/foo.ts".to_owned()]
         );
     }
 

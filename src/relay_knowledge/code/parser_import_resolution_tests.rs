@@ -205,6 +205,30 @@ export function buildClient(): Session {
 }
 
 #[test]
+fn typescript_import_specifiers_do_not_strip_source_like_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "src/session.ts",
+            r#"
+export class Session {}
+"#,
+        ),
+        (
+            "src/client.ts",
+            r#"
+import { Session } from "lib/session";
+
+export function buildClient(): Session {
+    return new Session();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "lib/session", "unresolved");
+}
+
+#[test]
 fn typescript_dynamic_imports_use_string_specifier_identity() {
     let snapshot = parse_sources(&[
         ("src/lazy/alpha.ts", "export function alpha(): void {}"),
@@ -372,6 +396,32 @@ var _ context.Context
             .iter()
             .any(|import| import.module.contains("not/local"))
     );
+}
+
+#[test]
+fn go_import_resolution_preserves_explicit_vendor_module_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "vendor/k8s.io/client-go/informers/factory.go",
+            r#"
+package informers
+
+type SharedInformerFactory interface {}
+"#,
+        ),
+        (
+            "pkg/kubeapiserver/authorizer/config.go",
+            r#"
+package authorizer
+
+import informers "k8s.io/client-go/informers"
+
+var _ informers.SharedInformerFactory
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "k8s.io/client-go/informers", "resolved");
 }
 
 #[test]
