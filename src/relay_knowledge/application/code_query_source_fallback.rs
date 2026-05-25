@@ -15,6 +15,7 @@ use super::code_query_source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
+const DYNAMIC_IMPORT_SOURCE_FALLBACK_BONUS: f64 = 1.1;
 const REFERENCE_SOURCE_DECLARATION_PENALTY: f64 = -1.9;
 
 pub(super) struct CodeGrepFallbackPlan {
@@ -390,7 +391,7 @@ fn fallback_diagnostic(
     let reason = degraded_reason?;
     if external_import_fallback {
         Some(format!(
-            "ripgrep fallback for unresolved external import failed: {reason}"
+            "source fallback for unresolved external import failed: {reason}"
         ))
     } else {
         Some(reason)
@@ -406,10 +407,32 @@ fn source_grep_match_score(
         SourceGrepKind::References => {
             reference_source_grep_score_adjustment(&plan.query, &matched.excerpt)
         }
-        SourceGrepKind::Definition | SourceGrepKind::Hybrid | SourceGrepKind::Imports => 0.0,
+        SourceGrepKind::Imports => {
+            import_source_grep_score_adjustment(&plan.query, &matched.excerpt)
+        }
+        SourceGrepKind::Definition | SourceGrepKind::Hybrid => 0.0,
     };
 
     (base_score + adjustment).max(0.0)
+}
+
+fn import_source_grep_score_adjustment(specifier: &str, excerpt: &str) -> f64 {
+    let line = excerpt.trim();
+    if relative_path_import_specifier(specifier)
+        && !source_line_starts_with_comment(line)
+        && line.contains(specifier)
+        && (line.contains("import(") || line.contains("import ("))
+    {
+        DYNAMIC_IMPORT_SOURCE_FALLBACK_BONUS
+    } else {
+        0.0
+    }
+}
+
+fn source_line_starts_with_comment(line: &str) -> bool {
+    ["//", "#", "/*", "*", "--", "<!--"]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
 }
 
 fn hit_source_line_is_better(hit: &CodeRetrievalHit, matched: &SourceGrepMatch) -> bool {

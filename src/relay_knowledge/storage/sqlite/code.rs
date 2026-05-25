@@ -3,6 +3,9 @@ use rusqlite::Connection;
 #[path = "code_query.rs"]
 mod code_query;
 
+#[path = "code_query_prepare.rs"]
+mod code_query_prepare;
+
 #[path = "code_query_hits.rs"]
 mod code_query_hits;
 

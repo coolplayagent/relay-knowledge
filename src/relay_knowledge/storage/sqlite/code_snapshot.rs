@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use rusqlite::{Connection, params, params_from_iter, types::Value};
+use rusqlite::{Connection, params};
 
 use crate::{
     domain::{CodeFileFingerprint, CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary},

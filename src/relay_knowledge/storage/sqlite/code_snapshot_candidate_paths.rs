@@ -4,6 +4,8 @@ use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
+use super::code_query_prepare::retry_code_search_operation;
+
 const MAX_CANDIDATE_PATH_FTS_TERMS: usize = 8;
 
 pub(in crate::storage::sqlite) fn file_candidate_paths_for_scope(
@@ -48,14 +50,16 @@ pub(in crate::storage::sqlite) fn file_candidate_paths_for_query_scope(
     language_filters: &[String],
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
-    match file_candidate_paths_from_search(
-        connection,
-        source_scope,
-        query,
-        path_filters,
-        language_filters,
-        limit,
-    ) {
+    match retry_code_search_operation(|| {
+        file_candidate_paths_from_search(
+            connection,
+            source_scope,
+            query,
+            path_filters,
+            language_filters,
+            limit,
+        )
+    }) {
         Ok(paths) if !paths.is_empty() => Ok(paths),
         Ok(_) => file_candidate_paths_for_scope(
             connection,

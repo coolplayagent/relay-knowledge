@@ -329,6 +329,93 @@ fn import_fallback_scans_scope_for_relative_module_queries() {
 }
 
 #[test]
+fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes() {
+    let request = request("import \"./protocol\"", CodeQueryKind::Imports, Vec::new());
+    let mut graph_hit = hit("src/provider.ts", "import \"./protocol\" target symbols");
+    graph_hit.score = 3.75;
+    graph_hit.edge_kind = Some("import".to_owned());
+    graph_hit.edge_resolution_state = Some("resolved".to_owned());
+    graph_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+    let mut results = vec![graph_hit];
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "./protocol".to_owned(),
+        paths: Vec::new(),
+        path_filters: Vec::new(),
+        language_filters: vec!["typescript".to_owned()],
+        limit: 10,
+        kind: SourceGrepKind::Imports,
+        identity: None,
+        needs_scope_paths: false,
+    };
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![
+                SourceGrepMatch {
+                    path: "src/provider.ts".to_owned(),
+                    language_id: "typescript".to_owned(),
+                    excerpt: "import { sendEnvelope } from \"./protocol\";".to_owned(),
+                    byte_range: RepositoryCodeRange { start: 0, end: 41 },
+                    line_range: RepositoryCodeRange { start: 3, end: 3 },
+                },
+                SourceGrepMatch {
+                    path: "src/provider.ts".to_owned(),
+                    language_id: "typescript".to_owned(),
+                    excerpt: "await import(\"./protocol\");".to_owned(),
+                    byte_range: RepositoryCodeRange {
+                        start: 100,
+                        end: 127,
+                    },
+                    line_range: RepositoryCodeRange { start: 8, end: 8 },
+                },
+                SourceGrepMatch {
+                    path: "src/provider.ts".to_owned(),
+                    language_id: "typescript".to_owned(),
+                    excerpt: "// TODO: remove import(\"./protocol\")".to_owned(),
+                    byte_range: RepositoryCodeRange {
+                        start: 130,
+                        end: 166,
+                    },
+                    line_range: RepositoryCodeRange { start: 9, end: 9 },
+                },
+            ],
+            degraded_reason: None,
+        },
+    );
+
+    let graph_rank = results
+        .iter()
+        .position(|hit| {
+            hit.retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+        })
+        .expect("graph hit should remain");
+    let dynamic_rank = results
+        .iter()
+        .position(|hit| hit.excerpt.contains("await import"))
+        .expect("dynamic source hit should be returned");
+    let static_rank = results
+        .iter()
+        .position(|hit| hit.excerpt.starts_with("import {"))
+        .expect("static source hit should be returned");
+    let comment_rank = results
+        .iter()
+        .position(|hit| hit.excerpt.starts_with("// TODO"))
+        .expect("comment source hit should be returned");
+
+    assert!(dynamic_rank < graph_rank);
+    assert!(graph_rank < static_rank);
+    assert!(graph_rank < comment_rank);
+    assert!(results[dynamic_rank].score > results[static_rank].score);
+    assert_eq!(results[static_rank].score, results[comment_rank].score);
+}
+
+#[test]
 fn import_fallback_keeps_graph_evidence_ahead_of_text_fallback() {
     let mut request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     request.limit = 1;

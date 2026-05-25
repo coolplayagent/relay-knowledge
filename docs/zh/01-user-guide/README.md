@@ -14,7 +14,7 @@
 
 - 零配置本地 SQLite 图谱、平台运行时目录和 deterministic semantic/vector read models。
 - evidence ingest、三层 GraphRAG 检索、graph-only 查询、index refresh 和 freshness diagnostics。
-- 代码仓库图谱，包括 tree-sitter 索引、符号与关系检索、有界 `ripgrep` 精确文本兜底、增量更新、worktree overlay、影响分析和报告。
+- 代码仓库图谱，包括 tree-sitter 索引、符号与关系检索、有界内部 exact-text source fallback、增量更新、worktree overlay、影响分析和报告。
 - 静态 Web 工作区与同源操作执行，覆盖 retrieval、ingest、repo、index、provider、worker、proposal、audit 和 service snapshot。
 - MCP Streamable HTTP、本地 ACP adapter、QoS、scope policy、取消、metrics 和审计。
 - service manager 计划、definition 生成、silent-update operator 状态、worker/proposal/audit 运维入口。
@@ -27,7 +27,7 @@
 - [第 2 章 CLI 基础](02-cli-basics.md): 命令语法、输出格式、freshness 和解析诊断。
 - [第 3 章 CLI 命令参考](03-cli-command-reference.md): 命令总览、状态诊断、setup profile 和 provider probe。
 - [第 4 章 知识图谱](04-knowledge-graph.md): evidence 写入、context pack 查询、图检查、多模态 evidence 和检索后端入口。
-- [第 5 章 代码仓库图谱工作流](05-code-repository-graph-workflow.md): 仓库注册、代码图谱索引、符号与关系查询、`ripgrep` 兜底诊断、增量更新、影响分析和报告。
+- [第 5 章 代码仓库图谱工作流](05-code-repository-graph-workflow.md): 仓库注册、代码图谱索引、符号与关系查询、source fallback 诊断、增量更新、影响分析和报告。
 - [第 6 章 Web 工作区](06-web-workspace.md): 静态资源、同源接口、操作执行、浏览器集成测试和安全边界。
 - [第 7 章 MCP Agent 接入](07-mcp-agent-access.md): MCP policy、会话流程、tools/resources/prompts 和访问边界。
 - [第 8 章 ACP 本地 Adapter](08-acp-local-adapter.md): 本地 ACP 会话、progress、cancellation 和 context artifact。

@@ -940,7 +940,7 @@ pub(crate) async fn apply_code_grep_fallback(
             Ok(paths) => paths,
             Err(error) => {
                 return Ok(Some(format!(
-                    "ripgrep candidate path lookup unavailable: {error}"
+                    "source fallback candidate path lookup unavailable: {error}"
                 )));
             }
         };

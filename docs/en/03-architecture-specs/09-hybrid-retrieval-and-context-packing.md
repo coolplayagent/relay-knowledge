@@ -28,7 +28,7 @@ No retriever bypasses scope filters, authorization policy, or freshness policy.
 
 The query planner first classifies intent: exact term, conceptual, multi-hop, temporal, code symbol, impact, file path, file content, or mixed agent context. Each intent selects retriever families and budgets. For example, filename/path queries prefer `local_file_path` and metadata, while content questions enter `local_file_content`, BM25, or semantic/vector paths.
 
-For code intent, recall order is tree-sitter code graph, SQLite FTS/BM25, semantic/vector supplement, and only then bounded exact-text grep fallback. Product runtime fallback uses `rg` when available, inherits source scope, path/language filters, authorization, and freshness policy, and searches indexed commit content rather than a dirty worktree. It can produce source span evidence only; it cannot declare new graph edges or override edge confidence. Agent or maintainer inspection may use `grep -RIn` when `rg` is not installed, but that is a bounded development search technique, not a product query-path substitute.
+For code intent, recall order is tree-sitter code graph, SQLite FTS/BM25, semantic/vector supplement, and only then bounded internal exact-text source fallback. Product runtime fallback inherits source scope, path/language filters, authorization, and freshness policy, and searches materialized indexed-commit candidates rather than a dirty worktree. It can produce source span evidence only; it cannot declare new graph edges or override edge confidence. Agent or maintainer inspection may use `rg` or `grep -RIn`, but that is a bounded development search technique, not a product query-path substitute.
 
 ## 3. Fusion Model
 
@@ -66,7 +66,7 @@ Packing favors diversity and citability. Duplicate hits from the same parent evi
 - Exact-term, conceptual, multi-hop, temporal, and code-symbol queries have corresponding retriever signals.
 - Filename/path and file-content queries distinguish path, metadata, content, and change-cursor freshness.
 - Results explain item source, rank contribution, and freshness.
-- Code exact-text fallback hits preserve `text_fallback` provenance and return degraded reasons when `rg` is missing, times out, or exhausts budget; manual agent inspection documents the `grep -RIn` fallback path separately.
+- Code exact-text fallback hits preserve `text_fallback` provenance and return degraded reasons when candidate-path or budget limits are hit; manual agent inspection documents the `rg`/`grep -RIn` fallback path separately.
 - Broad-scope code exact-text fallback first narrows candidate paths through the indexed FTS read model using query, path filters, and language filters; it falls back to bounded scope enumeration only when the query has no indexed candidates.
 - Degraded backends produce explicit degradation metadata instead of silent absence.
 

@@ -26,7 +26,7 @@ Installation and release are part of product architecture. Stable releases are v
 
 Installers or install scripts support version selection, install directory selection, dry run, checksum verification, service-definition generation, failure rollback, and uninstall plans. Runtime data is not written to release extraction directories by default.
 
-Ripgrep is an optional runtime enhancement for exact code-source fallback. Installers and packaged diagnostics should detect whether `rg` is on `PATH` and report that code graph queries still work without it, while exact fallback hits may be degraded. Agent-facing setup notes may mention bounded `grep -RIn` as a manual inspection fallback when `rg` is absent, but installers must not make recursive `grep` a service dependency or a replacement for indexed query behavior.
+Exact code-source fallback is implemented inside the product and must not require `rg` at runtime. Agent-facing setup notes may mention bounded `rg` or `grep -RIn` as manual inspection tools, but installers must not make recursive grep a service dependency or a replacement for indexed query behavior.
 
 ## 4. Runtime State
 

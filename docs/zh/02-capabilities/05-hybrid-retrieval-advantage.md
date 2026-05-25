@@ -8,7 +8,7 @@
 
 ## 能力定位
 
-混合检索是第二卷最核心的竞争力能力。它同时使用 BM25、local semantic token read model、local hashed-vector ANN、可配置 external semantic/vector backend、graph evidence fallback、code graph documents、有界代码 `ripgrep` 精确文本兜底、local file path/content read model、schema path、temporal event、community summary 和 RRF。
+混合检索是第二卷最核心的竞争力能力。它同时使用 BM25、local semantic token read model、local hashed-vector ANN、可配置 external semantic/vector backend、graph evidence fallback、code graph documents、有界代码 exact-text source fallback、local file path/content read model、schema path、temporal event、community summary 和 RRF。
 
 ## 用户可见行为
 
@@ -32,7 +32,7 @@ relay-knowledge query "retry policy graph path"   --freshness wait-until-fresh  
 ## 降级与诊断
 
 Semantic/vector backend disabled 或 cursor stale 时，BM25 和 graph evidence 仍可工作。响应的 `context_pack.backend_statuses` 会说明 configured backend、model、dimension、scope post-filter 和 indexed graph version。
-代码 `ripgrep` 缺失、超时或预算耗尽时，只降级 exact-text 兜底层；已有 BM25、code graph edge 和 graph evidence 仍可进入 context pack。
+代码 source fallback 候选路径或预算耗尽时，只降级 exact-text 兜底层；已有 BM25、code graph edge 和 graph evidence 仍可进入 context pack。
 本机文件 content cursor stale 时，path/metadata 仍可服务文件定位；响应需要说明 content stale、watcher lag 或 bounded rescan 状态。
 
 ## 关联架构章节

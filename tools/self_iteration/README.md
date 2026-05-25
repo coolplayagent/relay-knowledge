@@ -119,20 +119,20 @@ renewal without indexing exhaustive large repositories.
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
 runs the semantic/vector guardrail query. The TypeScript, C, and C++ syntax
-fixtures keep external-import guardrails in the default fast loop and require
-missing dependency source to stay as unresolved edge metadata instead of
-`degraded_reason`. The C and C++ fixtures also cover macro-generated handlers
-and export-macro-decorated classes so recoverable parser errors do not force a
-query-time grep fallback. The
+fixtures keep external-import source fallback guardrails in the default fast
+loop and require missing dependency source to stay as unresolved edge metadata
+instead of `degraded_reason`. The C and C++ fixtures also cover macro-generated
+handlers and export-macro-decorated classes so recoverable parser errors do not
+force query-time source fallback. The
 nonstandard layout fixture keeps Python, TypeScript, Go, Java, C++, and Swift
 sources outside a top-level `src/` covered by fast guardrails. The same
 nonstandard layout fixture also carries fast guardrails for
 `repo query --kind sbom` over Cargo, npm, Go, Python, Maven BOM, Gradle, and
 Conan manifest or lock files, so dependency-inventory regressions are rejected
-by the default loop. The C fixture also includes explicit grep/text-fallback
+by the default loop. The C fixture also includes explicit source/text-fallback
 cases early in its fast case window, so exact source-text recovery stays covered
-without indexing another large repository or making missing `rg` a hard
-quality-gate failure. It reuses
+without indexing another large repository or depending on an external `rg`
+binary. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
 repeated registration and indexing cost. Score history is isolated by profile
 and category focus, so `fast --categories semantic_vector` compares only
@@ -391,11 +391,11 @@ enumerating cases.
   `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `hybrid` scenarios for
   functions, methods, classes, exported values, macros, includes/imports,
   callback or trait relationships, and execution flows. Import cases may require
-  the external-dependency grep fallback diagnostic: when an import target is
+  the external-dependency source fallback diagnostic: when an import target is
   unresolved because the dependency library is not indexed, the product searches
   only the current indexed repository source and returns `text_fallback`
   evidence for LLM reasoning. Fast C fixture guardrails also exercise exact
-  grep fallback for comment-only references and hybrid source-text hits in
+  source fallback for comment-only references and hybrid source-text hits in
   headers, implementation files, and generated-table source. Relationship targets
   stay split into regression and challenge groups, with extended relationship
   files adding explicit implementation, alias, and inline callback/closure

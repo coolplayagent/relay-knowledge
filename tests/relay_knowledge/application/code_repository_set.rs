@@ -370,10 +370,7 @@ pub fn original() -> u32 {
 }
 
 #[tokio::test]
-async fn repository_set_import_query_keeps_external_dependency_gap_non_degraded() {
-    if Command::new("rg").arg("--version").output().is_err() {
-        return;
-    }
+async fn repository_set_import_query_reports_external_dependency_source_fallback() {
     let repo = FixtureRepo::create("repo-set-external-import");
     repo.write(
         "src/lib.rs",
