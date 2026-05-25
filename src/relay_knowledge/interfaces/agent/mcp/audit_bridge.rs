@@ -186,7 +186,10 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
         return usize::try_from(returned).ok();
     }
 
-    structured["results"].as_array().map(Vec::len)
+    structured["results"]
+        .as_array()
+        .map(Vec::len)
+        .or_else(|| structured["flags"].as_array().map(Vec::len))
 }
 
 #[cfg(test)]

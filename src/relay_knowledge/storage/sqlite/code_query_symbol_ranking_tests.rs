@@ -55,6 +55,7 @@ async fn hybrid_symbols_rank_header_declarations_above_matching_implementations(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -123,6 +124,7 @@ async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -193,6 +195,7 @@ async fn hybrid_symbols_rank_typed_function_values_above_broad_method_matches() 
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -261,6 +264,7 @@ async fn scoped_definition_identity_ignores_non_contiguous_path_matches() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -321,6 +325,7 @@ async fn definition_queries_drop_test_symbols_when_production_alternatives_exist
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -381,6 +386,7 @@ async fn definition_path_queries_rank_exact_symbol_path_above_mentions() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })

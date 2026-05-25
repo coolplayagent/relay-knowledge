@@ -58,6 +58,7 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
             symbols: vec![target_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -81,6 +82,7 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
             symbols: Vec::new(),
             references: vec![target_reference],
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -195,6 +197,7 @@ async fn checkpointed_finalize_preserves_reference_resolution_rules() {
             symbols,
             references,
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -284,6 +287,7 @@ async fn checkpointed_batches_finalize_python_import_edges() {
             symbols: vec![request_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -299,6 +303,7 @@ async fn checkpointed_batches_finalize_python_import_edges() {
             symbols: Vec::new(),
             references: Vec::new(),
             imports: vec![service_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -365,6 +370,7 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
             symbols: vec![request_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -380,6 +386,7 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
             symbols: Vec::new(),
             references: Vec::new(),
             imports: vec![service_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -446,6 +453,7 @@ async fn checkpointed_batches_finalize_java_import_edges_under_maven_roots() {
             symbols: vec![context_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -461,6 +469,7 @@ async fn checkpointed_batches_finalize_java_import_edges_under_maven_roots() {
             symbols: Vec::new(),
             references: Vec::new(),
             imports: vec![loader_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -534,6 +543,7 @@ async fn checkpointed_batches_finalize_java_wildcard_import_edges_for_fqn_symbol
             symbols: vec![context_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -549,6 +559,7 @@ async fn checkpointed_batches_finalize_java_wildcard_import_edges_for_fqn_symbol
             symbols: Vec::new(),
             references: Vec::new(),
             imports: vec![loader_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -627,6 +638,7 @@ async fn checkpointed_batches_finalize_go_package_import_edges_for_symbol_querie
             symbols: vec![informer_symbol],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -642,6 +654,7 @@ async fn checkpointed_batches_finalize_go_package_import_edges_for_symbol_querie
             symbols: Vec::new(),
             references: Vec::new(),
             imports: vec![importer_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -692,6 +705,7 @@ async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
         symbols: vec![indexed_symbol],
         references: Vec::new(),
         imports: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     };
@@ -744,6 +758,7 @@ async fn new_checkpoint_batch_replaces_colliding_path_rows() {
         symbols: vec![symbol(source_scope, symbol_id, file_id, path, name, "rust")],
         references: Vec::new(),
         imports: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     };

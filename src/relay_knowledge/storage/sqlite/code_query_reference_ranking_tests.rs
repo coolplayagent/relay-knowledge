@@ -48,6 +48,7 @@ async fn scoped_reference_queries_use_resolved_symbol_identity() {
         )],
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "caller-chunk",
             "caller-file",
@@ -91,6 +92,7 @@ async fn exact_reference_queries_fall_back_to_chunks_when_reference_facts_are_mi
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "pipeline-chunk",
             "pipeline-file",
@@ -144,6 +146,7 @@ async fn reference_excerpts_prefer_the_reference_line_inside_large_chunks() {
         )],
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "cache-class-chunk",
             "cache-file",
@@ -196,6 +199,7 @@ async fn exact_reference_fallback_chunks_rank_usage_context_before_declarations(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![
             chunk(
                 "pipeline-declaration-chunk",
@@ -282,6 +286,7 @@ async fn exact_reference_queries_rank_initializer_usage_before_declarations() {
         ],
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![
             chunk(
                 "header-chunk",
@@ -364,6 +369,7 @@ async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarat
         ],
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![
             chunk(
                 "pipeline-declaration-chunk",

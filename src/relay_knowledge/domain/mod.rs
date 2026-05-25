@@ -19,7 +19,8 @@ pub use code::{
     CodeReferenceKind, CodeReferenceRecord, CodeResolutionState, CodeSymbolKind, CodeSymbolRecord,
 };
 pub use code_repository::{
-    CodeCallRecord, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
+    CodeCallRecord, CodeFeatureFlagGraph, CodeFeatureFlagRecord, CodeFeatureFlagRequest,
+    CodeFeatureFlagUsage, CodeFileDiagnostic, CodeFileFingerprint, CodeImpactPathGroups,
     CodeImpactRequest, CodeImportRecord, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexMode,
     CodeIndexProgressSummary, CodeIndexRequest, CodeIndexResourceBudget, CodeIndexSession,
     CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeIndexTaskState,

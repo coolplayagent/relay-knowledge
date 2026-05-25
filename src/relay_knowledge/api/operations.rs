@@ -4,20 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{
-        CodeImpactPathGroups, CodeImpactRequest, CodeIndexCheckpoint, CodeIndexSummary,
-        CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositoryReport,
-        CodeRepositoryScopePreview, CodeRepositorySelector, CodeRepositorySet,
-        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest, CodeRepositorySetMember,
-        CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest, CodeRepositorySetRefreshSummary,
-        CodeRepositorySetRefreshTaskRecord, CodeRepositorySetRemoveMemberRequest,
-        CodeRepositorySetStatus, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-        CodeRetrievalRequest, CodeScopeRetentionSummary, CommitReceipt, ConfidenceScore,
-        EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan, ExtractionDiagnostic,
-        FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange, IndexKind, IndexStatus,
-        LayoutRegion, ProposalConflictRecord, ProposalRecord, ProposalState, RerankDiagnostics,
-        RetrievalBackendStatus, RetrievalBudgetUsed, RetrievalHit, RetrievalMode,
-        RetrievedContextPack, ServiceDefinitionPlan, ServiceManagerAction, ServiceOperatorStatus,
-        WorkerKind, WorkerStatus, WorkerTaskRecord,
+        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeImpactPathGroups, CodeImpactRequest,
+        CodeIndexCheckpoint, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryRegistration,
+        CodeRepositoryReport, CodeRepositoryScopePreview, CodeRepositorySelector,
+        CodeRepositorySet, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
+        CodeRepositorySetMember, CodeRepositorySetQueryHit, CodeRepositorySetQueryRequest,
+        CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord,
+        CodeRepositorySetRemoveMemberRequest, CodeRepositorySetStatus, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
+        CommitReceipt, ConfidenceScore, EvidenceExtractionMetadata, EvidenceModality, EvidenceSpan,
+        ExtractionDiagnostic, FactStatus, FreshnessPolicy, FusionDiagnostics, GraphVersionRange,
+        IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
+        ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
+        RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
+        ServiceManagerAction, ServiceOperatorStatus, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -715,6 +715,17 @@ pub struct CodeRepositoryQueryResponse {
     pub scope: CodeRepositoryScopeMetadata,
     pub request: CodeRetrievalRequest,
     pub results: Vec<CodeRetrievalHit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+}
+
+/// Code repository feature-flag graph response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeRepositoryFeatureFlagsResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub request: CodeFeatureFlagRequest,
+    pub flags: Vec<CodeFeatureFlagGraph>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degraded_reason: Option<String>,
 }

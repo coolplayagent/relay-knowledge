@@ -148,6 +148,29 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_feature_flags (
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            feature_flag_id TEXT NOT NULL,
+            usage_id TEXT NOT NULL,
+            file_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            language_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            edge_kind TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            confidence_tier TEXT NOT NULL,
+            byte_start INTEGER NOT NULL,
+            byte_end INTEGER NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            excerpt TEXT NOT NULL,
+            PRIMARY KEY (source_scope, usage_id),
+            FOREIGN KEY (repository_id) REFERENCES code_repositories(repository_id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS code_repository_chunks (
             repository_id TEXT NOT NULL,
             source_scope TEXT NOT NULL,
@@ -339,6 +362,8 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             ON code_repository_references(source_scope, name, kind, path);
         CREATE INDEX IF NOT EXISTS code_repository_calls_lookup
             ON code_repository_calls(source_scope, callee_name, caller_name, path);
+        CREATE INDEX IF NOT EXISTS code_repository_feature_flags_lookup
+            ON code_repository_feature_flags(source_scope, name, source_key, edge_kind, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_lookup
             ON code_repository_imports(source_scope, module, path);
         CREATE INDEX IF NOT EXISTS code_repository_imports_target_lookup
@@ -400,6 +425,7 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_symbols(connection)?;
     backfill_search_references(connection)?;
     backfill_search_imports(connection)?;
+    backfill_search_feature_flags(connection)?;
     backfill_search_calls(connection)?;
     backfill_search_chunks(connection)?;
     mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
@@ -504,6 +530,40 @@ fn backfill_search_imports(connection: &Connection) -> Result<(), StorageError> 
         LEFT JOIN code_repository_files file
           ON file.source_scope = import.source_scope
          AND file.path = import.path
+        ",
+        [],
+    )?;
+
+    Ok(())
+}
+
+fn backfill_search_feature_flags(connection: &Connection) -> Result<(), StorageError> {
+    if !table_has_columns(
+        connection,
+        "code_repository_feature_flags",
+        &[
+            "source_scope",
+            "usage_id",
+            "path",
+            "language_id",
+            "name",
+            "source_kind",
+            "source_key",
+            "edge_kind",
+            "excerpt",
+        ],
+    )? {
+        return Ok(());
+    }
+    connection.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT source_scope, 'feature_flag', usage_id, path, language_id,
+               name || ' ' || source_kind || ' ' || source_key || ' ' || edge_kind || ' ' ||
+               excerpt || ' ' || path
+        FROM code_repository_feature_flags
         ",
         [],
     )?;

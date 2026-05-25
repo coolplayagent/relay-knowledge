@@ -5,8 +5,8 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
+        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
     },
 };
 
@@ -48,6 +48,15 @@ pub enum RepoCommand {
         language_filters: Vec<String>,
         freshness: FreshnessPolicy,
     },
+    FeatureFlags {
+        alias: String,
+        query: Option<String>,
+        limit: usize,
+        ref_selector: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+        freshness: FreshnessPolicy,
+    },
     Impact {
         alias: String,
         base_ref: String,
@@ -70,6 +79,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("scope") => parse_scope(&tokens[1..]),
         Some("update") => parse_update(&tokens[1..]),
         Some("query") => parse_query(&tokens[1..]),
+        Some("feature-flags") => parse_feature_flags(&tokens[1..]),
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
@@ -234,6 +244,34 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.query",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::FeatureFlags {
+            alias,
+            query,
+            limit,
+            ref_selector,
+            path_filters,
+            language_filters,
+            freshness,
+        } => {
+            let request = CodeFeatureFlagRequest::new(
+                query,
+                selector(alias, ref_selector, path_filters, language_filters)?,
+                limit,
+                freshness,
+            )
+            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            let response = service
+                .query_code_repository_feature_flags(request, context)
+                .await
+                .map_err(|error| CliError::ApiFailed(error.message))?;
+
+            render_response(
+                "code.repo.feature_flags",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -506,6 +544,65 @@ fn parse_query(tokens: &[String]) -> Result<RepoCommand, CliError> {
         alias,
         query: query.ok_or(CliError::MissingValue("--query"))?,
         kind,
+        limit,
+        ref_selector,
+        path_filters,
+        language_filters,
+        freshness,
+    })
+}
+
+fn parse_feature_flags(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut query = None;
+    let mut limit = 50;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut path_filters = Vec::new();
+    let mut language_filters = Vec::new();
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--query" => {
+                let (value, next_index) = collect_query_value(tokens, index, "--query")?;
+                query = Some(value);
+                index = next_index;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--path" => {
+                path_filters.push(value_after(tokens, index, "--path")?);
+                index += 2;
+            }
+            "--language" => {
+                language_filters.push(value_after(tokens, index, "--language")?);
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            other if !other.starts_with('-') && query.is_none() => {
+                let (value, next_index) = collect_positional_query(tokens, index);
+                query = Some(value);
+                index = next_index;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::FeatureFlags {
+        alias,
+        query,
         limit,
         ref_selector,
         path_filters,

@@ -117,6 +117,7 @@ impl CodeIndexPlan {
             symbols: build.symbols,
             references: build.references,
             imports: build.imports,
+            feature_flags: build.feature_flags,
             chunks: build.chunks,
             diagnostics: build.diagnostics,
         };
@@ -306,6 +307,7 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.symbols.len())
         .saturating_add(build.references.len())
         .saturating_add(build.imports.len())
+        .saturating_add(build.feature_flags.len())
         .saturating_add(build.chunks.len())
         .saturating_add(build.diagnostics.len())
 }
@@ -349,5 +351,33 @@ mod tests {
         let workers = worker_count(40, 128 * 1024);
 
         assert_eq!(workers, available.min(3).min(40));
+    }
+
+    #[test]
+    fn batch_row_count_includes_feature_flags() {
+        let registration =
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate");
+        let mut build = SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        );
+        build.feature_flags = crate::code::feature_flags::extract_feature_flags(
+            crate::code::feature_flags::FeatureFlagFileInput {
+                repository_id: &build.repository_id,
+                source_scope: &build.source_scope,
+                file_id: "file",
+                path: "src/lib.rs",
+                language_id: "rust",
+                content: "if env::var(\"CHECKOUT_V2\").is_ok() && env::var(\"PAYMENTS_V2\").is_ok() {}",
+            },
+        )
+        .expect("feature flags should extract");
+
+        assert_eq!(batch_row_count(&build), 2);
     }
 }

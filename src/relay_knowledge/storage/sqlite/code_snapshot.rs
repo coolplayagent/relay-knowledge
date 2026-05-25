@@ -276,6 +276,7 @@ pub(super) fn apply_snapshot(
                 .saturating_add(snapshot.references.len())
                 .saturating_add(snapshot.imports.len())
                 .saturating_add(snapshot.calls.len())
+                .saturating_add(snapshot.feature_flags.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
@@ -438,6 +439,13 @@ fn clone_active_scope_for_incremental(
         transaction,
         "code_repository_calls",
         "repository_id, source_scope, call_id, file_id, path, caller_symbol_snapshot_id, caller_name, callee_symbol_snapshot_id, callee_name, target_hint, resolution_state, confidence_basis_points, confidence_tier, line_start, line_end",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
+        "code_repository_feature_flags",
+        "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
         &previous_scope,
         &snapshot.source_scope,
     )?;
@@ -634,6 +642,7 @@ fn insert_imports_calls_chunks_diagnostics(
             ],
         )?;
     }
+    super::code_feature_flags::insert_records(transaction, &snapshot.feature_flags)?;
     for diagnostic in &snapshot.diagnostics {
         transaction.execute(
             "

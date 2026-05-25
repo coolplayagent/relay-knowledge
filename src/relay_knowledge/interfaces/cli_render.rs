@@ -187,6 +187,11 @@ where
             "results={}",
             value["results"].as_array().map_or(0, Vec::len)
         ),
+        "code.repo.feature_flags" => format!(
+            "feature_flags={} degraded={}",
+            value["flags"].as_array().map_or(0, Vec::len),
+            value["degraded_reason"].as_str().unwrap_or("none")
+        ),
         "code.repo.impact" => format!(
             "changed_in_scope={} results={}",
             value["path_groups"]["in_scope_changed_paths"]

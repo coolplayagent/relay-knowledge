@@ -48,6 +48,7 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
             symbols: Vec::new(),
             references: vec![rust_reference],
             imports: vec![python_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -119,6 +120,7 @@ async fn checkpointed_call_search_uses_caller_signature_for_scoped_callee_querie
             symbols: vec![caller],
             references: vec![call_reference],
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -197,6 +199,7 @@ async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_querie
             symbols: vec![caller, callee],
             references: vec![call_reference],
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -263,6 +266,7 @@ async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
             symbols: Vec::new(),
             references: vec![rust_reference],
             imports: vec![python_import],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -310,6 +314,7 @@ async fn retained_scope_reindex_keeps_intermediate_edge_search_rows() {
             symbols: Vec::new(),
             references: vec![rust_reference],
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })

@@ -107,6 +107,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         repo_scope_preview(),
         repo_update(),
         repo_query(),
+        repo_feature_flags(),
         repo_impact(),
         repo_status(),
         repo_report(),
@@ -560,6 +561,84 @@ fn repo_query() -> CliCommandSpec {
         ],
         &["relay-knowledge repo query core --query retry_policy --kind definition --format json"],
         &["The meaning of --kind is command-local; do not reuse index or worker kind values here."],
+    )
+}
+
+fn repo_feature_flags() -> CliCommandSpec {
+    command!(
+        &["repo", "feature-flags"],
+        "relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--freshness <policy>] [--limit <n>]",
+        "List configuration-driven feature flags and code relationships from a repository index.",
+        "code.repo.feature_flags",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--query",
+                Some("text"),
+                false,
+                false,
+                "Optional filter over feature flag name, config key, path, or excerpt.",
+                None,
+                &[],
+            ),
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--path",
+                Some("filter"),
+                false,
+                true,
+                "Restricts query to indexed path prefix.",
+                None,
+                &[],
+            ),
+            opt(
+                "--language",
+                Some("id"),
+                false,
+                true,
+                "Restricts query to language id.",
+                None,
+                &[],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls index freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum feature flag groups requested from the API.",
+                Some("50"),
+                &[],
+            ),
+        ],
+        &["relay-knowledge repo feature-flags core --query checkout --format json"],
+        &[
+            "Feature flags are indexed facts; this command does not scan the repository at query time."
+        ],
     )
 }
 

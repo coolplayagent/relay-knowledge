@@ -45,6 +45,7 @@ async fn callers_follow_designated_function_pointer_bindings() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![read_call],
+        feature_flags: Vec::new(),
         chunks: vec![
             chunk(
                 "table-init-chunk",

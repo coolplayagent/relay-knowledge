@@ -65,6 +65,7 @@ async fn callees_rank_receiver_qualified_member_call_sites() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![member_call, helper_call],
+        feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
         diagnostics: Vec::new(),
     })
@@ -152,6 +153,7 @@ async fn callees_preserve_execution_order_inside_matched_caller() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![read, unlock, lock, open, validate],
+        feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
         diagnostics: Vec::new(),
     })
@@ -235,6 +237,7 @@ async fn callees_rank_local_callable_declaration_before_lambda_body_calls() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![pipeline, insert, append_event],
+        feature_flags: Vec::new(),
         chunks: vec![caller_chunk],
         diagnostics: Vec::new(),
     })
@@ -287,6 +290,7 @@ async fn callees_match_scoped_caller_query_from_symbol_signature() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![read_block_call],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -332,6 +336,7 @@ async fn callers_match_scoped_callee_query_from_symbol_signature() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![read_block_call],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -382,6 +387,7 @@ async fn callees_apply_direction_before_candidate_limit() {
         references: Vec::new(),
         imports: Vec::new(),
         calls,
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -432,6 +438,7 @@ async fn callees_use_exact_caller_identity_before_fts_candidate_window() {
         references: Vec::new(),
         imports: Vec::new(),
         calls,
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -511,6 +518,7 @@ async fn callers_rank_target_named_surface_above_generic_transport_wrappers() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![executor_call, redactor_call],
+        feature_flags: Vec::new(),
         chunks: vec![executor_chunk, redactor_chunk],
         diagnostics: Vec::new(),
     })
@@ -611,6 +619,7 @@ async fn callers_rank_assigned_result_sites_above_plain_invocations() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![plain_call, test_call, assigned_call],
+        feature_flags: Vec::new(),
         chunks: vec![plain_chunk, test_chunk, assigned_chunk],
         diagnostics: Vec::new(),
     })
@@ -673,6 +682,7 @@ async fn callers_rank_high_confidence_inferred_target_bindings() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![transitive_call, local_call],
+        feature_flags: Vec::new(),
         chunks: vec![local_binding],
         diagnostics: Vec::new(),
     })

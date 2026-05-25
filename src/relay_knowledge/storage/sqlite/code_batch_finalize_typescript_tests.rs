@@ -34,6 +34,7 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
             )],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -55,6 +56,7 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
                 "src/app/use_client.ts",
                 "import { RuntimeClient } from \"../runtime/client\";",
             )],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -102,6 +104,7 @@ async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_e
             )],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -132,6 +135,7 @@ async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_e
                     "await import(\"../protocol\")",
                 ),
             ],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -206,6 +210,7 @@ async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
             ],
             references: Vec::new(),
             imports: Vec::new(),
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })
@@ -237,6 +242,7 @@ async fn checkpointed_finalize_resolves_typescript_imported_call_references() {
                 "packages/http-recorder/src/redactor.ts",
                 "import { redactUrl } from \"./redaction\";",
             )],
+            feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
         })

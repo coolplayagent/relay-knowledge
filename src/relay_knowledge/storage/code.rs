@@ -1,12 +1,12 @@
 //! Storage contracts for code repository indexes.
 
 use crate::domain::{
-    CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession,
-    CodeIndexSnapshot, CodeIndexSummary, CodeIndexTaskRecord, CodeRepositoryCrossEdge,
-    CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositorySet, CodeRepositorySetMember,
-    CodeRepositorySetRefreshSummary, CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus,
-    CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
-    CodeScopeRetentionSummary,
+    CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
+    CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+    CodeIndexTaskRecord, CodeRepositoryCrossEdge, CodeRepositoryRegistration, CodeRepositoryReport,
+    CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
+    CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
+    CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
 };
 
 use super::{StorageError, StorageFuture};
@@ -277,6 +277,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>>;
+
+    fn search_code_feature_flags(
+        &self,
+        request: CodeFeatureFlagRequest,
+    ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code feature flag search for repository '{}' is unavailable",
+                request.repository.repository
+            )))
+        })
+    }
 
     fn search_code_scope(
         &self,

@@ -59,8 +59,8 @@ use super::{
 use audit_bridge::{record_mcp_qos_rejection, record_mcp_tool_audit};
 use code_tools::run_code_tool;
 use tool_registry::{
-    CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL, HEALTH_TOOL,
-    INDEX_STATUS_TOOL, INSPECT_GRAPH_TOOL, RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL,
+    CODE_FEATURE_FLAGS_TOOL, CODE_IMPACT_TOOL, CODE_QUERY_TOOL, CODE_REPOSITORY_SET_QUERY_TOOL,
+    HEALTH_TOOL, INDEX_STATUS_TOOL, INSPECT_GRAPH_TOOL, RETRIEVE_CONTEXT_TOOL, SERVICE_STATUS_TOOL,
     is_known_tool, tools_list_result,
 };
 
@@ -662,7 +662,10 @@ async fn run_tool_call(server: &McpServer, params: ToolCallParams, request_id: S
         HEALTH_TOOL => health_tool(server, request_id).await,
         SERVICE_STATUS_TOOL => service_status_tool(server, request_id).await,
         INDEX_STATUS_TOOL => index_status_tool(server, request_id).await,
-        CODE_QUERY_TOOL | CODE_IMPACT_TOOL | CODE_REPOSITORY_SET_QUERY_TOOL => {
+        CODE_QUERY_TOOL
+        | CODE_FEATURE_FLAGS_TOOL
+        | CODE_IMPACT_TOOL
+        | CODE_REPOSITORY_SET_QUERY_TOOL => {
             run_code_tool(server, params.name.as_str(), params.arguments, request_id).await
         }
         _ => json!({
@@ -973,6 +976,10 @@ mod mcp_tests;
 #[cfg(test)]
 #[path = "mcp_tool_tests.rs"]
 mod mcp_tool_tests;
+
+#[cfg(test)]
+#[path = "mcp_feature_flag_tool_tests.rs"]
+mod mcp_feature_flag_tool_tests;
 
 #[cfg(test)]
 #[path = "mcp_protocol_tests.rs"]

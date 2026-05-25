@@ -133,6 +133,7 @@ fn snapshot(repository_id: &str, source_scope: &str) -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

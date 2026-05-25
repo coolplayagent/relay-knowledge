@@ -79,6 +79,7 @@ fn apply_batch_once(
     };
     insert_references(&transaction, batch, edge_search_languages.as_ref())?;
     insert_imports(&transaction, batch, edge_search_languages.as_ref())?;
+    super::code_feature_flags::insert_records(&transaction, &batch.feature_flags)?;
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
     update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;
@@ -842,6 +843,7 @@ fn count_scope_rows(connection: &Connection, source_scope: &str) -> Result<usize
         "code_repository_references",
         "code_repository_imports",
         "code_repository_calls",
+        "code_repository_feature_flags",
         "code_repository_chunks",
         "code_repository_file_diagnostics",
     ] {

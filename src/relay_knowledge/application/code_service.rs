@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use crate::{
     api::{
-        ApiError, ApiMetadata, CodeRepositoryImpactResponse, CodeRepositoryIndexResponse,
-        CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
+        ApiError, ApiMetadata, CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
+        CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
         CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
         CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
         CodeRepositoryStatusResponse, RequestContext,
@@ -16,9 +16,9 @@ use crate::{
         source_declarations_for_identity, source_grep_matches,
     },
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositoryStatus,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
+        CodeIndexResourceBudget, CodeRepositoryRegistration, CodeRepositorySelector,
+        CodeRepositoryStatus, CodeRetrievalRequest, FreshnessPolicy,
         code_snapshot_expected_scope_id as expected_scope_id,
     },
     storage::{CodeImpactChanges, StorageError},
@@ -500,6 +500,69 @@ impl RelayKnowledgeService {
         })
     }
 
+    /// Lists configuration-driven feature flags and their code graph relationships.
+    pub async fn query_code_repository_feature_flags(
+        &self,
+        request: CodeFeatureFlagRequest,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryFeatureFlagsResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let status = required_code_repository(&store, &request.repository.repository).await?;
+        if request.freshness_policy == FreshnessPolicy::GraphOnly {
+            let graph_version = store
+                .current_graph_version()
+                .await
+                .map_err(storage_api_error)?;
+            return Ok(CodeRepositoryFeatureFlagsResponse {
+                metadata: ApiMetadata::graph_only(&context, graph_version),
+                scope: crate::api::CodeRepositoryScopeMetadata::from_status(
+                    &status,
+                    &request.repository,
+                    request.repository.ref_selector.clone(),
+                ),
+                request,
+                flags: Vec::new(),
+                degraded_reason: Some("graph_only freshness policy selected".to_owned()),
+            });
+        }
+        let requested_ref = request.repository.ref_selector.clone();
+        let request = feature_flag_request_at_indexed_ref(request, &status).await?;
+        let scoped_status =
+            resolved_code_scope_status(&store, &status, &request.repository).await?;
+        if request.freshness_policy == FreshnessPolicy::WaitUntilFresh && scoped_status.stale {
+            return Err(ApiError::invalid_argument(format!(
+                "code repository '{}' scope '{}' is stale; run repo index or repo update before querying feature flags with wait_until_fresh",
+                scoped_status.alias,
+                scoped_status
+                    .last_indexed_scope_id
+                    .as_deref()
+                    .unwrap_or("unscoped")
+            )));
+        }
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+        let flags = store
+            .search_code_feature_flags(request.clone())
+            .await
+            .map_err(storage_api_error)?;
+        let scope = crate::api::CodeRepositoryScopeMetadata::from_status(
+            &scoped_status,
+            &request.repository,
+            requested_ref,
+        );
+        let degraded_reason = scoped_status.degraded_reason.clone();
+
+        Ok(CodeRepositoryFeatureFlagsResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            scope,
+            request,
+            flags,
+            degraded_reason,
+        })
+    }
+
     /// Returns impact radius for a Git diff using the indexed code graph.
     pub async fn impact_code_repository(
         &self,
@@ -813,6 +876,16 @@ async fn retrieval_request_at_indexed_ref(
     mut request: CodeRetrievalRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<CodeRetrievalRequest, ApiError> {
+    request.repository.ref_selector =
+        indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
+
+    Ok(request)
+}
+
+async fn feature_flag_request_at_indexed_ref(
+    mut request: CodeFeatureFlagRequest,
+    status: &CodeRepositoryStatus,
+) -> Result<CodeFeatureFlagRequest, ApiError> {
     request.repository.ref_selector =
         indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
 

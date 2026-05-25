@@ -75,6 +75,7 @@ fn snapshot_with_contextual_symbol_and_typedef_chunk() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![typedef_chunk],
         diagnostics: Vec::new(),
     }
