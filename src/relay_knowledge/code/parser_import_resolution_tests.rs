@@ -279,6 +279,58 @@ def build():
 }
 
 #[test]
+fn python_import_resolution_handles_external_deps_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "external_deps/python_sdk/session_client.py",
+            r#"
+class ExternalSessionClient:
+    pass
+"#,
+        ),
+        (
+            "src/app.py",
+            r#"
+from python_sdk.session_client import ExternalSessionClient
+
+def build():
+    return ExternalSessionClient()
+"#,
+        ),
+    ]);
+
+    assert_import_state(
+        &snapshot,
+        "from python_sdk.session_client import ExternalSessionClient",
+        "resolved",
+    );
+}
+
+#[test]
+fn typescript_import_resolution_handles_external_deps_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "external_deps/ts_sdk/sessionClient.ts",
+            r#"
+export class ExternalSessionClient {}
+"#,
+        ),
+        (
+            "src/app.ts",
+            r#"
+import { ExternalSessionClient } from "ts_sdk/sessionClient";
+
+export function buildClient(): ExternalSessionClient {
+    return new ExternalSessionClient();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "ts_sdk/sessionClient", "resolved");
+}
+
+#[test]
 fn go_import_resolution_splits_blocks_and_handles_staging_source_roots() {
     let snapshot = parse_sources(&[
         (
@@ -320,6 +372,62 @@ var _ context.Context
             .iter()
             .any(|import| import.module.contains("not/local"))
     );
+}
+
+#[test]
+fn go_import_resolution_handles_plugin_module_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "plugins/example.com/nonstandard/session/client.go",
+            r#"
+package session
+
+type ExternalSessionClient interface {}
+"#,
+        ),
+        (
+            "cmd/app/main.go",
+            r#"
+package main
+
+import session "example.com/nonstandard/session"
+
+var _ session.ExternalSessionClient
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "example.com/nonstandard/session", "resolved");
+}
+
+#[test]
+fn java_import_resolution_handles_nested_module_source_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "modules/java_sdk/src/main/java/example/SessionClient.java",
+            r#"
+package example;
+
+public class SessionClient {}
+"#,
+        ),
+        (
+            "src/main/java/app/Worker.java",
+            r#"
+package app;
+
+import example.SessionClient;
+
+class Worker {
+    SessionClient client() {
+        return null;
+    }
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "example.SessionClient", "resolved");
 }
 
 #[test]
@@ -493,6 +601,35 @@ void platform_driver(void);
 
     assert_eq!(import.resolution_state, "resolved");
     assert_eq!(import.target_hint.as_deref(), Some("include/driver.h"));
+}
+
+#[test]
+fn cpp_include_resolution_handles_external_include_roots() {
+    let snapshot = parse_sources(&[
+        (
+            "external_deps/cpp_sdk/include/session_client.hpp",
+            r#"
+void external_session_client(void);
+"#,
+        ),
+        (
+            "src/app.cpp",
+            r#"
+#include <session_client.hpp>
+
+void run() {
+    external_session_client();
+}
+"#,
+        ),
+    ]);
+    let import = import_containing(&snapshot, "<session_client.hpp>");
+
+    assert_eq!(import.resolution_state, "resolved");
+    assert_eq!(
+        import.target_hint.as_deref(),
+        Some("external_deps/cpp_sdk/include/session_client.hpp")
+    );
 }
 
 #[test]

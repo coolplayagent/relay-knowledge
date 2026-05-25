@@ -38,6 +38,12 @@ Scope 构造遵循固定流程：
 
 查询不得把窄 filter 自动回退到宽 scope；需要新 filter 组合时必须先索引该 scope。
 
+仓库源码规范化必须把 source root 视为一组布局，而不是单一 `src/` 约定。支持的
+source-root candidate 包括 `src/`、`lib/`、`Sources/`、`external_deps/`、
+`packages/`、`modules/`、`plugins/`、`extensions/`，以及这些目录下的嵌套
+JVM source root。默认排除 preset 仍保护普通 `vendor/`、`third_party/` 这类
+高容量依赖转储；这些路径必须通过显式 path filter opt in 后才能进入仓库 scope。
+
 ## 4. Git 快照规则
 
 - `repository_id` 是本地稳定身份，不等于 alias。

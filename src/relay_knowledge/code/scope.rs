@@ -523,4 +523,59 @@ mod tests {
         ));
         assert!(!path_is_selected("uv.lock", &registration, &selector));
     }
+
+    #[test]
+    fn nonstandard_source_roots_are_selected_without_opt_in() {
+        let registration = CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            "/tmp/repo",
+            vec![".".to_owned()],
+            Vec::new(),
+        )
+        .expect("registration should validate");
+        let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+            .expect("selector should validate");
+
+        for path in [
+            "external_deps/python_sdk/session_client.py",
+            "packages/ui/src/index.ts",
+            "modules/java_sdk/src/main/java/example/SessionClient.java",
+            "plugins/example.com/nonstandard/session/client.go",
+            "Sources/SwiftSdk/SessionClient.swift",
+            "lib/app/controller.rb",
+        ] {
+            assert!(path_is_selected(path, &registration, &selector), "{path}");
+        }
+        assert!(!path_is_selected(
+            "vendor/pkg/session_client.py",
+            &registration,
+            &selector
+        ));
+        assert!(!path_is_selected(
+            "third_party/pkg/session_client.py",
+            &registration,
+            &selector
+        ));
+    }
+
+    #[test]
+    fn explicit_vendor_source_opt_in_stays_supported() {
+        let registration = CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            "/tmp/repo",
+            vec![".".to_owned(), "vendor".to_owned()],
+            Vec::new(),
+        )
+        .expect("registration should validate");
+        let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+            .expect("selector should validate");
+
+        assert!(path_is_selected(
+            "vendor/pkg/session_client.py",
+            &registration,
+            &selector
+        ));
+    }
 }

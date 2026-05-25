@@ -128,11 +128,13 @@ fn parse_named_imports(imports: &str) -> Vec<String> {
 }
 
 fn relative_module_candidates(import_path: &str, specifier: &str) -> Vec<String> {
-    if !(specifier.starts_with("./") || specifier.starts_with("../")) {
-        return Vec::new();
-    }
-    let Some(base_path) = normalize_join(parent_dir(import_path), specifier) else {
-        return Vec::new();
+    let base_path = if specifier.starts_with("./") || specifier.starts_with("../") {
+        let Some(base_path) = normalize_join(parent_dir(import_path), specifier) else {
+            return Vec::new();
+        };
+        base_path
+    } else {
+        specifier.to_owned()
     };
     let mut candidates = Vec::new();
     push_module_file_candidates(&mut candidates, &base_path);
