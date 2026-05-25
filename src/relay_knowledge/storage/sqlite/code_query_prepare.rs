@@ -23,6 +23,15 @@ pub(super) fn retry_code_search_operation<T>(
     operation()
 }
 
+pub(super) fn code_search_error_can_use_empty_results(error: &StorageError) -> bool {
+    match error {
+        StorageError::Sqlite(error) => {
+            code_search_read_model_unavailable_message(&error.to_string())
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn prepare_code_search_statement<'connection>(
     connection: &'connection Connection,
     sql: &str,
@@ -57,10 +66,17 @@ fn code_search_prepare_error_message_is_retryable(message: &str) -> bool {
         || message.contains("database is locked")
 }
 
+fn code_search_read_model_unavailable_message(message: &str) -> bool {
+    message.contains("vtable constructor failed: code_repository_search")
+        || message.contains("no such table: code_repository_search")
+        || message.contains("no such module: fts5")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        code_search_prepare_error_message_is_retryable, code_search_storage_error_is_retryable,
+        code_search_error_can_use_empty_results, code_search_prepare_error_message_is_retryable,
+        code_search_storage_error_is_retryable,
     };
     use crate::storage::StorageError;
 
@@ -81,6 +97,25 @@ mod tests {
     fn code_search_operation_retry_only_wraps_sqlite_transients() {
         assert!(!code_search_storage_error_is_retryable(
             &StorageError::InvalidInput("database is locked".to_owned())
+        ));
+    }
+
+    #[test]
+    fn unavailable_code_search_read_model_can_fall_back_to_empty_results() {
+        assert!(code_search_error_can_use_empty_results(
+            &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some("no such table: code_repository_search".to_owned()),
+            ))
+        ));
+        assert!(code_search_error_can_use_empty_results(
+            &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some("no such module: fts5".to_owned()),
+            ))
+        ));
+        assert!(!code_search_error_can_use_empty_results(
+            &StorageError::InvalidInput("no such table: code_repository_search".to_owned())
         ));
     }
 }

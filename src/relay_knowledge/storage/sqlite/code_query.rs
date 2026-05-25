@@ -84,7 +84,10 @@ use code_query_import_targets::{
 use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
 };
-use code_query_prepare::{prepare_code_search_statement, retry_code_search_operation};
+use code_query_prepare::{
+    code_search_error_can_use_empty_results, prepare_code_search_statement,
+    retry_code_search_operation,
+};
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
 use code_query_rows::{ChunkRow, ImportRow};
@@ -100,7 +103,11 @@ pub(super) fn search_code(
     request: CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let status = required_repository(connection, &request.repository)?;
-    retry_code_search_operation(|| search_code_with_status(connection, &status, &request))
+    match retry_code_search_operation(|| search_code_with_status(connection, &status, &request)) {
+        Ok(hits) => Ok(hits),
+        Err(error) if code_search_error_can_use_empty_results(&error) => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 pub(super) fn search_code_scope(
@@ -116,7 +123,11 @@ pub(super) fn search_code_scope(
                 ))
             })?;
 
-    retry_code_search_operation(|| search_code_with_status(connection, &status, &request))
+    match retry_code_search_operation(|| search_code_with_status(connection, &status, &request)) {
+        Ok(hits) => Ok(hits),
+        Err(error) if code_search_error_can_use_empty_results(&error) => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
 }
 
 fn search_code_with_status(

@@ -1,7 +1,8 @@
 use super::*;
 use crate::{
     domain::{
-        CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeChunkRecord,
+        CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
+        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord,
         RepositoryCodeFileRecord, RepositoryCodeRange,
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
@@ -172,6 +173,44 @@ async fn candidate_paths_for_query_scope_falls_back_when_search_table_unavailabl
         .expect("scope fallback should load candidate paths");
 
     assert_eq!(paths, ["zzz/target.rs"]);
+}
+
+#[tokio::test]
+async fn code_search_returns_empty_when_search_read_model_unavailable() {
+    let snapshot = snapshot_with_chunk_status(
+        "repo",
+        "src/lib.rs",
+        "fn rk_search_unavailable_note() {}",
+        CodeParseStatus::Parsed,
+        None,
+    );
+    let store = store_with_repository_snapshot(snapshot).await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+    let request = CodeRetrievalRequest::new(
+        "rk_search_unavailable_note",
+        CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate"),
+        CodeQueryKind::Hybrid,
+        10,
+        FreshnessPolicy::AllowStale,
+    )
+    .expect("request should validate");
+
+    let hits = store
+        .search_code_scope(TEST_SOURCE_SCOPE.to_owned(), request)
+        .await
+        .expect("unavailable FTS read model should not fail the code query");
+
+    assert!(
+        hits.is_empty(),
+        "structured FTS layer should empty out so application fallback can continue: {hits:?}"
+    );
 }
 
 #[test]
