@@ -4,8 +4,22 @@ pub(super) fn cargo_lock_source_is_external(source: Option<&str>) -> bool {
     source.is_some_and(|source| source.starts_with("registry+") || source.starts_with("git+"))
 }
 
-pub(super) fn package_lock_entry_is_link(package: &Value) -> bool {
+pub(super) fn npm_requirement_is_local(requirement: &str) -> bool {
+    let requirement = requirement.trim();
+    requirement.starts_with('.')
+        || requirement.starts_with('/')
+        || requirement.starts_with("~/")
+        || ["file:", "link:", "portal:", "workspace:"]
+            .iter()
+            .any(|prefix| requirement.starts_with(prefix))
+}
+
+pub(super) fn package_lock_entry_is_local(package: &Value) -> bool {
     package.get("link").and_then(Value::as_bool) == Some(true)
+        || package
+            .get("resolved")
+            .and_then(Value::as_str)
+            .is_some_and(npm_requirement_is_local)
 }
 
 pub(super) fn package_lock_package_name(path: &str, package: &Value) -> Option<String> {
@@ -77,9 +91,15 @@ pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)
     }
     let value = value.split_once(';').map_or(value, |(left, _)| left).trim();
     let (version_input, direct_reference) = split_direct_reference(value);
+    if direct_reference.is_some_and(python_reference_is_local) {
+        return None;
+    }
     if direct_reference.is_none() {
         if let Some(name) = requirement_egg_name(value) {
             return Some((name, Some(format!("@ {value}"))));
+        }
+        if python_reference_is_local(value) {
+            return None;
         }
     }
     let split_at = version_input
@@ -91,6 +111,9 @@ pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)
         .unwrap_or(&version_input[..split_at])
         .trim();
     if name.is_empty() {
+        return None;
+    }
+    if python_name_is_local_path(name) {
         return None;
     }
     let requirement = direct_reference
@@ -126,12 +149,91 @@ fn requirement_egg_name(value: &str) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+fn python_reference_is_local(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with('.')
+        || value.starts_with('/')
+        || value.starts_with("~/")
+        || value.starts_with("file:")
+}
+
+fn python_name_is_local_path(name: &str) -> bool {
+    name.contains('/') || name.contains('\\') || python_reference_is_local(name)
+}
+
 fn version_requirement(value: &str, split_at: usize) -> Option<String> {
     value
         .get(split_at..)
         .map(str::trim)
         .filter(|requirement| !requirement.is_empty())
         .map(str::to_owned)
+}
+
+pub(super) fn inline_table_field(value: &str, field: &str) -> Option<String> {
+    let after_equals = inline_table_value(value, field)?;
+    let quote = after_equals.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let end = after_equals.get(1..)?.find(quote)?;
+    Some(after_equals[1..1 + end].to_owned())
+}
+
+pub(super) fn inline_table_bool_field(value: &str, field: &str) -> Option<bool> {
+    let after_equals = inline_table_value(value, field)?;
+    if after_equals.starts_with("true") {
+        Some(true)
+    } else if after_equals.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn inline_table_value<'a>(value: &'a str, field: &str) -> Option<&'a str> {
+    let mut start = 0;
+    let body = inline_table_body(value);
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, character) in body.char_indices() {
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' && active_quote == '"' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(character, '"' | '\'') {
+            quote = Some(character);
+        } else if character == ',' {
+            if let Some(result) = inline_table_entry_value(&body[start..index], field) {
+                return Some(result);
+            }
+            start = index + character.len_utf8();
+        }
+    }
+    inline_table_entry_value(&body[start..], field)
+}
+
+fn inline_table_body(value: &str) -> &str {
+    let value = value.trim();
+    value
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(value)
+        .trim()
+}
+
+fn inline_table_entry_value<'a>(entry: &'a str, field: &str) -> Option<&'a str> {
+    let (key, raw_value) = entry.split_once('=')?;
+    if key.trim() == field {
+        Some(raw_value.trim())
+    } else {
+        None
+    }
 }
 
 pub(super) fn gradle_dependency_call(line: &str) -> Option<(String, String)> {

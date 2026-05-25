@@ -11,7 +11,8 @@ mod support;
 
 use support::{
     cargo_lock_source_is_external, gradle_coordinate_parts, gradle_dependency_call,
-    package_lock_entry_is_link, package_lock_package_name, python_requirement,
+    inline_table_bool_field, inline_table_field, npm_requirement_is_local,
+    package_lock_entry_is_local, package_lock_package_name, python_requirement,
     requirements_dependency_line,
 };
 
@@ -238,6 +239,9 @@ fn parse_package_json(content: &str, records: &mut Vec<DependencySeed>) {
         };
         for (name, requirement) in dependencies {
             let requirement = requirement.as_str().map(str::to_owned);
+            if requirement.as_deref().is_some_and(npm_requirement_is_local) {
+                continue;
+            }
             let line = line_containing_json_key(content, name).unwrap_or(1);
             push_seed(
                 records,
@@ -263,7 +267,7 @@ fn parse_package_lock(content: &str, records: &mut Vec<DependencySeed>) {
     };
     if let Some(packages) = value.get("packages").and_then(Value::as_object) {
         for (path, package) in packages {
-            if package_lock_entry_is_link(package) {
+            if package_lock_entry_is_local(package) {
                 continue;
             }
             let Some(name) = package_lock_package_name(path, package) else {
@@ -778,7 +782,10 @@ fn parse_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
     }
     let value = value.trim();
     let requirement = if value.starts_with('{') {
-        object_field(value, "version").or_else(|| object_field(value, "rev"))
+        if inline_table_field(value, "path").is_some() {
+            return None;
+        }
+        inline_table_field(value, "version").or_else(|| inline_table_field(value, "rev"))
     } else {
         Some(unquote(value.trim_end_matches(',')))
     };
@@ -798,42 +805,18 @@ fn parse_cargo_assignment_dependency(line: &str) -> Option<(String, Option<Strin
     if cargo_inline_dependency_is_local(value) {
         return None;
     }
-    let package_name = object_field(value, "package").unwrap_or(name);
-    let requirement = object_field(value, "version")
-        .or_else(|| object_field(value, "rev"))
-        .or_else(|| object_field(value, "tag"))
-        .or_else(|| object_field(value, "branch"))
-        .or_else(|| object_field(value, "git"));
+    let package_name = inline_table_field(value, "package").unwrap_or(name);
+    let requirement = inline_table_field(value, "version")
+        .or_else(|| inline_table_field(value, "rev"))
+        .or_else(|| inline_table_field(value, "tag"))
+        .or_else(|| inline_table_field(value, "branch"))
+        .or_else(|| inline_table_field(value, "git"));
     Some((package_name, requirement.filter(|value| !value.is_empty())))
 }
 
 fn cargo_inline_dependency_is_local(value: &str) -> bool {
-    object_field(value, "path").is_some() || object_bool_field(value, "workspace") == Some(true)
-}
-
-fn object_bool_field(value: &str, field: &str) -> Option<bool> {
-    let field_start = value.find(field)?;
-    let after_field = value.get(field_start + field.len()..)?;
-    let after_equals = after_field.split_once('=')?.1.trim();
-    if after_equals.starts_with("true") {
-        Some(true)
-    } else if after_equals.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-fn object_field(value: &str, field: &str) -> Option<String> {
-    let field_start = value.find(field)?;
-    let after_field = value.get(field_start + field.len()..)?;
-    let after_equals = after_field.split_once('=')?.1.trim();
-    let quote = after_equals.chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let end = after_equals.get(1..)?.find(quote)?;
-    Some(after_equals[1..1 + end].to_owned())
+    inline_table_field(value, "path").is_some()
+        || inline_table_bool_field(value, "workspace") == Some(true)
 }
 
 fn unquote(value: &str) -> String {

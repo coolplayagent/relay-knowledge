@@ -5,10 +5,12 @@ use crate::domain::{CodeDependencyRecord, CodeRepositoryRegistration};
 fn extracts_cargo_and_npm_manifest_dependencies() {
     let cargo = collect(
         "Cargo.toml",
-        "[dependencies]\nserde = \"1\"\nserde_alias = { package = \"serde\", version = \"1.0\" }\nlocal_core = { path = \"../core\" }\nworkspace_dep = { workspace = true }\n[dev-dependencies]\ntokio = { version = \"1\" }\n[target.'cfg(unix)'.dependencies]\nnix = { rev = \"abc\" }\n",
+        "[dependencies]\nserde = \"1\"\nserde_alias = { package = \"serde\", version = \"1.0\" }\npathfinder = { git = \"https://example.invalid/pathfinder.git\", rev = \"abc123\" }\nsemver_alias = { package = \"semver\", cargo-version = \"ignored\", version = \"1.0\" }\nlocal_core = { path = \"../core\" }\nworkspace_dep = { workspace = true }\n[dev-dependencies]\ntokio = { version = \"1\" }\n[target.'cfg(unix)'.dependencies]\nnix = { rev = \"abc\" }\n",
     );
     assert_dependency(&cargo, "serde", "dependencies", Some("1"), None);
     assert_dependency(&cargo, "serde", "dependencies", Some("1.0"), None);
+    assert_dependency(&cargo, "pathfinder", "dependencies", Some("abc123"), None);
+    assert_dependency(&cargo, "semver", "dependencies", Some("1.0"), None);
     assert_dependency(&cargo, "tokio", "dev", Some("1"), None);
     assert_dependency(&cargo, "nix", "dependencies", Some("abc"), None);
     assert!(!cargo.iter().any(|dependency| matches!(
@@ -19,8 +21,8 @@ fn extracts_cargo_and_npm_manifest_dependencies() {
     let package = collect(
         "package.json",
         r#"{
-          "dependencies": {"react": "^18"},
-          "devDependencies": {"vitest": "1.0.0"},
+          "dependencies": {"react": "^18", "@workspace/internal": "workspace:*", "local-file": "file:../packages/local-file"},
+          "devDependencies": {"vitest": "1.0.0", "local-link": "link:../packages/local-link"},
           "peerDependencies": {"typescript": ">=5"},
           "optionalDependencies": {"fsevents": "2.3.3"}
         }"#,
@@ -29,6 +31,10 @@ fn extracts_cargo_and_npm_manifest_dependencies() {
     assert_dependency(&package, "vitest", "dev", Some("1.0.0"), None);
     assert_dependency(&package, "typescript", "peer", Some(">=5"), None);
     assert_dependency(&package, "fsevents", "optional", Some("2.3.3"), None);
+    assert!(!package.iter().any(|dependency| matches!(
+        dependency.package_name.as_str(),
+        "@workspace/internal" | "local-file" | "local-link"
+    )));
 }
 
 #[test]
@@ -92,7 +98,7 @@ fn recurses_package_lock_v1_dependencies() {
 fn extracts_package_lock_v2_packages() {
     let dependencies = collect(
         "package-lock.json",
-        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"},"node_modules/a/node_modules/b":{"version":"2.0.0"},"node_modules/a/node_modules/@scope/transitive":{"version":"3.0.0"},"node_modules/workspace-pkg":{"resolved":"packages/workspace-pkg","link":true}}}"#,
+        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"},"node_modules/a/node_modules/b":{"version":"2.0.0"},"node_modules/a/node_modules/@scope/transitive":{"version":"3.0.0"},"node_modules/workspace-pkg":{"resolved":"packages/workspace-pkg","link":true},"node_modules/local-file":{"version":"1.0.0","resolved":"file:../packages/local-file"},"node_modules/local-workspace":{"version":"1.0.0","resolved":"workspace:packages/local-workspace"}}}"#,
     );
 
     assert_dependency(&dependencies, "react", "locked", None, Some("18.2.0"));
@@ -115,11 +121,10 @@ fn extracts_package_lock_v2_packages() {
             .iter()
             .any(|dependency| dependency.package_name == "a/node_modules/b")
     );
-    assert!(
-        !dependencies
-            .iter()
-            .any(|dependency| dependency.package_name == "workspace-pkg")
-    );
+    assert!(!dependencies.iter().any(|dependency| matches!(
+        dependency.package_name.as_str(),
+        "workspace-pkg" | "local-file" | "local-workspace"
+    )));
 }
 
 #[test]
@@ -190,11 +195,13 @@ fn restricts_poetry_parsing_to_dependency_sections() {
 	]
 [project.optional-dependencies]
 docs = ["mkdocs>=1"]
-[tool.poetry.dependencies]
-python = "^3.12"
-requests = "^2"
-[tool.poetry.group.test.dependencies]
-pytest = "^8"
+	[tool.poetry.dependencies]
+	python = "^3.12"
+	requests = "^2"
+	rich = { markers = "python_version >= '3.12'", version = "^13" }
+	local_shared = { path = "../shared", develop = true }
+	[tool.poetry.group.test.dependencies]
+	pytest = "^8"
 [tool.poetry.scripts]
 serve = "app.cli:main"
 [tool.poetry.extras]
@@ -206,10 +213,11 @@ fast = ["uvloop"]
     assert_dependency(&dependencies, "colorama", "dependencies", None, None);
     assert_dependency(&dependencies, "mkdocs", "docs", Some(">=1"), None);
     assert_dependency(&dependencies, "requests", "dependencies", Some("^2"), None);
+    assert_dependency(&dependencies, "rich", "dependencies", Some("^13"), None);
     assert_dependency(&dependencies, "pytest", "test", Some("^8"), None);
     assert!(!dependencies.iter().any(|dependency| matches!(
         dependency.package_name.as_str(),
-        "python" | "serve" | "fast"
+        "python" | "local_shared" | "serve" | "fast"
     )));
 }
 
@@ -217,7 +225,7 @@ fast = ["uvloop"]
 fn extracts_requirements_dependencies_without_options() {
     let dependencies = collect(
         "requirements-dev.txt",
-        "# install set\n-r base.txt\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl#sha256=abc ; python_version >= \"3.11\"\n-e git+https://example.invalid/editable.git#egg=editable_pkg\n--editable git+ssh://git@example.invalid/org/other.git#egg=other-pkg\n",
+        "# install set\n-r base.txt\n../shared-lib\n./vendor/pkg\nlocal_path @ file:../local-path\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl#sha256=abc ; python_version >= \"3.11\"\n-e git+https://example.invalid/editable.git#egg=editable_pkg\n--editable git+ssh://git@example.invalid/org/other.git#egg=other-pkg\n",
     );
 
     assert_dependency(
@@ -257,6 +265,10 @@ fn extracts_requirements_dependencies_without_options() {
         None,
     );
     assert_eq!(dependencies.len(), 6);
+    assert!(!dependencies.iter().any(|dependency| matches!(
+        dependency.package_name.as_str(),
+        "../shared-lib" | "./vendor/pkg" | "local_path"
+    )));
 }
 
 #[test]
