@@ -692,17 +692,17 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
 fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'static str)>, String> {
     match fixture {
         "c_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "c_syntax_v1\n"),
             ("include/driver_ops.h", C_DRIVER_OPS_H),
             ("include/macros.h", C_MACROS_H),
             ("src/driver_ops.c", C_DRIVER_OPS_C),
             ("src/dispatch.c", C_DISPATCH_C),
             ("src/generated_table.c", C_GENERATED_TABLE_C),
+            ("src/http_macro_module.c", C_HTTP_MACRO_MODULE_C),
             ("tests/fake_driver.c", C_FAKE_DRIVER_C),
         ]),
         "cpp_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "cpp_syntax_v1\n"),
             ("include/store/cache.hpp", CPP_CACHE_HPP),
+            ("include/store/exported_module.hpp", CPP_EXPORTED_MODULE_HPP),
             ("include/store/pipeline.hpp", CPP_PIPELINE_HPP),
             ("src/cache.cpp", CPP_CACHE_CPP),
             ("src/pipeline.cpp", CPP_PIPELINE_CPP),
@@ -721,7 +721,6 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("tests/fake_bridge.c", CROSS_LANGUAGE_FAKE_BRIDGE),
         ]),
         "python_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "python_syntax_v2\n"),
             ("docs/operations.md", PYTHON_OPERATIONS_MD),
             ("syntax_service/__init__.py", PYTHON_INIT),
             ("syntax_service/decorators.py", PYTHON_DECORATORS),
@@ -730,14 +729,12 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("tests/fake_service.py", PYTHON_FAKE_SERVICE),
         ]),
         "javascript_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "javascript_syntax_v2\n"),
             ("src/runtime.js", JAVASCRIPT_RUNTIME),
             ("src/registry.js", JAVASCRIPT_REGISTRY),
             ("src/index.js", JAVASCRIPT_INDEX),
             ("tests/fakeRuntime.js", JAVASCRIPT_FAKE_RUNTIME),
         ]),
         "typescript_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "typescript_syntax_v2\n"),
             ("src/protocol.ts", TYPESCRIPT_PROTOCOL),
             ("src/provider.ts", TYPESCRIPT_PROVIDER),
             ("src/component.tsx", TYPESCRIPT_COMPONENT),
@@ -745,66 +742,56 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("tests/fakeProvider.ts", TYPESCRIPT_FAKE_PROVIDER),
         ]),
         "go_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "go_syntax_v2\n"),
             ("go.mod", GO_MOD),
             ("processor/worker.go", GO_WORKER),
             ("processor/pipeline.go", GO_PIPELINE),
             ("tests/fake_worker.go", GO_FAKE_WORKER),
         ]),
         "java_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "java_syntax_v2\n"),
             ("src/main/java/example/ServiceContract.java", JAVA_SERVICE_CONTRACT),
             ("src/main/java/example/AnnotatedService.java", JAVA_ANNOTATED_SERVICE),
             ("src/main/java/example/ServiceFactory.java", JAVA_SERVICE_FACTORY),
             ("src/test/java/example/FakeService.java", JAVA_FAKE_SERVICE),
         ]),
         "rust_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "rust_syntax_v2\n"),
             ("src/lib.rs", RUST_LIB),
             ("src/service.rs", RUST_SERVICE),
             ("src/model.rs", RUST_MODEL),
             ("tests/fake_service.rs", RUST_FAKE_SERVICE),
         ]),
         "bash_syntax_v1" => Ok(vec![
-            (".relay-knowledge-fixture-version", "bash_syntax_v1\n"),
             ("bin/install.sh", BASH_INSTALL),
             ("lib/runtime.sh", BASH_RUNTIME),
             ("tests/fake_runtime.sh", BASH_FAKE_RUNTIME),
         ]),
         "csharp_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "csharp_syntax_v2\n"),
             ("src/Runtime/BufferPool.cs", CSHARP_BUFFER_POOL),
             ("src/Runtime/RuntimeService.cs", CSHARP_RUNTIME_SERVICE),
             ("tests/FakeRuntimeService.cs", CSHARP_FAKE_SERVICE),
         ]),
         "kotlin_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "kotlin_syntax_v2\n"),
             ("src/main/kotlin/example/Client.kt", KOTLIN_CLIENT),
             ("src/main/kotlin/example/Pipeline.kt", KOTLIN_PIPELINE),
             ("tests/FakeClient.kt", KOTLIN_FAKE_CLIENT),
         ]),
         "php_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "php_syntax_v2\n"),
             ("src/App/Kernel.php", PHP_KERNEL),
             ("src/App/Contracts/Bootable.php", PHP_BOOTABLE),
             ("src/App/Providers/CacheProvider.php", PHP_CACHE_PROVIDER),
             ("tests/FakeKernel.php", PHP_FAKE_KERNEL),
         ]),
         "ruby_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "ruby_syntax_v2\n"),
             ("lib/app/controller.rb", RUBY_CONTROLLER),
             ("lib/app/extensions.rb", RUBY_EXTENSIONS),
             ("lib/app/runtime.rb", RUBY_RUNTIME),
             ("tests/fake_controller.rb", RUBY_FAKE_CONTROLLER),
         ]),
         "scala_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "scala_syntax_v2\n"),
             ("src/main/scala/example/Pipeline.scala", SCALA_PIPELINE),
             ("src/main/scala/example/Runtime.scala", SCALA_RUNTIME),
             ("tests/FakePipeline.scala", SCALA_FAKE_PIPELINE),
         ]),
         "swift_syntax_v2" => Ok(vec![
-            (".relay-knowledge-fixture-version", "swift_syntax_v2\n"),
             ("Sources/App/SessionClient.swift", SWIFT_SESSION_CLIENT),
             ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
             ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
@@ -1084,6 +1071,27 @@ int rk_table_read(struct rk_device *dev, char *buffer, size_t length)
 }
 "#;
 
+const C_HTTP_MACRO_MODULE_C: &str = r#"#include "driver_ops.h"
+#include <openssl/ssl.h>
+
+#define RK_HTTP_HANDLER(name) int name(struct rk_device *dev)
+#define RK_HTTP_MODULE_ENTRY(name) { #name, name }
+
+struct rk_http_module_entry {
+    const char *name;
+    int (*handler)(struct rk_device *dev);
+};
+
+RK_HTTP_HANDLER(rk_http_access_handler)
+{
+    return dev != 0;
+}
+
+static const struct rk_http_module_entry rk_http_modules[] = {
+    RK_HTTP_MODULE_ENTRY(rk_http_access_handler),
+};
+"#;
+
 const C_FAKE_DRIVER_C: &str = r#"#include "driver_ops.h"
 
 int rk_driver_read_fake(struct rk_device *dev, char *buffer, size_t length)
@@ -1125,6 +1133,28 @@ class Cache {
 class RecordingWriter final : public Writer {
  public:
     void Append(const std::string& key) override;
+};
+
+}  // namespace rk::store
+"#;
+
+const CPP_EXPORTED_MODULE_HPP: &str = r#"#pragma once
+
+#include <boost/asio.hpp>
+#include <string>
+
+#define RK_STORE_API __attribute__((visibility("default")))
+
+namespace rk::store {
+
+class BaseModule {
+ public:
+    virtual ~BaseModule() = default;
+};
+
+RK_STORE_API class HttpModule final : public BaseModule {
+ public:
+    void Start(const std::string& route);
 };
 
 }  // namespace rk::store
