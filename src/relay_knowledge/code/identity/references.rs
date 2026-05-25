@@ -78,9 +78,10 @@ fn resolve_call_reference_target<'a>(
     by_name: &BTreeMap<&str, Vec<&'a RepositoryCodeSymbolRecord>>,
     by_name_and_path: &BTreeMap<(&str, &str), Vec<&'a RepositoryCodeSymbolRecord>>,
 ) -> Resolution<'a> {
-    for candidate in call_target_name_candidates(&reference.name) {
+    let mut ambiguous_target_hint = None;
+    for candidate in call_target_name_candidates(&reference.name, &reference.path) {
         let target_hint = call_target_hint(&reference.name, &candidate);
-        match resolve_reference_target(
+        match resolve_call_target(
             &candidate,
             by_name.get(candidate.as_str()).map(std::vec::Vec::as_slice),
             by_name_and_path
@@ -93,14 +94,14 @@ fn resolve_call_reference_target<'a>(
                 ) {
                     return Resolution::Resolved(symbol, target_hint);
                 }
-                return Resolution::Ambiguous(target_hint);
+                ambiguous_target_hint.get_or_insert(target_hint);
             }
             Resolution::Resolved(symbol, _) => return Resolution::Resolved(symbol, target_hint),
             Resolution::Unresolved => {}
         }
     }
 
-    Resolution::Unresolved
+    ambiguous_target_hint.map_or(Resolution::Unresolved, Resolution::Ambiguous)
 }
 
 fn call_target_hint(reference_name: &str, candidate: &str) -> String {
@@ -130,10 +131,49 @@ fn resolve_reference_target<'a>(
     Resolution::Ambiguous(target_hint.to_owned())
 }
 
+fn resolve_call_target<'a>(
+    target_hint: &str,
+    candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+    same_path_candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+) -> Resolution<'a> {
+    let Some(candidates) = candidates else {
+        return Resolution::Unresolved;
+    };
+    if !candidates
+        .iter()
+        .any(|candidate| callable_target_symbol_kind(&candidate.kind))
+    {
+        return Resolution::Unresolved;
+    }
+    if candidates.len() == 1 && callable_target_symbol_kind(&candidates[0].kind) {
+        return Resolution::Resolved(candidates[0], target_hint.to_owned());
+    }
+
+    if let Some(same_path) = same_path_candidates.and_then(unique_callable_candidate) {
+        return Resolution::Resolved(same_path, target_hint.to_owned());
+    }
+
+    Resolution::Ambiguous(target_hint.to_owned())
+}
+
 fn unique_candidate<'a>(
     candidates: &[&'a RepositoryCodeSymbolRecord],
 ) -> Option<&'a RepositoryCodeSymbolRecord> {
     match candidates {
+        [candidate] => Some(*candidate),
+        _ => None,
+    }
+}
+
+fn unique_callable_candidate<'a>(
+    candidates: &[&'a RepositoryCodeSymbolRecord],
+) -> Option<&'a RepositoryCodeSymbolRecord> {
+    let callable = candidates
+        .iter()
+        .filter(|symbol| callable_target_symbol_kind(&symbol.kind))
+        .copied()
+        .collect::<Vec<_>>();
+    match callable.as_slice() {
         [candidate] => Some(*candidate),
         _ => None,
     }
@@ -245,6 +285,8 @@ mod tests {
                 "crates/app/src/lib.rs",
                 "module::sys::connect",
             ),
+            reference("rust-c-member-call", "crates/app/src/lib.rs", "C.connect"),
+            reference("go-object-c-call", "bridge/go_bridge.go", "obj.C.connect"),
         ];
 
         resolve_reference_targets(&symbols, &mut references);
@@ -261,6 +303,45 @@ mod tests {
             references[1].target_hint.as_deref(),
             Some("module::sys::connect")
         );
+        assert_eq!(references[2].target_hint.as_deref(), Some("C.connect"));
+        assert_eq!(references[3].target_hint.as_deref(), Some("obj.C.connect"));
+    }
+
+    #[test]
+    fn call_resolution_ignores_unique_non_callable_leaf_targets() {
+        let mut symbols = vec![symbol("constant-connect", "src/constants.rs", "connect")];
+        symbols[0].kind = "constant".to_owned();
+        let mut references = vec![reference("ffi-connect", "src/lib.rs", "ffi::connect")];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(references[0].target_symbol_snapshot_id, None);
+        assert_eq!(references[0].target_hint.as_deref(), Some("ffi::connect"));
+        assert_eq!(references[0].resolution_state, "unresolved");
+    }
+
+    #[test]
+    fn call_resolution_continues_to_leaf_after_scoped_ambiguity() {
+        let mut symbols = vec![
+            symbol("ffi-declaration-a", "src/bindings_a.rs", "ffi::rk_c_decode"),
+            symbol("ffi-declaration-b", "src/bindings_b.rs", "ffi::rk_c_decode"),
+            symbol("c-definition", "src/c_entry.c", "rk_c_decode"),
+        ];
+        symbols[0].kind = "function_declaration".to_owned();
+        symbols[1].kind = "function_declaration".to_owned();
+        let mut references = vec![reference("ffi-call", "src/lib.rs", "ffi::rk_c_decode")];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(
+            references[0].target_symbol_snapshot_id.as_deref(),
+            Some("c-definition")
+        );
+        assert_eq!(
+            references[0].target_hint.as_deref(),
+            Some("ffi::rk_c_decode")
+        );
+        assert_eq!(references[0].resolution_state, "resolved");
     }
 
     fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {

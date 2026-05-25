@@ -118,18 +118,21 @@ impl CallTargetIndex {
     }
 
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
-        for candidate in call_target_name_candidates(name) {
+        let mut ambiguous_target_hint = None;
+        for candidate in call_target_name_candidates(name, reference_path) {
             let target_hint = call_target_hint(name, &candidate);
             match self.resolve_candidate(&candidate, reference_path) {
                 TargetResolution::Unresolved => {}
                 TargetResolution::Resolved(symbol, _) => {
                     return TargetResolution::Resolved(symbol, target_hint);
                 }
-                TargetResolution::Ambiguous(_) => return TargetResolution::Ambiguous(target_hint),
+                TargetResolution::Ambiguous(_) => {
+                    ambiguous_target_hint.get_or_insert(target_hint);
+                }
             }
         }
 
-        TargetResolution::Unresolved
+        ambiguous_target_hint.map_or(TargetResolution::Unresolved, TargetResolution::Ambiguous)
     }
 
     fn resolve_candidate(&self, name: &str, reference_path: &str) -> TargetResolution {
@@ -137,10 +140,20 @@ impl CallTargetIndex {
             return TargetResolution::Unresolved;
         };
         if let [symbol] = symbols.as_slice() {
-            return TargetResolution::Resolved(symbol.clone(), name.to_owned());
+            if callable_target_symbol_kind(&symbol.kind) {
+                return TargetResolution::Resolved(symbol.clone(), name.to_owned());
+            }
+            return TargetResolution::Unresolved;
+        }
+        if !symbols
+            .iter()
+            .any(|symbol| callable_target_symbol_kind(&symbol.kind))
+        {
+            return TargetResolution::Unresolved;
         }
         let same_path = symbols
             .iter()
+            .filter(|symbol| callable_target_symbol_kind(&symbol.kind))
             .filter(|symbol| symbol.path == reference_path)
             .take(2)
             .cloned()
