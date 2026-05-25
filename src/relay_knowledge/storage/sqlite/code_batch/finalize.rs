@@ -2,7 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::{Transaction, params};
 
-use crate::{domain::RepositoryCodeRange, storage::StorageError};
+use crate::{
+    code::source_roots::{
+        c_family_module_candidates, go_module_candidates, source_module_candidates,
+        source_relative_path,
+    },
+    domain::RepositoryCodeRange,
+    storage::StorageError,
+};
 
 #[path = "finalize_call_targets.rs"]
 mod call_targets;
@@ -142,7 +149,7 @@ fn resolve_imports(
     files: &BTreeMap<String, String>,
     symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
-    let module_paths = module_path_index(files.keys());
+    let module_paths = module_path_index(files);
     let imports = load_import_keys(transaction, source_scope)?;
     let symbols_by_name = if imports.iter().any(|import| {
         let statement = import.module.trim();
@@ -765,7 +772,8 @@ fn relative_python_module_path(import_path: &str, module: &str) -> Option<String
         .take_while(|character| *character == '.')
         .count();
     let remainder = module[dot_count..].replace('.', "/");
-    let mut package = parent_dir(strip_source_root(import_path))
+    let import_path = source_relative_path(import_path);
+    let mut package = parent_dir(&import_path)
         .split('/')
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
@@ -801,7 +809,10 @@ fn parse_python_imported_names(names: &str) -> Vec<String> {
 
 fn path_matches_candidate(path: &str, candidate: &str) -> bool {
     let candidate = normalize_module_path(candidate);
-    path == candidate || strip_source_root(path) == candidate
+    path == candidate.as_str()
+        || source_module_candidates(path)
+            .iter()
+            .any(|module_path| module_path == &candidate)
 }
 
 fn resolve_first_module_file(
@@ -838,11 +849,18 @@ fn resolve_module_file(
         return ImportResolution::Resolved(exact[0].to_string());
     }
     if !allow_source_root_match {
+        if files.len() == 1 && key == module_path {
+            return ImportResolution::Resolved(files[0].clone());
+        }
         return ImportResolution::Unresolved;
     }
     let source_root = files
         .iter()
-        .filter(|path| strip_source_root(path) == module_path)
+        .filter(|path| {
+            source_module_candidates(path)
+                .iter()
+                .any(|candidate| candidate == &key)
+        })
         .take(2)
         .collect::<Vec<_>>();
     if source_root.len() == 1 {
@@ -890,15 +908,20 @@ fn parse_quoted_specifier(statement: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
-fn module_path_index<'a>(
-    paths: impl IntoIterator<Item = &'a String>,
-) -> BTreeMap<String, Vec<String>> {
+fn module_path_index(files: &BTreeMap<String, String>) -> BTreeMap<String, Vec<String>> {
     let mut module_paths = BTreeMap::<String, Vec<String>>::new();
-    for path in paths {
-        module_paths
-            .entry(strip_source_root(path).to_owned())
-            .or_default()
-            .push(path.clone());
+    for (path, language_id) in files {
+        let candidates = match language_id.as_str() {
+            "c" | "cpp" => c_family_module_candidates(path),
+            "go" => go_module_candidates(path),
+            _ => source_module_candidates(path),
+        };
+        for module_path in candidates {
+            module_paths
+                .entry(module_path)
+                .or_default()
+                .push(path.clone());
+        }
     }
 
     module_paths
@@ -932,29 +955,11 @@ fn normalize_join(parent: &str, child: &str) -> Option<String> {
 }
 
 fn normalize_module_path(path: &str) -> String {
-    strip_source_root(path.trim_start_matches("./")).to_owned()
-}
-
-fn strip_source_root(path: &str) -> &str {
-    for prefix in [
-        "src/main/java/",
-        "src/test/java/",
-        "src/main/kotlin/",
-        "src/test/kotlin/",
-        "src/main/scala/",
-        "src/test/scala/",
-        "src/main/groovy/",
-        "src/test/groovy/",
-        "staging/src/",
-        "vendor/",
-        "src/",
-    ] {
-        if let Some(stripped) = path.strip_prefix(prefix) {
-            return stripped;
-        }
+    let mut normalized = path.trim();
+    while let Some(stripped) = normalized.strip_prefix("./") {
+        normalized = stripped;
     }
-
-    path
+    normalized.trim_end_matches('/').to_owned()
 }
 
 fn push_candidate(candidates: &mut Vec<String>, candidate: String) {

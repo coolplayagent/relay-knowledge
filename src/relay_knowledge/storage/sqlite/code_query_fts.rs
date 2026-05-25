@@ -12,6 +12,8 @@ const MAX_HYBRID_CHUNK_RECALL_ANCHORS: usize = 3;
 const MIN_API_DENSE_HIGH_SIGNAL_TERMS: usize = 3;
 const MIN_HIGH_SIGNAL_TERM_PRIORITY: usize = 4;
 const MAX_API_DENSE_UNSTRUCTURED_TERMS: usize = 1;
+const STRICT_HYBRID_CHUNK_MIN_STRUCTURED_TERMS: usize = 2;
+const STRICT_HYBRID_CHUNK_MAX_TERMS: usize = 3;
 
 pub(in crate::storage::sqlite::code::code_query) fn fts_match_query(query: &str) -> String {
     fts_match_query_with_operator(&super::fts_query_terms(query), " ", true)
@@ -31,6 +33,18 @@ pub(in crate::storage::sqlite::code::code_query) fn hybrid_chunk_fts_match_query
 
     let recall_terms = hybrid_chunk_recall_terms(&terms);
     fts_match_query_with_operator(&recall_terms, " OR ", true)
+}
+
+pub(in crate::storage::sqlite::code::code_query) fn strict_hybrid_chunk_fts_match_query(
+    query: &str,
+) -> Option<String> {
+    let terms = dedupe_terms(super::fts_query_terms(query));
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS || !api_dense_hybrid_query(&terms) {
+        return None;
+    }
+    let strict_terms = strict_hybrid_chunk_recall_terms(&terms);
+    (strict_terms.len() >= STRICT_HYBRID_CHUNK_MIN_STRUCTURED_TERMS)
+        .then(|| fts_match_query_with_operator(&strict_terms, " ", false))
 }
 
 fn fts_match_query_with_operator(
@@ -166,6 +180,33 @@ fn high_signal_hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
                 continue;
             }
             unstructured_terms += 1;
+        }
+        push_case_insensitive_unique_term(&mut recall_terms, term);
+    }
+
+    recall_terms
+}
+
+fn strict_hybrid_chunk_recall_terms(terms: &[String]) -> Vec<String> {
+    let mut ranked = terms
+        .iter()
+        .enumerate()
+        .filter(|(_, term)| identifier_term_has_structure(term))
+        .filter(|(_, term)| hybrid_chunk_term_priority(term) >= MIN_HIGH_SIGNAL_TERM_PRIORITY)
+        .map(|(position, term)| (hybrid_chunk_term_priority(term), position, term))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
+
+    let mut recall_terms = Vec::new();
+    for (_, _, term) in ranked {
+        if recall_terms.len() >= STRICT_HYBRID_CHUNK_MAX_TERMS {
+            break;
         }
         push_case_insensitive_unique_term(&mut recall_terms, term);
     }

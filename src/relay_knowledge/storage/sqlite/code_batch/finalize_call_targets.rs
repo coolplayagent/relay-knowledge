@@ -17,7 +17,7 @@ pub(super) fn resolve_references(
     if index.is_empty() {
         return Ok(());
     }
-    let references = load_unresolved_call_references(transaction, source_scope)?;
+    let references = load_call_references(transaction, source_scope)?;
     if references.is_empty() {
         return Ok(());
     }
@@ -56,7 +56,17 @@ pub(super) fn resolve_references(
                     "ambiguous"
                 ])?;
             }
-            TargetResolution::Unresolved => {}
+            TargetResolution::Unresolved => {
+                update.execute(params![
+                    source_scope,
+                    reference.reference_id,
+                    Option::<String>::None,
+                    reference.name,
+                    "unresolved",
+                    2_500_u16,
+                    "ambiguous"
+                ])?;
+            }
         }
     }
 
@@ -118,12 +128,19 @@ impl CallTargetIndex {
     }
 
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
+        let candidates = call_target_name_candidates(name, reference_path);
         let mut ambiguous_target_hint = None;
-        for candidate in call_target_name_candidates(name, reference_path) {
-            let target_hint = call_target_hint(name, &candidate);
-            match self.resolve_candidate(&candidate, reference_path) {
+        let mut deferred_scoped_resolution = None;
+        for (position, candidate) in candidates.iter().enumerate() {
+            let target_hint = call_target_hint(name, candidate);
+            let has_alias_fallback = position + 1 < candidates.len();
+            match self.resolve_candidate(candidate, reference_path) {
                 TargetResolution::Unresolved => {}
                 TargetResolution::Resolved(symbol, _) => {
+                    if has_alias_fallback && !callable_definition_symbol_kind(&symbol.kind) {
+                        deferred_scoped_resolution.get_or_insert((symbol, target_hint));
+                        continue;
+                    }
                     return TargetResolution::Resolved(symbol, target_hint);
                 }
                 TargetResolution::Ambiguous(_) => {
@@ -132,7 +149,12 @@ impl CallTargetIndex {
             }
         }
 
-        ambiguous_target_hint.map_or(TargetResolution::Unresolved, TargetResolution::Ambiguous)
+        if let Some(target_hint) = ambiguous_target_hint {
+            return TargetResolution::Ambiguous(target_hint);
+        }
+        deferred_scoped_resolution.map_or(TargetResolution::Unresolved, |(symbol, target_hint)| {
+            TargetResolution::Resolved(symbol, target_hint)
+        })
     }
 
     fn resolve_candidate(&self, name: &str, reference_path: &str) -> TargetResolution {
@@ -202,7 +224,7 @@ fn unique_preferred_callable(symbols: &[CallTargetSymbol]) -> Option<CallTargetS
     }
 }
 
-fn load_unresolved_call_references(
+fn load_call_references(
     transaction: &Transaction<'_>,
     source_scope: &str,
 ) -> Result<Vec<CallReference>, StorageError> {
@@ -212,7 +234,6 @@ fn load_unresolved_call_references(
         FROM code_repository_references
         WHERE source_scope = ?1
           AND kind = 'call'
-          AND resolution_state != 'resolved'
         ",
     )?;
     let rows = statement.query_map(params![source_scope], |row| {

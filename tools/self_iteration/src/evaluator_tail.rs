@@ -450,6 +450,7 @@ fn fast_repository_names() -> Vec<String> {
                 "cpp_syntax_fixture".to_owned(),
                 "cross_language_syntax_fixture".to_owned(),
                 "typescript_syntax_fixture".to_owned(),
+                "nonstandard_layout_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),
                 "temporal_samples_go".to_owned(),
@@ -786,6 +787,41 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("Sources/App/SessionClient.swift", SWIFT_SESSION_CLIENT),
             ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
             ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
+        ]),
+        "nonstandard_layout_v1" => Ok(vec![
+            (
+                ".relay-knowledge-fixture-version",
+                "nonstandard_layout_v1\n",
+            ),
+            (
+                "external_deps/python_sdk/session_client.py",
+                NONSTANDARD_PYTHON_SESSION_CLIENT,
+            ),
+            (
+                "external_deps/ts_sdk/sessionClient.ts",
+                NONSTANDARD_TYPESCRIPT_SESSION_CLIENT,
+            ),
+            (
+                "plugins/example.com/nonstandard/session/client.go",
+                NONSTANDARD_GO_SESSION_CLIENT,
+            ),
+            (
+                "modules/java_sdk/src/main/java/example/ExternalJavaSessionClient.java",
+                NONSTANDARD_JAVA_SESSION_CLIENT,
+            ),
+            (
+                "external_deps/cpp_sdk/include/external_session_client.hpp",
+                NONSTANDARD_CPP_SESSION_CLIENT_HPP,
+            ),
+            (
+                "external_deps/cpp_sdk/session_client.cpp",
+                NONSTANDARD_CPP_SESSION_CLIENT_CPP,
+            ),
+            (
+                "Sources/SwiftSdk/ExternalSwiftSessionClient.swift",
+                NONSTANDARD_SWIFT_SESSION_CLIENT,
+            ),
+            ("src/application.ts", NONSTANDARD_APPLICATION_TS),
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
@@ -1991,6 +2027,86 @@ import Foundation
 
 final class SessionClient {
     func request() {}
+}
+"#;
+
+const NONSTANDARD_PYTHON_SESSION_CLIENT: &str = r#"
+class ExternalPythonSessionClient:
+    def open_external_session(self, payload):
+        return f"python-session:{payload}"
+"#;
+
+const NONSTANDARD_TYPESCRIPT_SESSION_CLIENT: &str = r#"
+export class ExternalTypeScriptSessionClient {
+  openExternalSession(payload: string): string {
+    return `typescript-session:${payload}`;
+  }
+}
+"#;
+
+const NONSTANDARD_GO_SESSION_CLIENT: &str = r#"
+package session
+
+import "context"
+
+type ExternalGoSessionClient interface {
+    OpenExternalSession(ctx context.Context, payload string) error
+}
+"#;
+
+const NONSTANDARD_JAVA_SESSION_CLIENT: &str = r#"
+package example;
+
+public class ExternalJavaSessionClient {
+    public String openExternalSession(String payload) {
+        return "java-session:" + payload;
+    }
+}
+"#;
+
+const NONSTANDARD_CPP_SESSION_CLIENT_HPP: &str = r#"#pragma once
+
+namespace nonstandard {
+
+class ExternalCppSessionClient {
+public:
+    void openExternalSession();
+};
+
+void external_session_client();
+
+}  // namespace nonstandard
+"#;
+
+const NONSTANDARD_CPP_SESSION_CLIENT_CPP: &str = r#"#include <external_session_client.hpp>
+
+namespace nonstandard {
+
+void ExternalCppSessionClient::openExternalSession() {
+    external_session_client();
+}
+
+void external_session_client() {}
+
+}  // namespace nonstandard
+"#;
+
+const NONSTANDARD_SWIFT_SESSION_CLIENT: &str = r#"
+import Foundation
+
+final class ExternalSwiftSessionClient {
+    func openExternalSession(payload: String) -> String {
+        "swift-session:\(payload)"
+    }
+}
+"#;
+
+const NONSTANDARD_APPLICATION_TS: &str = r#"
+import { ExternalTypeScriptSessionClient } from "ts_sdk/sessionClient";
+
+export function runExternalSessionWorkflow(payload: string): string {
+  const client = new ExternalTypeScriptSessionClient();
+  return client.openExternalSession(payload);
 }
 "#;
 

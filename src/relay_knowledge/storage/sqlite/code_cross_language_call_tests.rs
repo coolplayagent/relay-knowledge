@@ -62,6 +62,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     range(7, 11),
                 ),
                 symbol(
+                    "c-rk-c-encode",
+                    "c-file",
+                    "src/c_entry.c",
+                    "rk_c_encode",
+                    "c",
+                    "function",
+                    range(12, 12),
+                ),
+                symbol(
                     "cpp-score",
                     "cpp-file",
                     "src/cpp_bridge.cpp",
@@ -105,6 +114,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "rust",
                     "function_declaration",
                     range(5, 5),
+                ),
+                symbol(
+                    "rust-ffi-encode-declaration",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::rk_c_encode",
+                    "rust",
+                    "function_declaration",
+                    range(6, 6),
                 ),
                 symbol(
                     "c-connect",
@@ -153,6 +171,13 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "crates/rust_bridge/src/lib.rs",
                     "ffi::rk_c_decode",
                     range(10, 10),
+                ),
+                reference(
+                    "rust-calls-c-encode",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::rk_c_encode",
+                    range(11, 11),
                 ),
                 reference(
                     "rust-namespaced-connect",
@@ -284,6 +309,72 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
     assert_eq!(non_callable.0, "unresolved");
     assert_eq!(non_callable.1, None);
     assert_eq!(non_callable.2.as_deref(), Some("ffi::not_callable_target"));
+
+    let single_scoped_declaration = reference_resolution(&store, "rust-calls-c-encode").await;
+    assert_eq!(single_scoped_declaration.0, "resolved");
+    assert_eq!(
+        single_scoped_declaration.1.as_deref(),
+        Some("c-rk-c-encode")
+    );
+    assert_eq!(
+        single_scoped_declaration.2.as_deref(),
+        Some("ffi::rk_c_encode")
+    );
+}
+
+#[tokio::test]
+async fn finalize_reruns_call_target_checks_for_pre_resolved_calls() {
+    let store = registered_store().await;
+    let session = session_for_scope(1);
+    let mut pre_resolved_non_callable = reference(
+        "pre-resolved-non-callable",
+        "rust-file",
+        "src/lib.rs",
+        "not_callable_target",
+        range(3, 3),
+    );
+    pre_resolved_non_callable.target_symbol_snapshot_id = Some("constant-not-callable".to_owned());
+    pre_resolved_non_callable.resolution_state = "resolved".to_owned();
+    pre_resolved_non_callable.confidence_basis_points = 8_000;
+    pre_resolved_non_callable.confidence_tier = "inferred".to_owned();
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: SOURCE_SCOPE.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 80,
+            files: vec![file("rust-file", "src/lib.rs", "rust")],
+            symbols: vec![symbol(
+                "constant-not-callable",
+                "rust-file",
+                "src/lib.rs",
+                "not_callable_target",
+                "rust",
+                "constant",
+                range(1, 1),
+            )],
+            references: vec![pre_resolved_non_callable],
+            imports: Vec::new(),
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let resolution = reference_resolution(&store, "pre-resolved-non-callable").await;
+    assert_eq!(resolution.0, "unresolved");
+    assert_eq!(resolution.1, None);
+    assert_eq!(resolution.2.as_deref(), Some("not_callable_target"));
 }
 
 async fn registered_store() -> SqliteGraphStore {

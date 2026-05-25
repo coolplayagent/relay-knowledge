@@ -307,6 +307,7 @@ mod tests {
         let names = fast_repository_names();
 
         assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
+        assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
     }
 
     #[test]
@@ -412,6 +413,8 @@ mod tests {
             .expect("go fixture should write");
         create_generated_repository_files(&root.join("swift"), "swift_syntax_v2")
             .expect("swift fixture should write");
+        create_generated_repository_files(&root.join("nonstandard"), "nonstandard_layout_v1")
+            .expect("nonstandard fixture should write");
 
         let c_source =
             std::fs::read_to_string(root.join("c/src/driver_ops.c")).expect("c source");
@@ -432,6 +435,14 @@ mod tests {
         let swift_source =
             std::fs::read_to_string(root.join("swift/Sources/App/RequestPipeline.swift"))
                 .expect("swift source");
+        let nonstandard_ts = std::fs::read_to_string(
+            root.join("nonstandard/external_deps/ts_sdk/sessionClient.ts"),
+        )
+        .expect("nonstandard TypeScript source");
+        let nonstandard_cpp = std::fs::read_to_string(
+            root.join("nonstandard/external_deps/cpp_sdk/session_client.cpp"),
+        )
+        .expect("nonstandard C++ source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(cpp_source.contains("auto append_event = [&cache, &pipeline]"));
@@ -445,6 +456,8 @@ mod tests {
         assert!(go_source.contains("ctxalias \"context\""));
         assert!(go_pipeline.contains("notify := func(payload string) string"));
         assert!(swift_source.contains("let request = { (url: URL) async throws -> Data in"));
+        assert!(nonstandard_ts.contains("ExternalTypeScriptSessionClient"));
+        assert!(nonstandard_cpp.contains("#include <external_session_client.hpp>"));
 
         std::fs::remove_dir_all(&root).expect("cleanup fixture");
     }

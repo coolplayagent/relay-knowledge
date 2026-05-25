@@ -30,6 +30,13 @@ relay-knowledge repo status core --format json
 
 仓库索引绑定 repository id、resolved commit、tree hash、path filter 和 language filter。相同树可以复用 scope，rebase 或 force-moved head 需要新索引，dirty worktree 通过 worktree overlay 显式建模。
 
+代码源码布局识别不再局限于顶层 `src/` 目录。索引器和 import 解析会识别
+`external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、
+`Sources/`、`lib/` 等目录下的真实源码，也支持
+`modules/<name>/src/main/java` 这类嵌套 JVM source root。普通 `vendor/`
+和 `third_party/` 这类重型依赖转储仍由 source preset 默认排除，除非用户通过
+path filter 显式 opt in。
+
 ## 命令/API 入口
 
 窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。调用图检索会对跨语言调用目标做规范化：C/C++ 互调、Go cgo 的 `C.*` 调用和 Rust FFI/bindings 路径会解析到同仓库里的 C/C++ 符号；当 header 声明和实现同名时，唯一实现优先作为 resolved call target。`C.*` leaf fallback 只用于 Go cgo 文件，call target 只会解析到 callable 符号。普通命名空间调用不会只按叶子名合并，例如 `module::connect` 或 `module::sys::connect` 不会被当作 `connect` 的 FFI 调用别名；已解析 FFI 调用保留原始 scoped hint，因此 `rk_c_decode` 和 `ffi::rk_c_decode` 查询都能匹配对应调用边。
