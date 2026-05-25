@@ -157,6 +157,33 @@ query kinds cannot express the request, or the user explicitly asks for raw
 text or regular-expression matching. When falling back, say that text search
 is a fallback rather than the preferred code graph path.
 
+Feature flag query flow:
+
+For prompts about feature flags, config keys, environment-variable gates,
+settings gates, gray-release switches, or code guarded by runtime configuration,
+use `repo feature-flags` instead of `repo query --kind`. Feature flags are a
+separate indexed graph surface; do not pass `feature_flag` or `feature-flags` as
+a query kind.
+
+```bash
+relay-knowledge repo feature-flags core \
+  --query checkout \
+  --ref HEAD \
+  --path src \
+  --limit 20 \
+  --format json
+```
+
+Without `--query`, the command enumerates feature flag groups for the selected
+indexed scope. With `--query`, it filters indexed feature flag names, config
+sources, paths, and excerpts. It does not recursively grep the repository at
+query time; after adding flags or changing extraction rules, refresh the scope
+with `repo index` or `repo update`.
+
+Use `grep`, `ripgrep`, `rg`, or another raw text search for feature flag prompts
+only when the CLI is unavailable, the target repository cannot be indexed, or
+the user explicitly asks for raw text or regular-expression matching.
+
 Incremental update and impact:
 
 ```bash

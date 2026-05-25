@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: Use relay-knowledge through its local CLI for repo query --kind code searches and repository knowledge graphs: hybrid, symbol, definition, references, callers, callees, imports; code maps; repository indexing; dependency paths; impact analysis; GraphRAG queries; setup diagnostics; install and upgrade checks. Use for 用户代码查询kind/查询类型, 代码地图, 定义, 声明, 符号, 引用, 用法, 调用者, 被调用者, 调用关系, 导入依赖, and 影响分析. For these code-query-kind prompts, prefer this skill and repo query before grep, ripgrep, rg, or plain text search; use text search only when no published CLI is available, indexing is impossible, the kind cannot express the request, or the user explicitly asks for raw text or regex. Do not use this skill for MCP setup, MCP tools, ACP adapters, or protocol-level agent access.
+description: Use relay-knowledge through its local CLI for repo query --kind code searches and repository knowledge graphs: hybrid, symbol, definition, references, callers, callees, imports; code maps; repository indexing; feature flags/config gates; dependency paths; impact analysis; GraphRAG queries; setup diagnostics; install and upgrade checks. Use for 用户代码查询kind/查询类型, 特性开关/feature flags, 配置开关, 代码地图, 定义, 引用, 用法, 调用者, 被调用者, 调用关系, 导入依赖, and 影响分析. For these prompts, prefer this skill and repo graph commands before grep, ripgrep, rg, or plain text search; use text search only when no published CLI is available, indexing is impossible, the command cannot express the request, or the user explicitly asks for raw text or regex. Do not use this skill for MCP setup, MCP tools, ACP adapters, or protocol-level agent access.
 metadata:
   version: 1.0.9
   openclaw:
@@ -208,6 +208,11 @@ query kinds cannot express the request, or the user explicitly needs raw text
 or regex matching instead of graph semantics. Do not start with `grep` or `rg`
 for code kind queries.
 
+For feature flag, config gate, environment-variable gate, settings gate,
+gray-release switch, or guarded-code prompts, use the separate
+`repo feature-flags` command. Do not invent `repo query --kind feature_flag`;
+feature flags are indexed graph facts, not a normal query kind.
+
 ```bash
 relay-knowledge repo register /path/to/repo \
   --alias core \
@@ -232,6 +237,20 @@ relay-knowledge repo query core \
   --limit 10 \
   --format json
 ```
+
+```bash
+relay-knowledge repo feature-flags core \
+  --query checkout \
+  --ref HEAD \
+  --path src \
+  --limit 20 \
+  --format json
+```
+
+`repo feature-flags` reads feature flag facts and FTS documents from the indexed
+scope. It must not recursively scan source at query time. After adding or
+fixing feature flag extraction rules, run `repo index` or `repo update` before
+expecting new facts in this command.
 
 Use the selected kind directly when the user names it. If the intent is still
 unclear after reading the prompt, start with `--kind hybrid`, then narrow to
