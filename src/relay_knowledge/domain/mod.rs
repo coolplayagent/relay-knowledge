@@ -1,6 +1,7 @@
 //! Pure domain model types.
 
 mod code;
+pub(crate) mod code_call_targets;
 mod code_dependency;
 mod code_repository;
 mod code_repository_set;

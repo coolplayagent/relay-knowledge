@@ -83,6 +83,11 @@ jobs:
           python3 tools/release/update_skill_metadata_version.py --check \
             skills/relay-knowledge-cli/SKILL.md "$manifest_version"
 
+      - name: Linux glibc compatibility policy gate
+        run: |
+          python3 tools/release/check_linux_glibc_compat.py --self-test \
+            --verify-workflow .github/workflows/release.yml
+
   coverage:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest

@@ -27,7 +27,11 @@ mod tests {
             QualityGateStage::Parallel(gates) => {
                 assert_eq!(
                     gates.iter().map(|gate| gate.name).collect::<Vec<_>>(),
-                    vec!["cargo_fmt_check", "self_iteration_cargo_fmt_check"]
+                    vec![
+                        "cargo_fmt_check",
+                        "self_iteration_cargo_fmt_check",
+                        "linux_glibc_compatibility_policy"
+                    ]
                 );
             }
             QualityGateStage::Rails(_) => panic!("fmt gates should be parallel"),
@@ -82,6 +86,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(gate_names.contains(&"cargo_build_debug"));
         assert!(gate_names.contains(&"self_iteration_cargo_check"));
+        assert!(gate_names.contains(&"linux_glibc_compatibility_policy"));
         assert!(!gate_names.contains(&"cargo_build_release"));
         assert!(!gate_names.contains(&"cargo_clippy"));
         assert!(!gate_names.contains(&"cargo_test"));
@@ -307,11 +312,25 @@ mod tests {
         let names = fast_repository_names();
 
         assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
+        assert!(names.iter().any(|name| name == "grep_budget_fixture"));
         assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
     }
 
     #[test]
-    fn fast_preserves_typescript_import_grep_guardrail_case() {
+    fn fast_default_repositories_include_cross_language_fixture() {
+        if std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS").is_ok() {
+            return;
+        }
+
+        let names = fast_repository_names();
+
+        assert!(names
+            .iter()
+            .any(|name| name == "cross_language_syntax_fixture"));
+    }
+
+    #[test]
+    fn fast_preserves_grep_guardrail_cases() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),
             serde_json::json!({
@@ -325,6 +344,18 @@ mod tests {
                     "retrieval_layer": "text_fallback"
                 }],
                 "degraded_reason_contains": "external dependency import is not indexed"
+            }),
+            serde_json::json!({
+                "id": "grep_budget_reference_late_comment_after_scope_budget",
+                "repository": "grep_budget_fixture",
+                "kind": "references",
+                "query": "RK_LATE_BUDGET_NOTE",
+                "guardrail": true,
+                "expected": [{
+                    "path": "zzz/late_target.c",
+                    "retrieval_layer": "text_fallback"
+                }],
+                "degraded_reason": false
             }),
         ];
 
@@ -345,6 +376,13 @@ mod tests {
             "external dependency import is not indexed"
         );
         assert!(case.get("guardrail").and_then(Value::as_bool).unwrap_or(false));
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "") == "grep_budget_reference_late_comment_after_scope_budget"
+                && case
+                    .get("degraded_reason")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
     }
 
     #[test]

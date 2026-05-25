@@ -23,6 +23,13 @@ Beyond C/C++, the evaluator now generates these fixture repositories under the e
 | `ruby_syntax_fixture` | `ruby_syntax_v2` | modules/classes, singleton methods, require_relative, mixins, lambda runtime flow |
 | `scala_syntax_fixture` | `scala_syntax_v2` | packages, traits, objects, inline methods, imports, function literals, stage/runtime flow |
 | `swift_syntax_fixture` | `swift_syntax_v2` | protocols, final classes, structs, imports, async throws, closure request flow |
+| `cross_language_syntax_fixture` | `cross_language_syntax_v1` | same-repository C/C++/Go/Rust files covering caller and callee retrieval for C calling C++, C++ calling C, Go cgo calling C, and Rust FFI calling C |
+
+`cross_language_syntax_fixture` stays in the default `fast` profile. It is not a
+replacement for real multilingual repositories; it gives fast self-iteration a
+deterministic cross-compilation-boundary workload where a C entrypoint calls a
+C++ `extern "C"` bridge, the C++ bridge calls back into C, Go reaches C through
+cgo, and Rust reaches C through an FFI declaration.
 
 ## Lambda And Callback Coverage
 
@@ -40,7 +47,7 @@ The generated fixtures now distinguish native lambda support from language-speci
 - Most generated fixtures now provide 7 core syntax cases: `symbol`, `definition`, `imports`, `callees` or relationship flow, `hybrid`, an explicit lambda/closure case where the language supports one, and `negative`.
 - Hybrid and relationship cases use `expected_all`, `expected_sequence`, `forbidden`, or `forbidden_rank_penalty` to preserve continuous scoring pressure after basic pass/fail is achieved.
 - Python syntax fixture cases also cover text-only Markdown documentation references, where `references` queries for `ServiceRunner` and `dispatch_event` must recover the documentation line as `text_fallback` evidence without graph-edge confidence.
-- Generated fixtures are not added to the normal fast repository list by default. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
+- Except for the C/C++, cross-language, TypeScript, and `grep_budget_fixture` cases already covered by the default fast profile, generated fixtures are not added to the normal fast repository list by default. `grep_budget_fixture` creates more than 256 C files and requires a no-path-filter `references` query to recover a late-sorted target through query-aware fallback candidates without `ripgrep candidate file budget exhausted`. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
 
 ```bash
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=python_syntax_fixture,typescript_syntax_fixture \

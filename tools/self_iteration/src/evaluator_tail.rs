@@ -34,6 +34,7 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     120,
                 ),
+                linux_glibc_compatibility_policy_gate(),
             ]),
             QualityGateStage::Parallel(vec![quality_gate(
                 "cargo_build_debug",
@@ -68,6 +69,7 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 ],
                 120,
             ),
+            linux_glibc_compatibility_policy_gate(),
         ]),
         QualityGateStage::Parallel(vec![
             quality_gate("cargo_build_release", ["cargo", "build", "--release"], 1200),
@@ -137,6 +139,20 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     ]
 }
 
+fn linux_glibc_compatibility_policy_gate() -> QualityGate {
+    quality_gate(
+        "linux_glibc_compatibility_policy",
+        [
+            "python3",
+            "tools/release/check_linux_glibc_compat.py",
+            "--self-test",
+            "--verify-workflow",
+            ".github/workflows/release.yml",
+        ],
+        60,
+    )
+}
+
 fn quality_gate<const N: usize>(
     name: &'static str,
     command: [&'static str; N],
@@ -157,6 +173,7 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
         "self_iteration_cargo_build_release" => Some(60_000.0),
         "cargo_fmt_check" => Some(20_000.0),
         "self_iteration_cargo_fmt_check" => Some(20_000.0),
+        "linux_glibc_compatibility_policy" => Some(10_000.0),
         "cargo_clippy" => Some(180_000.0),
         "self_iteration_cargo_clippy" => Some(60_000.0),
         "cargo_test" => Some(240_000.0),
@@ -446,8 +463,10 @@ fn fast_repository_names() -> Vec<String> {
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| {
             vec![
+                "grep_budget_fixture".to_owned(),
                 "c_syntax_fixture".to_owned(),
                 "cpp_syntax_fixture".to_owned(),
+                "cross_language_syntax_fixture".to_owned(),
                 "typescript_syntax_fixture".to_owned(),
                 "nonstandard_layout_fixture".to_owned(),
                 "relay_teams".to_owned(),
@@ -661,6 +680,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     }
     fs::create_dir_all(root)
         .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    if fixture == "grep_budget_v1" {
+        return write_grep_budget_fixture(root);
+    }
     for (path, content) in generated_repository_files(fixture)? {
         write_fixture_file(&root.join(path), content)?;
     }
@@ -685,6 +707,18 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("src/cache.cpp", CPP_CACHE_CPP),
             ("src/pipeline.cpp", CPP_PIPELINE_CPP),
             ("tests/fake_cache.cpp", CPP_FAKE_CACHE_CPP),
+        ]),
+        "cross_language_syntax_v1" => Ok(vec![
+            (
+                ".relay-knowledge-fixture-version",
+                "cross_language_syntax_v1\n",
+            ),
+            ("include/rk_bridge.h", CROSS_LANGUAGE_BRIDGE_H),
+            ("src/c_entry.c", CROSS_LANGUAGE_C_ENTRY),
+            ("src/cpp_bridge.cpp", CROSS_LANGUAGE_CPP_BRIDGE),
+            ("bridge/go_bridge.go", CROSS_LANGUAGE_GO_BRIDGE),
+            ("crates/rust_bridge/src/lib.rs", CROSS_LANGUAGE_RUST_BRIDGE),
+            ("tests/fake_bridge.c", CROSS_LANGUAGE_FAKE_BRIDGE),
         ]),
         "python_syntax_v2" => Ok(vec![
             (".relay-knowledge-fixture-version", "python_syntax_v2\n"),
@@ -822,6 +856,24 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
+}
+
+fn write_grep_budget_fixture(root: &Path) -> Result<(), String> {
+    for index in 0..300 {
+        write_fixture_file(
+            &root.join("src").join(format!("noise_{index:03}.c")),
+            &format!("int noise_{index:03}(void) {{ return {index}; }}\n"),
+        )?;
+    }
+    write_fixture_file(
+        &root.join("zzz").join("late_target.c"),
+        r#"// RK_LATE_BUDGET_NOTE must remain reachable after broad candidate selection.
+int late_budget_target(void)
+{
+    return 7;
+}
+"#,
+    )
 }
 
 fn commit_generated_repository(
@@ -1198,6 +1250,108 @@ class FakeCache {
 };
 
 }  // namespace rk::store::test
+"#;
+
+const CROSS_LANGUAGE_BRIDGE_H: &str = r#"#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int rk_c_decode(const char *payload);
+int rk_cpp_score(const char *payload);
+int rk_c_entry_process(const char *payload);
+
+#ifdef __cplusplus
+}
+#endif
+"#;
+
+const CROSS_LANGUAGE_C_ENTRY: &str = r#"#include "rk_bridge.h"
+
+static int rk_c_weight(char value)
+{
+    return (int)value;
+}
+
+int rk_c_decode(const char *payload)
+{
+    if (payload == 0 || payload[0] == '\0') {
+        return 0;
+    }
+    return rk_c_weight(payload[0]);
+}
+
+int rk_c_entry_process(const char *payload)
+{
+    int native = rk_c_decode(payload);
+    int bridged = rk_cpp_score(payload);
+    return native + bridged;
+}
+"#;
+
+const CROSS_LANGUAGE_CPP_BRIDGE: &str = r#"#include "rk_bridge.h"
+
+#include <string_view>
+
+namespace rk::bridge {
+
+class BridgeHelper {
+ public:
+    int Normalize(const char *payload) const
+    {
+        std::string_view view(payload == nullptr ? "" : payload);
+        return static_cast<int>(view.size());
+    }
+};
+
+}  // namespace rk::bridge
+
+extern "C" int rk_cpp_score(const char *payload)
+{
+    rk::bridge::BridgeHelper helper;
+    return helper.Normalize(payload) + rk_c_decode(payload);
+}
+"#;
+
+const CROSS_LANGUAGE_GO_BRIDGE: &str = r#"package bridge
+
+/*
+#cgo CFLAGS: -I../include
+#include <stdlib.h>
+#include "rk_bridge.h"
+*/
+import "C"
+
+import "unsafe"
+
+func RunCgoBridge(payload string) int {
+    cPayload := C.CString(payload)
+    defer C.free(unsafe.Pointer(cPayload))
+    return int(C.rk_c_decode(cPayload))
+}
+"#;
+
+const CROSS_LANGUAGE_RUST_BRIDGE: &str = r#"use std::ffi::CString;
+use std::os::raw::{c_char, c_int};
+
+unsafe extern "C" {
+    fn rk_c_decode(payload: *const c_char) -> c_int;
+}
+
+pub fn run_rust_bridge(payload: &str) -> i32 {
+    let c_payload = CString::new(payload).expect("fixture payload should not contain nul bytes");
+    unsafe { rk_c_decode(c_payload.as_ptr()) as i32 }
+}
+"#;
+
+const CROSS_LANGUAGE_FAKE_BRIDGE: &str = r#"#include "rk_bridge.h"
+
+int rk_cpp_score_fake(const char *payload)
+{
+    (void)payload;
+    return 0;
+}
 "#;
 
 const PYTHON_OPERATIONS_MD: &str = r#"# Syntax service operations

@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md) | [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> Document version: 2.0
-> Date: 2026-05-24
+> Document version: 2.1
+> Date: 2026-05-25
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -17,9 +17,10 @@ Installation and release are part of product architecture. Stable releases are v
 - Homebrew, Scoop, winget, or distro packages reference artifacts from the same release tag instead of rebuilding divergent snapshots.
 - Release tags use `vX.Y.Z`, `X.Y.Z`, or matching prerelease forms such as `vX.Y.Z-rc.1`; the numeric version must match `Cargo.toml` and `Cargo.lock` before the tag is pushed. Manual dry-run dispatches validate the same version contract without publishing crates.io or GitHub release artifacts, and the workflow default dry-run tag must be updated with each release version bump.
 - macOS x64 release jobs must use an active Intel runner label, such as `macos-15-intel`, rather than retired `macos-13` images. Artifact upload/download and attestation actions must stay on Node 24-compatible releases so the release workflow remains runnable after GitHub-hosted runner runtime migrations.
+- Linux GNU release jobs must build `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` artifacts on a glibc 2.31 baseline and fail the release if the resulting ELF requires any `GLIBC_*` symbol newer than 2.31. The CLI skill Linux x64 bundled asset must pass the same ABI check after packaging.
 - Release archive attestations use the generated `checksums.txt` as their subject manifest, so GitHub artifact attestations cover the same archive digests that users verify locally.
 - CLI version discovery uses configurable dual sources: GitHub Releases and crates.io. Detection must go through the `env`, `paths`, and `net::http` boundaries, inherit proxy, TLS, timeout, and runtime-cache policy, and ordinary commands may only notify about newer stable versions rather than silently replacing binaries.
-- GitHub Releases include a `relay-knowledge-cli-skill-<tag>.tar.gz` skill artifact built from `skills/relay-knowledge-cli`; its version follows `Cargo.toml` and is written into generated `SKILL.md` metadata as numeric semver. The skill artifact includes a root-level `README.md`, Linux x64 and Windows x64 binaries under `assets/`, and the skill instructs agents to prefer the matching bundled asset whenever `version --format json` succeeds. Agents use `PATH` only as a fallback or when the user explicitly requests the system install. The release workflow may also publish the same generated skill layout to ClawHub with `clawhub publish` when `CLAWHUB_TOKEN` is configured. This skill-over-CLI artifact is separate from MCP protocol packaging.
+- GitHub Releases include a `relay-knowledge-cli-skill-<tag>.tar.gz` skill artifact built from `skills/relay-knowledge-cli`; its version follows `Cargo.toml` and is written into generated `SKILL.md` metadata as numeric semver. The skill artifact includes a root-level `README.md`, Linux x64 and Windows x64 binaries under `assets/`, and the skill instructs agents to prefer the matching bundled asset whenever `version --format json` succeeds. Agents use `PATH` only as a fallback, when the host Linux glibc is older than the bundled asset baseline, or when the user explicitly requests the system install. The release workflow may also publish the same generated skill layout to ClawHub with `clawhub publish` when `CLAWHUB_TOKEN` is configured. This skill-over-CLI artifact is separate from MCP protocol packaging.
 
 ## 3. Installation Experience
 
@@ -59,6 +60,7 @@ restart, and post-upgrade doctor flow.
 ## 6. Acceptance Criteria
 
 - Release artifacts, checksums, versions, and documentation match each other.
+- Linux GNU release binaries and the skill Linux x64 bundled asset require no `GLIBC_*` symbol newer than 2.31.
 - The GitHub Release includes the CLI skill archive in `checksums.txt`, the archive contains the skill `README.md` plus Linux x64 and Windows x64 asset binaries, and ClawHub publication uses the same crate version and generated asset layout when enabled.
 - The CLI can explain when a newer stable version is available, JSON output remains machine-readable, and ordinary commands never auto-install an update.
 - Service installation uses systemd, launchd, or Windows Service instead of unmanaged loops.

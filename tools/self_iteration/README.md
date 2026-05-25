@@ -68,7 +68,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
+4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, the Linux glibc compatibility policy gate, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`; `accepted` means a git commit was created.
@@ -103,20 +103,22 @@ the current gate, metric, case, path, or algorithm objective. The direct history
 synthesis has a hard prompt budget cap, so long-running iteration does not
 expand linearly into the LLM context.
 
-The default profile is `fast`. It runs product and harness `fmt --check`, then a
-product debug build plus harness `cargo check`, and evaluates with
+The default profile is `fast`. It runs product and harness `fmt --check`, checks
+that the release workflow still enforces the glibc 2.31 Linux GNU baseline, then
+runs a product debug build plus harness `cargo check`, and evaluates with
 `target/debug/relay-knowledge`. It does not run the product release build, full
 clippy, full test suite, local-file fixtures, or research judge by default.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
-`typescript_syntax_fixture`, `nonstandard_layout_fixture`, `relay_teams`,
-`leveldb_cpp`, `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8
-normal query cases per repository while always preserving explicit guardrail
-cases, keeps 2 cross-repository threshold cases from the
-`temporal_go_workspace` repo-set, and runs the semantic/vector guardrail query.
-The TypeScript fixture keeps the external-import grep fallback guardrail in the
-default fast loop, and the nonstandard layout fixture keeps Python, TypeScript,
-Go, Java, C++, and Swift sources outside a top-level `src/` covered by fast
-guardrails. The same nonstandard layout fixture also carries fast guardrails for
+`cross_language_syntax_fixture`, `typescript_syntax_fixture`,
+`nonstandard_layout_fixture`, `relay_teams`, `leveldb_cpp`,
+`temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
+cases per repository while always preserving explicit guardrail cases, keeps 2
+cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
+runs the semantic/vector guardrail query. The TypeScript fixture keeps the
+external-import grep fallback guardrail in the default fast loop, and the
+nonstandard layout fixture keeps Python, TypeScript, Go, Java, C++, and Swift
+sources outside a top-level `src/` covered by fast guardrails. The same
+nonstandard layout fixture also carries fast guardrails for
 `repo query --kind sbom` over Cargo, npm, Go, Python, Maven BOM, Gradle, and
 Conan manifest or lock files, so dependency-inventory regressions are rejected
 by the default loop. The C fixture also includes explicit grep/text-fallback
@@ -131,7 +133,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
@@ -371,8 +373,9 @@ enumerating cases.
   evaluator.
 - Multi-language repository retrieval targets are split by language under
   `cases/repository_*_targets.json` so each language can evolve independently.
-  The default profile covers generated C/C++ syntax fixtures, relay-teams
-  Python/JavaScript, opencode TypeScript/TSX, and LevelDB C++; Linux C,
+  The default profile covers generated C/C++ syntax fixtures, a generated
+  C/C++/Go/Rust cross-language call fixture, relay-teams Python/JavaScript,
+  opencode TypeScript/TSX, and LevelDB C++; Linux C,
   Kubernetes Go,
   Spring Framework Java, RustFS Rust, Codex Python, nvm Bash, dotnet/runtime C#,
   OkHttp Kotlin, Laravel PHP, Rails Ruby, Scala 3, and Alamofire Swift remain behind
@@ -403,6 +406,11 @@ enumerating cases.
   using aliases, and header/source split. Their design and external repository
   commit pins are recorded in
   `docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md`.
+- The cross-language syntax fixture is also generated locally and stays in the
+  default fast profile. It covers C calling C++, C++ calling C, Go cgo calling C,
+  and Rust FFI calling C with caller and callee queries so the fast loop keeps
+  pressure on multi-language call graph retrieval without cloning another
+  external repository.
 - Additional generated syntax fixtures cover Python, JavaScript, TypeScript/TSX,
   Go, Java, Rust, Bash, C#, Kotlin, PHP, Ruby, Scala, and Swift. They keep
   language-specific cases compact and reproducible while real pinned

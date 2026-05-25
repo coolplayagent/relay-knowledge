@@ -28,7 +28,7 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-稳定版本通过 GitHub Releases 发布，包含 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64 的预构建压缩包。下载后先用 `checksums.txt` 校验，再将二进制文件放入 `PATH`。在原生 Windows ARM64 CI runner 可用之前，Windows ARM64 压缩包由 release workflow 交叉构建生成。
+稳定版本通过 GitHub Releases 发布，包含 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64 的预构建压缩包。下载后先用 `checksums.txt` 校验，再将二进制文件放入 `PATH`。Linux GNU 压缩包以 glibc 2.31 为 ABI baseline 构建和检查，可运行在 Ubuntu 20.04 同级或更新的 GNU/Linux 发行版上。在原生 Windows ARM64 CI runner 可用之前，Windows ARM64 压缩包由 release workflow 交叉构建生成。
 
 Rust 用户也可以从 crates.io 安装：
 
@@ -42,8 +42,8 @@ relay-knowledge service doctor
 `relay-knowledge-cli-skill-<tag>.tar.gz`，这是一个兼容 ClawHub
 的 skill，用于引导 LLM agent 通过 `relay-knowledge` CLI 使用本地图谱和代码仓库工作流。skill
 包会在 `assets/` 下内置 Linux x64 和 Windows x64 二进制；当匹配平台的内置二进制通过
-`version --format json` 校验时，agent 会优先使用它，只有内置二进制不可用或用户明确要求
-系统安装版本时才回退到 `PATH`。生成后的 `SKILL.md` metadata 会记录与 `Cargo.toml`
+`version --format json` 校验时，agent 会优先使用它，只有内置二进制不可用、Linux glibc
+低于 2.31，或用户明确要求系统安装版本时才回退到 `PATH`。生成后的 `SKILL.md` metadata 会记录与 `Cargo.toml`
 相同的数字版本。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个生成后的 skill
 布局发布到 ClawHub。skill 包还会携带根目录 `README.md`，供 registry 和包使用者查看：
 
@@ -141,6 +141,8 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 存储契约包含 v1 代码图数据面：tree-sitter 输出的版本化代码文件、符号、引用、代码块和解析状态诊断均通过存储 trait 提交，而非直接访问 SQLite。当前代码仓库索引支持 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash；不支持或降级的文件会回退为文本代码块。代码仓库 full index 使用受资源预算约束的 SQLite 批次和持久 checkpoint；大 scope 索引过程中 `repo status` 会显示 `indexing` 和已提交计数，旧的 fresh scope 在 finalize 成功前继续服务查询，finalize 阶段再基于同一 scope 的完整已落库事实解析跨 batch reference、include 和 call edge。冷启动 full `repo index` 会落持久化 code-index task 并立即返回 `task` handle；CLI 会启动有界单次 worker，`service run` 则用同一队列上的单个仓库索引 worker 消费任务。`repo status` 会报告 `active_task`、checkpoint 计数和 scope retention；后台任务成功后保留 active scope、最近两个完成 scope 以及未完成任务 scope，并淘汰更旧的仓库 scope。Git 分支、标签和工作树选择器会解析为带作用域的提交/树快照；已索引作用域可按显式引用查询；rebase 或强制移动的 HEAD 需要重新索引；相同树的分支会复用同一作用域，同时保留请求引用的审计元数据。
 
 代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用、导入和 SBOM 依赖命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析、有歧义、声明型或锁定型边误报为确定调用。
+
+代码仓库 source scope 不再局限于顶层 `src/` 布局：`external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root 下的真实源码会默认纳入索引，普通 `vendor/` 和 `third_party/` 这类大容量依赖转储仍需要显式 path opt-in。调用图检索也支持同仓静态跨语言边：C/C++ 互调、Go cgo `C.*` 和 Rust FFI/bindings 路径可解析为代码图证据，但这不等同于完整 build-system 或 linker 分析。
 
 代码仓库词法检索使用 SQLite FTS 候选表覆盖 symbol、reference、call、import、SBOM dependency 和 chunk。有效 path filter 会在 FTS 候选窗口内先过滤再进入有界评分；graph edge 候选在截断前按 BM25 排序；fuzzy symbol 召回可以命中任一查询词，而 typed graph edge 查询保持更窄语义；Rust 评分会识别 snake_case/CamelCase identifier 片段、多段符号名、调用方向上下文和声明形态 API chunk。`repo query --kind sbom` 会返回索引期从 Cargo、npm、Go、Python、Maven BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它不会执行包管理器、访问 registry，也不提供漏洞或许可证分析。Call excerpt 通过 `source_scope + symbol_snapshot_id` chunk lookup 与调用行包含条件定位，避免高 fan-out caller/callee 查询把一条 call edge 放大成多个无关 chunk 候选。代码仓库查询还会使用可选 ripgrep 兜底恢复精确源码文本：AST 和已索引词法层先执行，当 definition/reference/hybrid 存在具体召回缺口，或 import 指向未作为代码图 target 索引的 unresolved external dependency 时，再用有界 `rg` 搜索已索引 commit 内容。外部依赖兜底使用 unresolved target hint 而非任意用户查询文本，排序低于结构化 import-graph 证据，并标记 `text_fallback` 与诊断，提醒 agent 这是当前仓库源码证据，不是依赖库图谱证据。`rg` 缺失或超时只降级兜底层；结构化代码图结果仍可用，并会返回诊断信息。人工 agent 或维护者检查源码时优先使用 `rg`；如果本机未安装，可用排除 VCS 和 build 目录的有界 `grep -RIn` 继续搜索，不能因为缺少 ripgrep 就停止源码分析。
 

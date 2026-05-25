@@ -107,6 +107,7 @@ impl SnapshotBuild {
         identity::resolve_reference_targets(&self.symbols, &mut self.references);
         identity::resolve_import_targets(&self.files, &self.symbols, &mut self.imports);
         let symbols_by_path = build_symbol_path_index(&self.symbols);
+        let symbols_by_id = build_symbol_id_index(&self.symbols);
         self.calls = self
             .references
             .iter()
@@ -125,6 +126,14 @@ impl SnapshotBuild {
                         )
                     })
                     .unwrap_or((None, None));
+
+                let callee_name = reference
+                    .target_symbol_snapshot_id
+                    .as_deref()
+                    .and_then(|symbol_id| symbols_by_id.get(symbol_id))
+                    .map(|symbol| symbol.name.clone())
+                    .or_else(|| reference.target_hint.clone())
+                    .unwrap_or_else(|| reference.name.clone());
 
                 CodeCallRecord {
                     repository_id: reference.repository_id.clone(),
@@ -145,7 +154,7 @@ impl SnapshotBuild {
                     caller_symbol_snapshot_id,
                     caller_name,
                     callee_symbol_snapshot_id: reference.target_symbol_snapshot_id.clone(),
-                    callee_name: reference.name.clone(),
+                    callee_name,
                     target_hint: reference.target_hint.clone(),
                     resolution_state: reference.resolution_state.clone(),
                     confidence_basis_points: reference.confidence_basis_points,
@@ -206,6 +215,17 @@ fn build_symbol_path_index(
     index
 }
 
+fn build_symbol_id_index(
+    symbols: &[RepositoryCodeSymbolRecord],
+) -> BTreeMap<&str, &RepositoryCodeSymbolRecord> {
+    let mut index = BTreeMap::<&str, &RepositoryCodeSymbolRecord>::new();
+    for symbol in symbols {
+        index.insert(&symbol.symbol_snapshot_id, symbol);
+    }
+
+    index
+}
+
 fn caller_for_line<'a>(
     symbols_by_path: &'a BTreeMap<&str, Vec<&'a RepositoryCodeSymbolRecord>>,
     path: &str,
@@ -232,7 +252,9 @@ fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::RepositoryCodeRange;
+    use crate::domain::{
+        CodeRepositoryRegistration, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    };
 
     use super::*;
 
@@ -250,6 +272,38 @@ mod tests {
         assert_eq!(caller.name, "inner");
         assert!(caller_for_line(&index, "src/other.rs", 5).is_none());
         assert!(caller_for_line(&index, "src/missing.rs", 6).is_none());
+    }
+
+    #[test]
+    fn call_materialization_keeps_scoped_hint_and_resolved_callee_name() {
+        let registration =
+            CodeRepositoryRegistration::new("repo", "fixture", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration");
+        let mut build = SnapshotBuild::new(
+            &registration,
+            "commit".to_owned(),
+            "tree".to_owned(),
+            true,
+            1,
+            0,
+        );
+        build
+            .symbols
+            .push(symbol("c-definition", "src/c_entry.c", "rk_c_decode", 1, 3));
+        build
+            .references
+            .push(reference("ffi-call", "src/lib.rs", "ffi::rk_c_decode", 2));
+
+        let snapshot = build.finish();
+        let call = snapshot.calls.first().expect("call should materialize");
+
+        assert_eq!(call.callee_name, "rk_c_decode");
+        assert_eq!(call.target_hint.as_deref(), Some("ffi::rk_c_decode"));
+        assert_eq!(
+            call.callee_symbol_snapshot_id.as_deref(),
+            Some("c-definition")
+        );
+        assert_eq!(call.resolution_state, "resolved");
     }
 
     fn symbol(
@@ -276,6 +330,33 @@ mod tests {
             line_range: RepositoryCodeRange {
                 start: line_start,
                 end: line_end,
+            },
+        }
+    }
+
+    fn reference(
+        reference_id: &str,
+        path: &str,
+        name: &str,
+        line: u32,
+    ) -> RepositoryCodeReferenceRecord {
+        RepositoryCodeReferenceRecord {
+            repository_id: "repo".to_owned(),
+            source_scope: "scope".to_owned(),
+            reference_id: reference_id.to_owned(),
+            file_id: format!("file-{reference_id}"),
+            path: path.to_owned(),
+            name: name.to_owned(),
+            kind: "call".to_owned(),
+            target_symbol_snapshot_id: None,
+            target_hint: Some(name.to_owned()),
+            resolution_state: "unresolved".to_owned(),
+            confidence_basis_points: 2_500,
+            confidence_tier: "ambiguous".to_owned(),
+            byte_range: RepositoryCodeRange { start: 0, end: 1 },
+            line_range: RepositoryCodeRange {
+                start: line,
+                end: line,
             },
         }
     }

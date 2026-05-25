@@ -14,6 +14,8 @@ use super::{
     code_status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
+const MAX_CANDIDATE_PATH_FTS_TERMS: usize = 8;
+
 pub(super) fn file_fingerprints(
     connection: &mut Connection,
     repository_id: &str,
@@ -95,6 +97,145 @@ pub(super) fn file_candidate_paths_for_scope(
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+pub(super) fn file_candidate_paths_for_query_scope(
+    connection: &mut Connection,
+    source_scope: &str,
+    query: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    let paths = file_candidate_paths_from_search(
+        connection,
+        source_scope,
+        query,
+        path_filters,
+        language_filters,
+        limit,
+    )?;
+    if !paths.is_empty() {
+        return Ok(paths);
+    }
+
+    file_candidate_paths_for_scope(
+        connection,
+        source_scope,
+        path_filters,
+        language_filters,
+        limit,
+    )
+}
+
+fn file_candidate_paths_from_search(
+    connection: &mut Connection,
+    source_scope: &str,
+    query: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+    limit: usize,
+) -> Result<Vec<String>, StorageError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let Some(fts_query) = candidate_path_fts_query(query) else {
+        return Ok(Vec::new());
+    };
+    let path_filter = path_filter_sql_for_column("path", path_filters);
+    let language_filter = language_filter_sql_for_column("language_id", language_filters);
+    let sql = format!(
+        "
+        SELECT path
+        FROM code_repository_search
+        WHERE code_repository_search MATCH ?
+          AND source_scope = ?
+          {path_filter}
+          {language_filter}
+        GROUP BY path
+        ORDER BY MIN(rank) ASC, path ASC
+        LIMIT ?
+        "
+    );
+    let mut values = vec![Value::Text(fts_query), Value::Text(source_scope.to_owned())];
+    push_path_filter_values(&mut values, path_filters);
+    push_language_filter_values(&mut values, language_filters);
+    values.push(Value::Integer(limit as i64));
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(values), |row| row.get(0))?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+pub(super) fn candidate_path_fts_query(query: &str) -> Option<String> {
+    let terms = candidate_path_fts_terms(query)
+        .into_iter()
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+    (!terms.is_empty()).then(|| terms.join(" OR "))
+}
+
+fn candidate_path_fts_terms(query: &str) -> Vec<String> {
+    let terms = query
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .map(str::trim)
+        .filter(|term| !term.is_empty())
+        .fold(Vec::<String>::new(), |mut terms, term| {
+            if !terms
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(term))
+            {
+                terms.push(term.to_owned());
+            }
+            terms
+        });
+    if terms.len() <= MAX_CANDIDATE_PATH_FTS_TERMS {
+        return terms;
+    }
+
+    let mut ranked = terms
+        .iter()
+        .enumerate()
+        .map(|(position, term)| (candidate_path_term_priority(term), position, term))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(right.2))
+    });
+    let selected = ranked
+        .into_iter()
+        .take(MAX_CANDIDATE_PATH_FTS_TERMS)
+        .map(|(_, position, _)| position)
+        .collect::<BTreeSet<_>>();
+
+    terms
+        .into_iter()
+        .enumerate()
+        .filter_map(|(position, term)| selected.contains(&position).then_some(term))
+        .collect()
+}
+
+fn candidate_path_term_priority(term: &str) -> usize {
+    let length_score = term.chars().count().min(64);
+    let structure_bonus = if term
+        .chars()
+        .any(|character| character == '_' || character.is_ascii_uppercase())
+    {
+        16
+    } else {
+        0
+    };
+    let digit_bonus = if term.chars().any(|character| character.is_ascii_digit()) {
+        4
+    } else {
+        0
+    };
+
+    length_score + structure_bonus + digit_bonus
 }
 
 pub(super) fn apply_snapshot(

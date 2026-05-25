@@ -1,6 +1,7 @@
 {
   "include_files": [
     "cases/file_background_targets.json",
+    "cases/repository_grep_budget_targets.json",
     "cases/repository_python_syntax_fixture_targets.json",
     "cases/repository_python_targets.json",
     "cases/repository_javascript_syntax_fixture_targets.json",
@@ -12,6 +13,7 @@
     "cases/repository_bash_targets.json",
     "cases/repository_c_targets.json",
     "cases/repository_c_syntax_fixture_targets.json",
+    "cases/repository_cross_language_syntax_fixture_targets.json",
     "cases/repository_csharp_syntax_fixture_targets.json",
     "cases/repository_csharp_targets.json",
     "cases/repository_cpp_targets.json",

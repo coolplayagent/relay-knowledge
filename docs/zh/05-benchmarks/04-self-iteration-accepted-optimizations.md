@@ -5,6 +5,14 @@
 - 算法/架构：代码索引新增依赖清单事实层，把 Cargo、npm、Go、Python、Maven BOM、Gradle 与 Conan manifest/lockfile 解析为 `CodeDependencyRecord`，并写入 SQLite dependency 表和 FTS `dependency` 文档；`repo query --kind sbom`、repo-set、Web 与 MCP 共享同一 `CodeQueryKind::Sbom` 检索入口，按 source scope、path/language filter 与 freshness 状态返回结构化依赖证据。
 - 不变量/预期影响/风险：不改变现有 symbol/reference/import/call/chunk ranking、semantic/vector read model、env/paths/net、服务安装或 release artifact；SBOM 只来自仓库内 manifest/lockfile 的声明/锁定文本，不做漏洞扫描、许可证判定或 package manager 网络解析。预期解决 Issue #148 的仓库依赖软件清单缺口，并让 Java BOM、Gradle 与 Conan 依赖在 fast guardrail 中持续受保护；风险是 manifest 语法覆盖不完整或 lockfile 行号粗粒度，受 parser 单测、SQLite SBOM 查询测试、接口解析测试和 nonstandard layout fast cases 控制。
 - 策略关联：延续非标准目录 fixture 的通用能力覆盖，把依赖清单作为检索事实和评估 case，而不是枚举真实用户仓库、路径或 query；同时把业务文档与 self-iteration 算法记录纳入同一 patch，避免未来新增 kind 时漏掉 schema、接口和 guardrail 文档。
+## 候选优化说明：manual-issue-147-cross-language-call-graph
+- 算法/架构：调用目标解析在原始 target hint 外，为同仓跨语言边界增加受限 leaf candidate：C/C++ 互调保留直接符号名，Go 仅在 `.go` 文件中把 `C.<name>` 映射到 `<name>`，Rust/FFI 仅对 `ffi`、`bindings`、`libc` 或 `*_sys` 前缀生成 leaf；finalize 与 query path 只解析 callable symbol，并优先唯一实现而非 header/FFI signature-only declaration。self-iteration 通过默认 fast 中的 `cross_language_syntax_fixture` 覆盖 C 调 C++、C++ 调 C、Go cgo 调 C、Rust FFI 调 C 的 caller/callee 检索。
+- 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、ranking 权重、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或安装发布；能力边界是同仓静态代码图谱，不承诺完整 build-system/linker 解析、动态加载、宏展开生成调用、外部 prebuilt SDK 或未入索引 bindgen 文件。预期解决 Issue #147 中多语言仓库跨编译边界调用者/被调用者检索缺口；风险是 leaf alias 过宽导致误解析，受前缀白名单、Go path gate、callable-only、唯一实现优先、反例单测和 fast guardrail 控制。
+- 策略关联：延续跨文件关系解析的结构化 edge 证据边界，不用仓库、路径、case id 或 query 字符串特判；把能力稳定性放入默认 fast，避免后续优化退回单语言调用图假设。
+## 候选优化说明：manual-issue-154-query-aware-grep-candidates
+- 算法/架构：source-text fallback 需要宽 scope 候选路径时，SQLite 存储先用 query、path filter、language filter 在已索引 `code_repository_search` FTS read model 中按 rank 收敛文件路径；只有 query 无索引候选时才退回原有 scope path 枚举。应用层继续把 Git blob 物化和 `rg` 执行放在 blocking worker 边界内，且保持 256 文件、8 MiB blob、4096 字节行长和 3 秒 timeout 预算。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入内容、code query ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 或安装发布；不扩大 grep 候选预算，也不枚举仓库、路径、case id 或查询字符串。预期修复 issue #154 中宽范围代码地图/查询因 `ripgrep candidate file budget exhausted` 漏掉排序靠后相关文件的问题，并让结构化 symbol/definition 结果继续独立于 grep fallback；风险是 FTS 候选为空时仍可能报告预算耗尽，受 storage query-candidate 单测、真实 Git+rg 应用回归和 fast `grep_budget_fixture` guardrail 控制。
+- 策略关联：延续 accepted grep fallback 的有界降级与 source-text evidence 边界，避免通过全局放大候选文件数、递归 grep 全仓扫描或 fixture 特判修复单个问题。
 ## 候选优化说明：manual-nonstandard-source-layout
 - 算法/架构：代码索引新增 source-root layout 归一化层，import/module 解析不再只剥离顶层 `src/`，同时识别 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 与嵌套 JVM source root；TypeScript bare specifier 仅在索引中存在本地模块候选时解析，C/C++ include roots 支持非标准 `include/` 片段。self-iteration 新增 `nonstandard_layout_fixture` 并加入 fast 默认仓库，用 guardrail case 覆盖 Python、TypeScript、Go、Java、C++、Swift 的非 `src/` 源码。
 - 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、candidate window、ranking 权重、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或安装发布；普通 `vendor/`、`third_party/` 仍默认排除并需要显式 path filter opt in。预期解决 Issue #146 中非标准目录源码漏检和跨文件关系解析不足；风险是本地 bare module 或 include root 更容易被识别为本仓目标，受本地模块存在性、path/language filter、ambiguous resolution、vendor 边界单测和 fast guardrail 控制。
@@ -914,10 +922,6 @@
 - known degradations: metric:temporal_sdk_go_index_ms 503.0->565.0; metric:temporal_sdk_go_register_index_ms 564.0->646.0; metric:leveldb_cpp_index_ms 121.0->262.0; metric:leveldb_cpp_register_index_ms 187.0->303.0; metric:typescript_syntax_fixture_query_p95_ms 1616.0->1696.0
 - latency metrics: cargo_fmt_check_ms=1615ms; self_iteration_cargo_fmt_check_ms=263ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=102ms; temporal_samples_go_index_ms=144ms; temporal_samples_go_register_index_ms=205ms; temporal_sdk_go_index_ms=565ms; temporal_sdk_go_register_index_ms=646ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779626871
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779626871.patch`
@@ -927,10 +931,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.972908->0.9814465778455568; score_component:performance 0.849491->0.8969254324753153; metric:cargo_build_debug_ms 15782.0->223.0; metric:cpp_syntax_fixture_index_ms 181.0->40.0; metric:cpp_syntax_fixture_register_index_ms 242.0->101.0; metric:cpp_syntax_fixture_query_p95_ms 465.0->303.0; metric:relay_teams_query_p50_ms 202.0->167.0; metric:c_syntax_fixture_index_ms 222.0->124.0
 - known degradations: metric:temporal_sdk_go_index_ms 428.0->686.0; metric:temporal_sdk_go_register_index_ms 489.0->752.0; metric:relay_teams_index_ms 687.0->727.0; metric:relay_teams_register_index_ms 749.0->794.0; metric:relay_teams_query_p95_ms 586.0->629.0; metric:c_syntax_fixture_query_p50_ms 161.0->242.0; metric:leveldb_cpp_register_index_ms 263.0->303.0; metric:leveldb_cpp_query_p95_ms 203.0->304.0
 - latency metrics: cargo_fmt_check_ms=1574ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=223ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=686ms; temporal_sdk_go_register_index_ms=752ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=186ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
 ## run-1779644421
 
@@ -942,10 +942,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - known degradations: metric:python_syntax_fixture_index_ms 1310.0->1913.0; metric:python_syntax_fixture_register_index_ms 1492.0->1955.0; metric:ruby_syntax_fixture_index_ms 1512.0->2035.0; metric:ruby_syntax_fixture_register_index_ms 1594.0->2076.0; metric:php_syntax_fixture_index_ms 1473.0->1554.0; metric:opencode_typescript_query_p50_ms 524.0->704.0; metric:leveldb_cpp_query_p50_ms 404.0->727.0; metric:leveldb_cpp_query_p95_ms 4532.0->17776.0
 - latency metrics: cargo_fmt_check_ms=1634ms; self_iteration_cargo_fmt_check_ms=262ms; cargo_build_release_ms=85712ms; self_iteration_cargo_build_release_ms=142ms; cargo_clippy_ms=15450ms; cargo_test_ms=34380ms; self_iteration_cargo_clippy_ms=283ms; self_iteration_cargo_test_ms=202ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779652179
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779652179.patch`
@@ -956,10 +952,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - known degradations: score_component:performance 0.801698->0.7965817575444437; case_score:opencode_ts_implementation_data_migration_service_challenge 1.0->0.75; case_rank:opencode_ts_implementation_data_migration_service_challenge 1->2; case_rank:otel_go_repo_set_receiver_factory_create_logs 5->10; case_rank:otel_go_repo_set_filelog_component_type 6->null; metric:temporal_samples_go_index_ms 1634.0->3394.0; metric:temporal_samples_go_register_index_ms 1675.0->3435.0; metric:relay_teams_query_p50_ms 402.0->504.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_release_ms=86811ms; self_iteration_cargo_build_release_ms=243ms; cargo_clippy_ms=363ms; cargo_test_ms=14775ms; self_iteration_cargo_clippy_ms=242ms; self_iteration_cargo_test_ms=161ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779662884
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779662884.patch`
@@ -969,10 +961,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.872638->0.8883815451024761; score_component:performance 0.775995->0.822288778004426; score_component:research_judge 0.82->0.86; case_rank:otel_go_repo_set_filelog_component_type null->7; case_score:research_judge 0.82->0.86; metric:cargo_fmt_check_ms 1776.0->1676.0; metric:temporal_samples_go_index_ms 1637.0->1575.0; metric:scala_syntax_fixture_index_ms 9032.0->564.0
 - known degradations: metric:self_iteration_cargo_build_release_ms 122.0->222.0; metric:self_iteration_cargo_clippy_ms 202.0->262.0; metric:swift_syntax_fixture_index_ms 887.0->928.0; metric:swift_syntax_fixture_register_index_ms 928.0->968.0; metric:relay_teams_query_p50_ms 282.0->465.0; metric:otel_collector_contrib_index_ms 370144.0->399267.0; metric:otel_collector_contrib_register_index_ms 370185.0->399348.0; metric:opencode_typescript_index_ms 37265.0->47417.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_release_ms=87456ms; self_iteration_cargo_build_release_ms=222ms; cargo_clippy_ms=383ms; cargo_test_ms=14969ms; self_iteration_cargo_clippy_ms=262ms; self_iteration_cargo_test_ms=161ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
 ## run-1779664778
 
@@ -993,3 +981,9 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 
 ## run-1779720535
 - summary: accepted SBOM dependency inventory query scored 0.980875 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; `fast` passed 146/146 gates and 68/68 cases, including Cargo, npm, Go, Python, Maven BOM, Gradle, and Conan manifest/lockfile guardrails. Full patch, changed paths, metrics, and accepted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779720535.patch`, `.git/relay-knowledge-self-iteration/reports-v2/run-1779720535.json`, and progressive memory.
+
+## manual-glibc-release-guard-2026-05-25
+- changed paths: `.github/workflows/release.yml`, `.github/workflows/pr-checks.yml`, `tools/release/check_linux_glibc_compat.py`, `tools/self_iteration/src/evaluator_tail.rs`, release and skill docs
+- optimization: lock Linux GNU release and skill asset binaries to a glibc 2.31 ABI ceiling, and add a fast self-iteration policy gate that self-tests the checker and verifies release workflow coverage.
+- invariant: no retrieval scoring, parser, storage schema, runtime state, CLI JSON, or network behavior changes; the guard fails only release/packaging policy when a Linux GNU binary or workflow can reintroduce a higher GLIBC dependency.
+- expected impact: issue #156-style Ubuntu 20.04/GLIBC_2.31 startup regressions are caught before release or skill packaging, while fast self-iteration stays lightweight because it validates policy rather than building release artifacts.
