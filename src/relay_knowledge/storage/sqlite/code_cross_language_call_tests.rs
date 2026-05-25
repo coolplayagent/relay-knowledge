@@ -115,14 +115,17 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "function_declaration",
                     range(5, 5),
                 ),
-                symbol(
-                    "rust-ffi-encode-declaration",
-                    "rust-file",
-                    "crates/rust_bridge/src/lib.rs",
-                    "ffi::rk_c_encode",
-                    "rust",
-                    "function_declaration",
-                    range(6, 6),
+                with_signature(
+                    symbol(
+                        "rust-ffi-encode-declaration",
+                        "rust-file",
+                        "crates/rust_bridge/src/lib.rs",
+                        "ffi::rk_c_encode",
+                        "rust",
+                        "function",
+                        range(6, 6),
+                    ),
+                    "fn rk_c_encode(input: *const u8);",
                 ),
                 symbol(
                     "c-connect",
@@ -463,6 +466,14 @@ fn symbol(
         byte_range: range(0, 8),
         line_range,
     }
+}
+
+fn with_signature(
+    mut record: RepositoryCodeSymbolRecord,
+    signature: &str,
+) -> RepositoryCodeSymbolRecord {
+    record.signature = signature.to_owned();
+    record
 }
 
 fn reference(

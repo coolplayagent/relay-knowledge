@@ -4,7 +4,7 @@ use rusqlite::{Transaction, params};
 
 use crate::{
     domain::code_call_targets::{
-        call_target_name_candidates, callable_definition_symbol_kind, callable_target_symbol_kind,
+        call_target_name_candidates, callable_definition_symbol, callable_target_symbol_kind,
     },
     storage::StorageError,
 };
@@ -89,6 +89,7 @@ struct CallTargetSymbol {
     symbol_snapshot_id: String,
     path: String,
     kind: String,
+    signature: String,
 }
 
 struct CallReference {
@@ -110,7 +111,7 @@ impl CallTargetIndex {
     fn load(transaction: &Transaction<'_>, source_scope: &str) -> Result<Self, StorageError> {
         let mut statement = transaction.prepare(
             "
-            SELECT symbol_snapshot_id, path, name, kind
+            SELECT symbol_snapshot_id, path, name, kind, signature
             FROM code_repository_symbols
             WHERE source_scope = ?1
             ",
@@ -121,6 +122,7 @@ impl CallTargetIndex {
                 symbol_snapshot_id: row.get(0)?,
                 path: row.get(1)?,
                 kind: row.get(3)?,
+                signature: row.get(4)?,
             };
             Ok((name, symbol))
         })?;
@@ -160,7 +162,7 @@ impl CallTargetIndex {
             match self.resolve_candidate(&candidate, reference_path) {
                 TargetResolution::Unresolved => {}
                 TargetResolution::Resolved(symbol, _) => {
-                    if callable_definition_symbol_kind(&symbol.kind) {
+                    if callable_definition_symbol(&symbol.kind, &symbol.signature) {
                         return TargetResolution::Resolved(symbol, target_hint);
                     }
                     deferred_resolution.get_or_insert((symbol, target_hint));
@@ -223,7 +225,7 @@ fn call_target_hint(reference_name: &str, candidate: &str) -> String {
 fn unique_preferred_callable(symbols: &[CallTargetSymbol]) -> Option<CallTargetSymbol> {
     let definitions = symbols
         .iter()
-        .filter(|symbol| callable_definition_symbol_kind(&symbol.kind))
+        .filter(|symbol| callable_definition_symbol(&symbol.kind, &symbol.signature))
         .take(2)
         .cloned()
         .collect::<Vec<_>>();

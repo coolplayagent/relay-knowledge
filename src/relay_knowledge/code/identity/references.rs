@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::domain::{
     RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     code_call_targets::{
-        call_target_name_candidates, callable_definition_symbol_kind, callable_target_symbol_kind,
+        call_target_name_candidates, callable_definition_symbol, callable_target_symbol_kind,
     },
 };
 
@@ -98,7 +98,7 @@ fn resolve_call_reference_target<'a>(
                 ambiguous_target_hint.get_or_insert(target_hint);
             }
             Resolution::Resolved(symbol, _) => {
-                if callable_definition_symbol_kind(&symbol.kind) {
+                if callable_definition_symbol(&symbol.kind, &symbol.signature) {
                     return Resolution::Resolved(symbol, target_hint);
                 }
                 deferred_resolution.get_or_insert((symbol, target_hint));
@@ -195,7 +195,7 @@ fn unique_preferred_callable<'a>(
     let candidates = candidates?;
     let definitions = candidates
         .iter()
-        .filter(|symbol| callable_definition_symbol_kind(&symbol.kind))
+        .filter(|symbol| callable_definition_symbol(&symbol.kind, &symbol.signature))
         .copied()
         .collect::<Vec<_>>();
     match definitions.as_slice() {
@@ -361,6 +361,28 @@ mod tests {
             symbol("c-definition", "src/c_entry.c", "rk_c_decode"),
         ];
         symbols[0].kind = "function_declaration".to_owned();
+        let mut references = vec![reference("ffi-call", "src/lib.rs", "ffi::rk_c_decode")];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(
+            references[0].target_symbol_snapshot_id.as_deref(),
+            Some("c-definition")
+        );
+        assert_eq!(
+            references[0].target_hint.as_deref(),
+            Some("ffi::rk_c_decode")
+        );
+        assert_eq!(references[0].resolution_state, "resolved");
+    }
+
+    #[test]
+    fn call_resolution_treats_signature_only_functions_as_declarations() {
+        let mut symbols = vec![
+            symbol("ffi-declaration", "src/bindings.rs", "ffi::rk_c_decode"),
+            symbol("c-definition", "src/c_entry.c", "rk_c_decode"),
+        ];
+        symbols[0].signature = "fn rk_c_decode(input: *const u8);".to_owned();
         let mut references = vec![reference("ffi-call", "src/lib.rs", "ffi::rk_c_decode")];
 
         resolve_reference_targets(&symbols, &mut references);
