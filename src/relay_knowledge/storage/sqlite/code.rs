@@ -66,6 +66,10 @@ mod code_batch_finalize_typescript_tests;
 mod code_batch_search_tests;
 
 #[cfg(test)]
+#[path = "code_snapshot_progress_tests.rs"]
+mod code_snapshot_progress_tests;
+
+#[cfg(test)]
 #[path = "code_query_accuracy_tests.rs"]
 mod code_query_accuracy_tests;
 

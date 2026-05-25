@@ -45,6 +45,7 @@ pub(crate) fn extract_feature_flags(
     let mut records = Vec::new();
     let mut byte_start = 0usize;
     let config_file = looks_like_config_file(input.path);
+    let mut comment_state = CommentState::default();
     for (line_index, segment) in input.content.split_inclusive('\n').enumerate() {
         let line = segment.trim_end_matches('\n').trim_end_matches('\r');
         collect_line_records(
@@ -55,6 +56,7 @@ pub(crate) fn extract_feature_flags(
                 line_number: line_index.saturating_add(1),
                 byte_start,
                 config_file,
+                skip_for_comment: comment_state.skip_line(line, &input),
             },
         )?;
         byte_start = byte_start.saturating_add(segment.len());
@@ -74,17 +76,21 @@ struct LineContext<'a, 'input> {
     line_number: usize,
     byte_start: usize,
     config_file: bool,
+    skip_for_comment: bool,
 }
 
 fn collect_line_records(
     records: &mut Vec<CodeFeatureFlagRecord>,
     context: LineContext<'_, '_>,
 ) -> Result<(), DomainError> {
-    if line_is_comment(context.line) {
+    if context.skip_for_comment {
         return Ok(());
     }
 
     let mut line_records = Vec::new();
+    for key in preprocessor_flag_keys(context.line, context.input.language_id) {
+        line_records.push(("preprocessor_symbol", key, "guards_code"));
+    }
     for key in env_keys(context.line) {
         line_records.push(("env_var", key, usage_edge_kind(context.line)));
     }
@@ -173,12 +179,40 @@ fn feature_flag_record(
     })
 }
 
-fn line_is_comment(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with("//")
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("/*")
-        || trimmed.starts_with('*')
+#[derive(Default)]
+struct CommentState {
+    in_block_comment: bool,
+}
+
+impl CommentState {
+    fn skip_line(&mut self, line: &str, input: &FeatureFlagFileInput<'_>) -> bool {
+        let trimmed = line.trim_start();
+        if self.in_block_comment {
+            if trimmed.contains("*/") {
+                self.in_block_comment = false;
+            }
+            return true;
+        }
+        if trimmed.starts_with("/*") {
+            self.in_block_comment = !trimmed.contains("*/");
+            return true;
+        }
+
+        trimmed.starts_with("//")
+            || trimmed.starts_with('*')
+            || (trimmed.starts_with('#') && hash_starts_comment(input))
+    }
+}
+
+fn hash_starts_comment(input: &FeatureFlagFileInput<'_>) -> bool {
+    if looks_like_config_file(input.path) {
+        return true;
+    }
+
+    matches!(
+        input.language_id,
+        "python" | "ruby" | "bash" | "php" | "unknown"
+    )
 }
 
 fn env_keys(line: &str) -> Vec<String> {
@@ -207,6 +241,76 @@ fn config_read_keys(line: &str) -> Vec<String> {
     }
 
     keys
+}
+
+fn preprocessor_flag_keys(line: &str, language_id: &str) -> Vec<String> {
+    if !matches!(language_id, "c" | "cpp" | "csharp") {
+        return Vec::new();
+    }
+    let trimmed = line.trim_start();
+    let remainder = if let Some(remainder) = trimmed.strip_prefix("#ifdef") {
+        remainder
+    } else if let Some(remainder) = trimmed.strip_prefix("#ifndef") {
+        remainder
+    } else if let Some(remainder) = trimmed.strip_prefix("#if") {
+        remainder
+    } else {
+        return Vec::new();
+    };
+
+    let mut keys = Vec::new();
+    collect_defined_preprocessor_keys(remainder, &mut keys);
+    if let Some(key) = first_preprocessor_identifier(remainder) {
+        push_unique(&mut keys, key);
+    }
+
+    keys
+}
+
+fn collect_defined_preprocessor_keys(value: &str, keys: &mut Vec<String>) {
+    let mut start = 0usize;
+    while let Some(relative_index) = value[start..].find("defined") {
+        let defined_start = start + relative_index + "defined".len();
+        let after_defined = value[defined_start..].trim_start();
+        let candidate = if let Some(remainder) = after_defined.strip_prefix('(') {
+            remainder
+                .split_once(')')
+                .map(|(identifier, _)| identifier.trim())
+        } else {
+            Some(
+                after_defined
+                    .split(|character: char| {
+                        !(character.is_ascii_alphanumeric() || character == '_')
+                    })
+                    .next()
+                    .unwrap_or_default(),
+            )
+        };
+        if let Some(identifier) = candidate
+            && valid_preprocessor_key(identifier)
+        {
+            push_unique(keys, identifier.to_owned());
+        }
+        start = defined_start.saturating_add(1);
+    }
+}
+
+fn first_preprocessor_identifier(value: &str) -> Option<String> {
+    let identifier = value
+        .trim_start()
+        .trim_start_matches('(')
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .find(|part| !part.is_empty())?;
+    valid_preprocessor_key(identifier).then(|| identifier.to_owned())
+}
+
+fn valid_preprocessor_key(key: &str) -> bool {
+    valid_source_key(key)
+        && key
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && !matches!(key, "defined" | "if" | "ifdef" | "ifndef")
 }
 
 fn collect_quoted_arguments(line: &str, pattern: &str, keys: &mut Vec<String>) {
@@ -387,13 +491,74 @@ mod tests {
 
     #[test]
     fn ignores_comment_only_feature_flag_examples() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "src/app.py",
+            language_id: "python",
+            content:
+                "// std::env::var(\"COMMENTED_FLAG\")\n# config.get_bool(\"commented\")\nif config.get_bool(\"live\") {}\n",
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
+    fn ignores_flags_inside_block_comments() {
         let records = extract_feature_flags(input(
-            "// std::env::var(\"COMMENTED_FLAG\")\n# config.get_bool(\"commented\")\nif config.get_bool(\"live\") {}\n",
+            "/*\nstd::env::var(\"COMMENTED_FLAG\");\n*/\nif config.get_bool(\"live\") {}\n",
         ))
         .expect("feature flag records should extract");
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
+    fn extracts_preprocessor_feature_gates() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "src/lib.c",
+            language_id: "c",
+            content: "#ifdef FEATURE_X\n#endif\n#if FEATURE_Y && defined(FEATURE_Z)\n#endif\n",
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 3);
+        assert!(records.iter().any(|record| {
+            record.source_kind == "preprocessor_symbol" && record.source_key == "FEATURE_X"
+        }));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.source_key == "FEATURE_Y")
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.source_key == "FEATURE_Z")
+        );
+    }
+
+    #[test]
+    fn treats_hash_lines_as_comments_in_config_files() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: ".env",
+            language_id: "unknown",
+            content: "# CHECKOUT_V2=true\nPAYMENTS_V2=true\n",
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "PAYMENTS_V2");
     }
 
     #[test]

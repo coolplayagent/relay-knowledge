@@ -276,6 +276,7 @@ pub(super) fn apply_snapshot(
                 .saturating_add(snapshot.references.len())
                 .saturating_add(snapshot.imports.len())
                 .saturating_add(snapshot.calls.len())
+                .saturating_add(snapshot.feature_flags.len())
                 .saturating_add(snapshot.chunks.len())
                 .saturating_add(snapshot.diagnostics.len()),
             skipped_file_count: snapshot.skipped_unchanged_count,
