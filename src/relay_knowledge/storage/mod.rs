@@ -28,10 +28,10 @@ pub use canvas::{
 };
 pub use code::{
     CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-    CodeIndexTaskSeed, CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
-    CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
-    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
-    CodeScopeRetentionRequest,
+    CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
+    CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
+    CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed,
+    CodeRepositoryStore, CodeScopeRetentionRequest,
 };
 pub use file_index::{
     FileIndexDiagnostics, FileIndexEntry, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,

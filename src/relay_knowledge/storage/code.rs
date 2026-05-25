@@ -46,6 +46,16 @@ pub struct CodeIndexTaskClaimRequest {
     pub now_ms: u64,
 }
 
+/// Lease renewal request for an actively running code index task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeIndexTaskLeaseRenewal {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub attempt_count: u32,
+    pub lease_duration_ms: u64,
+    pub now_ms: u64,
+}
+
 /// Completion report guarded by task lease and attempt token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskCompletion {
@@ -169,6 +179,29 @@ pub trait CodeRepositoryStore: Send + Sync {
         &self,
         request: CodeIndexTaskClaimRequest,
     ) -> StorageFuture<'_, Option<CodeIndexTaskRecord>>;
+
+    fn recover_code_index_task_leases(
+        &self,
+        _now_ms: u64,
+        _max_attempts: u32,
+    ) -> StorageFuture<'_, ()> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "code index task lease recovery is unavailable".to_owned(),
+            ))
+        })
+    }
+
+    fn renew_code_index_task_lease(
+        &self,
+        _request: CodeIndexTaskLeaseRenewal,
+    ) -> StorageFuture<'_, CodeIndexTaskRecord> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "code index task lease renewal is unavailable".to_owned(),
+            ))
+        })
+    }
 
     fn complete_code_index_task(
         &self,

@@ -73,6 +73,16 @@ impl RelayKnowledgeService {
         request: CodeIndexRequest,
         context: RequestContext,
     ) -> Result<CodeRepositoryIndexResponse, ApiError> {
+        self.index_code_repository_inner(request, context, None)
+            .await
+    }
+
+    async fn index_code_repository_inner(
+        &self,
+        request: CodeIndexRequest,
+        context: RequestContext,
+        task_lease: Option<CodeIndexTaskLeaseContext>,
+    ) -> Result<CodeRepositoryIndexResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
         if let Some(response) = self
@@ -84,31 +94,14 @@ impl RelayKnowledgeService {
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
         let summary = if request.mode == CodeIndexMode::Full {
-            let resource_budget = CodeIndexResourceBudget::default();
-            let mut plan = run_blocking_code(move || {
-                prepare_full_index_plan(registration, selector, resource_budget)
-            })
-            .await?;
-            let session = plan.session();
-            store
-                .begin_code_index_session(session.clone())
-                .await
-                .map_err(storage_api_error)?;
-            loop {
-                let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
-                plan = next_plan;
-                let Some(batch) = batch else {
-                    break;
-                };
-                store
-                    .apply_code_index_batch(batch)
-                    .await
-                    .map_err(storage_api_error)?;
-            }
-            store
-                .finalize_code_index_session(session)
-                .await
-                .map_err(storage_api_error)?
+            self.apply_full_code_index(
+                &store,
+                registration,
+                selector,
+                CodeIndexResourceBudget::default(),
+                task_lease,
+            )
+            .await?
         } else {
             let previous = previous_fingerprints_for_index(&store, &status, &request).await?;
             let mode = request.mode;
@@ -141,6 +134,53 @@ impl RelayKnowledgeService {
             summary,
             status,
         })
+    }
+
+    async fn apply_full_code_index(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+        registration: crate::domain::CodeRepositoryRegistration,
+        selector: CodeRepositorySelector,
+        resource_budget: CodeIndexResourceBudget,
+        task_lease: Option<CodeIndexTaskLeaseContext>,
+    ) -> Result<crate::domain::CodeIndexSummary, ApiError> {
+        let mut plan = run_blocking_code(move || {
+            prepare_full_index_plan(registration, selector, resource_budget)
+        })
+        .await?;
+        let session = plan.session();
+        store
+            .begin_code_index_session(session.clone())
+            .await
+            .map_err(storage_api_error)?;
+        loop {
+            let (next_plan, batch) = run_blocking_code(move || plan.parse_next_batch()).await?;
+            plan = next_plan;
+            let Some(batch) = batch else {
+                break;
+            };
+            store
+                .apply_code_index_batch(batch)
+                .await
+                .map_err(storage_api_error)?;
+            if let Some(lease) = &task_lease {
+                store
+                    .renew_code_index_task_lease(crate::storage::CodeIndexTaskLeaseRenewal {
+                        task_id: lease.task_id.clone(),
+                        lease_owner: lease.lease_owner.clone(),
+                        attempt_count: lease.attempt_count,
+                        lease_duration_ms: lease.lease_duration_ms,
+                        now_ms: now_millis(),
+                    })
+                    .await
+                    .map_err(storage_api_error)?;
+            }
+        }
+
+        store
+            .finalize_code_index_session(session)
+            .await
+            .map_err(storage_api_error)
     }
 
     /// Starts a repository index request, queueing cold full indexes for background execution.
@@ -268,7 +308,18 @@ impl RelayKnowledgeService {
             }
         };
         request.repository.ref_selector = task.resolved_commit_sha.clone();
-        let result = self.index_code_repository(request, context).await;
+        let result = self
+            .index_code_repository_inner(
+                request,
+                context,
+                Some(CodeIndexTaskLeaseContext {
+                    task_id: task.task_id.clone(),
+                    lease_owner: lease_owner.clone(),
+                    attempt_count: task.attempt_count,
+                    lease_duration_ms: CODE_INDEX_TASK_LEASE_MS,
+                }),
+            )
+            .await;
         match result {
             Ok(response) => {
                 let completed = store
@@ -633,6 +684,10 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryStatusResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &selector.repository).await?;
+        store
+            .recover_code_index_task_leases(now_millis(), CODE_INDEX_TASK_MAX_ATTEMPTS)
+            .await
+            .map_err(storage_api_error)?;
         let active_task = store
             .active_code_index_task(status.repository_id.clone())
             .await
@@ -722,6 +777,14 @@ async fn required_code_repository(
         .ok_or_else(|| {
             ApiError::invalid_argument(format!("code repository '{repository}' is not registered"))
         })
+}
+
+#[derive(Debug, Clone)]
+struct CodeIndexTaskLeaseContext {
+    task_id: String,
+    lease_owner: String,
+    attempt_count: u32,
+    lease_duration_ms: u64,
 }
 
 fn registration_from_status(

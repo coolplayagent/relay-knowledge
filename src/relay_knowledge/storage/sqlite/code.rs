@@ -175,6 +175,23 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run(move |connection| code_tasks::claim_task(connection, request))
     }
 
+    fn recover_code_index_task_leases(
+        &self,
+        now_ms: u64,
+        max_attempts: u32,
+    ) -> StorageFuture<'_, ()> {
+        self.run(move |connection| {
+            code_tasks::recover_expired_task_leases(connection, now_ms, max_attempts)
+        })
+    }
+
+    fn renew_code_index_task_lease(
+        &self,
+        request: crate::storage::CodeIndexTaskLeaseRenewal,
+    ) -> StorageFuture<'_, crate::domain::CodeIndexTaskRecord> {
+        self.run(move |connection| code_tasks::renew_task_lease(connection, request))
+    }
+
     fn complete_code_index_task(
         &self,
         request: crate::storage::CodeIndexTaskCompletion,
