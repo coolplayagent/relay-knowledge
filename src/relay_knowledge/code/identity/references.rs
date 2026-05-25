@@ -79,6 +79,7 @@ fn resolve_call_reference_target<'a>(
     by_name_and_path: &BTreeMap<(&str, &str), Vec<&'a RepositoryCodeSymbolRecord>>,
 ) -> Resolution<'a> {
     for candidate in call_target_name_candidates(&reference.name) {
+        let target_hint = call_target_hint(&reference.name, &candidate);
         match resolve_reference_target(
             &candidate,
             by_name.get(candidate.as_str()).map(std::vec::Vec::as_slice),
@@ -90,16 +91,24 @@ fn resolve_call_reference_target<'a>(
                 if let Some(symbol) = unique_preferred_callable(
                     by_name.get(candidate.as_str()).map(std::vec::Vec::as_slice),
                 ) {
-                    return Resolution::Resolved(symbol, candidate);
+                    return Resolution::Resolved(symbol, target_hint);
                 }
-                return Resolution::Ambiguous(candidate);
+                return Resolution::Ambiguous(target_hint);
             }
-            Resolution::Resolved(symbol, _) => return Resolution::Resolved(symbol, candidate),
+            Resolution::Resolved(symbol, _) => return Resolution::Resolved(symbol, target_hint),
             Resolution::Unresolved => {}
         }
     }
 
     Resolution::Unresolved
+}
+
+fn call_target_hint(reference_name: &str, candidate: &str) -> String {
+    if candidate == reference_name {
+        candidate.to_owned()
+    } else {
+        reference_name.to_owned()
+    }
 }
 
 fn resolve_reference_target<'a>(
@@ -213,28 +222,45 @@ mod tests {
 
         assert!(references.iter().all(|reference| {
             reference.target_symbol_snapshot_id.as_deref() == Some("c-definition")
-                && reference.target_hint.as_deref() == Some("rk_c_decode")
                 && reference.resolution_state == "resolved"
         }));
+        assert_eq!(references[0].target_hint.as_deref(), Some("C.rk_c_decode"));
+        assert_eq!(
+            references[1].target_hint.as_deref(),
+            Some("ffi::rk_c_decode")
+        );
     }
 
     #[test]
     fn call_resolution_does_not_leaf_alias_ordinary_namespaced_calls() {
         let symbols = vec![symbol("plain-connect", "src/socket.c", "connect")];
-        let mut references = vec![reference(
-            "rust-module-call",
-            "crates/app/src/lib.rs",
-            "module::connect",
-        )];
+        let mut references = vec![
+            reference(
+                "rust-module-call",
+                "crates/app/src/lib.rs",
+                "module::connect",
+            ),
+            reference(
+                "rust-module-sys-call",
+                "crates/app/src/lib.rs",
+                "module::sys::connect",
+            ),
+        ];
 
         resolve_reference_targets(&symbols, &mut references);
 
-        assert_eq!(references[0].target_symbol_snapshot_id, None);
+        assert!(references.iter().all(|reference| {
+            reference.target_symbol_snapshot_id.is_none()
+                && reference.resolution_state == "unresolved"
+        }));
         assert_eq!(
             references[0].target_hint.as_deref(),
             Some("module::connect")
         );
-        assert_eq!(references[0].resolution_state, "unresolved");
+        assert_eq!(
+            references[1].target_hint.as_deref(),
+            Some("module::sys::connect")
+        );
     }
 
     fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {

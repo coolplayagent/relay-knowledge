@@ -34,12 +34,12 @@ pub(super) fn resolve_references(
     )?;
     for reference in references {
         match index.resolve(&reference.name, &reference.path) {
-            TargetResolution::Resolved(symbol) => {
+            TargetResolution::Resolved(symbol, target_hint) => {
                 update.execute(params![
                     source_scope,
                     reference.reference_id,
                     symbol.symbol_snapshot_id,
-                    symbol.name,
+                    target_hint,
                     "resolved",
                     8_000_u16,
                     "inferred"
@@ -71,7 +71,6 @@ struct CallTargetIndex {
 struct CallTargetSymbol {
     symbol_snapshot_id: String,
     path: String,
-    name: String,
     kind: String,
 }
 
@@ -82,7 +81,7 @@ struct CallReference {
 }
 
 enum TargetResolution {
-    Resolved(CallTargetSymbol),
+    Resolved(CallTargetSymbol, String),
     Ambiguous(String),
     Unresolved,
 }
@@ -97,17 +96,18 @@ impl CallTargetIndex {
             ",
         )?;
         let rows = statement.query_map(params![source_scope], |row| {
-            Ok(CallTargetSymbol {
+            let name: String = row.get(2)?;
+            let symbol = CallTargetSymbol {
                 symbol_snapshot_id: row.get(0)?,
                 path: row.get(1)?,
-                name: row.get(2)?,
                 kind: row.get(3)?,
-            })
+            };
+            Ok((name, symbol))
         })?;
         let mut by_name = BTreeMap::<String, Vec<CallTargetSymbol>>::new();
-        for symbol in rows {
-            let symbol = symbol?;
-            by_name.entry(symbol.name.clone()).or_default().push(symbol);
+        for row in rows {
+            let (name, symbol) = row?;
+            by_name.entry(name).or_default().push(symbol);
         }
 
         Ok(Self { by_name })
@@ -119,9 +119,13 @@ impl CallTargetIndex {
 
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
         for candidate in call_target_name_candidates(name) {
+            let target_hint = call_target_hint(name, &candidate);
             match self.resolve_candidate(&candidate, reference_path) {
                 TargetResolution::Unresolved => {}
-                resolution => return resolution,
+                TargetResolution::Resolved(symbol, _) => {
+                    return TargetResolution::Resolved(symbol, target_hint);
+                }
+                TargetResolution::Ambiguous(_) => return TargetResolution::Ambiguous(target_hint),
             }
         }
 
@@ -133,7 +137,7 @@ impl CallTargetIndex {
             return TargetResolution::Unresolved;
         };
         if let [symbol] = symbols.as_slice() {
-            return TargetResolution::Resolved(symbol.clone());
+            return TargetResolution::Resolved(symbol.clone(), name.to_owned());
         }
         let same_path = symbols
             .iter()
@@ -142,13 +146,21 @@ impl CallTargetIndex {
             .cloned()
             .collect::<Vec<_>>();
         if let [symbol] = same_path.as_slice() {
-            return TargetResolution::Resolved(symbol.clone());
+            return TargetResolution::Resolved(symbol.clone(), name.to_owned());
         }
         if let Some(symbol) = unique_preferred_callable(symbols) {
-            return TargetResolution::Resolved(symbol);
+            return TargetResolution::Resolved(symbol, name.to_owned());
         }
 
         TargetResolution::Ambiguous(name.to_owned())
+    }
+}
+
+fn call_target_hint(reference_name: &str, candidate: &str) -> String {
+    if candidate == reference_name {
+        candidate.to_owned()
+    } else {
+        reference_name.to_owned()
     }
 }
 

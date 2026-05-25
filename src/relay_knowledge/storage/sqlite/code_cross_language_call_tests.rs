@@ -134,6 +134,13 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "module::connect",
                     range(12, 12),
                 ),
+                reference(
+                    "rust-module-sys-connect",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "module::sys::connect",
+                    range(13, 13),
+                ),
             ],
             imports: Vec::new(),
             feature_flags: Vec::new(),
@@ -156,9 +163,27 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
     assert!(c_caller_paths.contains("src/cpp_bridge.cpp"));
     assert!(c_caller_paths.contains("bridge/go_bridge.go"));
     assert!(c_caller_paths.contains("crates/rust_bridge/src/lib.rs"));
-    assert!(c_callers.iter().all(|hit| {
-        hit.edge_target_hint.as_deref() == Some("rk_c_decode")
-            && hit.edge_resolution_state.as_deref() == Some("resolved")
+    assert!(
+        c_callers
+            .iter()
+            .all(|hit| hit.edge_resolution_state.as_deref() == Some("resolved"))
+    );
+    assert!(c_callers.iter().any(|hit| {
+        hit.path == "src/cpp_bridge.cpp" && hit.edge_target_hint.as_deref() == Some("rk_c_decode")
+    }));
+    assert!(c_callers.iter().any(|hit| {
+        hit.path == "bridge/go_bridge.go"
+            && hit.edge_target_hint.as_deref() == Some("C.rk_c_decode")
+    }));
+    assert!(c_callers.iter().any(|hit| {
+        hit.path == "crates/rust_bridge/src/lib.rs"
+            && hit.edge_target_hint.as_deref() == Some("ffi::rk_c_decode")
+    }));
+
+    let scoped_rust_callers = search(&store, "ffi::rk_c_decode", CodeQueryKind::Callers).await;
+    assert!(scoped_rust_callers.iter().any(|hit| {
+        hit.path == "crates/rust_bridge/src/lib.rs"
+            && hit.edge_target_hint.as_deref() == Some("ffi::rk_c_decode")
     }));
 
     let cpp_callers = search(&store, "rk_cpp_score", CodeQueryKind::Callers).await;
@@ -176,6 +201,14 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
     assert_eq!(namespaced_connect.0, "unresolved");
     assert_eq!(namespaced_connect.1, None);
     assert_eq!(namespaced_connect.2.as_deref(), Some("module::connect"));
+
+    let module_sys_connect = reference_resolution(&store, "rust-module-sys-connect").await;
+    assert_eq!(module_sys_connect.0, "unresolved");
+    assert_eq!(module_sys_connect.1, None);
+    assert_eq!(
+        module_sys_connect.2.as_deref(),
+        Some("module::sys::connect")
+    );
 }
 
 async fn registered_store() -> SqliteGraphStore {
