@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, Transaction, params, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -98,45 +98,9 @@ fn search_with_status(
         .map(query_terms)
         .unwrap_or_default();
     let retrieval_request = retrieval_like_request(request)?;
-    let mut statement = connection.prepare(
-        "
-        SELECT flag.feature_flag_id, flag.usage_id, flag.file_id, flag.path, flag.language_id,
-               flag.name, flag.source_kind, flag.source_key, flag.edge_kind,
-               flag.confidence_basis_points, flag.confidence_tier,
-               flag.byte_start, flag.byte_end, flag.line_start, flag.line_end, flag.excerpt,
-               (
-                   SELECT symbol_snapshot_id
-                   FROM code_repository_symbols symbol
-                   WHERE symbol.source_scope = flag.source_scope
-                     AND symbol.path = flag.path
-                     AND symbol.line_start <= flag.line_start
-                     AND symbol.line_end >= flag.line_start
-                   ORDER BY symbol.line_start DESC, symbol.line_end ASC
-                   LIMIT 1
-               ) AS related_symbol_snapshot_id,
-               (
-                   SELECT name
-                   FROM code_repository_symbols symbol
-                   WHERE symbol.source_scope = flag.source_scope
-                     AND symbol.path = flag.path
-                     AND symbol.line_start <= flag.line_start
-                     AND symbol.line_end >= flag.line_start
-                   ORDER BY symbol.line_start DESC, symbol.line_end ASC
-                   LIMIT 1
-               ) AS related_symbol_name
-        FROM code_repository_feature_flags flag
-        WHERE flag.source_scope = ?1
-        ORDER BY flag.name ASC,
-                 CASE flag.edge_kind
-                   WHEN 'guards_code' THEN 0
-                   WHEN 'defines_config' THEN 1
-                   ELSE 2
-                 END,
-                 flag.path ASC,
-                 flag.line_start ASC
-        ",
-    )?;
-    let rows = statement.query_map(params![source_scope], |row| {
+    let query = feature_flag_sql_query(source_scope, status, request, &terms);
+    let mut statement = connection.prepare(&query.sql)?;
+    let rows = statement.query_map(params_from_iter(query.params.iter()), |row| {
         Ok(FeatureFlagRow {
             feature_flag_id: row.get(0)?,
             usage_id: row.get(1)?,
@@ -219,6 +183,80 @@ fn search_with_status(
     Ok(groups)
 }
 
+fn feature_flag_sql_query(
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeFeatureFlagRequest,
+    terms: &[String],
+) -> FeatureFlagSqlQuery {
+    let FeatureFlagSqlFilter {
+        where_clause,
+        params: filter_params,
+    } = feature_flag_sql_filter(source_scope, status, request, terms);
+    let query_bonus = if terms.is_empty() { "0.0" } else { "8.0" };
+    let sql = format!(
+        "
+        WITH filtered_flags AS (
+            SELECT flag.feature_flag_id,
+                   MAX(
+                       CASE flag.edge_kind
+                         WHEN 'guards_code' THEN 20.0
+                         WHEN 'defines_config' THEN 16.0
+                         ELSE 12.0
+                       END + CAST(flag.confidence_basis_points AS REAL) / 1000.0 + {query_bonus}
+                   ) AS rank_score,
+                   MIN(flag.name) AS sort_name,
+                   MIN(flag.source_key) AS sort_source_key
+            FROM code_repository_feature_flags flag
+            WHERE {where_clause}
+            GROUP BY flag.feature_flag_id
+            ORDER BY rank_score DESC, sort_name ASC, sort_source_key ASC
+            LIMIT ?
+        )
+        SELECT flag.feature_flag_id, flag.usage_id, flag.file_id, flag.path, flag.language_id,
+               flag.name, flag.source_kind, flag.source_key, flag.edge_kind,
+               flag.confidence_basis_points, flag.confidence_tier,
+               flag.byte_start, flag.byte_end, flag.line_start, flag.line_end, flag.excerpt,
+               (
+                   SELECT symbol_snapshot_id
+                   FROM code_repository_symbols symbol
+                   WHERE symbol.source_scope = flag.source_scope
+                     AND symbol.path = flag.path
+                     AND symbol.line_start <= flag.line_start
+                     AND symbol.line_end >= flag.line_start
+                   ORDER BY symbol.line_start DESC, symbol.line_end ASC
+                   LIMIT 1
+               ) AS related_symbol_snapshot_id,
+               (
+                   SELECT name
+                   FROM code_repository_symbols symbol
+                   WHERE symbol.source_scope = flag.source_scope
+                     AND symbol.path = flag.path
+                     AND symbol.line_start <= flag.line_start
+                     AND symbol.line_end >= flag.line_start
+                   ORDER BY symbol.line_start DESC, symbol.line_end ASC
+                   LIMIT 1
+               ) AS related_symbol_name
+        FROM code_repository_feature_flags flag
+        JOIN filtered_flags selected ON selected.feature_flag_id = flag.feature_flag_id
+        WHERE {where_clause}
+        ORDER BY flag.name ASC,
+                 CASE flag.edge_kind
+                   WHEN 'guards_code' THEN 0
+                   WHEN 'defines_config' THEN 1
+                   ELSE 2
+                 END,
+                 flag.path ASC,
+                 flag.line_start ASC
+        "
+    );
+    let mut params = filter_params.clone();
+    params.push(Value::Integer(request.limit as i64));
+    params.extend(filter_params);
+
+    FeatureFlagSqlQuery { sql, params }
+}
+
 #[derive(Debug)]
 struct FeatureFlagRow {
     feature_flag_id: String,
@@ -237,6 +275,138 @@ struct FeatureFlagRow {
     excerpt: String,
     related_symbol_snapshot_id: Option<String>,
     related_symbol_name: Option<String>,
+}
+
+struct FeatureFlagSqlQuery {
+    sql: String,
+    params: Vec<Value>,
+}
+
+struct FeatureFlagSqlFilter {
+    where_clause: String,
+    params: Vec<Value>,
+}
+
+fn feature_flag_sql_filter(
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeFeatureFlagRequest,
+    terms: &[String],
+) -> FeatureFlagSqlFilter {
+    let mut clauses = vec!["flag.source_scope = ?".to_owned()];
+    let mut params = vec![Value::Text(source_scope.to_owned())];
+    append_path_filter_clause(&mut clauses, &mut params, &status.path_filters);
+    append_path_filter_clause(&mut clauses, &mut params, &request.repository.path_filters);
+    append_language_filter_clause(&mut clauses, &mut params, &status.language_filters);
+    append_language_filter_clause(
+        &mut clauses,
+        &mut params,
+        &request.repository.language_filters,
+    );
+    append_query_term_clauses(&mut clauses, &mut params, terms);
+
+    FeatureFlagSqlFilter {
+        where_clause: clauses.join(" AND "),
+        params,
+    }
+}
+
+fn append_path_filter_clause(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Value>,
+    filters: &[String],
+) {
+    if filters.is_empty() {
+        return;
+    }
+
+    let mut fragments = Vec::new();
+    for filter in filters {
+        let filter = normalize_sql_path_filter(filter);
+        if filter == "." {
+            return;
+        }
+        if filter.is_empty() {
+            continue;
+        }
+        fragments.push("(flag.path = ? OR flag.path LIKE ? ESCAPE '\\')".to_owned());
+        params.push(Value::Text(filter.to_owned()));
+        params.push(Value::Text(format!("{}/%", escape_like_pattern(filter))));
+    }
+
+    if fragments.is_empty() {
+        clauses.push("0 = 1".to_owned());
+    } else {
+        clauses.push(format!("({})", fragments.join(" OR ")));
+    }
+}
+
+fn append_language_filter_clause(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Value>,
+    filters: &[String],
+) {
+    if filters.is_empty() {
+        return;
+    }
+
+    let mut unique = Vec::<&str>::new();
+    for filter in filters {
+        if !filter.is_empty() && !unique.contains(&filter.as_str()) {
+            unique.push(filter);
+        }
+    }
+    if unique.is_empty() {
+        clauses.push("0 = 1".to_owned());
+        return;
+    }
+
+    clauses.push(format!(
+        "flag.language_id IN ({})",
+        vec!["?"; unique.len()].join(", ")
+    ));
+    for filter in unique {
+        params.push(Value::Text(filter.to_owned()));
+    }
+}
+
+fn append_query_term_clauses(clauses: &mut Vec<String>, params: &mut Vec<Value>, terms: &[String]) {
+    let fields = [
+        "lower(flag.name) LIKE ? ESCAPE '\\'",
+        "lower(flag.source_kind) LIKE ? ESCAPE '\\'",
+        "lower(flag.source_key) LIKE ? ESCAPE '\\'",
+        "lower(flag.edge_kind) LIKE ? ESCAPE '\\'",
+        "lower(flag.path) LIKE ? ESCAPE '\\'",
+        "lower(flag.excerpt) LIKE ? ESCAPE '\\'",
+    ];
+    for term in terms {
+        clauses.push(format!("({})", fields.join(" OR ")));
+        let pattern = format!("%{}%", escape_like_pattern(term));
+        for _ in fields {
+            params.push(Value::Text(pattern.clone()));
+        }
+    }
+}
+
+fn normalize_sql_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::new();
+    for character in value.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+
+    escaped
 }
 
 fn retrieval_like_request(
@@ -293,5 +463,81 @@ fn edge_priority(edge_kind: &str) -> usize {
         "guards_code" => 0,
         "defines_config" => 1,
         _ => 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
+
+    #[test]
+    fn feature_flag_sql_applies_filters_and_limit_before_usage_lookup() {
+        let selector = CodeRepositorySelector::new(
+            "fixture",
+            "commit",
+            vec!["./src/payments".to_owned()],
+            vec!["rust".to_owned()],
+        )
+        .expect("selector should validate");
+        let request = CodeFeatureFlagRequest::new(
+            Some("CHECKOUT_V2".to_owned()),
+            selector,
+            1,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("feature flag request should validate");
+        let terms = request
+            .query
+            .as_deref()
+            .map(query_terms)
+            .unwrap_or_default();
+
+        let query = feature_flag_sql_query("scope", &status(), &request, &terms);
+
+        assert!(query.sql.contains("WITH filtered_flags AS"));
+        assert!(query.sql.contains("LIMIT ?"));
+        assert_eq!(query.sql.matches("flag.source_scope = ?").count(), 2);
+        assert_eq!(
+            query
+                .sql
+                .matches("flag.path = ? OR flag.path LIKE ? ESCAPE '\\'")
+                .count(),
+            4
+        );
+        assert_eq!(query.sql.matches("flag.language_id IN").count(), 4);
+        assert!(query.sql.contains("lower(flag.source_key) LIKE ?"));
+        assert_eq!(query.params.len(), 27);
+        assert!(query.params.contains(&Value::Integer(1)));
+        assert!(
+            query
+                .params
+                .contains(&Value::Text("src/payments/%".to_owned()))
+        );
+        assert!(
+            query
+                .params
+                .contains(&Value::Text("%checkout\\_v2%".to_owned()))
+        );
+    }
+
+    fn status() -> CodeRepositoryStatus {
+        CodeRepositoryStatus {
+            repository_id: "repo".to_owned(),
+            alias: "fixture".to_owned(),
+            root_path: "/tmp/repo".to_owned(),
+            path_filters: vec!["src".to_owned()],
+            language_filters: vec!["rust".to_owned()],
+            last_indexed_scope_id: Some("scope".to_owned()),
+            last_indexed_commit: Some("commit".to_owned()),
+            tree_hash: Some("tree".to_owned()),
+            state: "indexed".to_owned(),
+            indexed_file_count: 1,
+            symbol_count: 0,
+            reference_count: 0,
+            chunk_count: 0,
+            stale: false,
+            degraded_reason: None,
+        }
     }
 }

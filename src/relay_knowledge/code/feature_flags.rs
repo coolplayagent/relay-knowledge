@@ -186,11 +186,6 @@ struct CommentState {
 
 impl CommentState {
     fn scan_line(&mut self, line: &str, input: &FeatureFlagFileInput<'_>) -> Option<String> {
-        let trimmed = line.trim_start();
-        if self.block_depth == 0 && trimmed.starts_with('*') {
-            return None;
-        }
-
         let mut scan_line = String::new();
         let hash_comment = hash_starts_comment(input);
         let nested_blocks = nested_block_comments(input.language_id);
@@ -234,6 +229,11 @@ impl CommentState {
                 continue;
             }
 
+            if let Some(lifetime_len) = rust_lifetime_token_len(input.language_id, rest) {
+                scan_line.push_str(&rest[1..lifetime_len]);
+                index = index.saturating_add(lifetime_len);
+                continue;
+            }
             if character == '"' || character == '\'' {
                 quote = Some(character);
                 scan_line.push(character);
@@ -258,7 +258,35 @@ impl CommentState {
 }
 
 fn nested_block_comments(language_id: &str) -> bool {
-    language_id == "rust"
+    matches!(language_id, "kotlin" | "rust" | "scala" | "swift")
+}
+
+fn rust_lifetime_token_len(language_id: &str, value: &str) -> Option<usize> {
+    if language_id != "rust" || !value.starts_with('\'') {
+        return None;
+    }
+
+    let mut chars = value.char_indices();
+    chars.next();
+    let (first_index, first) = chars.next()?;
+    if first != '_' && !first.is_ascii_alphabetic() {
+        return None;
+    }
+
+    let mut end = first_index.saturating_add(first.len_utf8());
+    for (index, character) in chars {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            end = index.saturating_add(character.len_utf8());
+        } else {
+            break;
+        }
+    }
+
+    if value[end..].starts_with('\'') {
+        return None;
+    }
+
+    Some(end)
 }
 
 fn hash_starts_comment(input: &FeatureFlagFileInput<'_>) -> bool {
@@ -278,6 +306,8 @@ fn env_keys(line: &str) -> Vec<String> {
         "std::env::var(",
         "std::env::var_os(",
         "env::var(",
+        "std::getenv(",
+        "getenv(",
         "os.getenv(",
         "System.getenv(",
     ] {
@@ -356,8 +386,8 @@ fn valid_preprocessor_key(key: &str) -> bool {
 
 fn collect_quoted_arguments(line: &str, pattern: &str, keys: &mut Vec<String>) {
     let mut start = 0usize;
-    while let Some(relative_index) = line[start..].find(pattern) {
-        let value_start = start + relative_index + pattern.len();
+    while let Some(pattern_start) = find_code_pattern(line, pattern, start) {
+        let value_start = pattern_start + pattern.len();
         if let Some(key) = quoted_prefix(&line[value_start..]) {
             push_unique(keys, key);
         }
@@ -371,8 +401,8 @@ fn collect_bracket_keys(line: &str, pattern: &str, keys: &mut Vec<String>) {
 
 fn collect_dotted_members(line: &str, pattern: &str, keys: &mut Vec<String>) {
     let mut start = 0usize;
-    while let Some(relative_index) = line[start..].find(pattern) {
-        let member_start = start + relative_index + pattern.len();
+    while let Some(pattern_start) = find_code_pattern(line, pattern, start) {
+        let member_start = pattern_start + pattern.len();
         let member = line[member_start..]
             .chars()
             .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
@@ -382,6 +412,37 @@ fn collect_dotted_members(line: &str, pattern: &str, keys: &mut Vec<String>) {
         }
         start = member_start.saturating_add(member.len().max(1));
     }
+}
+
+fn find_code_pattern(line: &str, pattern: &str, start: usize) -> Option<usize> {
+    let mut quote = None;
+    let mut escaped = false;
+    let mut index = 0usize;
+    while index < line.len() {
+        let rest = &line[index..];
+        let character = rest.chars().next()?;
+        if let Some(quote_character) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == quote_character {
+                quote = None;
+            }
+            index = index.saturating_add(character.len_utf8());
+            continue;
+        }
+
+        if index >= start && rest.starts_with(pattern) {
+            return Some(index);
+        }
+        if character == '"' || character == '\'' {
+            quote = Some(character);
+        }
+        index = index.saturating_add(character.len_utf8());
+    }
+
+    None
 }
 
 fn boolean_config_key(line: &str) -> Option<String> {
@@ -570,6 +631,50 @@ mod tests {
     }
 
     #[test]
+    fn ignores_process_env_inside_string_literals() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "src/app.ts",
+            language_id: "typescript",
+            content:
+                "console.log(\"use process.env.CHECKOUT_V2\");\nif (process.env.PAYMENTS_V2) {}\n",
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "PAYMENTS_V2");
+    }
+
+    #[test]
+    fn extracts_flags_from_executable_star_prefixed_lines() {
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "src/lib.cc",
+            language_id: "cpp",
+            content: "*ptr = std::getenv(\"CHECKOUT_V2\");\n",
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "CHECKOUT_V2");
+    }
+
+    #[test]
+    fn rust_lifetimes_do_not_hide_inline_comments() {
+        let records = extract_feature_flags(input(
+            "let marker: &'a str = value; // config.get_bool(\"commented\")\nif config.get_bool(\"live\") {}\n",
+        ))
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
     fn keeps_nested_rust_block_comments_active() {
         let records = extract_feature_flags(input(
             "/*\n/*\nstd::env::var(\"INNER_COMMENT\")\n*/\nstd::env::var(\"OUTER_COMMENT\")\n*/\nif config.get_bool(\"live\") {}\n",
@@ -578,6 +683,24 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].source_key, "live");
+    }
+
+    #[test]
+    fn keeps_nested_block_comments_active_for_nested_comment_languages() {
+        for language_id in ["kotlin", "scala", "swift"] {
+            let records = extract_feature_flags(FeatureFlagFileInput {
+                repository_id: "repo",
+                source_scope: "scope",
+                file_id: "file",
+                path: "src/app.code",
+                language_id,
+                content: "/*\n/*\nconfig.get_bool(\"inner\")\n*/\nconfig.get_bool(\"outer\")\n*/\nif config.get_bool(\"live\") {}\n",
+            })
+            .expect("feature flag records should extract");
+
+            assert_eq!(records.len(), 1, "{language_id} should keep nesting");
+            assert_eq!(records[0].source_key, "live");
+        }
     }
 
     #[test]
