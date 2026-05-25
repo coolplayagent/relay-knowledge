@@ -87,6 +87,7 @@ relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
 relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports]
+relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
 relay-knowledge repo status <alias>
@@ -114,6 +115,8 @@ relay-knowledge version check
 Cold full `repo index` requests return a durable task handle immediately and start a bounded background worker from the CLI process. `service run` drains the same code-index queue for installed or foreground service operation. Use `repo status --format json` to inspect `active_task`, checkpoint counters, and scope retention while a cold repository index is running.
 
 `repo query` runs `definition`, `references`, and `hybrid` queries through the indexed tree-sitter graph and SQLite FTS read model first. Only when those structured layers leave a specific recall gap does the query start bounded `ripgrep` fallback against the same indexed commit. JSON hits are marked with `retrieval_layers=["lexical","text_fallback"]`; definition fallback may also include `definition`. Missing `rg`, timeouts, or exhausted budgets degrade only the fallback layer and appear in `degraded_reason`; structured code graph results remain valid.
+
+`repo feature-flags` reads configuration-driven feature-flag graph facts written during indexing. By default it lists flags, configuration sources, and code-usage edges in the selected repository scope; `--query` filters by flag name, config key, path, or excerpt. The command does not scan the whole source tree at query time; after extractor changes or newly added flags, run `repo index` or `repo update` before expecting new facts.
 
 ## 3.5 Read and Write Impact
 

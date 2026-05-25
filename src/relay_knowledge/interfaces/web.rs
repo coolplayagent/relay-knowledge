@@ -30,8 +30,8 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
+        CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
         FreshnessPolicy, IndexKind, ProposalState, WorkerKind,
     },
@@ -318,6 +318,12 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo.feature_flags" => {
+            let response = service
+                .query_code_repository_feature_flags(code_feature_flag_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "code.repo.impact" => {
             let response = service
                 .impact_code_repository(code_impact_request(payload)?, context)
@@ -549,6 +555,16 @@ fn code_query_request(payload: &Value) -> Result<CodeRetrievalRequest, WebError>
         string_field(payload, "query")?,
         code_selector(payload)?,
         parse_code_query_kind(string_field(payload, "kind")?)?,
+        usize_field(payload, "limit")?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
+fn code_feature_flag_request(payload: &Value) -> Result<CodeFeatureFlagRequest, WebError> {
+    CodeFeatureFlagRequest::new(
+        optional_string_field(payload, "query"),
+        code_selector(payload)?,
         usize_field(payload, "limit")?,
         parse_freshness(string_field(payload, "freshness")?)?,
     )

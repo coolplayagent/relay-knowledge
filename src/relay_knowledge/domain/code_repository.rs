@@ -203,6 +203,42 @@ impl CodeRetrievalRequest {
     }
 }
 
+/// Feature-flag graph query over an indexed repository scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeFeatureFlagRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    pub repository: CodeRepositorySelector,
+    pub limit: usize,
+    pub freshness_policy: FreshnessPolicy,
+}
+
+impl CodeFeatureFlagRequest {
+    /// Validates optional filter text and bounds the number of returned flags.
+    pub fn new(
+        query: Option<String>,
+        repository: CodeRepositorySelector,
+        limit: usize,
+        freshness_policy: FreshnessPolicy,
+    ) -> Result<Self, DomainError> {
+        let limit = match limit {
+            1..=100 => limit,
+            0 => return Err(DomainError::invalid("limit", "must be greater than zero")),
+            _ => return Err(DomainError::invalid("limit", "must be 100 or less")),
+        };
+        let query = query
+            .map(|value| required_text("query", value))
+            .transpose()?;
+
+        Ok(Self {
+            query,
+            repository,
+            limit,
+            freshness_policy,
+        })
+    }
+}
+
 /// Code impact analysis request over a Git diff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeImpactRequest {
@@ -387,6 +423,27 @@ pub struct CodeCallRecord {
     pub confidence_basis_points: u16,
     pub confidence_tier: String,
     pub line_range: RepositoryCodeRange,
+}
+
+/// Feature flag or runtime configuration relationship extracted from code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeFeatureFlagRecord {
+    pub repository_id: String,
+    pub source_scope: String,
+    pub feature_flag_id: String,
+    pub usage_id: String,
+    pub file_id: String,
+    pub path: String,
+    pub language_id: String,
+    pub name: String,
+    pub source_kind: String,
+    pub source_key: String,
+    pub edge_kind: String,
+    pub confidence_basis_points: u16,
+    pub confidence_tier: String,
+    pub byte_range: RepositoryCodeRange,
+    pub line_range: RepositoryCodeRange,
+    pub excerpt: String,
 }
 
 /// Searchable code chunk.
@@ -821,6 +878,36 @@ pub struct CodeRetrievalHit {
     pub edge_confidence_tier: Option<String>,
     pub score: f64,
     pub excerpt: String,
+}
+
+/// One code location where a feature flag is defined, read, or guards code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeFeatureFlagUsage {
+    pub usage_id: String,
+    pub path: String,
+    pub language_id: String,
+    pub file_id: String,
+    pub byte_range: RepositoryCodeRange,
+    pub line_range: RepositoryCodeRange,
+    pub edge_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_symbol_snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_symbol_name: Option<String>,
+    pub confidence_basis_points: u16,
+    pub confidence_tier: String,
+    pub excerpt: String,
+}
+
+/// Feature flag graph grouped by stable configuration source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeFeatureFlagGraph {
+    pub feature_flag_id: String,
+    pub name: String,
+    pub source_kind: String,
+    pub source_key: String,
+    pub score: f64,
+    pub usages: Vec<CodeFeatureFlagUsage>,
 }
 
 fn normalize_filter_list(

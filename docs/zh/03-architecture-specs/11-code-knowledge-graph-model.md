@@ -20,14 +20,17 @@
 | `CanonicalSymbol` | 跨 snapshot 的稳定符号身份候选 |
 | `CodeChunk` | 可检索上下文单元，绑定行列范围和父符号 |
 | `CodeChangeSet` | base/head 范围内的 diff 与影响证据 |
+| `FeatureFlag` | 配置驱动的运行时特性开关，绑定环境变量、配置 key 或设置项 |
 
 `symbol_snapshot_id` 表示某快照下的定义；`canonical_symbol_id` 表示跨快照稳定身份。二者不能混用。
 
 ## 3. 边类型
 
-代码边包括：defines、references、calls、imports、implements、overrides、contains、documents、changed_by、tested_by 和 affects。每条边必须有 resolution state：resolved、unresolved、ambiguous 或 inferred。
+代码边包括：defines、references、calls、imports、implements、overrides、contains、documents、changed_by、tested_by、affects、defines_config、reads_config 和 guards_code。每条边必须有 resolution state：resolved、unresolved、ambiguous 或 inferred。
 
 `imports` 边是依赖集合的首要结构来源。依赖解析必须先从 import/include/module import 事实和已索引代码地图中获取目标；当依赖目标没有代码地图或代码图索引时，系统保留 unresolved target hint，允许查询时使用有界 `rg` 精确文本兜底补充当前仓库源码证据。兜底命中不能创建依赖图事实，不能把边标记为 resolved，也不能伪装成依赖库自身的代码地图证据。
+
+`FeatureFlag` v1 只覆盖配置驱动开关：环境变量读取、常见 config/settings key 读取、布尔配置声明，以及这些读取参与条件表达式时产生的 guarded-code 关系。索引器可以把文件中的配置声明标记为 `defines_config`，把普通读取标记为 `reads_config`，把条件上下文标记为 `guards_code`。查询必须读取版本化图事实和 FTS 文档，不能为了列出全仓库开关在查询热路径递归扫描源码。
 
 ## 4. 置信度
 
@@ -42,6 +45,7 @@
 - 检索结果区分 canonical symbol 与 snapshot symbol。
 - 未解析或歧义边在 API、CLI、Web 和 context pack 中可见。
 - 缺失依赖代码地图时，import 查询仍能暴露 unresolved target hint，并把文本兜底命中标记为当前仓库 lexical evidence。
+- 特性开关查询按 scope 返回配置来源、代码使用关系、置信度、来源范围和相关符号；新增抽取规则后需要重新索引才能出现新事实。
 - 同路径不同 commit 的代码事实不会共享事实主键。
 
 ---

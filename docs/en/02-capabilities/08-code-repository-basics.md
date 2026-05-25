@@ -34,6 +34,8 @@ Repository indexing binds repository id, resolved commit, tree hash, path filter
 
 Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, and `imports`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together.
 
+`repo feature-flags` is a separate read-only entry point for enumerating or filtering configuration-driven feature-flag graph facts in an indexed scope. It returns flags grouped with configuration sources and `defines_config`, `reads_config`, and `guards_code` relationships instead of adding feature flags as a normal `repo query --kind` value.
+
 ## Degradation and Diagnostics
 
 Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with error nodes are indexed as partial and record file diagnostics. Missing `rg`, timeouts, or exhausted candidate budgets degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.

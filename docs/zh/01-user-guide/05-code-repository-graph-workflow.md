@@ -93,6 +93,17 @@ branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个
 
 如果 `rg` 不存在、超时、候选文件数或物化字节预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 `ripgrep unavailable`、`ripgrep timeout` 或相应预算原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
 
+### 特性开关图查询
+
+存量仓库经常把特性开关分散在环境变量、配置 key、设置对象和条件分支里。`repo feature-flags` 使用索引阶段抽取出的结构化事实列出配置驱动开关及其代码关系:
+
+```bash
+relay-knowledge repo feature-flags core --ref HEAD --format json
+relay-knowledge repo feature-flags core --query checkout --path src --limit 20 --format json
+```
+
+响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
+
 ### 多仓库 Repository Set 查询
 
 多仓库查询使用显式 `repo-set` 覆盖层。先把每个成员仓库索引成真实单仓 snapshot，再创建集合并把成员指向这些 snapshot:

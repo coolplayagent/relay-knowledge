@@ -34,6 +34,8 @@ relay-knowledge repo status core --format json
 
 窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees` 和 `imports`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。
 
+`repo feature-flags` 是独立只读入口，用于枚举或过滤 indexed scope 内的配置驱动特性开关图。它返回按开关分组的配置来源和 `defines_config`、`reads_config`、`guards_code` 关系，而不是把 feature flag 作为普通 `repo query --kind` 值。
+
 ## 降级与诊断
 
 Unsupported、非法 UTF-8、二进制或超大文件会降级为 text-only chunk。包含 error node 的 syntax tree 以 partial 状态索引，并记录 file diagnostic。`rg` 缺失、超时或候选预算耗尽只降级 query-time exact-text fallback，响应必须保留 `degraded_reason`，已有结构化命中仍然可用。

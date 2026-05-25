@@ -48,6 +48,40 @@ fn parses_repo_query_with_kind_filters_and_freshness() {
 }
 
 #[test]
+fn parses_repo_feature_flags_with_optional_filter_and_scope() {
+    let command = parse_repo(&[
+        "feature-flags".to_owned(),
+        "core".to_owned(),
+        "--query".to_owned(),
+        "checkout".to_owned(),
+        "--ref".to_owned(),
+        "HEAD".to_owned(),
+        "--path".to_owned(),
+        "src".to_owned(),
+        "--language".to_owned(),
+        "rust".to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        "20".to_owned(),
+    ])
+    .expect("feature flags command should parse");
+
+    assert_eq!(
+        command,
+        RepoCommand::FeatureFlags {
+            alias: "core".to_owned(),
+            query: Some("checkout".to_owned()),
+            limit: 20,
+            ref_selector: "HEAD".to_owned(),
+            path_filters: vec!["src".to_owned()],
+            language_filters: vec!["rust".to_owned()],
+            freshness: FreshnessPolicy::WaitUntilFresh,
+        }
+    );
+}
+
+#[test]
 fn parses_repo_command_forms_and_validation_errors() {
     let register = parse_repo(&[
         "register".to_owned(),

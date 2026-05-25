@@ -93,6 +93,17 @@ Symbol hits also include `canonical_symbol_id` for expressing logical symbol ide
 
 If `rg` is missing, times out, or exhausts candidate-file or materialized-byte budgets, the query still returns existing code graph results and reports `ripgrep unavailable`, `ripgrep timeout`, or the budget reason through `degraded_reason`. Narrowing `--path` or `--language`, and confirming that the target ref is fresh, is usually more useful than raising `--limit`.
 
+### Feature-Flag Graph Queries
+
+Existing repositories often spread feature flags across environment variables, config keys, settings objects, and guarded branches. `repo feature-flags` lists configuration-driven flags and their code relationships from facts extracted during indexing:
+
+```bash
+relay-knowledge repo feature-flags core --ref HEAD --format json
+relay-knowledge repo feature-flags core --query checkout --path src --limit 20 --format json
+```
+
+Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
+
 ### Multi-Repository Repository Set Queries
 
 Multi-repository query uses an explicit `repo-set` overlay. Index each member repository as a real single-repository snapshot first, then create a set and point members at those snapshots:

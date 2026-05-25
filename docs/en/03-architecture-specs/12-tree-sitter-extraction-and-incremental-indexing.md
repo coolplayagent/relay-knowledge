@@ -16,7 +16,7 @@ Each language registration includes language id, file extensions, tree-sitter gr
 
 ## 3. Capture Contract
 
-Query captures emit a common structure: definitions, references, calls, imports, documentation comments, symbol spans, body spans, and chunk spans. Capture output is validated for scope, path, line/column, and content hash before write.
+Query captures emit a common structure: definitions, references, calls, imports, feature flag/config usage, documentation comments, symbol spans, body spans, and chunk spans. Capture output is validated for scope, path, line/column, and content hash before write.
 
 ## 4. Full Build
 
@@ -24,7 +24,7 @@ Query captures emit a common structure: definitions, references, calls, imports,
 resolve snapshot
   -> enumerate authorized files
   -> batch parse and chunk
-  -> write file/symbol/reference/chunk facts
+  -> write file/symbol/reference/feature-flag/chunk facts
   -> finalize cross-batch edges
   -> refresh code/BM25/semantic/vector indexes
   -> mark scope fresh
@@ -42,6 +42,8 @@ Incremental indexing first narrows the work set:
 4. Refresh only affected code facts, chunks, and index families.
 
 Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. The query layer may use the hint inside the same scope to trigger bounded `rg` fallback.
+
+Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
 
 ## 6. High-Performance Boundaries
 

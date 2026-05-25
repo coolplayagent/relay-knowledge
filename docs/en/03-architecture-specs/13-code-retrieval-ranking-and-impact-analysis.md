@@ -18,6 +18,7 @@ Advanced code retrieval comes from fusing structural signals with lexical and se
 | reference | Reference edge, target hint, confidence, callsite excerpt |
 | caller/callee | Call edge, line containment, fan-out budget |
 | import/dependency | Import edge, module path, resolution state |
+| feature-flags | Config source, guards_code/read edge, source range, confidence |
 | explanation | Doc comment, body chunk, semantic/vector similarity |
 | impact | Changeset diff, reverse dependency, test edge, risk score |
 
@@ -38,6 +39,8 @@ FTS and grep candidate windows apply scope/path/language filters before bounded 
 Ripgrep fallback runs behind the same blocking-worker boundary as Git snapshot reads. It is constrained by storage-side candidate-path limits, candidate-file, match, line-length, and timeout budgets. The current fallback budget is 256 candidate files, 8 MiB of materialized blobs, 4096 bytes per line, and a 3 second `rg` timeout. It searches indexed commit content rather than the dirty working tree. The materialized search tree must include indexed dot-path candidates, and JSON decoding must accept both ripgrep `text` and base64 `bytes` fields. Oversized blobs are skipped without stopping later candidates that still fit the materialization budget, and definition fallback filters candidate lines before enforcing the returned-hit limit. If `rg` is unavailable, times out, exhausts its budget, or cannot obtain bounded candidate paths from the storage backend, the query remains valid and surfaces a degraded reason instead of bypassing freshness or authorization. The product runtime does not shell out to recursive `grep`; recursive `grep -RIn` is documented only as a bounded agent/maintainer search fallback when investigating the workspace.
 
 Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
+
+Feature-flag queries enumerate structured flag facts in the indexed scope by default. When `--query` is present, they filter only indexed flag names, source keys, paths, and excerpts. Ranking prioritizes guarded-code relationships, configuration definitions, ordinary reads, then query matches and path/language filters. The query must not use query-time grep to enumerate unknown flags or hardcode known product, repository, or benchmark flag names to improve ranking.
 
 ## 5. Impact Analysis
 

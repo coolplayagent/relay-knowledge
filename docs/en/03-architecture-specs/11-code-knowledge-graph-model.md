@@ -20,14 +20,17 @@ A code repository is not a plain text directory. Advanced code retrieval underst
 | `CanonicalSymbol` | Candidate stable identity across snapshots |
 | `CodeChunk` | Retrieval unit bound to line/column ranges and parent symbol |
 | `CodeChangeSet` | Diff and impact evidence across base/head |
+| `FeatureFlag` | Configuration-driven runtime toggle bound to an environment variable, config key, or setting |
 
 `symbol_snapshot_id` identifies a definition in one snapshot; `canonical_symbol_id` identifies a stable cross-snapshot candidate. They are not interchangeable.
 
 ## 3. Edge Types
 
-Code edges include defines, references, calls, imports, implements, overrides, contains, documents, changed_by, tested_by, and affects. Each edge has a resolution state: resolved, unresolved, ambiguous, or inferred.
+Code edges include defines, references, calls, imports, implements, overrides, contains, documents, changed_by, tested_by, affects, defines_config, reads_config, and guards_code. Each edge has a resolution state: resolved, unresolved, ambiguous, or inferred.
 
 `imports` edges are the primary structural source for dependency sets. Dependency resolution first derives targets from import/include/module-import facts and indexed code maps. When a dependency target has no code map or code graph index, the system preserves the unresolved target hint and may use bounded query-time `rg` exact-text fallback to add current-repository source evidence. Fallback hits cannot create dependency graph facts, mark the edge as resolved, or masquerade as code-map evidence from the dependency library itself.
+
+`FeatureFlag` v1 covers only configuration-driven toggles: environment variable reads, common config/settings key reads, boolean config declarations, and guarded-code relationships when those reads participate in conditional expressions. The indexer may record config declarations as `defines_config`, ordinary reads as `reads_config`, and conditional contexts as `guards_code`. Queries must read versioned graph facts and FTS documents; they must not recursively scan source in the query hot path to enumerate repository-wide flags.
 
 ## 4. Confidence
 
@@ -42,6 +45,7 @@ Code facts bind to repository snapshot or changeset scope. The same path at diff
 - Retrieval results distinguish canonical symbols from snapshot symbols.
 - Unresolved and ambiguous edges are visible in API, CLI, Web, and context packs.
 - When a dependency code map is missing, import queries still expose the unresolved target hint and mark text fallback hits as current-repository lexical evidence.
+- Feature-flag queries return configuration sources, code usage relationships, confidence, source ranges, and related symbols by scope; new extractor rules require reindexing before new facts appear.
 - Code facts from the same path at different commits do not share fact keys.
 
 ---

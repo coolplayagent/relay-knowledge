@@ -6,6 +6,9 @@ mod code_query;
 #[path = "code_query_hits.rs"]
 mod code_query_hits;
 
+#[path = "code_feature_flags.rs"]
+mod code_feature_flags;
+
 #[path = "code_query_scope.rs"]
 mod code_query_scope;
 
@@ -96,10 +99,10 @@ mod code_set_tests;
 
 use crate::{
     domain::{
-        CodeFileFingerprint, CodeImpactRequest, CodeIndexBatch, CodeIndexCheckpoint,
-        CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary, CodeRepositoryRegistration,
-        CodeRepositoryReport, CodeRepositoryStatus, CodeRepositoryTotals, CodeRetrievalHit,
-        CodeRetrievalRequest,
+        CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
+        CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
+        CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -276,6 +279,13 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         self.run(move |connection| code_query::search_code(connection, request))
+    }
+
+    fn search_code_feature_flags(
+        &self,
+        request: CodeFeatureFlagRequest,
+    ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
+        self.run(move |connection| code_feature_flags::search(connection, request))
     }
 
     fn search_code_scope(

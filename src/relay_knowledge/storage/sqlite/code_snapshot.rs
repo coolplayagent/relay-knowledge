@@ -443,6 +443,13 @@ fn clone_active_scope_for_incremental(
     )?;
     clone_code_table(
         transaction,
+        "code_repository_feature_flags",
+        "repository_id, source_scope, feature_flag_id, usage_id, file_id, path, language_id, name, source_kind, source_key, edge_kind, confidence_basis_points, confidence_tier, byte_start, byte_end, line_start, line_end, excerpt",
+        &previous_scope,
+        &snapshot.source_scope,
+    )?;
+    clone_code_table(
+        transaction,
         "code_repository_chunks",
         "repository_id, source_scope, chunk_id, file_id, path, language_id, content, byte_start, byte_end, line_start, line_end, symbol_snapshot_id",
         &previous_scope,
@@ -634,6 +641,7 @@ fn insert_imports_calls_chunks_diagnostics(
             ],
         )?;
     }
+    super::code_feature_flags::insert_from_chunks(transaction, &snapshot.chunks)?;
     for diagnostic in &snapshot.diagnostics {
         transaction.execute(
             "

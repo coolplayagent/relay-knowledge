@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use super::code_tools::{code_impact_tool_definition, code_query_tool_definition};
+use super::code_tools::{
+    code_feature_flags_tool_definition, code_impact_tool_definition, code_query_tool_definition,
+};
 
 pub(super) const RETRIEVE_CONTEXT_TOOL: &str = "relay_retrieve_context";
 pub(super) const INSPECT_GRAPH_TOOL: &str = "relay_inspect_graph";
@@ -8,6 +10,7 @@ pub(super) const HEALTH_TOOL: &str = "relay_health";
 pub(super) const SERVICE_STATUS_TOOL: &str = "relay_service_status";
 pub(super) const INDEX_STATUS_TOOL: &str = "relay_index_status";
 pub(super) const CODE_QUERY_TOOL: &str = "relay_code_query";
+pub(super) const CODE_FEATURE_FLAGS_TOOL: &str = "relay_code_feature_flags";
 pub(super) const CODE_IMPACT_TOOL: &str = "relay_code_impact";
 pub(super) const CODE_REPOSITORY_SET_QUERY_TOOL: &str = "relay_code_repository_set_query";
 
@@ -20,6 +23,7 @@ pub(super) fn is_known_tool(name: &str) -> bool {
             | SERVICE_STATUS_TOOL
             | INDEX_STATUS_TOOL
             | CODE_QUERY_TOOL
+            | CODE_FEATURE_FLAGS_TOOL
             | CODE_IMPACT_TOOL
             | CODE_REPOSITORY_SET_QUERY_TOOL
     )
@@ -36,6 +40,7 @@ pub(super) fn tools_list_result() -> Value {
         no_argument_tool(SERVICE_STATUS_TOOL, "Return resident service status."),
         no_argument_tool(INDEX_STATUS_TOOL, "Return derived retrieval index status."),
         code_query_tool_definition(),
+        code_feature_flags_tool_definition(),
         code_impact_tool_definition(),
         super::code_tools::code_repository_set_query_tool_definition(),
     ];

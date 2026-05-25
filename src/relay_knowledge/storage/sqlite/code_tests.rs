@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
     domain::{
-        CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalLayer, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+        CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy,
     },
     storage::{SqliteGraphStore, StorageError},
 };
@@ -14,6 +14,49 @@ mod code_test_support;
 mod code_snapshot_fixtures;
 
 pub(super) use code_snapshot_fixtures::*;
+
+#[tokio::test]
+async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/flags.rs",
+        "if std::env::var(\"CHECKOUT_V2\").is_ok() {\n    enable_checkout();\n}\nconfig.get_bool(\"payments.enabled\");",
+    ))
+    .await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let flags = store
+        .search_code_feature_flags(
+            CodeFeatureFlagRequest::new(None, selector.clone(), 10, FreshnessPolicy::AllowStale)
+                .expect("feature flag request should validate"),
+        )
+        .await
+        .expect("feature flags should query");
+    let filtered = store
+        .search_code_feature_flags(
+            CodeFeatureFlagRequest::new(
+                Some("payments".to_owned()),
+                selector,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("filtered feature flag request should validate"),
+        )
+        .await
+        .expect("filtered feature flags should query");
+
+    assert_eq!(flags.len(), 2);
+    assert!(flags.iter().any(|flag| {
+        flag.source_key == "CHECKOUT_V2"
+            && flag
+                .usages
+                .iter()
+                .any(|usage| usage.edge_kind == "guards_code")
+    }));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].source_key, "payments.enabled");
+}
 
 #[tokio::test]
 async fn text_only_chunk_hits_are_marked_as_text_fallback() {
