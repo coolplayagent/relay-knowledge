@@ -305,7 +305,7 @@ BM25 对这些代码问题很强:
 
 ### 8.2 精确源码 grep 兜底强项
 
-有界 `ripgrep` 兜底适合这些代码问题:
+有界内部 exact-text source fallback 适合这些代码问题:
 
 - AST query 或 capture 漏掉的精确定义行。
 - 引用层没有 resolved/reference edge，但源码中存在明确标识符使用。
@@ -366,7 +366,7 @@ v1 最小可用能力:
 - 注册本地 Git 仓库。
 - 对 HEAD 快照全量构建主流语法注册表语言的定义/导入/代码块。
 - 使用 BM25 搜索 path/symbol/chunk。
-- 在 definition/reference/hybrid 的结构化召回有缺口时，使用有界 `ripgrep` 搜索 indexed commit 候选内容。
+- 在 definition/reference/hybrid 的结构化召回有缺口时，使用有界内部 exact-text source fallback 搜索 indexed commit 候选内容。
 - 支持 commit-to-commit 增量更新。
 - 返回作用域、提交、树、行范围、过时/降级元数据。
 

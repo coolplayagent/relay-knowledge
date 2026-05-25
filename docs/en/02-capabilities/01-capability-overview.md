@@ -37,7 +37,7 @@ Common entry points include `status`, `ingest`, `query`, `repo register`, `repo 
 
 ## Degradation and Diagnostics
 
-Capabilities degrade explicitly: semantic/vector can be disabled, code parse failures become text-only, missing `ripgrep` only affects exact-text fallback, stale indexes are explainable, and unavailable external workers can leave BM25 and graph paths usable. Degradation enters response metadata instead of silently dropping capability.
+Capabilities degrade explicitly: semantic/vector can be disabled, code parse failures become text-only, source fallback budget issues only affect exact-text fallback, stale indexes are explainable, and unavailable external workers can leave BM25 and graph paths usable. Degradation enters response metadata instead of silently dropping capability.
 
 ## Related Architecture Chapters
 

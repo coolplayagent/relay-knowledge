@@ -22,7 +22,7 @@ relay-knowledge repo status core --format json
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy.
 
-`definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded `ripgrep` fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
+`definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded internal exact-text source fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
 
 Cold full `repo index` returns a queued task handle and lets the background code-index worker perform parsing and SQLite writes under a lease. `repo status` exposes the active task, checkpoint progress, and retention summary; successful workers keep the active scope, the two latest completed scopes, and unfinished task scopes.
 
@@ -46,7 +46,7 @@ Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `cal
 
 ## Degradation and Diagnostics
 
-Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with unrecoverable error nodes are indexed as partial and record file diagnostics; C/C++ macro-heavy files may remain parsed when errors are isolated to macro expansions, bounded preprocessor directives, or decorator-bearing declarations and reliable symbols, references, or imports are still extracted. Missing external dependency source is exposed as unresolved edge coverage metadata, not `degraded_reason`. Missing `rg`, timeouts, or exhausted candidate budgets degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.
+Unsupported, invalid UTF-8, binary, or oversized files degrade to text-only chunks. Syntax trees with unrecoverable error nodes are indexed as partial and record file diagnostics; C/C++ macro-heavy files may remain parsed when errors are isolated to macro expansions, bounded preprocessor directives, or decorator-bearing declarations and reliable symbols, references, or imports are still extracted. Missing external dependency source is exposed as unresolved edge coverage metadata, not `degraded_reason`. Source fallback candidate-path, candidate-file, materialized-byte, or line-length budget issues degrade only query-time exact-text fallback; responses keep `degraded_reason` while existing structured hits remain usable.
 
 ## Related Architecture Chapters
 

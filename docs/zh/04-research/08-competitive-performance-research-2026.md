@@ -20,7 +20,7 @@
 - GraphRAG 论文和产品实践共同指向 query router、local/global 检索、社区摘要、路径组织和增量刷新；盲目扩大 k-hop 或 top-k 会增加噪声和 token 成本。
 - 向量检索的高性能来自 HNSW、PQ/IVF、磁盘图索引、量化、过滤前置和多阶段重排；向量索引只能作为候选和排序信号，不能成为事实真源。
 - 全文与混合搜索的成熟模式是倒排索引、BM25/BM25F、trigram/posting list、RRF 和 phased ranking；不同召回器分数不可直接相加时，rank-based fusion 更稳。
-- 代码搜索的竞争力来自精确符号、trigram/regex、BM25、AST 结构、引用/调用/import 边、有界 `ripgrep` 精确文本兜底、语言和路径过滤、版本 scope 与影响分析，而不是“代码 embedding”单一路径。
+- 代码搜索的竞争力来自精确符号、trigram/regex、BM25、AST 结构、引用/调用/import 边、有界内部 exact-text fallback、语言和路径过滤、版本 scope 与影响分析，而不是“代码 embedding”单一路径。
 - 本机文件高速检索必须把文件名/路径、metadata、内容和变更游标拆成独立 read model；Everything、Spotlight、Windows Search、plocate 和 ripgrep 是机制参考，不应成为 relay-knowledge 的运行依赖。
 - 大规模图和权限系统强调缓存、关系模型、因果一致性、权限过滤前置和低延迟检查；Context Pack 和文件/代码查询不能在最终截断后才做授权。
 - 高性能后台运行依赖 bounded queue、lease、dead-letter、replay、adaptive concurrency、timeout、cancellation、trace/metric/log 关联和明确的 overload 行为。
@@ -86,7 +86,7 @@ normalize file query
 | P0 | 在架构和能力文档中把本机文件检索定义为 `local_file_path`、`local_file_metadata`、`local_file_content`、`local_file_change_cursor` 四层 read model。 | 文档说明文件名查询不依赖内容索引，所有文件查询返回 freshness/degraded reason。 |
 | P0 | 为代码、文件、图谱混合检索统一记录 candidate window、filter count、RRF contribution、truncation reason 和 stale lag。 | context pack 和 benchmark 文档有可观测字段和 p95/p99 指标。 |
 | P1 | 增加文件内容索引路线：文本 chunk BM25/trigram 优先，semantic/vector 作为可选后端，OCR/压缩包/大文件走 worker。 | 文件名查询和内容查询有独立延迟预算，内容索引失败不影响路径索引。 |
-| P1 | 将代码 `ripgrep` 兜底纳入检索 trace：记录触发原因、候选文件数、物化字节、timeout/budget degraded reason 和 `text_fallback` 排名贡献。 | definition/reference/hybrid 的 fallback 命中可解释，且不会压过 exact symbol 或 resolved edge。 |
+| P1 | 将代码 source fallback 纳入检索 trace：记录触发原因、候选文件数、物化字节、candidate/budget degraded reason 和 `text_fallback` 排名贡献。 | definition/reference/hybrid 的 fallback 命中可解释，且不会压过 exact symbol 或 resolved edge。 |
 | P1 | 引入 query router：区分 exact term、conceptual、multi-hop、code symbol、file path、impact 和 temporal 查询。 | 每类查询有明确 retriever family、预算和降级规则。 |
 | P1 | 将 cold indexing、incremental update、no-op refresh、watcher lag、queue lag 纳入基准门禁。 | 基准章节记录目标、采集命令和回归阈值。 |
 | P2 | 评估平台 watcher 后端和 ANN 后端的可插拔实现。 | 后端能力缺失时可降级为 bounded rescan 或 local lexical read model。 |

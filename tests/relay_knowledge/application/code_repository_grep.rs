@@ -30,11 +30,8 @@ use relay_knowledge::{
 };
 
 #[tokio::test]
-async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
-    if Command::new("rg").arg("--version").output().is_err() {
-        return;
-    }
-    let repo = FixtureRepo::create("code-ripgrep-reference");
+async fn reference_query_uses_internal_text_fallback_for_comment_reference() {
+    let repo = FixtureRepo::create("code-source-fallback-reference");
     repo.write(
         "include/macros.h",
         "#ifndef RK_MACROS_H\n#define RK_MACROS_H\n#define RK_TRACE_VALUE(value) ((value) + 17)\n#endif\n",
@@ -55,7 +52,7 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
                 path_filters: vec!["include".to_owned(), "src".to_owned()],
                 language_filters: vec!["c".to_owned()],
             },
-            context("register-ripgrep-reference"),
+            context("register-source-fallback-reference"),
         )
         .await
         .expect("repository should register");
@@ -66,7 +63,7 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
                 mode: CodeIndexMode::Full,
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
-            context("index-ripgrep-reference"),
+            context("index-source-fallback-reference"),
         )
         .await
         .expect("repository should index");
@@ -87,7 +84,7 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
                 FreshnessPolicy::AllowStale,
             )
             .expect("query request should validate"),
-            context("query-ripgrep-reference"),
+            context("query-source-fallback-reference"),
         )
         .await
         .expect("query should succeed");
@@ -110,11 +107,8 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
 }
 
 #[tokio::test]
-async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
-    if Command::new("rg").arg("--version").output().is_err() {
-        return;
-    }
-    let repo = FixtureRepo::create("code-ripgrep-query-candidate-budget");
+async fn source_fallback_uses_query_candidates_before_scope_file_budget() {
+    let repo = FixtureRepo::create("code-source-fallback-query-candidate-budget");
     for index in 0..300 {
         repo.write(
             &format!("src/noise_{index:03}.c"),
@@ -137,7 +131,7 @@ async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
                 path_filters: vec!["src".to_owned(), "zzz".to_owned()],
                 language_filters: vec!["c".to_owned()],
             },
-            context("register-ripgrep-query-candidates"),
+            context("register-source-fallback-query-candidates"),
         )
         .await
         .expect("repository should register");
@@ -148,7 +142,7 @@ async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
                 mode: CodeIndexMode::Full,
                 freshness_policy: FreshnessPolicy::WaitUntilFresh,
             },
-            context("index-ripgrep-query-candidates"),
+            context("index-source-fallback-query-candidates"),
         )
         .await
         .expect("repository should index");
@@ -164,7 +158,7 @@ async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
                 FreshnessPolicy::AllowStale,
             )
             .expect("query request should validate"),
-            context("query-ripgrep-query-candidates"),
+            context("query-source-fallback-query-candidates"),
         )
         .await
         .expect("query should succeed");
@@ -182,8 +176,8 @@ async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
 }
 
 #[tokio::test]
-async fn definition_query_line_scans_when_ripgrep_omits_long_lines() {
-    let repo = FixtureRepo::create("code-ripgrep-long-line-definition");
+async fn definition_query_line_scans_long_definition_lines() {
+    let repo = FixtureRepo::create("code-source-fallback-long-line-definition");
     let filler = "x".repeat(5000);
     repo.write(
         "docs/api.txt",
@@ -258,7 +252,7 @@ async fn definition_query_line_scans_when_ripgrep_omits_long_lines() {
 
 #[tokio::test]
 async fn query_degrades_when_candidate_path_lookup_is_unavailable() {
-    let repo = FixtureRepo::create("code-ripgrep-candidate-path-unavailable");
+    let repo = FixtureRepo::create("code-source-fallback-candidate-path-unavailable");
     repo.write(
         "src/lib.c",
         "int rk_unavailable_candidate(void) { return 1; }\n",
@@ -289,10 +283,9 @@ async fn query_degrades_when_candidate_path_lookup_is_unavailable() {
     assert_eq!(response.results.len(), 1);
     assert_eq!(response.results[0].path, "src/lib.c");
     assert!(
-        response
-            .degraded_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("ripgrep candidate path lookup unavailable")),
+        response.degraded_reason.as_deref().is_some_and(
+            |reason| reason.contains("source fallback candidate path lookup unavailable")
+        ),
         "unexpected degraded reason: {:?}",
         response.degraded_reason
     );
@@ -327,11 +320,8 @@ async fn status_skips_optional_task_lease_recovery_for_partial_store() {
 }
 
 #[tokio::test]
-async fn import_query_uses_grep_fallback_for_unindexed_external_dependency_without_degrading() {
-    if Command::new("rg").arg("--version").output().is_err() {
-        return;
-    }
-    let repo = FixtureRepo::create("code-ripgrep-external-import");
+async fn import_query_uses_source_fallback_for_unindexed_external_dependency() {
+    let repo = FixtureRepo::create("code-source-fallback-external-import");
     repo.write(
         "src/component.tsx",
         r#"

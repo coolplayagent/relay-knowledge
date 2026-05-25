@@ -30,8 +30,6 @@ mod code_query_import_targets;
 mod code_query_line_ranges;
 #[path = "code_query_path_ranking.rs"]
 mod code_query_path_ranking;
-#[path = "code_query_prepare.rs"]
-mod code_query_prepare;
 #[path = "code_query_proximity_scoring.rs"]
 mod code_query_proximity_scoring;
 #[path = "code_query_references.rs"]
@@ -59,6 +57,10 @@ pub(super) use super::code_query_hits::{
     HitParts, chunk_layers, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
     required_repository, required_scope,
 };
+use super::code_query_prepare::{
+    code_search_error_can_use_empty_results, code_search_plannable_outage_reason,
+    prepare_code_search_statement, retry_code_search_operation,
+};
 #[cfg(test)]
 use super::code_query_scope::path_matches_filter;
 pub(super) use super::code_query_scope::{language_filter_allows, path_filter_allows};
@@ -83,10 +85,6 @@ use code_query_import_targets::{
 };
 use code_query_path_ranking::{
     declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
-};
-use code_query_prepare::{
-    code_search_error_can_use_empty_results, code_search_plannable_outage_reason,
-    prepare_code_search_statement, retry_code_search_operation,
 };
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};

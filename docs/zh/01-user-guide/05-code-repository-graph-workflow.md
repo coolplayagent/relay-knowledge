@@ -87,11 +87,11 @@ relay-knowledge repo query core --query crate::retry_policy --kind imports --for
 
 branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个 branch 复用同一 scope，但响应仍保留本次请求的 ref 作为审计信息。rebase 或 force-move 后的新 head 必须先重新索引，否则查询会失败而不是返回旧 branch 内容。
 
-符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。如果 import 指向没有作为代码图谱 target 建索引的 unresolved 外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 grep fallback 在当前已索引仓库源码中搜索。grep 搜索词来自 unresolved target hint，并排在结构化 import-graph 证据之后，因此小 `limit` 下 agent 仍能看到 `edge_resolution_state` 和 `edge_target_hint`。此类 fallback 命中会携带 `text_fallback`；外部依赖源码缺失保持 unresolved edge coverage metadata，除非兜底自身失败，否则不设置 `degraded_reason`。
+符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。如果 import 指向没有作为代码图谱 target 建索引的 unresolved 外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 source fallback 在当前已索引仓库源码中搜索。fallback 搜索词来自 unresolved target hint，并排在结构化 import-graph 证据之后，因此小 `limit` 下 agent 仍能看到 `edge_resolution_state` 和 `edge_target_hint`。此类 fallback 命中会携带 `text_fallback`，因此 agent 应把结果当成本仓源码文本证据，而不是依赖库图谱证据。外部依赖源码缺失保持 unresolved edge coverage metadata，除非兜底自身失败，否则不设置 `degraded_reason`。
 
-`definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、`ripgrep` 兜底的顺序。兜底只在当前结构化结果没有覆盖具体身份、引用或 hybrid 结果窗口仍有空位时触发；它搜索已索引 commit 中经过 path/language/scope 过滤的候选文件，而不是直接扫当前脏工作树。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
+`definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、内部 exact-text source fallback 兜底的顺序。兜底只在当前结构化结果没有覆盖具体身份、引用或 hybrid 结果窗口仍有空位时触发；它搜索已索引 commit 中经过 path/language/scope 过滤并物化的候选文件，而不是直接扫当前脏工作树。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
 
-如果 `rg` 不存在、超时、候选文件数或物化字节预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 `ripgrep unavailable`、`ripgrep timeout` 或相应预算原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
+如果候选路径查询不可用、候选文件数、物化字节或单行长度预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 source fallback 预算或候选路径原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
 
 ### 特性开关图查询
 
@@ -204,7 +204,7 @@ relay-knowledge repo status core --format json
 2. 查询时的 `--ref` 是否与已索引 snapshot 一致。
 3. 请求的 `--path` 和 `--language` 是否只是在注册 scope 内进一步收窄。
 4. `--kind` 是否过窄；不确定时先用 `--kind hybrid`。
-5. `degraded_reason` 是否报告 `ripgrep unavailable`、`ripgrep timeout` 或 grep fallback 预算；exact-text 兜底降级时，结构化命中仍然可用。
+5. `degraded_reason` 是否报告 source fallback 候选路径或预算问题；exact-text 兜底降级时，结构化命中仍然可用。
 6. 文件是否被诊断为 unsupported、binary、oversized、invalid UTF-8 或 parser failed。
 
 `repo impact` 需要 `--head` 对应已索引 snapshot。先运行 `repo index core --ref <head>` 或 `repo update core --base <base> --head <head>`，再运行 impact。

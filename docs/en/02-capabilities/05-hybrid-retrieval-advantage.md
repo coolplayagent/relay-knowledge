@@ -8,7 +8,7 @@
 
 ## Capability Positioning
 
-Hybrid retrieval is the central competitive capability in Book 2. It combines BM25, local semantic token read models, local hashed-vector ANN, configurable external semantic/vector backends, graph evidence fallback, code graph documents, bounded code `ripgrep` exact-text fallback, local file path/content read models, schema paths, temporal events, community summaries, and RRF.
+Hybrid retrieval is the central competitive capability in Book 2. It combines BM25, local semantic token read models, local hashed-vector ANN, configurable external semantic/vector backends, graph evidence fallback, code graph documents, bounded code exact-text source fallback, local file path/content read models, schema paths, temporal events, community summaries, and RRF.
 
 ## User-visible Behavior
 
@@ -32,7 +32,7 @@ relay-knowledge query "retry policy graph path"   --freshness wait-until-fresh  
 ## Degradation and Diagnostics
 
 When semantic/vector backends are disabled or cursors are stale, BM25 and graph evidence remain usable. `context_pack.backend_statuses` explains configured backend, model, dimension, scope post-filter, and indexed graph version.
-When code `ripgrep` is missing, times out, or exhausts its budget, only exact-text fallback is degraded; existing BM25, code graph edge, and graph evidence candidates can still enter the context pack.
+When code source fallback hits candidate-path or budget limits, only exact-text fallback is degraded; existing BM25, code graph edge, and graph evidence candidates can still enter the context pack.
 When local file content cursors are stale, path and metadata remain usable for file location; responses explain content staleness, watcher lag, or bounded-rescan state.
 
 ## Related Architecture Chapters

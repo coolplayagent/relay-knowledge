@@ -8,7 +8,7 @@ This audit records the 2026-05-22 documentation refresh for code retrieval `ripg
 
 | Area | Refresh |
 | --- | --- |
-| User guide | The overview, CLI command reference, code repository workflow, and troubleshooting chapters now state that `repo query` runs `definition`, `references`, and `hybrid` queries through tree-sitter/FTS first, then uses bounded `ripgrep` fallback only when needed. |
+| User guide | The overview, CLI command reference, code repository workflow, and troubleshooting chapters now state that `repo query` runs `definition`, `references`, and `hybrid` queries through tree-sitter/FTS first, then uses bounded internal exact-text source fallback only when needed. |
 | Capabilities | The capability overview, hybrid retrieval, code repository basics, and code graph competitive chapters now document `text_fallback` provenance, missing-`rg` degradation, and the boundary that fallback cannot replace resolved edges. |
 | Architecture | The hybrid retrieval, Tree-sitter indexing, and code retrieval ranking chapters now state that fallback inherits scope/path/language/freshness/authorization, runs behind a blocking-worker boundary, and records candidate-file, materialized-byte, line-length, and timeout budgets. |
 | Research and benchmarks | The Tree-sitter retrieval research, implementation reference, competitive research, and benchmark target chapters now include grep fallback scenarios, risks, observability fields, and regression principles. |
@@ -19,7 +19,7 @@ This audit records the 2026-05-22 documentation refresh for code retrieval `ripg
 - `ripgrep` fallback only fills exact source lines from indexed commits; it does not directly scan the current dirty worktree.
 - Fallback hits must include `lexical` and `text_fallback`; definition fallback may also include `definition`.
 - Fallback hits do not return resolved edge confidence and must not outrank existing exact symbols or resolved edges.
-- Missing `rg`, timeouts, candidate-file budget exhaustion, or materialized-byte budget exhaustion degrade only exact-text fallback and surface through `degraded_reason`.
+- Candidate-path lookup failures, candidate-file budget exhaustion, materialized-byte budget exhaustion, or line-length limits degrade only exact-text fallback and surface through `degraded_reason`.
 
 ## Verification Commands
 

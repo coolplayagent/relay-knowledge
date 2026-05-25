@@ -10,6 +10,7 @@ use crate::{
 use super::{
     MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT,
     code_cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
+    code_query_prepare::retry_code_search_operation,
     code_search::insert_search_document,
     code_status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
@@ -107,14 +108,16 @@ pub(super) fn file_candidate_paths_for_query_scope(
     language_filters: &[String],
     limit: usize,
 ) -> Result<Vec<String>, StorageError> {
-    match file_candidate_paths_from_search(
-        connection,
-        source_scope,
-        query,
-        path_filters,
-        language_filters,
-        limit,
-    ) {
+    match retry_code_search_operation(|| {
+        file_candidate_paths_from_search(
+            connection,
+            source_scope,
+            query,
+            path_filters,
+            language_filters,
+            limit,
+        )
+    }) {
         Ok(paths) if !paths.is_empty() => Ok(paths),
         Ok(_) => file_candidate_paths_for_scope(
             connection,
