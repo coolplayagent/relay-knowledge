@@ -140,18 +140,145 @@ async fn sbom_query_honors_path_and_language_filters() {
     assert_eq!(hits[0].path, "web/package.json");
 }
 
+#[tokio::test]
+async fn sbom_query_applies_requested_limit_after_relevance_ranking() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("react-dom-file", "a/package.json", "javascript"),
+            file("react-file", "z/package.json", "javascript"),
+        ],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: vec![
+            dependency(
+                "dep-react-dom",
+                "react-dom-file",
+                "a/package.json",
+                "npm",
+                "react-dom",
+                Some("^18.2.0"),
+            ),
+            dependency(
+                "dep-react",
+                "react-file",
+                "z/package.json",
+                "npm",
+                "react",
+                Some("^18.2.0"),
+            ),
+        ],
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request_with_limit(
+            "react",
+            CodeQueryKind::Sbom,
+            Vec::new(),
+            Vec::new(),
+            1,
+        ))
+        .await
+        .expect("limited sbom query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("react"));
+    assert_eq!(hits[0].path, "z/package.json");
+}
+
+#[tokio::test]
+async fn sbom_query_marks_lockfile_edges_as_locked() {
+    let mut locked = dependency(
+        "dep-locked",
+        "lock-file",
+        "package-lock.json",
+        "npm",
+        "left-pad",
+        None,
+    );
+    locked.is_lockfile = true;
+    locked.dependency_group = "locked".to_owned();
+    locked.resolved_version = Some("1.3.0".to_owned());
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("lock-file", "package-lock.json", "javascript")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: vec![locked],
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "left-pad",
+            CodeQueryKind::Sbom,
+            Vec::new(),
+            Vec::new(),
+        ))
+        .await
+        .expect("lockfile sbom query should succeed");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("locked"));
+    assert!(hits[0].excerpt.contains("1.3.0"));
+}
+
 fn request(
     query: &str,
     kind: CodeQueryKind,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
 ) -> crate::domain::CodeRetrievalRequest {
+    request_with_limit(query, kind, path_filters, language_filters, 10)
+}
+
+fn request_with_limit(
+    query: &str,
+    kind: CodeQueryKind,
+    path_filters: Vec<String>,
+    language_filters: Vec<String>,
+    limit: usize,
+) -> crate::domain::CodeRetrievalRequest {
     crate::domain::CodeRetrievalRequest::new(
         query,
         CodeRepositorySelector::new("repo", "commit", path_filters, language_filters)
             .expect("selector should validate"),
         kind,
-        10,
+        limit,
         FreshnessPolicy::AllowStale,
     )
     .expect("request should validate")

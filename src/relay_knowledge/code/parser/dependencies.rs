@@ -273,27 +273,38 @@ fn parse_package_lock(content: &str, records: &mut Vec<DependencySeed>) {
         return;
     }
     if let Some(dependencies) = value.get("dependencies").and_then(Value::as_object) {
-        for (name, package) in dependencies {
-            let version = package
-                .get("version")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            let line = line_containing_json_key(content, name).unwrap_or(1);
-            push_seed(
-                records,
-                SeedInput::new(
-                    "npm",
-                    "javascript",
-                    name.to_owned(),
-                    None,
-                    "locked",
-                    "package-lock.json",
-                    true,
-                )
-                .resolved(version)
-                .line(line)
-                .excerpt(name.as_str()),
-            );
+        collect_package_lock_v1_dependencies(content, dependencies, records);
+    }
+}
+
+fn collect_package_lock_v1_dependencies(
+    content: &str,
+    dependencies: &serde_json::Map<String, Value>,
+    records: &mut Vec<DependencySeed>,
+) {
+    for (name, package) in dependencies {
+        let version = package
+            .get("version")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let line = line_containing_json_key(content, name).unwrap_or(1);
+        push_seed(
+            records,
+            SeedInput::new(
+                "npm",
+                "javascript",
+                name.to_owned(),
+                None,
+                "locked",
+                "package-lock.json",
+                true,
+            )
+            .resolved(version)
+            .line(line)
+            .excerpt(name.as_str()),
+        );
+        if let Some(nested) = package.get("dependencies").and_then(Value::as_object) {
+            collect_package_lock_v1_dependencies(content, nested, records);
         }
     }
 }
@@ -365,12 +376,14 @@ fn parse_go_sum(content: &str, records: &mut Vec<DependencySeed>) {
 fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {
     let mut section = String::new();
     let mut group = "dependencies".to_owned();
+    let mut poetry_group = None::<String>;
     let mut in_array = false;
     for (index, line) in content.lines().enumerate() {
         let trimmed = strip_comment(line, '#').trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             section = trimmed.trim_matches(['[', ']']).to_owned();
             group = pyproject_group(&section);
+            poetry_group = poetry_dependency_group(&section);
             in_array = false;
             continue;
         }
@@ -399,7 +412,7 @@ fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {
             if trimmed.contains(']') {
                 in_array = false;
             }
-        } else if section.starts_with("tool.poetry") {
+        } else if let Some(group) = poetry_group.as_deref() {
             let Some((name, requirement)) = parse_assignment_dependency(trimmed) else {
                 continue;
             };
@@ -411,7 +424,7 @@ fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {
                         "python",
                         name,
                         requirement,
-                        group.as_str(),
+                        group,
                         "pyproject.toml",
                         false,
                     )
@@ -812,6 +825,19 @@ fn pyproject_group(section: &str) -> String {
     }
 }
 
+fn poetry_dependency_group(section: &str) -> Option<String> {
+    if section == "tool.poetry.dependencies" {
+        Some("dependencies".to_owned())
+    } else if section == "tool.poetry.dev-dependencies" {
+        Some("dev".to_owned())
+    } else if let Some(rest) = section.strip_prefix("tool.poetry.group.") {
+        let (group, suffix) = rest.split_once('.')?;
+        (suffix == "dependencies" && !group.is_empty()).then(|| group.to_owned())
+    } else {
+        None
+    }
+}
+
 fn quoted_values(value: &str) -> Vec<&str> {
     let mut values = Vec::new();
     let mut start = None::<usize>;
@@ -882,9 +908,21 @@ fn gradle_coordinate_parts(value: &str) -> (Option<String>, Option<String>, Opti
     if value.contains(':') {
         let mut parts = value.split(':');
         return (
-            parts.next().map(str::to_owned),
-            parts.next().map(str::to_owned),
-            parts.next().map(str::to_owned),
+            parts
+                .next()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_owned),
+            parts
+                .next()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_owned),
+            parts
+                .next()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_owned),
         );
     }
     (None, None, None)
@@ -903,87 +941,5 @@ fn conan_reference(value: &str) -> Option<(String, Option<String>)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::CodeRepositoryRegistration;
-
-    #[test]
-    fn extracts_manifest_and_lock_dependencies() {
-        let build = test_build();
-        let cargo = collect_dependencies(
-            &build,
-            "Cargo.toml",
-            "file-cargo",
-            "[dependencies]\nserde = \"1\"\n[dev-dependencies]\ntokio = { version = \"1\" }\n",
-        )
-        .expect("cargo dependencies should parse");
-        assert!(
-            cargo
-                .iter()
-                .any(|dependency| dependency.package_name == "serde")
-        );
-        assert!(
-            cargo
-                .iter()
-                .any(|dependency| dependency.package_name == "tokio"
-                    && dependency.dependency_group == "dev")
-        );
-
-        let lock = collect_dependencies(
-            &build,
-            "package-lock.json",
-            "file-lock",
-            r#"{"packages":{"node_modules/react":{"version":"18.2.0"}}}"#,
-        )
-        .expect("package lock should parse");
-        assert!(lock.iter().any(|dependency| {
-            dependency.package_name == "react"
-                && dependency.resolved_version.as_deref() == Some("18.2.0")
-        }));
-    }
-
-    #[test]
-    fn extracts_jvm_and_conan_dependencies() {
-        let build = test_build();
-        let pom = collect_dependencies(
-            &build,
-            "pom.xml",
-            "file-pom",
-            "<dependencyManagement><dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-dependencies</artifactId><version>3.2.0</version><type>pom</type><scope>import</scope></dependency></dependencies></dependencyManagement>",
-        )
-        .expect("pom dependencies should parse");
-        assert!(pom.iter().any(|dependency| {
-            dependency.package_name == "org.springframework.boot:spring-boot-dependencies"
-                && dependency.dependency_group == "bom"
-        }));
-
-        let conan = collect_dependencies(
-            &build,
-            "conanfile.py",
-            "file-conan",
-            "def requirements(self):\n    self.requires(\"zlib/1.2.13\")\n",
-        )
-        .expect("conan dependencies should parse");
-        assert!(conan.iter().any(|dependency| {
-            dependency.package_name == "zlib" && dependency.requirement.as_deref() == Some("1.2.13")
-        }));
-    }
-
-    fn test_build() -> SnapshotBuild {
-        let registration = CodeRepositoryRegistration {
-            repository_id: "repo".to_owned(),
-            root_path: "/tmp/repo".to_owned(),
-            alias: "repo".to_owned(),
-            path_filters: Vec::new(),
-            language_filters: Vec::new(),
-        };
-        SnapshotBuild::new(
-            &registration,
-            "HEAD".to_owned(),
-            "tree".to_owned(),
-            true,
-            1,
-            0,
-        )
-    }
-}
+#[path = "dependencies_tests.rs"]
+mod tests;

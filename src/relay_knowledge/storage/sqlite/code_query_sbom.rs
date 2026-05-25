@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::{
     domain::{
@@ -8,11 +8,13 @@ use crate::{
     storage::StorageError,
 };
 
-use super::{CandidateLayer, ScoreQuery, candidate_limit, fts_match_query, selected_row};
 use super::{
-    HitParts, code_query_rows::DependencyRow, fts_path_and_language_filter_sql,
-    fts_values_for_limited_with_language, hit_from_parts, prepare_code_search_statement,
-    required_scope,
+    CandidateLayer, ScoreQuery, candidate_limit, fts_match_query, push_language_filter_values,
+    push_path_filter_values, selected_row,
+};
+use super::{
+    HitParts, code_query_rows::DependencyRow, fts_path_and_language_filter_sql, hit_from_parts,
+    prepare_code_search_statement, required_scope,
 };
 
 pub(super) fn search_sbom(
@@ -30,30 +32,38 @@ pub(super) fn search_sbom(
                dependency.source_kind, dependency.is_lockfile, dependency.line_start,
                dependency.line_end, dependency.excerpt
         FROM code_repository_dependencies dependency
-        WHERE dependency.source_scope = ?
-          AND dependency.dependency_id IN (
-              SELECT record_id
+        JOIN (
+              SELECT source_scope, record_id, bm25(code_repository_search) AS fts_rank
               FROM code_repository_search
               WHERE code_repository_search MATCH ?
                 AND source_scope = ?
                 AND document_kind = 'dependency'
                 {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
+              ORDER BY fts_rank ASC, record_id ASC
               LIMIT ?
-          )
-        ORDER BY dependency.path ASC, dependency.line_start ASC, dependency.package_name ASC
+        ) candidate
+          ON candidate.source_scope = dependency.source_scope
+         AND candidate.record_id = dependency.dependency_id
+        WHERE dependency.source_scope = ?
+        ORDER BY CASE WHEN lower(dependency.package_name) = lower(?) THEN 0 ELSE 1 END ASC,
+                 candidate.fts_rank ASC,
+                 dependency.is_lockfile DESC,
+                 dependency.path ASC,
+                 dependency.line_start ASC,
+                 dependency.package_name ASC
         LIMIT ?
         "
     );
     let mut statement = prepare_code_search_statement(connection, &sql)?;
+    let source_scope = required_scope(status)?;
+    let candidate_limit = candidate_limit(request, CandidateLayer::Sbom);
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
-            required_scope(status)?,
+        params_from_iter(sbom_query_values(
+            source_scope,
             status,
             request,
             &fts_query,
-            candidate_limit(request, CandidateLayer::Sbom),
-            candidate_limit(request, CandidateLayer::Sbom),
+            candidate_limit,
         )),
         |row| {
             Ok(DependencyRow {
@@ -116,6 +126,29 @@ pub(super) fn search_sbom(
             })
         })
         .collect())
+}
+
+fn sbom_query_values(
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    fts_query: &str,
+    candidate_limit: usize,
+) -> Vec<Value> {
+    let mut values = vec![
+        Value::Text(fts_query.to_owned()),
+        Value::Text(source_scope.to_owned()),
+    ];
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    values.push(Value::Integer(candidate_limit as i64));
+    values.push(Value::Text(source_scope.to_owned()));
+    values.push(Value::Text(request.query.trim().to_owned()));
+    values.push(Value::Integer(request.limit.max(1) as i64));
+
+    values
 }
 
 fn dependency_score(query: &ScoreQuery, raw_query: &str, row: &DependencyRow) -> f64 {

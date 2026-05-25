@@ -50,18 +50,9 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
         .expect("session should begin");
     let checkpoint = store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![target_file],
             symbols: vec![target_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("first batch should persist");
@@ -75,18 +66,9 @@ async fn checkpointed_batches_finalize_cross_batch_call_edges() {
     assert_eq!(indexing_status.indexed_file_count, 1);
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![caller_file],
-            symbols: Vec::new(),
             references: vec![target_reference],
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("second batch should persist");
@@ -191,18 +173,11 @@ async fn checkpointed_finalize_preserves_reference_resolution_rules() {
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
             parsed_byte_count: 60,
             files: vec![file_a, file_b, file_c],
             symbols,
             references,
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("batch should persist");
@@ -282,35 +257,17 @@ async fn checkpointed_batches_finalize_python_import_edges() {
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![model_file],
             symbols: vec![request_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("model batch should persist");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![service_file],
-            symbols: Vec::new(),
-            references: Vec::new(),
             imports: vec![service_import],
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("service batch should persist");
@@ -367,35 +324,17 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![model_file],
             symbols: vec![request_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("model batch should persist");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![service_file],
-            symbols: Vec::new(),
-            references: Vec::new(),
             imports: vec![service_import],
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("service batch should persist");
@@ -452,35 +391,17 @@ async fn checkpointed_batches_finalize_java_import_edges_under_maven_roots() {
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![context_file],
             symbols: vec![context_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("context batch should persist");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![loader_file],
-            symbols: Vec::new(),
-            references: Vec::new(),
             imports: vec![loader_import],
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("loader batch should persist");
@@ -544,35 +465,17 @@ async fn checkpointed_batches_finalize_java_wildcard_import_edges_for_fqn_symbol
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![context_file],
             symbols: vec![context_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("context batch should persist");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![loader_file],
-            symbols: Vec::new(),
-            references: Vec::new(),
             imports: vec![loader_import],
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("loader batch should persist");
@@ -641,35 +544,17 @@ async fn checkpointed_batches_finalize_go_package_import_edges_for_symbol_querie
         .expect("session should begin");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 1,
-            parsed_byte_count: 20,
             files: vec![informer_file],
             symbols: vec![informer_symbol],
-            references: Vec::new(),
-            imports: Vec::new(),
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 1)
         })
         .await
         .expect("informer batch should persist");
     store
         .apply_code_index_batch(CodeIndexBatch {
-            repository_id: "repo".to_owned(),
-            source_scope: source_scope.to_owned(),
-            batch_index: 2,
-            parsed_byte_count: 20,
             files: vec![importer_file],
-            symbols: Vec::new(),
-            references: Vec::new(),
             imports: vec![importer_import],
-            dependencies: Vec::new(),
-            feature_flags: Vec::new(),
-            chunks: Vec::new(),
-            diagnostics: Vec::new(),
+            ..batch(source_scope, 2)
         })
         .await
         .expect("importer batch should persist");
@@ -710,18 +595,9 @@ async fn checkpointed_batch_replay_keeps_progress_counts_stable() {
         "rust",
     );
     let batch = CodeIndexBatch {
-        repository_id: "repo".to_owned(),
-        source_scope: source_scope.to_owned(),
-        batch_index: 1,
-        parsed_byte_count: 20,
         files: vec![indexed_file],
         symbols: vec![indexed_symbol],
-        references: Vec::new(),
-        imports: Vec::new(),
-        dependencies: Vec::new(),
-        feature_flags: Vec::new(),
-        chunks: Vec::new(),
-        diagnostics: Vec::new(),
+        ..batch(source_scope, 1)
     };
 
     store
@@ -758,10 +634,6 @@ async fn new_checkpoint_batch_replaces_colliding_path_rows() {
     let session = session_for_scope(source_scope, 2);
     let path = "src/lib.rs";
     let batch = |batch_index, file_id: &str, symbol_id: &str, name: &str| CodeIndexBatch {
-        repository_id: "repo".to_owned(),
-        source_scope: source_scope.to_owned(),
-        batch_index,
-        parsed_byte_count: 20,
         files: vec![file(
             source_scope,
             file_id,
@@ -770,12 +642,7 @@ async fn new_checkpoint_batch_replaces_colliding_path_rows() {
             CodeParseStatus::Parsed,
         )],
         symbols: vec![symbol(source_scope, symbol_id, file_id, path, name, "rust")],
-        references: Vec::new(),
-        imports: Vec::new(),
-        dependencies: Vec::new(),
-        feature_flags: Vec::new(),
-        chunks: Vec::new(),
-        diagnostics: Vec::new(),
+        ..batch(source_scope, batch_index)
     };
 
     store
@@ -814,6 +681,23 @@ async fn registered_store() -> SqliteGraphStore {
         .expect("repository should persist");
 
     store
+}
+
+fn batch(source_scope: &str, batch_index: usize) -> CodeIndexBatch {
+    CodeIndexBatch {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        batch_index,
+        parsed_byte_count: 20,
+        files: Vec::new(),
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    }
 }
 
 async fn reference_resolution_rows(
