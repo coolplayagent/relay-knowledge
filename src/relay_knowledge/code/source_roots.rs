@@ -33,7 +33,7 @@ const LEADING_SOURCE_MARKERS: &[&str] = &[
 
 /// Returns repository-relative module identities for layouts that commonly
 /// carry source outside a top-level src directory.
-pub(super) fn source_module_candidates(path: &str) -> Vec<String> {
+pub(crate) fn source_module_candidates(path: &str) -> Vec<String> {
     let path = normalize_layout_path(path);
     let mut candidates = Vec::new();
     push_candidate(&mut candidates, path.to_owned());
@@ -44,14 +44,14 @@ pub(super) fn source_module_candidates(path: &str) -> Vec<String> {
     candidates
 }
 
-pub(super) fn source_relative_path(path: &str) -> String {
+pub(crate) fn source_relative_path(path: &str) -> String {
     source_module_candidates(path)
         .into_iter()
         .find(|candidate| candidate != path)
         .unwrap_or_else(|| normalize_layout_path(path).to_owned())
 }
 
-pub(super) fn go_module_candidates(path: &str) -> Vec<String> {
+pub(crate) fn go_module_candidates(path: &str) -> Vec<String> {
     let path = normalize_layout_path(path);
     let mut candidates = source_module_candidates(path);
     if let Some(stripped) = path.strip_prefix("staging/src/") {
@@ -64,7 +64,7 @@ pub(super) fn go_module_candidates(path: &str) -> Vec<String> {
     candidates
 }
 
-pub(super) fn c_family_module_candidates(path: &str) -> Vec<String> {
+pub(crate) fn c_family_module_candidates(path: &str) -> Vec<String> {
     let mut candidates = source_module_candidates(path);
     for candidate in candidates.clone() {
         if let Some(include_path) = include_segment_path(&candidate) {
@@ -78,7 +78,7 @@ pub(super) fn c_family_module_candidates(path: &str) -> Vec<String> {
     candidates
 }
 
-pub(super) fn normalized_module_candidates(path: &str) -> Vec<String> {
+pub(crate) fn normalized_module_candidates(path: &str) -> Vec<String> {
     let path = normalize_layout_path(path).trim_start_matches("./");
     if path.is_empty() {
         Vec::new()

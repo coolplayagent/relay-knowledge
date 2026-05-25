@@ -21,7 +21,7 @@ mod parser;
 mod pipeline;
 mod scope;
 mod snapshot;
-mod source_roots;
+pub(crate) mod source_roots;
 
 #[cfg(test)]
 mod tests;

@@ -133,8 +133,10 @@ fn relative_module_candidates(import_path: &str, specifier: &str) -> Vec<String>
             return Vec::new();
         };
         base_path
-    } else {
+    } else if specifier.contains('/') {
         specifier.to_owned()
+    } else {
+        return Vec::new();
     };
     let mut candidates = Vec::new();
     push_module_file_candidates(&mut candidates, &base_path);

@@ -229,6 +229,30 @@ export function buildClient(): Session {
 }
 
 #[test]
+fn typescript_bare_package_specifiers_do_not_resolve_local_single_segment_files() {
+    let snapshot = parse_sources(&[
+        (
+            "src/react.ts",
+            r#"
+export class ReactClient {}
+"#,
+        ),
+        (
+            "src/client.ts",
+            r#"
+import { ReactClient } from "react";
+
+export function buildClient(): ReactClient {
+    return new ReactClient();
+}
+"#,
+        ),
+    ]);
+
+    assert_import_state(&snapshot, "react", "unresolved");
+}
+
+#[test]
 fn typescript_dynamic_imports_use_string_specifier_identity() {
     let snapshot = parse_sources(&[
         ("src/lazy/alpha.ts", "export function alpha(): void {}"),

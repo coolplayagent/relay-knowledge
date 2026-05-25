@@ -79,6 +79,150 @@ async fn checkpointed_batches_finalize_typescript_named_import_edges() {
 }
 
 #[tokio::test]
+async fn checkpointed_batches_finalize_typescript_nonstandard_source_root_import_edges() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:typescript-nonstandard-import-finalize";
+    let session = session_for_scope(source_scope, 2);
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(
+                source_scope,
+                "external-client-file",
+                "external_deps/ts_sdk/sessionClient.ts",
+            )],
+            symbols: vec![symbol(
+                source_scope,
+                "external-client-symbol",
+                "external-client-file",
+                "external_deps/ts_sdk/sessionClient.ts",
+                "ExternalSessionClient",
+            )],
+            references: Vec::new(),
+            imports: Vec::new(),
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("target batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "importer-file", "src/app/use_client.ts")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![import(
+                source_scope,
+                "external-client-import",
+                "importer-file",
+                "src/app/use_client.ts",
+                "import { ExternalSessionClient } from \"ts_sdk/sessionClient\";",
+            )],
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("import batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "ExternalSessionClient", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/app/use_client.ts");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("external_deps/ts_sdk/sessionClient.ts")
+    );
+}
+
+#[tokio::test]
+async fn checkpointed_batches_finalize_keeps_bare_typescript_packages_unresolved() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:typescript-bare-package-finalize";
+    let session = session_for_scope(source_scope, 2);
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "react-file", "src/react.ts")],
+            symbols: vec![symbol(
+                source_scope,
+                "react-client-symbol",
+                "react-file",
+                "src/react.ts",
+                "ReactClient",
+            )],
+            references: Vec::new(),
+            imports: Vec::new(),
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("target batch should persist");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 2,
+            parsed_byte_count: 20,
+            files: vec![file(source_scope, "importer-file", "src/app/use_client.ts")],
+            symbols: Vec::new(),
+            references: Vec::new(),
+            imports: vec![import(
+                source_scope,
+                "react-import",
+                "importer-file",
+                "src/app/use_client.ts",
+                "import { ReactClient } from \"react\";",
+            )],
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("import batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let hits = search(&store, "react", CodeQueryKind::Imports).await;
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "src/app/use_client.ts");
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("unresolved"));
+    assert_eq!(
+        hits[0].edge_target_hint.as_deref(),
+        Some("import { ReactClient } from \"react\";")
+    );
+}
+
+#[tokio::test]
 async fn checkpointed_batches_finalize_typescript_re_export_and_dynamic_import_edges() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:typescript-re-export-finalize";
