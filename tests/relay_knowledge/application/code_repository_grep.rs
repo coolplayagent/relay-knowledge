@@ -299,6 +299,34 @@ async fn query_degrades_when_candidate_path_lookup_is_unavailable() {
 }
 
 #[tokio::test]
+async fn status_skips_optional_task_lease_recovery_for_partial_store() {
+    let repo = FixtureRepo::create("code-status-partial-lease-store");
+    repo.write(
+        "src/lib.c",
+        "int rk_status_partial_store(void) { return 1; }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "status"]);
+    let commit = repo.git_stdout(["rev-parse", "HEAD"]);
+    let store = Arc::new(CandidatePathUnavailableStore {
+        status: repository_status(&repo.path, &commit),
+    });
+    let service = service_with_store(store).await;
+
+    let response = service
+        .code_repository_status(
+            selector("fixture", "HEAD"),
+            context("status-partial-lease-store"),
+        )
+        .await
+        .expect("status should ignore optional lease recovery when unsupported");
+
+    assert!(response.active_task.is_none());
+    assert!(response.checkpoint.is_none());
+    assert_eq!(response.status.repository_id, "repo");
+}
+
+#[tokio::test]
 async fn import_query_uses_grep_fallback_for_unindexed_external_dependency() {
     if Command::new("rg").arg("--version").output().is_err() {
         return;
@@ -573,9 +601,27 @@ impl CodeRepositoryStore for CandidatePathUnavailableStore {
     unsupported_code_repository_method!(complete_code_index_task(request: CodeIndexTaskCompletion) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(fail_code_index_task(request: CodeIndexTaskFailure) -> CodeIndexTaskRecord);
     unsupported_code_repository_method!(code_index_task(task_id: String) -> Option<CodeIndexTaskRecord>);
-    unsupported_code_repository_method!(active_code_index_task(repository_id: String) -> Option<CodeIndexTaskRecord>);
-    unsupported_code_repository_method!(code_index_checkpoint(source_scope: String) -> Option<CodeIndexCheckpoint>);
-    unsupported_code_repository_method!(code_scope_retention(repository_id: String) -> CodeScopeRetentionSummary);
+    fn active_code_index_task(
+        &self,
+        _repository_id: String,
+    ) -> StorageFuture<'_, Option<CodeIndexTaskRecord>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn code_index_checkpoint(
+        &self,
+        _source_scope: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn code_scope_retention(
+        &self,
+        _repository_id: String,
+    ) -> StorageFuture<'_, CodeScopeRetentionSummary> {
+        Box::pin(async { Ok(CodeScopeRetentionSummary::default()) })
+    }
+
     unsupported_code_repository_method!(prune_code_repository_scopes(request: CodeScopeRetentionRequest) -> CodeScopeRetentionSummary);
     unsupported_code_repository_method!(code_file_fingerprints(repository_id: String) -> Vec<CodeFileFingerprint>);
     unsupported_code_repository_method!(apply_code_index_snapshot(snapshot: relay_knowledge::domain::CodeIndexSnapshot) -> CodeIndexSummary);

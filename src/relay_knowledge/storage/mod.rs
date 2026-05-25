@@ -27,6 +27,7 @@ pub use canvas::{
     GraphCanvasStorageRequest, GraphCanvasStorageSnapshot,
 };
 pub use code::{
+    CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
     CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
     CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
     CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,

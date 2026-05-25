@@ -11,6 +11,14 @@ use crate::domain::{
 
 use super::{StorageError, StorageFuture};
 
+/// Default error text for stores that do not support code task lease recovery.
+pub const CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE: &str =
+    "code index task lease recovery is unavailable";
+
+/// Default error text for stores that do not support code task lease renewal.
+pub const CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE: &str =
+    "code index task lease renewal is unavailable";
+
 /// Diff-derived inputs used to seed code impact expansion.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CodeImpactChanges {
@@ -187,7 +195,7 @@ pub trait CodeRepositoryStore: Send + Sync {
     ) -> StorageFuture<'_, ()> {
         Box::pin(async {
             Err(StorageError::InvalidInput(
-                "code index task lease recovery is unavailable".to_owned(),
+                CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE.to_owned(),
             ))
         })
     }
@@ -198,7 +206,7 @@ pub trait CodeRepositoryStore: Send + Sync {
     ) -> StorageFuture<'_, CodeIndexTaskRecord> {
         Box::pin(async {
             Err(StorageError::InvalidInput(
-                "code index task lease renewal is unavailable".to_owned(),
+                CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE.to_owned(),
             ))
         })
     }
