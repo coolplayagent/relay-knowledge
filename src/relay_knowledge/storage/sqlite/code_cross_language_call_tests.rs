@@ -88,6 +88,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "function",
                     range(8, 11),
                 ),
+                symbol(
+                    "c-connect",
+                    "c-file",
+                    "src/c_entry.c",
+                    "connect",
+                    "c",
+                    "function",
+                    range(13, 15),
+                ),
             ],
             references: vec![
                 reference(
@@ -117,6 +126,13 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "crates/rust_bridge/src/lib.rs",
                     "ffi::rk_c_decode",
                     range(10, 10),
+                ),
+                reference(
+                    "rust-namespaced-connect",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "module::connect",
+                    range(12, 12),
                 ),
             ],
             imports: Vec::new(),
@@ -154,6 +170,11 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
     let c_entry_callees = search(&store, "rk_c_entry_process", CodeQueryKind::Callees).await;
     assert_eq!(c_entry_callees[0].path, "src/c_entry.c");
     assert!(c_entry_callees[0].excerpt.contains("rk_cpp_score"));
+
+    let namespaced_connect = reference_resolution(&store, "rust-namespaced-connect").await;
+    assert_eq!(namespaced_connect.0, "unresolved");
+    assert_eq!(namespaced_connect.1, None);
+    assert_eq!(namespaced_connect.2.as_deref(), Some("module::connect"));
 }
 
 async fn registered_store() -> SqliteGraphStore {
@@ -202,6 +223,29 @@ async fn search(
         )
         .await
         .expect("query should succeed")
+}
+
+async fn reference_resolution(
+    store: &SqliteGraphStore,
+    reference_id: &str,
+) -> (String, Option<String>, Option<String>) {
+    let reference_id = reference_id.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT resolution_state, target_symbol_snapshot_id, target_hint
+                    FROM code_repository_references
+                    WHERE source_scope = ?1 AND reference_id = ?2
+                    ",
+                    rusqlite::params![SOURCE_SCOPE, reference_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("reference resolution should load")
 }
 
 fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {

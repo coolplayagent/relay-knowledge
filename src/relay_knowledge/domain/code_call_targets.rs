@@ -30,7 +30,8 @@ fn cross_language_call_leaf(name: &str) -> Option<&str> {
     {
         return Some(leaf);
     }
-    if let Some((_, leaf)) = name.rsplit_once("::")
+    if let Some((prefix, leaf)) = name.rsplit_once("::")
+        && foreign_member_prefix(prefix)
         && simple_identifier(leaf)
     {
         return Some(leaf);
@@ -71,13 +72,21 @@ mod tests {
             call_target_name_candidates("ffi::rk_c_decode"),
             ["ffi::rk_c_decode", "rk_c_decode"]
         );
+        assert_eq!(
+            call_target_name_candidates("crate::ffi::rk_c_decode"),
+            ["crate::ffi::rk_c_decode", "rk_c_decode"]
+        );
     }
 
     #[test]
-    fn ordinary_member_calls_do_not_alias_to_broad_method_names() {
+    fn ordinary_member_and_namespace_calls_do_not_alias_to_broad_method_names() {
         assert_eq!(
             call_target_name_candidates("client.connect"),
             ["client.connect"]
+        );
+        assert_eq!(
+            call_target_name_candidates("module::connect"),
+            ["module::connect"]
         );
     }
 }

@@ -218,6 +218,25 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn call_resolution_does_not_leaf_alias_ordinary_namespaced_calls() {
+        let symbols = vec![symbol("plain-connect", "src/socket.c", "connect")];
+        let mut references = vec![reference(
+            "rust-module-call",
+            "crates/app/src/lib.rs",
+            "module::connect",
+        )];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(references[0].target_symbol_snapshot_id, None);
+        assert_eq!(
+            references[0].target_hint.as_deref(),
+            Some("module::connect")
+        );
+        assert_eq!(references[0].resolution_state, "unresolved");
+    }
+
     fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
         RepositoryCodeSymbolRecord {
             repository_id: "repo".to_owned(),
