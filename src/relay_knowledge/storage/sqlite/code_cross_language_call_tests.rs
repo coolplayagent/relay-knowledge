@@ -169,25 +169,32 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     range(13, 13),
                 ),
                 reference(
+                    "rust-client-ffi-connect",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "client.ffi.connect",
+                    range(14, 14),
+                ),
+                reference(
                     "rust-c-member-connect",
                     "rust-file",
                     "crates/rust_bridge/src/lib.rs",
                     "C.connect",
-                    range(14, 14),
+                    range(15, 15),
                 ),
                 reference(
                     "go-object-c-connect",
                     "go-file",
                     "bridge/go_bridge.go",
                     "obj.C.connect",
-                    range(13, 13),
+                    range(14, 14),
                 ),
                 reference(
                     "rust-ffi-non-callable",
                     "rust-file",
                     "crates/rust_bridge/src/lib.rs",
                     "ffi::not_callable_target",
-                    range(17, 17),
+                    range(18, 18),
                 ),
             ],
             imports: Vec::new(),
@@ -257,6 +264,11 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
         module_sys_connect.2.as_deref(),
         Some("module::sys::connect")
     );
+
+    let client_ffi_connect = reference_resolution(&store, "rust-client-ffi-connect").await;
+    assert_eq!(client_ffi_connect.0, "unresolved");
+    assert_eq!(client_ffi_connect.1, None);
+    assert_eq!(client_ffi_connect.2.as_deref(), Some("client.ffi.connect"));
 
     let rust_c_connect = reference_resolution(&store, "rust-c-member-connect").await;
     assert_eq!(rust_c_connect.0, "unresolved");

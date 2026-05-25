@@ -30,7 +30,7 @@ fn cross_language_call_leaf<'a>(name: &'a str, path: &str) -> Option<&'a str> {
         if prefix == "C" && go_source_path(path) {
             return Some(leaf);
         }
-        if prefix != "C" && foreign_member_prefix(prefix) {
+        if prefix != "C" && simple_identifier(prefix) && foreign_member_prefix(prefix) {
             return Some(leaf);
         }
     }
@@ -108,6 +108,10 @@ mod tests {
         assert_eq!(
             call_target_name_candidates("module.raw.connect", "src/lib.rs"),
             ["module.raw.connect"]
+        );
+        assert_eq!(
+            call_target_name_candidates("client.ffi.connect", "src/lib.rs"),
+            ["client.ffi.connect"]
         );
         assert_eq!(
             call_target_name_candidates("std::ffi::CString::new", "src/lib.rs"),
