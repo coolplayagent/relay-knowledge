@@ -517,11 +517,19 @@ pub fn run_rust_bridge(payload: *const i8) -> i32 {
     assert!(snapshot.calls.iter().any(|call| {
         call.path == "bridge/go_bridge.go"
             && call.callee_name == "rk_c_decode"
+            && matches!(
+                call.target_hint.as_deref(),
+                Some("C.rk_c_decode" | "rk_c_decode")
+            )
             && call.resolution_state == "resolved"
     }));
     assert!(snapshot.calls.iter().any(|call| {
         call.path == "crates/rust_bridge/src/lib.rs"
             && call.callee_name == "rk_c_decode"
+            && matches!(
+                call.target_hint.as_deref(),
+                Some("ffi::rk_c_decode" | "rk_c_decode")
+            )
             && call.resolution_state == "resolved"
     }));
 }

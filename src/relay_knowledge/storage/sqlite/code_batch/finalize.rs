@@ -291,9 +291,9 @@ fn rebuild_calls(
             .target_symbol_snapshot_id
             .as_deref()
             .and_then(|symbol_id| by_symbol_id.get(symbol_id).copied());
-        let callee_name = reference
-            .target_hint
-            .as_deref()
+        let callee_name = callee
+            .map(|symbol| symbol.name.as_str())
+            .or(reference.target_hint.as_deref())
             .unwrap_or(reference.name.as_str());
         let call_id = stable_id(
             "call",

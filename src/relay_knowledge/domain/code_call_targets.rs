@@ -44,10 +44,10 @@ fn foreign_member_prefix(prefix: &str) -> bool {
         .rsplit(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
         .find(|term| !term.is_empty())
         .unwrap_or(prefix);
-    matches!(
-        prefix_leaf,
-        "C" | "bindings" | "ffi" | "libc" | "native" | "raw" | "sys"
-    )
+    matches!(prefix_leaf, "C" | "bindings" | "ffi" | "libc")
+        || prefix_leaf
+            .strip_suffix("_sys")
+            .is_some_and(|crate_name| !crate_name.is_empty())
 }
 
 fn simple_identifier(value: &str) -> bool {
@@ -76,10 +76,14 @@ mod tests {
             call_target_name_candidates("crate::ffi::rk_c_decode"),
             ["crate::ffi::rk_c_decode", "rk_c_decode"]
         );
+        assert_eq!(
+            call_target_name_candidates("openssl_sys::rk_c_decode"),
+            ["openssl_sys::rk_c_decode", "rk_c_decode"]
+        );
     }
 
     #[test]
-    fn ordinary_member_and_namespace_calls_do_not_alias_to_broad_method_names() {
+    fn ordinary_member_and_namespace_calls_do_not_alias_to_broad_names() {
         assert_eq!(
             call_target_name_candidates("client.connect"),
             ["client.connect"]
@@ -87,6 +91,18 @@ mod tests {
         assert_eq!(
             call_target_name_candidates("module::connect"),
             ["module::connect"]
+        );
+        assert_eq!(
+            call_target_name_candidates("module::sys::connect"),
+            ["module::sys::connect"]
+        );
+        assert_eq!(
+            call_target_name_candidates("module.raw.connect"),
+            ["module.raw.connect"]
+        );
+        assert_eq!(
+            call_target_name_candidates("std::ffi::CString::new"),
+            ["std::ffi::CString::new"]
         );
     }
 }
