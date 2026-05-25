@@ -641,7 +641,7 @@ fn insert_imports_calls_chunks_diagnostics(
             ],
         )?;
     }
-    super::code_feature_flags::insert_from_chunks(transaction, &snapshot.chunks)?;
+    super::code_feature_flags::insert_records(transaction, &snapshot.feature_flags)?;
     for diagnostic in &snapshot.diagnostics {
         transaction.execute(
             "

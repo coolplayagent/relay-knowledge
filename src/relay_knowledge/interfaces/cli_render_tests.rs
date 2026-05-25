@@ -81,6 +81,14 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "changed_in_scope=1 results=1\n",
         ),
         (
+            "code.repo.feature_flags",
+            serde_json::json!({
+                "flags": [{"feature_flag_id": "flag:1"}],
+                "degraded_reason": null,
+            }),
+            "feature_flags=1 degraded=none\n",
+        ),
+        (
             "code.repo.status",
             serde_json::json!({
                 "status": {

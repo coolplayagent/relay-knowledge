@@ -39,6 +39,7 @@ async fn incremental_call_search_uses_cloned_symbol_signatures() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -115,6 +116,7 @@ async fn incremental_call_search_batches_cloned_symbol_signature_lookups() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -182,6 +184,7 @@ fn incremental_snapshot() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

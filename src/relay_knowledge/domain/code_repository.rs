@@ -503,6 +503,7 @@ pub struct CodeIndexSnapshot {
     pub references: Vec<RepositoryCodeReferenceRecord>,
     pub imports: Vec<CodeImportRecord>,
     pub calls: Vec<CodeCallRecord>,
+    pub feature_flags: Vec<CodeFeatureFlagRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     pub diagnostics: Vec<CodeFileDiagnostic>,
 }
@@ -594,6 +595,7 @@ pub struct CodeIndexBatch {
     pub symbols: Vec<RepositoryCodeSymbolRecord>,
     pub references: Vec<RepositoryCodeReferenceRecord>,
     pub imports: Vec<CodeImportRecord>,
+    pub feature_flags: Vec<CodeFeatureFlagRecord>,
     pub chunks: Vec<RepositoryCodeChunkRecord>,
     pub diagnostics: Vec<CodeFileDiagnostic>,
 }
@@ -606,6 +608,7 @@ impl CodeIndexBatch {
             .saturating_add(self.symbols.len())
             .saturating_add(self.references.len())
             .saturating_add(self.imports.len())
+            .saturating_add(self.feature_flags.len())
             .saturating_add(self.chunks.len())
             .saturating_add(self.diagnostics.len())
     }

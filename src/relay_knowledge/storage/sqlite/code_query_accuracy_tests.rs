@@ -732,6 +732,7 @@ fn snapshot_with_target_symbol() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -784,6 +785,7 @@ fn snapshot_with_path_filtered_candidate_overflow() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -830,6 +832,7 @@ fn snapshot_with_degraded_files(count: usize) -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics,
     }
@@ -916,6 +919,7 @@ fn snapshot_with_archive_output_dir_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1002,6 +1006,7 @@ fn snapshot_with_checkpoint_version_constant_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1053,6 +1058,7 @@ fn snapshot_with_resolved_callee_tie() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![ambiguous, resolved],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1112,6 +1118,7 @@ fn snapshot_with_many_caller_candidate_ties() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls,
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1173,6 +1180,7 @@ fn snapshot_with_same_callee_context_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![first_noise, second_noise, exact],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1222,6 +1230,7 @@ fn snapshot_with_call_site_chunk() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![call],
+        feature_flags: Vec::new(),
         chunks: vec![
             RepositoryCodeChunkRecord {
                 line_range: range(110, 115),
@@ -1273,6 +1282,7 @@ fn snapshot_with_eval_checkpoint_chunk() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "checkpoint-chunk",
             "checkpoint-source",
@@ -1333,6 +1343,7 @@ fn snapshot_with_cache_interface_chunk_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![target, noise],
         diagnostics: Vec::new(),
     }
@@ -1387,6 +1398,7 @@ fn snapshot_with_recovery_manifest_chunk_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![target, noise],
         diagnostics: Vec::new(),
     }
@@ -1435,6 +1447,7 @@ fn snapshot_with_related_callee_names() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![unrelated, related],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1525,6 +1538,7 @@ fn snapshot_with_exact_match_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![exact_callee, noisy_callee, exact_caller, noisy_caller],
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1585,6 +1599,7 @@ fn snapshot_with_type_name_signature_mentions() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1652,6 +1667,7 @@ fn snapshot_with_many_signature_mentions() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1741,6 +1757,7 @@ fn snapshot_with_scoped_cpp_definition_noise() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -1797,6 +1814,7 @@ fn snapshot_with_c_imports() -> CodeIndexSnapshot {
             ),
         ],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

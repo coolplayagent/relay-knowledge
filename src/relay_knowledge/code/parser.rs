@@ -18,6 +18,7 @@ use crate::domain::{
 
 use super::{
     CodeIndexError, SnapshotBuild,
+    feature_flags::{FeatureFlagFileInput, extract_feature_flags},
     languages::{LanguageSpec, detect_language},
     stable_content_hash, stable_id,
 };
@@ -82,6 +83,7 @@ pub(in crate::code) fn parse_indexed_file(
             },
         );
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
+        record_feature_flags(build, path, &file_id, "unknown", &content)?;
         return Ok(());
     };
     if parse_status == CodeParseStatus::TextOnly {
@@ -99,6 +101,7 @@ pub(in crate::code) fn parse_indexed_file(
             },
         );
         add_file_chunk(build, path, &file_id, language.id, &content)?;
+        record_feature_flags(build, path, &file_id, language.id, &content)?;
         return Ok(());
     }
 
@@ -170,6 +173,13 @@ fn parse_syntax_file(
         Ok(parsed) => parsed,
         Err(error) => {
             record_tree_sitter_failure(build, &input, "parse", &error);
+            record_feature_flags(
+                build,
+                input.path,
+                input.file_id,
+                input.language.id,
+                input.content,
+            )?;
             return Ok(());
         }
     };
@@ -178,6 +188,13 @@ fn parse_syntax_file(
         Ok(captures) => captures,
         Err(error) => {
             record_tree_sitter_failure(build, &input, "query", &error);
+            record_feature_flags(
+                build,
+                input.path,
+                input.file_id,
+                input.language.id,
+                input.content,
+            )?;
             return Ok(());
         }
     };
@@ -237,7 +254,35 @@ fn parse_syntax_file(
     build.symbols.extend(output.symbols);
     build.references.extend(output.references);
     build.imports.extend(imports);
+    record_feature_flags(
+        build,
+        input.path,
+        input.file_id,
+        input.language.id,
+        input.content,
+    )?;
     build.chunks.extend(chunks);
+
+    Ok(())
+}
+
+fn record_feature_flags(
+    build: &mut SnapshotBuild,
+    path: &str,
+    file_id: &str,
+    language_id: &str,
+    content: &str,
+) -> Result<(), CodeIndexError> {
+    let records = extract_feature_flags(FeatureFlagFileInput {
+        repository_id: &build.repository_id,
+        source_scope: &build.source_scope,
+        file_id,
+        path,
+        language_id,
+        content,
+    })
+    .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
+    build.feature_flags.extend(records);
 
     Ok(())
 }

@@ -56,6 +56,31 @@ fn retry_policy() {
 }
 
 #[test]
+fn feature_flags_are_extracted_from_full_symbol_bearing_files() {
+    let snapshot = parse_source_snapshot(
+        "src/app.py",
+        br#"
+import os
+
+CHECKOUT_ENABLED = os.getenv("CHECKOUT_V2")
+
+def run_checkout():
+    execute_checkout()
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "run_checkout")
+    );
+    assert!(snapshot.feature_flags.iter().any(|record| {
+        record.source_key == "CHECKOUT_V2" && record.edge_kind == "reads_config"
+    }));
+}
+
+#[test]
 fn python_tree_sitter_imports_resolve_local_symbols() {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())

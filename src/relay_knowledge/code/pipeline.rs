@@ -117,6 +117,7 @@ impl CodeIndexPlan {
             symbols: build.symbols,
             references: build.references,
             imports: build.imports,
+            feature_flags: build.feature_flags,
             chunks: build.chunks,
             diagnostics: build.diagnostics,
         };

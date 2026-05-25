@@ -37,6 +37,7 @@ async fn pure_hybrid_symbol_identity_uses_symbol_only_plan() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
             "connector-file",
@@ -85,6 +86,7 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![chunk(
             "connector-chunk",
             "connector-file",
@@ -148,6 +150,7 @@ async fn multi_api_symbol_query_keeps_direct_identity_facets() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -214,6 +217,7 @@ async fn covered_multi_api_symbol_query_elides_fts_noise() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })

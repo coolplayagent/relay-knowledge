@@ -79,7 +79,7 @@ fn apply_batch_once(
     };
     insert_references(&transaction, batch, edge_search_languages.as_ref())?;
     insert_imports(&transaction, batch, edge_search_languages.as_ref())?;
-    super::code_feature_flags::insert_from_chunks(&transaction, &batch.chunks)?;
+    super::code_feature_flags::insert_records(&transaction, &batch.feature_flags)?;
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
     update_checkpoint_after_batch(&transaction, batch, batch_is_new)?;

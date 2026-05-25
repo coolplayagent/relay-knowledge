@@ -141,6 +141,7 @@ fn snapshot_with_import_target_outside_importer_scope() -> CodeIndexSnapshot {
             Some("k8s.io/client-go/informers"),
         )],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -180,6 +181,7 @@ fn snapshot_with_python_vendor_target() -> CodeIndexSnapshot {
             Some("pkg"),
         )],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -226,6 +228,7 @@ fn snapshot_with_many_target_symbol_hints() -> CodeIndexSnapshot {
             Some("pkg139"),
         )],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     }

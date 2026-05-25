@@ -50,6 +50,7 @@ async fn symbol_import_queries_rank_repository_context_before_line_number() {
         references: Vec::new(),
         imports: vec![utility_import, openai_import],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -117,6 +118,7 @@ async fn symbol_import_queries_rank_dense_same_file_alias_usage() {
             ),
         ],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: vec![
             chunk(
                 "script-chunk",
@@ -196,6 +198,7 @@ async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
         references: Vec::new(),
         imports: vec![include_import],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -264,6 +267,7 @@ async fn path_import_queries_rank_public_header_importers_before_implementation_
         references: Vec::new(),
         imports: vec![implementation_import, test_import, header_import],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -328,6 +332,7 @@ async fn path_import_queries_demote_test_importers_without_test_intent() {
         references: Vec::new(),
         imports: vec![test_import, production_import],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
@@ -378,6 +383,7 @@ async fn script_import_queries_match_shellcheck_source_context() {
         references: Vec::new(),
         imports: vec![source_import],
         calls: Vec::new(),
+        feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
     })
