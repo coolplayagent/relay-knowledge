@@ -446,6 +446,7 @@ fn fast_repository_names() -> Vec<String> {
         .filter(|items| !items.is_empty())
         .unwrap_or_else(|| {
             vec![
+                "grep_budget_fixture".to_owned(),
                 "c_syntax_fixture".to_owned(),
                 "cpp_syntax_fixture".to_owned(),
                 "cross_language_syntax_fixture".to_owned(),
@@ -662,6 +663,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     }
     fs::create_dir_all(root)
         .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
+    if fixture == "grep_budget_v1" {
+        return write_grep_budget_fixture(root);
+    }
     for (path, content) in generated_repository_files(fixture)? {
         write_fixture_file(&root.join(path), content)?;
     }
@@ -825,6 +829,24 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
+}
+
+fn write_grep_budget_fixture(root: &Path) -> Result<(), String> {
+    for index in 0..300 {
+        write_fixture_file(
+            &root.join("src").join(format!("noise_{index:03}.c")),
+            &format!("int noise_{index:03}(void) {{ return {index}; }}\n"),
+        )?;
+    }
+    write_fixture_file(
+        &root.join("zzz").join("late_target.c"),
+        r#"// RK_LATE_BUDGET_NOTE must remain reachable after broad candidate selection.
+int late_budget_target(void)
+{
+    return 7;
+}
+"#,
+    )
 }
 
 fn commit_generated_repository(

@@ -110,6 +110,78 @@ async fn reference_query_uses_ripgrep_text_fallback_for_comment_reference() {
 }
 
 #[tokio::test]
+async fn ripgrep_fallback_uses_query_candidates_before_scope_file_budget() {
+    if Command::new("rg").arg("--version").output().is_err() {
+        return;
+    }
+    let repo = FixtureRepo::create("code-ripgrep-query-candidate-budget");
+    for index in 0..300 {
+        repo.write(
+            &format!("src/noise_{index:03}.c"),
+            &format!("int noise_{index:03}(void) {{ return {index}; }}\n"),
+        );
+    }
+    repo.write(
+        "zzz/late_target.c",
+        "// RK_LATE_BUDGET_NOTE must stay reachable after broad candidate selection.\nint late_budget_target(void) { return 7; }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "late grep target"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned(), "zzz".to_owned()],
+                language_filters: vec!["c".to_owned()],
+            },
+            context("register-ripgrep-query-candidates"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-ripgrep-query-candidates"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "RK_LATE_BUDGET_NOTE",
+                CodeRepositorySelector::new("fixture", "HEAD", Vec::new(), vec!["c".to_owned()])
+                    .expect("selector should validate"),
+                CodeQueryKind::References,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-ripgrep-query-candidates"),
+        )
+        .await
+        .expect("query should succeed");
+
+    assert!(response.degraded_reason.is_none());
+    assert!(response.results.iter().any(|hit| {
+        hit.path == "zzz/late_target.c"
+            && hit
+                .excerpt
+                .contains("RK_LATE_BUDGET_NOTE must stay reachable")
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::TextFallback)
+    }));
+}
+
+#[tokio::test]
 async fn definition_query_line_scans_when_ripgrep_omits_long_lines() {
     let repo = FixtureRepo::create("code-ripgrep-long-line-definition");
     let filler = "x".repeat(5000);

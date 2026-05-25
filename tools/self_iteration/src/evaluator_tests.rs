@@ -307,6 +307,7 @@ mod tests {
         let names = fast_repository_names();
 
         assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
+        assert!(names.iter().any(|name| name == "grep_budget_fixture"));
         assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
     }
 
@@ -324,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_preserves_typescript_import_grep_guardrail_case() {
+    fn fast_preserves_grep_guardrail_cases() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),
             serde_json::json!({
@@ -338,6 +339,18 @@ mod tests {
                     "retrieval_layer": "text_fallback"
                 }],
                 "degraded_reason_contains": "external dependency import is not indexed"
+            }),
+            serde_json::json!({
+                "id": "grep_budget_reference_late_comment_after_scope_budget",
+                "repository": "grep_budget_fixture",
+                "kind": "references",
+                "query": "RK_LATE_BUDGET_NOTE",
+                "guardrail": true,
+                "expected": [{
+                    "path": "zzz/late_target.c",
+                    "retrieval_layer": "text_fallback"
+                }],
+                "degraded_reason": false
             }),
         ];
 
@@ -358,6 +371,13 @@ mod tests {
             "external dependency import is not indexed"
         );
         assert!(case.get("guardrail").and_then(Value::as_bool).unwrap_or(false));
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "") == "grep_budget_reference_late_comment_after_scope_budget"
+                && case
+                    .get("degraded_reason")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+        }));
     }
 
     #[test]

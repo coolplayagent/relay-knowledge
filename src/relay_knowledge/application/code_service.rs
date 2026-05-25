@@ -826,8 +826,9 @@ pub(crate) async fn apply_code_grep_fallback(
                 ))
             })?;
         let paths = match store
-            .code_file_candidate_paths_for_scope(
+            .code_file_candidate_paths_for_query_scope(
                 source_scope.to_owned(),
+                plan.query.clone(),
                 plan.path_filters.clone(),
                 plan.language_filters.clone(),
                 SOURCE_GREP_CANDIDATE_FILE_LIMIT.saturating_add(1),

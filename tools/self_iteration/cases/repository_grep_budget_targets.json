@@ -1,0 +1,52 @@
+{
+  "repositories": {
+    "grep_budget_fixture": {
+      "generated_fixture": "grep_budget_v1",
+      "alias": "grep-budget-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["c"],
+      "index_budget_ms": 20000,
+      "register_index_budget_ms": 23000,
+      "query_p50_budget_ms": 120,
+      "query_p95_budget_ms": 240
+    }
+  },
+  "query_cases": [
+    {
+      "id": "grep_budget_symbol_late_target_structured",
+      "repository": "grep_budget_fixture",
+      "kind": "symbol",
+      "query": "late_budget_target",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["c"],
+      "expected": [{"path": "zzz/late_target.c", "excerpt_contains": "late_budget_target"}],
+      "degraded_reason": false,
+      "case_group": "grep_candidate_budget"
+    },
+    {
+      "id": "grep_budget_reference_late_comment_after_scope_budget",
+      "repository": "grep_budget_fixture",
+      "kind": "references",
+      "query": "RK_LATE_BUDGET_NOTE",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "language_filters": ["c"],
+      "expected": [
+        {
+          "path": "zzz/late_target.c",
+          "excerpt_contains": "RK_LATE_BUDGET_NOTE must remain reachable",
+          "retrieval_layer": "text_fallback",
+          "edge_confidence_absent": true
+        }
+      ],
+      "degraded_reason": false,
+      "case_group": "grep_candidate_budget"
+    }
+  ]
+}

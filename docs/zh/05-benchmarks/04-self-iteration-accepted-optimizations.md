@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-issue-154-query-aware-grep-candidates
+- 算法/架构：source-text fallback 需要宽 scope 候选路径时，SQLite 存储先用 query、path filter、language filter 在已索引 `code_repository_search` FTS read model 中按 rank 收敛文件路径；只有 query 无索引候选时才退回原有 scope path 枚举。应用层继续把 Git blob 物化和 `rg` 执行放在 blocking worker 边界内，且保持 256 文件、8 MiB blob、4096 字节行长和 3 秒 timeout 预算。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入内容、code query ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 或安装发布；不扩大 grep 候选预算，也不枚举仓库、路径、case id 或查询字符串。预期修复 issue #154 中宽范围代码地图/查询因 `ripgrep candidate file budget exhausted` 漏掉排序靠后相关文件的问题，并让结构化 symbol/definition 结果继续独立于 grep fallback；风险是 FTS 候选为空时仍可能报告预算耗尽，受 storage query-candidate 单测、真实 Git+rg 应用回归和 fast `grep_budget_fixture` guardrail 控制。
+- 策略关联：延续 accepted grep fallback 的有界降级与 source-text evidence 边界，避免通过全局放大候选文件数、递归 grep 全仓扫描或 fixture 特判修复单个问题。
 ## 候选优化说明：manual-nonstandard-source-layout
 - 算法/架构：代码索引新增 source-root layout 归一化层，import/module 解析不再只剥离顶层 `src/`，同时识别 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 与嵌套 JVM source root；TypeScript bare specifier 仅在索引中存在本地模块候选时解析，C/C++ include roots 支持非标准 `include/` 片段。self-iteration 新增 `nonstandard_layout_fixture` 并加入 fast 默认仓库，用 guardrail case 覆盖 Python、TypeScript、Go、Java、C++、Swift 的非 `src/` 源码。
 - 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、candidate window、ranking 权重、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或安装发布；普通 `vendor/`、`third_party/` 仍默认排除并需要显式 path filter opt in。预期解决 Issue #146 中非标准目录源码漏检和跨文件关系解析不足；风险是本地 bare module 或 include root 更容易被识别为本仓目标，受本地模块存在性、path/language filter、ambiguous resolution、vendor 边界单测和 fast guardrail 控制。
@@ -910,10 +914,6 @@
 - known degradations: metric:temporal_sdk_go_index_ms 503.0->565.0; metric:temporal_sdk_go_register_index_ms 564.0->646.0; metric:leveldb_cpp_index_ms 121.0->262.0; metric:leveldb_cpp_register_index_ms 187.0->303.0; metric:typescript_syntax_fixture_query_p95_ms 1616.0->1696.0
 - latency metrics: cargo_fmt_check_ms=1615ms; self_iteration_cargo_fmt_check_ms=263ms; cargo_build_debug_ms=263ms; self_iteration_cargo_check_ms=102ms; temporal_samples_go_index_ms=144ms; temporal_samples_go_register_index_ms=205ms; temporal_sdk_go_index_ms=565ms; temporal_sdk_go_register_index_ms=646ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779626871
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779626871.patch`
@@ -923,10 +923,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.972908->0.9814465778455568; score_component:performance 0.849491->0.8969254324753153; metric:cargo_build_debug_ms 15782.0->223.0; metric:cpp_syntax_fixture_index_ms 181.0->40.0; metric:cpp_syntax_fixture_register_index_ms 242.0->101.0; metric:cpp_syntax_fixture_query_p95_ms 465.0->303.0; metric:relay_teams_query_p50_ms 202.0->167.0; metric:c_syntax_fixture_index_ms 222.0->124.0
 - known degradations: metric:temporal_sdk_go_index_ms 428.0->686.0; metric:temporal_sdk_go_register_index_ms 489.0->752.0; metric:relay_teams_index_ms 687.0->727.0; metric:relay_teams_register_index_ms 749.0->794.0; metric:relay_teams_query_p95_ms 586.0->629.0; metric:c_syntax_fixture_query_p50_ms 161.0->242.0; metric:leveldb_cpp_register_index_ms 263.0->303.0; metric:leveldb_cpp_query_p95_ms 203.0->304.0
 - latency metrics: cargo_fmt_check_ms=1574ms; self_iteration_cargo_fmt_check_ms=303ms; cargo_build_debug_ms=223ms; self_iteration_cargo_check_ms=101ms; temporal_sdk_go_index_ms=686ms; temporal_sdk_go_register_index_ms=752ms; temporal_samples_go_index_ms=121ms; temporal_samples_go_register_index_ms=186ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
 ## run-1779644421
 
@@ -938,10 +934,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - known degradations: metric:python_syntax_fixture_index_ms 1310.0->1913.0; metric:python_syntax_fixture_register_index_ms 1492.0->1955.0; metric:ruby_syntax_fixture_index_ms 1512.0->2035.0; metric:ruby_syntax_fixture_register_index_ms 1594.0->2076.0; metric:php_syntax_fixture_index_ms 1473.0->1554.0; metric:opencode_typescript_query_p50_ms 524.0->704.0; metric:leveldb_cpp_query_p50_ms 404.0->727.0; metric:leveldb_cpp_query_p95_ms 4532.0->17776.0
 - latency metrics: cargo_fmt_check_ms=1634ms; self_iteration_cargo_fmt_check_ms=262ms; cargo_build_release_ms=85712ms; self_iteration_cargo_build_release_ms=142ms; cargo_clippy_ms=15450ms; cargo_test_ms=34380ms; self_iteration_cargo_clippy_ms=283ms; self_iteration_cargo_test_ms=202ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779652179
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779652179.patch`
@@ -952,10 +944,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - known degradations: score_component:performance 0.801698->0.7965817575444437; case_score:opencode_ts_implementation_data_migration_service_challenge 1.0->0.75; case_rank:opencode_ts_implementation_data_migration_service_challenge 1->2; case_rank:otel_go_repo_set_receiver_factory_create_logs 5->10; case_rank:otel_go_repo_set_filelog_component_type 6->null; metric:temporal_samples_go_index_ms 1634.0->3394.0; metric:temporal_samples_go_register_index_ms 1675.0->3435.0; metric:relay_teams_query_p50_ms 402.0->504.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=282ms; cargo_build_release_ms=86811ms; self_iteration_cargo_build_release_ms=243ms; cargo_clippy_ms=363ms; cargo_test_ms=14775ms; self_iteration_cargo_clippy_ms=242ms; self_iteration_cargo_test_ms=161ms
 
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779662884
 
 - patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1779662884.patch`
@@ -965,10 +953,6 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.872638->0.8883815451024761; score_component:performance 0.775995->0.822288778004426; score_component:research_judge 0.82->0.86; case_rank:otel_go_repo_set_filelog_component_type null->7; case_score:research_judge 0.82->0.86; metric:cargo_fmt_check_ms 1776.0->1676.0; metric:temporal_samples_go_index_ms 1637.0->1575.0; metric:scala_syntax_fixture_index_ms 9032.0->564.0
 - known degradations: metric:self_iteration_cargo_build_release_ms 122.0->222.0; metric:self_iteration_cargo_clippy_ms 202.0->262.0; metric:swift_syntax_fixture_index_ms 887.0->928.0; metric:swift_syntax_fixture_register_index_ms 928.0->968.0; metric:relay_teams_query_p50_ms 282.0->465.0; metric:otel_collector_contrib_index_ms 370144.0->399267.0; metric:otel_collector_contrib_register_index_ms 370185.0->399348.0; metric:opencode_typescript_index_ms 37265.0->47417.0
 - latency metrics: cargo_fmt_check_ms=1676ms; self_iteration_cargo_fmt_check_ms=283ms; cargo_build_release_ms=87456ms; self_iteration_cargo_build_release_ms=222ms; cargo_clippy_ms=383ms; cargo_test_ms=14969ms; self_iteration_cargo_clippy_ms=262ms; self_iteration_cargo_test_ms=161ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
 ## run-1779664778
 

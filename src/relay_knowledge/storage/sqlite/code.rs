@@ -50,6 +50,10 @@ mod code_set_tasks;
 mod code_tests;
 
 #[cfg(test)]
+#[path = "code_snapshot_candidate_paths_tests.rs"]
+mod code_snapshot_candidate_paths_tests;
+
+#[cfg(test)]
 #[path = "code_incremental_search_tests.rs"]
 mod code_incremental_search_tests;
 
@@ -247,6 +251,26 @@ impl CodeRepositoryStore for SqliteGraphStore {
             code_snapshot::file_candidate_paths_for_scope(
                 connection,
                 &source_scope,
+                &path_filters,
+                &language_filters,
+                limit,
+            )
+        })
+    }
+
+    fn code_file_candidate_paths_for_query_scope(
+        &self,
+        source_scope: String,
+        query: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+        limit: usize,
+    ) -> StorageFuture<'_, Vec<String>> {
+        self.run(move |connection| {
+            code_snapshot::file_candidate_paths_for_query_scope(
+                connection,
+                &source_scope,
+                &query,
                 &path_filters,
                 &language_filters,
                 limit,
