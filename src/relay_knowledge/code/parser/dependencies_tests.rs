@@ -27,6 +27,35 @@ fn extracts_cargo_and_npm_manifest_dependencies() {
 }
 
 #[test]
+fn cargo_lock_skips_local_workspace_packages() {
+    let dependencies = collect(
+        "Cargo.lock",
+        r#"[[package]]
+name = "workspace-root"
+version = "0.1.0"
+
+[[package]]
+name = "serde"
+version = "1.0.203"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "git-helper"
+version = "0.2.0"
+source = "git+https://example.invalid/helper.git#abcdef"
+"#,
+    );
+
+    assert_dependency(&dependencies, "serde", "locked", None, Some("1.0.203"));
+    assert_dependency(&dependencies, "git-helper", "locked", None, Some("0.2.0"));
+    assert!(
+        !dependencies
+            .iter()
+            .any(|dependency| dependency.package_name == "workspace-root")
+    );
+}
+
+#[test]
 fn recurses_package_lock_v1_dependencies() {
     let dependencies = collect(
         "package-lock.json",
@@ -58,7 +87,7 @@ fn recurses_package_lock_v1_dependencies() {
 fn extracts_package_lock_v2_packages() {
     let dependencies = collect(
         "package-lock.json",
-        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"},"node_modules/a/node_modules/b":{"version":"2.0.0"},"node_modules/a/node_modules/@scope/transitive":{"version":"3.0.0"}}}"#,
+        r#"{"packages":{"":{"name":"root"},"node_modules/react":{"version":"18.2.0"},"node_modules/@scope/pkg":{"name":"@scope/pkg","version":"1.2.3"},"node_modules/a/node_modules/b":{"version":"2.0.0"},"node_modules/a/node_modules/@scope/transitive":{"version":"3.0.0"},"node_modules/workspace-pkg":{"resolved":"packages/workspace-pkg","link":true}}}"#,
     );
 
     assert_dependency(&dependencies, "react", "locked", None, Some("18.2.0"));
@@ -80,6 +109,11 @@ fn extracts_package_lock_v2_packages() {
         !dependencies
             .iter()
             .any(|dependency| dependency.package_name == "a/node_modules/b")
+    );
+    assert!(
+        !dependencies
+            .iter()
+            .any(|dependency| dependency.package_name == "workspace-pkg")
     );
 }
 
@@ -135,9 +169,10 @@ fn restricts_poetry_parsing_to_dependency_sections() {
     let dependencies = collect(
         "pyproject.toml",
         r#"[project]
-dependencies = [
-  "httpx>=0.27",
-]
+	dependencies = [
+	  "httpx>=0.27",
+	  "colorama; platform_system == 'Windows'",
+	]
 [project.optional-dependencies]
 docs = ["mkdocs>=1"]
 [tool.poetry.dependencies]
@@ -153,6 +188,7 @@ fast = ["uvloop"]
     );
 
     assert_dependency(&dependencies, "httpx", "dependencies", Some(">=0.27"), None);
+    assert_dependency(&dependencies, "colorama", "dependencies", None, None);
     assert_dependency(&dependencies, "mkdocs", "docs", Some(">=1"), None);
     assert_dependency(&dependencies, "requests", "dependencies", Some("^2"), None);
     assert_dependency(&dependencies, "pytest", "test", Some("^8"), None);
@@ -166,7 +202,7 @@ fast = ["uvloop"]
 fn extracts_requirements_dependencies_without_options() {
     let dependencies = collect(
         "requirements-dev.txt",
-        "# install set\n-r base.txt\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\n",
+        "# install set\n-r base.txt\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl ; python_version >= \"3.11\"\n",
     );
 
     assert_dependency(
@@ -183,7 +219,15 @@ fn extracts_requirements_dependencies_without_options() {
         Some("==0.29.0"),
         None,
     );
-    assert_eq!(dependencies.len(), 2);
+    assert_dependency(&dependencies, "colorama", "requirements", None, None);
+    assert_dependency(
+        &dependencies,
+        "watchfiles",
+        "requirements",
+        Some("@ https://example.invalid/watchfiles.whl"),
+        None,
+    );
+    assert_eq!(dependencies.len(), 4);
 }
 
 #[test]
@@ -221,7 +265,7 @@ fn extracts_maven_bom_and_gradle_external_dependencies() {
 
     let gradle = collect(
         "build.gradle",
-        "plugins { id 'java' }\nimplementation platform('org.springframework.boot:spring-boot-dependencies:3.2.0')\nimplementation 'org.slf4j:slf4j-api:2.0.9'\nimplementation(project(':core'))\n",
+        "plugins { id 'java' }\nimplementation platform('org.springframework.boot:spring-boot-dependencies:3.2.0')\nimplementation 'org.slf4j:slf4j-api:2.0.9'\nruntimeOnly group: 'ch.qos.logback', name: 'logback-classic', version: '1.4.14'\ntestImplementation(group = \"org.junit.jupiter\", name = \"junit-jupiter-api\", version = \"5.10.1\")\nimplementation(project(':core'))\n",
     );
     assert_dependency(
         &gradle,
@@ -235,6 +279,20 @@ fn extracts_maven_bom_and_gradle_external_dependencies() {
         "org.slf4j:slf4j-api",
         "implementation",
         Some("2.0.9"),
+        None,
+    );
+    assert_dependency(
+        &gradle,
+        "ch.qos.logback:logback-classic",
+        "runtimeOnly",
+        Some("1.4.14"),
+        None,
+    );
+    assert_dependency(
+        &gradle,
+        "org.junit.jupiter:junit-jupiter-api",
+        "testImplementation",
+        Some("5.10.1"),
         None,
     );
     assert!(

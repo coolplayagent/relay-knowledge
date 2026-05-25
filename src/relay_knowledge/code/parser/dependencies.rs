@@ -6,6 +6,14 @@ use crate::domain::{CodeDependencyRecord, RepositoryCodeRange};
 
 use super::super::{CodeIndexError, SnapshotBuild, stable_id};
 
+#[path = "dependencies_support.rs"]
+mod support;
+
+use support::{
+    cargo_lock_source_is_external, gradle_coordinate_parts, gradle_dependency_call,
+    package_lock_entry_is_link, package_lock_package_name, python_requirement,
+};
+
 pub(super) fn collect_dependencies(
     build: &SnapshotBuild,
     path: &str,
@@ -180,17 +188,11 @@ fn parse_cargo_lock(content: &str, records: &mut Vec<DependencySeed>) {
     let mut in_package = false;
     let mut name = None::<(String, usize)>;
     let mut version = None::<String>;
+    let mut source = None::<String>;
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed == "[[package]]" {
-            push_lock_seed(
-                records,
-                "cargo",
-                "rust",
-                "Cargo.lock",
-                name.take(),
-                version.take(),
-            );
+            push_cargo_lock_seed(records, name.take(), version.take(), source.take());
             in_package = true;
             continue;
         }
@@ -201,7 +203,21 @@ fn parse_cargo_lock(content: &str, records: &mut Vec<DependencySeed>) {
             name = Some((unquote(value), index + 1));
         } else if let Some(value) = trimmed.strip_prefix("version = ") {
             version = Some(unquote(value));
+        } else if let Some(value) = trimmed.strip_prefix("source = ") {
+            source = Some(unquote(value));
         }
+    }
+    push_cargo_lock_seed(records, name, version, source);
+}
+
+fn push_cargo_lock_seed(
+    records: &mut Vec<DependencySeed>,
+    name: Option<(String, usize)>,
+    version: Option<String>,
+    source: Option<String>,
+) {
+    if !cargo_lock_source_is_external(source.as_deref()) {
+        return;
     }
     push_lock_seed(records, "cargo", "rust", "Cargo.lock", name, version);
 }
@@ -246,6 +262,9 @@ fn parse_package_lock(content: &str, records: &mut Vec<DependencySeed>) {
     };
     if let Some(packages) = value.get("packages").and_then(Value::as_object) {
         for (path, package) in packages {
+            if package_lock_entry_is_link(package) {
+                continue;
+            }
             let Some(name) = package_lock_package_name(path, package) else {
                 continue;
             };
@@ -796,37 +815,6 @@ fn value_as_text(value: Option<&Value>) -> String {
     value.and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
-fn package_lock_package_name(path: &str, package: &Value) -> Option<String> {
-    if path.is_empty() {
-        return None;
-    }
-    package
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .or_else(|| package_lock_package_name_from_path(path))
-}
-
-fn package_lock_package_name_from_path(path: &str) -> Option<String> {
-    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
-    let mut package_name = None;
-    while let Some(segment) = segments.next() {
-        if segment != "node_modules" {
-            continue;
-        }
-        let Some(first) = segments.next() else {
-            continue;
-        };
-        package_name = if first.starts_with('@') {
-            segments.next().map(|name| format!("{first}/{name}"))
-        } else {
-            Some(first.to_owned())
-        };
-    }
-    package_name
-}
-
 fn line_containing_json_key(content: &str, key: &str) -> Option<usize> {
     let needle = format!("\"{key}\"");
     content
@@ -874,28 +862,6 @@ fn quoted_values(value: &str) -> Vec<&str> {
     values
 }
 
-fn python_requirement(value: &str) -> Option<(String, Option<String>)> {
-    let value = value.trim().trim_matches(',').trim();
-    if value.is_empty() {
-        return None;
-    }
-    let split_at = value.find(['=', '<', '>', '~', '!']).unwrap_or(value.len());
-    let name = value[..split_at]
-        .split_once('[')
-        .map(|(left, _)| left)
-        .unwrap_or(&value[..split_at])
-        .trim();
-    if name.is_empty() {
-        return None;
-    }
-    let requirement = value
-        .get(split_at..)
-        .map(str::trim)
-        .filter(|requirement| !requirement.is_empty())
-        .map(str::to_owned);
-    Some((name.to_owned(), requirement))
-}
-
 fn capture_xml_text(line: &str, tag: &str, output: &mut Option<String>) {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
@@ -908,44 +874,6 @@ fn capture_xml_text(line: &str, tag: &str, output: &mut Option<String>) {
     if !value.is_empty() {
         *output = Some(value.to_owned());
     }
-}
-
-fn gradle_dependency_call(line: &str) -> Option<(String, String)> {
-    let trimmed = line.trim();
-    let config_end =
-        trimmed.find(|character: char| character.is_whitespace() || character == '(')?;
-    let configuration = trimmed[..config_end].trim();
-    if configuration.is_empty() || matches!(configuration, "id" | "alias") {
-        return None;
-    }
-    quoted_values(trimmed)
-        .into_iter()
-        .next()
-        .map(|dependency| (configuration.to_owned(), dependency.to_owned()))
-}
-
-fn gradle_coordinate_parts(value: &str) -> (Option<String>, Option<String>, Option<String>) {
-    if value.contains(':') {
-        let mut parts = value.split(':');
-        return (
-            parts
-                .next()
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .map(str::to_owned),
-            parts
-                .next()
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .map(str::to_owned),
-            parts
-                .next()
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .map(str::to_owned),
-        );
-    }
-    (None, None, None)
 }
 
 fn conan_reference(value: &str) -> Option<(String, Option<String>)> {
