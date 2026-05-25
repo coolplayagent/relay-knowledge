@@ -13,9 +13,10 @@ mod syntax;
 mod text;
 
 use crate::domain::{
-    CodeFileDiagnostic, CodeParseStatus, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord,
+    CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeFileRecord,
+    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
 };
+use tree_sitter::Node;
 
 use super::{
     CodeIndexError, SnapshotBuild,
@@ -29,6 +30,7 @@ use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]
 use manual::manual_definitions;
+use nodes::push_children_reverse;
 use records::records_from_captures;
 #[cfg(test)]
 use syntax::parse_tree;
@@ -37,8 +39,7 @@ use syntax::{extract_tag_captures_safely, parse_tree_safely};
 use text::MAX_TEXT_FILE_BYTES;
 use text::{count_lines, validate_text_content};
 
-#[cfg(test)]
-use nodes::push_children_reverse;
+const MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES: usize = 120;
 
 pub(in crate::code) fn parse_indexed_file(
     build: &mut SnapshotBuild,
@@ -202,29 +203,6 @@ fn parse_syntax_file(
             return Ok(());
         }
     };
-    let (parse_status, degraded_reason) = if root.has_error() {
-        (
-            CodeParseStatus::Partial,
-            Some(
-                "tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned(),
-            ),
-        )
-    } else {
-        (CodeParseStatus::Parsed, None)
-    };
-    record_file_status(
-        build,
-        FileStatusInput {
-            path: input.path,
-            file_id: input.file_id,
-            language_id: input.language.id,
-            blob_hash: input.blob_hash,
-            byte_len: input.byte_len,
-            line_count: input.line_count,
-            parse_status,
-            degraded_reason,
-        },
-    );
     let context = FileParseContext {
         build,
         path: input.path,
@@ -254,6 +232,21 @@ fn parse_syntax_file(
         input.content,
         &output.symbols,
     )?;
+    let (parse_status, degraded_reason) =
+        syntax_parse_status(input.language.id, root, input.content, &output, &imports);
+    record_file_status(
+        build,
+        FileStatusInput {
+            path: input.path,
+            file_id: input.file_id,
+            language_id: input.language.id,
+            blob_hash: input.blob_hash,
+            byte_len: input.byte_len,
+            line_count: input.line_count,
+            parse_status,
+            degraded_reason,
+        },
+    );
 
     build.symbols.extend(output.symbols);
     build.references.extend(output.references);
@@ -269,6 +262,343 @@ fn parse_syntax_file(
     build.chunks.extend(chunks);
 
     Ok(())
+}
+
+fn syntax_parse_status(
+    language_id: &str,
+    root: Node<'_>,
+    content: &str,
+    output: &FileParseOutput,
+    imports: &[CodeImportRecord],
+) -> (CodeParseStatus, Option<String>) {
+    if !root.has_error() {
+        return (CodeParseStatus::Parsed, None);
+    }
+    if recoverable_c_family_parse(language_id, root, content, output, imports) {
+        return (CodeParseStatus::Parsed, None);
+    }
+
+    (
+        CodeParseStatus::Partial,
+        Some("tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned()),
+    )
+}
+
+fn recoverable_c_family_parse(
+    language_id: &str,
+    root: Node<'_>,
+    content: &str,
+    output: &FileParseOutput,
+    imports: &[CodeImportRecord],
+) -> bool {
+    if !matches!(language_id, "c" | "cpp") {
+        return false;
+    }
+    if output.symbols.is_empty() && output.references.is_empty() && imports.is_empty() {
+        return false;
+    }
+
+    let mut saw_error = false;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if syntax_error_node(node) {
+            saw_error = true;
+            if !recoverable_c_family_error(content, node) {
+                return false;
+            }
+        }
+        push_children_reverse(node, &mut stack);
+    }
+
+    saw_error
+}
+
+fn syntax_error_node(node: Node<'_>) -> bool {
+    node.is_error() || node.is_missing() || node.kind() == "ERROR"
+}
+
+fn recoverable_c_family_error(content: &str, node: Node<'_>) -> bool {
+    let range = nodes::syntax_range(node);
+    if recoverable_missing_declarator_after_decorated_type(content, node) {
+        return true;
+    }
+    if range.line_end.saturating_sub(range.line_start) > 2 {
+        return recoverable_decorated_type_error(content, node, &range);
+    }
+    if recoverable_preprocessor_error(content, node, &range) {
+        return true;
+    }
+
+    source_line(content, range.line_start).is_some_and(recoverable_c_family_error_line)
+}
+
+fn recoverable_decorated_type_error(
+    content: &str,
+    node: Node<'_>,
+    range: &nodes::SyntaxRange,
+) -> bool {
+    if range.line_end.saturating_sub(range.line_start) > MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES
+    {
+        return false;
+    }
+    if !source_line(content, range.line_start).is_some_and(c_family_decorated_type_line) {
+        return false;
+    }
+
+    content
+        .get(node.start_byte()..node.end_byte())
+        .is_some_and(recoverable_decorated_type_error_text)
+}
+
+fn recoverable_decorated_type_error_text(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if !trimmed.contains('{') || !(trimmed.ends_with("};") || trimmed.ends_with('}')) {
+        return false;
+    }
+
+    decorated_type_error_body_is_declaration_like(trimmed)
+}
+
+fn decorated_type_error_body_is_declaration_like(text: &str) -> bool {
+    let Some(open_brace) = text.find('{') else {
+        return false;
+    };
+    let Some(close_brace) = text.rfind('}') else {
+        return false;
+    };
+    if close_brace <= open_brace {
+        return false;
+    }
+
+    let mut brace_depth = 0isize;
+    for line in text[open_brace + 1..close_brace].lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || matches!(trimmed, "public:" | "protected:" | "private:") {
+            continue;
+        }
+        if !decorated_type_error_body_line_is_declaration_like(trimmed, brace_depth) {
+            return false;
+        }
+        brace_depth += trimmed
+            .chars()
+            .filter(|character| *character == '{')
+            .count() as isize;
+        brace_depth -= trimmed
+            .chars()
+            .filter(|character| *character == '}')
+            .count() as isize;
+        if brace_depth < 0 {
+            return false;
+        }
+    }
+
+    brace_depth == 0
+}
+
+fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
+    if !line_has_balanced_delimiters(line) || line.contains("=;") || line.contains("= ;") {
+        return false;
+    }
+    if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {
+        return false;
+    }
+    if brace_depth > 0 {
+        return line.ends_with(';') || line.ends_with('{') || line.ends_with('}');
+    }
+
+    line.ends_with(';') || line.ends_with('{') || line.starts_with('}')
+}
+
+fn decorated_type_error_body_top_level_statement(line: &str) -> bool {
+    let first_token = line
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .find(|token| !token.is_empty());
+    first_token.is_some_and(|token| {
+        matches!(
+            token,
+            "break"
+                | "case"
+                | "continue"
+                | "default"
+                | "do"
+                | "else"
+                | "for"
+                | "goto"
+                | "if"
+                | "return"
+                | "switch"
+                | "while"
+        )
+    })
+}
+
+fn line_has_balanced_delimiters(line: &str) -> bool {
+    let mut parentheses = 0isize;
+    let mut brackets = 0isize;
+    for character in line.chars() {
+        match character {
+            '(' => parentheses += 1,
+            ')' => parentheses -= 1,
+            '[' => brackets += 1,
+            ']' => brackets -= 1,
+            _ => {}
+        }
+        if parentheses < 0 || brackets < 0 {
+            return false;
+        }
+    }
+
+    parentheses == 0 && brackets == 0
+}
+
+fn recoverable_missing_declarator_after_decorated_type(content: &str, node: Node<'_>) -> bool {
+    if !node.is_missing() || node.kind() != "identifier" {
+        return false;
+    }
+    let Some(parent) = node
+        .parent()
+        .filter(|parent| parent.kind() == "declaration")
+    else {
+        return false;
+    };
+    content
+        .get(parent.start_byte()..parent.end_byte())
+        .is_some_and(|text| {
+            text.lines()
+                .find(|line| !line.trim().is_empty())
+                .is_some_and(c_family_decorated_type_line)
+                && text.contains('{')
+                && text.trim_end().ends_with("};")
+        })
+}
+
+fn recoverable_preprocessor_error(
+    content: &str,
+    mut node: Node<'_>,
+    range: &nodes::SyntaxRange,
+) -> bool {
+    let line_starts_with_directive = source_line(content, range.line_start)
+        .is_some_and(|line| line.trim_start().starts_with('#'));
+    loop {
+        if node.kind().starts_with("preproc") {
+            if matches!(
+                node.kind(),
+                "preproc_def" | "preproc_function_def" | "preproc_include" | "preproc_call"
+            ) {
+                let preprocessor_range = nodes::syntax_range(node);
+                return preprocessor_range
+                    .line_end
+                    .saturating_sub(preprocessor_range.line_start)
+                    <= 2;
+            }
+            return line_starts_with_directive;
+        }
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        node = parent;
+    }
+}
+
+fn source_line(content: &str, line_number: usize) -> Option<&str> {
+    line_number
+        .checked_sub(1)
+        .and_then(|index| content.lines().nth(index))
+}
+
+fn recoverable_c_family_error_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('#') {
+        return true;
+    }
+    if (trimmed.starts_with("template class ") || trimmed.starts_with("template struct "))
+        && trimmed.contains('<')
+        && trimmed.contains('>')
+        && trimmed.ends_with(';')
+    {
+        return true;
+    }
+    if c_family_decorated_type_line(trimmed) {
+        return true;
+    }
+
+    let Some(token) = trimmed
+        .split(|character: char| !c_identifier_char(character))
+        .next()
+    else {
+        return false;
+    };
+    c_family_macro_name(token) && trimmed.contains('(')
+}
+
+fn c_family_decorated_type_line(trimmed: &str) -> bool {
+    let tokens = trimmed
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    tokens.iter().enumerate().any(|(index, token)| {
+        matches!(*token, "class" | "struct" | "enum" | "union")
+            && (c_family_decorator_before_type(&tokens, index)
+                || c_family_decorator_after_type(&tokens, index))
+    })
+}
+
+fn c_family_decorator_before_type(tokens: &[&str], index: usize) -> bool {
+    let mut cursor = index;
+    while let Some(previous_index) = cursor.checked_sub(1) {
+        let Some(previous) = tokens.get(previous_index) else {
+            return false;
+        };
+        if c_family_known_decorator_token(previous) {
+            return true;
+        }
+        if !c_family_decorator_payload_token(previous) {
+            return false;
+        }
+        cursor = previous_index;
+    }
+
+    false
+}
+
+fn c_family_decorator_after_type(tokens: &[&str], index: usize) -> bool {
+    tokens
+        .get(index + 1)
+        .is_some_and(|candidate| c_family_known_decorator_token(candidate))
+}
+
+fn c_family_known_decorator_token(token: &str) -> bool {
+    matches!(
+        token,
+        "__attribute__" | "__attribute" | "__declspec" | "__declspec__"
+    ) || token.ends_with("_API")
+        || token.ends_with("_EXPORT")
+        || token.ends_with("_EXPORTS")
+}
+
+fn c_family_decorator_payload_token(token: &str) -> bool {
+    matches!(
+        token,
+        "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
+    )
+}
+
+fn c_family_macro_name(token: &str) -> bool {
+    !token.is_empty()
+        && token.chars().all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
+        && token.chars().any(|character| character == '_')
+        && token
+            .chars()
+            .any(|character| character.is_ascii_uppercase())
+}
+
+fn c_identifier_char(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
 }
 
 fn record_dependencies(
@@ -361,6 +691,10 @@ mod identity_tests;
 #[cfg(test)]
 #[path = "parser_c_tests.rs"]
 mod c_tests;
+
+#[cfg(test)]
+#[path = "parser_review_tests.rs"]
+mod review_tests;
 
 #[cfg(test)]
 #[path = "parser_import_resolution_tests.rs"]

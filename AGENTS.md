@@ -52,6 +52,9 @@ Document required services, such as graph databases or local containers, in `REA
 - Network and HTTP entry points must support high-concurrency operation with bounded memory, connection budgets, request budgets, timeouts, cancellation, backpressure, graceful shutdown, and observability for connection counts, queue depth, drops, rate limits, and timeouts.
 - Provide a `net::qos` module for admission control, per-source or per-tenant limits, priorities, resource budgets, overload behavior, and QoS metrics. All inbound and outbound network work must pass through QoS policy before consuming unbounded resources.
 - Treat high performance and retrieval accuracy as algorithm and architecture problems, not as isolated fixture fixes. Improvements must generalize through better data structures, ranking signals, indexing strategy, query planning, batching, concurrency boundaries, or storage layout. Do not solve benchmark or eval failures by enumerating known queries, paths, repositories, symbols, or other narrow special cases unless the enumeration is a documented product contract with tests and maintenance guidance.
+- Do not treat missing external dependency source as parser, index, file, scope, or response degradation. External packages, headers, modules, submodules, generated SDKs, and cross-repository targets that are not part of the authorized indexed scope must be exposed as unresolved edge metadata such as `resolution_state` and `target_hint`, not as `degraded_reason`.
+- Recover C/C++ parser errors as `parsed` only when the file still has real structured facts and every error is isolated to a known-safe shape such as macro expansion, a bounded preprocessor directive, explicit template instantiation, or a decorator-bearing type declaration. Do not let arbitrary broken code inside a conditional preprocessor block suppress partial diagnostics.
+- Prefer structured code graph evidence over grep/text fallback. Use bounded `rg` fallback only to fill a specific source-text recall gap after indexed graph/lexical layers run; do not use grep fallback to mask recoverable parser behavior, missing dependency coverage, stale indexes, authorization gaps, or fixture-specific ranking gaps.
 
 ## Release & Installation Constraints
 
@@ -80,6 +83,8 @@ Do not add shallow functions. A function must enforce an invariant, perform mean
 Do not add or keep dead code. Remove unused modules, functions, types, fields, feature flags, fixtures, commented-out implementations, TODO stubs, and speculative extension points. New public APIs need a production caller or a documented spec-backed extension point with tests. Do not hide dead code with `#[allow(dead_code)]` or similar attributes except for generated/platform/protocol cases with an explicit removal condition.
 
 Documentation completeness is mandatory. Every code, configuration, behavior, test harness, workflow, benchmark, packaging, release, installation, or operations change must include the matching documentation refresh in the same change set. Update README guidance, architecture specs, installation/release notes, benchmark notes, examples, CLI help/spec docs, or contributor docs as appropriate; if no user-facing or maintainer-facing document is affected, state that explicitly in the PR/change summary. Do not leave documentation refresh as a follow-up task.
+
+Self-iteration and benchmark changes must protect general behavior. When adding or fixing cases for C/C++ macros, dependency coverage, grep fallback, or parser degradation, improve parser extraction, edge metadata, ranking, candidate windows, or index structures; do not enumerate known queries, paths, repositories, dependency names, symbols, or fixture strings in product code.
 
 ## Testing Guidelines
 

@@ -114,8 +114,12 @@ clippy, full test suite, local-file fixtures, or research judge by default.
 `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
-runs the semantic/vector guardrail query. The TypeScript fixture keeps the
-external-import grep fallback guardrail in the default fast loop, and the
+runs the semantic/vector guardrail query. The TypeScript, C, and C++ syntax
+fixtures keep external-import guardrails in the default fast loop and require
+missing dependency source to stay as unresolved edge metadata instead of
+`degraded_reason`. The C and C++ fixtures also cover macro-generated handlers
+and export-macro-decorated classes so recoverable parser errors do not force a
+query-time grep fallback. The
 nonstandard layout fixture keeps Python, TypeScript, Go, Java, C++, and Swift
 sources outside a top-level `src/` covered by fast guardrails. The same
 nonstandard layout fixture also carries fast guardrails for

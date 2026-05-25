@@ -1,4 +1,4 @@
-use crate::domain::CodeRepositoryRegistration;
+use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
 
 use super::*;
 
@@ -89,8 +89,436 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
         .find(|symbol| symbol.name == "read")
         .expect("SYSCALL_DEFINE should expose the syscall name as a function definition");
 
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
     assert_eq!(syscall.kind, "function");
     assert_eq!(syscall.line_range.start, 2);
+}
+
+#[test]
+fn c_macro_generated_handlers_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "src/http_module.c",
+        br#"
+#define RK_HTTP_HANDLER(name) int name(struct rk_request *request)
+
+struct rk_request {
+    int status;
+};
+
+RK_HTTP_HANDLER(rk_http_access_handler)
+{
+    return request->status;
+}
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "rk_http_access_handler"),
+        "macro-generated handler should be available as a structured symbol: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn c_macro_generated_function_recovery_skips_data_macros_and_type_arguments() {
+    let snapshot = parse_source_snapshot(
+        "src/macro_declarations.c",
+        br#"
+	DEFINE_MUTEX(lock);
+	DEFINE_PER_CPU(int, cpu_counter);
+	DECLARE_FUNCTION(int, rk_macro_handler, void);
+	DECLARE_FUNCTION(Result, rk_result_handler, void);
+	"#,
+    );
+
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "function" && matches!(symbol.name.as_str(), "lock" | "cpu_counter")
+        }),
+        "data declaration macros should not become callable symbols: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "int"),
+        "macro function recovery should skip return-type arguments"
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "rk_macro_handler"),
+        "declaration-style function macros should expose the real symbol name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "rk_result_handler"),
+        "custom return types should not be indexed instead of the macro function name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "Result"),
+        "custom return-type arguments should not become macro function symbols"
+    );
+}
+
+#[test]
+fn c_recoverable_errors_without_structured_facts_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/empty_macro_error.c",
+        br#"
+RECOVERABLE_MACRO(
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(snapshot.symbols.is_empty());
+}
+
+#[test]
+fn c_unrecoverable_syntax_errors_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/broken.c",
+        br#"
+int broken_value = ;
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes"))
+    );
+}
+
+#[test]
+fn c_preprocessor_branch_syntax_errors_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/configured.c",
+        br#"
+int valid_symbol(void) { return 1; }
+
+#if FEATURE_ENABLED
+int broken_value = ;
+#endif
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes")),
+        "broken code inside a preprocessor branch should still surface parse diagnostics"
+    );
+}
+
+#[test]
+fn c_family_recoverable_line_narrows_decorators_and_accepts_digit_macros() {
+    assert!(!recoverable_c_family_error_line(
+        "class HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "class __declspec(dllexport) HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "RK2_API class HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "SYSCALL_DEFINE3(read, unsigned int, fd)"
+    ));
+}
+
+#[test]
+fn cpp_macro_decorated_classes_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/http_module.hpp",
+        br#"
+#define RK_CPP_API __attribute__((visibility("default")))
+
+class BaseModule {
+ public:
+    virtual ~BaseModule() = default;
+};
+
+RK_CPP_API class HttpModule final : public BaseModule {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HttpModule" && symbol.kind == "class"),
+        "macro-decorated class should expose the real class name: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_post_keyword_decorators_and_uppercase_type_names_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/exported.hpp",
+        br#"
+class __declspec(dllexport) HTTP_MODULE final {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HTTP_MODULE" && symbol.kind == "class"),
+        "post-keyword decorators should not hide uppercase snake-case type names: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_digit_decorated_type_recovery_accepts_uppercase_type_names() {
+    let snapshot = parse_source_snapshot(
+        "include/http_module.hpp",
+        br#"
+#define RK2_API __attribute__((visibility("default")))
+
+RK2_API class HTTP_MODULE final {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HTTP_MODULE" && symbol.kind == "class"),
+        "digit-suffixed decorator macros should still recover the real type name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "RK2_API" && symbol.kind == "class"),
+        "decorator tokens should not replace the real C++ type name"
+    );
+}
+
+#[test]
+fn cpp_manual_recovery_keeps_function_definitions_with_type_parameters() {
+    let snapshot = parse_source_snapshot(
+        "src/http_module.cpp",
+        br#"
+int BuildResponse(struct Request *request)
+{
+    return request != nullptr;
+}
+"#,
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "BuildResponse" && symbol.kind == "function"),
+        "function definitions should not be replaced by parameter type recovery: {:?}",
+        snapshot.symbols
+    );
+    assert_eq!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == "Request" && symbol.kind == "type")
+            .count(),
+        0,
+        "parameter type mentions should not synthesize type definitions"
+    );
+}
+
+#[test]
+fn cpp_manual_type_recovery_rejects_keywords_and_type_mentions() {
+    let snapshot = parse_source_snapshot(
+        "src/direction.cpp",
+        br#"
+enum class Direction {
+    Left,
+    Right,
+};
+
+int Parse(enum Direction direction);
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Direction" && symbol.kind == "type"),
+        "enum class declarations should expose the real type name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| symbol.name == "class"),
+        "C++ keywords should not become recovered type names"
+    );
+    let mention = "int Parse(enum Direction direction);";
+    let language = detect_language("src/direction_mention.cpp").expect("C++ should be configured");
+    let parsed = parse_tree(language, mention).expect("C++ should parse");
+    let declaration_node = first_node_of_kind(parsed.root_node(), "declaration")
+        .expect("function declaration should be present");
+    let manual = manual_definitions(mention, language.id, declaration_node);
+    assert!(
+        !manual
+            .iter()
+            .any(|(name, kind, _)| name == "Direction" && *kind == "type"),
+        "manual recovery should not turn type mentions into type definitions: {:?}",
+        manual
+    );
+}
+
+#[test]
+fn cpp_manual_type_recovery_rejects_builtin_specifier_candidates() {
+    let content = "struct { int value; } node;";
+    let language = detect_language("src/anonymous.cpp").expect("C++ should be configured");
+    let parsed = parse_tree(language, content).expect("C++ should parse");
+    let declaration_node = first_node_of_kind(parsed.root_node(), "declaration")
+        .expect("anonymous struct declaration should be present");
+    let manual = manual_definitions(content, language.id, declaration_node);
+
+    assert!(
+        !manual
+            .iter()
+            .any(|(name, kind, _)| name == "int" && *kind == "type"),
+        "builtin specifiers should not become recovered type symbols: {:?}",
+        manual
+    );
+}
+
+#[test]
+fn cpp_union_specifiers_are_manual_definition_candidates() {
+    let snapshot = parse_source_snapshot(
+        "src/payload.cpp",
+        br#"
+union Payload {
+    int value;
+};
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Payload" && symbol.kind == "type"),
+        "union_specifier traversal should recover union type symbols: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_decorated_enum_union_errors_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/modes.hpp",
+        br#"
+#define RK2_API __attribute__((visibility("default")))
+
+RK2_API enum Mode {
+    Fast,
+    Slow,
+};
+
+RK2_API union Payload {
+    int value;
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    for name in ["Mode", "Payload"] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == name && symbol.kind == "type"),
+            "{name} should be recovered from decorated enum/union syntax: {:?}",
+            snapshot.symbols
+        );
+    }
+}
+
+#[test]
+fn cpp_explicit_template_instantiations_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "src/cache.cpp",
+        br#"
+#include <memory>
+#include <string>
+
+namespace rk::store {
+
+class Writer {
+ public:
+    void Append(const std::string& key);
+};
+
+template <typename Key>
+class Cache {
+ public:
+    explicit Cache(std::unique_ptr<Writer> writer);
+    void Insert(const Key& key);
+
+ private:
+    std::unique_ptr<Writer> writer_;
+};
+
+template <typename Key>
+Cache<Key>::Cache(std::unique_ptr<Writer> writer) : writer_(std::move(writer)) {}
+
+template <typename Key>
+void Cache<Key>::Insert(const Key& key)
+{
+    writer_->Append(std::string(key));
+}
+
+template class Cache<std::string>;
+
+}  // namespace rk::store
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Cache" || symbol.name == "Cache<Key>::Insert"),
+        "template implementation should keep structured symbols: {:?}",
+        snapshot.symbols
+    );
 }
 
 #[test]

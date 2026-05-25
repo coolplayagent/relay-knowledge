@@ -191,6 +191,14 @@ pub(super) fn dedupe_sort_truncate(hits: &mut Vec<CodeRetrievalHit>, limit: usiz
     hits.truncate(limit);
 }
 
+pub(super) fn mark_hits_degraded(hits: &mut [CodeRetrievalHit], reason: &str) {
+    for hit in hits {
+        if hit.degraded_reason.is_none() {
+            hit.degraded_reason = Some(reason.to_owned());
+        }
+    }
+}
+
 fn merge_hit_provenance(target: &mut CodeRetrievalHit, source: &CodeRetrievalHit) {
     for layer in &source.retrieval_layers {
         if !target.retrieval_layers.contains(layer) {
