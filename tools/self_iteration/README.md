@@ -108,7 +108,7 @@ product debug build plus harness `cargo check`, and evaluates with
 `target/debug/relay-knowledge`. It does not run the product release build, full
 clippy, full test suite, local-file fixtures, or research judge by default.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
-`typescript_syntax_fixture`, `relay_teams`, `leveldb_cpp`,
+`cross_language_syntax_fixture`, `typescript_syntax_fixture`, `relay_teams`, `leveldb_cpp`,
 `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
@@ -125,7 +125,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,typescript_syntax_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
@@ -365,8 +365,9 @@ enumerating cases.
   evaluator.
 - Multi-language repository retrieval targets are split by language under
   `cases/repository_*_targets.json` so each language can evolve independently.
-  The default profile covers generated C/C++ syntax fixtures, relay-teams
-  Python/JavaScript, opencode TypeScript/TSX, and LevelDB C++; Linux C,
+  The default profile covers generated C/C++ syntax fixtures, a generated
+  C/C++/Go/Rust cross-language call fixture, relay-teams Python/JavaScript,
+  opencode TypeScript/TSX, and LevelDB C++; Linux C,
   Kubernetes Go,
   Spring Framework Java, RustFS Rust, Codex Python, nvm Bash, dotnet/runtime C#,
   OkHttp Kotlin, Laravel PHP, Rails Ruby, Scala 3, and Alamofire Swift remain behind
@@ -397,6 +398,11 @@ enumerating cases.
   using aliases, and header/source split. Their design and external repository
   commit pins are recorded in
   `docs/en/05-benchmarks/06-c-cpp-syntax-self-iteration-evaluation.md`.
+- The cross-language syntax fixture is also generated locally and stays in the
+  default fast profile. It covers C calling C++, C++ calling C, Go cgo calling C,
+  and Rust FFI calling C with caller and callee queries so the fast loop keeps
+  pressure on multi-language call graph retrieval without cloning another
+  external repository.
 - Additional generated syntax fixtures cover Python, JavaScript, TypeScript/TSX,
   Go, Java, Rust, Bash, C#, Kotlin, PHP, Ruby, Scala, and Swift. They keep
   language-specific cases compact and reproducible while real pinned

@@ -310,6 +310,19 @@ mod tests {
     }
 
     #[test]
+    fn fast_default_repositories_include_cross_language_fixture() {
+        if std::env::var("RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS").is_ok() {
+            return;
+        }
+
+        let names = fast_repository_names();
+
+        assert!(names
+            .iter()
+            .any(|name| name == "cross_language_syntax_fixture"));
+    }
+
+    #[test]
     fn fast_preserves_typescript_import_grep_guardrail_case() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),
