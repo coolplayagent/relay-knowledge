@@ -833,9 +833,7 @@ fn python_requirement(value: &str) -> Option<(String, Option<String>)> {
     if value.is_empty() {
         return None;
     }
-    let split_at = value
-        .find(|character: char| matches!(character, '=' | '<' | '>' | '~' | '!'))
-        .unwrap_or(value.len());
+    let split_at = value.find(['=', '<', '>', '~', '!']).unwrap_or(value.len());
     let name = value[..split_at]
         .split_once('[')
         .map(|(left, _)| left)
