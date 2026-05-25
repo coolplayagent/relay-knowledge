@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-issue-147-cross-language-call-graph
+- 算法/架构：调用目标解析在原始 target hint 外，为同仓跨语言边界增加受限 leaf candidate：C/C++ 互调保留直接符号名，Go 仅在 `.go` 文件中把 `C.<name>` 映射到 `<name>`，Rust/FFI 仅对 `ffi`、`bindings`、`libc` 或 `*_sys` 前缀生成 leaf；finalize 与 query path 只解析 callable symbol，并优先唯一实现而非 header/FFI signature-only declaration。self-iteration 通过默认 fast 中的 `cross_language_syntax_fixture` 覆盖 C 调 C++、C++ 调 C、Go cgo 调 C、Rust FFI 调 C 的 caller/callee 检索。
+- 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS MATCH、ranking 权重、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API 或安装发布；能力边界是同仓静态代码图谱，不承诺完整 build-system/linker 解析、动态加载、宏展开生成调用、外部 prebuilt SDK 或未入索引 bindgen 文件。预期解决 Issue #147 中多语言仓库跨编译边界调用者/被调用者检索缺口；风险是 leaf alias 过宽导致误解析，受前缀白名单、Go path gate、callable-only、唯一实现优先、反例单测和 fast guardrail 控制。
+- 策略关联：延续跨文件关系解析的结构化 edge 证据边界，不用仓库、路径、case id 或 query 字符串特判；把能力稳定性放入默认 fast，避免后续优化退回单语言调用图假设。
 ## 候选优化说明：manual-issue-154-query-aware-grep-candidates
 - 算法/架构：source-text fallback 需要宽 scope 候选路径时，SQLite 存储先用 query、path filter、language filter 在已索引 `code_repository_search` FTS read model 中按 rank 收敛文件路径；只有 query 无索引候选时才退回原有 scope path 枚举。应用层继续把 Git blob 物化和 `rg` 执行放在 blocking worker 边界内，且保持 256 文件、8 MiB blob、4096 字节行长和 3 秒 timeout 预算。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入内容、code query ranking、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API 或安装发布；不扩大 grep 候选预算，也不枚举仓库、路径、case id 或查询字符串。预期修复 issue #154 中宽范围代码地图/查询因 `ripgrep candidate file budget exhausted` 漏掉排序靠后相关文件的问题，并让结构化 symbol/definition 结果继续独立于 grep fallback；风险是 FTS 候选为空时仍可能报告预算耗尽，受 storage query-candidate 单测、真实 Git+rg 应用回归和 fast `grep_budget_fixture` guardrail 控制。
