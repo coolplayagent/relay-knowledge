@@ -30,6 +30,14 @@ Cold full `repo index` returns a queued task handle and lets the background code
 
 Repository indexing binds repository id, resolved commit, tree hash, path filters, and language filters. Equal trees can reuse scopes, rebased or force-moved heads require new indexes, and dirty worktrees are represented through explicit worktree overlays.
 
+Code source layout detection is not limited to a top-level `src/` directory.
+The indexer and import resolver also recognize real source under roots such as
+`external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`,
+`Sources/`, and `lib/`, including nested JVM roots like
+`modules/<name>/src/main/java`. Heavy dependency dumps such as plain `vendor/`
+and `third_party/` remain excluded by the source preset unless the user
+explicitly opts in with a path filter.
+
 ## Command/API Entry Points
 
 Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, and `imports`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together.

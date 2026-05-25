@@ -434,7 +434,7 @@ fn member_priority_bonus(
     fresh: bool,
     overlay_evidence: &[CodeRepositoryCrossEdge],
 ) -> f64 {
-    if !fresh || !has_resolved_overlay_evidence(overlay_evidence) {
+    if !fresh || !has_priority_supporting_overlay_evidence(overlay_evidence) {
         return f64::from(priority) * 0.01;
     }
 
@@ -444,11 +444,14 @@ fn member_priority_bonus(
     )) * EVIDENCE_BACKED_PRIORITY_SCORE_STEP
 }
 
-fn has_resolved_overlay_evidence(overlay_evidence: &[CodeRepositoryCrossEdge]) -> bool {
+fn has_priority_supporting_overlay_evidence(overlay_evidence: &[CodeRepositoryCrossEdge]) -> bool {
     overlay_evidence.iter().any(|edge| {
-        edge.resolution_state == "resolved"
-            && edge.confidence_basis_points > 0
-            && edge.to_source_scope.is_some()
+        edge.confidence_basis_points > 0
+            && match edge.resolution_state.as_str() {
+                "resolved" => edge.to_source_scope.is_some(),
+                "ambiguous" => true,
+                _ => false,
+            }
     })
 }
 
@@ -730,6 +733,16 @@ mod tests {
         assert!(
             repository_set_score(&preferred_hit, &preferred, &[])
                 < repository_set_score(&dependency_hit, &dependency, &[])
+        );
+        let mut ambiguous_package = evidence[0].clone();
+        ambiguous_package.resolution_state = "ambiguous".to_owned();
+        ambiguous_package.to_source_scope = None;
+        ambiguous_package.to_repository_id = None;
+        ambiguous_package.to_record_id = None;
+        ambiguous_package.confidence_basis_points = 5_000;
+        assert!(
+            member_priority_bonus(10, true, &[ambiguous_package])
+                > member_priority_bonus(10, true, &[])
         );
         assert_eq!(
             member_priority_bonus(100, true, &evidence),

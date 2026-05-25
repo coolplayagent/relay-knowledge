@@ -64,17 +64,7 @@ fn resolve_directory_with_go_files(
 }
 
 fn normalize_module_path(path: &str) -> &str {
-    strip_source_root(path.trim_start_matches("./"))
-}
-
-fn strip_source_root(path: &str) -> &str {
-    for prefix in ["staging/src/", "vendor/", "src/"] {
-        if let Some(stripped) = path.strip_prefix(prefix) {
-            return stripped;
-        }
-    }
-
-    path
+    path.trim().trim_start_matches("./").trim_end_matches('/')
 }
 
 fn parent_dir(path: &str) -> &str {

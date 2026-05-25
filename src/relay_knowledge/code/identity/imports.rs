@@ -2,6 +2,11 @@ use std::collections::BTreeMap;
 
 use crate::domain::{CodeImportRecord, RepositoryCodeFileRecord, RepositoryCodeSymbolRecord};
 
+use super::super::source_roots::{
+    c_family_module_candidates, go_module_candidates, normalized_module_candidates,
+    source_module_candidates, source_relative_path,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ImportResolution {
     Resolved,
@@ -32,15 +37,18 @@ impl<'a> ImportContext<'a> {
         let mut go_module_paths = BTreeMap::<String, Vec<&RepositoryCodeFileRecord>>::new();
         for file in files {
             file_languages.insert(file.path.as_str(), file.language_id.as_str());
-            module_paths
-                .entry(strip_source_root(&file.path).to_owned())
-                .or_default()
-                .push(file);
+            let candidates = if matches!(file.language_id.as_str(), "c" | "cpp") {
+                c_family_module_candidates(&file.path)
+            } else {
+                source_module_candidates(&file.path)
+            };
+            for module_path in candidates {
+                module_paths.entry(module_path).or_default().push(file);
+            }
             if file.language_id == "go" {
-                go_module_paths
-                    .entry(strip_go_source_root(&file.path).to_owned())
-                    .or_default()
-                    .push(file);
+                for module_path in go_module_candidates(&file.path) {
+                    go_module_paths.entry(module_path).or_default().push(file);
+                }
             }
         }
 
@@ -65,8 +73,9 @@ impl<'a> ImportContext<'a> {
     }
 
     pub(super) fn module_file_exists(&self, module_path: &str) -> bool {
-        self.module_paths
-            .contains_key(normalize_module_path(module_path))
+        normalized_module_candidates(module_path)
+            .iter()
+            .any(|candidate| self.module_paths.contains_key(candidate))
     }
 
     pub(super) fn any_module_file_exists(&self, module_paths: &[String]) -> bool {
@@ -98,16 +107,11 @@ impl<'a> ImportContext<'a> {
         directory_path: &str,
         language_id: &str,
     ) -> bool {
-        let directory = normalize_module_path(directory_path);
-        let prefix = if directory.is_empty() {
-            String::new()
-        } else {
-            format!("{directory}/")
-        };
-        self.module_paths
-            .range(prefix.clone()..)
-            .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
-            .any(|(_, files)| files.iter().any(|file| file.language_id == language_id))
+        normalized_module_candidates(directory_path)
+            .iter()
+            .any(|directory| {
+                directory_has_language_files(&self.module_paths, directory, language_id)
+            })
     }
 
     pub(super) fn resolve_go_directory_with_language_files(
@@ -116,7 +120,7 @@ impl<'a> ImportContext<'a> {
     ) -> ModuleFileResolution {
         resolve_directory_from_modules(
             &self.go_module_paths,
-            normalize_go_module_path(directory_path),
+            &normalized_module_candidates(directory_path),
             "go",
         )
     }
@@ -129,6 +133,10 @@ impl<'a> ImportContext<'a> {
         let Some(candidates) = self.symbols_by_name.get(name) else {
             return ImportResolution::Unresolved;
         };
+        let module_paths = module_paths
+            .iter()
+            .flat_map(|module_path| normalized_module_candidates(module_path))
+            .collect::<Vec<_>>();
         let match_count = candidates
             .iter()
             .filter(|symbol| {
@@ -198,33 +206,39 @@ impl ImportContext<'_> {
         module_path: &str,
         allow_source_root_match: bool,
     ) -> ModuleFileResolution {
-        let Some(files) = self.module_paths.get(normalize_module_path(module_path)) else {
-            return ModuleFileResolution::Unresolved;
-        };
-        if let Some(path) = unique_file_match(
-            files
-                .iter()
-                .copied()
-                .filter(|file| file.path == module_path),
-        ) {
-            return ModuleFileResolution::Resolved(path);
-        }
-        if !allow_source_root_match {
-            return ModuleFileResolution::Unresolved;
-        }
-        if let Some(path) = unique_file_match(
-            files
-                .iter()
-                .copied()
-                .filter(|file| strip_source_root(&file.path) == module_path),
-        ) {
-            return ModuleFileResolution::Resolved(path);
-        }
-        if files.len() == 1 {
-            return ModuleFileResolution::Resolved(files[0].path.clone());
+        for normalized_path in normalized_module_candidates(module_path) {
+            let Some(files) = self.module_paths.get(&normalized_path) else {
+                continue;
+            };
+            if let Some(path) = unique_file_match(
+                files
+                    .iter()
+                    .copied()
+                    .filter(|file| file.path == module_path),
+            ) {
+                return ModuleFileResolution::Resolved(path);
+            }
+            if !allow_source_root_match {
+                if files.len() == 1 && normalized_path == module_path {
+                    return ModuleFileResolution::Resolved(files[0].path.clone());
+                }
+                continue;
+            }
+            if let Some(path) = unique_file_match(files.iter().copied().filter(|file| {
+                source_module_candidates(&file.path)
+                    .iter()
+                    .any(|candidate| candidate == &normalized_path)
+            })) {
+                return ModuleFileResolution::Resolved(path);
+            }
+            if files.len() == 1 {
+                return ModuleFileResolution::Resolved(files[0].path.clone());
+            }
+
+            return ModuleFileResolution::Ambiguous;
         }
 
-        ModuleFileResolution::Ambiguous
+        ModuleFileResolution::Unresolved
     }
 }
 
@@ -319,50 +333,47 @@ pub(super) fn normalize_join(parent: &str, child: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-pub(super) fn strip_source_root(path: &str) -> &str {
-    for prefix in [
-        "src/main/java/",
-        "src/test/java/",
-        "src/main/kotlin/",
-        "src/test/kotlin/",
-        "src/main/scala/",
-        "src/test/scala/",
-        "src/main/groovy/",
-        "src/test/groovy/",
-        "src/",
-    ] {
-        if let Some(stripped) = path.strip_prefix(prefix) {
-            return stripped;
-        }
-    }
-
-    path
-}
-
-fn normalize_module_path(path: &str) -> &str {
-    strip_source_root(path.trim_start_matches("./"))
-}
-
-fn strip_go_source_root(path: &str) -> &str {
-    for prefix in ["staging/src/", "vendor/", "src/"] {
-        if let Some(stripped) = path.strip_prefix(prefix) {
-            return stripped;
-        }
-    }
-
-    path
-}
-
-fn normalize_go_module_path(path: &str) -> &str {
-    strip_go_source_root(path.trim_start_matches("./"))
+pub(super) fn strip_source_root(path: &str) -> String {
+    source_relative_path(path)
 }
 
 fn path_matches_candidate(path: &str, candidate: &str) -> bool {
-    let candidate = normalize_module_path(candidate);
-    path == candidate || strip_source_root(path) == candidate
+    let candidates = source_module_candidates(path);
+    path == candidate
+        || candidates
+            .iter()
+            .any(|module_path| module_path == candidate)
 }
 
 fn resolve_directory_from_modules(
+    module_paths: &BTreeMap<String, Vec<&RepositoryCodeFileRecord>>,
+    directories: &[String],
+    language_id: &str,
+) -> ModuleFileResolution {
+    let mut resolved_directories = Vec::new();
+    for directory in directories {
+        match resolve_single_directory_from_modules(module_paths, directory, language_id) {
+            ModuleFileResolution::Resolved(directory) => {
+                if !resolved_directories.contains(&directory) {
+                    resolved_directories.push(directory);
+                }
+                if resolved_directories.len() > 1 {
+                    return ModuleFileResolution::Ambiguous;
+                }
+            }
+            ModuleFileResolution::Ambiguous => return ModuleFileResolution::Ambiguous,
+            ModuleFileResolution::Unresolved => {}
+        }
+    }
+
+    match resolved_directories.as_slice() {
+        [directory] => ModuleFileResolution::Resolved(directory.clone()),
+        [] => ModuleFileResolution::Unresolved,
+        _ => ModuleFileResolution::Ambiguous,
+    }
+}
+
+fn resolve_single_directory_from_modules(
     module_paths: &BTreeMap<String, Vec<&RepositoryCodeFileRecord>>,
     directory: &str,
     language_id: &str,
@@ -396,6 +407,22 @@ fn resolve_directory_from_modules(
         [] => ModuleFileResolution::Unresolved,
         _ => ModuleFileResolution::Ambiguous,
     }
+}
+
+fn directory_has_language_files(
+    module_paths: &BTreeMap<String, Vec<&RepositoryCodeFileRecord>>,
+    directory: &str,
+    language_id: &str,
+) -> bool {
+    let prefix = if directory.is_empty() {
+        String::new()
+    } else {
+        format!("{directory}/")
+    };
+    module_paths
+        .range(prefix.clone()..)
+        .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
+        .any(|(_, files)| files.iter().any(|file| file.language_id == language_id))
 }
 
 fn normalize_qualified_name(value: &str) -> String {

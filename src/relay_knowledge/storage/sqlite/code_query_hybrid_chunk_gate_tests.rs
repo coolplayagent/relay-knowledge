@@ -79,6 +79,44 @@ fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
     ));
 }
 
+#[test]
+fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
+    let strict = strict_hybrid_chunk_fts_match_query(
+        "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+    )
+    .expect("multiple API anchors should enable strict chunk recall");
+
+    assert_eq!(
+        strict,
+        "\"RegisterWorkflow\" \"RegisterActivity\" \"InterruptCh\""
+    );
+    assert!(strict_hybrid_chunk_fts_match_query("RK_PIPELINE_NOTE").is_none());
+    assert!(
+        strict_hybrid_chunk_fts_match_query(
+            "client.Dial envconfig MustLoadDefaultClientOptions workflow client"
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn strict_hybrid_chunk_candidate_limit_stays_bounded() {
+    assert_eq!(
+        strict_hybrid_chunk_candidate_limit(&hybrid_gate_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            10,
+        )),
+        120
+    );
+    assert_eq!(
+        strict_hybrid_chunk_candidate_limit(&hybrid_gate_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            40,
+        )),
+        180
+    );
+}
+
 fn hybrid_gate_request(query: &str, limit: usize) -> CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should be valid");

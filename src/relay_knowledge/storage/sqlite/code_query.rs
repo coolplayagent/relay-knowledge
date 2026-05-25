@@ -91,6 +91,10 @@ use code_query_rows::{ChunkRow, ImportRow};
 use code_query_support::*;
 use code_query_symbols::search_symbols;
 
+const STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER: usize = 12;
+const STRICT_HYBRID_CHUNK_MIN_CANDIDATES: usize = 40;
+const STRICT_HYBRID_CHUNK_MAX_CANDIDATES: usize = 180;
+
 pub(super) fn search_code(
     connection: &mut Connection,
     request: CodeRetrievalRequest,
@@ -604,7 +608,36 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
+    if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
+        let hits = search_chunks_with_fts_query(
+            connection,
+            status,
+            request,
+            &strict_fts_query,
+            strict_hybrid_chunk_candidate_limit(request),
+        )?;
+        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
+            return Ok(hits);
+        }
+    }
+
     let fts_query = hybrid_chunk_fts_match_query(&request.query);
+    search_chunks_with_fts_query(
+        connection,
+        status,
+        request,
+        &fts_query,
+        candidate_limit(request, CandidateLayer::Chunk),
+    )
+}
+
+fn search_chunks_with_fts_query(
+    connection: &Connection,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    fts_query: &str,
+    fts_limit: usize,
+) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let fts_filter = fts_path_and_language_filter_sql(status, request);
     let sql = format!(
         "
@@ -639,9 +672,9 @@ fn search_chunks(
             required_scope(status)?,
             status,
             request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Chunk),
-            candidate_limit(request, CandidateLayer::Chunk),
+            fts_query,
+            fts_limit,
+            fts_limit,
         )),
         |row| {
             Ok(ChunkRow {
@@ -777,6 +810,17 @@ fn search_chunks(
             })
         })
         .collect())
+}
+
+fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
+    request
+        .limit
+        .max(1)
+        .saturating_mul(STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER)
+        .clamp(
+            STRICT_HYBRID_CHUNK_MIN_CANDIDATES,
+            STRICT_HYBRID_CHUNK_MAX_CANDIDATES,
+        )
 }
 
 fn chunk_layers_for_request(

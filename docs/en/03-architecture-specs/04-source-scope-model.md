@@ -39,6 +39,14 @@ Scope construction follows a fixed flow:
 
 Queries must not automatically fall back from narrow filters to wider scopes. A new filter combination requires indexing that scope first.
 
+Repository source normalization must treat source roots as a layout set rather
+than a single `src/` convention. Supported source-root candidates include
+`src/`, `lib/`, `Sources/`, `external_deps/`, `packages/`, `modules/`,
+`plugins/`, `extensions/`, and nested JVM roots beneath those directories.
+Default exclusion presets still protect high-volume dependency dumps such as
+plain `vendor/` and `third_party/`; those paths require explicit path-filter
+opt-in before they can enter a repository scope.
+
 ## 4. Git Snapshot Rules
 
 - `repository_id` is the stable local identity and is not an alias.

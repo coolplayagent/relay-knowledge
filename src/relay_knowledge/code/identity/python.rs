@@ -151,7 +151,8 @@ fn relative_python_module_path(import_path: &str, module: &str) -> Option<String
         .take_while(|character| *character == '.')
         .count();
     let remainder = module[dot_count..].replace('.', "/");
-    let mut package = parent_dir(strip_source_root(import_path))
+    let import_path = strip_source_root(import_path);
+    let mut package = parent_dir(&import_path)
         .split('/')
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
