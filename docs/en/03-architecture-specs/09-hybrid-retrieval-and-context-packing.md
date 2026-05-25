@@ -67,6 +67,7 @@ Packing favors diversity and citability. Duplicate hits from the same parent evi
 - Filename/path and file-content queries distinguish path, metadata, content, and change-cursor freshness.
 - Results explain item source, rank contribution, and freshness.
 - Code exact-text fallback hits preserve `text_fallback` provenance and return degraded reasons when `rg` is missing, times out, or exhausts budget; manual agent inspection documents the `grep -RIn` fallback path separately.
+- Broad-scope code exact-text fallback first narrows candidate paths through the indexed FTS read model using query, path filters, and language filters; it falls back to bounded scope enumeration only when the query has no indexed candidates.
 - Degraded backends produce explicit degradation metadata instead of silent absence.
 
 ---
