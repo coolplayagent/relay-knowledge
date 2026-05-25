@@ -105,7 +105,9 @@ pub(super) fn search_code(
     let status = required_repository(connection, &request.repository)?;
     match retry_code_search_operation(|| search_code_with_status(connection, &status, &request)) {
         Ok(hits) => Ok(hits),
-        Err(error) if code_search_error_can_use_empty_results(&error) => Ok(Vec::new()),
+        Err(error) if code_search_error_can_use_empty_results(request.code_query_kind, &error) => {
+            Ok(Vec::new())
+        }
         Err(error) => Err(error),
     }
 }
@@ -125,7 +127,9 @@ pub(super) fn search_code_scope(
 
     match retry_code_search_operation(|| search_code_with_status(connection, &status, &request)) {
         Ok(hits) => Ok(hits),
-        Err(error) if code_search_error_can_use_empty_results(&error) => Ok(Vec::new()),
+        Err(error) if code_search_error_can_use_empty_results(request.code_query_kind, &error) => {
+            Ok(Vec::new())
+        }
         Err(error) => Err(error),
     }
 }

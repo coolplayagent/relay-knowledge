@@ -299,7 +299,8 @@ fn declaration_style_macro_starts_with_return_type(
     };
 
     macro_argument_looks_like_type(return_type)
-        || (macro_argument_looks_like_custom_return_type(return_type)
+        || (declaration_style_macro_uses_return_type_slot(macro_name)
+            && macro_argument_looks_like_custom_return_type(return_type)
             && macro_argument_symbol_candidate(symbol_argument).is_some()
             && !macro_argument_looks_like_type(symbol_argument))
 }
@@ -353,6 +354,12 @@ fn declaration_style_macro_name(name: &str) -> bool {
         && tokens
             .iter()
             .any(|token| matches!(*token, "FUNCTION" | "METHOD" | "CALLBACK"))
+}
+
+fn declaration_style_macro_uses_return_type_slot(name: &str) -> bool {
+    name.split('_')
+        .filter(|token| !token.is_empty())
+        .any(|token| matches!(token, "FUNCTION" | "METHOD"))
 }
 
 fn macro_argument_looks_like_type(argument: &MacroArgument) -> bool {

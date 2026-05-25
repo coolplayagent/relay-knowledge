@@ -8,6 +8,7 @@ fn c_macro_recovery_keeps_pascal_callback_and_skips_registration_macros() {
         "src/callbacks.c",
         br#"
 DECLARE_CALLBACK(HandlerFn, Context *);
+DECLARE_CALLBACK(PlainHandlerFn, Context);
 REGISTER_HANDLER(rk_registered_handler);
 "#,
     );
@@ -18,6 +19,14 @@ REGISTER_HANDLER(rk_registered_handler);
             .iter()
             .any(|symbol| symbol.kind == "function" && symbol.name == "HandlerFn"),
         "PascalCase callback names should remain callable symbols: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "PlainHandlerFn"),
+        "plain context callback arguments should not replace the callback symbol: {:?}",
         snapshot.symbols
     );
     assert!(
@@ -40,6 +49,9 @@ fn c_family_recoverable_line_accepts_declspec_prefix_payloads() {
     ));
     assert!(!recoverable_c_family_error_line(
         "HTTP_MODULE class ExportedWidget {"
+    ));
+    assert!(!recoverable_c_family_error_line(
+        "struct __kernel_timespec {"
     ));
 }
 
@@ -64,6 +76,69 @@ class FactoryResult make_factory_result()
             .any(|symbol| symbol.kind == "function" && symbol.name == "make_factory_result"),
         "elaborated return types should not hide function definitions: {:?}",
         snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_manual_recovery_keeps_prefixed_elaborated_return_type_functions() {
+    let snapshot = parse_source_snapshot(
+        "src/prefixed_factory.cpp",
+        br#"
+#define RK_API __attribute__((visibility("default")))
+
+class FactoryResult {};
+
+RK_API class FactoryResult make_factory_result()
+{
+    return FactoryResult();
+}
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "make_factory_result"),
+        "visibility prefixes should not route elaborated-return functions into type recovery: {:?}",
+        snapshot.symbols
+    );
+    assert_eq!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.kind == "class" && symbol.name == "FactoryResult")
+            .count(),
+        1,
+        "the return type should not be emitted again as the prefixed function definition"
+    );
+}
+
+#[test]
+fn cpp_decorated_type_recovery_rejects_broken_member_bodies() {
+    let snapshot = parse_source_snapshot(
+        "include/broken_exported.hpp",
+        br#"
+__declspec(dllexport) class BrokenWidget {
+ public:
+    void Run(;
+};
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "broken member syntax should keep diagnostics visible: symbols={:?}; diagnostics={:?}",
+        snapshot.symbols,
+        snapshot.diagnostics
+    );
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes")),
+        "unrecoverable decorated type bodies should report parser diagnostics"
     );
 }
 

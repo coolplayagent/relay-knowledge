@@ -2,7 +2,7 @@ use std::{thread, time::Duration};
 
 use rusqlite::{Connection, Statement};
 
-use crate::storage::StorageError;
+use crate::{domain::CodeQueryKind, storage::StorageError};
 
 const CODE_SEARCH_PREPARE_RETRY_DELAYS_MS: [u64; 3] = [4, 12, 36];
 const CODE_SEARCH_OPERATION_RETRY_DELAYS_MS: [u64; 4] = [10, 30, 90, 270];
@@ -23,13 +23,29 @@ pub(super) fn retry_code_search_operation<T>(
     operation()
 }
 
-pub(super) fn code_search_error_can_use_empty_results(error: &StorageError) -> bool {
+pub(super) fn code_search_error_can_use_empty_results(
+    kind: CodeQueryKind,
+    error: &StorageError,
+) -> bool {
+    if !code_query_kind_has_source_fallback(kind) {
+        return false;
+    }
     match error {
         StorageError::Sqlite(error) => {
             code_search_read_model_unavailable_message(&error.to_string())
         }
         _ => false,
     }
+}
+
+fn code_query_kind_has_source_fallback(kind: CodeQueryKind) -> bool {
+    matches!(
+        kind,
+        CodeQueryKind::Definition
+            | CodeQueryKind::References
+            | CodeQueryKind::Imports
+            | CodeQueryKind::Hybrid
+    )
 }
 
 pub(super) fn prepare_code_search_statement<'connection>(
@@ -75,10 +91,10 @@ fn code_search_read_model_unavailable_message(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        code_search_error_can_use_empty_results, code_search_prepare_error_message_is_retryable,
-        code_search_storage_error_is_retryable,
+        code_query_kind_has_source_fallback, code_search_error_can_use_empty_results,
+        code_search_prepare_error_message_is_retryable, code_search_storage_error_is_retryable,
     };
-    use crate::storage::StorageError;
+    use crate::{domain::CodeQueryKind, storage::StorageError};
 
     #[test]
     fn code_search_prepare_retry_is_limited_to_transient_search_open_errors() {
@@ -103,19 +119,47 @@ mod tests {
     #[test]
     fn unavailable_code_search_read_model_can_fall_back_to_empty_results() {
         assert!(code_search_error_can_use_empty_results(
+            CodeQueryKind::Definition,
             &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                 Some("no such table: code_repository_search".to_owned()),
             ))
         ));
         assert!(code_search_error_can_use_empty_results(
+            CodeQueryKind::Hybrid,
             &StorageError::Sqlite(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
                 Some("no such module: fts5".to_owned()),
             ))
         ));
         assert!(!code_search_error_can_use_empty_results(
+            CodeQueryKind::Definition,
             &StorageError::InvalidInput("no such table: code_repository_search".to_owned())
+        ));
+    }
+
+    #[test]
+    fn unavailable_code_search_read_model_propagates_without_source_fallback() {
+        let error = StorageError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some("no such module: fts5".to_owned()),
+        ));
+
+        assert!(code_query_kind_has_source_fallback(
+            CodeQueryKind::References
+        ));
+        assert!(!code_query_kind_has_source_fallback(CodeQueryKind::Symbol));
+        assert!(!code_search_error_can_use_empty_results(
+            CodeQueryKind::Symbol,
+            &error
+        ));
+        assert!(!code_search_error_can_use_empty_results(
+            CodeQueryKind::Callers,
+            &error
+        ));
+        assert!(!code_search_error_can_use_empty_results(
+            CodeQueryKind::Callees,
+            &error
         ));
     }
 }

@@ -342,10 +342,108 @@ fn recoverable_decorated_type_error(
 
     content
         .get(node.start_byte()..node.end_byte())
-        .is_some_and(|text| {
-            let trimmed = text.trim_end();
-            trimmed.contains('{') && (trimmed.ends_with("};") || trimmed.ends_with('}'))
-        })
+        .is_some_and(recoverable_decorated_type_error_text)
+}
+
+fn recoverable_decorated_type_error_text(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if !trimmed.contains('{') || !(trimmed.ends_with("};") || trimmed.ends_with('}')) {
+        return false;
+    }
+
+    decorated_type_error_body_is_declaration_like(trimmed)
+}
+
+fn decorated_type_error_body_is_declaration_like(text: &str) -> bool {
+    let Some(open_brace) = text.find('{') else {
+        return false;
+    };
+    let Some(close_brace) = text.rfind('}') else {
+        return false;
+    };
+    if close_brace <= open_brace {
+        return false;
+    }
+
+    let mut brace_depth = 0isize;
+    for line in text[open_brace + 1..close_brace].lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || matches!(trimmed, "public:" | "protected:" | "private:") {
+            continue;
+        }
+        if !decorated_type_error_body_line_is_declaration_like(trimmed, brace_depth) {
+            return false;
+        }
+        brace_depth += trimmed
+            .chars()
+            .filter(|character| *character == '{')
+            .count() as isize;
+        brace_depth -= trimmed
+            .chars()
+            .filter(|character| *character == '}')
+            .count() as isize;
+        if brace_depth < 0 {
+            return false;
+        }
+    }
+
+    brace_depth == 0
+}
+
+fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
+    if !line_has_balanced_delimiters(line) || line.contains("=;") || line.contains("= ;") {
+        return false;
+    }
+    if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {
+        return false;
+    }
+    if brace_depth > 0 {
+        return line.ends_with(';') || line.ends_with('{') || line.ends_with('}');
+    }
+
+    line.ends_with(';') || line.ends_with('{') || line.starts_with('}')
+}
+
+fn decorated_type_error_body_top_level_statement(line: &str) -> bool {
+    let first_token = line
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .find(|token| !token.is_empty());
+    first_token.is_some_and(|token| {
+        matches!(
+            token,
+            "break"
+                | "case"
+                | "continue"
+                | "default"
+                | "do"
+                | "else"
+                | "for"
+                | "goto"
+                | "if"
+                | "return"
+                | "switch"
+                | "while"
+        )
+    })
+}
+
+fn line_has_balanced_delimiters(line: &str) -> bool {
+    let mut parentheses = 0isize;
+    let mut brackets = 0isize;
+    for character in line.chars() {
+        match character {
+            '(' => parentheses += 1,
+            ')' => parentheses -= 1,
+            '[' => brackets += 1,
+            ']' => brackets -= 1,
+            _ => {}
+        }
+        if parentheses < 0 || brackets < 0 {
+            return false;
+        }
+    }
+
+    parentheses == 0 && brackets == 0
 }
 
 fn recoverable_missing_declarator_after_decorated_type(content: &str, node: Node<'_>) -> bool {
@@ -468,8 +566,10 @@ fn c_family_decorator_after_type(tokens: &[&str], index: usize) -> bool {
 }
 
 fn c_family_known_decorator_token(token: &str) -> bool {
-    token.starts_with("__")
-        || token.ends_with("_API")
+    matches!(
+        token,
+        "__attribute__" | "__attribute" | "__declspec" | "__declspec__"
+    ) || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
 }

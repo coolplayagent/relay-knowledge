@@ -23,9 +23,9 @@ pub(super) fn manual_definitions(
                 .unwrap_or_default()
         }
         "function_definition"
-            if (node.child_by_field_name("declarator").is_none()
-                || decorated_declaration_head_has_type_prefix(content, node))
-                && decorated_declaration_head_starts_with_type_definition(content, node) =>
+            if decorated_declaration_head_starts_with_type_definition(content, node)
+                && (node.child_by_field_name("declarator").is_none()
+                    || !decorated_declaration_head_declares_function(content, node)) =>
         {
             decorated_cpp_type_symbol(content, node)
                 .map(|symbol| vec![symbol])
@@ -105,23 +105,22 @@ fn decorated_declaration_head_starts_with_type_definition(content: &str, node: N
     false
 }
 
-fn decorated_declaration_head_has_type_prefix(content: &str, node: Node<'_>) -> bool {
+fn decorated_declaration_head_declares_function(content: &str, node: Node<'_>) -> bool {
     let text = node_text(content, node);
     let head = text
         .split(['{', ';'])
         .next()
         .unwrap_or(text.as_str())
         .trim();
-    let mut saw_prefix = false;
-    for token in cpp_head_tokens(head) {
-        if cpp_type_intro_keyword(token.text) {
-            return saw_prefix;
-        }
-        if cpp_declaration_prefix_token(token.text) {
-            saw_prefix = true;
+    let tokens = cpp_head_tokens(head);
+    for (index, token) in tokens.iter().enumerate() {
+        if !cpp_type_intro_keyword(token.text) {
             continue;
         }
-        return false;
+        let Some(name) = cpp_type_name_after_intro_token(head, &tokens[index + 1..]) else {
+            return false;
+        };
+        return head[name.end..].contains('(');
     }
 
     false
@@ -189,6 +188,13 @@ fn cpp_type_name_after_intro<'text>(
     head: &'text str,
     tokens: &[CppHeadToken<'text>],
 ) -> Option<&'text str> {
+    cpp_type_name_after_intro_token(head, tokens).map(|token| token.text)
+}
+
+fn cpp_type_name_after_intro_token<'text>(
+    head: &'text str,
+    tokens: &[CppHeadToken<'text>],
+) -> Option<CppHeadToken<'text>> {
     let mut index = cpp_skip_type_name_prefix(tokens);
     while tokens
         .get(index)
@@ -211,7 +217,7 @@ fn cpp_type_name_after_intro<'text>(
         index += 1;
     }
 
-    Some(name.text)
+    Some(name)
 }
 
 fn cpp_skip_type_name_prefix(tokens: &[CppHeadToken<'_>]) -> usize {
@@ -286,7 +292,7 @@ fn cpp_declaration_prefix_token(token: &str) -> bool {
 }
 
 fn cpp_type_name_decorator_prefix(token: &str) -> bool {
-    token.starts_with("__")
+    cpp_double_underscore_decorator_token(token)
         || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
@@ -351,7 +357,7 @@ fn cpp_builtin_type_token(token: &str) -> bool {
 }
 
 fn cpp_decorator_token(token: &str) -> bool {
-    token.starts_with("__")
+    cpp_double_underscore_decorator_token(token)
         || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
@@ -359,6 +365,13 @@ fn cpp_decorator_token(token: &str) -> bool {
             && token.chars().all(|character| {
                 character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
             }))
+}
+
+fn cpp_double_underscore_decorator_token(token: &str) -> bool {
+    matches!(
+        token,
+        "__attribute__" | "__attribute" | "__declspec" | "__declspec__"
+    )
 }
 
 fn declarator_name(content: &str, node: Node<'_>) -> Option<String> {
