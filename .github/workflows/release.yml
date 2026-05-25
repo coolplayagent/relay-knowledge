@@ -132,28 +132,28 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-            cross: false
+            linux_gnu: true
+            linux_glibc_max: '2.31'
+            linux_linker: ''
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-            cross: true
+            linux_gnu: true
+            linux_glibc_max: '2.31'
+            linux_linker: aarch64-linux-gnu-gcc
           - target: x86_64-apple-darwin
             os: macos-15-intel
             archive: tar.gz
-            cross: false
           - target: aarch64-apple-darwin
             os: macos-14
             archive: tar.gz
-            cross: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-            cross: false
             msvc_arch: amd64
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
-            cross: false
             msvc_arch: amd64_arm64
     runs-on: ${{ matrix.os }}
     steps:
@@ -161,13 +161,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Rust toolchain
+        if: matrix.linux_gnu != true
         run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
-
-      - name: Set up Linux cross toolchain
-        if: matrix.cross == true
-        uses: taiki-e/setup-cross-toolchain-action@v1
-        with:
-          target: ${{ matrix.target }}
 
       - name: Set up MSVC toolchain
         if: runner.os == 'Windows'
@@ -176,7 +171,53 @@ jobs:
           arch: ${{ matrix.msvc_arch }}
 
       - name: Build release binary
+        if: matrix.linux_gnu != true
         run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Build Linux GNU release binary on glibc 2.31
+        if: matrix.linux_gnu == true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          LINKER: ${{ matrix.linux_linker }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e CARGO_TERM_COLOR \
+            -e TARGET \
+            -e LINKER \
+            ubuntu:20.04 \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential ca-certificates curl git pkg-config
+              if [[ -n "${LINKER:-}" ]]; then
+                apt-get install -y --no-install-recommends \
+                  gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+              fi
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs \
+                | sh -s -- -y --profile minimal --default-toolchain stable
+              . "$HOME/.cargo/env"
+              rustup target add "$TARGET"
+              if [[ -n "${LINKER:-}" ]]; then
+                export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$LINKER"
+              fi
+              cargo build --release --locked --target "$TARGET"
+              chown -R "$(stat -c "%u:%g" /workspace)" /workspace/target
+            '
+
+      - name: Verify Linux GNU glibc compatibility
+        if: matrix.linux_gnu == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/release/check_linux_glibc_compat.py \
+            --max "${{ matrix.linux_glibc_max }}" \
+            "target/${{ matrix.target }}/release/${BIN_NAME}"
 
       - name: Smoke test release binary
         if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-apple-darwin' || matrix.target == 'aarch64-apple-darwin'
@@ -265,7 +306,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create skill archive
+      - name: Create skill archive and verify CLI skill Linux asset glibc compatibility
         shell: bash
         run: |
           set -euo pipefail
@@ -297,6 +338,9 @@ jobs:
           chmod 0755 "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
           test -x "dist/$package/assets/linux-x86_64/${BIN_NAME}"
           test -f "dist/$package/assets/windows-x86_64/${BIN_NAME}.exe"
+          python3 tools/release/check_linux_glibc_compat.py \
+            --max 2.31 \
+            "dist/$package/assets/linux-x86_64/${BIN_NAME}"
           python3 tools/release/update_skill_metadata_version.py --check \
             "dist/$package/SKILL.md" "${{ needs.verify.outputs.version }}"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
@@ -427,8 +471,8 @@ jobs:
 
           ## Platform Artifacts
 
-          - Linux x64: `x86_64-unknown-linux-gnu`
-          - Linux ARM64: `aarch64-unknown-linux-gnu`
+          - Linux x64: `x86_64-unknown-linux-gnu` built on the glibc 2.31 baseline
+          - Linux ARM64: `aarch64-unknown-linux-gnu` built on the glibc 2.31 baseline
           - macOS Intel: `x86_64-apple-darwin`
           - macOS Apple Silicon: `aarch64-apple-darwin`
           - Windows x64: `x86_64-pc-windows-msvc`
@@ -516,7 +560,7 @@ jobs:
           name: ${{ env.BIN_NAME }}-${{ needs.verify.outputs.tag }}-x86_64-pc-windows-msvc
           path: skill-artifacts/windows-x86_64
 
-      - name: Install CLI skill asset binaries
+      - name: Install CLI skill asset binaries and verify Linux glibc compatibility
         if: steps.clawhub-token.outputs.publish == 'true'
         shell: bash
         run: |
@@ -543,6 +587,9 @@ jobs:
           chmod 0755 "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
           test -x "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
           test -f "skills/relay-knowledge-cli/assets/windows-x86_64/${BIN_NAME}.exe"
+          python3 tools/release/check_linux_glibc_compat.py \
+            --max 2.31 \
+            "skills/relay-knowledge-cli/assets/linux-x86_64/${BIN_NAME}"
           python3 tools/release/update_skill_metadata_version.py \
             skills/relay-knowledge-cli/SKILL.md "${{ needs.verify.outputs.version }}"
           python3 tools/release/update_skill_metadata_version.py --check \

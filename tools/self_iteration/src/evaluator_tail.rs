@@ -34,6 +34,7 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ],
                     120,
                 ),
+                linux_glibc_compatibility_policy_gate(),
             ]),
             QualityGateStage::Parallel(vec![quality_gate(
                 "cargo_build_debug",
@@ -68,6 +69,7 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                 ],
                 120,
             ),
+            linux_glibc_compatibility_policy_gate(),
         ]),
         QualityGateStage::Parallel(vec![
             quality_gate("cargo_build_release", ["cargo", "build", "--release"], 1200),
@@ -137,6 +139,20 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
     ]
 }
 
+fn linux_glibc_compatibility_policy_gate() -> QualityGate {
+    quality_gate(
+        "linux_glibc_compatibility_policy",
+        [
+            "python3",
+            "tools/release/check_linux_glibc_compat.py",
+            "--self-test",
+            "--verify-workflow",
+            ".github/workflows/release.yml",
+        ],
+        60,
+    )
+}
+
 fn quality_gate<const N: usize>(
     name: &'static str,
     command: [&'static str; N],
@@ -157,6 +173,7 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
         "self_iteration_cargo_build_release" => Some(60_000.0),
         "cargo_fmt_check" => Some(20_000.0),
         "self_iteration_cargo_fmt_check" => Some(20_000.0),
+        "linux_glibc_compatibility_policy" => Some(10_000.0),
         "cargo_clippy" => Some(180_000.0),
         "self_iteration_cargo_clippy" => Some(60_000.0),
         "cargo_test" => Some(240_000.0),

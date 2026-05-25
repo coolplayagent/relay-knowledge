@@ -28,7 +28,7 @@ target/debug/relay-knowledge help --format json
 
 ## 安装发布版
 
-稳定版本通过 GitHub Releases 发布，包含 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64 的预构建压缩包。下载后先用 `checksums.txt` 校验，再将二进制文件放入 `PATH`。在原生 Windows ARM64 CI runner 可用之前，Windows ARM64 压缩包由 release workflow 交叉构建生成。
+稳定版本通过 GitHub Releases 发布，包含 Linux x64/ARM64、macOS Intel/Apple Silicon、Windows x64/ARM64 的预构建压缩包。下载后先用 `checksums.txt` 校验，再将二进制文件放入 `PATH`。Linux GNU 压缩包以 glibc 2.31 为 ABI baseline 构建和检查，可运行在 Ubuntu 20.04 同级或更新的 GNU/Linux 发行版上。在原生 Windows ARM64 CI runner 可用之前，Windows ARM64 压缩包由 release workflow 交叉构建生成。
 
 Rust 用户也可以从 crates.io 安装：
 
@@ -42,8 +42,8 @@ relay-knowledge service doctor
 `relay-knowledge-cli-skill-<tag>.tar.gz`，这是一个兼容 ClawHub
 的 skill，用于引导 LLM agent 通过 `relay-knowledge` CLI 使用本地图谱和代码仓库工作流。skill
 包会在 `assets/` 下内置 Linux x64 和 Windows x64 二进制；当匹配平台的内置二进制通过
-`version --format json` 校验时，agent 会优先使用它，只有内置二进制不可用或用户明确要求
-系统安装版本时才回退到 `PATH`。生成后的 `SKILL.md` metadata 会记录与 `Cargo.toml`
+`version --format json` 校验时，agent 会优先使用它，只有内置二进制不可用、Linux glibc
+低于 2.31，或用户明确要求系统安装版本时才回退到 `PATH`。生成后的 `SKILL.md` metadata 会记录与 `Cargo.toml`
 相同的数字版本。配置 `CLAWHUB_TOKEN` 后，release workflow 可以把同一个生成后的 skill
 布局发布到 ClawHub。skill 包还会携带根目录 `README.md`，供 registry 和包使用者查看：
 

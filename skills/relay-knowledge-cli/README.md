@@ -28,7 +28,7 @@ are not a `repo query --kind` value.
 - `agents/openai.yaml`: UI metadata for OpenAI-compatible agent surfaces.
 - `references/cli-workflows.md`: detailed CLI workflows and safety defaults.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
-  release packages.
+  release packages, built and checked against the glibc 2.31 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in
   generated release packages.
 
@@ -44,10 +44,11 @@ asset binary for the current platform whenever it exists, is executable, and
 and use it for every CLI command.
 
 Use a published binary on `PATH` only when the bundled asset is absent,
-unusable, unsupported on the current operating system or CPU architecture, or
-explicitly requested by the user. If no usable binary is available, install
-`relay-knowledge` from a published channel first, such as a verified GitHub
-Release archive or `cargo install relay-knowledge` from crates.io.
+unusable, unsupported on the current operating system or CPU architecture,
+incompatible with the host Linux glibc version, or explicitly requested by the
+user. If no usable binary is available, install `relay-knowledge` from a
+published channel first, such as a verified GitHub Release archive or
+`cargo install relay-knowledge` from crates.io.
 
 ## Protocol Boundary
 

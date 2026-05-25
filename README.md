@@ -39,6 +39,8 @@ for Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64/ARM64. Verify
 the downloaded archive with `checksums.txt` before placing the binary on your
 PATH. GitHub artifact attestations cover the same archive digests and can be
 verified with `gh attestation verify <artifact> -R coolplayagent/relay-knowledge`.
+Linux GNU archives are built and checked against a glibc 2.31 baseline so they
+run on Ubuntu 20.04-class hosts and newer GNU/Linux distributions.
 Windows ARM64 archives are produced by the release workflow as
 cross-built artifacts until native Windows ARM64 CI runners are available.
 
@@ -55,8 +57,9 @@ Each GitHub Release also includes
 teaches LLM agents to use the `relay-knowledge` CLI for local graph and
 code-repository workflows. The skill package includes Linux x64 and Windows x64
 binaries under `assets/`; agents prefer the matching bundled asset when it
-passes `version --format json`, and use `PATH` only as a fallback or when the
-user explicitly requests the system install. The generated `SKILL.md` metadata
+passes `version --format json`, and use `PATH` only as a fallback, when Linux
+glibc is older than 2.31, or when the user explicitly requests the system
+install. The generated `SKILL.md` metadata
 records the same numeric version as `Cargo.toml`. The skill package also
 carries a root-level `README.md` for registry and package consumers. The
 release workflow can publish the same generated skill layout to ClawHub when

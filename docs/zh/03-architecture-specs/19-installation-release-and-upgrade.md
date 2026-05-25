@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/19-installation-release-and-upgrade.md) | [English](../../en/03-architecture-specs/19-installation-release-and-upgrade.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-24
+> 文档版本: 2.1
+> 编制日期: 2026-05-25
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -17,9 +17,10 @@
 - Homebrew、Scoop、winget 或发行版包应引用同一 release tag 产物，不重建分叉快照。
 - Release tag 使用 `vX.Y.Z`、`X.Y.Z` 或 `vX.Y.Z-rc.1` 这类 prerelease 形式；数字版本必须在推送 tag 前与 `Cargo.toml` 和 `Cargo.lock` 保持一致。手动 dry-run dispatch 复用同一版本契约，但不会发布 crates.io 或 GitHub release 产物；workflow 默认 dry-run tag 必须随每次 release 版本提升同步更新。
 - macOS x64 release job 必须使用仍可用的 Intel runner label，例如 `macos-15-intel`，不能继续依赖已退休的 `macos-13` 镜像。Artifact upload/download 和 attestation action 必须保持在兼容 Node 24 的版本，确保 GitHub-hosted runner runtime 迁移后 release workflow 仍可运行。
+- Linux GNU release job 必须在 glibc 2.31 baseline 上构建 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu` 产物；如果产出的 ELF 需要任何高于 2.31 的 `GLIBC_*` 符号，release 必须失败。CLI skill 内置的 Linux x64 asset 打包后也必须通过同一 ABI 检查。
 - Release archive attestation 使用生成的 `checksums.txt` 作为 subject manifest，使 GitHub artifact attestation 覆盖用户本地校验的同一批 archive digest。
 - CLI 新版本发现使用可配置双源：GitHub Releases 和 crates.io。检测必须走 `env`、`paths`、`net::http` 边界，继承代理、TLS、timeout 和 runtime cache 策略；普通命令只能提示稳定新版，不能静默替换二进制。
-- GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`，并会以数字 semver 写入生成后的 `SKILL.md` metadata。skill 产物包含根目录 `README.md`，并在 `assets/` 下内置 Linux x64 和 Windows x64 二进制，要求 agent 在匹配平台的内置二进制通过 `version --format json` 校验时优先使用它。只有内置二进制不可用或用户明确要求系统安装版本时，agent 才回退到 `PATH`。配置 `CLAWHUB_TOKEN` 时，release workflow 还可以用 `clawhub publish` 把同一个生成后的 skill 布局发布到 ClawHub。该 skill-over-CLI 产物与 MCP 协议打包分离。
+- GitHub Releases 包含从 `skills/relay-knowledge-cli` 构建的 `relay-knowledge-cli-skill-<tag>.tar.gz` skill 产物；其版本跟随 `Cargo.toml`，并会以数字 semver 写入生成后的 `SKILL.md` metadata。skill 产物包含根目录 `README.md`，并在 `assets/` 下内置 Linux x64 和 Windows x64 二进制，要求 agent 在匹配平台的内置二进制通过 `version --format json` 校验时优先使用它。只有内置二进制不可用、宿主 Linux glibc 低于内置 asset baseline，或用户明确要求系统安装版本时，agent 才回退到 `PATH`。配置 `CLAWHUB_TOKEN` 时，release workflow 还可以用 `clawhub publish` 把同一个生成后的 skill 布局发布到 ClawHub。该 skill-over-CLI 产物与 MCP 协议打包分离。
 
 ## 3. 安装体验
 
@@ -54,6 +55,7 @@ preflight doctor
 ## 6. 验收标准
 
 - Release artifact、checksum、版本号和文档能互相对应。
+- Linux GNU release 二进制和 skill Linux x64 内置 asset 不得依赖高于 2.31 的 `GLIBC_*` 符号。
 - GitHub Release 将 CLI skill archive 纳入 `checksums.txt`，archive 内含 skill `README.md`、Linux x64 和 Windows x64 asset 二进制；启用 ClawHub 发布时使用同一个 crate 版本和生成后的 asset 布局。
 - CLI 能说明稳定新版本可用，JSON 输出保持机器可读且普通命令不会自动安装新版。
 - service install 使用 systemd、launchd 或 Windows Service，而非 unmanaged loop。

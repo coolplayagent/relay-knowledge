@@ -68,7 +68,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
+4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, the Linux glibc compatibility policy gate, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`; `accepted` means a git commit was created.
@@ -103,8 +103,9 @@ the current gate, metric, case, path, or algorithm objective. The direct history
 synthesis has a hard prompt budget cap, so long-running iteration does not
 expand linearly into the LLM context.
 
-The default profile is `fast`. It runs product and harness `fmt --check`, then a
-product debug build plus harness `cargo check`, and evaluates with
+The default profile is `fast`. It runs product and harness `fmt --check`, checks
+that the release workflow still enforces the glibc 2.31 Linux GNU baseline, then
+runs a product debug build plus harness `cargo check`, and evaluates with
 `target/debug/relay-knowledge`. It does not run the product release build, full
 clippy, full test suite, local-file fixtures, or research judge by default.
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
