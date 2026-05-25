@@ -30,7 +30,23 @@ fn callable_declaration_symbol(kind: &str, signature: &str) -> bool {
 fn signature_only_callable(kind: &str, signature: &str) -> bool {
     matches!(kind, "constructor" | "function" | "method")
         && signature.trim_end().ends_with(';')
-        && !signature.contains('{')
+        && !contains_top_level_body_block(signature)
+}
+
+fn contains_top_level_body_block(signature: &str) -> bool {
+    let mut parenthesis_depth = 0_u16;
+    let mut bracket_depth = 0_u16;
+    for character in signature.chars() {
+        match character {
+            '(' => parenthesis_depth = parenthesis_depth.saturating_add(1),
+            ')' => parenthesis_depth = parenthesis_depth.saturating_sub(1),
+            '[' => bracket_depth = bracket_depth.saturating_add(1),
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' if parenthesis_depth == 0 && bracket_depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn cross_language_call_leaf<'a>(name: &'a str, path: &str) -> Option<&'a str> {
@@ -143,9 +159,17 @@ mod tests {
             "function",
             "int rk_c_decode(const char *input) {"
         ));
+        assert!(callable_definition_symbol(
+            "function",
+            "int rk_c_decode(const char *input) { return 0; };"
+        ));
         assert!(!callable_definition_symbol(
             "function",
             "int rk_c_decode(const char *input);"
+        ));
+        assert!(!callable_definition_symbol(
+            "function",
+            "int rk_c_decode(std::array<int, 1> input = {0});"
         ));
         assert!(!callable_definition_symbol(
             "function_declaration",

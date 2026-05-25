@@ -410,6 +410,30 @@ mod tests {
         assert_eq!(references[0].resolution_state, "resolved");
     }
 
+    #[test]
+    fn call_resolution_defers_ambiguous_declaration_until_leaf_fallback() {
+        let mut symbols = vec![
+            symbol("ffi-declaration", "src/bindings.rs", "ffi::rk_c_decode"),
+            symbol("ffi-constant", "src/constants.rs", "ffi::rk_c_decode"),
+            symbol("c-definition", "src/c_entry.c", "rk_c_decode"),
+        ];
+        symbols[0].kind = "function_declaration".to_owned();
+        symbols[1].kind = "constant".to_owned();
+        let mut references = vec![reference("ffi-call", "src/lib.rs", "ffi::rk_c_decode")];
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(
+            references[0].target_symbol_snapshot_id.as_deref(),
+            Some("c-definition")
+        );
+        assert_eq!(
+            references[0].target_hint.as_deref(),
+            Some("ffi::rk_c_decode")
+        );
+        assert_eq!(references[0].resolution_state, "resolved");
+    }
+
     fn symbol(id: &str, path: &str, name: &str) -> RepositoryCodeSymbolRecord {
         RepositoryCodeSymbolRecord {
             repository_id: "repo".to_owned(),
