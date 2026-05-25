@@ -13,6 +13,11 @@ text search only when the CLI cannot satisfy the request, the target repository
 cannot be indexed, or the user explicitly needs raw text or regular-expression
 matching.
 
+For `repo query --kind` prompts, the supported code query kinds are `hybrid`,
+`symbol`, `definition`, `references`, `callers`, `callees`, and `imports`.
+Agents should choose one of these kinds first and treat `grep`/`rg` as fallback
+tools, not the preferred path.
+
 ## Package Contents
 
 - `SKILL.md`: agent instructions and skill metadata.
