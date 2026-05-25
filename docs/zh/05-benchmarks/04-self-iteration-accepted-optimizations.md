@@ -986,3 +986,9 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 
 ## run-1779694672-to-run-1779697627 compacted
 - summary: accepted ambiguous overlay priority and strict API-dense Hybrid chunk pass records are compacted here to keep this primary benchmark log under the hard line cap. Latest accepted `run-1779694672` scored 0.982871 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full patches, metrics, changed paths, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries.
+
+## manual-glibc-release-guard-2026-05-25
+- changed paths: `.github/workflows/release.yml`, `.github/workflows/pr-checks.yml`, `tools/release/check_linux_glibc_compat.py`, `tools/self_iteration/src/evaluator_tail.rs`, release and skill docs
+- optimization: lock Linux GNU release and skill asset binaries to a glibc 2.31 ABI ceiling, and add a fast self-iteration policy gate that self-tests the checker and verifies release workflow coverage.
+- invariant: no retrieval scoring, parser, storage schema, runtime state, CLI JSON, or network behavior changes; the guard fails only release/packaging policy when a Linux GNU binary or workflow can reintroduce a higher GLIBC dependency.
+- expected impact: issue #156-style Ubuntu 20.04/GLIBC_2.31 startup regressions are caught before release or skill packaging, while fast self-iteration stays lightweight because it validates policy rather than building release artifacts.

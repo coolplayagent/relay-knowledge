@@ -21,9 +21,10 @@ and `version --format json` succeeds. Released skill packages include Linux x64
 and Windows x64 binaries at `assets/linux-x86_64/relay-knowledge` and
 `assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
 only when the bundled asset is missing, not executable, fails its version check,
-has no matching OS or CPU architecture, or the user explicitly asks for the
-system-installed binary. Version comparisons are diagnostic only; do not choose
-a newer `PATH` binary over a working bundled asset by default.
+has no matching OS or CPU architecture, the Linux host is older than the glibc
+2.31 baseline, or the user explicitly asks for the system-installed binary.
+Version comparisons are diagnostic only; do not choose a newer `PATH` binary
+over a working bundled asset by default.
 
 The command examples below use `relay-knowledge` as readable shorthand for the
 resolved executable. When the bundled asset is selected, substitute that asset
@@ -37,6 +38,10 @@ first and fall back to `PATH` only when the asset is unusable:
 command -v relay-knowledge
 relay-knowledge version --format json
 ```
+
+If the Linux asset fails before printing JSON with an error that mentions
+`GLIBC_`, treat the bundled asset as incompatible with that host and use a
+published install path built for the host instead of retrying the same asset.
 
 ```powershell
 C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe version --format json

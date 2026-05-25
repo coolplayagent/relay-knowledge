@@ -27,7 +27,11 @@ mod tests {
             QualityGateStage::Parallel(gates) => {
                 assert_eq!(
                     gates.iter().map(|gate| gate.name).collect::<Vec<_>>(),
-                    vec!["cargo_fmt_check", "self_iteration_cargo_fmt_check"]
+                    vec![
+                        "cargo_fmt_check",
+                        "self_iteration_cargo_fmt_check",
+                        "linux_glibc_compatibility_policy"
+                    ]
                 );
             }
             QualityGateStage::Rails(_) => panic!("fmt gates should be parallel"),
@@ -82,6 +86,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(gate_names.contains(&"cargo_build_debug"));
         assert!(gate_names.contains(&"self_iteration_cargo_check"));
+        assert!(gate_names.contains(&"linux_glibc_compatibility_policy"));
         assert!(!gate_names.contains(&"cargo_build_release"));
         assert!(!gate_names.contains(&"cargo_clippy"));
         assert!(!gate_names.contains(&"cargo_test"));
