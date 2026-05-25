@@ -1,0 +1,132 @@
+{
+  "repositories": {
+    "cross_language_syntax_fixture": {
+      "generated_fixture": "cross_language_syntax_v1",
+      "alias": "cross-language-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["c", "cpp", "go", "rust"],
+      "index_budget_ms": 18000,
+      "register_index_budget_ms": 22000,
+      "query_p50_budget_ms": 100,
+      "query_p95_budget_ms": 220
+    }
+  },
+  "query_cases": [
+    {
+      "id": "cross_language_c_callees_cpp_bridge_score",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callees",
+      "query": "rk_c_entry_process",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["src/c_entry.c"],
+      "expected": [{"path": "src/c_entry.c", "excerpt_contains": "rk_cpp_score(payload)"}],
+      "expected_sequence": [
+        {"path": "src/c_entry.c", "excerpt_contains": "rk_c_decode(payload)"},
+        {"path": "src/c_entry.c", "excerpt_contains": "rk_cpp_score(payload)"}
+      ],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_cpp_callers_c_entry_process",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callers",
+      "query": "rk_cpp_score",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["src/c_entry.c"],
+      "expected": [{"path": "src/c_entry.c", "excerpt_contains": "rk_cpp_score(payload)"}],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_cpp_callees_c_decode",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callees",
+      "query": "rk_cpp_score",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["src/cpp_bridge.cpp"],
+      "expected": [{"path": "src/cpp_bridge.cpp", "excerpt_contains": "rk_c_decode(payload)"}],
+      "expected_all": [
+        {"path": "src/cpp_bridge.cpp", "excerpt_contains": "helper.Normalize(payload)"},
+        {"path": "src/cpp_bridge.cpp", "excerpt_contains": "rk_c_decode(payload)"}
+      ],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_c_callers_cpp_bridge_score",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callers",
+      "query": "rk_c_decode",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["src/cpp_bridge.cpp"],
+      "expected": [{"path": "src/cpp_bridge.cpp", "excerpt_contains": "rk_c_decode(payload)"}],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_go_cgo_callees_c_decode",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callees",
+      "query": "RunCgoBridge",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["bridge/go_bridge.go"],
+      "expected": [{"path": "bridge/go_bridge.go", "excerpt_contains": "C.rk_c_decode(cPayload)"}],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_c_callers_go_cgo_decode",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callers",
+      "query": "rk_c_decode",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["bridge/go_bridge.go"],
+      "expected": [{"path": "bridge/go_bridge.go", "excerpt_contains": "C.rk_c_decode(cPayload)"}],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_rust_ffi_callees_c_decode",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callees",
+      "query": "run_rust_bridge",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["crates/rust_bridge/src/lib.rs"],
+      "expected": [
+        {
+          "path": "crates/rust_bridge/src/lib.rs",
+          "excerpt_contains": "rk_c_decode(c_payload.as_ptr())"
+        }
+      ],
+      "case_group": "cross_language_call_graph"
+    },
+    {
+      "id": "cross_language_c_callers_rust_ffi_decode",
+      "repository": "cross_language_syntax_fixture",
+      "kind": "callers",
+      "query": "rk_c_decode",
+      "objective": "competitive_capability",
+      "limit": 12,
+      "max_rank": 6,
+      "path_filters": ["crates/rust_bridge/src/lib.rs"],
+      "expected": [
+        {
+          "path": "crates/rust_bridge/src/lib.rs",
+          "excerpt_contains": "rk_c_decode(c_payload.as_ptr())"
+        }
+      ],
+      "case_group": "cross_language_call_graph"
+    }
+  ]
+}
