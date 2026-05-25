@@ -7,22 +7,98 @@ pub(super) fn manual_definitions(
     node: Node<'_>,
 ) -> Vec<(String, &'static str, SyntaxRange)> {
     match node.kind() {
-        "class_specifier" | "struct_specifier" => decorated_cpp_type_symbol(content, node)
+        "class_specifier" | "enum_specifier" | "struct_specifier" | "union_specifier"
+            if cpp_type_declaration_context(content, node) =>
+        {
+            decorated_cpp_type_symbol(content, node)
+                .map(|symbol| vec![symbol])
+                .unwrap_or_default()
+        }
+        "declaration" => decorated_cpp_declaration_type_symbol(content, node)
             .map(|symbol| vec![symbol])
             .unwrap_or_default(),
-        "declaration" => decorated_cpp_type_symbol(content, node)
-            .map(|symbol| vec![symbol])
-            .unwrap_or_default(),
-        "function_definition" => decorated_cpp_type_symbol(content, node)
-            .map(|symbol| vec![symbol])
-            .or_else(|| {
-                node.child_by_field_name("declarator")
-                    .and_then(|declarator| declarator_name(content, declarator))
-                    .map(|name| vec![(name, "function", syntax_range(node))])
-            })
+        "function_definition"
+            if decorated_declaration_head_starts_with_type_definition(content, node) =>
+        {
+            decorated_cpp_type_symbol(content, node)
+                .map(|symbol| vec![symbol])
+                .unwrap_or_default()
+        }
+        "function_definition" => node
+            .child_by_field_name("declarator")
+            .and_then(|declarator| declarator_name(content, declarator))
+            .map(|name| vec![(name, "function", syntax_range(node))])
             .unwrap_or_default(),
         _ => Vec::new(),
     }
+}
+
+fn decorated_cpp_declaration_type_symbol(
+    content: &str,
+    node: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    let type_node = direct_definition_type_specifier(content, node)?;
+    decorated_cpp_type_symbol(content, type_node)
+        .or_else(|| decorated_cpp_type_symbol(content, node))
+        .map(|(name, kind, _)| (name, kind, syntax_range(node)))
+}
+
+fn direct_definition_type_specifier<'tree>(
+    content: &str,
+    node: Node<'tree>,
+) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| {
+            matches!(
+                child.kind(),
+                "class_specifier" | "enum_specifier" | "struct_specifier" | "union_specifier"
+            ) && cpp_type_declaration_context(content, *child)
+        })
+        .or_else(|| {
+            decorated_declaration_head_starts_with_type_definition(content, node).then_some(node)
+        })
+}
+
+fn cpp_type_declaration_context(content: &str, node: Node<'_>) -> bool {
+    if node_text(content, node).contains('{') {
+        return true;
+    }
+    let Some(parent) = node
+        .parent()
+        .filter(|parent| parent.kind() == "declaration")
+    else {
+        return false;
+    };
+    content
+        .get(node.end_byte()..parent.end_byte())
+        .is_some_and(|trailing| trailing.trim() == ";")
+}
+
+fn decorated_declaration_head_starts_with_type_definition(content: &str, node: Node<'_>) -> bool {
+    let text = node_text(content, node);
+    if !text.contains('{') {
+        return false;
+    }
+    let head = text
+        .split(['{', ';'])
+        .next()
+        .unwrap_or(text.as_str())
+        .trim();
+    let tokens = head
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .filter(|token| !token.is_empty());
+    for token in tokens {
+        if cpp_type_intro_keyword(token) {
+            return true;
+        }
+        if cpp_declaration_prefix_token(token) {
+            continue;
+        }
+        return false;
+    }
+
+    false
 }
 
 fn decorated_cpp_type_symbol(
@@ -52,10 +128,7 @@ fn decorated_cpp_type_symbol(
 }
 
 fn cpp_type_name_candidate(token: &str) -> bool {
-    if matches!(
-        token,
-        "final" | "public" | "private" | "protected" | "virtual"
-    ) {
+    if cpp_keyword_token(token) {
         return false;
     }
     if cpp_decorator_token(token) {
@@ -66,6 +139,57 @@ fn cpp_type_name_candidate(token: &str) -> bool {
         .next()
         .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
         && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn cpp_type_intro_keyword(token: &str) -> bool {
+    matches!(token, "class" | "struct" | "union" | "enum")
+}
+
+fn cpp_declaration_prefix_token(token: &str) -> bool {
+    cpp_decorator_token(token)
+        || matches!(
+            token,
+            "alignas"
+                | "constexpr"
+                | "export"
+                | "extern"
+                | "friend"
+                | "inline"
+                | "static"
+                | "template"
+                | "typename"
+                | "using"
+        )
+}
+
+fn cpp_keyword_token(token: &str) -> bool {
+    matches!(
+        token,
+        "alignas"
+            | "class"
+            | "const"
+            | "constexpr"
+            | "enum"
+            | "explicit"
+            | "export"
+            | "extern"
+            | "final"
+            | "friend"
+            | "inline"
+            | "mutable"
+            | "namespace"
+            | "private"
+            | "protected"
+            | "public"
+            | "static"
+            | "struct"
+            | "template"
+            | "typename"
+            | "union"
+            | "using"
+            | "virtual"
+            | "volatile"
+    )
 }
 
 fn cpp_decorator_token(token: &str) -> bool {

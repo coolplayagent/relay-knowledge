@@ -12,8 +12,8 @@ mod syntax;
 mod text;
 
 use crate::domain::{
-    CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeChunkRecord,
-    RepositoryCodeFileRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+    CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeFileRecord,
+    RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
 };
 use tree_sitter::Node;
 
@@ -226,14 +226,8 @@ fn parse_syntax_file(
         input.content,
         &output.symbols,
     )?;
-    let (parse_status, degraded_reason) = syntax_parse_status(
-        input.language.id,
-        root,
-        input.content,
-        &output,
-        &imports,
-        &chunks,
-    );
+    let (parse_status, degraded_reason) =
+        syntax_parse_status(input.language.id, root, input.content, &output, &imports);
     record_file_status(
         build,
         FileStatusInput {
@@ -269,12 +263,11 @@ fn syntax_parse_status(
     content: &str,
     output: &FileParseOutput,
     imports: &[CodeImportRecord],
-    chunks: &[RepositoryCodeChunkRecord],
 ) -> (CodeParseStatus, Option<String>) {
     if !root.has_error() {
         return (CodeParseStatus::Parsed, None);
     }
-    if recoverable_c_family_parse(language_id, root, content, output, imports, chunks) {
+    if recoverable_c_family_parse(language_id, root, content, output, imports) {
         return (CodeParseStatus::Parsed, None);
     }
 
@@ -290,16 +283,11 @@ fn recoverable_c_family_parse(
     content: &str,
     output: &FileParseOutput,
     imports: &[CodeImportRecord],
-    chunks: &[RepositoryCodeChunkRecord],
 ) -> bool {
     if !matches!(language_id, "c" | "cpp") {
         return false;
     }
-    if output.symbols.is_empty()
-        && output.references.is_empty()
-        && imports.is_empty()
-        && chunks.is_empty()
-    {
+    if output.symbols.is_empty() && output.references.is_empty() && imports.is_empty() {
         return false;
     }
 

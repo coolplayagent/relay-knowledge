@@ -123,6 +123,54 @@ RK_HTTP_HANDLER(rk_http_access_handler)
 }
 
 #[test]
+fn c_macro_generated_function_recovery_skips_data_macros_and_type_arguments() {
+    let snapshot = parse_source_snapshot(
+        "src/macro_declarations.c",
+        br#"
+DEFINE_MUTEX(lock);
+DEFINE_PER_CPU(int, cpu_counter);
+DECLARE_FUNCTION(int, rk_macro_handler, void);
+"#,
+    );
+
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "function" && matches!(symbol.name.as_str(), "lock" | "cpu_counter")
+        }),
+        "data declaration macros should not become callable symbols: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "int"),
+        "macro function recovery should skip return-type arguments"
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "rk_macro_handler"),
+        "declaration-style function macros should expose the real symbol name: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn c_recoverable_errors_without_structured_facts_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/empty_macro_error.c",
+        br#"
+RECOVERABLE_MACRO(
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(snapshot.symbols.is_empty());
+}
+
+#[test]
 fn c_unrecoverable_syntax_errors_remain_partial() {
     let snapshot = parse_source_snapshot(
         "src/broken.c",
@@ -167,6 +215,77 @@ RK_CPP_API class HttpModule final : public BaseModule {
             .any(|symbol| symbol.name == "HttpModule" && symbol.kind == "class"),
         "macro-decorated class should expose the real class name: {:?}",
         snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_manual_recovery_keeps_function_definitions_with_type_parameters() {
+    let snapshot = parse_source_snapshot(
+        "src/http_module.cpp",
+        br#"
+int BuildResponse(struct Request *request)
+{
+    return request != nullptr;
+}
+"#,
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "BuildResponse" && symbol.kind == "function"),
+        "function definitions should not be replaced by parameter type recovery: {:?}",
+        snapshot.symbols
+    );
+    assert_eq!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == "Request" && symbol.kind == "type")
+            .count(),
+        0,
+        "parameter type mentions should not synthesize type definitions"
+    );
+}
+
+#[test]
+fn cpp_manual_type_recovery_rejects_keywords_and_type_mentions() {
+    let snapshot = parse_source_snapshot(
+        "src/direction.cpp",
+        br#"
+enum class Direction {
+    Left,
+    Right,
+};
+
+int Parse(enum Direction direction);
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Direction" && symbol.kind == "type"),
+        "enum class declarations should expose the real type name: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| symbol.name == "class"),
+        "C++ keywords should not become recovered type names"
+    );
+    let mention = "int Parse(enum Direction direction);";
+    let language = detect_language("src/direction_mention.cpp").expect("C++ should be configured");
+    let parsed = parse_tree(language, mention).expect("C++ should parse");
+    let declaration_node = first_node_of_kind(parsed.root_node(), "declaration")
+        .expect("function declaration should be present");
+    let manual = manual_definitions(mention, language.id, declaration_node);
+    assert!(
+        !manual
+            .iter()
+            .any(|(name, kind, _)| name == "Direction" && *kind == "type"),
+        "manual recovery should not turn type mentions into type definitions: {:?}",
+        manual
     );
 }
 

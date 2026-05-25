@@ -205,10 +205,7 @@ fn macro_generated_function_definition(
         return None;
     }
     let arguments = call.child_by_field_name("arguments")?;
-    let name = first_named_child_of_kind(arguments, "identifier")
-        .map(|node| node_text(content, node))
-        .filter(|name| data_symbol_name(name))
-        .filter(|name| !uppercase_macro_token(name))?;
+    let name = macro_generated_function_name(content, arguments)?;
 
     Some((name, "function", syntax_range(call)))
 }
@@ -225,12 +222,50 @@ fn definition_like_macro_name(name: &str) -> bool {
         return false;
     }
 
-    tokens.iter().any(|token| {
-        matches!(
-            *token,
-            "DECLARE" | "DEFINE" | "DEF" | "HANDLER" | "FUNCTION" | "METHOD" | "CALLBACK"
-        )
-    })
+    tokens
+        .iter()
+        .any(|token| matches!(*token, "HANDLER" | "FUNCTION" | "METHOD" | "CALLBACK"))
+}
+
+fn macro_generated_function_name(content: &str, arguments: Node<'_>) -> Option<String> {
+    let mut stack = vec![arguments];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "identifier" {
+            let name = node_text(content, node);
+            if data_symbol_name(&name)
+                && !uppercase_macro_token(&name)
+                && !c_macro_type_argument(&name)
+            {
+                return Some(name);
+            }
+        }
+        push_children_reverse(node, &mut stack);
+    }
+
+    None
+}
+
+fn c_macro_type_argument(name: &str) -> bool {
+    matches!(
+        name,
+        "void"
+            | "char"
+            | "short"
+            | "int"
+            | "long"
+            | "float"
+            | "double"
+            | "signed"
+            | "unsigned"
+            | "const"
+            | "volatile"
+            | "static"
+            | "extern"
+            | "inline"
+            | "struct"
+            | "union"
+            | "enum"
+    ) || name.ends_with("_t")
 }
 
 fn uppercase_macro_token(name: &str) -> bool {
