@@ -394,32 +394,29 @@ fn c_family_decorated_type_line(trimmed: &str) -> bool {
             && (index
                 .checked_sub(1)
                 .and_then(|previous| tokens.get(previous))
-                .is_some_and(|candidate| c_family_decorator_token(candidate))
+                .is_some_and(|candidate| c_family_known_decorator_token(candidate))
                 || tokens
                     .get(index + 1)
-                    .is_some_and(|candidate| c_family_decorator_token(candidate)))
+                    .is_some_and(|candidate| c_family_known_decorator_token(candidate)))
     })
 }
 
-fn c_family_decorator_token(token: &str) -> bool {
+fn c_family_known_decorator_token(token: &str) -> bool {
     token.starts_with("__")
         || token.ends_with("_API")
         || token.ends_with("_EXPORT")
         || token.ends_with("_EXPORTS")
-        || (token
-            .chars()
-            .any(|character| character == '_' || character.is_ascii_uppercase())
-            && token.chars().all(|character| {
-                character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
-            }))
 }
 
 fn c_family_macro_name(token: &str) -> bool {
     !token.is_empty()
+        && token.chars().all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
+        && token.chars().any(|character| character == '_')
         && token
             .chars()
-            .all(|character| character == '_' || character.is_ascii_uppercase())
-        && token.chars().any(|character| character == '_')
+            .any(|character| character.is_ascii_uppercase())
 }
 
 fn c_identifier_char(character: char) -> bool {

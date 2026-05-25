@@ -89,6 +89,7 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
         .find(|symbol| symbol.name == "read")
         .expect("SYSCALL_DEFINE should expose the syscall name as a function definition");
 
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
     assert_eq!(syscall.kind, "function");
     assert_eq!(syscall.line_range.start, 2);
 }
@@ -225,6 +226,22 @@ int broken_value = ;
             .any(|diagnostic| diagnostic.message.contains("error nodes")),
         "broken code inside a preprocessor branch should still surface parse diagnostics"
     );
+}
+
+#[test]
+fn c_family_recoverable_line_narrows_decorators_and_accepts_digit_macros() {
+    assert!(!recoverable_c_family_error_line(
+        "class HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "class __declspec(dllexport) HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "RK2_API class HTTP_MODULE final {"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "SYSCALL_DEFINE3(read, unsigned int, fd)"
+    ));
 }
 
 #[test]
