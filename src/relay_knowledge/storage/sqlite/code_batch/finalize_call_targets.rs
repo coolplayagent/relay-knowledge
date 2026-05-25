@@ -4,7 +4,7 @@ use rusqlite::{Transaction, params};
 
 use crate::{
     domain::code_call_targets::{
-        call_target_name_candidates, callable_definition_symbol_kind, callable_target_symbol_kind,
+        call_target_name_candidates, callable_definition_symbol, callable_target_symbol_kind,
     },
     storage::StorageError,
 };
@@ -46,6 +46,9 @@ pub(super) fn resolve_references(
                 ])?;
             }
             TargetResolution::Ambiguous(target_hint) => {
+                if index.should_keep_existing_resolution(&reference) {
+                    continue;
+                }
                 update.execute(params![
                     source_scope,
                     reference.reference_id,
@@ -57,6 +60,9 @@ pub(super) fn resolve_references(
                 ])?;
             }
             TargetResolution::Unresolved => {
+                if index.should_keep_existing_resolution(&reference) {
+                    continue;
+                }
                 update.execute(params![
                     source_scope,
                     reference.reference_id,
@@ -75,6 +81,7 @@ pub(super) fn resolve_references(
 
 struct CallTargetIndex {
     by_name: BTreeMap<String, Vec<CallTargetSymbol>>,
+    by_snapshot_id: BTreeMap<String, CallTargetSymbol>,
 }
 
 #[derive(Clone)]
@@ -82,12 +89,16 @@ struct CallTargetSymbol {
     symbol_snapshot_id: String,
     path: String,
     kind: String,
+    signature: String,
 }
 
 struct CallReference {
     reference_id: String,
     path: String,
     name: String,
+    target_symbol_snapshot_id: Option<String>,
+    resolution_state: String,
+    confidence_basis_points: u16,
 }
 
 enum TargetResolution {
@@ -100,7 +111,7 @@ impl CallTargetIndex {
     fn load(transaction: &Transaction<'_>, source_scope: &str) -> Result<Self, StorageError> {
         let mut statement = transaction.prepare(
             "
-            SELECT symbol_snapshot_id, path, name, kind
+            SELECT symbol_snapshot_id, path, name, kind, signature
             FROM code_repository_symbols
             WHERE source_scope = ?1
             ",
@@ -111,34 +122,52 @@ impl CallTargetIndex {
                 symbol_snapshot_id: row.get(0)?,
                 path: row.get(1)?,
                 kind: row.get(3)?,
+                signature: row.get(4)?,
             };
             Ok((name, symbol))
         })?;
         let mut by_name = BTreeMap::<String, Vec<CallTargetSymbol>>::new();
+        let mut by_snapshot_id = BTreeMap::<String, CallTargetSymbol>::new();
         for row in rows {
             let (name, symbol) = row?;
+            by_snapshot_id.insert(symbol.symbol_snapshot_id.clone(), symbol.clone());
             by_name.entry(name).or_default().push(symbol);
         }
 
-        Ok(Self { by_name })
+        Ok(Self {
+            by_name,
+            by_snapshot_id,
+        })
     }
 
     fn is_empty(&self) -> bool {
         self.by_name.is_empty()
     }
 
+    fn should_keep_existing_resolution(&self, reference: &CallReference) -> bool {
+        reference.resolution_state == "resolved"
+            && reference.confidence_basis_points > 8_000
+            && reference
+                .target_symbol_snapshot_id
+                .as_deref()
+                .and_then(|symbol_id| self.by_snapshot_id.get(symbol_id))
+                .is_some_and(|symbol| callable_target_symbol_kind(&symbol.kind))
+    }
+
     fn resolve(&self, name: &str, reference_path: &str) -> TargetResolution {
         let candidates = call_target_name_candidates(name, reference_path);
         let mut ambiguous_target_hint = None;
-        let mut deferred_scoped_resolution = None;
+        let mut deferred_resolution = None;
         for (position, candidate) in candidates.iter().enumerate() {
             let target_hint = call_target_hint(name, candidate);
             let has_alias_fallback = position + 1 < candidates.len();
             match self.resolve_candidate(candidate, reference_path) {
                 TargetResolution::Unresolved => {}
                 TargetResolution::Resolved(symbol, _) => {
-                    if has_alias_fallback && !callable_definition_symbol_kind(&symbol.kind) {
-                        deferred_scoped_resolution.get_or_insert((symbol, target_hint));
+                    if has_alias_fallback
+                        && !callable_definition_symbol(&symbol.kind, &symbol.signature)
+                    {
+                        deferred_resolution.get_or_insert((symbol, target_hint));
                         continue;
                     }
                     return TargetResolution::Resolved(symbol, target_hint);
@@ -152,7 +181,7 @@ impl CallTargetIndex {
         if let Some(target_hint) = ambiguous_target_hint {
             return TargetResolution::Ambiguous(target_hint);
         }
-        deferred_scoped_resolution.map_or(TargetResolution::Unresolved, |(symbol, target_hint)| {
+        deferred_resolution.map_or(TargetResolution::Unresolved, |(symbol, target_hint)| {
             TargetResolution::Resolved(symbol, target_hint)
         })
     }
@@ -202,7 +231,7 @@ fn call_target_hint(reference_name: &str, candidate: &str) -> String {
 fn unique_preferred_callable(symbols: &[CallTargetSymbol]) -> Option<CallTargetSymbol> {
     let definitions = symbols
         .iter()
-        .filter(|symbol| callable_definition_symbol_kind(&symbol.kind))
+        .filter(|symbol| callable_definition_symbol(&symbol.kind, &symbol.signature))
         .take(2)
         .cloned()
         .collect::<Vec<_>>();
@@ -230,7 +259,8 @@ fn load_call_references(
 ) -> Result<Vec<CallReference>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT reference_id, path, name
+        SELECT reference_id, path, name, target_symbol_snapshot_id, resolution_state,
+               confidence_basis_points
         FROM code_repository_references
         WHERE source_scope = ?1
           AND kind = 'call'
@@ -241,6 +271,9 @@ fn load_call_references(
             reference_id: row.get(0)?,
             path: row.get(1)?,
             name: row.get(2)?,
+            target_symbol_snapshot_id: row.get(3)?,
+            resolution_state: row.get(4)?,
+            confidence_basis_points: row.get(5)?,
         })
     })?;
 

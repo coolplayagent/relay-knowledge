@@ -53,6 +53,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     range(3, 5),
                 ),
                 symbol(
+                    "c-rk-c-encode",
+                    "c-file",
+                    "src/c_entry.c",
+                    "rk_c_encode",
+                    "c",
+                    "function",
+                    range(6, 6),
+                ),
+                symbol(
                     "c-entry-process",
                     "c-file",
                     "src/c_entry.c",
@@ -60,15 +69,6 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "c",
                     "function",
                     range(7, 11),
-                ),
-                symbol(
-                    "c-rk-c-encode",
-                    "c-file",
-                    "src/c_entry.c",
-                    "rk_c_encode",
-                    "c",
-                    "function",
-                    range(12, 12),
                 ),
                 symbol(
                     "cpp-score",
@@ -115,14 +115,17 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "function_declaration",
                     range(5, 5),
                 ),
-                symbol(
-                    "rust-ffi-encode-declaration",
-                    "rust-file",
-                    "crates/rust_bridge/src/lib.rs",
-                    "ffi::rk_c_encode",
-                    "rust",
-                    "function_declaration",
-                    range(6, 6),
+                with_signature(
+                    symbol(
+                        "rust-ffi-encode-declaration",
+                        "rust-file",
+                        "crates/rust_bridge/src/lib.rs",
+                        "ffi::rk_c_encode",
+                        "rust",
+                        "function",
+                        range(6, 6),
+                    ),
+                    "fn rk_c_encode(input: *const u8);",
                 ),
                 symbol(
                     "c-connect",
@@ -141,6 +144,15 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "rust",
                     "constant",
                     range(16, 16),
+                ),
+                symbol(
+                    "rust-ffi-scoped-constant",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::scoped_constant",
+                    "rust",
+                    "constant",
+                    range(17, 17),
                 ),
             ],
             references: vec![
@@ -173,7 +185,7 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     range(10, 10),
                 ),
                 reference(
-                    "rust-calls-c-encode",
+                    "rust-calls-c-through-unique-scoped-declaration",
                     "rust-file",
                     "crates/rust_bridge/src/lib.rs",
                     "ffi::rk_c_encode",
@@ -221,6 +233,13 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
                     "ffi::not_callable_target",
                     range(18, 18),
                 ),
+                reference(
+                    "rust-ffi-scoped-non-callable",
+                    "rust-file",
+                    "crates/rust_bridge/src/lib.rs",
+                    "ffi::scoped_constant",
+                    range(19, 19),
+                ),
             ],
             imports: Vec::new(),
             feature_flags: Vec::new(),
@@ -266,6 +285,23 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
             && hit.edge_target_hint.as_deref() == Some("ffi::rk_c_decode")
     }));
 
+    let c_encode_callers = search(&store, "rk_c_encode", CodeQueryKind::Callers).await;
+    assert!(c_encode_callers.iter().any(|hit| {
+        hit.path == "crates/rust_bridge/src/lib.rs"
+            && hit.edge_target_hint.as_deref() == Some("ffi::rk_c_encode")
+    }));
+    let unique_scoped_declaration =
+        reference_resolution(&store, "rust-calls-c-through-unique-scoped-declaration").await;
+    assert_eq!(unique_scoped_declaration.0, "resolved");
+    assert_eq!(
+        unique_scoped_declaration.1.as_deref(),
+        Some("c-rk-c-encode")
+    );
+    assert_eq!(
+        unique_scoped_declaration.2.as_deref(),
+        Some("ffi::rk_c_encode")
+    );
+
     let cpp_callers = search(&store, "rk_cpp_score", CodeQueryKind::Callers).await;
     assert_eq!(cpp_callers[0].path, "src/c_entry.c");
     assert_eq!(
@@ -310,15 +346,12 @@ async fn cross_language_call_queries_resolve_c_cpp_cgo_and_rust_ffi_targets() {
     assert_eq!(non_callable.1, None);
     assert_eq!(non_callable.2.as_deref(), Some("ffi::not_callable_target"));
 
-    let single_scoped_declaration = reference_resolution(&store, "rust-calls-c-encode").await;
-    assert_eq!(single_scoped_declaration.0, "resolved");
+    let scoped_non_callable = reference_resolution(&store, "rust-ffi-scoped-non-callable").await;
+    assert_eq!(scoped_non_callable.0, "unresolved");
+    assert_eq!(scoped_non_callable.1, None);
     assert_eq!(
-        single_scoped_declaration.1.as_deref(),
-        Some("c-rk-c-encode")
-    );
-    assert_eq!(
-        single_scoped_declaration.2.as_deref(),
-        Some("ffi::rk_c_encode")
+        scoped_non_callable.2.as_deref(),
+        Some("ffi::scoped_constant")
     );
 }
 
@@ -488,6 +521,14 @@ fn symbol(
         byte_range: range(0, 8),
         line_range,
     }
+}
+
+fn with_signature(
+    mut record: RepositoryCodeSymbolRecord,
+    signature: &str,
+) -> RepositoryCodeSymbolRecord {
+    record.signature = signature.to_owned();
+    record
 }
 
 fn reference(

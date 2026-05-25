@@ -19,8 +19,18 @@ pub(crate) fn callable_target_symbol_kind(kind: &str) -> bool {
     )
 }
 
-pub(crate) fn callable_definition_symbol_kind(kind: &str) -> bool {
-    callable_target_symbol_kind(kind) && kind != "function_declaration"
+pub(crate) fn callable_definition_symbol(kind: &str, signature: &str) -> bool {
+    callable_target_symbol_kind(kind) && !callable_declaration_symbol(kind, signature)
+}
+
+fn callable_declaration_symbol(kind: &str, signature: &str) -> bool {
+    kind == "function_declaration" || signature_only_callable(kind, signature)
+}
+
+fn signature_only_callable(kind: &str, signature: &str) -> bool {
+    matches!(kind, "constructor" | "function" | "method")
+        && signature.trim_end().ends_with(';')
+        && !signature.contains('{')
 }
 
 fn cross_language_call_leaf<'a>(name: &'a str, path: &str) -> Option<&'a str> {
@@ -125,5 +135,21 @@ mod tests {
             call_target_name_candidates("obj.C.connect", "bridge/go_bridge.go"),
             ["obj.C.connect"]
         );
+    }
+
+    #[test]
+    fn callable_definitions_exclude_signature_only_declarations() {
+        assert!(callable_definition_symbol(
+            "function",
+            "int rk_c_decode(const char *input) {"
+        ));
+        assert!(!callable_definition_symbol(
+            "function",
+            "int rk_c_decode(const char *input);"
+        ));
+        assert!(!callable_definition_symbol(
+            "function_declaration",
+            "int rk_c_decode(const char *input)"
+        ));
     }
 }
