@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use serde_json::Value;
 
@@ -12,6 +12,7 @@ mod support;
 use support::{
     cargo_lock_source_is_external, gradle_coordinate_parts, gradle_dependency_call,
     package_lock_entry_is_link, package_lock_package_name, python_requirement,
+    requirements_dependency_line,
 };
 
 pub(super) fn collect_dependencies(
@@ -152,7 +153,7 @@ fn parse_cargo_toml(content: &str, records: &mut Vec<DependencySeed>) {
         let Some(group) = group.as_deref() else {
             continue;
         };
-        let Some((name, requirement)) = parse_assignment_dependency(trimmed) else {
+        let Some((name, requirement)) = parse_cargo_assignment_dependency(trimmed) else {
             continue;
         };
         push_seed(
@@ -373,6 +374,7 @@ fn parse_go_mod(content: &str, records: &mut Vec<DependencySeed>) {
 }
 
 fn parse_go_sum(content: &str, records: &mut Vec<DependencySeed>) {
+    let mut seen = HashSet::new();
     for (index, line) in content.lines().enumerate() {
         let mut parts = line.split_whitespace();
         let (Some(name), Some(version)) = (parts.next(), parts.next()) else {
@@ -380,6 +382,9 @@ fn parse_go_sum(content: &str, records: &mut Vec<DependencySeed>) {
         };
         let version = version.strip_suffix("/go.mod").unwrap_or(version);
         if !name.contains('.') {
+            continue;
+        }
+        if !seen.insert((name.to_owned(), version.to_owned())) {
             continue;
         }
         push_seed(
@@ -457,13 +462,12 @@ fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {
 
 fn parse_requirements(content: &str, records: &mut Vec<DependencySeed>) {
     for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '#').trim();
-        if trimmed.is_empty() || trimmed.starts_with('-') {
+        let Some(requirement) = requirements_dependency_line(line) else {
             continue;
-        }
+        };
         push_python_requirement(
             records,
-            trimmed,
+            requirement,
             "requirements",
             "requirements.txt",
             index + 1,
@@ -513,6 +517,13 @@ fn parse_pom(content: &str, records: &mut Vec<DependencySeed>) {
             let bom = in_dependency_management
                 && dep_type.as_deref() == Some("pom")
                 && scope.as_deref() == Some("import");
+            if in_dependency_management && !bom {
+                in_dependency = false;
+                if closes_dependency_management {
+                    in_dependency_management = false;
+                }
+                continue;
+            }
             let package_name = format!("{group_id}:{artifact_id}");
             let dependency_group = if bom {
                 "bom".to_owned()
@@ -772,6 +783,45 @@ fn parse_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
         Some(unquote(value.trim_end_matches(',')))
     };
     Some((name, requirement.filter(|value| !value.is_empty())))
+}
+
+fn parse_cargo_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
+    let (name, value) = line.split_once('=')?;
+    let name = name.trim().trim_matches('"').trim_matches('\'').to_owned();
+    if name.is_empty() {
+        return None;
+    }
+    let value = value.trim();
+    if !value.starts_with('{') {
+        return Some((name, Some(unquote(value.trim_end_matches(',')))));
+    }
+    if cargo_inline_dependency_is_local(value) {
+        return None;
+    }
+    let package_name = object_field(value, "package").unwrap_or(name);
+    let requirement = object_field(value, "version")
+        .or_else(|| object_field(value, "rev"))
+        .or_else(|| object_field(value, "tag"))
+        .or_else(|| object_field(value, "branch"))
+        .or_else(|| object_field(value, "git"));
+    Some((package_name, requirement.filter(|value| !value.is_empty())))
+}
+
+fn cargo_inline_dependency_is_local(value: &str) -> bool {
+    object_field(value, "path").is_some() || object_bool_field(value, "workspace") == Some(true)
+}
+
+fn object_bool_field(value: &str, field: &str) -> Option<bool> {
+    let field_start = value.find(field)?;
+    let after_field = value.get(field_start + field.len()..)?;
+    let after_equals = after_field.split_once('=')?.1.trim();
+    if after_equals.starts_with("true") {
+        Some(true)
+    } else if after_equals.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn object_field(value: &str, field: &str) -> Option<String> {

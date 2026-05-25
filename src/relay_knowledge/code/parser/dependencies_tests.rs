@@ -5,11 +5,16 @@ use crate::domain::{CodeDependencyRecord, CodeRepositoryRegistration};
 fn extracts_cargo_and_npm_manifest_dependencies() {
     let cargo = collect(
         "Cargo.toml",
-        "[dependencies]\nserde = \"1\"\n[dev-dependencies]\ntokio = { version = \"1\" }\n[target.'cfg(unix)'.dependencies]\nnix = { rev = \"abc\" }\n",
+        "[dependencies]\nserde = \"1\"\nserde_alias = { package = \"serde\", version = \"1.0\" }\nlocal_core = { path = \"../core\" }\nworkspace_dep = { workspace = true }\n[dev-dependencies]\ntokio = { version = \"1\" }\n[target.'cfg(unix)'.dependencies]\nnix = { rev = \"abc\" }\n",
     );
     assert_dependency(&cargo, "serde", "dependencies", Some("1"), None);
+    assert_dependency(&cargo, "serde", "dependencies", Some("1.0"), None);
     assert_dependency(&cargo, "tokio", "dev", Some("1"), None);
     assert_dependency(&cargo, "nix", "dependencies", Some("abc"), None);
+    assert!(!cargo.iter().any(|dependency| matches!(
+        dependency.package_name.as_str(),
+        "serde_alias" | "local_core" | "workspace_dep"
+    )));
 
     let package = collect(
         "package.json",
@@ -147,7 +152,7 @@ fn extracts_go_manifest_and_sum_dependencies() {
 
     let go_sum = collect(
         "go.sum",
-        "github.com/gin-gonic/gin v1.9.1 h1:abc\ngolang.org/x/sync v0.7.0/go.mod h1:def\nlocalmodule v0.1.0 h1:skip\n",
+        "github.com/gin-gonic/gin v1.9.1 h1:abc\ngithub.com/gin-gonic/gin v1.9.1/go.mod h1:abcmod\ngolang.org/x/sync v0.7.0/go.mod h1:def\nlocalmodule v0.1.0 h1:skip\n",
     );
     assert_dependency(
         &go_sum,
@@ -161,6 +166,16 @@ fn extracts_go_manifest_and_sum_dependencies() {
         !go_sum
             .iter()
             .any(|dependency| dependency.package_name == "localmodule")
+    );
+    assert_eq!(
+        go_sum
+            .iter()
+            .filter(
+                |dependency| dependency.package_name == "github.com/gin-gonic/gin"
+                    && dependency.resolved_version.as_deref() == Some("v1.9.1")
+            )
+            .count(),
+        1
     );
 }
 
@@ -202,7 +217,7 @@ fast = ["uvloop"]
 fn extracts_requirements_dependencies_without_options() {
     let dependencies = collect(
         "requirements-dev.txt",
-        "# install set\n-r base.txt\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl ; python_version >= \"3.11\"\n",
+        "# install set\n-r base.txt\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl#sha256=abc ; python_version >= \"3.11\"\n-e git+https://example.invalid/editable.git#egg=editable_pkg\n--editable git+ssh://git@example.invalid/org/other.git#egg=other-pkg\n",
     );
 
     assert_dependency(
@@ -224,10 +239,24 @@ fn extracts_requirements_dependencies_without_options() {
         &dependencies,
         "watchfiles",
         "requirements",
-        Some("@ https://example.invalid/watchfiles.whl"),
+        Some("@ https://example.invalid/watchfiles.whl#sha256=abc"),
         None,
     );
-    assert_eq!(dependencies.len(), 4);
+    assert_dependency(
+        &dependencies,
+        "editable_pkg",
+        "requirements",
+        Some("@ git+https://example.invalid/editable.git#egg=editable_pkg"),
+        None,
+    );
+    assert_dependency(
+        &dependencies,
+        "other-pkg",
+        "requirements",
+        Some("@ git+ssh://git@example.invalid/org/other.git#egg=other-pkg"),
+        None,
+    );
+    assert_eq!(dependencies.len(), 6);
 }
 
 #[test]
@@ -236,15 +265,20 @@ fn extracts_maven_bom_and_gradle_external_dependencies() {
         "pom.xml",
         "<dependencyManagement>
   <dependencies>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-dependencies</artifactId>
-      <version>3.2.0</version>
-      <type>pom</type>
-      <scope>import</scope>
-    </dependency>
-  </dependencies>
-</dependencyManagement>
+	    <dependency>
+	      <groupId>org.springframework.boot</groupId>
+	      <artifactId>spring-boot-dependencies</artifactId>
+	      <version>3.2.0</version>
+	      <type>pom</type>
+	      <scope>import</scope>
+	    </dependency>
+	    <dependency>
+	      <groupId>org.junit</groupId>
+	      <artifactId>junit-bom</artifactId>
+	      <version>5.10.1</version>
+	    </dependency>
+	  </dependencies>
+	</dependencyManagement>
 <dependencies>
   <dependency>
     <groupId>org.slf4j</groupId>
@@ -262,6 +296,10 @@ fn extracts_maven_bom_and_gradle_external_dependencies() {
         None,
     );
     assert_dependency(&pom, "org.slf4j:slf4j-api", "runtime", Some("2.0.9"), None);
+    assert!(
+        !pom.iter()
+            .any(|dependency| dependency.package_name == "org.junit:junit-bom")
+    );
 
     let gradle = collect(
         "build.gradle",

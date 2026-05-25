@@ -39,6 +39,37 @@ fn package_lock_package_name_from_path(path: &str) -> Option<String> {
     package_name
 }
 
+pub(super) fn requirements_dependency_line(line: &str) -> Option<&str> {
+    let trimmed = strip_requirement_comment(line).trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    for prefix in ["-e ", "-e\t", "--editable ", "--editable\t"] {
+        if let Some(requirement) = trimmed.strip_prefix(prefix) {
+            return Some(requirement.trim()).filter(|requirement| !requirement.is_empty());
+        }
+    }
+    (!trimmed.starts_with('-')).then_some(trimmed)
+}
+
+fn strip_requirement_comment(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('#') {
+        return "";
+    }
+    for (index, character) in line.char_indices() {
+        if character == '#'
+            && line[..index]
+                .chars()
+                .last()
+                .is_some_and(char::is_whitespace)
+        {
+            return &line[..index];
+        }
+    }
+    line
+}
+
 pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)> {
     let value = value.trim().trim_matches(',').trim();
     if value.is_empty() {
@@ -46,6 +77,11 @@ pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)
     }
     let value = value.split_once(';').map_or(value, |(left, _)| left).trim();
     let (version_input, direct_reference) = split_direct_reference(value);
+    if direct_reference.is_none() {
+        if let Some(name) = requirement_egg_name(value) {
+            return Some((name, Some(format!("@ {value}"))));
+        }
+    }
     let split_at = version_input
         .find(['=', '<', '>', '~', '!'])
         .unwrap_or(version_input.len());
@@ -64,16 +100,30 @@ pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)
 }
 
 fn split_direct_reference(value: &str) -> (&str, Option<&str>) {
-    let Some(index) = value.find('@') else {
+    let Some(index) = value.find(" @ ") else {
         return (value, None);
     };
     let name = value[..index].trim();
-    let reference = value[index + 1..].trim();
+    let reference = value[index + 3..].trim();
     if name.is_empty() || reference.is_empty() {
         (value, None)
     } else {
         (name, Some(reference))
     }
+}
+
+fn requirement_egg_name(value: &str) -> Option<String> {
+    let fragment = value.split_once('#')?.1;
+    fragment
+        .split('&')
+        .find_map(|part| part.strip_prefix("egg="))
+        .map(|name| {
+            name.split_once('[')
+                .map_or(name, |(left, _)| left)
+                .trim()
+                .to_owned()
+        })
+        .filter(|name| !name.is_empty())
 }
 
 fn version_requirement(value: &str, split_at: usize) -> Option<String> {
