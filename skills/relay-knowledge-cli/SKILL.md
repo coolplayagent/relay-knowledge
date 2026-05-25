@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: Use relay-knowledge through its local CLI for code maps, repository knowledge graphs, repository indexing, code graph search, definitions, declarations, references, usages, callers, callees, call graphs, call chains, dependency paths, impact analysis, GraphRAG queries, setup diagnostics, install checks, and upgrade checks, including 代码地图, 代码知识图谱, 代码仓库地图, 函数定义, 符号定义, 引用, 调用者, 被调用者, 调用图, 调用链, and 影响分析. For code-structure questions, prefer this skill before grep, ripgrep, rg, or plain text search; fall back only when no published CLI is available, the repository cannot be indexed, or the user explicitly needs raw text or regex search. Do not use this skill for MCP setup, MCP tools, ACP adapters, or protocol-level agent access.
+description: Use relay-knowledge through its local CLI for repo query --kind code searches and repository knowledge graphs: hybrid, symbol, definition, references, callers, callees, imports; code maps; repository indexing; dependency paths; impact analysis; GraphRAG queries; setup diagnostics; install and upgrade checks. Use for 用户代码查询kind/查询类型, 代码地图, 定义, 声明, 符号, 引用, 用法, 调用者, 被调用者, 调用关系, 导入依赖, and 影响分析. For these code-query-kind prompts, prefer this skill and repo query before grep, ripgrep, rg, or plain text search; use text search only when no published CLI is available, indexing is impossible, the kind cannot express the request, or the user explicitly asks for raw text or regex. Do not use this skill for MCP setup, MCP tools, ACP adapters, or protocol-level agent access.
 metadata:
   version: 1.0.9
   openclaw:
@@ -188,15 +188,25 @@ upgrade.
 
 For repository questions, make the index state explicit before querying. Use a
 short alias and narrow scope when the user provides relevant paths or languages.
-For code-structure questions, use the code graph before raw text search: choose
-`definition` or `symbol` for function, type, method, or constant locations;
-`references` for usages; `callers` for incoming calls; `callees` for outgoing
-calls; and `imports` for import/include/module edges. For call-chain questions,
-expand callers or callees step by step from the known symbol and report when
-the CLI exposes only bounded one-hop call edges. Use `grep`, `ripgrep`, `rg`,
-or other plain text search only as a fallback after the CLI is unavailable,
-the target scope cannot be indexed, or the user needs raw text or regex
-matching instead of graph semantics.
+For code-structure or code-query-kind prompts, use `repo query --kind` before
+raw text search. Choose the kind from the user's intent:
+
+- `hybrid`: natural-language discovery, broad concepts, or ambiguous code
+  questions.
+- `symbol`: symbol, class, function, method, type, or constant name lookup.
+- `definition`: definitions, declarations, implementations, and API locations.
+- `references`: references, usages, and "where is this used" questions.
+- `callers`: incoming call edges and "who calls this" questions.
+- `callees`: outgoing call edges and "what does this call" questions.
+- `imports`: import, include, module, and dependency edges.
+
+For call-chain questions, expand callers or callees step by step from the known
+symbol and report when the CLI exposes only bounded one-hop call edges. Use
+`grep`, `ripgrep`, `rg`, or other plain text search only as a fallback after
+the CLI is unavailable, the target scope cannot be indexed, the supported
+query kinds cannot express the request, or the user explicitly needs raw text
+or regex matching instead of graph semantics. Do not start with `grep` or `rg`
+for code kind queries.
 
 ```bash
 relay-knowledge repo register /path/to/repo \
@@ -223,10 +233,11 @@ relay-knowledge repo query core \
   --format json
 ```
 
-Choose `--kind hybrid` for broad discovery, `symbol` or `definition` for API
-locations, `references` for uses, `callers` or `callees` for call relations,
-and `imports` for import edges. For diff-aware work, index the head snapshot
-first and then run:
+Use the selected kind directly when the user names it. If the intent is still
+unclear after reading the prompt, start with `--kind hybrid`, then narrow to
+`symbol`, `definition`, `references`, `callers`, `callees`, or `imports` based
+on the returned evidence. For diff-aware work, index the head snapshot first
+and then run:
 
 ```bash
 relay-knowledge repo update core --base main --head HEAD --format json

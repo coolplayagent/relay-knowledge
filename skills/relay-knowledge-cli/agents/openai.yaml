@@ -1,4 +1,4 @@
 interface:
   display_name: "Relay Knowledge CLI"
-  short_description: "Query code definitions, calls, and knowledge graphs"
-  default_prompt: "Use $relay-knowledge-cli first for code maps, function definitions, references, callers, callees, call chains, repository indexing, and code graph questions."
+  short_description: "Query repo code kinds and knowledge graphs"
+  default_prompt: "Use $relay-knowledge-cli first for repo query --kind requests: hybrid, symbol, definition, references, callers, callees, imports. Treat grep, ripgrep, and rg as fallback only."

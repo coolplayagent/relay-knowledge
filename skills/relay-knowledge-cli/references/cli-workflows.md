@@ -138,13 +138,24 @@ relay-knowledge repo query core \
 
 Kind selection:
 
-- `hybrid`: first pass when intent is broad or ambiguous.
-- `symbol`: find declarations by identifier.
-- `definition`: locate API definitions or type/function declarations.
-- `references`: find uses of a symbol or concept.
-- `callers`: find who calls a function-like symbol.
-- `callees`: find calls made by a function-like symbol.
-- `imports`: find import/include/module dependency edges.
+For user prompts about supported code query kinds, use
+`relay-knowledge repo query --kind ...` before plain text search. Select the
+kind from the user's intent:
+
+- `hybrid`: natural-language discovery, broad concepts, or ambiguous code
+  questions.
+- `symbol`: symbol, class, function, method, type, or constant name lookup.
+- `definition`: definitions, declarations, implementations, and API locations.
+- `references`: references, usages, and "where is this used" questions.
+- `callers`: incoming call edges and "who calls this" questions.
+- `callees`: outgoing call edges and "what does this call" questions.
+- `imports`: import, include, module, and dependency edges.
+
+Use `grep`, `ripgrep`, `rg`, or other text search only as a fallback after the
+CLI is unavailable, the target repository cannot be indexed, the supported
+query kinds cannot express the request, or the user explicitly asks for raw
+text or regular-expression matching. When falling back, say that text search
+is a fallback rather than the preferred code graph path.
 
 Incremental update and impact:
 
