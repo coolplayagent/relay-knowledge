@@ -1,4 +1,4 @@
-use crate::domain::CodeRepositoryRegistration;
+use crate::domain::{CodeParseStatus, CodeRepositoryRegistration};
 
 use super::*;
 
@@ -91,6 +91,134 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 
     assert_eq!(syscall.kind, "function");
     assert_eq!(syscall.line_range.start, 2);
+}
+
+#[test]
+fn c_macro_generated_handlers_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "src/http_module.c",
+        br#"
+#define RK_HTTP_HANDLER(name) int name(struct rk_request *request)
+
+struct rk_request {
+    int status;
+};
+
+RK_HTTP_HANDLER(rk_http_access_handler)
+{
+    return request->status;
+}
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "rk_http_access_handler"),
+        "macro-generated handler should be available as a structured symbol: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn c_unrecoverable_syntax_errors_remain_partial() {
+    let snapshot = parse_source_snapshot(
+        "src/broken.c",
+        br#"
+int broken_value = ;
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Partial);
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes"))
+    );
+}
+
+#[test]
+fn cpp_macro_decorated_classes_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "include/http_module.hpp",
+        br#"
+#define RK_CPP_API __attribute__((visibility("default")))
+
+class BaseModule {
+ public:
+    virtual ~BaseModule() = default;
+};
+
+RK_CPP_API class HttpModule final : public BaseModule {
+ public:
+    void Run();
+};
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "HttpModule" && symbol.kind == "class"),
+        "macro-decorated class should expose the real class name: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
+fn cpp_explicit_template_instantiations_can_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "src/cache.cpp",
+        br#"
+#include <memory>
+#include <string>
+
+namespace rk::store {
+
+class Writer {
+ public:
+    void Append(const std::string& key);
+};
+
+template <typename Key>
+class Cache {
+ public:
+    explicit Cache(std::unique_ptr<Writer> writer);
+    void Insert(const Key& key);
+
+ private:
+    std::unique_ptr<Writer> writer_;
+};
+
+template <typename Key>
+Cache<Key>::Cache(std::unique_ptr<Writer> writer) : writer_(std::move(writer)) {}
+
+template <typename Key>
+void Cache<Key>::Insert(const Key& key)
+{
+    writer_->Append(std::string(key));
+}
+
+template class Cache<std::string>;
+
+}  // namespace rk::store
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "Cache" || symbol.name == "Cache<Key>::Insert"),
+        "template implementation should keep structured symbols: {:?}",
+        snapshot.symbols
+    );
 }
 
 #[test]

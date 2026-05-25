@@ -38,6 +38,7 @@ pub(super) fn manual_definitions(
             .unwrap_or_default(),
         "call_expression" if !has_ancestor_kind(node, "compound_statement") => {
             syscall_macro_definition(content, node)
+                .or_else(|| macro_generated_function_definition(content, node))
                 .map(|definition| vec![definition])
                 .unwrap_or_default()
         }
@@ -192,6 +193,50 @@ fn is_syscall_definition_macro(name: &str) -> bool {
     };
 
     !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit())
+}
+
+fn macro_generated_function_definition(
+    content: &str,
+    call: Node<'_>,
+) -> Option<(String, &'static str, SyntaxRange)> {
+    let function = call.child_by_field_name("function")?;
+    let macro_name = node_text(content, function);
+    if !definition_like_macro_name(&macro_name) {
+        return None;
+    }
+    let arguments = call.child_by_field_name("arguments")?;
+    let name = first_named_child_of_kind(arguments, "identifier")
+        .map(|node| node_text(content, node))
+        .filter(|name| data_symbol_name(name))
+        .filter(|name| !uppercase_macro_token(name))?;
+
+    Some((name, "function", syntax_range(call)))
+}
+
+fn definition_like_macro_name(name: &str) -> bool {
+    if matches!(name, "EXPORT_SYMBOL" | "EXPORT_SYMBOL_GPL" | "IS_ENABLED") {
+        return false;
+    }
+    let tokens = name
+        .split('_')
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if tokens.is_empty() || !uppercase_macro_token(name) {
+        return false;
+    }
+
+    tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "DECLARE" | "DEFINE" | "DEF" | "HANDLER" | "FUNCTION" | "METHOD" | "CALLBACK"
+        )
+    })
+}
+
+fn uppercase_macro_token(name: &str) -> bool {
+    name.chars().all(|character| {
+        character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+    }) && name.chars().any(|character| character.is_ascii_uppercase())
 }
 
 fn function_declaration_symbols(

@@ -203,7 +203,7 @@ fn hybrid_source_surface_fallback_skips_complete_exported_value_surfaces() {
 }
 
 #[test]
-fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability() {
+fn import_fallback_runs_for_unresolved_external_imports_without_degrading() {
     let request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     let mut import_hit = hit("src/component.tsx", "react");
     import_hit.edge_kind = Some("import".to_owned());
@@ -227,10 +227,9 @@ fn import_fallback_runs_for_unresolved_external_imports_and_reports_capability()
         degraded_reason: None,
     };
 
-    let reason = append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome)
-        .expect("import fallback should explain external dependency fallback");
+    let reason = append_code_grep_fallback(&status(), &request, &mut results, &plan, outcome);
 
-    assert!(reason.contains("external dependency import is not indexed"));
+    assert_eq!(reason, None);
     assert!(results.iter().any(|hit| {
         hit.retrieval_layers
             .contains(&CodeRetrievalLayer::ImportGraph)

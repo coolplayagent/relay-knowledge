@@ -370,7 +370,7 @@ pub fn original() -> u32 {
 }
 
 #[tokio::test]
-async fn repository_set_import_query_reports_external_dependency_grep_fallback() {
+async fn repository_set_import_query_keeps_external_dependency_gap_non_degraded() {
     if Command::new("rg").arg("--version").output().is_err() {
         return;
     }
@@ -400,6 +400,10 @@ pub struct Event {
         .await
         .expect("set should create");
     add_member(&service, "workspace", "app", 0).await;
+    service
+        .refresh_code_repository_set("workspace".to_owned(), context("external-set-refresh"))
+        .await
+        .expect("set refresh should succeed");
 
     let response = service
         .query_code_repository_set(
@@ -418,14 +422,7 @@ pub struct Event {
         .await
         .expect("repository-set query should succeed");
 
-    assert!(
-        response
-            .degraded_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("external dependency import is not indexed")),
-        "unexpected degraded reason: {:?}",
-        response.degraded_reason
-    );
+    assert_eq!(response.degraded_reason, None);
     assert!(
         response.results.iter().any(|result| {
             result.member.repository_alias == "app"

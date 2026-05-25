@@ -299,7 +299,7 @@ async fn query_degrades_when_candidate_path_lookup_is_unavailable() {
 }
 
 #[tokio::test]
-async fn import_query_uses_grep_fallback_for_unindexed_external_dependency() {
+async fn import_query_uses_grep_fallback_for_unindexed_external_dependency_without_degrading() {
     if Command::new("rg").arg("--version").output().is_err() {
         return;
     }
@@ -360,14 +360,7 @@ export function Panel({ value }: { value: string }) {
         .await
         .expect("query should succeed");
 
-    assert!(
-        response
-            .degraded_reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("external dependency import is not indexed")),
-        "unexpected degraded reason: {:?}",
-        response.degraded_reason
-    );
+    assert_eq!(response.degraded_reason, None);
     assert!(
         response.results.iter().any(|hit| {
             hit.path == "src/component.tsx"

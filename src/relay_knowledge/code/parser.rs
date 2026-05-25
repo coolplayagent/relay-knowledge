@@ -12,9 +12,10 @@ mod syntax;
 mod text;
 
 use crate::domain::{
-    CodeFileDiagnostic, CodeParseStatus, RepositoryCodeFileRecord, RepositoryCodeReferenceRecord,
-    RepositoryCodeSymbolRecord,
+    CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeChunkRecord,
+    RepositoryCodeFileRecord, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
 };
+use tree_sitter::Node;
 
 use super::{
     CodeIndexError, SnapshotBuild,
@@ -27,6 +28,7 @@ use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]
 use manual::manual_definitions;
+use nodes::push_children_reverse;
 use records::records_from_captures;
 #[cfg(test)]
 use syntax::parse_tree;
@@ -34,9 +36,6 @@ use syntax::{extract_tag_captures_safely, parse_tree_safely};
 #[cfg(test)]
 use text::MAX_TEXT_FILE_BYTES;
 use text::{count_lines, validate_text_content};
-
-#[cfg(test)]
-use nodes::push_children_reverse;
 
 pub(in crate::code) fn parse_indexed_file(
     build: &mut SnapshotBuild,
@@ -198,29 +197,6 @@ fn parse_syntax_file(
             return Ok(());
         }
     };
-    let (parse_status, degraded_reason) = if root.has_error() {
-        (
-            CodeParseStatus::Partial,
-            Some(
-                "tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned(),
-            ),
-        )
-    } else {
-        (CodeParseStatus::Parsed, None)
-    };
-    record_file_status(
-        build,
-        FileStatusInput {
-            path: input.path,
-            file_id: input.file_id,
-            language_id: input.language.id,
-            blob_hash: input.blob_hash,
-            byte_len: input.byte_len,
-            line_count: input.line_count,
-            parse_status,
-            degraded_reason,
-        },
-    );
     let context = FileParseContext {
         build,
         path: input.path,
@@ -250,6 +226,27 @@ fn parse_syntax_file(
         input.content,
         &output.symbols,
     )?;
+    let (parse_status, degraded_reason) = syntax_parse_status(
+        input.language.id,
+        root,
+        input.content,
+        &output,
+        &imports,
+        &chunks,
+    );
+    record_file_status(
+        build,
+        FileStatusInput {
+            path: input.path,
+            file_id: input.file_id,
+            language_id: input.language.id,
+            blob_hash: input.blob_hash,
+            byte_len: input.byte_len,
+            line_count: input.line_count,
+            parse_status,
+            degraded_reason,
+        },
+    );
 
     build.symbols.extend(output.symbols);
     build.references.extend(output.references);
@@ -264,6 +261,149 @@ fn parse_syntax_file(
     build.chunks.extend(chunks);
 
     Ok(())
+}
+
+fn syntax_parse_status(
+    language_id: &str,
+    root: Node<'_>,
+    content: &str,
+    output: &FileParseOutput,
+    imports: &[CodeImportRecord],
+    chunks: &[RepositoryCodeChunkRecord],
+) -> (CodeParseStatus, Option<String>) {
+    if !root.has_error() {
+        return (CodeParseStatus::Parsed, None);
+    }
+    if recoverable_c_family_parse(language_id, root, content, output, imports, chunks) {
+        return (CodeParseStatus::Parsed, None);
+    }
+
+    (
+        CodeParseStatus::Partial,
+        Some("tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned()),
+    )
+}
+
+fn recoverable_c_family_parse(
+    language_id: &str,
+    root: Node<'_>,
+    content: &str,
+    output: &FileParseOutput,
+    imports: &[CodeImportRecord],
+    chunks: &[RepositoryCodeChunkRecord],
+) -> bool {
+    if !matches!(language_id, "c" | "cpp") {
+        return false;
+    }
+    if output.symbols.is_empty()
+        && output.references.is_empty()
+        && imports.is_empty()
+        && chunks.is_empty()
+    {
+        return false;
+    }
+
+    let mut saw_error = false;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if syntax_error_node(node) {
+            saw_error = true;
+            if !recoverable_c_family_error(content, node) {
+                return false;
+            }
+        }
+        push_children_reverse(node, &mut stack);
+    }
+
+    saw_error
+}
+
+fn syntax_error_node(node: Node<'_>) -> bool {
+    node.is_error() || node.is_missing() || node.kind() == "ERROR"
+}
+
+fn recoverable_c_family_error(content: &str, node: Node<'_>) -> bool {
+    if has_preprocessor_ancestor(node) {
+        return true;
+    }
+    let range = nodes::syntax_range(node);
+    if range.line_end.saturating_sub(range.line_start) > 2 {
+        return false;
+    }
+
+    source_line(content, range.line_start).is_some_and(recoverable_c_family_error_line)
+}
+
+fn has_preprocessor_ancestor(mut node: Node<'_>) -> bool {
+    loop {
+        if node.kind().starts_with("preproc") {
+            return true;
+        }
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        node = parent;
+    }
+}
+
+fn source_line(content: &str, line_number: usize) -> Option<&str> {
+    line_number
+        .checked_sub(1)
+        .and_then(|index| content.lines().nth(index))
+}
+
+fn recoverable_c_family_error_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('#') {
+        return true;
+    }
+    if (trimmed.starts_with("template class ") || trimmed.starts_with("template struct "))
+        && trimmed.contains('<')
+        && trimmed.contains('>')
+        && trimmed.ends_with(';')
+    {
+        return true;
+    }
+    if trimmed.contains(" class ") || trimmed.contains(" struct ") || trimmed.starts_with("class ")
+    {
+        return trimmed
+            .split_whitespace()
+            .next()
+            .is_some_and(c_family_decorator_token);
+    }
+
+    let Some(token) = trimmed
+        .split(|character: char| !c_identifier_char(character))
+        .next()
+    else {
+        return false;
+    };
+    c_family_macro_name(token) && trimmed.contains('(')
+}
+
+fn c_family_decorator_token(token: &str) -> bool {
+    token.starts_with("__")
+        || token.ends_with("_API")
+        || token.ends_with("_EXPORT")
+        || token.ends_with("_EXPORTS")
+        || token
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_uppercase())
+}
+
+fn c_family_macro_name(token: &str) -> bool {
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_uppercase())
+        && token.chars().any(|character| character == '_')
+}
+
+fn c_identifier_char(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
 }
 
 fn record_feature_flags(
