@@ -54,11 +54,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "git-helper"
 version = "0.2.0"
 source = "git+https://example.invalid/helper.git#abcdef"
+
+[[package]]
+name = "sparse-helper"
+version = "0.3.0"
+source = "sparse+https://index.crates.io/"
 "#,
     );
 
     assert_dependency(&dependencies, "serde", "locked", None, Some("1.0.203"));
     assert_dependency(&dependencies, "git-helper", "locked", None, Some("0.2.0"));
+    assert_dependency(
+        &dependencies,
+        "sparse-helper",
+        "locked",
+        None,
+        Some("0.3.0"),
+    );
     assert!(
         !dependencies
             .iter()
@@ -269,6 +281,21 @@ fn extracts_requirements_dependencies_without_options() {
         dependency.package_name.as_str(),
         "../shared-lib" | "./vendor/pkg" | "local_path"
     )));
+}
+
+#[test]
+fn extracts_nested_requirements_and_constraints_files() {
+    let nested = collect("requirements/base.txt", "Django>=5.0\n-r local-dev.txt\n");
+    let constraints = collect("constraints.txt", "urllib3==2.2.1\n");
+
+    assert_dependency(&nested, "Django", "requirements", Some(">=5.0"), None);
+    assert_dependency(
+        &constraints,
+        "urllib3",
+        "requirements",
+        Some("==2.2.1"),
+        None,
+    );
 }
 
 #[test]

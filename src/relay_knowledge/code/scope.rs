@@ -12,7 +12,7 @@ use crate::domain::{
 
 use super::{
     CodeIndexError, changes::tracked_entries, git_bytes, git_object_exists, languages::language_id,
-    resolve_ref, resolve_tree,
+    parser::dependency_manifest_language_ids, resolve_ref, resolve_tree,
 };
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
@@ -336,10 +336,17 @@ fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
 }
 
 fn language_filter_allows(path: &str, filters: &[String]) -> bool {
-    filters.is_empty()
-        || language_id(path)
-            .map(|language| filters.iter().any(|filter| filter == language))
-            .unwrap_or(false)
+    if filters.is_empty() {
+        return true;
+    }
+    if language_id(path).is_some_and(|language| filters.iter().any(|filter| filter == language)) {
+        return true;
+    }
+    dependency_manifest_language_ids(path).is_some_and(|languages| {
+        languages
+            .iter()
+            .any(|language| filters.iter().any(|filter| filter == language))
+    })
 }
 
 fn default_source_preset_excludes(path: &str) -> bool {

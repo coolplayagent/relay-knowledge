@@ -136,6 +136,59 @@ pub fn test_retry_policy() -> u32 {
 }
 
 #[tokio::test]
+async fn language_scoped_index_includes_dependency_manifests() {
+    let repo = FixtureRepo::create("code-query-language-sbom");
+    repo.write("src/lib.rs", "pub fn uses_serde() {}\n");
+    repo.write("Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-language-sbom"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-language-sbom"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "serde",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Sbom,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-language-sbom"),
+        )
+        .await
+        .expect("sbom query should include language-compatible manifests");
+
+    assert!(response.results.iter().any(|hit| {
+        hit.path == "Cargo.toml" && hit.edge_target_hint.as_deref() == Some("serde")
+    }));
+}
+
+#[tokio::test]
 async fn restricted_index_rejects_query_filters_outside_indexed_scope() {
     let repo = FixtureRepo::create("code-query-filter-restricted");
     repo.write(

@@ -4,7 +4,7 @@ use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
-use super::code_query_prepare::retry_code_search_operation;
+use super::super::code_query_prepare::retry_code_search_operation;
 
 const MAX_CANDIDATE_PATH_FTS_TERMS: usize = 8;
 

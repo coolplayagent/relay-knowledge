@@ -47,6 +47,12 @@ pub(super) fn collect_dependencies(
         .collect())
 }
 
+pub(in crate::code) fn dependency_manifest_language_ids(
+    path: &str,
+) -> Option<&'static [&'static str]> {
+    DependencyFileKind::from_path(path).map(DependencyFileKind::language_ids)
+}
+
 #[derive(Clone, Copy)]
 enum DependencyFileKind {
     CargoToml,
@@ -78,12 +84,30 @@ impl DependencyFileKind {
             "build.gradle" | "build.gradle.kts" => Some(Self::Gradle),
             "conanfile.txt" => Some(Self::ConanfileTxt),
             "conanfile.py" => Some(Self::ConanfilePy),
-            _ if file_name.starts_with("requirements") && file_name.ends_with(".txt") => {
-                Some(Self::RequirementsTxt)
-            }
+            _ if python_requirements_path(path, file_name) => Some(Self::RequirementsTxt),
             _ => None,
         }
     }
+
+    fn language_ids(self) -> &'static [&'static str] {
+        match self {
+            Self::CargoToml | Self::CargoLock => &["rust"],
+            Self::PackageJson | Self::PackageLockJson => {
+                &["javascript", "jsx", "typescript", "tsx"]
+            }
+            Self::GoMod | Self::GoSum => &["go"],
+            Self::PyprojectToml | Self::RequirementsTxt => &["python"],
+            Self::PomXml | Self::Gradle => &["java", "kotlin", "scala"],
+            Self::ConanfileTxt | Self::ConanfilePy => &["c", "cpp"],
+        }
+    }
+}
+
+fn python_requirements_path(path: &str, file_name: &str) -> bool {
+    file_name.ends_with(".txt")
+        && (file_name.starts_with("requirements")
+            || file_name.starts_with("constraints")
+            || path.split('/').any(|segment| segment == "requirements"))
 }
 
 #[derive(Clone)]

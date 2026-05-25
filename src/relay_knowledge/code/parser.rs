@@ -26,6 +26,7 @@ use super::{
 };
 use chunks::{add_file_chunk, chunks_for_symbols};
 use dependencies::collect_dependencies;
+pub(in crate::code) use dependencies::dependency_manifest_language_ids;
 use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]

@@ -1,7 +1,11 @@
 use serde_json::Value;
 
 pub(super) fn cargo_lock_source_is_external(source: Option<&str>) -> bool {
-    source.is_some_and(|source| source.starts_with("registry+") || source.starts_with("git+"))
+    source.is_some_and(|source| {
+        source.starts_with("registry+")
+            || source.starts_with("git+")
+            || source.starts_with("sparse+")
+    })
 }
 
 pub(super) fn npm_requirement_is_local(requirement: &str) -> bool {

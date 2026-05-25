@@ -108,6 +108,70 @@ fn selector_filters_cannot_widen_registered_scope() {
 }
 
 #[test]
+fn language_scoped_selection_keeps_dependency_manifests() {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let rust_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["rust".to_owned()])
+            .expect("selector should validate");
+    let javascript_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["javascript".to_owned()])
+            .expect("selector should validate");
+    let python_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["python".to_owned()])
+            .expect("selector should validate");
+    let java_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["java".to_owned()])
+            .expect("selector should validate");
+    let cpp_selector =
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), vec!["cpp".to_owned()])
+            .expect("selector should validate");
+
+    assert!(path_is_selected(
+        "Cargo.toml",
+        &registration,
+        &rust_selector
+    ));
+    assert!(path_is_selected(
+        "Cargo.lock",
+        &registration,
+        &rust_selector
+    ));
+    assert!(!path_is_selected(
+        "package.json",
+        &registration,
+        &rust_selector
+    ));
+    assert!(path_is_selected(
+        "package-lock.json",
+        &registration,
+        &javascript_selector
+    ));
+    assert!(path_is_selected(
+        "requirements/base.txt",
+        &registration,
+        &python_selector
+    ));
+    assert!(path_is_selected(
+        "constraints.txt",
+        &registration,
+        &python_selector
+    ));
+    assert!(path_is_selected("pom.xml", &registration, &java_selector));
+    assert!(path_is_selected(
+        "build.gradle",
+        &registration,
+        &java_selector
+    ));
+    assert!(path_is_selected(
+        "conanfile.py",
+        &registration,
+        &cpp_selector
+    ));
+}
+
+#[test]
 fn dot_path_filter_selects_repository_root() {
     let registration = CodeRepositoryRegistration::new(
         "repo",
