@@ -12,10 +12,7 @@ use crate::{
 use super::{
     RelayKnowledgeService,
     index_refresh::{IndexRefreshOutcome, filter_outcome_to_read_models, metadata_for_indexes},
-    service::{
-        current_time_millis, file_index_diagnostics_or_default, graph_with_repository_code_totals,
-        storage_api_error,
-    },
+    service::{current_time_millis, graph_with_repository_code_totals, storage_api_error},
     status::runtime_status_with_model_profiles,
 };
 
@@ -25,23 +22,10 @@ impl RelayKnowledgeService {
     /// Returns liveness-safe service and data health diagnostics.
     pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
         let store = self.storage.get().await.map_err(storage_api_error)?;
-        match tokio::time::timeout(
-            HEALTH_STORAGE_BUDGET,
-            store.health_snapshot(current_time_millis()),
-        )
-        .await
+        match tokio::time::timeout(HEALTH_STORAGE_BUDGET, self.storage_health_snapshot(&store))
+            .await
         {
             Ok(Ok(snapshot)) => {
-                let response = self
-                    .health_from_storage_snapshot(context, snapshot, None)
-                    .await;
-                *self.health_cache.write().await = Some(response.clone());
-                Ok(response)
-            }
-            Ok(Err(StorageError::InvalidInput(message)))
-                if message == "health snapshot storage is unavailable" =>
-            {
-                let snapshot = self.legacy_health_snapshot(&store).await?;
                 let response = self
                     .health_from_storage_snapshot(context, snapshot, None)
                     .await;
@@ -55,6 +39,21 @@ impl RelayKnowledgeService {
             Err(_) => Ok(self
                 .degraded_cached_health(context, "storage_busy: health snapshot timed out")
                 .await),
+        }
+    }
+
+    async fn storage_health_snapshot(
+        &self,
+        store: &Arc<dyn KnowledgeStore>,
+    ) -> Result<HealthStorageSnapshot, StorageError> {
+        match store.health_snapshot(current_time_millis()).await {
+            Ok(snapshot) => Ok(snapshot),
+            Err(StorageError::InvalidInput(message))
+                if message == "health snapshot storage is unavailable" =>
+            {
+                self.legacy_health_snapshot(store).await
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -109,20 +108,16 @@ impl RelayKnowledgeService {
     async fn legacy_health_snapshot(
         &self,
         store: &Arc<dyn KnowledgeStore>,
-    ) -> Result<HealthStorageSnapshot, ApiError> {
+    ) -> Result<HealthStorageSnapshot, StorageError> {
         Ok(HealthStorageSnapshot {
-            graph: store.inspect_graph().await.map_err(storage_api_error)?,
-            repository_code_totals: store
-                .code_repository_totals()
-                .await
-                .map_err(storage_api_error)?,
-            indexes: store.index_statuses().await.map_err(storage_api_error)?,
-            index_cursors: store.index_cursors().await.map_err(storage_api_error)?,
+            graph: store.inspect_graph().await?,
+            repository_code_totals: store.code_repository_totals().await?,
+            indexes: store.index_statuses().await?,
+            index_cursors: store.index_cursors().await?,
             index_refresh: store
                 .index_refresh_diagnostics(current_time_millis())
-                .await
-                .map_err(storage_api_error)?,
-            file_index: file_index_diagnostics_or_default(store).await?,
+                .await?,
+            file_index: legacy_file_index_diagnostics_or_default(store).await?,
         })
     }
 
@@ -159,5 +154,19 @@ impl RelayKnowledgeService {
                     .await,
             ),
         }
+    }
+}
+
+async fn legacy_file_index_diagnostics_or_default(
+    store: &Arc<dyn KnowledgeStore>,
+) -> Result<FileIndexDiagnostics, StorageError> {
+    match store.file_index_diagnostics().await {
+        Ok(diagnostics) => Ok(diagnostics),
+        Err(StorageError::InvalidInput(message))
+            if message == "file index storage is unavailable" =>
+        {
+            Ok(FileIndexDiagnostics::default())
+        }
+        Err(error) => Err(error),
     }
 }

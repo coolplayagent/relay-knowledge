@@ -379,11 +379,61 @@ pub(super) async fn active_index_matches_request(
     };
 
     Ok(task.resolved_commit_sha == selector.ref_selector
-        && requested_languages_fit_indexed_scope(
+        && active_languages_cover_requested_scope(
+            &status.language_filters,
             &task.language_filters,
             &selector.language_filters,
         )
-        && requested_paths_fit_indexed_scope(&task.path_filters, &selector.path_filters))
+        && active_paths_cover_requested_scope(
+            &status.path_filters,
+            &task.path_filters,
+            &selector.path_filters,
+        ))
+}
+
+fn active_paths_cover_requested_scope(
+    registration_filters: &[String],
+    task_filters: &[String],
+    selector_filters: &[String],
+) -> bool {
+    if !requested_paths_fit_indexed_scope(registration_filters, selector_filters) {
+        return false;
+    }
+    let task_selector_filters =
+        filters_without_registration_scope(task_filters, registration_filters);
+    if selector_filters.is_empty() {
+        return task_selector_filters.is_empty();
+    }
+    task_selector_filters.is_empty()
+        || requested_paths_fit_indexed_scope(&task_selector_filters, selector_filters)
+}
+
+fn active_languages_cover_requested_scope(
+    registration_filters: &[String],
+    task_filters: &[String],
+    selector_filters: &[String],
+) -> bool {
+    if !requested_languages_fit_indexed_scope(registration_filters, selector_filters) {
+        return false;
+    }
+    let task_selector_filters =
+        filters_without_registration_scope(task_filters, registration_filters);
+    if selector_filters.is_empty() {
+        return task_selector_filters.is_empty();
+    }
+    task_selector_filters.is_empty()
+        || requested_languages_fit_indexed_scope(&task_selector_filters, selector_filters)
+}
+
+fn filters_without_registration_scope(
+    task_filters: &[String],
+    registration_filters: &[String],
+) -> Vec<String> {
+    task_filters
+        .iter()
+        .filter(|filter| !registration_filters.contains(filter))
+        .cloned()
+        .collect()
 }
 
 fn path_filter_covers(indexed_filter: &str, selector_filter: &str) -> bool {
@@ -496,6 +546,62 @@ mod tests {
         assert!(!storage_error_message_is(
             &StorageError::InvalidInput("code index task lease expired".to_owned()),
             CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
+        ));
+    }
+
+    #[test]
+    fn active_path_filters_preserve_registration_scope_boundaries() {
+        let registration = vec!["src".to_owned()];
+        let narrow_task = vec!["src".to_owned(), "src/a.rs".to_owned()];
+
+        assert!(!active_paths_cover_requested_scope(
+            &registration,
+            &narrow_task,
+            &[]
+        ));
+        assert!(active_paths_cover_requested_scope(
+            &registration,
+            &narrow_task,
+            &["src/a.rs".to_owned()]
+        ));
+        assert!(active_paths_cover_requested_scope(
+            &registration,
+            &registration,
+            &["src/a.rs".to_owned()]
+        ));
+        assert!(!active_paths_cover_requested_scope(
+            &registration,
+            &registration,
+            &["tests/a.rs".to_owned()]
+        ));
+        assert!(!active_paths_cover_requested_scope(
+            &[],
+            &["src/a.rs".to_owned()],
+            &["src".to_owned()]
+        ));
+    }
+
+    #[test]
+    fn active_language_filters_preserve_registration_scope_boundaries() {
+        assert!(!active_languages_cover_requested_scope(
+            &[],
+            &["python".to_owned()],
+            &[]
+        ));
+        assert!(active_languages_cover_requested_scope(
+            &[],
+            &["python".to_owned()],
+            &["python".to_owned()]
+        ));
+        assert!(!active_languages_cover_requested_scope(
+            &["rust".to_owned()],
+            &["rust".to_owned()],
+            &["python".to_owned()]
+        ));
+        assert!(!active_languages_cover_requested_scope(
+            &[],
+            &["python".to_owned()],
+            &["rust".to_owned()]
         ));
     }
 }

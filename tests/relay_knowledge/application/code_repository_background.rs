@@ -438,6 +438,62 @@ async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_i
 }
 
 #[tokio::test]
+async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_request() {
+    let repo = FixtureRepo::create("code-stale-unmatched-active-scope");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 1 }\n");
+    repo.write("src/b.rs", "pub fn stable_b_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-stale-unmatched-active").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-unmatched-a"),
+        )
+        .await
+        .expect("a scope should index");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-a"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-stale-unmatched-a"),
+        )
+        .await
+        .expect("narrow refresh should queue");
+    assert!(started.task.is_some());
+
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "stable_b_policy",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-stale-unmatched-unfiltered"),
+        )
+        .await
+        .expect_err("unfiltered request should not use a narrow active task as stale fallback");
+
+    assert!(error.message.contains("has no index for ref"));
+    assert!(error.message.contains("requested filters"));
+}
+
+#[tokio::test]
 async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_active_index() {
     let repo = FixtureRepo::create("code-stale-feature-flag-scope");
     repo.write(
