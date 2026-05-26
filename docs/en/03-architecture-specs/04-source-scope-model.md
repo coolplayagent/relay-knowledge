@@ -34,7 +34,7 @@ Scope construction follows a fixed flow:
 2. Normalize paths, languages, source kinds, and aliases.
 3. Resolve branch, tag, HEAD, and PR refs to commit/tree identities.
 4. Reject refs that could be parsed as command options, such as inputs beginning with `-`.
-5. Merge path/language filters and produce a stable filter hash.
+5. Merge path filters and any request-time language filters, then produce a stable filter hash. Repository registration never contributes language filters.
 6. Look up or create the scoped index partition.
 
 Queries must not automatically fall back from narrow filters to wider scopes. A new filter combination requires indexing that scope first.

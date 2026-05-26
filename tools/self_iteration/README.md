@@ -112,6 +112,8 @@ clippy, full test suite, local-file fixtures, or research judge by default.
 The code-index recovery gate covers expired task lease recovery, stale worker
 completion rejection, attempt-budget dead-lettering, and checkpoint-batch lease
 renewal without indexing exhaustive large repositories.
+`fast` also runs a registration guardrail proving `repo register --language`
+is rejected so mixed C/C++ repositories cannot be narrowed at registration.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
 `nonstandard_layout_fixture`, `relay_teams`, `leveldb_cpp`,
@@ -487,4 +489,4 @@ git clone --depth 1 https://github.com/scala/scala3.git /opt/workspace/scala3
 git clone --depth 1 https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire
 ```
 
-All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.
+All repository targets must use `scope=all`. The evaluator rejects non-full scopes, full-scope registration does not pass path or language filters to `repo register`, and a default guardrail verifies that product registration rejects `--language`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

@@ -31,7 +31,7 @@ The current implementation provides the initial product path across all three ph
 
 The current implementation already has the foundation:
 
-- `CodeRepository` has stable `repository_id`, alias, root path, and registered path/language scope.
+- `CodeRepository` has stable `repository_id`, alias, root path, and registered path scope; language filters are request-time narrowing controls rather than registration defaults.
 - `repository_snapshot` scope is derived from `repository_id`, tree hash, path filters, and language filters.
 - SQLite code fact tables are partitioned by `source_scope` and keep `repository_id`.
 - `repo register/index/query/impact/status/report` currently accept one repository selector.

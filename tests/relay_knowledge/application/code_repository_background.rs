@@ -276,7 +276,7 @@ async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRe
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context(name),
         )

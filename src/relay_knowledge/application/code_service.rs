@@ -9,8 +9,8 @@ use crate::{
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, build_index_snapshot,
-        changed_paths_for_diff, deleted_symbol_names_for_diff,
+        CodeIndexError, REGISTRATION_LANGUAGE_FILTER_ERROR, SOURCE_GREP_CANDIDATE_FILE_LIMIT,
+        build_index_snapshot, changed_paths_for_diff, deleted_symbol_names_for_diff,
         partition_changed_paths_for_selector, prepare_full_index_plan, preview_repository_scope,
         register_repository, resolve_repository_ref, resolve_repository_snapshot,
         source_declarations_for_identity, source_grep_matches,
@@ -44,6 +44,11 @@ impl RelayKnowledgeService {
         request: CodeRepositoryRegisterRequest,
         context: RequestContext,
     ) -> Result<CodeRepositoryRegisterResponse, ApiError> {
+        if !request.language_filters.is_empty() {
+            return Err(ApiError::invalid_argument(
+                REGISTRATION_LANGUAGE_FILTER_ERROR,
+            ));
+        }
         let registration = run_blocking_code(move || {
             register_repository(
                 request.root_path,

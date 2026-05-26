@@ -433,6 +433,23 @@ fn repository_id_includes_local_root_with_remote_origin() {
 }
 
 #[test]
+fn register_repository_rejects_language_filters() {
+    let repo = TempGitRepo::create("register-language-filter");
+    repo.write("src/lib.rs", "fn value() {}\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+
+    let error = register_repository(&repo.path, "fixture", Vec::new(), vec!["rust".to_owned()])
+        .expect_err("registration language filters should be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains(REGISTRATION_LANGUAGE_FILTER_ERROR)
+    );
+}
+
+#[test]
 fn diff_refs_reject_dash_prefixed_values() {
     let repo = TempGitRepo::create("dash-ref");
     repo.write("src/lib.rs", "fn value() {}\n");
