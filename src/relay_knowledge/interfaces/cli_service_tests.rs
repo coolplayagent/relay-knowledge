@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use super::*;
 use crate::{
+    application::RuntimeConfiguration,
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeFileRecord,
     },
@@ -57,7 +58,7 @@ async fn service_repo_set_refresh_loop_drains_queued_overlay_tasks() {
     assert!(queued.task.is_some());
 
     let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
-    let worker = tokio::spawn(run_code_repository_set_refresh_loop(
+    let worker = tokio::spawn(super::service_cli::run_code_repository_set_refresh_loop(
         service.clone(),
         Duration::from_millis(10),
         shutdown_receiver,

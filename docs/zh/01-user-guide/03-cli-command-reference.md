@@ -4,6 +4,8 @@
 
 本章提供可执行命令索引。工作流说明分散在后续章节；本章用于快速找到入口和诊断命令。
 
+当请求 `--format json` 或 `--format streaming-json` 时，写入 stderr 的解析诊断和运行期 API 失败都会使用 JSON。运行期 API 失败沿用稳定 API 错误结构，包含 `error_kind`、`message` 和可选 `metadata`；text 和 markdown 格式继续输出便于人工阅读的 stderr 消息。
+
 ## 3.1 常用状态命令
 
 项目状态:

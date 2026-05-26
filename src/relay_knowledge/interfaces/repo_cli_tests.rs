@@ -612,6 +612,50 @@ async fn repo_register_rejects_language_filters() {
     );
 }
 
+#[tokio::test]
+async fn repo_api_errors_render_json_stderr_when_json_format_is_requested() {
+    let service = service_with_memory_store().await;
+    let error = run_repo(
+        &service,
+        RepoCommand::Status {
+            alias: "missing".to_owned(),
+        },
+        context("missing-repo-json"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect_err("missing repository should fail");
+    let value: serde_json::Value =
+        serde_json::from_str(&error.render_stderr()).expect("stderr should be JSON");
+
+    assert_eq!(value["error_kind"], "invalid_argument");
+    assert_eq!(
+        value["message"],
+        "code repository 'missing' is not registered"
+    );
+    assert_eq!(error.exit_code(), 1);
+}
+
+#[tokio::test]
+async fn repo_api_errors_keep_text_stderr_for_text_format() {
+    let service = service_with_memory_store().await;
+    let error = run_repo(
+        &service,
+        RepoCommand::Status {
+            alias: "missing".to_owned(),
+        },
+        context("missing-repo-text"),
+        OutputFormat::Text,
+    )
+    .await
+    .expect_err("missing repository should fail");
+
+    assert_eq!(
+        error.render_stderr(),
+        "code repository 'missing' is not registered"
+    );
+}
+
 fn json_value(output: &str) -> serde_json::Value {
     serde_json::from_str(output.trim()).expect("json output should parse")
 }

@@ -72,11 +72,11 @@ pub async fn run_repo_set(
     match command {
         RepoSetCommand::Create { alias, description } => {
             let request = CodeRepositorySetCreateRequest::new(alias, description, None)
-                .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+                .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .create_code_repository_set(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.create",
@@ -101,11 +101,11 @@ pub async fn run_repo_set(
                 language_filters,
                 priority,
             )
-            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .add_code_repository_set_member(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.add",
@@ -119,11 +119,11 @@ pub async fn run_repo_set(
             repository_alias,
         } => {
             let request = CodeRepositorySetRemoveMemberRequest::new(set_alias, repository_alias)
-                .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+                .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .remove_code_repository_set_member(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.remove",
@@ -150,11 +150,11 @@ pub async fn run_repo_set(
                 path_filters,
                 language_filters,
             )
-            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_set(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.query",
@@ -167,7 +167,7 @@ pub async fn run_repo_set(
             let response = service
                 .code_repository_set_status(set_alias, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.status",
@@ -189,7 +189,7 @@ pub async fn run_repo_set(
                     .refresh_code_repository_set(set_alias, context)
                     .await
             }
-            .map_err(|error| CliError::ApiFailed(error.message))?;
+            .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo_set.refresh",
@@ -202,11 +202,11 @@ pub async fn run_repo_set(
             let completed = service
                 .run_code_repository_set_refresh_task_once(task_id, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
             Ok(match completed {
                 Some(task) => serde_json::to_string(&task)
                     .map(|json| format!("{json}\n"))
-                    .map_err(|error| CliError::ApiFailed(error.to_string()))?,
+                    .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?,
                 None => String::new(),
             })
         }
