@@ -817,6 +817,10 @@ mod identity_tests;
 mod c_tests;
 
 #[cfg(test)]
+#[path = "parser_enum_tests.rs"]
+mod enum_tests;
+
+#[cfg(test)]
 #[path = "parser_review_tests.rs"]
 mod review_tests;
 

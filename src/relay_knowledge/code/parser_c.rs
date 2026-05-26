@@ -31,7 +31,8 @@ pub(super) fn manual_definitions(
             if is_typedef_declaration(content, node) {
                 typedef_type_symbols(content, node)
             } else {
-                let mut symbols = function_declaration_symbols(content, node);
+                let mut symbols = enum_type_symbols(content, node);
+                symbols.extend(function_declaration_symbols(content, node));
                 symbols.extend(top_level_data_symbols(content, node));
                 symbols
             }
@@ -117,6 +118,23 @@ fn macro_body_argument_groups(head: &str) -> Option<Vec<MacroArgument>> {
             })
             .collect(),
     )
+}
+
+fn enum_type_symbols(
+    content: &str,
+    declaration: Node<'_>,
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    let mut cursor = declaration.walk();
+    declaration
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "enum_specifier")
+        .filter(|child| node_text(content, *child).contains('{'))
+        .filter_map(|child| {
+            let name = child.child_by_field_name("name")?;
+            let name = node_text(content, name);
+            data_symbol_name(&name).then(|| (name, "type", syntax_range(child)))
+        })
+        .collect()
 }
 
 fn typedef_type_symbols(
