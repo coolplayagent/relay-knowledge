@@ -7,7 +7,7 @@ use std::{
 };
 
 use relay_knowledge::{
-    api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
+    api::{CodeRepositoryRegisterRequest, ErrorKind, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
@@ -50,7 +50,7 @@ fn run_worker() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register"),
         )
@@ -178,6 +178,36 @@ pub fn retry_policy_v2() -> u32 {
 }
 
 #[tokio::test]
+async fn register_rejects_language_filters_to_preserve_full_language_surface() {
+    let repo = FixtureRepo::create("code-register-language-rejected");
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    let error = service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-language-rejected"),
+        )
+        .await
+        .expect_err("registration language filters should be rejected");
+
+    assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
+    assert!(
+        error
+            .message
+            .contains("registration language filters are not supported")
+    );
+    assert!(error.message.contains("query-time --language"));
+}
+
+#[tokio::test]
 async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
     let repo = FixtureRepo::create("code-incremental-base");
     repo.write("src/lib.rs", "pub fn value() -> u32 { 2 }\n");
@@ -192,7 +222,7 @@ async fn incremental_index_uses_persisted_base_scope_when_head_is_active() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-incremental-base"),
         )
@@ -282,7 +312,7 @@ async fn duplicate_root_registration_preserves_existing_aliases() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture-web".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-secondary-alias"),
         )
@@ -326,7 +356,7 @@ async fn alias_collision_across_repositories_is_rejected() {
                 root_path: first.path.display().to_string(),
                 alias: "shared".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-shared-first"),
         )
@@ -338,7 +368,7 @@ async fn alias_collision_across_repositories_is_rejected() {
                 root_path: second.path.display().to_string(),
                 alias: "shared".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-shared-second"),
         )
@@ -482,7 +512,7 @@ pub fn caller_missing() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-unresolved-callee"),
         )
@@ -536,7 +566,7 @@ async fn worktree_overlay_requires_explicit_worktree_ref_for_queries() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-overlay"),
         )
@@ -849,7 +879,7 @@ async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRe
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context(name),
         )

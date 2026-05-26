@@ -13,7 +13,7 @@
 ## 用户可见行为
 
 ```bash
-relay-knowledge repo register /path/to/repo --alias core --path src --language rust
+relay-knowledge repo register /path/to/repo --alias core --path src
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
@@ -21,7 +21,7 @@ relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 ```
 
-`repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。
+`repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
 `definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界内部 exact-text source fallback。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
 
@@ -29,7 +29,7 @@ relay-knowledge repo status core --format json
 
 ## 竞争力特性
 
-仓库索引绑定 repository id、resolved commit、tree hash、path filter 和 language filter。相同树可以复用 scope，rebase 或 force-moved head 需要新索引，dirty worktree 通过 worktree overlay 显式建模。
+仓库索引绑定 repository id、resolved commit、tree hash 和 path filter。查询期 language filter 会在完整语言 scope 上继续收窄。相同树可以复用 scope，rebase 或 force-moved head 需要新索引，dirty worktree 通过 worktree overlay 显式建模。
 
 代码源码布局识别不再局限于顶层 `src/` 目录。索引器和 import 解析会识别
 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、

@@ -22,6 +22,11 @@ This page is the compact English companion for the self-iteration optimization l
 - Invariants and limits: plain `vendor/` and `third_party/` remain excluded by the source preset and require explicit path-filter opt-in. TypeScript bare specifiers resolve only when a local indexed module candidate exists, and ambiguous local matches stay protected.
 - Guardrails: `nonstandard_layout_fixture` is included in the default fast profile and covers Python, TypeScript, Go, Java, C++, and Swift source outside a top-level `src/` directory without repository, path, query, symbol, or case-id special casing.
 
+## Issue #166: Registration Language Filters
+
+- Algorithm and architecture: repository registration rejects non-empty language filters so mixed-language repositories keep their complete indexed language surface. Query-time `--language` remains the supported narrowing mechanism.
+- Guardrails: the default fast self-iteration profile includes a generated cross-language registration case that expects `repo register --language cpp` to fail with the stable registration-language error.
+
 ## Documentation Maintenance
 
 - The primary Chinese accepted-optimization log is kept below the 1000-line hard cap by moving late detailed records to dated archive files.

@@ -479,7 +479,7 @@ async fn register_repository(
                 root_path: repo.path.display().to_string(),
                 alias: alias.to_owned(),
                 path_filters: path_filters.into_iter().map(str::to_owned).collect(),
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context(&format!("register-{alias}")),
         )

@@ -923,3 +923,4 @@
 
 ## 20260524-20260526 late detailed entries
 - archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves run details for `run-1779620755` through `run-1779722194`, including SBOM dependency inventory, internal source fallback, query-aware candidate recovery, release glibc policy, and code-index lease recovery records.
+- 2026-05-26 registration language guardrail: application and lower code registration now reject non-empty language filters so mixed C/C++ repositories cannot silently drop `.c` or `.cpp` files at registration; query-time `--language` remains the supported narrowing mechanism. Fast self-iteration adds a cross-language generated fixture guardrail that expects `repo register --language cpp` to fail with the stable registration-language error.

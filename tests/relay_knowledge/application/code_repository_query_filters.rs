@@ -136,7 +136,7 @@ pub fn test_retry_policy() -> u32 {
 }
 
 #[tokio::test]
-async fn language_scoped_index_includes_dependency_manifests() {
+async fn query_language_filter_includes_dependency_manifests() {
     let repo = FixtureRepo::create("code-query-language-sbom");
     repo.write("src/lib.rs", "pub fn uses_serde() {}\n");
     repo.write("Cargo.toml", "[dependencies]\nserde = \"1\"\n");
@@ -150,7 +150,7 @@ async fn language_scoped_index_includes_dependency_manifests() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: Vec::new(),
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-language-sbom"),
         )
@@ -189,7 +189,7 @@ async fn language_scoped_index_includes_dependency_manifests() {
 }
 
 #[tokio::test]
-async fn language_scoped_index_preserves_shared_dependency_manifest_languages() {
+async fn query_language_filters_preserve_shared_dependency_manifest_languages() {
     assert_language_scoped_sbom(LanguageScopedSbomFixture {
         repo_name: "code-query-typescript-sbom",
         alias: "fixture-ts",
@@ -226,7 +226,7 @@ async fn language_scoped_index_preserves_shared_dependency_manifest_languages() 
 }
 
 #[tokio::test]
-async fn restricted_index_rejects_query_filters_outside_indexed_scope() {
+async fn restricted_path_index_rejects_query_paths_outside_indexed_scope() {
     let repo = FixtureRepo::create("code-query-filter-restricted");
     repo.write(
         "src/lib.rs",
@@ -254,7 +254,7 @@ pub fn test_retry_policy() -> u32 {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-restricted"),
         )
@@ -312,27 +312,6 @@ pub fn test_retry_policy() -> u32 {
         )
         .await
         .expect_err("path outside indexed scope should be rejected");
-    let language_error = service
-        .query_code_repository(
-            CodeRetrievalRequest::new(
-                "retry_policy",
-                CodeRepositorySelector::new(
-                    "fixture",
-                    "HEAD",
-                    Vec::new(),
-                    vec!["python".to_owned()],
-                )
-                .expect("selector should validate"),
-                CodeQueryKind::Definition,
-                10,
-                FreshnessPolicy::AllowStale,
-            )
-            .expect("query request should validate"),
-            context("query-restricted-language"),
-        )
-        .await
-        .expect_err("language outside indexed scope should be rejected");
-
     assert!(
         narrower_response
             .results
@@ -340,7 +319,6 @@ pub fn test_retry_policy() -> u32 {
             .any(|hit| hit.path == "src/lib.rs")
     );
     assert!(path_error.message.contains("requested filters"));
-    assert!(language_error.message.contains("requested filters"));
 }
 
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
@@ -370,7 +348,7 @@ async fn assert_language_scoped_sbom(fixture: LanguageScopedSbomFixture<'_>) {
                 root_path: repo.path.display().to_string(),
                 alias: fixture.alias.to_owned(),
                 path_filters: Vec::new(),
-                language_filters: vec![fixture.language.to_owned()],
+                language_filters: Vec::new(),
             },
             context(&format!("register-{}", fixture.repo_name)),
         )

@@ -50,7 +50,7 @@ async fn reference_query_uses_internal_text_fallback_for_comment_reference() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["include".to_owned(), "src".to_owned()],
-                language_filters: vec!["c".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-source-fallback-reference"),
         )
@@ -129,7 +129,7 @@ async fn source_fallback_uses_query_candidates_before_scope_file_budget() {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: vec!["src".to_owned(), "zzz".to_owned()],
-                language_filters: vec!["c".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-source-fallback-query-candidates"),
         )
@@ -344,7 +344,7 @@ export function Panel({ value }: { value: string }) {
                 root_path: repo.path.display().to_string(),
                 alias: "fixture".to_owned(),
                 path_filters: Vec::new(),
-                language_filters: vec!["tsx".to_owned()],
+                language_filters: Vec::new(),
             },
             context("register-external-import"),
         )

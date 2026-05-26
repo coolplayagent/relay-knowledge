@@ -665,7 +665,7 @@ async fn register_and_index_fixture(
                 root_path: repo.path.display().to_string(),
                 alias: alias.to_owned(),
                 path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             RequestContext::with_ids(InterfaceKind::Cli, "req-register", "trace-register"),
         )

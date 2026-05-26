@@ -13,7 +13,7 @@ Code repository basics let users register Git repositories as first-class source
 ## User-visible Behavior
 
 ```bash
-relay-knowledge repo register /path/to/repo --alias core --path src --language rust
+relay-knowledge repo register /path/to/repo --alias core --path src
 relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
@@ -21,7 +21,7 @@ relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo status core --format json
 ```
 
-`repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy.
+`repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
 
 `definition`, `references`, and `hybrid` queries use the indexed code graph and SQLite FTS first. When those layers leave a specific recall gap, the query may run bounded internal exact-text source fallback over candidate files from the indexed commit. Fallback results are exposed through `lexical` and `text_fallback` layers and do not replace resolved reference, call, or import edges.
 
@@ -29,7 +29,7 @@ Cold full `repo index` returns a queued task handle and lets the background code
 
 ## Competitive Features
 
-Repository indexing binds repository id, resolved commit, tree hash, path filters, and language filters. Equal trees can reuse scopes, rebased or force-moved heads require new indexes, and dirty worktrees are represented through explicit worktree overlays.
+Repository indexing binds repository id, resolved commit, tree hash, and path filters. Query-time language filters narrow an indexed full-language scope. Equal trees can reuse scopes, rebased or force-moved heads require new indexes, and dirty worktrees are represented through explicit worktree overlays.
 
 Code source layout detection is not limited to a top-level `src/` directory.
 The indexer and import resolver also recognize real source under roots such as

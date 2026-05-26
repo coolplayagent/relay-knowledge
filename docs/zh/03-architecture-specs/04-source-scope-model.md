@@ -33,7 +33,7 @@ Scope 构造遵循固定流程：
 2. 规范化路径、语言、source kind 和 alias。
 3. 把 branch、tag、HEAD、PR ref 解析为 commit/tree。
 4. 拒绝可被解释为命令选项的 ref，例如以 `-` 开头的输入。
-5. 合并 path/language filter，并生成稳定 filter hash。
+5. 合并 path filter 和请求期 language filter，并生成稳定 filter hash；仓库注册不会贡献 language filter。
 6. 查找或创建 scoped index partition。
 
 查询不得把窄 filter 自动回退到宽 scope；需要新 filter 组合时必须先索引该 scope。
