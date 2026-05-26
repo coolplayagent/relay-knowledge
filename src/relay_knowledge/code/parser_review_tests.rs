@@ -56,6 +56,147 @@ fn c_family_recoverable_line_accepts_declspec_prefix_payloads() {
 }
 
 #[test]
+fn c_family_recoverable_line_accepts_external_typedef_shapes() {
+    assert!(recoverable_c_family_error_line(
+        "static ngx_int_t ngx_http_demo_init(ngx_pool_t *pool)"
+    ));
+    assert!(recoverable_c_family_error_line(
+        "ngx_module_t ngx_http_demo_module = {"
+    ));
+    assert!(!recoverable_c_family_error_line("ngx_pool_t *pool;"));
+    assert!(!recoverable_c_family_error_line("ngx_int_t broken_call("));
+    assert!(!recoverable_c_family_error_line(
+        "ngx_int_t broken_value = ;"
+    ));
+}
+
+#[test]
+fn c_external_header_macro_file_keeps_structured_facts() {
+    let snapshot = parse_source_snapshot(
+        "src/ngx_http_demo_module.c",
+        br#"
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+KONG_ACCESS_PHASE(ngx_http_demo_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+static ngx_command_t ngx_http_demo_commands[] = {
+    { ngx_string("demo"), NGX_HTTP_LOC_CONF, ngx_conf_set_str_slot, 0, 0, NULL },
+    ngx_null_command
+};
+
+static ngx_http_module_t ngx_http_demo_module_ctx = {
+    NULL,
+    ngx_http_demo_init,
+    NULL,
+    NULL
+};
+
+ngx_module_t ngx_http_demo_module = {
+    NGX_MODULE_V1,
+    &ngx_http_demo_module_ctx,
+    ngx_http_demo_commands,
+    NGX_HTTP_MODULE,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NGX_MODULE_V1_PADDING
+};
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "external typedef and macro recovery should avoid file degradation: {:?}",
+        snapshot.diagnostics
+    );
+    assert!(snapshot.files[0].degraded_reason.is_none());
+    for name in [
+        "ngx_http_demo_init",
+        "ngx_http_demo_access",
+        "ngx_http_demo_commands",
+        "ngx_http_demo_module_ctx",
+        "ngx_http_demo_module",
+    ] {
+        assert!(
+            snapshot.symbols.iter().any(|symbol| symbol.name == name),
+            "{name} should be extracted as structured code graph evidence: {:?}",
+            snapshot.symbols
+        );
+    }
+    assert!(
+        snapshot.calls.iter().any(|call| {
+            call.caller_name.as_deref() == Some("ngx_http_demo_access")
+                && call.callee_name == "ngx_http_demo_init"
+        }),
+        "macro-with-body definitions should own calls in their body: {:?}",
+        snapshot.calls
+    );
+    assert!(
+        snapshot.imports.iter().any(|import| {
+            import.module.contains("ngx_http.h") && import.resolution_state == "unresolved"
+        }),
+        "external headers should remain unresolved import metadata: {:?}",
+        snapshot.imports
+    );
+}
+
+#[test]
+fn c_macro_body_recovery_requires_definition_style_macro_name() {
+    let snapshot = parse_source_snapshot(
+        "src/generic_block_macro.c",
+        br#"
+#define BENCHMARK_CASE(name) name
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+BENCHMARK_CASE(ngx_http_demo_access)
+{
+    ngx_http_demo_init(0);
+}
+"#,
+    );
+
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "ngx_http_demo_access"),
+        "generic block macros should not become function definitions: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot.calls.iter().any(|call| {
+            call.caller_name.as_deref() == Some("ngx_http_demo_access")
+                && call.callee_name == "ngx_http_demo_init"
+        }),
+        "generic block macros should not own call graph edges: {:?}",
+        snapshot.calls
+    );
+}
+
+#[test]
 fn cpp_manual_recovery_keeps_elaborated_return_type_functions() {
     let snapshot = parse_source_snapshot(
         "src/factory.cpp",

@@ -525,6 +525,9 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
     if c_family_decorated_type_line(trimmed) {
         return true;
     }
+    if c_family_typedef_like_error_line(trimmed) {
+        return true;
+    }
 
     let Some(token) = trimmed
         .split(|character: char| !c_identifier_char(character))
@@ -533,6 +536,72 @@ fn recoverable_c_family_error_line(line: &str) -> bool {
         return false;
     };
     c_family_macro_name(token) && trimmed.contains('(')
+}
+
+fn c_family_typedef_like_error_line(trimmed: &str) -> bool {
+    if trimmed.contains("=;") || trimmed.contains("= ;") {
+        return false;
+    }
+
+    c_family_typedef_like_function_signature(trimmed)
+        || c_family_typedef_like_initializer_declaration(trimmed)
+}
+
+fn c_family_typedef_like_function_signature(trimmed: &str) -> bool {
+    if trimmed.contains('=') || !line_has_balanced_delimiters(trimmed) {
+        return false;
+    }
+    let Some((head, _parameters)) = trimmed.split_once('(') else {
+        return false;
+    };
+
+    c_family_typedef_declaration_head(head).is_some()
+}
+
+fn c_family_typedef_like_initializer_declaration(trimmed: &str) -> bool {
+    let Some((head, initializer)) = trimmed.split_once('=') else {
+        return false;
+    };
+    let initializer = initializer.trim_start();
+    if !initializer.starts_with('{') {
+        return false;
+    }
+
+    c_family_typedef_declaration_head(head).is_some()
+}
+
+fn c_family_typedef_declaration_head(head: &str) -> Option<(&str, &str)> {
+    let tokens = head
+        .split(|character: char| !c_identifier_char(character))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let name = tokens
+        .last()
+        .copied()
+        .filter(|token| c_identifier_name(token))?;
+    if c_family_typedef_like_type_token(name) {
+        return None;
+    }
+    let type_token = tokens
+        .iter()
+        .rev()
+        .skip(1)
+        .copied()
+        .find(|token| !c_declaration_qualifier_token(token))
+        .filter(|token| c_family_typedef_like_type_token(token))?;
+
+    Some((type_token, name))
+}
+
+fn c_family_typedef_like_type_token(token: &str) -> bool {
+    token.ends_with("_t") && c_identifier_name(token)
+}
+
+fn c_declaration_qualifier_token(token: &str) -> bool {
+    matches!(
+        token,
+        "const" | "extern" | "inline" | "register" | "restrict" | "static" | "volatile"
+    )
 }
 
 fn c_family_decorated_type_line(trimmed: &str) -> bool {
@@ -600,6 +669,14 @@ fn c_family_macro_name(token: &str) -> bool {
 
 fn c_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn c_identifier_name(token: &str) -> bool {
+    let mut characters = token.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(c_identifier_char)
 }
 
 fn record_dependencies(

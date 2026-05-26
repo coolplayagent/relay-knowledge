@@ -906,6 +906,7 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("src/dispatch.c", C_DISPATCH_C),
             ("src/generated_table.c", C_GENERATED_TABLE_C),
             ("src/http_macro_module.c", C_HTTP_MACRO_MODULE_C),
+            ("src/nginx_external_module.c", C_NGINX_EXTERNAL_MODULE_C),
             ("tests/fake_driver.c", C_FAKE_DRIVER_C),
         ]),
         "cpp_syntax_v1" => Ok(vec![
@@ -1308,6 +1309,51 @@ RK_HTTP_HANDLER(rk_http_access_handler)
 
 static const struct rk_http_module_entry rk_http_modules[] = {
     RK_HTTP_MODULE_ENTRY(rk_http_access_handler),
+};
+"#;
+
+const C_NGINX_EXTERNAL_MODULE_C: &str = r#"#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+KONG_ACCESS_PHASE(ngx_http_demo_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+static ngx_command_t ngx_http_demo_commands[] = {
+    { ngx_string("demo"), NGX_HTTP_LOC_CONF, ngx_conf_set_str_slot, 0, 0, NULL },
+    ngx_null_command
+};
+
+static ngx_http_module_t ngx_http_demo_module_ctx = {
+    NULL,
+    ngx_http_demo_init,
+    NULL,
+    NULL
+};
+
+ngx_module_t ngx_http_demo_module = {
+    NGX_MODULE_V1,
+    &ngx_http_demo_module_ctx,
+    ngx_http_demo_commands,
+    NGX_HTTP_MODULE,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NGX_MODULE_V1_PADDING
 };
 "#;
 

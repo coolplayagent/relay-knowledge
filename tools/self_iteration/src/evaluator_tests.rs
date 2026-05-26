@@ -436,6 +436,18 @@ mod tests {
                 }],
                 "degraded_reason": false
             }),
+            serde_json::json!({
+                "id": "c_syntax_definition_nginx_external_macro_handler",
+                "repository": "c_syntax_fixture",
+                "kind": "definition",
+                "query": "ngx_http_demo_access",
+                "guardrail": true,
+                "expected": [{
+                    "path": "src/nginx_external_module.c",
+                    "retrieval_layer": "definition"
+                }],
+                "degraded_reason": null
+            }),
         ];
 
         let selected = select_repository_cases_for_profile("fast", None, cases);
@@ -458,6 +470,10 @@ mod tests {
                     .get("degraded_reason")
                     .and_then(Value::as_bool)
                     == Some(false)
+        }));
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "") == "c_syntax_definition_nginx_external_macro_handler"
+                && case.get("degraded_reason").is_some_and(Value::is_null)
         }));
     }
 
@@ -525,6 +541,8 @@ mod tests {
             std::fs::read_to_string(root.join("c/src/driver_ops.c")).expect("c source");
         let c_macro_source =
             std::fs::read_to_string(root.join("c/src/http_macro_module.c")).expect("c macro source");
+        let c_nginx_source = std::fs::read_to_string(root.join("c/src/nginx_external_module.c"))
+            .expect("c nginx external source");
         let cpp_exported_source =
             std::fs::read_to_string(root.join("cpp/include/store/exported_module.hpp"))
                 .expect("cpp exported source");
@@ -560,6 +578,9 @@ mod tests {
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(c_macro_source.contains("RK_HTTP_HANDLER(rk_http_access_handler)"));
         assert!(c_macro_source.contains("#include <openssl/ssl.h>"));
+        assert!(c_nginx_source.contains("#include <ngx_http.h>"));
+        assert!(c_nginx_source.contains("KONG_ACCESS_PHASE(ngx_http_demo_access)"));
+        assert!(c_nginx_source.contains("ngx_module_t ngx_http_demo_module"));
         assert!(cpp_exported_source.contains("RK_STORE_API class HttpModule final"));
         assert!(cpp_exported_source.contains("#include <boost/asio.hpp>"));
         assert!(cpp_source.contains("auto append_event = [&cache, &pipeline]"));

@@ -27,6 +27,12 @@ This page is the compact English companion for the self-iteration optimization l
 - Algorithm and architecture: repository registration rejects non-empty language filters so mixed-language repositories keep their complete indexed language surface. Query-time `--language` remains the supported narrowing mechanism.
 - Guardrails: the default fast self-iteration profile includes a generated cross-language registration case that expects `repo register --language cpp` to fail with the stable registration-language error.
 
+## Issue #167: C External Header Macro Recovery
+
+- Algorithm and architecture: C parser recovery now treats isolated typedef-style external-header declarations, module tables, and uppercase macro calls with declaration bodies as recoverable when structured symbols, references, imports, or calls are still extracted. Macro-generated C function symbols expand to the following compound body so call ownership remains available.
+- Invariants and limits: missing Nginx/Kong-style headers stay unresolved import metadata with `target_hint`; they are not file degradation. Broken assignments, preprocessor-branch syntax errors, registration macros, and non-body data macros still surface diagnostics or stay out of the call graph.
+- Guardrails: the default fast `c_syntax_fixture` includes unresolved `ngx_*` headers, a `KONG_ACCESS_PHASE` handler, typedef-style module tables, symbol/definition/callee/import cases, and no repository/path/query special casing.
+
 ## Documentation Maintenance
 
 - The primary Chinese accepted-optimization log is kept below the 1000-line hard cap by moving late detailed records to dated archive files.
