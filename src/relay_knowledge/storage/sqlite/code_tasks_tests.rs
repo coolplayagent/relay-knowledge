@@ -144,6 +144,247 @@ async fn code_index_task_queue_claim_complete_and_checkpoint_round_trip() {
 }
 
 #[tokio::test]
+async fn code_index_sqlite_lock_cases_running_repository_blocks_second_task_claim() {
+    let store = registered_store().await;
+    let first = store
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-first", "scope-first", 10)))
+        .await
+        .expect("first task should queue");
+    let second = store
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-second", "scope-second", 11)))
+        .await
+        .expect("second task should queue");
+    let running = store
+        .run({
+            let task_id = first.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-a".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 20,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("first claim should query")
+        .expect("first task should claim");
+
+    assert_eq!(running.task_id, first.task_id);
+    assert_eq!(running.state, CodeIndexTaskState::Running);
+
+    let explicit_second = store
+        .run({
+            let task_id = second.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-b".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 30,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("blocked explicit claim should query");
+    let implicit_second = store
+        .run(|connection| {
+            code_tasks::claim_task(
+                connection,
+                CodeIndexTaskClaimRequest {
+                    task_id: None,
+                    lease_owner: "worker-c".to_owned(),
+                    lease_duration_ms: 100,
+                    max_attempts: 3,
+                    now_ms: 30,
+                },
+            )
+        })
+        .await
+        .expect("blocked implicit claim should query");
+
+    assert!(explicit_second.is_none());
+    assert!(implicit_second.is_none());
+
+    store
+        .run({
+            let task_id = first.task_id;
+            move |connection| {
+                code_tasks::complete_task(
+                    connection,
+                    CodeIndexTaskCompletion {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        now_ms: 40,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("first task should complete");
+    let next = store
+        .run(|connection| {
+            code_tasks::claim_task(
+                connection,
+                CodeIndexTaskClaimRequest {
+                    task_id: None,
+                    lease_owner: "worker-d".to_owned(),
+                    lease_duration_ms: 100,
+                    max_attempts: 3,
+                    now_ms: 50,
+                },
+            )
+        })
+        .await
+        .expect("second claim should query")
+        .expect("second task should claim after first completes");
+
+    assert_eq!(next.task_id, second.task_id);
+}
+
+#[tokio::test]
+async fn code_index_sqlite_lock_cases_task_transitions_return_updated_rows() {
+    let store = registered_store().await;
+    let queued = store
+        .run(|connection| {
+            code_tasks::queue_task(
+                connection,
+                seed("fp-transition-complete", "scope-complete", 10),
+            )
+        })
+        .await
+        .expect("task should queue");
+    let running = store
+        .run({
+            let task_id = queued.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-a".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 20,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("claim should query")
+        .expect("task should claim");
+
+    let renewed = store
+        .run({
+            let task_id = running.task_id.clone();
+            move |connection| {
+                code_tasks::renew_task_lease(
+                    connection,
+                    CodeIndexTaskLeaseRenewal {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        lease_duration_ms: 200,
+                        now_ms: 30,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("renewed task should be returned");
+    assert_eq!(renewed.state, CodeIndexTaskState::Running);
+    assert_eq!(renewed.lease_owner.as_deref(), Some("worker-a"));
+    assert_eq!(renewed.lease_expires_at_ms, Some(230));
+
+    let completed = store
+        .run({
+            let task_id = running.task_id.clone();
+            move |connection| {
+                code_tasks::complete_task(
+                    connection,
+                    CodeIndexTaskCompletion {
+                        task_id,
+                        lease_owner: "worker-a".to_owned(),
+                        attempt_count: 1,
+                        now_ms: 40,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("completed task should be returned");
+    assert_eq!(completed.state, CodeIndexTaskState::Succeeded);
+    assert!(completed.lease_owner.is_none());
+    assert!(completed.lease_expires_at_ms.is_none());
+    assert_eq!(completed.updated_at_ms, 40);
+
+    let queued_failure = store
+        .run(|connection| {
+            code_tasks::queue_task(connection, seed("fp-transition-fail", "scope-fail", 50))
+        })
+        .await
+        .expect("failure task should queue");
+    let running_failure = store
+        .run({
+            let task_id = queued_failure.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-b".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 60,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("failure task claim should query")
+        .expect("failure task should claim");
+
+    let failed = store
+        .run({
+            let task_id = running_failure.task_id.clone();
+            move |connection| {
+                code_tasks::fail_task(
+                    connection,
+                    CodeIndexTaskFailure {
+                        task_id,
+                        lease_owner: "worker-b".to_owned(),
+                        attempt_count: 1,
+                        error_kind: "code_index".to_owned(),
+                        error_message: "retryable failure".to_owned(),
+                        retry_backoff_ms: 25,
+                        max_attempts: 3,
+                        now_ms: 70,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("failed task should be returned");
+    assert_eq!(failed.state, CodeIndexTaskState::Retrying);
+    assert!(failed.lease_owner.is_none());
+    assert!(failed.lease_expires_at_ms.is_none());
+    assert_eq!(failed.next_retry_at_ms, 95);
+    assert_eq!(
+        failed.last_error_message.as_deref(),
+        Some("retryable failure")
+    );
+}
+
+#[tokio::test]
 async fn code_index_task_retry_dead_letter_and_invalid_rows_are_explicit() {
     let store = registered_store().await;
     let queued = store

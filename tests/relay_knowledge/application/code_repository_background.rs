@@ -240,6 +240,103 @@ async fn repository_status_recovers_expired_code_index_task_lease() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
+    let repo = FixtureRepo::create("code-shared-store-running-index");
+    repo.write("src/lib.rs", "pub fn shared_store_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let database_path = unique_database_path("code-shared-store-running-index");
+    let store_a = Arc::new(SqliteGraphStore::open(&database_path).expect("store a should open"));
+    let store_b = Arc::new(SqliteGraphStore::open(&database_path).expect("store b should open"));
+    let service_a = service_with_store(store_a.clone()).await;
+    let service_b = service_with_store(store_b.clone()).await;
+    register_fixture_repo(&service_a, &repo, "register-shared-store-running").await;
+
+    let started = service_a
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-shared-store-running"),
+        )
+        .await
+        .expect("cold index should queue");
+    let task = started.task.expect("cold index should return task");
+    let running = store_a
+        .claim_code_index_task(CodeIndexTaskClaimRequest {
+            task_id: Some(task.task_id.clone()),
+            lease_owner: "worker-a".to_owned(),
+            lease_duration_ms: 60_000,
+            max_attempts: 3,
+            now_ms: task.next_retry_at_ms,
+        })
+        .await
+        .expect("task claim should query")
+        .expect("task should claim");
+
+    let duplicate = service_b
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-shared-store-duplicate"),
+        )
+        .await
+        .expect("duplicate start should reuse running task");
+    let duplicate_task = duplicate.task.expect("duplicate should return task");
+    assert_eq!(duplicate_task.task_id, running.task_id);
+    assert_eq!(duplicate_task.state, CodeIndexTaskState::Running);
+    assert_eq!(duplicate_task.lease_owner.as_deref(), Some("worker-a"));
+
+    repo.write(
+        "src/lib.rs",
+        "pub fn shared_store_policy_v2() -> u32 { 2 }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update"]);
+    let moved = service_b
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-shared-store-moved-head"),
+        )
+        .await
+        .expect("moved head should queue a later task");
+    let moved_task = moved.task.expect("moved head should return task");
+    assert_ne!(moved_task.task_id, running.task_id);
+    let worker_attempt = service_b
+        .run_code_index_task_once(
+            Some(moved_task.task_id.clone()),
+            context("run-shared-store-moved-head"),
+        )
+        .await
+        .expect("second worker should see busy repository");
+    assert!(worker_attempt.is_none());
+
+    let status = service_b
+        .code_repository_status(
+            selector("fixture", "HEAD"),
+            context("status-shared-store-running"),
+        )
+        .await
+        .expect("status should load active running task");
+    assert_eq!(
+        status
+            .active_task
+            .as_ref()
+            .map(|task| task.task_id.as_str()),
+        Some(running.task_id.as_str())
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_index_health_isolation_cases_health_and_query_respond_during_full_index() {
     let repo = FixtureRepo::create("code-health-isolation");
     repo.write("src/lib.rs", "pub fn stable_policy() -> u32 { 1 }\n");

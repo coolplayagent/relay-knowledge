@@ -15,9 +15,24 @@ use crate::{
 
 use super::{code_cleanup::delete_scope_index, code_status::parse_json_list};
 
+const TASK_RECORD_COLUMNS: &str = "
+    task_id, repository_id, alias, ref_selector, resolved_commit_sha, tree_hash,
+    source_scope, path_filters_json, language_filters_json, mode_json, state,
+    lease_owner, lease_expires_at_ms, attempt_count, next_retry_at_ms,
+    input_fingerprint, resource_budget_json, payload_json, last_error_kind,
+    last_error_message, created_at_ms, updated_at_ms
+";
+
 pub(super) fn queue_task(
     connection: &mut Connection,
     task: CodeIndexTaskSeed,
+) -> Result<CodeIndexTaskRecord, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| queue_task_once(connection, &task))
+}
+
+fn queue_task_once(
+    connection: &mut Connection,
+    task: &CodeIndexTaskSeed,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
     if let Some(existing) =
         task_by_fingerprint(connection, &task.repository_id, &task.input_fingerprint)?
@@ -61,20 +76,20 @@ pub(super) fn queue_task(
             updated_at_ms = excluded.updated_at_ms
         ",
         params![
-            task_id,
-            task.repository_id,
-            task.alias,
-            task.ref_selector,
-            task.resolved_commit_sha,
-            task.tree_hash,
-            task.source_scope,
+            &task_id,
+            &task.repository_id,
+            &task.alias,
+            &task.ref_selector,
+            &task.resolved_commit_sha,
+            &task.tree_hash,
+            &task.source_scope,
             json(&task.path_filters)?,
             json(&task.language_filters)?,
             json(&task.mode)?,
             task.now_ms,
-            task.input_fingerprint,
+            &task.input_fingerprint,
             json(&task.resource_budget)?,
-            task.payload_json,
+            &task.payload_json,
         ],
     )?;
 
@@ -86,6 +101,13 @@ pub(super) fn claim_task(
     connection: &mut Connection,
     request: CodeIndexTaskClaimRequest,
 ) -> Result<Option<CodeIndexTaskRecord>, StorageError> {
+    super::super::retry::retry_sqlite_transient(|| claim_task_once(connection, &request))
+}
+
+fn claim_task_once(
+    connection: &mut Connection,
+    request: &CodeIndexTaskClaimRequest,
+) -> Result<Option<CodeIndexTaskRecord>, StorageError> {
     let lease_owner = validate_claim_request(
         &request.lease_owner,
         request.lease_duration_ms,
@@ -93,16 +115,23 @@ pub(super) fn claim_task(
     )?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     recover_expired_leases(&transaction, request.now_ms, request.max_attempts)?;
-    let task_id = if let Some(task_id) = request.task_id {
+    let task_id = if let Some(task_id) = request.task_id.as_deref() {
         transaction
             .query_row(
                 "
-                SELECT task_id
-                FROM code_repository_index_tasks
-                WHERE task_id = ?1
-                  AND next_retry_at_ms <= ?2
-                  AND attempt_count < ?3
-                  AND state IN ('queued', 'retrying')
+                SELECT candidate.task_id
+                FROM code_repository_index_tasks candidate
+                WHERE candidate.task_id = ?1
+                  AND candidate.next_retry_at_ms <= ?2
+                  AND candidate.attempt_count < ?3
+                  AND candidate.state IN ('queued', 'retrying')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM code_repository_index_tasks running
+                    WHERE running.repository_id = candidate.repository_id
+                      AND running.state = 'running'
+                      AND running.lease_expires_at_ms > ?2
+                  )
                 ",
                 params![task_id, request.now_ms, request.max_attempts],
                 |row| row.get::<_, String>(0),
@@ -112,12 +141,19 @@ pub(super) fn claim_task(
         transaction
             .query_row(
                 "
-                SELECT task_id
-                FROM code_repository_index_tasks
-                WHERE next_retry_at_ms <= ?1
-                  AND attempt_count < ?2
-                  AND state IN ('queued', 'retrying')
-                ORDER BY created_at_ms ASC, task_id ASC
+                SELECT candidate.task_id
+                FROM code_repository_index_tasks candidate
+                WHERE candidate.next_retry_at_ms <= ?1
+                  AND candidate.attempt_count < ?2
+                  AND candidate.state IN ('queued', 'retrying')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM code_repository_index_tasks running
+                    WHERE running.repository_id = candidate.repository_id
+                      AND running.state = 'running'
+                      AND running.lease_expires_at_ms > ?1
+                  )
+                ORDER BY candidate.created_at_ms ASC, candidate.task_id ASC
                 LIMIT 1
                 ",
                 params![request.now_ms, request.max_attempts],
@@ -175,7 +211,7 @@ pub(super) fn renew_task_lease(
             "code index task lease duration must be greater than zero".to_owned(),
         ));
     }
-    let changed = connection.execute(
+    let sql = task_update_returning_sql(
         "
         UPDATE code_repository_index_tasks
         SET lease_expires_at_ms = ?4,
@@ -186,20 +222,25 @@ pub(super) fn renew_task_lease(
           AND attempt_count = ?3
           AND lease_expires_at_ms > ?5
         ",
-        params![
-            request.task_id,
-            lease_owner,
-            request.attempt_count,
-            request.now_ms.saturating_add(request.lease_duration_ms),
-            request.now_ms,
-        ],
-    )?;
-    if changed == 0 {
-        return Err(inactive_lease_error(&request.task_id));
-    }
+    );
+    let renewed = super::super::retry::retry_sqlite_transient(|| {
+        connection
+            .query_row(
+                &sql,
+                params![
+                    &request.task_id,
+                    lease_owner,
+                    request.attempt_count,
+                    request.now_ms.saturating_add(request.lease_duration_ms),
+                    request.now_ms,
+                ],
+                task_from_row,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    })?;
 
-    task_by_id(connection, &request.task_id)?
-        .ok_or_else(|| StorageError::InvalidInput("renewed code index task is missing".to_owned()))
+    renewed.ok_or_else(|| inactive_lease_error(&request.task_id))
 }
 
 pub(super) fn complete_task(
@@ -207,7 +248,7 @@ pub(super) fn complete_task(
     request: CodeIndexTaskCompletion,
 ) -> Result<CodeIndexTaskRecord, StorageError> {
     let lease_owner = validate_lease_owner(&request.lease_owner)?;
-    let changed = connection.execute(
+    let sql = task_update_returning_sql(
         "
         UPDATE code_repository_index_tasks
         SET state = 'succeeded',
@@ -222,20 +263,24 @@ pub(super) fn complete_task(
           AND attempt_count = ?3
           AND lease_expires_at_ms > ?4
         ",
-        params![
-            request.task_id,
-            lease_owner,
-            request.attempt_count,
-            request.now_ms,
-        ],
-    )?;
-    if changed == 0 {
-        return Err(inactive_lease_error(&request.task_id));
-    }
+    );
+    let completed = super::super::retry::retry_sqlite_transient(|| {
+        connection
+            .query_row(
+                &sql,
+                params![
+                    &request.task_id,
+                    lease_owner,
+                    request.attempt_count,
+                    request.now_ms,
+                ],
+                task_from_row,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    })?;
 
-    task_by_id(connection, &request.task_id)?.ok_or_else(|| {
-        StorageError::InvalidInput("completed code index task is missing".to_owned())
-    })
+    completed.ok_or_else(|| inactive_lease_error(&request.task_id))
 }
 
 pub(super) fn fail_task(
@@ -253,7 +298,7 @@ pub(super) fn fail_task(
     } else {
         CodeIndexTaskState::Retrying
     };
-    let changed = connection.execute(
+    let sql = task_update_returning_sql(
         "
         UPDATE code_repository_index_tasks
         SET state = ?4,
@@ -269,23 +314,28 @@ pub(super) fn fail_task(
           AND attempt_count = ?3
           AND lease_expires_at_ms > ?8
         ",
-        params![
-            request.task_id,
-            lease_owner,
-            request.attempt_count,
-            next_state.as_str(),
-            request.now_ms.saturating_add(request.retry_backoff_ms),
-            request.error_kind,
-            request.error_message,
-            request.now_ms,
-        ],
-    )?;
-    if changed == 0 {
-        return Err(inactive_lease_error(&request.task_id));
-    }
+    );
+    let failed = super::super::retry::retry_sqlite_transient(|| {
+        connection
+            .query_row(
+                &sql,
+                params![
+                    &request.task_id,
+                    lease_owner,
+                    request.attempt_count,
+                    next_state.as_str(),
+                    request.now_ms.saturating_add(request.retry_backoff_ms),
+                    &request.error_kind,
+                    &request.error_message,
+                    request.now_ms,
+                ],
+                task_from_row,
+            )
+            .optional()
+            .map_err(StorageError::from)
+    })?;
 
-    task_by_id(connection, &request.task_id)?
-        .ok_or_else(|| StorageError::InvalidInput("failed code index task is missing".to_owned()))
+    failed.ok_or_else(|| inactive_lease_error(&request.task_id))
 }
 
 pub(super) fn task_by_id(
@@ -335,6 +385,16 @@ pub(super) fn checkpoint(
 }
 
 pub(super) fn recover_expired_task_leases(
+    connection: &mut Connection,
+    now_ms: u64,
+    max_attempts: u32,
+) -> Result<(), StorageError> {
+    super::super::retry::retry_sqlite_transient(|| {
+        recover_expired_task_leases_once(connection, now_ms, max_attempts)
+    })
+}
+
+fn recover_expired_task_leases_once(
     connection: &mut Connection,
     now_ms: u64,
     max_attempts: u32,
@@ -586,15 +646,15 @@ fn repository_set_member_scopes(
 fn task_select_sql(where_clause: &str) -> String {
     format!(
         "
-        SELECT task_id, repository_id, alias, ref_selector, resolved_commit_sha, tree_hash,
-               source_scope, path_filters_json, language_filters_json, mode_json, state,
-               lease_owner, lease_expires_at_ms, attempt_count, next_retry_at_ms,
-               input_fingerprint, resource_budget_json, payload_json, last_error_kind,
-               last_error_message, created_at_ms, updated_at_ms
+        SELECT {TASK_RECORD_COLUMNS}
         FROM code_repository_index_tasks
         {where_clause}
         "
     )
+}
+
+fn task_update_returning_sql(update_sql: &str) -> String {
+    format!("{update_sql} RETURNING {TASK_RECORD_COLUMNS}")
 }
 
 fn task_from_row(row: &Row<'_>) -> rusqlite::Result<CodeIndexTaskRecord> {
