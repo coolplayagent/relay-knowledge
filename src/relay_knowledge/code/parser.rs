@@ -553,11 +553,49 @@ fn c_family_typedef_like_function_signature(trimmed: &str) -> bool {
     if trimmed.contains('=') || !line_has_balanced_delimiters(trimmed) {
         return false;
     }
-    let Some((head, _parameters)) = trimmed.split_once('(') else {
+    let Some(parameter_start) = trimmed.find('(') else {
         return false;
     };
+    let head = &trimmed[..parameter_start];
+    let Some(parameter_end) = c_family_closing_parenthesis_index(&trimmed[parameter_start..])
+    else {
+        return false;
+    };
+    let tail = trimmed[parameter_start + parameter_end + 1..].trim();
+    if !c_family_typedef_signature_tail_is_declaration_shaped(tail) {
+        return false;
+    }
 
     c_family_typedef_declaration_head(head).is_some()
+}
+
+fn c_family_typedef_signature_tail_is_declaration_shaped(tail: &str) -> bool {
+    tail.is_empty()
+        || matches!(tail, ";" | "{")
+        || tail.starts_with("__attribute__")
+        || tail.starts_with("__attribute")
+        || tail.starts_with("__declspec")
+}
+
+fn c_family_closing_parenthesis_index(text: &str) -> Option<usize> {
+    if !text.starts_with('(') {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, character) in text.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn c_family_typedef_like_initializer_declaration(trimmed: &str) -> bool {

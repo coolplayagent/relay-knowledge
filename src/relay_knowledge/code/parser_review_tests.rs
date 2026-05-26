@@ -69,6 +69,9 @@ fn c_family_recoverable_line_accepts_external_typedef_shapes() {
     ));
     assert!(!recoverable_c_family_error_line("ngx_int_t broken_call("));
     assert!(!recoverable_c_family_error_line(
+        "ngx_int_t handler(req) + expr"
+    ));
+    assert!(!recoverable_c_family_error_line(
         "ngx_int_t broken_value = ;"
     ));
 }
@@ -345,6 +348,39 @@ CONDITIONAL_PHASE(ngx_http_inactive_ifdef)
             snapshot.calls
         );
     }
+}
+
+#[test]
+fn c_macro_body_recovery_falls_back_after_unavailable_macro_history() {
+    let snapshot = parse_source_snapshot(
+        "src/uppercase_function_after_undef.c",
+        br#"
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#undef KONG_ACCESS_PHASE
+
+KONG_ACCESS_PHASE(request)
+{
+    return request != 0;
+}
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "KONG_ACCESS_PHASE"),
+        "unavailable macro history should still allow real declarator fallback: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "request"),
+        "fallback should not turn the K&R parameter into a function symbol: {:?}",
+        snapshot.symbols
+    );
 }
 
 #[test]

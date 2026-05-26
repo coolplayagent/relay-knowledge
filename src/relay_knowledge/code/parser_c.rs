@@ -92,6 +92,7 @@ fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFun
             node.start_byte(),
         ) {
             LocalMacroFunctionName::Recovered(name) => name,
+            LocalMacroFunctionName::FallbackDeclarator(name) => name,
             LocalMacroFunctionName::Rejected => return MacroBodyFunctionDefinition::Rejected,
             LocalMacroFunctionName::NotMacro => return MacroBodyFunctionDefinition::NotMacroBody,
         }
@@ -300,6 +301,7 @@ fn macro_generated_function_definition(
             call.start_byte(),
         ) {
             LocalMacroFunctionName::Recovered(name) => Some(name),
+            LocalMacroFunctionName::FallbackDeclarator(name) => Some(name),
             LocalMacroFunctionName::Rejected | LocalMacroFunctionName::NotMacro => None,
         }
     } else {
@@ -387,7 +389,10 @@ fn local_macro_generated_function_name(
 ) -> LocalMacroFunctionName {
     let definition = match local_function_macro_definition(content, macro_name, limit_byte) {
         LocalFunctionMacroDefinition::Function(definition) => definition,
-        LocalFunctionMacroDefinition::KnownUnavailable => return LocalMacroFunctionName::Rejected,
+        LocalFunctionMacroDefinition::ActiveNonFunction => return LocalMacroFunctionName::Rejected,
+        LocalFunctionMacroDefinition::Unavailable => {
+            return LocalMacroFunctionName::FallbackDeclarator(macro_name.to_owned());
+        }
         LocalFunctionMacroDefinition::Missing => return LocalMacroFunctionName::NotMacro,
     };
     let argument_index = macro_definition_function_name_parameter_index(
@@ -409,6 +414,7 @@ fn local_macro_generated_function_name(
 
 enum LocalMacroFunctionName {
     Recovered(String),
+    FallbackDeclarator(String),
     Rejected,
     NotMacro,
 }

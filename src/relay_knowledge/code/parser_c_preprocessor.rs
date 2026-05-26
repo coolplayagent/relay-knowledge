@@ -7,7 +7,8 @@ pub(super) struct MacroFunctionDefinition {
 
 pub(super) enum LocalFunctionMacroDefinition {
     Function(MacroFunctionDefinition),
-    KnownUnavailable,
+    ActiveNonFunction,
+    Unavailable,
     Missing,
 }
 
@@ -20,7 +21,8 @@ pub(super) fn local_function_macro_definition(
     let mut active_macros = HashSet::new();
     let mut branches = Vec::new();
     let mut latest = None;
-    let mut seen_matching_macro = false;
+    let mut active_non_function = false;
+    let mut seen_unavailable_macro = false;
     let mut logical_line = String::new();
     for line in content[..search_end].lines() {
         if !logical_line.is_empty() {
@@ -31,7 +33,7 @@ pub(super) fn local_function_macro_definition(
                     macro_name,
                     &mut active_macros,
                     &mut latest,
-                    &mut seen_matching_macro,
+                    &mut active_non_function,
                 );
                 logical_line.clear();
             }
@@ -45,7 +47,7 @@ pub(super) fn local_function_macro_definition(
             continue;
         }
         if !preprocessor_branches_active(&branches) {
-            seen_matching_macro |= directive.keyword == "define"
+            seen_unavailable_macro |= directive.keyword == "define"
                 && directive_identifier(directive.rest).is_some_and(|name| name == macro_name);
             continue;
         }
@@ -58,7 +60,7 @@ pub(super) fn local_function_macro_definition(
                         macro_name,
                         &mut active_macros,
                         &mut latest,
-                        &mut seen_matching_macro,
+                        &mut active_non_function,
                     );
                     logical_line.clear();
                 }
@@ -67,7 +69,8 @@ pub(super) fn local_function_macro_definition(
                 if let Some(name) = directive_identifier(directive.rest) {
                     active_macros.remove(name);
                     if name == macro_name {
-                        seen_matching_macro = true;
+                        seen_unavailable_macro = true;
+                        active_non_function = false;
                         latest = None;
                     }
                 }
@@ -81,14 +84,15 @@ pub(super) fn local_function_macro_definition(
             macro_name,
             &mut active_macros,
             &mut latest,
-            &mut seen_matching_macro,
+            &mut active_non_function,
         );
     }
 
-    match (latest, seen_matching_macro) {
-        (Some(definition), _) => LocalFunctionMacroDefinition::Function(definition),
-        (None, true) => LocalFunctionMacroDefinition::KnownUnavailable,
-        (None, false) => LocalFunctionMacroDefinition::Missing,
+    match (latest, active_non_function, seen_unavailable_macro) {
+        (Some(definition), _, _) => LocalFunctionMacroDefinition::Function(definition),
+        (None, true, _) => LocalFunctionMacroDefinition::ActiveNonFunction,
+        (None, false, true) => LocalFunctionMacroDefinition::Unavailable,
+        (None, false, false) => LocalFunctionMacroDefinition::Missing,
     }
 }
 
@@ -118,7 +122,7 @@ fn apply_define_logical_line(
     macro_name: &str,
     active_macros: &mut HashSet<String>,
     latest: &mut Option<MacroFunctionDefinition>,
-    seen_matching_macro: &mut bool,
+    active_non_function: &mut bool,
 ) {
     let Some(directive) = preprocessor_directive(line.trim_start()) else {
         return;
@@ -131,8 +135,8 @@ fn apply_define_logical_line(
     };
     active_macros.insert(name.to_owned());
     if name == macro_name {
-        *seen_matching_macro = true;
         *latest = parse_function_macro_definition_line(line, macro_name);
+        *active_non_function = latest.is_none();
     }
 }
 
@@ -216,23 +220,27 @@ fn preprocessor_branches_active(branches: &[PreprocessorBranch]) -> bool {
 
 fn evaluate_if_condition(expression: &str, active_macros: &HashSet<String>) -> bool {
     let expression = expression.trim();
-    if expression == "0" {
-        return false;
-    }
-    if expression == "1" {
-        return true;
+    if let Ok(value) = expression.parse::<i64>() {
+        return value != 0;
     }
     if let Some(name) = defined_expression_name(expression) {
         return active_macros.contains(name);
     }
+    if directive_identifier(expression).is_some_and(|name| name == expression) {
+        return active_macros.contains(expression);
+    }
     if let Some(name) = expression
         .strip_prefix('!')
-        .and_then(|value| defined_expression_name(value.trim_start()))
+        .map(str::trim_start)
+        .and_then(|value| {
+            defined_expression_name(value)
+                .or_else(|| directive_identifier(value).filter(|name| *name == value))
+        })
     {
         return !active_macros.contains(name);
     }
 
-    true
+    false
 }
 
 fn defined_expression_name(expression: &str) -> Option<&str> {
@@ -359,7 +367,7 @@ mod tests {
 
         assert!(matches!(
             local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len()),
-            LocalFunctionMacroDefinition::KnownUnavailable
+            LocalFunctionMacroDefinition::Unavailable
         ));
     }
 
@@ -369,6 +377,9 @@ mod tests {
 #if 0
 #define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
 #endif
+#if FEATURE_FLAG
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
 #ifdef NEVER_DEFINED
 #define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
 #endif
@@ -376,7 +387,7 @@ mod tests {
 
         assert!(matches!(
             local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len()),
-            LocalFunctionMacroDefinition::KnownUnavailable
+            LocalFunctionMacroDefinition::Unavailable
         ));
     }
 }
