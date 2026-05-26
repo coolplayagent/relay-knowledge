@@ -86,6 +86,7 @@ async fn hybrid_chunks_rank_attached_symbol_identity() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -146,6 +147,7 @@ async fn hybrid_chunks_rank_execution_flow_context_above_local_tool_helpers() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -213,6 +215,7 @@ async fn hybrid_chunks_prefer_compact_high_coverage_usage() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -300,6 +303,7 @@ async fn hybrid_chunks_prefer_complete_compact_api_sequences() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -375,6 +379,7 @@ async fn hybrid_chunks_prefer_multi_callback_operation_tables() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -456,6 +461,7 @@ async fn hybrid_chunks_rank_source_definition_bodies_above_declaration_surfaces(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -544,6 +550,7 @@ async fn hybrid_chunks_rank_local_query_term_proximity_above_scattered_matches()
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(
@@ -625,6 +632,7 @@ async fn hybrid_chunks_rank_exact_path_above_mention_only_hits() {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![
             chunk(

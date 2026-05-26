@@ -359,7 +359,7 @@ pub(super) fn code_query_tool_definition() -> Value {
                 "query": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["hybrid", "symbol", "definition", "references", "callers", "callees", "imports"]
+                    "enum": ["hybrid", "symbol", "definition", "references", "callers", "callees", "imports", "sbom"]
                 },
                 "limit": {"type": "integer", "minimum": 1},
                 "ref_selector": {"type": "string"},
@@ -428,7 +428,7 @@ pub(super) fn code_repository_set_query_tool_definition() -> Value {
                 "query": {"type": "string", "minLength": 1},
                 "kind": {
                     "type": "string",
-                    "enum": ["hybrid", "symbol", "definition", "references", "callers", "callees", "imports"]
+                    "enum": ["hybrid", "symbol", "definition", "references", "callers", "callees", "imports", "sbom"]
                 },
                 "limit": {"type": "integer", "minimum": 1},
                 "path_filters": {"type": "array", "items": {"type": "string"}},
@@ -452,6 +452,7 @@ fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, AgentAdapterError
         "callers" => Ok(CodeQueryKind::Callers),
         "callees" => Ok(CodeQueryKind::Callees),
         "imports" => Ok(CodeQueryKind::Imports),
+        "sbom" => Ok(CodeQueryKind::Sbom),
         other => Err(AgentAdapterError::new(
             AgentAdapterErrorKind::InvalidArgument,
             format!("invalid code query kind '{other}'"),

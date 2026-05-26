@@ -15,6 +15,8 @@ use super::{
     code_status,
 };
 
+#[path = "code_batch/dependencies.rs"]
+pub(super) mod dependencies;
 #[path = "code_batch/finalize.rs"]
 mod finalize;
 
@@ -79,6 +81,7 @@ fn apply_batch_once(
     };
     insert_references(&transaction, batch, edge_search_languages.as_ref())?;
     insert_imports(&transaction, batch, edge_search_languages.as_ref())?;
+    dependencies::insert_dependencies(&transaction, batch)?;
     super::code_feature_flags::insert_records(&transaction, &batch.feature_flags)?;
     insert_chunks(&transaction, batch)?;
     insert_diagnostics(&transaction, batch)?;
@@ -844,6 +847,7 @@ fn count_scope_rows(connection: &Connection, source_scope: &str) -> Result<usize
         "code_repository_symbols",
         "code_repository_references",
         "code_repository_imports",
+        "code_repository_dependencies",
         "code_repository_calls",
         "code_repository_feature_flags",
         "code_repository_chunks",

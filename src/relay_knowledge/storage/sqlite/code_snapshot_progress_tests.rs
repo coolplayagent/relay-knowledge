@@ -61,6 +61,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: extract_feature_flags(FeatureFlagFileInput {
             repository_id: "repo",
             source_scope: TEST_SOURCE_SCOPE,

@@ -27,6 +27,9 @@ pub(in crate::storage::sqlite::code) fn retarget_snapshot_scope(
     for call in &mut snapshot.calls {
         call.source_scope = source_scope.to_owned();
     }
+    for dependency in &mut snapshot.dependencies {
+        dependency.source_scope = source_scope.to_owned();
+    }
     for feature_flag in &mut snapshot.feature_flags {
         feature_flag.source_scope = source_scope.to_owned();
     }
@@ -80,6 +83,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_chunk_status(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: feature_flags(repository_id, "file", path, "rust", content),
         chunks: vec![chunk("chunk", "file", path, content, None)],
         diagnostics: degraded_reason
@@ -144,6 +148,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_symbol_and_matching_chunk(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![chunk(
             "target-chunk",
@@ -199,6 +204,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_degraded_files(
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics,
@@ -248,6 +254,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_language_edges() -> CodeIn
             call("rust-call", "rust-file", "src/lib.rs", None),
             call("python-call", "python-file", "py/app.py", None),
         ],
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -298,6 +305,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_resolved_reference() -> Co
         )],
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -361,6 +369,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_duplicate_callee_names() -
                 Some("target-b"),
             ),
         ],
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -418,6 +427,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_out_of_scope_seed() -> Cod
             "src/caller.rs",
             Some("out-target"),
         )],
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -468,6 +478,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_rust_symbol_importer() -> 
             "use crate::retry_policy;",
         )],
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -505,6 +516,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_rust_module_import
             "use crate::deleted;",
         )],
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -542,6 +554,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_deleted_go_module_importer
             "import \"deleted\"",
         )],
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -573,6 +586,7 @@ pub(in crate::storage::sqlite::code) fn snapshot_with_unresolved_caller() -> Cod
         references: Vec::new(),
         imports: Vec::new(),
         calls: vec![call("call", "caller-file", "src/caller.rs", None)],
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
@@ -631,6 +645,7 @@ pub(in crate::storage::sqlite::code) fn incremental_snapshot_for_parsed_file() -
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
+        dependencies: Vec::new(),
         feature_flags: Vec::new(),
         chunks: vec![chunk(
             "src-chunk-2",

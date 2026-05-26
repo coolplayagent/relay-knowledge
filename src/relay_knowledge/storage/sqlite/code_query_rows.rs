@@ -70,6 +70,21 @@ pub(super) struct ImportRow {
     pub(super) confidence_tier: String,
 }
 
+pub(super) struct DependencyRow {
+    pub(super) file_id: String,
+    pub(super) path: String,
+    pub(super) language_id: String,
+    pub(super) ecosystem: String,
+    pub(super) package_name: String,
+    pub(super) requirement: Option<String>,
+    pub(super) resolved_version: Option<String>,
+    pub(super) dependency_group: String,
+    pub(super) source_kind: String,
+    pub(super) is_lockfile: bool,
+    pub(super) line_range: RepositoryCodeRange,
+    pub(super) excerpt: String,
+}
+
 pub(super) struct ChunkRow {
     pub(super) file_id: String,
     pub(super) path: String,

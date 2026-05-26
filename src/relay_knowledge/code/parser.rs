@@ -1,4 +1,5 @@
 mod chunks;
+mod dependencies;
 mod imports;
 mod language_nodes;
 mod manual;
@@ -24,6 +25,8 @@ use super::{
     stable_content_hash, stable_id,
 };
 use chunks::{add_file_chunk, chunks_for_symbols};
+use dependencies::collect_dependencies;
+pub(in crate::code) use dependencies::dependency_manifest_language_ids;
 use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]
@@ -84,6 +87,7 @@ pub(in crate::code) fn parse_indexed_file(
             },
         );
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
+        record_dependencies(build, path, &file_id, &content)?;
         record_feature_flags(build, path, &file_id, "unknown", &content)?;
         return Ok(());
     };
@@ -102,6 +106,7 @@ pub(in crate::code) fn parse_indexed_file(
             },
         );
         add_file_chunk(build, path, &file_id, language.id, &content)?;
+        record_dependencies(build, path, &file_id, &content)?;
         record_feature_flags(build, path, &file_id, language.id, &content)?;
         return Ok(());
     }
@@ -247,6 +252,7 @@ fn parse_syntax_file(
     build.symbols.extend(output.symbols);
     build.references.extend(output.references);
     build.imports.extend(imports);
+    record_dependencies(build, input.path, input.file_id, input.content)?;
     record_feature_flags(
         build,
         input.path,
@@ -594,6 +600,17 @@ fn c_family_macro_name(token: &str) -> bool {
 
 fn c_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn record_dependencies(
+    build: &mut SnapshotBuild,
+    path: &str,
+    file_id: &str,
+    content: &str,
+) -> Result<(), CodeIndexError> {
+    let records = collect_dependencies(build, path, file_id, content)?;
+    build.dependencies.extend(records);
+    Ok(())
 }
 
 fn record_feature_flags(

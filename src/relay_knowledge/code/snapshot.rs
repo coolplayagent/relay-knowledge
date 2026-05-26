@@ -26,6 +26,7 @@ pub(super) struct SnapshotBuild {
     pub(super) references: Vec<RepositoryCodeReferenceRecord>,
     pub(super) imports: Vec<crate::domain::CodeImportRecord>,
     calls: Vec<CodeCallRecord>,
+    pub(super) dependencies: Vec<crate::domain::CodeDependencyRecord>,
     pub(super) feature_flags: Vec<crate::domain::CodeFeatureFlagRecord>,
     pub(super) chunks: Vec<crate::domain::RepositoryCodeChunkRecord>,
     pub(super) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
@@ -94,6 +95,7 @@ impl SnapshotBuild {
             references: Vec::new(),
             imports: Vec::new(),
             calls: Vec::new(),
+            dependencies: Vec::new(),
             feature_flags: Vec::new(),
             chunks: Vec::new(),
             diagnostics: Vec::new(),
@@ -180,6 +182,7 @@ impl SnapshotBuild {
             references: self.references,
             imports: self.imports,
             calls: self.calls,
+            dependencies: self.dependencies,
             feature_flags: self.feature_flags,
             chunks: self.chunks,
             diagnostics: self.diagnostics,
@@ -194,9 +197,14 @@ impl SnapshotBuild {
         self.references.append(&mut other.references);
         self.imports.append(&mut other.imports);
         self.calls.append(&mut other.calls);
+        self.dependencies.append(&mut other.dependencies);
         self.feature_flags.append(&mut other.feature_flags);
         self.chunks.append(&mut other.chunks);
         self.diagnostics.append(&mut other.diagnostics);
+    }
+
+    pub(in crate::code) fn language_filters(&self) -> &[String] {
+        &self.language_filters
     }
 }
 

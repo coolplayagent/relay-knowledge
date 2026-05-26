@@ -838,6 +838,16 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
                 NONSTANDARD_SWIFT_SESSION_CLIENT,
             ),
             ("src/application.ts", NONSTANDARD_APPLICATION_TS),
+            ("Cargo.toml", NONSTANDARD_CARGO_TOML),
+            ("Cargo.lock", NONSTANDARD_CARGO_LOCK),
+            ("web/package.json", NONSTANDARD_PACKAGE_JSON),
+            ("web/package-lock.json", NONSTANDARD_PACKAGE_LOCK_JSON),
+            ("go.mod", NONSTANDARD_GO_MOD),
+            ("pyproject.toml", NONSTANDARD_PYPROJECT_TOML),
+            ("modules/java_sdk/pom.xml", NONSTANDARD_POM_XML),
+            ("modules/java_sdk/build.gradle.kts", NONSTANDARD_BUILD_GRADLE_KTS),
+            ("external_deps/cpp_sdk/conanfile.txt", NONSTANDARD_CONANFILE_TXT),
+            ("external_deps/cpp_sdk/conanfile.py", NONSTANDARD_CONANFILE_PY),
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
@@ -2185,6 +2195,99 @@ export function runExternalSessionWorkflow(payload: string): string {
   const client = new ExternalTypeScriptSessionClient();
   return client.openExternalSession(payload);
 }
+"#;
+
+const NONSTANDARD_CARGO_TOML: &str = r#"
+[package]
+name = "nonstandard-layout-fixture"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+"#;
+
+const NONSTANDARD_CARGO_LOCK: &str = r#"
+version = 3
+
+[[package]]
+name = "tokio"
+version = "1.36.0"
+"#;
+
+const NONSTANDARD_PACKAGE_JSON: &str = r#"
+{
+  "name": "nonstandard-layout-fixture",
+  "version": "0.1.0",
+  "dependencies": {
+    "react": "^18.2.0"
+  }
+}
+"#;
+
+const NONSTANDARD_PACKAGE_LOCK_JSON: &str = r#"
+{
+  "lockfileVersion": 3,
+  "packages": {
+    "node_modules/vite": {
+      "version": "5.1.0"
+    }
+  }
+}
+"#;
+
+const NONSTANDARD_GO_MOD: &str = r#"
+module example.com/nonstandard
+
+go 1.22
+
+require google.golang.org/grpc v1.62.0
+"#;
+
+const NONSTANDARD_PYPROJECT_TOML: &str = r#"
+[project]
+name = "nonstandard-layout-fixture"
+dependencies = [
+  "requests>=2.31",
+]
+"#;
+
+const NONSTANDARD_POM_XML: &str = r#"
+<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>3.2.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>
+"#;
+
+const NONSTANDARD_BUILD_GRADLE_KTS: &str = r#"
+plugins {
+    java
+}
+
+dependencies {
+    implementation("org.slf4j:slf4j-api:2.0.9")
+}
+"#;
+
+const NONSTANDARD_CONANFILE_TXT: &str = r#"
+[requires]
+zlib/1.2.13
+"#;
+
+const NONSTANDARD_CONANFILE_PY: &str = r#"
+from conan import ConanFile
+
+class NonstandardConan(ConanFile):
+    def requirements(self):
+        self.requires("openssl/3.2.1")
 "#;
 
 fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {

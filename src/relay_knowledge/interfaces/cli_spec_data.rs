@@ -511,6 +511,7 @@ fn repo_query() -> CliCommandSpec {
                     "callers",
                     "callees",
                     "imports",
+                    "sbom",
                 ],
             ),
             opt(

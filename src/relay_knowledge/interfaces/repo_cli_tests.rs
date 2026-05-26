@@ -198,6 +198,7 @@ fn parses_repo_command_forms_and_validation_errors() {
     assert_eq!(parse_query_kind("callers").unwrap(), CodeQueryKind::Callers);
     assert_eq!(parse_query_kind("callees").unwrap(), CodeQueryKind::Callees);
     assert_eq!(parse_query_kind("imports").unwrap(), CodeQueryKind::Imports);
+    assert_eq!(parse_query_kind("sbom").unwrap(), CodeQueryKind::Sbom);
     assert_eq!(
         parse_query_kind("impact").unwrap_err(),
         CliError::InvalidCodeQueryKind("impact".to_owned())

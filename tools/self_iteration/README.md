@@ -125,10 +125,14 @@ instead of `degraded_reason`. The C and C++ fixtures also cover macro-generated
 handlers and export-macro-decorated classes so recoverable parser errors do not
 force query-time source fallback. The
 nonstandard layout fixture keeps Python, TypeScript, Go, Java, C++, and Swift
-sources outside a top-level `src/` covered by fast guardrails. The C fixture
-also includes explicit source/text-fallback cases early in its fast case window,
-so exact source-text recovery stays covered without indexing another large
-repository or depending on an external `rg` binary. It reuses
+sources outside a top-level `src/` covered by fast guardrails. The same
+nonstandard layout fixture also carries fast guardrails for
+`repo query --kind sbom` over Cargo, npm, Go, Python, Maven BOM, Gradle, and
+Conan manifest or lock files, so dependency-inventory regressions are rejected
+by the default loop. The C fixture also includes explicit source/text-fallback
+cases early in its fast case window, so exact source-text recovery stays covered
+without indexing another large repository or depending on an external `rg`
+binary. It reuses
 `.git/relay-knowledge-self-iteration/cache-v2/fast-evaluation-home/` to reduce
 repeated registration and indexing cost. Score history is isolated by profile
 and category focus, so `fast --categories semantic_vector` compares only

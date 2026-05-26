@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-sbom-dependency-inventory
+- 算法/架构：代码索引新增依赖清单事实层，把 Cargo、npm、Go、Python、Maven BOM、Gradle 与 Conan manifest/lockfile 解析为 `CodeDependencyRecord`，并写入 SQLite dependency 表和 FTS `dependency` 文档；`repo query --kind sbom`、repo-set、Web 与 MCP 共享同一 `CodeQueryKind::Sbom` 检索入口，按 source scope、path/language filter 与 freshness 状态返回结构化依赖证据。
+- 不变量/预期影响/风险：不改变现有 symbol/reference/import/call/chunk ranking、semantic/vector read model、env/paths/net、服务安装或 release artifact；SBOM 只来自仓库内 manifest/lockfile 的声明/锁定文本，不做漏洞扫描、许可证判定或 package manager 网络解析。预期解决 Issue #148 的仓库依赖软件清单缺口，并让 Java BOM、Gradle 与 Conan 依赖在 fast guardrail 中持续受保护；风险是 manifest 语法覆盖不完整或 lockfile 行号粗粒度，受 parser 单测、SQLite SBOM 查询测试、接口解析测试和 nonstandard layout fast cases 控制。
+- 策略关联：延续非标准目录 fixture 的通用能力覆盖，把依赖清单作为检索事实和评估 case，而不是枚举真实用户仓库、路径或 query；同时把业务文档与 self-iteration 算法记录纳入同一 patch，避免未来新增 kind 时漏掉 schema、接口和 guardrail 文档。
 ## 候选优化说明：run-1779722194-internal-source-fallback-primary
 - 算法/架构：代码查询 exact source-text fallback 在 Git blob 物化后改为优先使用产品内部 fixed-string line scanner，不再把产品热路径依赖外部 `rg` 进程；scanner 继续在 blocking worker 边界内运行，沿用存储侧 query-aware candidate path、safe path、path/language filter、256 文件、8 MiB 物化 blob、4096 字节单行、result limit、Definition 行形态过滤和 `text_fallback` provenance。删除运行期已不用的 ripgrep 子进程和 JSON parser 路径，并把 query-aware candidate path 的 FTS 读取接入既有 `code_repository_search` transient retry；import source fallback 对本地相对导入查询中的 `import(...)` 动态导入源码行增加 source-line shape bonus，使真实运行时导入使用排在静态 import graph 摘要和静态文本回显前。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 写入内容、候选窗口、ranking 权重、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API shape 或安装发布；unresolved external dependency import 的 fallback 仍只搜索当前 indexed repository source，仍不能证明依赖库已入图。预期消除缺少 `rg` 导致的 fast `grep_budget_fixture` degraded_reason guardrail 失败，减少 source fallback 子进程启动和 JSON parse 开销，并避免并发评估中 transient FTS vtable open 把 source fallback 直接降级，改善 comment-only reference、external import、dynamic import 和 repo-set fallback 的 tail latency 与稳定性。风险是内部 scanner 与 ripgrep 在二进制/超长行或编码边界上存在差异，受单行预算、UTF-8 lossless display、Definition accept filter、materialization budget tests、应用层 fallback tests 和 fast guardrail 控制。
@@ -983,6 +987,9 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 
 ## run-1779694672-to-run-1779697627 compacted
 - summary: accepted ambiguous overlay priority and strict API-dense Hybrid chunk pass records are compacted here to keep this primary benchmark log under the hard line cap. Latest accepted `run-1779694672` scored 0.982871 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full patches, metrics, changed paths, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries.
+
+## run-1779720535
+- summary: accepted SBOM dependency inventory query scored 0.980875 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; `fast` passed 146/146 gates and 68/68 cases, including Cargo, npm, Go, Python, Maven BOM, Gradle, and Conan manifest/lockfile guardrails. Full patch, changed paths, metrics, and accepted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779720535.patch`, `.git/relay-knowledge-self-iteration/reports-v2/run-1779720535.json`, and progressive memory.
 
 ## manual-glibc-release-guard-2026-05-25
 - changed paths: `.github/workflows/release.yml`, `.github/workflows/pr-checks.yml`, `tools/release/check_linux_glibc_compat.py`, `tools/self_iteration/src/evaluator_tail.rs`, release and skill docs

@@ -93,6 +93,10 @@ mod code_query_import_target_tests;
 mod code_query_import_ranking_tests;
 
 #[cfg(test)]
+#[path = "code_query_sbom_tests.rs"]
+mod code_query_sbom_tests;
+
+#[cfg(test)]
 #[path = "code_query_line_context_tests.rs"]
 mod code_query_line_context_tests;
 

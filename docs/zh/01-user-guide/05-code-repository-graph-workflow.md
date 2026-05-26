@@ -2,7 +2,7 @@
 
 [中文](../../zh/01-user-guide/05-code-repository-graph-workflow.md) | [English](../../en/01-user-guide/05-code-repository-graph-workflow.md)
 
-代码仓库图谱把 Git tree、文件、符号、引用、调用和 import 关系纳入同一检索面。它不是简单的文件搜索；查询和影响分析都依赖已索引的代码图谱快照。精确文本 `grep` 只作为已索引快照上的有界兜底层，用来补齐 AST/FTS 明确漏召的源码行。
+代码仓库图谱把 Git tree、文件、符号、引用、调用、import 关系和依赖清单纳入同一检索面。它不是简单的文件搜索；查询和影响分析都依赖已索引的代码图谱快照。精确文本 `grep` 只作为已索引快照上的有界兜底层，用来补齐 AST/FTS 明确漏召的源码行。
 
 ## 5.1 注册仓库
 
@@ -54,7 +54,7 @@ relay-knowledge repo index core --ref <commit-sha> --format json
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的单个仓库索引 worker 消费任务。同一仓库已有 queued/running task 时，重复索引请求会复用当前任务，不会并行启动多个 full rebuild。
 
-已经 fresh 的 full index 仍会立即返回完成态 `summary`。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束。
+已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束。
 
 ## 5.4 符号与关系查询
 
@@ -81,13 +81,14 @@ relay-knowledge repo query core --query retry_policy --kind references --format 
 relay-knowledge repo query core --query retry_policy --kind callers --format json
 relay-knowledge repo query core --query retry_policy --kind callees --format json
 relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
+relay-knowledge repo query core --query serde --kind sbom --format json
 ```
 
 结果包含 repository id、alias、`scope_id`、requested ref、resolved commit、tree hash、path、language、byte range、line range、symbol/file id、retrieval layer、index version、freshness、score 和 excerpt。
 
 branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个 branch 复用同一 scope，但响应仍保留本次请求的 ref 作为审计信息。rebase 或 force-move 后的新 head 必须先重新索引，否则查询会失败而不是返回旧 branch 内容。
 
-符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用和 import 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。如果 import 指向没有作为代码图谱 target 建索引的 unresolved 外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 source fallback 在当前已索引仓库源码中搜索。fallback 搜索词来自 unresolved target hint，并排在结构化 import-graph 证据之后，因此小 `limit` 下 agent 仍能看到 `edge_resolution_state` 和 `edge_target_hint`。此类 fallback 命中会携带 `text_fallback`，因此 agent 应把结果当成本仓源码文本证据，而不是依赖库图谱证据。外部依赖源码缺失保持 unresolved edge coverage metadata，除非兜底自身失败，否则不设置 `degraded_reason`。
+符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用、import 和 SBOM 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。`repo query --kind sbom` 返回索引期从 `Cargo.toml`、`Cargo.lock`、`package.json`、`package-lock.json`、`go.mod`、`go.sum`、`pyproject.toml`、`requirements*.txt`、`requirements/` 目录下的依赖文本、`constraints.txt`、Maven `pom.xml` BOM import、Gradle dependency block，以及 Conan `conanfile.txt` 或常见 `conanfile.py` 声明中提取的依赖清单；共享的 npm、JVM 和 Conan manifest 会保留 TypeScript/JSX、Kotlin/Scala、C/C++ 查询可用的兼容语言 scope；它会处理常见 Python PEP 508 marker、editable Python direct reference、Cargo rename 语法和 Gradle map-style 写法，会去重 `go.sum` 中同一模块版本的普通行与 `/go.mod` 行，跳过本地 Cargo path/workspace 包、本地 npm `file:`/`link:`/`workspace:` spec、本地 npm package-lock v1/v2 workspace 行，以及本地 Python/Poetry path 依赖，并且只把 Maven `dependencyManagement` 里的 imported BOM 当作 SBOM 记录；它不会执行包管理器、解析传递依赖、访问 registry，也不提供漏洞或许可证分析。如果 import 指向没有作为代码图谱 target 建索引的 unresolved 外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 source fallback 在当前已索引仓库源码中搜索。fallback 搜索词来自 unresolved target hint，并排在结构化 import-graph 证据之后，因此小 `limit` 下 agent 仍能看到 `edge_resolution_state` 和 `edge_target_hint`。此类 fallback 命中会携带 `text_fallback`，因此 agent 应把结果当成本仓源码文本证据，而不是依赖库图谱证据。外部依赖源码缺失保持 unresolved edge coverage metadata，除非兜底自身失败，否则不设置 `degraded_reason`。
 
 `definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、内部 exact-text source fallback 兜底的顺序。兜底只在当前结构化结果没有覆盖具体身份、引用或 hybrid 结果窗口仍有空位时触发；它搜索已索引 commit 中经过 path/language/scope 过滤并物化的候选文件，而不是直接扫当前脏工作树。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
 

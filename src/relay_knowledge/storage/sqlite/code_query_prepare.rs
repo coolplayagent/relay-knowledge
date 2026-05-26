@@ -59,6 +59,7 @@ fn code_query_can_plan_source_fallback(request: &CodeRetrievalRequest) -> bool {
         | CodeQueryKind::Imports
         | CodeQueryKind::Callers
         | CodeQueryKind::Callees
+        | CodeQueryKind::Sbom
         | CodeQueryKind::Impact => false,
     }
 }

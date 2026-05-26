@@ -136,6 +136,96 @@ pub fn test_retry_policy() -> u32 {
 }
 
 #[tokio::test]
+async fn language_scoped_index_includes_dependency_manifests() {
+    let repo = FixtureRepo::create("code-query-language-sbom");
+    repo.write("src/lib.rs", "pub fn uses_serde() {}\n");
+    repo.write("Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: vec!["rust".to_owned()],
+            },
+            context("register-language-sbom"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-language-sbom"),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "serde",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Sbom,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-language-sbom"),
+        )
+        .await
+        .expect("sbom query should include language-compatible manifests");
+
+    assert!(response.results.iter().any(|hit| {
+        hit.path == "Cargo.toml" && hit.edge_target_hint.as_deref() == Some("serde")
+    }));
+}
+
+#[tokio::test]
+async fn language_scoped_index_preserves_shared_dependency_manifest_languages() {
+    assert_language_scoped_sbom(LanguageScopedSbomFixture {
+        repo_name: "code-query-typescript-sbom",
+        alias: "fixture-ts",
+        source_path: "src/app.ts",
+        source_content: "export const usesReact = true;\n",
+        manifest_path: "package.json",
+        manifest_content: r#"{"dependencies":{"react":"^18"}}"#,
+        language: "typescript",
+        dependency_query: "react",
+    })
+    .await;
+    assert_language_scoped_sbom(LanguageScopedSbomFixture {
+        repo_name: "code-query-kotlin-sbom",
+        alias: "fixture-kotlin",
+        source_path: "src/main/kotlin/App.kt",
+        source_content: "fun main() = println(\"ok\")\n",
+        manifest_path: "build.gradle.kts",
+        manifest_content: r#"dependencies { implementation("org.slf4j:slf4j-api:2.0.9") }"#,
+        language: "kotlin",
+        dependency_query: "org.slf4j:slf4j-api",
+    })
+    .await;
+    assert_language_scoped_sbom(LanguageScopedSbomFixture {
+        repo_name: "code-query-c-sbom",
+        alias: "fixture-c",
+        source_path: "src/app.c",
+        source_content: "int main(void) { return 0; }\n",
+        manifest_path: "conanfile.txt",
+        manifest_content: "[requires]\nzlib/1.2.13\n",
+        language: "c",
+        dependency_query: "zlib",
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn restricted_index_rejects_query_filters_outside_indexed_scope() {
     let repo = FixtureRepo::create("code-query-filter-restricted");
     repo.write(
@@ -264,6 +354,77 @@ fn context(name: &str) -> RequestContext {
         format!("req-{name}"),
         format!("trace-{name}"),
     )
+}
+
+async fn assert_language_scoped_sbom(fixture: LanguageScopedSbomFixture<'_>) {
+    let repo = FixtureRepo::create(fixture.repo_name);
+    repo.write(fixture.source_path, fixture.source_content);
+    repo.write(fixture.manifest_path, fixture.manifest_content);
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: fixture.alias.to_owned(),
+                path_filters: Vec::new(),
+                language_filters: vec![fixture.language.to_owned()],
+            },
+            context(&format!("register-{}", fixture.repo_name)),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector(fixture.alias, "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context(&format!("index-{}", fixture.repo_name)),
+        )
+        .await
+        .expect("repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                fixture.dependency_query,
+                CodeRepositorySelector::new(
+                    fixture.alias,
+                    "HEAD",
+                    Vec::new(),
+                    vec![fixture.language.to_owned()],
+                )
+                .expect("selector should validate"),
+                CodeQueryKind::Sbom,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context(&format!("query-{}", fixture.repo_name)),
+        )
+        .await
+        .expect("sbom query should include language-compatible manifests");
+
+    assert!(response.results.iter().any(|hit| {
+        hit.path == fixture.manifest_path
+            && hit.language_id == fixture.language
+            && hit.edge_target_hint.as_deref() == Some(fixture.dependency_query)
+    }));
+}
+
+struct LanguageScopedSbomFixture<'a> {
+    repo_name: &'a str,
+    alias: &'a str,
+    source_path: &'a str,
+    source_content: &'a str,
+    manifest_path: &'a str,
+    manifest_content: &'a str,
+    language: &'a str,
+    dependency_query: &'a str,
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {

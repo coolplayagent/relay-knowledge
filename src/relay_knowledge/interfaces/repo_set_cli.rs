@@ -439,6 +439,7 @@ fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
         "callers" => Ok(CodeQueryKind::Callers),
         "callees" => Ok(CodeQueryKind::Callees),
         "imports" => Ok(CodeQueryKind::Imports),
+        "sbom" => Ok(CodeQueryKind::Sbom),
         other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
     }
 }
