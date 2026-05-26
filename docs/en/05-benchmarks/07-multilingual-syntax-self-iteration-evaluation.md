@@ -25,11 +25,15 @@ Beyond C/C++, the evaluator now generates these fixture repositories under the e
 | `swift_syntax_fixture` | `swift_syntax_v2` | protocols, final classes, structs, imports, async throws, closure request flow |
 | `cross_language_syntax_fixture` | `cross_language_syntax_v1` | same-repository C/C++/Go/Rust files covering caller and callee retrieval for C calling C++, C++ calling C, Go cgo calling C, and Rust FFI calling C |
 
-`cross_language_syntax_fixture` stays in the default `fast` profile. It is not a
-replacement for real multilingual repositories; it gives fast self-iteration a
-deterministic cross-compilation-boundary workload where a C entrypoint calls a
-C++ `extern "C"` bridge, the C++ bridge calls back into C, Go reaches C through
-cgo, and Rust reaches C through an FFI declaration.
+`cross_language_syntax_fixture` and `nonstandard_layout_fixture` stay in the
+default `fast` profile. The former is not a replacement for real multilingual
+repositories; it gives fast self-iteration a deterministic
+cross-compilation-boundary workload where a C entrypoint calls a C++
+`extern "C"` bridge, the C++ bridge calls back into C, Go reaches C through cgo,
+and Rust reaches C through an FFI declaration. The latter covers Python,
+TypeScript, Go, Java, C++, and Swift source outside a top-level `src/` tree and
+guards source-root normalization for layouts such as `external_deps/`,
+`plugins/`, `modules/.../src/main/java`, and `Sources/`.
 
 ## Lambda And Callback Coverage
 
@@ -47,7 +51,7 @@ The generated fixtures now distinguish native lambda support from language-speci
 - Most generated fixtures now provide 7 core syntax cases: `symbol`, `definition`, `imports`, `callees` or relationship flow, `hybrid`, an explicit lambda/closure case where the language supports one, and `negative`.
 - Hybrid and relationship cases use `expected_all`, `expected_sequence`, `forbidden`, or `forbidden_rank_penalty` to preserve continuous scoring pressure after basic pass/fail is achieved.
 - Python syntax fixture cases also cover text-only Markdown documentation references, where `references` queries for `ServiceRunner` and `dispatch_event` must recover the documentation line as `text_fallback` evidence without graph-edge confidence.
-- Except for the C/C++, cross-language, TypeScript, and `grep_budget_fixture` cases already covered by the default fast profile, generated fixtures are not added to the normal fast repository list by default. `grep_budget_fixture` creates more than 256 C files and requires a no-path-filter `references` query to recover a late-sorted target through query-aware fallback candidates without source-fallback candidate budget exhaustion. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
+- Except for the C/C++, cross-language, TypeScript, `nonstandard_layout_fixture`, and `grep_budget_fixture` cases already covered by the default fast profile, generated fixtures are not added to the normal fast repository list by default. `grep_budget_fixture` creates more than 256 C files and requires a no-path-filter `references` query to recover a late-sorted target through query-aware fallback candidates without source-fallback candidate budget exhaustion. Run targeted checks with `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`, for example:
 
 ```bash
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=python_syntax_fixture,typescript_syntax_fixture \

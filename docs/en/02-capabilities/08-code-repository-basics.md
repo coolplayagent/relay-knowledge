@@ -39,6 +39,14 @@ The indexer and import resolver also recognize real source under roots such as
 and `third_party/` remain excluded by the source preset unless the user
 explicitly opts in with a path filter.
 
+For example, a mixed-layout repository can register
+`--path external_deps/python_sdk`,
+`--path plugins/example.com/nonstandard/session`, or
+`--path modules/payment/src/main/java` to index those authorized source trees.
+If source under `vendor/pkg` or `third_party/pkg` is intentionally needed, that
+path must be passed explicitly so high-volume dependency dumps do not enter the
+default scope by accident.
+
 ## Command/API Entry Points
 
 Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `sbom`. `--kind hybrid` searches symbols, definitions, references, imports, calls, and chunks together. `--kind sbom` searches dependency inventory facts extracted at index time from Cargo, npm, Go, Python, Maven BOM, Gradle, and Conan manifest or lock files; it is local inventory, not package-manager execution, transitive resolution, vulnerability analysis, or license compliance. Call-graph retrieval normalizes cross-language targets: C/C++ calls, Go cgo `C.*` calls, and Rust FFI/bindings paths resolve to C/C++ symbols in the same repository; when a header declaration, FFI scoped declaration, and implementation share a leaf name, the unique implementation is preferred as the resolved call target, and signature-only declarations do not block later implementation candidates. `C.*` leaf fallback is limited to Go cgo files, and call targets only resolve to callable symbols. Ordinary namespace calls are not collapsed to leaf names, so `module::connect` or `module::sys::connect` is not treated as an FFI alias for `connect`; resolved FFI calls keep the original scoped hint so both `rk_c_decode` and `ffi::rk_c_decode` queries can match the call edge.

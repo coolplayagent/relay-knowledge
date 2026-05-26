@@ -38,6 +38,12 @@ relay-knowledge repo status core --format json
 和 `third_party/` 这类重型依赖转储仍由 source preset 默认排除，除非用户通过
 path filter 显式 opt in。
 
+例如，混合布局仓库可以注册 `--path external_deps/python_sdk`、
+`--path plugins/example.com/nonstandard/session` 或
+`--path modules/payment/src/main/java` 来索引这些授权源码；如果确实需要
+`vendor/pkg` 或 `third_party/pkg` 中的源码，必须显式传入对应 `--path`，避免把大
+容量依赖转储误纳入默认 scope。
+
 ## 命令/API 入口
 
 窄类型包括 `symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`--kind hybrid` 同时检索 symbol、definition、reference、import、call 和 chunk。`--kind sbom` 检索索引期从 Cargo、npm、Go、Python、Maven BOM、Gradle 和 Conan manifest/lockfile 提取的依赖清单；它是本地 inventory，不执行包管理器、不解析传递依赖，也不做漏洞或许可证合规分析。调用图检索会对跨语言调用目标做规范化：C/C++ 互调、Go cgo 的 `C.*` 调用和 Rust FFI/bindings 路径会解析到同仓库里的 C/C++ 符号；当 header 声明、FFI scoped 声明和实现共享同一个叶子名时，唯一实现优先作为 resolved call target，signature-only 声明不会阻断后续实现候选。`C.*` leaf fallback 只用于 Go cgo 文件，call target 只会解析到 callable 符号。普通命名空间调用不会只按叶子名合并，例如 `module::connect` 或 `module::sys::connect` 不会被当作 `connect` 的 FFI 调用别名；已解析 FFI 调用保留原始 scoped hint，因此 `rk_c_decode` 和 `ffi::rk_c_decode` 查询都能匹配对应调用边。
