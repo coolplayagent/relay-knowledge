@@ -95,6 +95,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix A.1: relay-teams Baseline 2026-05-14](05-benchmarks/01-relay-teams-baseline-2026-05-14.md)
 - [Appendix A.2: relay-teams Optimization Issues 2026-05-14](05-benchmarks/02-relay-teams-optimization-issues-2026-05-14.md)
 - [Appendix A.3: relay-teams Optimization Study 2026-05-14](05-benchmarks/03-relay-teams-optimization-study-2026-05-14.md)
+- [Appendix A.4: Self-Iteration Accepted Optimization Records](05-benchmarks/04-self-iteration-accepted-optimizations.md)
 - [Appendix A.5: Competitive and High-Performance Benchmark Targets 2026-05-17](05-benchmarks/05-competitive-performance-benchmark-targets-2026-05-17.md)
 
 ## Appendix B: Verification
