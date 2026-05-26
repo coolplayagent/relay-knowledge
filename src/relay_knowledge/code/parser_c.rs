@@ -3,6 +3,7 @@ use tree_sitter::Node;
 use super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
+use super::parser_c_preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
 const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
 
@@ -11,14 +12,18 @@ pub(super) fn manual_definitions(
     node: Node<'_>,
 ) -> Vec<(String, &'static str, SyntaxRange)> {
     match node.kind() {
-        "function_definition" => decorated_cpp_class_symbol(content, node)
-            .map(|symbol| vec![symbol])
-            .or_else(|| {
-                node.child_by_field_name("declarator")
-                    .and_then(|declarator| declarator_name(content, declarator))
-                    .map(|name| vec![(name, "function", syntax_range(node))])
-            })
-            .unwrap_or_default(),
+        "function_definition" => match macro_body_function_definition(content, node) {
+            MacroBodyFunctionDefinition::Recovered(definition) => vec![definition],
+            MacroBodyFunctionDefinition::Rejected => Vec::new(),
+            MacroBodyFunctionDefinition::NotMacroBody => decorated_cpp_class_symbol(content, node)
+                .map(|symbol| vec![symbol])
+                .or_else(|| {
+                    node.child_by_field_name("declarator")
+                        .and_then(|declarator| declarator_name(content, declarator))
+                        .map(|name| vec![(name, "function", syntax_range(node))])
+                })
+                .unwrap_or_default(),
+        },
         "type_definition" if !has_ancestor_kind(node, "compound_statement") => {
             typedef_type_symbols(content, node)
         }
@@ -46,6 +51,74 @@ pub(super) fn manual_definitions(
     }
 }
 
+enum MacroBodyFunctionDefinition {
+    Recovered((String, &'static str, SyntaxRange)),
+    Rejected,
+    NotMacroBody,
+}
+
+fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFunctionDefinition {
+    let text = node_text(content, node);
+    let Some(head) = text.split('{').next().map(str::trim) else {
+        return MacroBodyFunctionDefinition::NotMacroBody;
+    };
+    let Some(macro_name) = head
+        .split(|character: char| !c_identifier_char(character))
+        .next()
+        .filter(|name| uppercase_macro_token(name))
+    else {
+        return MacroBodyFunctionDefinition::NotMacroBody;
+    };
+    let after_name = head
+        .get(macro_name.len()..)
+        .map(str::trim_start)
+        .unwrap_or_default();
+    if !after_name.starts_with('(') {
+        return MacroBodyFunctionDefinition::NotMacroBody;
+    }
+    let Some(arguments) = macro_body_argument_groups(head) else {
+        return MacroBodyFunctionDefinition::Rejected;
+    };
+    let name = if definition_like_macro_name(macro_name) {
+        let Some(name) = macro_generated_function_name_from_groups(&arguments, macro_name) else {
+            return MacroBodyFunctionDefinition::Rejected;
+        };
+        name
+    } else {
+        match local_macro_generated_function_name(
+            content,
+            macro_name,
+            &arguments,
+            node.start_byte(),
+        ) {
+            LocalMacroFunctionName::Recovered(name) => name,
+            LocalMacroFunctionName::FallbackDeclarator(name) => name,
+            LocalMacroFunctionName::Rejected => return MacroBodyFunctionDefinition::Rejected,
+            LocalMacroFunctionName::NotMacro => return MacroBodyFunctionDefinition::NotMacroBody,
+        }
+    };
+
+    MacroBodyFunctionDefinition::Recovered((name, "function", syntax_range(node)))
+}
+
+fn macro_body_argument_groups(head: &str) -> Option<Vec<MacroArgument>> {
+    let start = head.find('(')?;
+    let end = head.rfind(')')?;
+    if end <= start {
+        return None;
+    }
+
+    Some(
+        macro_argument_text_slots(&head[start..=end])
+            .into_iter()
+            .map(|argument| MacroArgument {
+                text: argument.to_owned(),
+                identifiers: macro_argument_text_identifiers(argument),
+            })
+            .collect(),
+    )
+}
+
 fn typedef_type_symbols(
     content: &str,
     declaration: Node<'_>,
@@ -70,12 +143,18 @@ fn top_level_data_symbols(
         return Vec::new();
     }
     let composite_type = declaration_has_composite_type(content, declaration);
+    let initializer_contract_type = declaration_has_initializer_contract_type(content, declaration);
     let mut cursor = declaration.walk();
 
     declaration
         .children_by_field_name("declarator", &mut cursor)
         .filter_map(|declarator| {
-            initialized_data_declarator_name(content, declarator, composite_type)
+            initialized_data_declarator_name(
+                content,
+                declarator,
+                composite_type,
+                initializer_contract_type,
+            )
         })
         .map(|name| (name, "constant", range.clone()))
         .collect()
@@ -85,6 +164,7 @@ fn initialized_data_declarator_name(
     content: &str,
     declarator: Node<'_>,
     composite_type: bool,
+    initializer_contract_type: bool,
 ) -> Option<String> {
     if declarator.kind() != "init_declarator" {
         return None;
@@ -94,7 +174,9 @@ fn initialized_data_declarator_name(
         return None;
     }
     let inner = declarator.child_by_field_name("declarator")?;
-    if !composite_type && !contains_node_kind(inner, "array_declarator") {
+    let array_declarator = contains_node_kind(inner, "array_declarator");
+    let typedef_initializer = initializer_contract_type && value.kind() == "initializer_list";
+    if !composite_type && !array_declarator && !typedef_initializer {
         return None;
     }
     if contains_node_kind(inner, "function_declarator") {
@@ -120,12 +202,28 @@ fn declaration_has_composite_type(content: &str, declaration: Node<'_>) -> bool 
         })
 }
 
+fn declaration_has_initializer_contract_type(content: &str, declaration: Node<'_>) -> bool {
+    declaration
+        .child_by_field_name("type")
+        .is_some_and(|type_node| typedef_like_contract_type(&node_text(content, type_node)))
+}
+
+fn typedef_like_contract_type(name: &str) -> bool {
+    name.split_whitespace()
+        .last()
+        .is_some_and(|token| token.ends_with("_t") && data_symbol_name(token))
+}
+
 fn data_symbol_name(name: &str) -> bool {
     let mut characters = name.chars();
     characters
         .next()
         .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
         && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn c_identifier_char(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
 }
 
 fn decorated_cpp_class_symbol(
@@ -190,18 +288,58 @@ fn macro_generated_function_definition(
 ) -> Option<(String, &'static str, SyntaxRange)> {
     let function = call.child_by_field_name("function")?;
     let macro_name = node_text(content, function);
-    if !definition_like_macro_name(&macro_name) {
-        return None;
-    }
+    let range = macro_generated_definition_range(call);
     let arguments = call.child_by_field_name("arguments")?;
-    let name = macro_generated_function_name(content, arguments, &macro_name)?;
+    let argument_groups = macro_argument_groups(content, arguments);
+    let name = if definition_like_macro_name(&macro_name) {
+        macro_generated_function_name_from_groups(&argument_groups, &macro_name)
+    } else if range.has_following_body {
+        match local_macro_generated_function_name(
+            content,
+            &macro_name,
+            &argument_groups,
+            call.start_byte(),
+        ) {
+            LocalMacroFunctionName::Recovered(name) => Some(name),
+            LocalMacroFunctionName::FallbackDeclarator(name) => Some(name),
+            LocalMacroFunctionName::Rejected | LocalMacroFunctionName::NotMacro => None,
+        }
+    } else {
+        None
+    }?;
 
-    Some((name, "function", syntax_range(call)))
+    Some((name, "function", range.range))
+}
+
+struct MacroGeneratedRange {
+    range: SyntaxRange,
+    has_following_body: bool,
+}
+
+fn macro_generated_definition_range(call: Node<'_>) -> MacroGeneratedRange {
+    let mut range = syntax_range(call);
+    let has_following_body = call
+        .next_named_sibling()
+        .filter(|sibling| sibling.kind() == "compound_statement")
+        .map(|body| {
+            let body_range = syntax_range(body);
+            range.byte_end = body_range.byte_end;
+            range.line_end = body_range.line_end;
+        })
+        .is_some();
+
+    MacroGeneratedRange {
+        range,
+        has_following_body,
+    }
 }
 
 fn definition_like_macro_name(name: &str) -> bool {
     if matches!(name, "EXPORT_SYMBOL" | "EXPORT_SYMBOL_GPL" | "IS_ENABLED") {
         return false;
+    }
+    if is_syscall_definition_macro(name) {
+        return true;
     }
     let tokens = name
         .split('_')
@@ -227,13 +365,11 @@ struct MacroArgument {
     identifiers: Vec<String>,
 }
 
-fn macro_generated_function_name(
-    content: &str,
-    arguments: Node<'_>,
+fn macro_generated_function_name_from_groups(
+    argument_groups: &[MacroArgument],
     macro_name: &str,
 ) -> Option<String> {
-    let argument_groups = macro_argument_groups(content, arguments);
-    if declaration_style_macro_starts_with_return_type(macro_name, &argument_groups) {
+    if declaration_style_macro_starts_with_return_type(macro_name, argument_groups) {
         return argument_groups
             .iter()
             .skip(1)
@@ -243,6 +379,119 @@ fn macro_generated_function_name(
     argument_groups
         .iter()
         .find_map(macro_argument_symbol_candidate)
+}
+
+fn local_macro_generated_function_name(
+    content: &str,
+    macro_name: &str,
+    argument_groups: &[MacroArgument],
+    limit_byte: usize,
+) -> LocalMacroFunctionName {
+    let definition = match local_function_macro_definition(content, macro_name, limit_byte) {
+        LocalFunctionMacroDefinition::Function(definition) => definition,
+        LocalFunctionMacroDefinition::ActiveNonFunction => return LocalMacroFunctionName::Rejected,
+        LocalFunctionMacroDefinition::Unavailable => {
+            return LocalMacroFunctionName::FallbackDeclarator(macro_name.to_owned());
+        }
+        LocalFunctionMacroDefinition::Missing => return LocalMacroFunctionName::NotMacro,
+    };
+    let argument_index = macro_definition_function_name_parameter_index(
+        &definition.replacement,
+        &definition.parameters,
+    );
+    let Some(argument_index) = argument_index else {
+        return LocalMacroFunctionName::Rejected;
+    };
+    let Some(argument) = argument_groups.get(argument_index) else {
+        return LocalMacroFunctionName::Rejected;
+    };
+
+    match macro_argument_symbol_candidate(argument) {
+        Some(name) => LocalMacroFunctionName::Recovered(name),
+        None => LocalMacroFunctionName::Rejected,
+    }
+}
+
+enum LocalMacroFunctionName {
+    Recovered(String),
+    FallbackDeclarator(String),
+    Rejected,
+    NotMacro,
+}
+
+fn macro_definition_function_name_parameter_index(
+    replacement: &str,
+    parameters: &[String],
+) -> Option<usize> {
+    parameters
+        .iter()
+        .position(|parameter| macro_replacement_parameter_is_function_name(replacement, parameter))
+}
+
+fn macro_replacement_parameter_is_function_name(replacement: &str, parameter: &str) -> bool {
+    let mut search_start = 0usize;
+    while let Some(relative_start) = replacement[search_start..].find(parameter) {
+        let start = search_start + relative_start;
+        let end = start + parameter.len();
+        if identifier_boundary(replacement, start, end)
+            && replacement[end..].trim_start().starts_with('(')
+            && macro_replacement_head_looks_like_function_return(&replacement[..start])
+        {
+            return true;
+        }
+        search_start = end;
+    }
+
+    false
+}
+
+fn identifier_boundary(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text[end..].chars().next();
+
+    before.is_none_or(|character| !c_identifier_char(character))
+        && after.is_none_or(|character| !c_identifier_char(character))
+}
+
+fn macro_replacement_head_looks_like_function_return(head: &str) -> bool {
+    if head.contains('=') {
+        return false;
+    }
+    let tokens = head
+        .split(|character: char| !c_identifier_char(character))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let Some((return_type, prefixes)) = tokens.split_last() else {
+        return false;
+    };
+
+    macro_replacement_return_type_token(return_type)
+        && prefixes
+            .iter()
+            .all(|token| macro_replacement_declaration_prefix_token(token))
+}
+
+fn macro_replacement_return_type_token(token: &str) -> bool {
+    c_macro_type_argument(token)
+        || token
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase())
+}
+
+fn macro_replacement_declaration_prefix_token(token: &str) -> bool {
+    matches!(
+        token,
+        "const"
+            | "extern"
+            | "inline"
+            | "register"
+            | "restrict"
+            | "static"
+            | "volatile"
+            | "__attribute__"
+            | "__declspec"
+    ) || uppercase_macro_token(token)
 }
 
 fn macro_argument_groups(content: &str, arguments: Node<'_>) -> Vec<MacroArgument> {
@@ -525,4 +774,33 @@ fn has_parenthesized_pointer_declarator(root: Node<'_>) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_macro_recovery_distinguishes_unknown_and_non_function_macros() {
+        let arguments = vec![MacroArgument {
+            text: "ngx_http_demo_access".to_owned(),
+            identifiers: vec!["ngx_http_demo_access".to_owned()],
+        }];
+
+        assert!(matches!(
+            local_macro_generated_function_name("", "NGX_HTTP_DEMO", &arguments, 0,),
+            LocalMacroFunctionName::NotMacro
+        ));
+
+        let content = "#define MODULE_ACCESS_PHASE(name) name\n";
+        assert!(matches!(
+            local_macro_generated_function_name(
+                content,
+                "MODULE_ACCESS_PHASE",
+                &arguments,
+                content.len(),
+            ),
+            LocalMacroFunctionName::Rejected
+        ));
+    }
 }

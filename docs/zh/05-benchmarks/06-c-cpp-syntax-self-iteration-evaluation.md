@@ -24,7 +24,7 @@
 
 | Repository key | Fixture version | 重点语法 | Fast profile |
 | --- | --- | --- | --- |
-| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedef、operation table、designated initializer、compound initializer、function-like macro、token paste、macro-generated handler、local 和 unresolved external include、callback dispatch、negative symbol | 是 |
+| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedef、operation table、designated initializer、compound initializer、function-like macro、token paste、macro-generated handler、Nginx/Kong 风格外部头文件 typedef 与 module table、local 和 unresolved external include、callback dispatch、negative symbol | 是 |
 | `cpp_syntax_fixture` | `cpp_syntax_v1` | namespace、template class、out-of-line template method、virtual override、operator overload、lambda capture、namespace alias、using alias、export-macro-decorated class、unresolved external include、header/source split、test fake demotion | 是 |
 
 这些 fixture 的源文件由 `tools/self_iteration/src/evaluator_tail.rs` 中的常量生成；生成仓库使用固定 git author/committer date，保证内容相同情况下 commit 可重复。
@@ -37,6 +37,7 @@ C 没有原生 lambda 语法，因此 fixture 明确使用 function pointer type
 
 - `symbol`/`definition`: `struct rk_driver_ops`、`rk_driver_read`、`rk_read_fn`。
 - 可恢复 C macro definition：`RK_HTTP_HANDLER(rk_http_access_handler)` 必须抽取为 definition，且文件不标为 partial。
+- 外部头文件 macro recovery：`KONG_ACCESS_PHASE(ngx_http_demo_access)`、`ngx_module_t ngx_http_demo_module` 与 unresolved `#include <ngx_http.h>` 必须保留结构化事实且不降级，即使 Nginx 头文件不在 indexed scope 内。parser regression 同时覆盖 `# define`、续行 define/condition、`#undef`、inactive preprocessor branch 与有界 numeric/comparison `#if` 条件求值下的本地 macro recovery。
 - `references`: `.read = rk_driver_read`、`rk_pipeline[index](dev)`、`RK_TRACE_VALUE(dev->fd)`。
 - `callers`/`callees`: function pointer dispatch、operation table read callback、dispatch 调用序列。
 - `imports`: 本地 `#include "driver_ops.h"` 和 unresolved external `#include <openssl/ssl.h>`，且不设置 `degraded_reason`。
