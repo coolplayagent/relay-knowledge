@@ -168,6 +168,22 @@ impl CodeRepositoryStore for SqliteGraphStore {
         })
     }
 
+    fn latest_code_repository_scope_status(
+        &self,
+        repository: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        self.run_read(move |connection| {
+            code_status::latest_repository_scope_status(
+                connection,
+                &repository,
+                &path_filters,
+                &language_filters,
+            )
+        })
+    }
+
     fn queue_code_index_task(
         &self,
         task: crate::storage::CodeIndexTaskSeed,
@@ -344,6 +360,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: CodeFeatureFlagRequest,
     ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
         self.run_read(move |connection| code_feature_flags::search(connection, request))
+    }
+
+    fn search_code_feature_flags_scope(
+        &self,
+        source_scope: String,
+        request: CodeFeatureFlagRequest,
+    ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
+        self.run_read(move |connection| {
+            code_feature_flags::search_scope(connection, &source_scope, request)
+        })
     }
 
     fn search_code_scope(

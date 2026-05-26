@@ -159,6 +159,76 @@ pub(super) fn repository_scope_status(
     Ok(None)
 }
 
+pub(super) fn latest_repository_scope_status(
+    connection: &mut Connection,
+    repository: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<Option<CodeRepositoryStatus>, StorageError> {
+    let base = repository_status(connection, repository)?;
+    let Some(base) = base else {
+        return Ok(None);
+    };
+    let base_path_filters = canonical_path_filters(&base.path_filters);
+    let base_language_filters = canonical_filter_values(&base.language_filters);
+    let requested_path_filters = canonical_path_filters(path_filters);
+    let requested_language_filters = canonical_filter_values(language_filters);
+    let mut statement = connection.prepare(
+        "
+        SELECT scope.source_scope, scope.resolved_commit_sha, scope.tree_hash,
+               scope.indexed_file_count, scope.symbol_count, scope.reference_count,
+               scope.chunk_count, scope.stale, scope.degraded_reason,
+               scope.path_filters_json, scope.language_filters_json
+        FROM code_repository_scopes scope
+        LEFT JOIN code_repository_index_checkpoints checkpoint
+          ON checkpoint.source_scope = scope.source_scope
+        WHERE scope.repository_id = ?1
+        ORDER BY coalesce(checkpoint.updated_at_ms, 0) DESC, scope.source_scope DESC
+        ",
+    )?;
+    let rows = statement.query_map(params![&base.repository_id], |row| {
+        let stored_path_filters = parse_json_list(row.get::<_, String>(9)?)?;
+        let stored_language_filters = parse_json_list(row.get::<_, String>(10)?)?;
+        Ok((
+            CodeRepositoryStatus {
+                repository_id: base.repository_id.clone(),
+                alias: base.alias.clone(),
+                root_path: base.root_path.clone(),
+                path_filters: stored_path_filters.clone(),
+                language_filters: stored_language_filters.clone(),
+                last_indexed_scope_id: Some(row.get(0)?),
+                last_indexed_commit: Some(row.get(1)?),
+                tree_hash: Some(row.get(2)?),
+                state: "fresh".to_owned(),
+                indexed_file_count: row.get(3)?,
+                symbol_count: row.get(4)?,
+                reference_count: row.get(5)?,
+                chunk_count: row.get(6)?,
+                stale: row.get::<_, i64>(7)? != 0,
+                degraded_reason: row.get(8)?,
+            },
+            stored_path_filters,
+            stored_language_filters,
+        ))
+    })?;
+    for row in rows {
+        let (status, stored_path_filters, stored_language_filters) = row?;
+        if path_scope_filters_cover_request(
+            &stored_path_filters,
+            &base_path_filters,
+            &requested_path_filters,
+        ) && value_scope_filters_cover_request(
+            &stored_language_filters,
+            &base_language_filters,
+            &requested_language_filters,
+        ) {
+            return Ok(Some(status));
+        }
+    }
+
+    Ok(None)
+}
+
 pub(super) fn repository_scope_status_by_source_scope(
     connection: &mut Connection,
     source_scope: &str,
@@ -297,4 +367,78 @@ fn normalize_path_filter(filter: &str) -> &str {
     }
 
     filter
+}
+
+fn path_filters_cover_request(stored_filters: &[String], requested_filters: &[String]) -> bool {
+    requested_filters.is_empty()
+        || stored_filters.is_empty()
+        || requested_filters.iter().all(|requested_filter| {
+            stored_filters
+                .iter()
+                .any(|stored_filter| path_filter_covers(stored_filter, requested_filter))
+        })
+}
+
+fn path_filter_covers(stored_filter: &str, requested_filter: &str) -> bool {
+    let stored_filter = normalize_path_filter(stored_filter);
+    let requested_filter = normalize_path_filter(requested_filter);
+    stored_filter == "."
+        || (!stored_filter.is_empty()
+            && !requested_filter.is_empty()
+            && (requested_filter == stored_filter
+                || requested_filter.starts_with(&format!("{stored_filter}/"))))
+}
+
+fn value_filters_cover_request(stored_filters: &[String], requested_filters: &[String]) -> bool {
+    requested_filters.is_empty()
+        || stored_filters.is_empty()
+        || requested_filters
+            .iter()
+            .all(|requested_filter| stored_filters.contains(requested_filter))
+}
+
+fn path_scope_filters_cover_request(
+    stored_filters: &[String],
+    base_filters: &[String],
+    requested_filters: &[String],
+) -> bool {
+    let stored_extra = path_filters_excluding_base(stored_filters, base_filters);
+    if requested_filters.is_empty() {
+        return stored_extra.is_empty();
+    }
+    if stored_extra.is_empty() {
+        return path_filters_cover_request(base_filters, requested_filters);
+    }
+
+    path_filters_cover_request(&stored_extra, requested_filters)
+}
+
+fn path_filters_excluding_base(filters: &[String], base_filters: &[String]) -> Vec<String> {
+    canonical_path_filters(filters)
+        .into_iter()
+        .filter(|filter| !base_filters.contains(filter))
+        .collect()
+}
+
+fn value_scope_filters_cover_request(
+    stored_filters: &[String],
+    base_filters: &[String],
+    requested_filters: &[String],
+) -> bool {
+    let stored_extra = value_filters_excluding_base(stored_filters, base_filters);
+    if requested_filters.is_empty() {
+        return stored_extra.is_empty();
+    }
+    if stored_extra.is_empty() {
+        return value_filters_cover_request(base_filters, requested_filters);
+    }
+
+    value_filters_cover_request(&stored_extra, requested_filters)
+}
+
+fn value_filters_excluding_base(filters: &[String], base_filters: &[String]) -> Vec<String> {
+    canonical_filter_values(filters)
+        .into_iter()
+        .filter(|filter| !base_filters.contains(filter))
+        .collect()
 }

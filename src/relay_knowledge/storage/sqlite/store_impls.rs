@@ -235,13 +235,15 @@ impl IndexStore for SqliteGraphStore {
     }
 
     fn search_files(&self, request: FileSearchRequest) -> StorageFuture<'_, Vec<FileSearchHit>> {
-        self.run_read(move |connection| {
-            let started = Instant::now();
-            let deadline = started
-                .checked_add(std::time::Duration::from_millis(request.timeout_ms))
-                .unwrap_or(started);
-            file_index::search(connection, request, deadline)
-        })
+        let started = Instant::now();
+        let deadline = started
+            .checked_add(std::time::Duration::from_millis(request.timeout_ms))
+            .unwrap_or(started);
+        self.run_read_until(
+            deadline,
+            "file query timed out waiting for storage lock",
+            move |connection| file_index::search(connection, request, deadline),
+        )
     }
 
     fn file_index_diagnostics(&self) -> StorageFuture<'_, FileIndexDiagnostics> {

@@ -28,10 +28,11 @@ use super::code_service_support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
     apply_code_grep_fallback, feature_flag_request_at_indexed_ref, index_start_from_completed,
-    merged_filters, now_millis, previous_fingerprints_for_index, recover_code_index_task_leases,
-    refresh_code_index_task_lease, registration_from_status, required_code_repository,
-    resolve_code_ref, resolved_code_scope_status, retrieval_request_at_indexed_ref,
-    run_blocking_code, storage_api_error,
+    latest_compatible_code_scope_status, merged_filters, now_millis,
+    previous_fingerprints_for_index, recover_code_index_task_leases, refresh_code_index_task_lease,
+    registration_from_status, required_code_repository, resolve_code_ref,
+    resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
+    storage_api_error,
 };
 
 impl RelayKnowledgeService {
@@ -515,7 +516,12 @@ impl RelayKnowledgeService {
                 if !active_index_matches_request(&store, &status, &request.repository).await? {
                     return Err(error);
                 }
-                let Some(last_indexed_commit) = status.last_indexed_commit.clone() else {
+                let Some(stale_status) =
+                    latest_compatible_code_scope_status(&store, &request.repository).await?
+                else {
+                    return Err(error);
+                };
+                let Some(last_indexed_commit) = stale_status.last_indexed_commit.clone() else {
                     return Err(error);
                 };
                 request.repository.ref_selector = last_indexed_commit;
@@ -523,7 +529,7 @@ impl RelayKnowledgeService {
                 stale_degraded_reason = Some(
                     "requested ref is not indexed yet; served last completed code index".to_owned(),
                 );
-                resolved_code_scope_status(&store, &status, &request.repository).await?
+                stale_status
             }
             Err(error) => return Err(error),
         };
@@ -541,10 +547,20 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let mut results = store
-            .search_code(request.clone())
-            .await
-            .map_err(storage_api_error)?;
+        let mut results = match served_stale_scope {
+            true => {
+                let source_scope =
+                    scoped_status.last_indexed_scope_id.clone().ok_or_else(|| {
+                        ApiError::invalid_argument(format!(
+                            "code repository '{}' does not have an indexed source scope",
+                            scoped_status.alias
+                        ))
+                    })?;
+                store.search_code_scope(source_scope, request.clone()).await
+            }
+            false => store.search_code(request.clone()).await,
+        }
+        .map_err(storage_api_error)?;
         let fallback_degraded_reason =
             apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
                 .await?;
@@ -613,7 +629,12 @@ impl RelayKnowledgeService {
                 if !active_index_matches_request(&store, &status, &request.repository).await? {
                     return Err(error);
                 }
-                let Some(last_indexed_commit) = status.last_indexed_commit.clone() else {
+                let Some(stale_status) =
+                    latest_compatible_code_scope_status(&store, &request.repository).await?
+                else {
+                    return Err(error);
+                };
+                let Some(last_indexed_commit) = stale_status.last_indexed_commit.clone() else {
                     return Err(error);
                 };
                 request.repository.ref_selector = last_indexed_commit;
@@ -621,7 +642,7 @@ impl RelayKnowledgeService {
                 stale_degraded_reason = Some(
                     "requested ref is not indexed yet; served last completed code index".to_owned(),
                 );
-                resolved_code_scope_status(&store, &status, &request.repository).await?
+                stale_status
             }
             Err(error) => return Err(error),
         };
@@ -639,10 +660,22 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let flags = store
-            .search_code_feature_flags(request.clone())
-            .await
-            .map_err(storage_api_error)?;
+        let flags = match served_stale_scope {
+            true => {
+                let source_scope =
+                    scoped_status.last_indexed_scope_id.clone().ok_or_else(|| {
+                        ApiError::invalid_argument(format!(
+                            "code repository '{}' does not have an indexed source scope",
+                            scoped_status.alias
+                        ))
+                    })?;
+                store
+                    .search_code_feature_flags_scope(source_scope, request.clone())
+                    .await
+            }
+            false => store.search_code_feature_flags(request.clone()).await,
+        }
+        .map_err(storage_api_error)?;
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,

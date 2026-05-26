@@ -1,16 +1,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{
-        Arc, Mutex, TryLockError,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
+    sync::{Arc, Mutex, TryLockError},
+    time::{Duration, Instant},
 };
 
 mod code;
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 mod canvas;
 mod canvas_code;
@@ -19,6 +16,7 @@ mod file_index;
 mod helpers;
 mod indexing;
 mod operations;
+mod read_pool;
 mod retrieval;
 mod retry;
 mod schema_columns;
@@ -38,22 +36,18 @@ use crate::{
     },
 };
 use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
+use read_pool::{
+    ReadConnectionPool, lock_any_read_connection_until, lock_connection_until,
+    try_lock_any_read_connection,
+};
 
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
-const READ_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
-const READ_CONNECTIONS: usize = 4;
 
 /// SQLite implementation of graph facts, mutation log, and index metadata.
 #[derive(Debug, Clone)]
 pub struct SqliteGraphStore {
     connection: Arc<Mutex<Connection>>,
     read_pool: Option<Arc<ReadConnectionPool>>,
-}
-
-#[derive(Debug)]
-struct ReadConnectionPool {
-    connections: Vec<Arc<Mutex<Connection>>>,
-    next: AtomicUsize,
 }
 
 impl SqliteGraphStore {
@@ -68,7 +62,7 @@ impl SqliteGraphStore {
         configure_connection(&connection)?;
         schema_migration::prepare_existing_database(&connection)?;
         initialize_schema(&connection)?;
-        let read_pool = ReadConnectionPool::open(&path, READ_CONNECTIONS)?;
+        let read_pool = ReadConnectionPool::open(&path)?;
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
@@ -125,13 +119,47 @@ impl SqliteGraphStore {
         self.run(operation)
     }
 
+    pub(super) fn run_read_until<T, F>(
+        &self,
+        deadline: Instant,
+        timeout_message: &'static str,
+        operation: F,
+    ) -> StorageFuture<'_, T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        if let Some(read_pool) = &self.read_pool {
+            let connections = read_pool.connections();
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut guard =
+                        lock_any_read_connection_until(&connections, deadline, timeout_message)?;
+
+                    operation(&mut guard)
+                })
+                .await?
+            });
+        }
+
+        let connection = Arc::clone(&self.connection);
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let mut guard = lock_connection_until(&connection, deadline, timeout_message)?;
+
+                operation(&mut guard)
+            })
+            .await?
+        })
+    }
+
     pub(super) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
         if let Some(read_pool) = &self.read_pool {
-            let connections = read_pool.connections.clone();
+            let connections = read_pool.connections();
             return Box::pin(async move {
                 tokio::task::spawn_blocking(move || {
                     let mut guard = try_lock_any_read_connection(&connections)?;
@@ -162,60 +190,8 @@ impl SqliteGraphStore {
     }
 }
 
-impl ReadConnectionPool {
-    fn open(path: &Path, count: usize) -> Result<Self, StorageError> {
-        let mut connections = Vec::with_capacity(count);
-        for _ in 0..count {
-            let connection = Connection::open_with_flags(
-                path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            )?;
-            configure_read_connection(&connection)?;
-            connections.push(Arc::new(Mutex::new(connection)));
-        }
-
-        Ok(Self {
-            connections,
-            next: AtomicUsize::new(0),
-        })
-    }
-
-    fn connection(&self) -> Arc<Mutex<Connection>> {
-        let index = self.next.fetch_add(1, Ordering::Relaxed) % self.connections.len();
-        Arc::clone(&self.connections[index])
-    }
-}
-
-fn try_lock_any_read_connection(
-    connections: &[Arc<Mutex<Connection>>],
-) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
-    for connection in connections {
-        match connection.try_lock() {
-            Ok(guard) => return Ok(guard),
-            Err(TryLockError::Poisoned(_)) => return Err(StorageError::LockPoisoned),
-            Err(TryLockError::WouldBlock) => {}
-        }
-    }
-
-    Err(StorageError::Busy(
-        "all sqlite read connections are currently occupied".to_owned(),
-    ))
-}
-
 fn configure_connection(connection: &Connection) -> Result<(), StorageError> {
     connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
-
-    Ok(())
-}
-
-fn configure_read_connection(connection: &Connection) -> Result<(), StorageError> {
-    connection.busy_timeout(READ_SQLITE_BUSY_TIMEOUT)?;
-    connection.execute_batch(
-        "
-        PRAGMA foreign_keys = ON;
-        PRAGMA query_only = ON;
-        ",
-    )?;
 
     Ok(())
 }

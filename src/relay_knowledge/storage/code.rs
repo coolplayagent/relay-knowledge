@@ -178,6 +178,15 @@ pub trait CodeRepositoryStore: Send + Sync {
         language_filters: Vec<String>,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>>;
 
+    fn latest_code_repository_scope_status(
+        &self,
+        _repository: String,
+        _path_filters: Vec<String>,
+        _language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn queue_code_index_task(
         &self,
         task: CodeIndexTaskSeed,
@@ -343,6 +352,18 @@ pub trait CodeRepositoryStore: Send + Sync {
             Err(StorageError::InvalidInput(format!(
                 "code feature flag search for repository '{}' is unavailable",
                 request.repository.repository
+            )))
+        })
+    }
+
+    fn search_code_feature_flags_scope(
+        &self,
+        source_scope: String,
+        _request: CodeFeatureFlagRequest,
+    ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code feature flag search for source scope '{source_scope}' is unavailable"
             )))
         })
     }

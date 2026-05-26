@@ -303,6 +303,22 @@ pub(super) async fn resolved_code_scope_status(
     })
 }
 
+pub(super) async fn latest_compatible_code_scope_status(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    selector: &CodeRepositorySelector,
+) -> Result<Option<CodeRepositoryStatus>, ApiError> {
+    let status = store
+        .latest_code_repository_scope_status(
+            selector.repository.clone(),
+            selector.path_filters.clone(),
+            selector.language_filters.clone(),
+        )
+        .await
+        .map_err(storage_api_error)?;
+
+    Ok(status)
+}
+
 pub(super) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     let mut merged = Vec::new();
     for value in left.iter().chain(right.iter()) {
