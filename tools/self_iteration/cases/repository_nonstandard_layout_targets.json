@@ -15,6 +15,30 @@
   },
   "query_cases": [
     {
+      "id": "nonstandard_layout_external_deps_definition_without_path_filter",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "definition",
+      "query": "ExternalTypeScriptSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "external_deps/ts_sdk/sessionClient.ts", "excerpt_contains": "class ExternalTypeScriptSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
+      "id": "nonstandard_layout_modules_definition_without_path_filter",
+      "repository": "nonstandard_layout_fixture",
+      "kind": "definition",
+      "query": "ExternalJavaSessionClient",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "expected": [{"path": "modules/java_sdk/src/main/java/example/ExternalJavaSessionClient.java", "excerpt_contains": "class ExternalJavaSessionClient"}],
+      "case_group": "nonstandard_source_layout"
+    },
+    {
       "id": "nonstandard_layout_python_external_deps_symbol",
       "repository": "nonstandard_layout_fixture",
       "kind": "symbol",

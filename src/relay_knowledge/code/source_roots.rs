@@ -1,4 +1,4 @@
-const STRIPPABLE_SOURCE_ROOTS: &[&str] = &[
+pub(crate) const STRIPPABLE_SOURCE_ROOTS: &[&str] = &[
     "src/",
     "lib/",
     "Sources/",
@@ -9,7 +9,7 @@ const STRIPPABLE_SOURCE_ROOTS: &[&str] = &[
     "extensions/",
 ];
 
-const NESTED_SOURCE_MARKERS: &[&str] = &[
+pub(crate) const NESTED_SOURCE_MARKERS: &[&str] = &[
     "/src/main/java/",
     "/src/test/java/",
     "/src/main/kotlin/",

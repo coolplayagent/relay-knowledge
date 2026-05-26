@@ -71,6 +71,8 @@ pub const RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT: &str = "RELAY_KNOWLEDGE_WORKER
 pub const RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT: &str =
     "RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT";
 pub const RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT: &str = "RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT";
+pub const RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT: &str =
+    "RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT";
 pub const RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED: &str = "RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED";
 pub const RELAY_KNOWLEDGE_FILE_INDEX_ENABLED: &str = "RELAY_KNOWLEDGE_FILE_INDEX_ENABLED";
 pub const RELAY_KNOWLEDGE_FILE_INDEX_ROOTS: &str = "RELAY_KNOWLEDGE_FILE_INDEX_ROOTS";
@@ -230,6 +232,7 @@ pub struct WorkerEnvOverrides {
     pub vision_endpoint: Option<String>,
     pub extractor_endpoint: Option<String>,
     pub max_in_flight: Option<usize>,
+    pub code_index_max_in_flight: Option<usize>,
     pub silent_updates_enabled: Option<bool>,
 }
 
@@ -436,6 +439,10 @@ impl EnvironmentConfig {
                 vision_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_VISION_ENDPOINT)?,
                 extractor_endpoint: string_var(&values, RELAY_KNOWLEDGE_WORKER_EXTRACTOR_ENDPOINT)?,
                 max_in_flight: positive_usize_var(&values, RELAY_KNOWLEDGE_WORKER_MAX_IN_FLIGHT)?,
+                code_index_max_in_flight: positive_usize_var(
+                    &values,
+                    RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT,
+                )?,
                 silent_updates_enabled: bool_var(&values, RELAY_KNOWLEDGE_SILENT_UPDATES_ENABLED)?,
             },
             file_index: FileIndexEnvOverrides {

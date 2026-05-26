@@ -32,6 +32,11 @@ pub(super) struct SnapshotBuild {
     pub(super) diagnostics: Vec<crate::domain::CodeFileDiagnostic>,
 }
 
+pub(super) struct SnapshotScopeFilters {
+    pub(super) path_filters: Vec<String>,
+    pub(super) language_filters: Vec<String>,
+}
+
 impl SnapshotBuild {
     #[cfg(test)]
     pub(super) fn new(
@@ -71,6 +76,31 @@ impl SnapshotBuild {
         let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
         let language_filters =
             merged_filters(&registration.language_filters, &selector.language_filters);
+        Self::new_with_scope_filters(
+            registration,
+            commit,
+            tree_hash,
+            SnapshotScopeFilters {
+                path_filters,
+                language_filters,
+            },
+            full_replace,
+            changed_path_count,
+            skipped_unchanged_count,
+        )
+    }
+
+    pub(super) fn new_with_scope_filters(
+        registration: &CodeRepositoryRegistration,
+        commit: String,
+        tree_hash: String,
+        filters: SnapshotScopeFilters,
+        full_replace: bool,
+        changed_path_count: usize,
+        skipped_unchanged_count: usize,
+    ) -> Self {
+        let path_filters = filters.path_filters;
+        let language_filters = filters.language_filters;
         let source_scope = code_snapshot_scope_id(
             &registration.repository_id,
             &tree_hash,
@@ -243,7 +273,7 @@ fn caller_for_line<'a>(
         .max_by_key(|symbol| symbol.line_range.start)
 }
 
-fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
+pub(super) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
     let mut merged = Vec::new();
     for value in left.iter().chain(right.iter()) {
         if !merged.contains(value) {

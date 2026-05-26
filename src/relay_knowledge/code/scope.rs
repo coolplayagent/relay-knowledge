@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -11,8 +11,13 @@ use crate::domain::{
 };
 
 use super::{
-    CodeIndexError, changes::tracked_entries, git_bytes, git_object_exists, languages::language_id,
-    parser::dependency_manifest_language_ids, resolve_ref, resolve_tree,
+    CodeIndexError,
+    changes::{GitTreeEntry, tracked_entries},
+    git_bytes, git_object_exists,
+    languages::language_id,
+    parser::dependency_manifest_language_ids,
+    resolve_ref, resolve_tree,
+    source_roots::{NESTED_SOURCE_MARKERS, STRIPPABLE_SOURCE_ROOTS},
 };
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
@@ -57,6 +62,9 @@ const DEFAULT_DISTRIBUTION_LANGUAGE_SEGMENTS: &[&str] = &[
 ];
 const DEFAULT_DISTRIBUTION_RUNTIME_SEGMENTS: &[&str] =
     &["app", "client", "core", "runtime", "server"];
+const SOURCE_LAYOUT_DISCOVERY_MAX_PATHS: usize = 200_000;
+const SOURCE_LAYOUT_DISCOVERY_MAX_ROOTS: usize = 512;
+const AUTO_SOURCE_SCOPE_FILTERS: &[&str] = &[".", "src", "include", "lib", "Sources"];
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
 pub fn preview_repository_scope(
@@ -76,10 +84,16 @@ pub fn preview_repository_scope(
     let mut largest_files = Vec::<CodeRepositoryLargestFile>::new();
     let mut excluded_paths = Vec::<CodeRepositoryExcludedPath>::new();
 
-    for entry in tracked_entries(&root, &commit)? {
-        if let Some(reason) =
-            selection_exclusion_reason(&entry.path, registration, selector, &ignore_rules)
-        {
+    let entries = tracked_entries(&root, &commit)?;
+    let source_layout = discover_source_layout(&entries);
+    for entry in entries {
+        if let Some(reason) = selection_exclusion_reason_with_layout(
+            &entry.path,
+            registration,
+            selector,
+            &ignore_rules,
+            &source_layout,
+        ) {
             if excluded_paths.len() < PREVIEW_MAX_EXCLUDED_PATHS {
                 excluded_paths.push(CodeRepositoryExcludedPath {
                     path: entry.path,
@@ -155,10 +169,20 @@ pub fn partition_changed_paths_for_selector(
     let root = PathBuf::from(&registration.root_path);
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
+    let entries = tracked_entries(&root, &commit)?;
+    let source_layout = discover_source_layout(&entries);
     let mut in_scope_changed_paths = Vec::new();
     let mut out_of_scope_changed_paths = Vec::new();
     for path in paths {
-        if selection_exclusion_reason(&path, registration, selector, &ignore_rules).is_none() {
+        if selection_exclusion_reason_with_layout(
+            &path,
+            registration,
+            selector,
+            &ignore_rules,
+            &source_layout,
+        )
+        .is_none()
+        {
             in_scope_changed_paths.push(path);
         } else {
             out_of_scope_changed_paths.push(path);
@@ -196,13 +220,48 @@ pub(super) fn path_is_selected_with_rules(
     selection_exclusion_reason(path, registration, selector, ignore_rules).is_none()
 }
 
+pub(super) fn path_is_selected_with_layout(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    ignore_rules: &[IgnoreRule],
+    source_layout: &SourceLayoutDiscovery,
+) -> bool {
+    selection_exclusion_reason_with_layout(
+        path,
+        registration,
+        selector,
+        ignore_rules,
+        source_layout,
+    )
+    .is_none()
+}
+
 pub(super) fn selection_exclusion_reason(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
     ignore_rules: &[IgnoreRule],
 ) -> Option<String> {
-    if !path_scope_allows(path, registration, selector) {
+    selection_exclusion_reason_with_layout(
+        path,
+        registration,
+        selector,
+        ignore_rules,
+        &SourceLayoutDiscovery::default(),
+    )
+}
+
+pub(super) fn selection_exclusion_reason_with_layout(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    ignore_rules: &[IgnoreRule],
+    source_layout: &SourceLayoutDiscovery,
+) -> Option<String> {
+    if !path_scope_allows(path, registration, selector)
+        && !source_layout.extends_path_scope(path, registration, selector)
+    {
         return Some("outside registered/requested path scope".to_owned());
     }
     if !language_filter_allows(path, &registration.language_filters)
@@ -214,6 +273,7 @@ pub(super) fn selection_exclusion_reason(
         return Some("excluded by .relay-knowledgeignore".to_owned());
     }
     if default_source_preset_excludes(path)
+        && !source_layout.keeps_default_excluded_source(path)
         && !explicit_path_filter_opts_into_default_exclusion(
             path,
             registration
@@ -226,6 +286,160 @@ pub(super) fn selection_exclusion_reason(
     }
 
     None
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct SourceLayoutDiscovery {
+    source_roots: BTreeSet<String>,
+}
+
+impl SourceLayoutDiscovery {
+    fn keeps_default_excluded_source(&self, path: &str) -> bool {
+        source_path_has_indexable_content(path)
+            && !path_contains_broad_dependency_segment(path)
+            && self
+                .source_roots
+                .iter()
+                .any(|root| path_matches_filter(path, root))
+    }
+
+    fn extends_path_scope(
+        &self,
+        path: &str,
+        registration: &CodeRepositoryRegistration,
+        selector: &CodeRepositorySelector,
+    ) -> bool {
+        registration_scope_can_discover_source_roots(&registration.path_filters)
+            && selector_path_scope_allows_discovered_root(path, &selector.path_filters)
+            && self.keeps_default_excluded_source(path)
+    }
+}
+
+pub(super) fn discover_source_layout(entries: &[GitTreeEntry]) -> SourceLayoutDiscovery {
+    let mut source_roots = BTreeSet::new();
+    for entry in entries.iter().take(SOURCE_LAYOUT_DISCOVERY_MAX_PATHS) {
+        if !source_path_has_indexable_content(&entry.path)
+            || path_contains_broad_dependency_segment(&entry.path)
+            || default_source_preset_excludes(&entry.path)
+        {
+            continue;
+        }
+        for root in source_layout_roots_for_path(&entry.path) {
+            source_roots.insert(root);
+            if source_roots.len() >= SOURCE_LAYOUT_DISCOVERY_MAX_ROOTS {
+                return SourceLayoutDiscovery { source_roots };
+            }
+        }
+    }
+
+    SourceLayoutDiscovery { source_roots }
+}
+
+pub(super) fn effective_index_path_filters(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    source_layout: &SourceLayoutDiscovery,
+) -> Vec<String> {
+    let mut filters = merged_path_filters(&registration.path_filters, &selector.path_filters);
+    if !registration_scope_can_discover_source_roots(&registration.path_filters) {
+        return filters;
+    }
+    for root in &source_layout.source_roots {
+        if !selector_filter_allows_root(root, &selector.path_filters) {
+            continue;
+        }
+        push_filter_if_uncovered(&mut filters, root);
+    }
+
+    filters
+}
+
+fn source_path_has_indexable_content(path: &str) -> bool {
+    language_id(path).is_some() || dependency_manifest_language_ids(path).is_some()
+}
+
+fn path_contains_broad_dependency_segment(path: &str) -> bool {
+    normalize_path_filter(path)
+        .split('/')
+        .any(|segment| matches!(segment, "vendor" | "third_party" | "node_modules"))
+}
+
+fn registration_scope_can_discover_source_roots(filters: &[String]) -> bool {
+    !filters.is_empty()
+        && filters.iter().all(|filter| {
+            let filter = normalize_path_filter(filter);
+            AUTO_SOURCE_SCOPE_FILTERS.contains(&filter)
+        })
+}
+
+fn selector_path_scope_allows_discovered_root(path: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| path_matches_filter(path, filter))
+}
+
+fn selector_filter_allows_root(root: &str, filters: &[String]) -> bool {
+    filters.is_empty()
+        || filters
+            .iter()
+            .any(|filter| path_matches_filter(root, filter) || path_overlaps_filter(root, filter))
+}
+
+fn merged_path_filters(left: &[String], right: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for filter in left.iter().chain(right.iter()) {
+        let normalized = normalize_path_filter(filter);
+        if !normalized.is_empty() && !merged.iter().any(|existing| existing == normalized) {
+            merged.push(normalized.to_owned());
+        }
+    }
+
+    merged
+}
+
+fn push_filter_if_uncovered(filters: &mut Vec<String>, root: &str) {
+    if filters
+        .iter()
+        .any(|filter| path_filter_covers(filter, root))
+    {
+        return;
+    }
+    filters.retain(|filter| !path_filter_covers(root, filter));
+    filters.push(root.to_owned());
+}
+
+fn path_filter_covers(filter: &str, path: &str) -> bool {
+    let filter = normalize_path_filter(filter);
+    filter == "." || path_matches_filter(path, filter)
+}
+
+fn source_layout_roots_for_path(path: &str) -> Vec<String> {
+    let path = normalize_path_filter(path);
+    let mut roots = Vec::new();
+    for marker in NESTED_SOURCE_MARKERS {
+        if let Some((prefix, _)) = path.split_once(marker) {
+            push_source_root(&mut roots, format!("{prefix}{marker}"));
+        }
+    }
+    for root in STRIPPABLE_SOURCE_ROOTS {
+        if let Some(suffix) = path.strip_prefix(root) {
+            let mut segments = suffix.split('/').filter(|segment| !segment.is_empty());
+            if let Some(first) = segments.next() {
+                push_source_root(&mut roots, format!("{root}{first}"));
+            } else {
+                push_source_root(&mut roots, root.trim_end_matches('/').to_owned());
+            }
+        }
+    }
+    roots
+}
+
+fn push_source_root(roots: &mut Vec<String>, root: String) {
+    let root = root.trim_end_matches('/').to_owned();
+    if !root.is_empty() && !roots.contains(&root) {
+        roots.push(root);
+    }
 }
 
 pub(super) fn path_scope_allows(

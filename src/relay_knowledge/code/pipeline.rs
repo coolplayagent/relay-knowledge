@@ -10,8 +10,11 @@ use super::{
     changes::{GitTreeEntry, tracked_entries},
     git::{git_batch_blobs, resolve_ref, resolve_tree},
     identity, parse_indexed_file,
-    scope::{load_ignore_rules_from_commit, selection_exclusion_reason},
-    snapshot::SnapshotBuild,
+    scope::{
+        discover_source_layout, effective_index_path_filters, load_ignore_rules_from_commit,
+        selection_exclusion_reason_with_layout,
+    },
+    snapshot::{SnapshotBuild, SnapshotScopeFilters},
 };
 
 const GIT_BLOB_FETCH_GROUP: usize = CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
@@ -24,7 +27,6 @@ const TARGET_PARSE_BYTES_PER_WORKER: usize = 512 * 1024;
 #[derive(Debug, Clone)]
 pub struct CodeIndexPlan {
     registration: CodeRepositoryRegistration,
-    selector: CodeRepositorySelector,
     root: PathBuf,
     commit: String,
     tree_hash: String,
@@ -64,11 +66,14 @@ impl CodeIndexPlan {
             return Ok((self, None));
         }
 
-        let mut build = SnapshotBuild::new_with_selector(
+        let mut build = SnapshotBuild::new_with_scope_filters(
             &self.registration,
-            &self.selector,
             self.commit.clone(),
             self.tree_hash.clone(),
+            SnapshotScopeFilters {
+                path_filters: self.path_filters.clone(),
+                language_filters: self.language_filters.clone(),
+            },
             true,
             self.paths.len(),
             0,
@@ -170,11 +175,14 @@ fn parse_one_file(
     path: &str,
     bytes: &[u8],
 ) -> Result<SnapshotBuild, CodeIndexError> {
-    let mut build = SnapshotBuild::new_with_selector(
+    let mut build = SnapshotBuild::new_with_scope_filters(
         &plan.registration,
-        &plan.selector,
         plan.commit.clone(),
         plan.tree_hash.clone(),
+        SnapshotScopeFilters {
+            path_filters: plan.path_filters.clone(),
+            language_filters: plan.language_filters.clone(),
+        },
         true,
         plan.paths.len(),
         0,
@@ -236,14 +244,22 @@ pub fn prepare_full_index_plan(
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(&root, &commit)?;
     let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
-    let paths = tracked_entries(&root, &commit)?
+    let entries = tracked_entries(&root, &commit)?;
+    let source_layout = discover_source_layout(&entries);
+    let paths = entries
         .into_iter()
         .filter(|entry| {
-            selection_exclusion_reason(&entry.path, &registration, &selector, &ignore_rules)
-                .is_none()
+            selection_exclusion_reason_with_layout(
+                &entry.path,
+                &registration,
+                &selector,
+                &ignore_rules,
+                &source_layout,
+            )
+            .is_none()
         })
         .collect::<Vec<_>>();
-    let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
+    let path_filters = effective_index_path_filters(&registration, &selector, &source_layout);
     let language_filters =
         merged_filters(&registration.language_filters, &selector.language_filters);
     let source_scope = code_snapshot_scope_id(
@@ -255,7 +271,6 @@ pub fn prepare_full_index_plan(
 
     Ok(CodeIndexPlan {
         registration,
-        selector,
         root,
         commit,
         tree_hash,

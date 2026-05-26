@@ -114,7 +114,8 @@ completion rejection, attempt-budget dead-lettering, and checkpoint-batch lease
 renewal without indexing exhaustive large repositories.
 The SQLite lock gate opens independent file-backed stores against the same
 database and verifies duplicate full-index starts reuse the running task while
-same-repository follow-up tasks wait behind the active lease.
+distinct task fingerprints can claim independent leases without waiting behind
+another running task.
 `fast` also runs a registration guardrail proving `repo register --language`
 is rejected so mixed C/C++ repositories cannot be narrowed at registration.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
@@ -454,7 +455,7 @@ enumerating cases.
   latest completed committed scope instead of hanging behind the index writer.
 - The fast profile runs `code_index_sqlite_lock_cases` as a product and storage
   gate. The cases protect duplicate-process SQLite lock avoidance, active-task
-  reuse, and per-repository task claim serialization.
+  reuse, and independent task claim concurrency.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can keep the suite selected while disabling the backend with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`; use `--exclude-categories research_judge` when the suite itself should not run. Unsupported backend names fail the judge gate, and an explicit CLI judge command selects the CLI backend unless `RELAY_KNOWLEDGE_JUDGE_BACKEND` explicitly requests HTTP. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.

@@ -5,13 +5,6 @@ use super::{
     git::{git_bytes, validate_git_ref_arg},
 };
 
-pub(super) fn tracked_paths(root: &Path, commit: &str) -> Result<Vec<String>, CodeIndexError> {
-    Ok(tracked_entries(root, commit)?
-        .into_iter()
-        .map(|entry| entry.path)
-        .collect())
-}
-
 pub(super) fn tracked_entries(
     root: &Path,
     commit: &str,

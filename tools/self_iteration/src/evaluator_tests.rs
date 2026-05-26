@@ -449,6 +449,16 @@ mod tests {
                 }],
                 "degraded_reason": null
             }),
+            serde_json::json!({
+                "id": "nonstandard_layout_external_deps_definition_without_path_filter",
+                "repository": "nonstandard_layout_fixture",
+                "kind": "definition",
+                "query": "ExternalTypeScriptSessionClient",
+                "guardrail": true,
+                "expected": [{
+                    "path": "external_deps/ts_sdk/sessionClient.ts"
+                }]
+            }),
         ];
 
         let selected = select_repository_cases_for_profile("fast", None, cases);
@@ -475,6 +485,11 @@ mod tests {
         assert!(selected.iter().any(|case| {
             string_or(case, "id", "") == "c_syntax_definition_nginx_external_macro_handler"
                 && case.get("degraded_reason").is_some_and(Value::is_null)
+        }));
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "")
+                == "nonstandard_layout_external_deps_definition_without_path_filter"
+                && array_field(case, "path_filters").is_empty()
         }));
     }
 

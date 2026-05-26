@@ -125,13 +125,6 @@ fn claim_task_once(
                   AND candidate.next_retry_at_ms <= ?2
                   AND candidate.attempt_count < ?3
                   AND candidate.state IN ('queued', 'retrying')
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM code_repository_index_tasks running
-                    WHERE running.repository_id = candidate.repository_id
-                      AND running.state = 'running'
-                      AND running.lease_expires_at_ms > ?2
-                  )
                 ",
                 params![task_id, request.now_ms, request.max_attempts],
                 |row| row.get::<_, String>(0),
@@ -146,13 +139,6 @@ fn claim_task_once(
                 WHERE candidate.next_retry_at_ms <= ?1
                   AND candidate.attempt_count < ?2
                   AND candidate.state IN ('queued', 'retrying')
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM code_repository_index_tasks running
-                    WHERE running.repository_id = candidate.repository_id
-                      AND running.state = 'running'
-                      AND running.lease_expires_at_ms > ?1
-                  )
                 ORDER BY candidate.created_at_ms ASC, candidate.task_id ASC
                 LIMIT 1
                 ",

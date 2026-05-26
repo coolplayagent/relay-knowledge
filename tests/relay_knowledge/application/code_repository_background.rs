@@ -317,8 +317,10 @@ async fn code_index_sqlite_lock_cases_shared_store_reuses_running_task() {
             context("run-shared-store-moved-head"),
         )
         .await
-        .expect("second worker should see busy repository");
-    assert!(worker_attempt.is_none());
+        .expect("second worker should run independently")
+        .expect("distinct task should claim while first task is running");
+    assert_eq!(worker_attempt.task_id, moved_task.task_id);
+    assert_eq!(worker_attempt.state, CodeIndexTaskState::Succeeded);
 
     let status = service_b
         .code_repository_status(

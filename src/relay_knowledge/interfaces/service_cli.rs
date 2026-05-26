@@ -35,11 +35,12 @@ pub(super) async fn run_service(
         None
     };
     let (code_index_shutdown, code_index_shutdown_receiver) = tokio::sync::watch::channel(false);
-    let code_index_task = tokio::spawn(run_code_index_loop(
+    let code_index_tasks = run_code_index_worker_pool(
         service.clone(),
+        runtime.workers.code_index_max_in_flight,
         std::time::Duration::from_secs(5),
         code_index_shutdown_receiver,
-    ));
+    );
     let (repo_set_refresh_shutdown, repo_set_refresh_shutdown_receiver) =
         tokio::sync::watch::channel(false);
     let repo_set_refresh_task = tokio::spawn(run_code_repository_set_refresh_loop(
@@ -87,12 +88,31 @@ pub(super) async fn run_service(
         let _ = task.await;
     }
     let _ = code_index_shutdown.send(true);
-    let _ = code_index_task.await;
+    for task in code_index_tasks {
+        let _ = task.await;
+    }
     let _ = repo_set_refresh_shutdown.send(true);
     let _ = repo_set_refresh_task.await;
     runtime.observability.shutdown();
 
     Ok(String::new())
+}
+
+pub(super) fn run_code_index_worker_pool(
+    service: RelayKnowledgeService,
+    worker_count: usize,
+    interval: std::time::Duration,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    (0..worker_count.max(1))
+        .map(|_| {
+            tokio::spawn(run_code_index_loop(
+                service.clone(),
+                interval,
+                shutdown.clone(),
+            ))
+        })
+        .collect()
 }
 
 async fn run_code_index_loop(

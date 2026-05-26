@@ -147,6 +147,7 @@ pub(super) fn repository_scope_status(
             ))
         },
     )?;
+    let mut compatible = None;
     for row in rows {
         let (status, stored_path_filters, stored_language_filters) = row?;
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
@@ -154,9 +155,18 @@ pub(super) fn repository_scope_status(
         {
             return Ok(Some(status));
         }
+        if compatible.is_none()
+            && compatible_path_filters_cover_request(&stored_path_filters, &requested_path_filters)
+            && compatible_value_filters_cover_request(
+                &stored_language_filters,
+                &requested_language_filters,
+            )
+        {
+            compatible = Some(status);
+        }
     }
 
-    Ok(None)
+    Ok(compatible)
 }
 
 pub(super) fn latest_repository_scope_status(
@@ -379,6 +389,16 @@ fn path_filters_cover_request(stored_filters: &[String], requested_filters: &[St
         })
 }
 
+fn compatible_path_filters_cover_request(
+    stored_filters: &[String],
+    requested_filters: &[String],
+) -> bool {
+    if requested_filters.is_empty() {
+        return stored_filters.is_empty();
+    }
+    path_filters_cover_request(stored_filters, requested_filters)
+}
+
 fn path_filter_covers(stored_filter: &str, requested_filter: &str) -> bool {
     let stored_filter = normalize_path_filter(stored_filter);
     let requested_filter = normalize_path_filter(requested_filter);
@@ -395,6 +415,16 @@ fn value_filters_cover_request(stored_filters: &[String], requested_filters: &[S
         || requested_filters
             .iter()
             .all(|requested_filter| stored_filters.contains(requested_filter))
+}
+
+fn compatible_value_filters_cover_request(
+    stored_filters: &[String],
+    requested_filters: &[String],
+) -> bool {
+    if requested_filters.is_empty() {
+        return stored_filters.is_empty();
+    }
+    value_filters_cover_request(stored_filters, requested_filters)
 }
 
 fn path_scope_filters_cover_request(
