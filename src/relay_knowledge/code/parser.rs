@@ -582,12 +582,18 @@ fn c_family_typedef_declaration_head(head: &str) -> Option<(&str, &str)> {
     if c_family_typedef_like_type_token(name) {
         return None;
     }
-    let type_token = tokens
+    let type_index = tokens[..tokens.len().saturating_sub(1)]
         .iter()
-        .rev()
-        .skip(1)
+        .rposition(|token| !c_declaration_qualifier_token(token))?;
+    if !tokens[..type_index]
+        .iter()
+        .all(|token| c_declaration_qualifier_token(token))
+    {
+        return None;
+    }
+    let type_token = tokens
+        .get(type_index)
         .copied()
-        .find(|token| !c_declaration_qualifier_token(token))
         .filter(|token| c_family_typedef_like_type_token(token))?;
 
     Some((type_token, name))

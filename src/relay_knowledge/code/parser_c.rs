@@ -75,13 +75,15 @@ fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFun
     if !after_name.starts_with('(') {
         return MacroBodyFunctionDefinition::NotMacroBody;
     }
-    if !definition_like_macro_name(macro_name, true) {
-        return MacroBodyFunctionDefinition::Rejected;
-    }
     let Some(arguments) = macro_body_argument_groups(head) else {
         return MacroBodyFunctionDefinition::Rejected;
     };
-    let Some(name) = macro_generated_function_name_from_groups(&arguments, macro_name) else {
+    let name = if definition_like_macro_name(macro_name) {
+        macro_generated_function_name_from_groups(&arguments, macro_name)
+    } else {
+        local_macro_generated_function_name(content, macro_name, &arguments, node.start_byte())
+    };
+    let Some(name) = name else {
         return MacroBodyFunctionDefinition::Rejected;
     };
 
@@ -276,11 +278,20 @@ fn macro_generated_function_definition(
     let function = call.child_by_field_name("function")?;
     let macro_name = node_text(content, function);
     let range = macro_generated_definition_range(call);
-    if !definition_like_macro_name(&macro_name, range.has_following_body) {
-        return None;
-    }
     let arguments = call.child_by_field_name("arguments")?;
-    let name = macro_generated_function_name(content, arguments, &macro_name)?;
+    let argument_groups = macro_argument_groups(content, arguments);
+    let name = if definition_like_macro_name(&macro_name) {
+        macro_generated_function_name_from_groups(&argument_groups, &macro_name)
+    } else if range.has_following_body {
+        local_macro_generated_function_name(
+            content,
+            &macro_name,
+            &argument_groups,
+            call.start_byte(),
+        )
+    } else {
+        None
+    }?;
 
     Some((name, "function", range.range))
 }
@@ -308,7 +319,7 @@ fn macro_generated_definition_range(call: Node<'_>) -> MacroGeneratedRange {
     }
 }
 
-fn definition_like_macro_name(name: &str, has_following_body: bool) -> bool {
+fn definition_like_macro_name(name: &str) -> bool {
     if matches!(name, "EXPORT_SYMBOL" | "EXPORT_SYMBOL_GPL" | "IS_ENABLED") {
         return false;
     }
@@ -332,27 +343,11 @@ fn definition_like_macro_name(name: &str, has_following_body: bool) -> bool {
     tokens
         .iter()
         .any(|token| matches!(*token, "HANDLER" | "FUNCTION" | "METHOD" | "CALLBACK"))
-        || (has_following_body
-            && tokens.iter().any(|token| {
-                matches!(
-                    *token,
-                    "ACCESS" | "ACTION" | "COMMAND" | "FILTER" | "HOOK" | "PHASE"
-                )
-            }))
 }
 
 struct MacroArgument {
     text: String,
     identifiers: Vec<String>,
-}
-
-fn macro_generated_function_name(
-    content: &str,
-    arguments: Node<'_>,
-    macro_name: &str,
-) -> Option<String> {
-    let argument_groups = macro_argument_groups(content, arguments);
-    macro_generated_function_name_from_groups(&argument_groups, macro_name)
 }
 
 fn macro_generated_function_name_from_groups(
@@ -369,6 +364,176 @@ fn macro_generated_function_name_from_groups(
     argument_groups
         .iter()
         .find_map(macro_argument_symbol_candidate)
+}
+
+fn local_macro_generated_function_name(
+    content: &str,
+    macro_name: &str,
+    argument_groups: &[MacroArgument],
+    limit_byte: usize,
+) -> Option<String> {
+    let definition = local_function_macro_definition(content, macro_name, limit_byte)?;
+    let argument_index = macro_definition_function_name_parameter_index(
+        definition.replacement,
+        &definition.parameters,
+    )?;
+    let argument = argument_groups.get(argument_index)?;
+
+    macro_argument_symbol_candidate(argument)
+}
+
+struct MacroFunctionDefinition<'a> {
+    parameters: Vec<&'a str>,
+    replacement: &'a str,
+}
+
+fn local_function_macro_definition<'a>(
+    content: &'a str,
+    macro_name: &str,
+    limit_byte: usize,
+) -> Option<MacroFunctionDefinition<'a>> {
+    let search_end = limit_byte.min(content.len());
+    content[..search_end]
+        .lines()
+        .rev()
+        .find_map(|line| parse_function_macro_definition_line(line, macro_name))
+}
+
+fn parse_function_macro_definition_line<'a>(
+    line: &'a str,
+    macro_name: &str,
+) -> Option<MacroFunctionDefinition<'a>> {
+    let directive = line
+        .trim_start()
+        .strip_prefix('#')?
+        .trim_start()
+        .strip_prefix("define")?;
+    if directive
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    let after_define = directive.trim_start();
+    let after_name = after_define.strip_prefix(macro_name)?;
+    if !after_name.starts_with('(') {
+        return None;
+    }
+    let parameters_end = closing_parenthesis_index(after_name)?;
+    let replacement = after_name[parameters_end + 1..].trim();
+    if replacement.is_empty() {
+        return None;
+    }
+    let parameters = after_name[1..parameters_end]
+        .split(',')
+        .map(str::trim)
+        .filter(|parameter| !parameter.is_empty() && *parameter != "...")
+        .collect::<Vec<_>>();
+    if parameters.is_empty() {
+        return None;
+    }
+
+    Some(MacroFunctionDefinition {
+        parameters,
+        replacement,
+    })
+}
+
+fn closing_parenthesis_index(text: &str) -> Option<usize> {
+    if !text.starts_with('(') {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (index, character) in text.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn macro_definition_function_name_parameter_index(
+    replacement: &str,
+    parameters: &[&str],
+) -> Option<usize> {
+    parameters
+        .iter()
+        .position(|parameter| macro_replacement_parameter_is_function_name(replacement, parameter))
+}
+
+fn macro_replacement_parameter_is_function_name(replacement: &str, parameter: &str) -> bool {
+    let mut search_start = 0usize;
+    while let Some(relative_start) = replacement[search_start..].find(parameter) {
+        let start = search_start + relative_start;
+        let end = start + parameter.len();
+        if identifier_boundary(replacement, start, end)
+            && replacement[end..].trim_start().starts_with('(')
+            && macro_replacement_head_looks_like_function_return(&replacement[..start])
+        {
+            return true;
+        }
+        search_start = end;
+    }
+
+    false
+}
+
+fn identifier_boundary(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text[end..].chars().next();
+
+    before.is_none_or(|character| !c_identifier_char(character))
+        && after.is_none_or(|character| !c_identifier_char(character))
+}
+
+fn macro_replacement_head_looks_like_function_return(head: &str) -> bool {
+    if head.contains('=') {
+        return false;
+    }
+    let tokens = head
+        .split(|character: char| !c_identifier_char(character))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let Some((return_type, prefixes)) = tokens.split_last() else {
+        return false;
+    };
+
+    macro_replacement_return_type_token(return_type)
+        && prefixes
+            .iter()
+            .all(|token| macro_replacement_declaration_prefix_token(token))
+}
+
+fn macro_replacement_return_type_token(token: &str) -> bool {
+    c_macro_type_argument(token)
+        || token
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase())
+}
+
+fn macro_replacement_declaration_prefix_token(token: &str) -> bool {
+    matches!(
+        token,
+        "const"
+            | "extern"
+            | "inline"
+            | "register"
+            | "restrict"
+            | "static"
+            | "volatile"
+            | "__attribute__"
+            | "__declspec"
+    ) || uppercase_macro_token(token)
 }
 
 fn macro_argument_groups(content: &str, arguments: Node<'_>) -> Vec<MacroArgument> {

@@ -64,6 +64,9 @@ fn c_family_recoverable_line_accepts_external_typedef_shapes() {
         "ngx_module_t ngx_http_demo_module = {"
     ));
     assert!(!recoverable_c_family_error_line("ngx_pool_t *pool;"));
+    assert!(!recoverable_c_family_error_line(
+        "return ngx_int_t handler(req)"
+    ));
     assert!(!recoverable_c_family_error_line("ngx_int_t broken_call("));
     assert!(!recoverable_c_family_error_line(
         "ngx_int_t broken_value = ;"
@@ -163,7 +166,7 @@ fn c_macro_body_recovery_requires_definition_style_macro_name() {
     let snapshot = parse_source_snapshot(
         "src/generic_block_macro.c",
         br#"
-#define BENCHMARK_CASE(name) name
+#define MODULE_ACCESS_PHASE(name) name
 
 static ngx_int_t
 ngx_http_demo_init(ngx_pool_t *pool)
@@ -171,7 +174,7 @@ ngx_http_demo_init(ngx_pool_t *pool)
     return ngx_array_init(pool);
 }
 
-BENCHMARK_CASE(ngx_http_demo_access)
+MODULE_ACCESS_PHASE(ngx_http_demo_access)
 {
     ngx_http_demo_init(0);
 }
