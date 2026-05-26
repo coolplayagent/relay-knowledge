@@ -27,64 +27,47 @@ pub(super) fn local_function_macro_definition(
     for line in content[..search_end].lines() {
         if !logical_line.is_empty() {
             append_preprocessor_logical_line(&mut logical_line, line);
-            if !line_continues_preprocessor_definition(line) {
-                apply_define_logical_line(
+            if !line_continues_preprocessor_directive(line) {
+                apply_preprocessor_logical_line(
                     &logical_line,
                     macro_name,
                     &mut active_macros,
+                    &mut branches,
                     &mut latest,
                     &mut active_non_function,
+                    &mut seen_unavailable_macro,
                 );
                 logical_line.clear();
             }
             continue;
         }
         let trimmed_start = line.trim_start();
-        let Some(directive) = preprocessor_directive(trimmed_start) else {
-            continue;
-        };
-        if update_preprocessor_branch(&directive, &active_macros, &mut branches) {
+        if preprocessor_directive(trimmed_start).is_none() {
             continue;
         }
-        if !preprocessor_branches_active(&branches) {
-            seen_unavailable_macro |= directive.keyword == "define"
-                && directive_identifier(directive.rest).is_some_and(|name| name == macro_name);
-            continue;
-        }
-        match directive.keyword {
-            "define" => {
-                append_preprocessor_logical_line(&mut logical_line, line);
-                if !line_continues_preprocessor_definition(line) {
-                    apply_define_logical_line(
-                        &logical_line,
-                        macro_name,
-                        &mut active_macros,
-                        &mut latest,
-                        &mut active_non_function,
-                    );
-                    logical_line.clear();
-                }
-            }
-            "undef" => {
-                if let Some(name) = directive_identifier(directive.rest) {
-                    active_macros.remove(name);
-                    if name == macro_name {
-                        seen_unavailable_macro = true;
-                        active_non_function = false;
-                        latest = None;
-                    }
-                }
-            }
-            _ => {}
+        append_preprocessor_logical_line(&mut logical_line, line);
+        if !line_continues_preprocessor_directive(line) {
+            apply_preprocessor_logical_line(
+                &logical_line,
+                macro_name,
+                &mut active_macros,
+                &mut branches,
+                &mut latest,
+                &mut active_non_function,
+                &mut seen_unavailable_macro,
+            );
+            logical_line.clear();
         }
     }
     if !logical_line.is_empty() {
-        apply_define_logical_line(
+        apply_preprocessor_logical_line(
             &logical_line,
             macro_name,
             &mut active_macros,
+            &mut branches,
             &mut latest,
             &mut active_non_function,
+            &mut seen_unavailable_macro,
         );
     }
 
@@ -115,6 +98,45 @@ fn preprocessor_directive(line: &str) -> Option<PreprocessorDirective<'_>> {
         keyword,
         rest: directive[keyword_end..].trim_start(),
     })
+}
+
+fn apply_preprocessor_logical_line(
+    line: &str,
+    macro_name: &str,
+    active_macros: &mut HashMap<String, ActiveMacroDefinition>,
+    branches: &mut Vec<PreprocessorBranch>,
+    latest: &mut Option<MacroFunctionDefinition>,
+    active_non_function: &mut bool,
+    seen_unavailable_macro: &mut bool,
+) {
+    let Some(directive) = preprocessor_directive(line.trim_start()) else {
+        return;
+    };
+    if update_preprocessor_branch(&directive, active_macros, branches) {
+        return;
+    }
+    if !preprocessor_branches_active(branches) {
+        *seen_unavailable_macro |= directive.keyword == "define"
+            && directive_identifier(directive.rest).is_some_and(|name| name == macro_name);
+        return;
+    }
+
+    match directive.keyword {
+        "define" => {
+            apply_define_logical_line(line, macro_name, active_macros, latest, active_non_function);
+        }
+        "undef" => {
+            if let Some(name) = directive_identifier(directive.rest) {
+                active_macros.remove(name);
+                if name == macro_name {
+                    *seen_unavailable_macro = true;
+                    *active_non_function = false;
+                    *latest = None;
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn apply_define_logical_line(
@@ -254,6 +276,12 @@ enum ConditionToken<'a> {
     Bang,
     AndAnd,
     OrOr,
+    EqualEqual,
+    BangEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
     LeftParen,
     RightParen,
 }
@@ -281,11 +309,30 @@ impl<'tokens, 'macros, 'visiting> PreprocessorConditionParser<'tokens, 'macros, 
     }
 
     fn parse_logical_and(&mut self) -> Option<i128> {
-        let mut value = self.parse_unary()?;
+        let mut value = self.parse_comparison()?;
         while matches!(self.peek(), Some(ConditionToken::AndAnd)) {
             self.position += 1;
-            let right = self.parse_unary()?;
+            let right = self.parse_comparison()?;
             value = bool_value(value != 0 && right != 0);
+        }
+        Some(value)
+    }
+
+    fn parse_comparison(&mut self) -> Option<i128> {
+        let mut value = self.parse_unary()?;
+        loop {
+            let comparison = match self.peek() {
+                Some(ConditionToken::EqualEqual) => |left, right| left == right,
+                Some(ConditionToken::BangEqual) => |left, right| left != right,
+                Some(ConditionToken::Less) => |left, right| left < right,
+                Some(ConditionToken::LessEqual) => |left, right| left <= right,
+                Some(ConditionToken::Greater) => |left, right| left > right,
+                Some(ConditionToken::GreaterEqual) => |left, right| left >= right,
+                _ => break,
+            };
+            self.position += 1;
+            let right = self.parse_unary()?;
+            value = bool_value(comparison(value, right));
         }
         Some(value)
     }
@@ -409,9 +456,37 @@ fn tokenize_condition_expression(expression: &str) -> Option<Vec<ConditionToken<
             index += 2;
             continue;
         }
+        if rest.starts_with("==") {
+            tokens.push(ConditionToken::EqualEqual);
+            index += 2;
+            continue;
+        }
+        if rest.starts_with("!=") {
+            tokens.push(ConditionToken::BangEqual);
+            index += 2;
+            continue;
+        }
+        if rest.starts_with("<=") {
+            tokens.push(ConditionToken::LessEqual);
+            index += 2;
+            continue;
+        }
+        if rest.starts_with(">=") {
+            tokens.push(ConditionToken::GreaterEqual);
+            index += 2;
+            continue;
+        }
         match character {
             '!' => {
                 tokens.push(ConditionToken::Bang);
+                index += 1;
+            }
+            '<' => {
+                tokens.push(ConditionToken::Less);
+                index += 1;
+            }
+            '>' => {
+                tokens.push(ConditionToken::Greater);
                 index += 1;
             }
             '(' => {
@@ -525,7 +600,7 @@ fn append_preprocessor_logical_line(logical_line: &mut String, line: &str) {
     logical_line.push_str(segment);
 }
 
-fn line_continues_preprocessor_definition(line: &str) -> bool {
+fn line_continues_preprocessor_directive(line: &str) -> bool {
     line.trim_end().ends_with('\\')
 }
 
@@ -739,6 +814,54 @@ mod tests {
             local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len())
         else {
             panic!("standard numeric constants should activate the branch");
+        };
+
+        assert_eq!(definition.parameters, ["name"]);
+    }
+
+    #[test]
+    fn local_macro_lookup_evaluates_comparison_conditions() {
+        let content = "\
+#define FEATURE_FLAG 1
+#define VERSION 3
+#if FEATURE_FLAG == 1 && VERSION >= 2
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        let LocalFunctionMacroDefinition::Function(definition) =
+            local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len())
+        else {
+            panic!("comparison conditions should activate matching branches");
+        };
+
+        assert_eq!(definition.parameters, ["name"]);
+
+        let inactive = "\
+#define VERSION 3
+#if VERSION < 2
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        assert!(matches!(
+            local_function_macro_definition(inactive, "KONG_ACCESS_PHASE", inactive.len()),
+            LocalFunctionMacroDefinition::Unavailable
+        ));
+    }
+
+    #[test]
+    fn local_macro_lookup_joins_continued_if_conditions() {
+        let content = "\
+#define FEATURE_FLAG 1
+#define EXTRA_FLAG 1
+#if FEATURE_FLAG \\
+    && EXTRA_FLAG
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        let LocalFunctionMacroDefinition::Function(definition) =
+            local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len())
+        else {
+            panic!("continued #if conditions should activate matching branches");
         };
 
         assert_eq!(definition.parameters, ["name"]);

@@ -373,6 +373,62 @@ COMPOUND_DEFINED_PHASE(ngx_http_compound_defined_false)
 }
 
 #[test]
+fn c_macro_body_recovery_reads_comparison_and_continued_if_conditions() {
+    let snapshot = parse_source_snapshot(
+        "src/conditional_macro_module.c",
+        br#"
+#define FEATURE_FLAG 1
+#define EXTRA_FLAG 1
+#define VERSION 3
+
+#if FEATURE_FLAG == 1 && VERSION >= 2
+#define COMPARISON_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
+#if FEATURE_FLAG \
+    && EXTRA_FLAG
+#define CONTINUED_IF_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+COMPARISON_PHASE(ngx_http_comparison_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+CONTINUED_IF_PHASE(ngx_http_continued_if_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+"#,
+    );
+
+    for name in ["ngx_http_comparison_access", "ngx_http_continued_if_access"] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "function" && symbol.name == name),
+            "active conditional macros should recover handler symbols: {:?}",
+            snapshot.symbols
+        );
+        assert!(
+            snapshot.calls.iter().any(|call| {
+                call.caller_name.as_deref() == Some(name)
+                    && call.callee_name == "ngx_http_demo_init"
+            }),
+            "active conditional macros should own call graph edges: {:?}",
+            snapshot.calls
+        );
+    }
+}
+
+#[test]
 fn c_macro_body_recovery_falls_back_after_unavailable_macro_history() {
     let snapshot = parse_source_snapshot(
         "src/uppercase_function_after_undef.c",

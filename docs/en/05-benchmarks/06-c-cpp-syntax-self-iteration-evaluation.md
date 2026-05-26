@@ -38,7 +38,7 @@ C cases live in `tools/self_iteration/cases/repository_c_syntax_fixture_targets.
 
 - `symbol`/`definition`: `struct rk_driver_ops`, `rk_driver_read`, and `rk_read_fn`.
 - Recoverable C macro definitions: `RK_HTTP_HANDLER(rk_http_access_handler)` must be extracted as a definition without marking the file partial.
-- External-header macro recovery: `KONG_ACCESS_PHASE(ngx_http_demo_access)`, `ngx_module_t ngx_http_demo_module`, and unresolved `#include <ngx_http.h>` must stay structured and non-degraded even though the external Nginx headers are not part of the indexed scope. Parser regression tests also cover spaced `# define`, continued definitions, `#undef`, inactive preprocessor branches, and bounded numeric `#if` condition evaluation for this local macro recovery path.
+- External-header macro recovery: `KONG_ACCESS_PHASE(ngx_http_demo_access)`, `ngx_module_t ngx_http_demo_module`, and unresolved `#include <ngx_http.h>` must stay structured and non-degraded even though the external Nginx headers are not part of the indexed scope. Parser regression tests also cover spaced `# define`, continued definitions and conditions, `#undef`, inactive preprocessor branches, and bounded numeric/comparison `#if` condition evaluation for this local macro recovery path.
 - `references`: `.read = rk_driver_read`, `rk_pipeline[index](dev)`, and `RK_TRACE_VALUE(dev->fd)`.
 - `callers`/`callees`: function pointer dispatch, operation-table callbacks, and dispatch call sequences.
 - `imports`: local `#include "driver_ops.h"` and unresolved external `#include <openssl/ssl.h>` with no `degraded_reason`.
