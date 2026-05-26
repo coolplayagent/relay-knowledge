@@ -776,6 +776,7 @@ fn parse_symbol_kind(value: &str) -> Result<CodeSymbolKind, StorageError> {
         "constant" => Ok(CodeSymbolKind::Constant),
         "field" => Ok(CodeSymbolKind::Field),
         "variable" => Ok(CodeSymbolKind::Variable),
+        "enum_member" => Ok(CodeSymbolKind::EnumMember),
         _ => Err(invalid_code_metadata(format!(
             "unknown code symbol kind '{value}'"
         ))),

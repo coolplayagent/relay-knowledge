@@ -1010,6 +1010,7 @@ dependencies = [
  "tree-sitter-scala",
  "tree-sitter-swift",
  "tree-sitter-typescript",
+ "unicode-ident",
 ]
 
 [[package]]

@@ -16,6 +16,8 @@ pub(in crate::code) fn enrich_symbol_identities(
             kind: symbol.kind.clone(),
             line_start: symbol.line_range.start,
             line_end: symbol.line_range.end,
+            byte_start: symbol.byte_range.start,
+            byte_end: symbol.byte_range.end,
             prefix: path_prefix(&symbol.qualified_name).to_owned(),
         })
         .collect::<Vec<_>>();
@@ -33,7 +35,9 @@ pub(in crate::code) fn enrich_symbol_identities(
             let right = &symbol_metadata[*right];
             left.line_start
                 .cmp(&right.line_start)
+                .then_with(|| left.byte_start.cmp(&right.byte_start))
                 .then_with(|| right.line_end.cmp(&left.line_end))
+                .then_with(|| right.byte_end.cmp(&left.byte_end))
                 .then_with(|| left.name.cmp(&right.name))
         });
         let mut container_stack = Vec::<usize>::new();
@@ -41,7 +45,7 @@ pub(in crate::code) fn enrich_symbol_identities(
             let metadata = &symbol_metadata[*metadata_index];
             while container_stack
                 .last()
-                .is_some_and(|ancestor| symbol_metadata[*ancestor].line_end < metadata.line_end)
+                .is_some_and(|ancestor| !symbol_contains(&symbol_metadata[*ancestor], metadata))
             {
                 container_stack.pop();
             }
@@ -70,6 +74,8 @@ struct SymbolIdentityMetadata {
     kind: String,
     line_start: u32,
     line_end: u32,
+    byte_start: u32,
+    byte_end: u32,
     prefix: String,
 }
 
@@ -84,4 +90,11 @@ fn container_kind(kind: &str) -> bool {
         kind,
         "class" | "constructor" | "function" | "interface" | "method" | "module" | "type"
     )
+}
+
+fn symbol_contains(container: &SymbolIdentityMetadata, symbol: &SymbolIdentityMetadata) -> bool {
+    container.line_start <= symbol.line_start
+        && container.line_end >= symbol.line_end
+        && container.byte_start <= symbol.byte_start
+        && container.byte_end >= symbol.byte_end
 }

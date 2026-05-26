@@ -11,7 +11,7 @@ use relay_knowledge::{
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
         CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeRetrievalLayer, CodeRetrievalRequest, FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::SqliteGraphStore,
@@ -26,6 +26,11 @@ async fn indexes_tree_sitter_repository_and_queries_code_graph() {
 /// Selects the retry budget.
 pub fn retry_policy() -> u32 {
     3
+}
+
+pub enum Color {
+    Red,
+    Blue,
 }
 "#,
     );
@@ -73,6 +78,8 @@ fn run_worker() {
 
     let definitions = query(&service, "retry_policy", CodeQueryKind::Definition).await;
     let doc_comment = query(&service, "budget", CodeQueryKind::Definition).await;
+    let enum_member_definition = query(&service, "Red", CodeQueryKind::Definition).await;
+    let enum_member_symbol = query(&service, "Color.Red", CodeQueryKind::Symbol).await;
     let references = query(&service, "retry_policy", CodeQueryKind::References).await;
     let imports = query(&service, "crate::retry_policy", CodeQueryKind::Imports).await;
 
@@ -96,6 +103,32 @@ fn run_worker() {
             .index_versions
             .iter()
             .any(|version| version.starts_with("code:"))
+    );
+    assert!(
+        enum_member_definition.results.iter().any(|hit| {
+            hit.path == "src/lib.rs"
+                && hit
+                    .canonical_symbol_id
+                    .as_deref()
+                    .is_some_and(|id| id.contains("Color.Red"))
+                && hit.retrieval_layers.contains(&CodeRetrievalLayer::Symbol)
+                && !hit
+                    .retrieval_layers
+                    .contains(&CodeRetrievalLayer::TextFallback)
+        }),
+        "enum member definition should come from the symbol index: {:?}",
+        enum_member_definition.results
+    );
+    assert!(
+        enum_member_symbol.results.iter().any(|hit| {
+            hit.path == "src/lib.rs"
+                && hit
+                    .canonical_symbol_id
+                    .as_deref()
+                    .is_some_and(|id| id.contains("Color.Red"))
+        }),
+        "scoped enum member symbol query should match the owner-qualified identity: {:?}",
+        enum_member_symbol.results
     );
     assert!(
         references

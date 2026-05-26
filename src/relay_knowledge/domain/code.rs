@@ -39,6 +39,7 @@ pub enum CodeSymbolKind {
     Constant,
     Field,
     Variable,
+    EnumMember,
 }
 
 impl CodeSymbolKind {
@@ -54,6 +55,7 @@ impl CodeSymbolKind {
             Self::Constant => "constant",
             Self::Field => "field",
             Self::Variable => "variable",
+            Self::EnumMember => "enum_member",
         }
     }
 }

@@ -167,6 +167,53 @@ async fn replacing_file_facts_removes_old_symbols() {
 }
 
 #[tokio::test]
+async fn symbol_search_returns_enum_members() {
+    let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
+    let source_scope = SourceScope::parse("repo").expect("scope should parse");
+    let symbol = CodeSymbolRecord::new(
+        "sym-color-red",
+        source_scope.clone(),
+        "src/lib.rs",
+        "Color.Red",
+        CodeSymbolKind::EnumMember,
+        range(13, 16),
+        extraction(),
+    )
+    .expect("enum member should validate");
+    let file = CodeFileRecord::new(CodeFileFields {
+        source_scope,
+        path: "src/lib.rs".to_owned(),
+        content_hash: "hash-enum-member".to_owned(),
+        language_id: "rust".to_owned(),
+        parse_status: CodeParseStatus::Parsed,
+        diagnostic: None,
+        symbols: vec![symbol],
+        references: Vec::new(),
+        chunks: Vec::new(),
+    })
+    .expect("file should validate");
+
+    store
+        .commit_code_graph_batch(CodeGraphBatch::new(vec![file]).expect("batch"))
+        .await
+        .expect("commit should succeed");
+    let symbols = store
+        .search_code_symbols(CodeSymbolSearchRequest {
+            source_scope: Some("repo".to_owned()),
+            path: None,
+            name: Some("Color.Red".to_owned()),
+            graph_version: GraphVersion::new(1),
+            limit: 5,
+        })
+        .await
+        .expect("enum member symbol search should succeed");
+
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].kind, CodeSymbolKind::EnumMember);
+    assert_eq!(symbols[0].name, "Color.Red");
+}
+
+#[tokio::test]
 async fn failed_and_partial_files_are_visible_in_parse_counts() {
     let store = crate::storage::SqliteGraphStore::open_in_memory().expect("store should open");
     let failed = CodeFileRecord::new(CodeFileFields {
