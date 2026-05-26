@@ -696,8 +696,18 @@ fn request_builders_parse_web_payload_variants() {
     });
 
     let registration = code_register_request(&payload).expect("registration");
+    assert_eq!(registration.alias, "relay");
     assert_eq!(registration.path_filters, ["src/", "tests"]);
     assert_eq!(registration.language_filters, ["rust"]);
+
+    let default_alias_registration =
+        code_register_request(&json!({"root_path": "/repo"})).expect("default alias registration");
+    assert!(default_alias_registration.alias.is_empty());
+
+    let invalid_alias = code_register_request(&json!({"root_path": "/repo", "alias": 123}))
+        .expect_err("numeric alias should be rejected");
+    assert_eq!(invalid_alias.status, StatusCode::BAD_REQUEST);
+    assert_eq!(invalid_alias.message, "alias must be a string");
 
     let selector = code_selector(&payload).expect("selector");
     assert_eq!(selector.repository, "relay");

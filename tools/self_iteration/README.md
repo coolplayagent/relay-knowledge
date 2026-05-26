@@ -116,11 +116,14 @@ renewal without indexing exhaustive large repositories.
 is rejected so mixed C/C++ repositories cannot be narrowed at registration.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
-`nonstandard_layout_fixture`, `relay_teams`, `leveldb_cpp`,
+`nonstandard_layout_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`,
 `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
-runs the semantic/vector guardrail query. The TypeScript, C, and C++ syntax
+runs the semantic/vector guardrail query. The project alias fixture registers a
+generated repository without `--alias`, adds a session-style explicit alias to
+the same root before indexing, and verifies both aliases reuse the same indexed
+scope. The TypeScript, C, and C++ syntax
 fixtures keep external-import source fallback guardrails in the default fast
 loop and require missing dependency source to stay as unresolved edge metadata
 instead of `degraded_reason`. The C and C++ fixtures also cover macro-generated
@@ -143,7 +146,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass

@@ -315,6 +315,38 @@ mod tests {
         assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
         assert!(names.iter().any(|name| name == "grep_budget_fixture"));
         assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
+        assert!(names.iter().any(|name| name == "project_alias_fixture"));
+    }
+
+    #[test]
+    fn register_command_can_omit_alias_for_default_project_name() {
+        let binary = Path::new("relay-knowledge");
+        let root = Path::new("/work/project");
+
+        assert_eq!(
+            register_command(binary, root, None),
+            vec![
+                "relay-knowledge",
+                "repo",
+                "register",
+                "/work/project",
+                "--format",
+                "json"
+            ]
+        );
+        assert_eq!(
+            register_command(binary, root, Some("stable")),
+            vec![
+                "relay-knowledge",
+                "repo",
+                "register",
+                "/work/project",
+                "--alias",
+                "stable",
+                "--format",
+                "json"
+            ]
+        );
     }
 
     #[test]
@@ -482,6 +514,8 @@ mod tests {
             .expect("go fixture should write");
         create_generated_repository_files(&root.join("swift"), "swift_syntax_v2")
             .expect("swift fixture should write");
+        create_generated_repository_files(&root.join("project_alias"), "project_alias_v1")
+            .expect("project alias fixture should write");
         create_generated_repository_files(&root.join("nonstandard"), "nonstandard_layout_v1")
             .expect("nonstandard fixture should write");
 
@@ -511,6 +545,9 @@ mod tests {
         let swift_source =
             std::fs::read_to_string(root.join("swift/Sources/App/RequestPipeline.swift"))
                 .expect("swift source");
+        let project_alias_source =
+            std::fs::read_to_string(root.join("project_alias/src/lib.rs"))
+                .expect("project alias source");
         let nonstandard_ts = std::fs::read_to_string(
             root.join("nonstandard/external_deps/ts_sdk/sessionClient.ts"),
         )
@@ -536,6 +573,7 @@ mod tests {
         assert!(go_source.contains("ctxalias \"context\""));
         assert!(go_pipeline.contains("notify := func(payload string) string"));
         assert!(swift_source.contains("let request = { (url: URL) async throws -> Data in"));
+        assert!(project_alias_source.contains("stable_project_entry"));
         assert!(nonstandard_ts.contains("ExternalTypeScriptSessionClient"));
         assert!(nonstandard_cpp.contains("#include <external_session_client.hpp>"));
 

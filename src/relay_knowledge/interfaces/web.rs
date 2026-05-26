@@ -520,10 +520,18 @@ fn index_request(payload: &Value) -> Result<IndexRefreshRequest, WebError> {
 fn code_register_request(payload: &Value) -> Result<CodeRepositoryRegisterRequest, WebError> {
     Ok(CodeRepositoryRegisterRequest {
         root_path: string_field(payload, "root_path")?.to_owned(),
-        alias: string_field(payload, "alias")?.to_owned(),
+        alias: code_register_alias(payload)?,
         path_filters: optional_string_array_field(payload, "path_filters")?,
         language_filters: optional_string_array_field(payload, "language_filters")?,
     })
+}
+
+fn code_register_alias(payload: &Value) -> Result<String, WebError> {
+    match payload.get("alias") {
+        Some(Value::String(alias)) => Ok(alias.trim().to_owned()),
+        Some(_) => Err(WebError::bad_request("alias must be a string".to_owned())),
+        None => Ok(String::new()),
+    }
 }
 
 fn code_index_request(payload: &Value, mode: CodeIndexMode) -> Result<CodeIndexRequest, WebError> {

@@ -82,7 +82,7 @@ relay-knowledge status
 relay-knowledge help [command...] [--format text|json]
 relay-knowledge ingest --source <scope> --content <text> [--entity <label>]
 relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]
-relay-knowledge repo register <path> --alias <name> [--path <filter>]
+relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>

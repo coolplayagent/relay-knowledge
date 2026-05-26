@@ -477,6 +477,7 @@ fn fast_repository_names() -> Vec<String> {
                 "cross_language_syntax_fixture".to_owned(),
                 "typescript_syntax_fixture".to_owned(),
                 "nonstandard_layout_fixture".to_owned(),
+                "project_alias_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),
                 "temporal_samples_go".to_owned(),
@@ -644,17 +645,18 @@ fn registration_case_command(binary: &Path, path: &Path, alias: &str, case: &Val
     command
 }
 
-fn register_command(binary: &Path, path: &Path, alias: &str) -> Vec<String> {
-    vec![
+fn register_command(binary: &Path, path: &Path, alias: Option<&str>) -> Vec<String> {
+    let mut command = vec![
         binary.display().to_string(),
         "repo".to_owned(),
         "register".to_owned(),
         path.display().to_string(),
-        "--alias".to_owned(),
-        alias.to_owned(),
-        "--format".to_owned(),
-        "json".to_owned(),
-    ]
+    ];
+    if let Some(alias) = alias {
+        command.extend(["--alias".to_owned(), alias.to_owned()]);
+    }
+    command.extend(["--format".to_owned(), "json".to_owned()]);
+    command
 }
 
 fn query_command(binary: &Path, alias: &str, ref_selector: &str, case: &Value) -> Vec<String> {
@@ -926,6 +928,7 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("crates/rust_bridge/src/lib.rs", CROSS_LANGUAGE_RUST_BRIDGE),
             ("tests/fake_bridge.c", CROSS_LANGUAGE_FAKE_BRIDGE),
         ]),
+        "project_alias_v1" => Ok(vec![("src/lib.rs", PROJECT_ALIAS_LIB_RS)]),
         "python_syntax_v2" => Ok(vec![
             ("docs/operations.md", PYTHON_OPERATIONS_MD),
             ("syntax_service/__init__.py", PYTHON_INIT),
@@ -1587,6 +1590,16 @@ int rk_cpp_score_fake(const char *payload)
 {
     (void)payload;
     return 0;
+}
+"#;
+
+const PROJECT_ALIAS_LIB_RS: &str = r#"
+pub fn stable_project_entry() -> &'static str {
+    "project-name-default-alias"
+}
+
+pub fn stable_project_session_entry() -> &'static str {
+    stable_project_entry()
 }
 "#;
 

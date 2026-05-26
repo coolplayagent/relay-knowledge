@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-issue-170-project-default-repository-alias
+- 算法/架构：代码仓库注册路径在解析 Git root 后，如果 CLI/API/Web 请求没有提供 alias 或 alias 为空，则用 Git root 目录名生成稳定默认 alias；显式 `--alias` 保持原有覆盖语义，SQLite 既有多 alias 映射继续让同一 repository id 的项目名 alias 与 session 临时 alias 共存。CLI spec 拆出 repo command 模块以保持文件长度约束，业务入口仍共享同一 `register_repository` 归一化路径。
+- 不变量/预期影响/风险：不改变 repository id、scope id、索引事实版本、SQLite schema、查询 ranking、repo-set overlay、semantic/vector read model、env/paths/net、安装发布或服务后台任务；默认 alias 只来自本地已授权 Git root 的目录名，不读取 package manifest，也不枚举仓库、路径、case id 或查询字符串。预期解决 Issue #170 中 agent 初次注册每个 session 自造不同 alias 导致索引不可复用的问题，并让后续 session 默认用项目名命中同一索引；风险是根目录名为空或非 UTF-8 时返回显式注册错误，受代码单测、CLI/Web 请求测试和 fast `project_alias_fixture` guardrail 控制。
+- 策略关联：新增 `project_alias_fixture` 到默认 fast profile，先无 `--alias` 注册生成仓库，再为同一 root 注册 session 风格 alias，并验证两个 alias 均可查询同一 indexed scope；这是通用注册/索引生命周期保护，不通过固定真实仓库名或特殊查询来绕过问题。
 ## 候选优化说明：manual-sbom-dependency-inventory
 - 算法/架构：代码索引新增依赖清单事实层，把 Cargo、npm、Go、Python、Maven BOM、Gradle 与 Conan manifest/lockfile 解析为 `CodeDependencyRecord`，并写入 SQLite dependency 表和 FTS `dependency` 文档；`repo query --kind sbom`、repo-set、Web 与 MCP 共享同一 `CodeQueryKind::Sbom` 检索入口，按 source scope、path/language filter 与 freshness 状态返回结构化依赖证据。
 - 不变量/预期影响/风险：不改变现有 symbol/reference/import/call/chunk ranking、semantic/vector read model、env/paths/net、服务安装或 release artifact；SBOM 只来自仓库内 manifest/lockfile 的声明/锁定文本，不做漏洞扫描、许可证判定或 package manager 网络解析。预期解决 Issue #148 的仓库依赖软件清单缺口，并让 Java BOM、Gradle 与 Conan 依赖在 fast guardrail 中持续受保护；风险是 manifest 语法覆盖不完整或 lockfile 行号粗粒度，受 parser 单测、SQLite SBOM 查询测试、接口解析测试和 nonstandard layout fast cases 控制。

@@ -44,6 +44,19 @@
     "cases/repository_multi_repository_targets.json"
   ],
   "repositories": {
+    "project_alias_fixture": {
+      "generated_fixture": "project_alias_v1",
+      "alias": "project_alias_fixture",
+      "register_without_alias": true,
+      "additional_aliases": ["session-ephemeral-project-alias"],
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 5000,
+      "query_p50_budget_ms": 50,
+      "query_p95_budget_ms": 150
+    },
     "relay_teams": {
       "path": "/opt/workspace/relay-teams",
       "alias": "relay-teams-self-iteration",
@@ -321,6 +334,27 @@
     "max_diff_chars": 30000
   },
   "query_cases": [
+    {
+      "id": "project_alias_default_register_query",
+      "repository": "project_alias_fixture",
+      "kind": "definition",
+      "query": "stable_project_entry",
+      "guardrail": true,
+      "limit": 5,
+      "max_rank": 1,
+      "expected": [{"path": "src/lib.rs", "excerpt_contains": "stable_project_entry"}]
+    },
+    {
+      "id": "project_alias_session_alias_reuses_index",
+      "repository": "project_alias_fixture",
+      "repository_alias": "session-ephemeral-project-alias",
+      "kind": "definition",
+      "query": "stable_project_entry",
+      "guardrail": true,
+      "limit": 5,
+      "max_rank": 1,
+      "expected": [{"path": "src/lib.rs", "excerpt_contains": "stable_project_entry"}]
+    },
     {
       "id": "rt_definition_connector_service",
       "repository": "relay_teams",

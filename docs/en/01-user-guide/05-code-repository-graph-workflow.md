@@ -10,12 +10,11 @@ Register a Git repository as a code retrieval source:
 
 ```bash
 relay-knowledge repo register /path/to/repo \
-  --alias core \
   --path src \
   --format json
 ```
 
-`--alias` is the short name used by later commands. `--path` can be repeated. Registration rejects `--language` so mixed-language repositories keep their full language surface; later `repo query --language` requests can narrow results without shrinking the indexed snapshot.
+When `--alias` is omitted, the short name used by later commands defaults to the resolved Git root directory name. For `/path/to/repo`, later commands use `repo` unless an explicit `--alias` override is supplied. `--path` can be repeated. Registration rejects `--language` so mixed-language repositories keep their full language surface; later `repo query --language` requests can narrow results without shrinking the indexed snapshot.
 
 Registration records the repository root, alias, and allowed scope. It does not parse files immediately. The path must point to a readable local Git worktree; the target ref or worktree overlay is resolved during indexing. Registering the same Git root again adds an alias to the same repository id. If an alias already belongs to another repository id, registration fails.
 
@@ -24,13 +23,13 @@ Registration records the repository root, alias, and allowed scope. It does not 
 Preview the files covered by the current scope before indexing:
 
 ```bash
-relay-knowledge repo scope preview core --ref HEAD --format json
+relay-knowledge repo scope preview repo --ref HEAD --format json
 ```
 
 `repo index --dry-run` uses the same preview path:
 
 ```bash
-relay-knowledge repo index core --ref HEAD --dry-run --format json
+relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
 Preview is useful after narrowing registered `--path` values so unrelated directories are not written into the code graph. The default source preset excludes dependency/cache/vendor/build/out/target directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Git-tracked source-language runtime subtrees under `dist`, such as `dist/js/core` or `dist/js/app`, are indexed, while minified files, CSS/assets, and other distribution subtrees remain excluded by default. Use a precise `--path` registration or request when other default-excluded files are intentionally needed.
@@ -40,13 +39,13 @@ Preview is useful after narrowing registered `--path` values so unrelated direct
 Index current `HEAD`:
 
 ```bash
-relay-knowledge repo index core --ref HEAD --format json
+relay-knowledge repo index repo --ref HEAD --format json
 ```
 
 Indexing an immutable commit is better for reproducible experiments:
 
 ```bash
-relay-knowledge repo index core --ref <commit-sha> --format json
+relay-knowledge repo index repo --ref <commit-sha> --format json
 ```
 
 Full indexing reads ordinary blobs from a clean tree through Git and parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter. Gitlink submodules are skipped in the parent snapshot and should be registered as separate repositories when their contents need code graph coverage. Unsupported, invalid UTF-8, binary, oversized, or parser-failed files degrade to text-only or failed diagnostics without failing the whole batch.
@@ -60,7 +59,7 @@ Fresh full indexes still return a completed `summary` immediately. Freshness che
 Hybrid query:
 
 ```bash
-relay-knowledge repo query core \
+relay-knowledge repo query repo \
   --query retry_policy \
   --kind hybrid \
   --ref HEAD \
@@ -74,13 +73,13 @@ relay-knowledge repo query core \
 Narrow query kinds:
 
 ```bash
-relay-knowledge repo query core --query RetryPolicy --kind symbol --format json
-relay-knowledge repo query core --query retry_policy --kind definition --format json
-relay-knowledge repo query core --query retry_policy --kind references --format json
-relay-knowledge repo query core --query retry_policy --kind callers --format json
-relay-knowledge repo query core --query retry_policy --kind callees --format json
-relay-knowledge repo query core --query crate::retry_policy --kind imports --format json
-relay-knowledge repo query core --query serde --kind sbom --format json
+relay-knowledge repo query repo --query RetryPolicy --kind symbol --format json
+relay-knowledge repo query repo --query retry_policy --kind definition --format json
+relay-knowledge repo query repo --query retry_policy --kind references --format json
+relay-knowledge repo query repo --query retry_policy --kind callers --format json
+relay-knowledge repo query repo --query retry_policy --kind callees --format json
+relay-knowledge repo query repo --query crate::retry_policy --kind imports --format json
+relay-knowledge repo query repo --query serde --kind sbom --format json
 ```
 
 Results include repository id, alias, `scope_id`, requested ref, resolved commit, tree hash, path, language, byte range, line range, symbol/file id, retrieval layer, index version, freshness, score, and excerpt.
@@ -98,8 +97,8 @@ If candidate-path lookup is unavailable, or if candidate-file, materialized-byte
 Existing repositories often spread feature flags across environment variables, config keys, settings objects, and guarded branches. `repo feature-flags` lists configuration-driven flags and their code relationships from facts extracted during indexing:
 
 ```bash
-relay-knowledge repo feature-flags core --ref HEAD --format json
-relay-knowledge repo feature-flags core --query checkout --path src --limit 20 --format json
+relay-knowledge repo feature-flags repo --ref HEAD --format json
+relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 --format json
 ```
 
 Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
@@ -110,7 +109,7 @@ Multi-repository query uses an explicit `repo-set` overlay. Index each member re
 
 ```bash
 relay-knowledge repo-set create workspace --format json
-relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set add workspace repo --ref HEAD --priority 10 --format json
 relay-knowledge repo-set add workspace sdk --ref HEAD --priority 0 --format json
 relay-knowledge repo-set refresh workspace --format json
 relay-knowledge repo-set remove workspace sdk --format json
@@ -136,7 +135,7 @@ Each result carries the member repository alias, repository id, resolved commit,
 Index changes between two refs:
 
 ```bash
-relay-knowledge repo update core --base main --head HEAD --format json
+relay-knowledge repo update repo --base main --head HEAD --format json
 ```
 
 `repo update` applies the diff from `base` to `head` to the persisted `base` snapshot. `base` does not need to be the current active snapshot; it only needs to have been indexed for the same repository id, path filter, and language filter.
@@ -144,8 +143,8 @@ relay-knowledge repo update core --base main --head HEAD --format json
 If the CLI reports that no matching indexed base scope exists, index the base first:
 
 ```bash
-relay-knowledge repo index core --ref main --format json
-relay-knowledge repo update core --base main --head HEAD --format json
+relay-knowledge repo index repo --ref main --format json
+relay-knowledge repo update repo --base main --head HEAD --format json
 ```
 
 The incremental path reads `git diff --name-status --find-renames -z` and rebuilds only added, modified, copied, renamed, or type-changed files. Deleted and renamed source paths are removed from the cloned base index, while rename lineage is kept as a tombstone.
@@ -155,8 +154,8 @@ The incremental path reads `git diff --name-status --find-renames -z` and rebuil
 Use `--ref worktree` to index uncommitted work:
 
 ```bash
-relay-knowledge repo index core --ref worktree --format json
-relay-knowledge repo query core --query retry_policy --ref worktree --format json
+relay-knowledge repo index repo --ref worktree --format json
+relay-knowledge repo query repo --query retry_policy --ref worktree --format json
 ```
 
 The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapshot identifier, and includes modified and untracked files. While an overlay is active, clean commit ref queries are rejected so uncommitted content is not mislabeled as a clean Git snapshot.
@@ -166,7 +165,7 @@ The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapsho
 Analyze diff impact:
 
 ```bash
-relay-knowledge repo impact core \
+relay-knowledge repo impact repo \
   --base main \
   --head HEAD \
   --limit 100 \
@@ -180,14 +179,14 @@ Impact analysis verifies that `head_ref` has an indexed snapshot, filters change
 Generate a readable report:
 
 ```bash
-relay-knowledge repo report core --format markdown
+relay-knowledge repo report repo --format markdown
 ```
 
 Use JSON for scripts:
 
 ```bash
-relay-knowledge repo report core --format json
-relay-knowledge repo status core --format json
+relay-knowledge repo report repo --format json
+relay-knowledge repo status repo --format json
 ```
 
 Reports include repository id, root, indexed commit, tree hash, file/symbol/reference/chunk totals, scope, representative queries, latency samples, and degradation summary. Markdown reports fit PRs or release notes; JSON reports fit CI comparisons of index quality.
@@ -207,4 +206,4 @@ When `repo query` returns no results, check in order:
 5. Whether `degraded_reason` reports a source fallback candidate-path or budget issue; structured hits remain usable while exact-text fallback is degraded.
 6. Whether files were diagnosed as unsupported, binary, oversized, invalid UTF-8, or parser failed.
 
-`repo impact` requires an indexed snapshot for `--head`. Run `repo index core --ref <head>` or `repo update core --base <base> --head <head>` before impact analysis.
+`repo impact` requires an indexed snapshot for `--head`. Run `repo index repo --ref <head>` or `repo update repo --base <base> --head <head>` before impact analysis.
