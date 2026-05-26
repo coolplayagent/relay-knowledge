@@ -202,6 +202,10 @@ impl SnapshotBuild {
         self.chunks.append(&mut other.chunks);
         self.diagnostics.append(&mut other.diagnostics);
     }
+
+    pub(in crate::code) fn language_filters(&self) -> &[String] {
+        &self.language_filters
+    }
 }
 
 fn build_symbol_path_index(

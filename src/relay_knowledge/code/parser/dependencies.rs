@@ -43,7 +43,15 @@ pub(super) fn collect_dependencies(
     Ok(records
         .into_iter()
         .enumerate()
-        .map(|(index, seed)| record_from_seed(build, path, file_id, index, seed))
+        .flat_map(|(seed_index, seed)| {
+            dependency_record_language_ids(build, kind, seed.language_id)
+                .into_iter()
+                .enumerate()
+                .map(move |(language_index, language_id)| {
+                    let index = seed_index * kind.language_ids().len() + language_index;
+                    record_from_seed(build, path, file_id, index, language_id, seed.clone())
+                })
+        })
         .collect())
 }
 
@@ -103,6 +111,34 @@ impl DependencyFileKind {
     }
 }
 
+fn dependency_record_language_ids(
+    build: &SnapshotBuild,
+    kind: DependencyFileKind,
+    default_language_id: &'static str,
+) -> Vec<&'static str> {
+    let compatible = kind.language_ids();
+    if build.language_filters().is_empty() {
+        return compatible.to_vec();
+    }
+
+    let mut selected = Vec::new();
+    for language_id in compatible {
+        if build
+            .language_filters()
+            .iter()
+            .any(|filter| filter.as_str() == *language_id)
+        {
+            selected.push(*language_id);
+        }
+    }
+
+    if selected.is_empty() {
+        vec![default_language_id]
+    } else {
+        selected
+    }
+}
+
 fn python_requirements_path(path: &str, file_name: &str) -> bool {
     file_name.ends_with(".txt")
         && (file_name.starts_with("requirements")
@@ -129,6 +165,7 @@ fn record_from_seed(
     path: &str,
     file_id: &str,
     index: usize,
+    language_id: &str,
     seed: DependencySeed,
 ) -> CodeDependencyRecord {
     let line = seed.line.max(1);
@@ -141,6 +178,7 @@ fn record_from_seed(
                 build.repository_id.as_str(),
                 build.source_scope.as_str(),
                 path,
+                language_id,
                 seed.ecosystem,
                 seed.package_name.as_str(),
                 seed.dependency_group.as_str(),
@@ -151,7 +189,7 @@ fn record_from_seed(
         ),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
-        language_id: seed.language_id.to_owned(),
+        language_id: language_id.to_owned(),
         ecosystem: seed.ecosystem.to_owned(),
         package_name: seed.package_name,
         requirement: seed.requirement,
@@ -336,21 +374,23 @@ fn collect_package_lock_v1_dependencies(
             .and_then(Value::as_str)
             .map(str::to_owned);
         let line = line_containing_json_key(content, name).unwrap_or(1);
-        push_seed(
-            records,
-            SeedInput::new(
-                "npm",
-                "javascript",
-                name.to_owned(),
-                None,
-                "locked",
-                "package-lock.json",
-                true,
+        if !version.as_deref().is_some_and(npm_requirement_is_local) {
+            push_seed(
+                records,
+                SeedInput::new(
+                    "npm",
+                    "javascript",
+                    name.to_owned(),
+                    None,
+                    "locked",
+                    "package-lock.json",
+                    true,
+                )
+                .resolved(version)
+                .line(line)
+                .excerpt(name.as_str()),
             )
-            .resolved(version)
-            .line(line)
-            .excerpt(name.as_str()),
-        );
+        }
         if let Some(nested) = package.get("dependencies").and_then(Value::as_object) {
             collect_package_lock_v1_dependencies(content, nested, records);
         }

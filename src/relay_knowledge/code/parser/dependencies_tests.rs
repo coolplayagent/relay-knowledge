@@ -91,10 +91,12 @@ fn recurses_package_lock_v1_dependencies() {
                 "accepts": {"version": "1.3.8"},
                 "body-parser": {
                   "version": "1.20.1",
-                  "dependencies": {"bytes": {"version": "3.1.2"}}
-                }
+                  "dependencies": {"bytes": {"version": "3.1.2"}, "local-nested": {"version": "file:../local-nested"}}
+                },
+                "local-linked": {"version": "file:../packages/local-linked"}
               }
-            }
+            },
+            "local-workspace": {"version": "workspace:packages/local-workspace"}
           }
         }"#,
     );
@@ -104,6 +106,10 @@ fn recurses_package_lock_v1_dependencies() {
     assert_dependency(&dependencies, "body-parser", "locked", None, Some("1.20.1"));
     assert_dependency(&dependencies, "bytes", "locked", None, Some("3.1.2"));
     assert!(dependencies.iter().all(|dependency| dependency.is_lockfile));
+    assert!(!dependencies.iter().any(|dependency| matches!(
+        dependency.package_name.as_str(),
+        "local-linked" | "local-nested" | "local-workspace"
+    )));
 }
 
 #[test]
@@ -397,6 +403,45 @@ fn extracts_conan_txt_and_python_dependencies() {
 }
 
 #[test]
+fn preserves_shared_manifest_language_scope_for_dependency_records() {
+    let package = collect_with_languages(
+        "package.json",
+        r#"{"dependencies":{"react":"^18"}}"#,
+        &["typescript"],
+    );
+    assert_dependency_language(&package, "react", "typescript");
+    assert_dependency_language(
+        &collect("package.json", r#"{"dependencies":{"react":"^18"}}"#),
+        "react",
+        "tsx",
+    );
+
+    let package_lock = collect_with_languages(
+        "package-lock.json",
+        r#"{"packages":{"node_modules/react":{"version":"18.2.0"}}}"#,
+        &["jsx"],
+    );
+    assert_dependency_language(&package_lock, "react", "jsx");
+
+    let pom = collect_with_languages(
+        "pom.xml",
+        "<dependencies><dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency></dependencies>",
+        &["scala"],
+    );
+    assert_dependency_language(&pom, "org.slf4j:slf4j-api", "scala");
+
+    let gradle = collect_with_languages(
+        "build.gradle.kts",
+        r#"implementation("org.slf4j:slf4j-api:2.0.9")"#,
+        &["kotlin"],
+    );
+    assert_dependency_language(&gradle, "org.slf4j:slf4j-api", "kotlin");
+
+    let conan = collect_with_languages("conanfile.txt", "[requires]\nzlib/1.2.13\n", &["c"]);
+    assert_dependency_language(&conan, "zlib", "c");
+}
+
+#[test]
 fn ignores_invalid_or_unsupported_dependency_files() {
     assert!(collect("package.json", "{not json").is_empty());
     assert!(collect("src/lib.rs", "serde = \"1\"").is_empty());
@@ -404,7 +449,15 @@ fn ignores_invalid_or_unsupported_dependency_files() {
 }
 
 fn collect(path: &str, content: &str) -> Vec<CodeDependencyRecord> {
-    collect_dependencies(&test_build(), path, "file", content)
+    collect_with_languages(path, content, &[])
+}
+
+fn collect_with_languages(
+    path: &str,
+    content: &str,
+    language_filters: &[&str],
+) -> Vec<CodeDependencyRecord> {
+    collect_dependencies(&test_build(language_filters), path, "file", content)
         .expect("dependency parsing should not fail")
 }
 
@@ -435,13 +488,36 @@ fn assert_dependency(
     );
 }
 
-fn test_build() -> SnapshotBuild {
+fn assert_dependency_language(
+    dependencies: &[CodeDependencyRecord],
+    package_name: &str,
+    language_id: &str,
+) {
+    assert!(
+        dependencies.iter().any(|dependency| {
+            dependency.package_name == package_name && dependency.language_id == language_id
+        }),
+        "missing dependency {package_name} language={language_id}; got {:?}",
+        dependencies
+            .iter()
+            .map(|dependency| (
+                dependency.package_name.as_str(),
+                dependency.language_id.as_str()
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+fn test_build(language_filters: &[&str]) -> SnapshotBuild {
     let registration = CodeRepositoryRegistration {
         repository_id: "repo".to_owned(),
         root_path: "/tmp/repo".to_owned(),
         alias: "repo".to_owned(),
         path_filters: Vec::new(),
-        language_filters: Vec::new(),
+        language_filters: language_filters
+            .iter()
+            .map(|language| (*language).to_owned())
+            .collect(),
     };
     SnapshotBuild::new(
         &registration,

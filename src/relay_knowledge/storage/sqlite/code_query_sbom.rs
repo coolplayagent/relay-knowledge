@@ -13,8 +13,9 @@ use super::{
     push_path_filter_values, selected_row,
 };
 use super::{
-    HitParts, code_query_rows::DependencyRow, fts_path_and_language_filter_sql, hit_from_parts,
-    prepare_code_search_statement, required_scope,
+    HitParts, code_query_rows::DependencyRow, dedupe_sort_truncate,
+    fts_path_and_language_filter_sql, hit_from_parts, prepare_code_search_statement,
+    required_scope,
 };
 
 pub(super) fn search_sbom(
@@ -90,7 +91,7 @@ pub(super) fn search_sbom(
         .collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)?;
 
-    Ok(rows
+    let mut hits = rows
         .into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
         .filter_map(|row| {
@@ -125,7 +126,10 @@ pub(super) fn search_sbom(
                 )
             })
         })
-        .collect())
+        .collect::<Vec<_>>();
+    dedupe_sort_truncate(&mut hits, request.limit.max(1));
+
+    Ok(hits)
 }
 
 fn sbom_query_values(
@@ -135,6 +139,11 @@ fn sbom_query_values(
     fts_query: &str,
     candidate_limit: usize,
 ) -> Vec<Value> {
+    let result_limit = request
+        .limit
+        .max(1)
+        .saturating_mul(4)
+        .min(candidate_limit.max(1));
     let mut values = vec![
         Value::Text(fts_query.to_owned()),
         Value::Text(source_scope.to_owned()),
@@ -146,7 +155,7 @@ fn sbom_query_values(
     values.push(Value::Integer(candidate_limit as i64));
     values.push(Value::Text(source_scope.to_owned()));
     values.push(Value::Text(request.query.trim().to_owned()));
-    values.push(Value::Integer(request.limit.max(1) as i64));
+    values.push(Value::Integer(result_limit as i64));
 
     values
 }

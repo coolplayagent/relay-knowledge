@@ -141,6 +141,69 @@ async fn sbom_query_honors_path_and_language_filters() {
 }
 
 #[tokio::test]
+async fn sbom_query_deduplicates_shared_manifest_language_rows() {
+    let react_js = dependency(
+        "dep-react-js",
+        "package-file",
+        "web/package.json",
+        "npm",
+        "react",
+        Some("^18.2.0"),
+    );
+    let mut react_ts = react_js.clone();
+    react_ts.dependency_id = "dep-react-ts".to_owned();
+    react_ts.language_id = "typescript".to_owned();
+
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("package-file", "web/package.json", "javascript")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: vec![react_js, react_ts],
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let all_hits = store
+        .search_code(request(
+            "react",
+            CodeQueryKind::Sbom,
+            Vec::new(),
+            Vec::new(),
+        ))
+        .await
+        .expect("unfiltered sbom query should succeed");
+    let typescript_hits = store
+        .search_code(request(
+            "react",
+            CodeQueryKind::Sbom,
+            Vec::new(),
+            vec!["typescript".to_owned()],
+        ))
+        .await
+        .expect("language-filtered sbom query should succeed");
+
+    assert_eq!(all_hits.len(), 1);
+    assert_eq!(typescript_hits.len(), 1);
+    assert_eq!(typescript_hits[0].language_id, "typescript");
+}
+
+#[tokio::test]
 async fn sbom_query_applies_requested_limit_after_relevance_ranking() {
     let store = store_with_snapshot(CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
