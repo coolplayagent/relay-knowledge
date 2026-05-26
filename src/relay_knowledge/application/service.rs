@@ -44,8 +44,8 @@ use crate::{
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
     index_refresh::{
-        filter_outcome_to_read_models, index_refresh_outcome, metadata_for_indexes,
-        reconcile_index_refreshes, recover_index_kinds, refresh_index_kinds,
+        index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
+        recover_index_kinds, refresh_index_kinds,
     },
     ingest::mutation_batch_from_request,
     multimodal::extraction_ingest_request,
@@ -61,6 +61,7 @@ use super::ingest::generated_evidence_id;
 pub struct RelayKnowledgeService {
     pub(super) runtime: RuntimeConfiguration,
     pub(super) storage: StorageProvider,
+    pub(super) health_cache: Arc<tokio::sync::RwLock<Option<HealthResponse>>>,
 }
 
 impl RelayKnowledgeService {
@@ -71,6 +72,7 @@ impl RelayKnowledgeService {
         Self {
             runtime,
             storage: StorageProvider::sqlite(database_path),
+            health_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -79,6 +81,7 @@ impl RelayKnowledgeService {
         Self {
             runtime,
             storage: StorageProvider::ready(store),
+            health_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -553,46 +556,6 @@ impl RelayKnowledgeService {
         })
     }
 
-    /// Returns service and data health for diagnostics.
-    pub async fn health(&self, context: RequestContext) -> Result<HealthResponse, ApiError> {
-        let store = self.storage.get().await.map_err(storage_api_error)?;
-        let repository_code_totals = store
-            .code_repository_totals()
-            .await
-            .map_err(storage_api_error)?;
-        let graph = graph_with_repository_code_totals(
-            store.inspect_graph().await.map_err(storage_api_error)?,
-            &repository_code_totals,
-        );
-        reconcile_index_refreshes(&store, graph.graph_version, &self.runtime.retrieval).await?;
-        let outcome = filter_outcome_to_read_models(
-            index_refresh_outcome(&store).await?,
-            &self.runtime.retrieval,
-        );
-        let healthy = outcome
-            .indexes
-            .iter()
-            .all(|status| !status.is_stale_for(graph.graph_version));
-        let file_index = file_index_diagnostics_or_default(&store).await?;
-
-        Ok(HealthResponse {
-            metadata: metadata_for_indexes(&context, graph.graph_version, &outcome.indexes),
-            healthy,
-            graph,
-            repository_code_totals,
-            indexes: outcome.indexes,
-            index_cursors: outcome.cursors,
-            index_refresh: outcome.diagnostics,
-            file_index,
-            runtime: runtime_status_with_model_profiles(
-                &self.runtime,
-                self.model_provider_config()
-                    .profile_summary(&self.runtime.retrieval)
-                    .await,
-            ),
-        })
-    }
-
     /// Probes the configured remote embedding provider without exposing secrets.
     pub async fn probe_embedding_provider(
         &self,
@@ -805,7 +768,7 @@ pub struct AgentDurableAuditInput {
     pub message: Option<String>,
 }
 
-fn current_time_millis() -> u64 {
+pub(super) fn current_time_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |duration| {
@@ -867,11 +830,11 @@ impl StorageProvider {
     }
 }
 
-fn storage_api_error(error: StorageError) -> ApiError {
+pub(super) fn storage_api_error(error: StorageError) -> ApiError {
     ApiError::storage_unavailable(error.to_string())
 }
 
-async fn file_index_diagnostics_or_default(
+pub(super) async fn file_index_diagnostics_or_default(
     store: &Arc<dyn KnowledgeStore>,
 ) -> Result<FileIndexDiagnostics, ApiError> {
     match store.file_index_diagnostics().await {
@@ -912,7 +875,7 @@ fn retrieval_context_bytes(
         )
 }
 
-fn graph_with_repository_code_totals(
+pub(super) fn graph_with_repository_code_totals(
     mut graph: GraphInspection,
     repository_totals: &CodeRepositoryTotals,
 ) -> GraphInspection {

@@ -571,6 +571,8 @@ pub struct ServiceRecoveryReport {
 pub struct HealthResponse {
     pub metadata: ApiMetadata,
     pub healthy: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
     pub graph: GraphInspection,
     pub repository_code_totals: CodeRepositoryTotals,
     pub indexes: Vec<IndexStatus>,

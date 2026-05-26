@@ -10,7 +10,7 @@ use crate::{
 
 use super::code_status;
 
-pub(super) fn repository_totals(
+pub(in crate::storage::sqlite) fn repository_totals(
     connection: &mut Connection,
 ) -> Result<CodeRepositoryTotals, StorageError> {
     Ok(CodeRepositoryTotals {

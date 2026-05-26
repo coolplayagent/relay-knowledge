@@ -445,6 +445,10 @@ enumerating cases.
   both `*_index_ms` and `*_register_index_ms` so self-iteration prioritizes cold
   indexing wall time after `repo register`, including batching, parser
   throughput, SQLite writes, finalize work, and incremental reuse.
+- The fast profile runs `code_index_health_isolation_cases` as a product gate.
+  The case indexes a no-language-filter repository update while checking that
+  health remains bounded and `repo query --freshness allow-stale` can read the
+  latest completed committed scope instead of hanging behind the index writer.
 - The built-in `semantic_vector_suite` writes a small evidence fixture into a self-iteration source scope, refreshes semantic/vector indexes, and verifies that query hits expose semantic/vector `retriever_sources`, available `backend_statuses`, and relevant ranking. When `RELAY_KNOWLEDGE_SEMANTIC_BACKEND=external` or `RELAY_KNOWLEDGE_VECTOR_BACKEND=external` is enabled, the evaluator inherits the runtime environment directly and runs `provider probe` first; provider URL, API key, model name, and dimension are not stored in cases or CLI flags.
 - `research_judge_suite` sends the candidate diff, deterministic evaluation summary, selected 02/03/04 documentation excerpts, configured competitive feature targets, and implementation guardrails to an LLM or coding-agent judge and emits the `research_judge` objective. It defaults to an `opencode` CLI judge, can be pointed at OpenAI-compatible HTTP, and can keep the suite selected while disabling the backend with `RELAY_KNOWLEDGE_JUDGE_BACKEND=none`; use `--exclude-categories research_judge` when the suite itself should not run. Unsupported backend names fail the judge gate, and an explicit CLI judge command selects the CLI backend unless `RELAY_KNOWLEDGE_JUDGE_BACKEND` explicitly requests HTTP. This suite does not replace deterministic gates; it covers research-style and open-ended quality judgment.
 - `/opt/workspace/relay-teams` full `scope=all` indexing and Python service, connector, eval checkpoint, and re-export queries.

@@ -45,13 +45,15 @@ CLI 可以生成服务定义和执行 doctor，但不应伪装成后台常驻管
 
 冷启动代码仓库 full indexing 采用同一恢复形态。`repo index` 会持久化包含 source scope、input fingerprint、payload、resource budget、attempt count、retry cursor 和 lease 字段的 code-index task；前台 CLI 只启动有界单次 worker，常驻 `service run` 则用单个仓库索引 worker 消费持久队列。过期 running lease 会在 claim/status 路径报告 active work 前被恢复：可重试 attempt 进入 retry 并记录 `lease_expired` 诊断，耗尽 attempt 的任务进入 dead-letter，旧 worker 在 lease 过期或被接管后不能再 complete/fail task。活跃 worker 会在昂贵 batch 解析前、每次提交 checkpoint batch 后、finalize 前后和完成 task 前续租；未实现可选 recovery/renewal hook 的 store 会将这些 hook 视为 no-op。checkpoint `updated_at_ms` 保持可见以诊断卡住任务。Repository-set overlay refresh task 采用同样的常驻服务模型：异步 refresh 请求会持久化带 lease 的任务，`service run` 用单个 repository-set overlay refresh worker 消费该队列。worker 失败时进入 retry 或 dead-letter；code-index 成功后还会保留 active scope、最近两个完成 scope 和未完成任务 scope，并淘汰更旧的代码 scope。
 
+大型 repository indexing 不能阻断服务 liveness 或普通读查询。SQLite 写入必须经过单 writer lane；health、graph/status/report、file query 和代码查询应优先走有界只读连接读取 committed snapshot。`health` 不执行 diagnostic reconcile 写入，不排队 refresh work，超过短预算时返回 stale/degraded `storage_busy`。代码查询的 `allow-stale` 策略在请求 ref 正在索引且新 scope 未 finalize 时读取上一个已完成 scope，并显式标记 stale/degraded；`wait-until-fresh` 才允许因为目标 scope 未完成而拒绝。
+
 Overload 处理遵循 SRE 和 adaptive concurrency 原则：当队列、IO、CPU 或 provider budget 饱和时，系统优先拒绝新后台 work、延迟低优先级内容索引、保留查询热路径预算，并返回 retryable/paused/degraded 状态。
 
 ## 6. 验收标准
 
 - 崩溃重启后不会丢失必要刷新工作。
 - dead-letter task 不被诊断路径自动复活。
-- 后台 CPU/IO-heavy work 不阻塞查询热路径。
+- 后台 CPU/IO-heavy work 不阻塞 health liveness 和查询热路径。
 - watcher lag、scan backlog、cursor invalidation 和 overload decision 可在 health/service doctor 中解释。
 
 ---

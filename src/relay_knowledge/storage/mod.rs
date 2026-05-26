@@ -51,6 +51,14 @@ pub trait GraphStore: Send + Sync {
 
     fn inspect_graph(&self) -> StorageFuture<'_, GraphInspection>;
 
+    fn health_snapshot(&self, _now_ms: u64) -> StorageFuture<'_, HealthStorageSnapshot> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "health snapshot storage is unavailable".to_owned(),
+            ))
+        })
+    }
+
     fn graph_canvas(
         &self,
         _request: GraphCanvasStorageRequest,
@@ -515,6 +523,36 @@ pub struct GraphInspection {
     pub code_parse_status_counts: CodeParseStatusCounts,
 }
 
+impl Default for GraphInspection {
+    fn default() -> Self {
+        Self {
+            graph_version: GraphVersion::ZERO,
+            entity_count: 0,
+            evidence_count: 0,
+            relation_count: 0,
+            claim_count: 0,
+            event_count: 0,
+            mutation_count: 0,
+            code_file_count: 0,
+            code_symbol_count: 0,
+            code_reference_count: 0,
+            code_chunk_count: 0,
+            code_parse_status_counts: CodeParseStatusCounts::default(),
+        }
+    }
+}
+
+/// Read-only storage view used by service health without mutating indexes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HealthStorageSnapshot {
+    pub graph: GraphInspection,
+    pub repository_code_totals: crate::domain::CodeRepositoryTotals,
+    pub indexes: Vec<IndexStatus>,
+    pub index_cursors: Vec<IndexCursor>,
+    pub index_refresh: IndexRefreshDiagnostics,
+    pub file_index: FileIndexDiagnostics,
+}
+
 /// Mutation log entry returned for replay and index refresh planning.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutationLogEntry {
@@ -664,7 +702,7 @@ pub struct IndexStalenessReason {
 }
 
 /// Snapshot for queue, dead-letter, and stale-index diagnostics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexRefreshDiagnostics {
     pub queue_depth: usize,
     pub running_count: usize,
@@ -692,6 +730,7 @@ pub enum StorageError {
     Sqlite(rusqlite::Error),
     Join(tokio::task::JoinError),
     LockPoisoned,
+    Busy(String),
     InvalidInput(String),
 }
 
@@ -702,6 +741,7 @@ impl fmt::Display for StorageError {
             Self::Sqlite(error) => write!(formatter, "sqlite operation failed: {error}"),
             Self::Join(error) => write!(formatter, "storage worker failed: {error}"),
             Self::LockPoisoned => write!(formatter, "sqlite connection lock was poisoned"),
+            Self::Busy(message) => write!(formatter, "storage busy: {message}"),
             Self::InvalidInput(message) => write!(formatter, "invalid storage input: {message}"),
         }
     }

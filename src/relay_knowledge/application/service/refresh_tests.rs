@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[tokio::test]
-async fn health_queues_scoped_backlogs_larger_than_initial_budget() {
+async fn health_reports_stale_scoped_backlogs_without_queuing_refresh_work() {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
     let service = service_with_store(store.clone()).await;
     store
@@ -26,10 +26,11 @@ async fn health_queues_scoped_backlogs_larger_than_initial_budget() {
             "trace-health",
         ))
         .await
-        .expect("health should degrade with queued work instead of failing");
+        .expect("health should degrade with stale work instead of failing");
 
     assert!(!health.healthy);
-    assert_eq!(health.index_refresh.queue_depth, 129);
+    assert!(health.metadata.stale);
+    assert_eq!(health.index_refresh.queue_depth, 0);
     assert_eq!(health.index_cursors.len(), 129);
 }
 

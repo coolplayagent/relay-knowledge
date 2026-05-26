@@ -58,6 +58,19 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     ["cargo", "test", "--all-targets", "code_index_task_"],
                     300,
                 ),
+                quality_gate(
+                    "code_index_health_isolation_cases",
+                    [
+                        "cargo",
+                        "test",
+                        "--test",
+                        "relay_knowledge",
+                        "code_index_health_isolation_cases",
+                        "--",
+                        "--nocapture",
+                    ],
+                    300,
+                ),
             ]),
         ];
     }

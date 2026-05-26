@@ -30,7 +30,7 @@ use super::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
         per_member_candidate_limit, prune_returned_overlay_evidence, repository_set_score,
     },
-    code_service::apply_code_grep_fallback,
+    code_service_support::apply_code_grep_fallback,
 };
 
 const REPOSITORY_SET_REFRESH_TASK_LEASE_MS: u64 = 10 * 60 * 1000;
