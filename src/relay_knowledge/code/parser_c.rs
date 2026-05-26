@@ -3,6 +3,7 @@ use tree_sitter::Node;
 use super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
+use super::parser_c_preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
 const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
 
@@ -384,8 +385,10 @@ fn local_macro_generated_function_name(
     argument_groups: &[MacroArgument],
     limit_byte: usize,
 ) -> LocalMacroFunctionName {
-    let Some(definition) = local_function_macro_definition(content, macro_name, limit_byte) else {
-        return LocalMacroFunctionName::NotMacro;
+    let definition = match local_function_macro_definition(content, macro_name, limit_byte) {
+        LocalFunctionMacroDefinition::Function(definition) => definition,
+        LocalFunctionMacroDefinition::KnownUnavailable => return LocalMacroFunctionName::Rejected,
+        LocalFunctionMacroDefinition::Missing => return LocalMacroFunctionName::NotMacro,
     };
     let argument_index = macro_definition_function_name_parameter_index(
         &definition.replacement,
@@ -408,116 +411,6 @@ enum LocalMacroFunctionName {
     Recovered(String),
     Rejected,
     NotMacro,
-}
-
-struct MacroFunctionDefinition {
-    parameters: Vec<String>,
-    replacement: String,
-}
-
-fn local_function_macro_definition(
-    content: &str,
-    macro_name: &str,
-    limit_byte: usize,
-) -> Option<MacroFunctionDefinition> {
-    let search_end = limit_byte.min(content.len());
-    let mut latest = None;
-    let mut logical_line = String::new();
-    for line in content[..search_end].lines() {
-        let trimmed_start = line.trim_start();
-        if logical_line.is_empty() && !trimmed_start.starts_with("#define") {
-            continue;
-        }
-        append_preprocessor_logical_line(&mut logical_line, line);
-        if !line_continues_preprocessor_definition(line) {
-            latest = parse_function_macro_definition_line(&logical_line, macro_name).or(latest);
-            logical_line.clear();
-        }
-    }
-    if !logical_line.is_empty() {
-        latest = parse_function_macro_definition_line(&logical_line, macro_name).or(latest);
-    }
-
-    latest
-}
-
-fn append_preprocessor_logical_line(logical_line: &mut String, line: &str) {
-    if !logical_line.is_empty() {
-        logical_line.push(' ');
-    }
-    let segment = line
-        .trim_end()
-        .strip_suffix('\\')
-        .unwrap_or_else(|| line.trim_end())
-        .trim();
-    logical_line.push_str(segment);
-}
-
-fn line_continues_preprocessor_definition(line: &str) -> bool {
-    line.trim_end().ends_with('\\')
-}
-
-fn parse_function_macro_definition_line(
-    line: &str,
-    macro_name: &str,
-) -> Option<MacroFunctionDefinition> {
-    let directive = line
-        .trim_start()
-        .strip_prefix('#')?
-        .trim_start()
-        .strip_prefix("define")?;
-    if directive
-        .chars()
-        .next()
-        .is_some_and(|character| character == '_' || character.is_ascii_alphanumeric())
-    {
-        return None;
-    }
-    let after_define = directive.trim_start();
-    let after_name = after_define.strip_prefix(macro_name)?;
-    if !after_name.starts_with('(') {
-        return None;
-    }
-    let parameters_end = closing_parenthesis_index(after_name)?;
-    let replacement = after_name[parameters_end + 1..].trim();
-    if replacement.is_empty() {
-        return None;
-    }
-    let parameters = after_name[1..parameters_end]
-        .split(',')
-        .map(str::trim)
-        .filter(|parameter| !parameter.is_empty() && *parameter != "...")
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if parameters.is_empty() {
-        return None;
-    }
-
-    Some(MacroFunctionDefinition {
-        parameters,
-        replacement: replacement.to_owned(),
-    })
-}
-
-fn closing_parenthesis_index(text: &str) -> Option<usize> {
-    if !text.starts_with('(') {
-        return None;
-    }
-    let mut depth = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
 }
 
 fn macro_definition_function_name_parameter_index(

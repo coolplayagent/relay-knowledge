@@ -31,7 +31,7 @@ This page is the compact English companion for the self-iteration optimization l
 
 - Algorithm and architecture: C parser recovery now treats isolated typedef-style external-header declarations, module tables, and uppercase macro calls with declaration bodies as recoverable when structured symbols, references, imports, or calls are still extracted. Macro-generated C function symbols expand to the following compound body so call ownership remains available.
 - Invariants and limits: missing Nginx/Kong-style headers stay unresolved import metadata with `target_hint`; they are not file degradation. Broken assignments, preprocessor-branch syntax errors, registration macros, and non-body data macros still surface diagnostics or stay out of the call graph.
-- Guardrails: the default fast `c_syntax_fixture` includes unresolved `ngx_*` headers, a `KONG_ACCESS_PHASE` handler, typedef-style module tables, symbol/definition/callee/import cases, and no repository/path/query special casing.
+- Guardrails: the default fast `c_syntax_fixture` includes unresolved `ngx_*` headers, a `KONG_ACCESS_PHASE` handler, typedef-style module tables, symbol/definition/callee/import cases, and no repository/path/query special casing. Local macro lookup now accepts spaced `# define` directives and backslash continuations, but treats `#undef` and inactive `#if 0`/locally false `#ifdef` definitions as unavailable so stale macro bodies cannot create caller ownership.
 
 ## Documentation Maintenance
 

@@ -247,6 +247,107 @@ KONG_ACCESS_PHASE(ngx_http_demo_access)
 }
 
 #[test]
+fn c_macro_body_recovery_reads_spaced_define_directive() {
+    let snapshot = parse_source_snapshot(
+        "src/spaced_define_macro_module.c",
+        br#"
+# define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+KONG_ACCESS_PHASE(ngx_http_demo_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "ngx_http_demo_access"),
+        "spaced define directives should recover the handler symbol: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot.calls.iter().any(|call| {
+            call.caller_name.as_deref() == Some("ngx_http_demo_access")
+                && call.callee_name == "ngx_http_demo_init"
+        }),
+        "spaced define directives should own calls in the body: {:?}",
+        snapshot.calls
+    );
+}
+
+#[test]
+fn c_macro_body_recovery_ignores_undef_and_inactive_macro_definitions() {
+    let snapshot = parse_source_snapshot(
+        "src/inactive_macro_module.c",
+        br#"
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#undef KONG_ACCESS_PHASE
+
+#if 0
+#define HIDDEN_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
+#ifdef NEVER_DEFINED
+#define CONDITIONAL_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+KONG_ACCESS_PHASE(ngx_http_after_undef)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+HIDDEN_PHASE(ngx_http_inactive_if)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+CONDITIONAL_PHASE(ngx_http_inactive_ifdef)
+{
+    return ngx_http_demo_init(request->pool);
+}
+"#,
+    );
+
+    for name in [
+        "ngx_http_after_undef",
+        "ngx_http_inactive_if",
+        "ngx_http_inactive_ifdef",
+    ] {
+        assert!(
+            !snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "function" && symbol.name == name),
+            "inactive or undefined macros should not recover handler symbols: {:?}",
+            snapshot.symbols
+        );
+        assert!(
+            !snapshot
+                .calls
+                .iter()
+                .any(|call| call.caller_name.as_deref() == Some(name)),
+            "inactive or undefined macros should not own call graph edges: {:?}",
+            snapshot.calls
+        );
+    }
+}
+
+#[test]
 fn cpp_manual_recovery_keeps_elaborated_return_type_functions() {
     let snapshot = parse_source_snapshot(
         "src/factory.cpp",

@@ -37,7 +37,7 @@ C 没有原生 lambda 语法，因此 fixture 明确使用 function pointer type
 
 - `symbol`/`definition`: `struct rk_driver_ops`、`rk_driver_read`、`rk_read_fn`。
 - 可恢复 C macro definition：`RK_HTTP_HANDLER(rk_http_access_handler)` 必须抽取为 definition，且文件不标为 partial。
-- 外部头文件 macro recovery：`KONG_ACCESS_PHASE(ngx_http_demo_access)`、`ngx_module_t ngx_http_demo_module` 与 unresolved `#include <ngx_http.h>` 必须保留结构化事实且不降级，即使 Nginx 头文件不在 indexed scope 内。
+- 外部头文件 macro recovery：`KONG_ACCESS_PHASE(ngx_http_demo_access)`、`ngx_module_t ngx_http_demo_module` 与 unresolved `#include <ngx_http.h>` 必须保留结构化事实且不降级，即使 Nginx 头文件不在 indexed scope 内。parser regression 同时覆盖 `# define`、续行 define、`#undef` 和 inactive preprocessor branch 下的本地 macro recovery。
 - `references`: `.read = rk_driver_read`、`rk_pipeline[index](dev)`、`RK_TRACE_VALUE(dev->fd)`。
 - `callers`/`callees`: function pointer dispatch、operation table read callback、dispatch 调用序列。
 - `imports`: 本地 `#include "driver_ops.h"` 和 unresolved external `#include <openssl/ssl.h>`，且不设置 `degraded_reason`。
