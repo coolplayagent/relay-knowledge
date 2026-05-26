@@ -127,16 +127,26 @@ pub(super) fn python_requirement(value: &str) -> Option<(String, Option<String>)
 }
 
 fn split_direct_reference(value: &str) -> (&str, Option<&str>) {
-    let Some(index) = value.find(" @ ") else {
-        return (value, None);
-    };
-    let name = value[..index].trim();
-    let reference = value[index + 3..].trim();
-    if name.is_empty() || reference.is_empty() {
-        (value, None)
-    } else {
-        (name, Some(reference))
+    for (index, _) in value.match_indices('@') {
+        let name = value[..index].trim();
+        let reference = value[index + 1..].trim();
+        if python_direct_reference_name(name) && !reference.is_empty() {
+            return (name, Some(reference));
+        }
     }
+
+    (value, None)
+}
+
+fn python_direct_reference_name(value: &str) -> bool {
+    let name = value.split_once('[').map_or(value, |(name, _)| name).trim();
+    !name.is_empty()
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        })
+        && name
+            .chars()
+            .any(|character| character.is_ascii_alphanumeric())
 }
 
 fn requirement_egg_name(value: &str) -> Option<String> {

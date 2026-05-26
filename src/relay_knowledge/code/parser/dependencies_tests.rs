@@ -210,6 +210,7 @@ fn restricts_poetry_parsing_to_dependency_sections() {
 	dependencies = [
 	  "httpx>=0.27",
 	  "colorama; platform_system == 'Windows'",
+	  "compact-ref@https://example.invalid/compact-ref.whl",
 	]
 [project.optional-dependencies]
 docs = ["mkdocs>=1"]
@@ -229,6 +230,13 @@ fast = ["uvloop"]
 
     assert_dependency(&dependencies, "httpx", "dependencies", Some(">=0.27"), None);
     assert_dependency(&dependencies, "colorama", "dependencies", None, None);
+    assert_dependency(
+        &dependencies,
+        "compact-ref",
+        "dependencies",
+        Some("@ https://example.invalid/compact-ref.whl"),
+        None,
+    );
     assert_dependency(&dependencies, "mkdocs", "docs", Some(">=1"), None);
     assert_dependency(&dependencies, "requests", "dependencies", Some("^2"), None);
     assert_dependency(&dependencies, "rich", "dependencies", Some("^13"), None);
@@ -243,7 +251,7 @@ fast = ["uvloop"]
 fn extracts_requirements_dependencies_without_options() {
     let dependencies = collect(
         "requirements-dev.txt",
-        "# install set\n-r base.txt\n../shared-lib\n./vendor/pkg\nlocal_path @ file:../local-path\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl#sha256=abc ; python_version >= \"3.11\"\n-e git+https://example.invalid/editable.git#egg=editable_pkg\n--editable git+ssh://git@example.invalid/org/other.git#egg=other-pkg\n",
+        "# install set\n-r base.txt\n../shared-lib\n./vendor/pkg\nlocal_path @ file:../local-path\nrequests[socks]>=2.32\nuvicorn==0.29.0 # server\ncolorama; platform_system == \"Windows\"\nwatchfiles @ https://example.invalid/watchfiles.whl#sha256=abc ; python_version >= \"3.11\"\ncompact-ref@https://example.invalid/compact-ref.whl#sha256=def\n-e git+https://example.invalid/editable.git#egg=editable_pkg\n--editable git+ssh://git@example.invalid/org/other.git#egg=other-pkg\n",
     );
 
     assert_dependency(
@@ -270,6 +278,13 @@ fn extracts_requirements_dependencies_without_options() {
     );
     assert_dependency(
         &dependencies,
+        "compact-ref",
+        "requirements",
+        Some("@ https://example.invalid/compact-ref.whl#sha256=def"),
+        None,
+    );
+    assert_dependency(
+        &dependencies,
         "editable_pkg",
         "requirements",
         Some("@ git+https://example.invalid/editable.git#egg=editable_pkg"),
@@ -282,7 +297,7 @@ fn extracts_requirements_dependencies_without_options() {
         Some("@ git+ssh://git@example.invalid/org/other.git#egg=other-pkg"),
         None,
     );
-    assert_eq!(dependencies.len(), 6);
+    assert_eq!(dependencies.len(), 7);
     assert!(!dependencies.iter().any(|dependency| matches!(
         dependency.package_name.as_str(),
         "../shared-lib" | "./vendor/pkg" | "local_path"
