@@ -79,16 +79,10 @@ fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFun
         return MacroBodyFunctionDefinition::Rejected;
     };
     let name = if definition_like_macro_name(macro_name) {
-        match macro_generated_function_name_from_groups(&arguments, macro_name) {
-            Some(name) => {
-                return MacroBodyFunctionDefinition::Recovered((
-                    name,
-                    "function",
-                    syntax_range(node),
-                ));
-            }
-            None => return MacroBodyFunctionDefinition::Rejected,
-        }
+        let Some(name) = macro_generated_function_name_from_groups(&arguments, macro_name) else {
+            return MacroBodyFunctionDefinition::Rejected;
+        };
+        name
     } else {
         match local_macro_generated_function_name(
             content,
