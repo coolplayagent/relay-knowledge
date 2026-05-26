@@ -112,6 +112,8 @@ clippy, full test suite, local-file fixtures, or research judge by default.
 The code-index recovery gate covers expired task lease recovery, stale worker
 completion rejection, attempt-budget dead-lettering, and checkpoint-batch lease
 renewal without indexing exhaustive large repositories.
+`fast` also runs a registration guardrail proving `repo register --language`
+is rejected so mixed C/C++ repositories cannot be narrowed at registration.
 `fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
 `nonstandard_layout_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`,
@@ -144,7 +146,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
@@ -490,4 +492,4 @@ git clone --depth 1 https://github.com/scala/scala3.git /opt/workspace/scala3
 git clone --depth 1 https://github.com/Alamofire/Alamofire.git /opt/workspace/alamofire
 ```
 
-All repository targets must use `scope=all`. The evaluator rejects non-full scopes, and full-scope registration does not pass path or language filters to `repo register`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.
+All repository targets must use `scope=all`. The evaluator rejects non-full scopes, full-scope registration does not pass path or language filters to `repo register`, and a default guardrail verifies that product registration rejects `--language`; case-level filters remain available to test query filtering. Use `--profile smoke` for launcher validation without repository evaluation. Use `--profile exhaustive` when long-cycle full initial indexing gates should be run; these gates are intentionally outside the default profile so single-CPU self-iteration workers do not reject every candidate before actionable retrieval feedback is collected.

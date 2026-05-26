@@ -48,6 +48,13 @@ struct FileReport {
 }
 
 #[derive(Debug, Clone)]
+struct RegistrationCaseReport {
+    commands: Vec<CommandResult>,
+    cases: Vec<CaseObservation>,
+    gates: Vec<GateObservation>,
+}
+
+#[derive(Debug, Clone)]
 struct EvalRuntime {
     binary: PathBuf,
     workspace: PathBuf,
@@ -214,6 +221,19 @@ pub fn evaluate_candidate(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
+    if selection.runs_repository_workload(&config.profile) {
+        let registration_report = evaluate_registration_cases(
+            &runtime,
+            &run_home,
+            &repository_configs,
+            cases_config,
+            &config.profile,
+            config.categories.as_ref(),
+        )?;
+        commands.extend(registration_report.commands);
+        cases.extend(registration_report.cases);
+        gates.extend(registration_report.gates);
+    }
     let required_repo_set_members = if selection.runs_repository_sets(&config.profile) {
         selected_repository_set_member_names(
             cases_config,

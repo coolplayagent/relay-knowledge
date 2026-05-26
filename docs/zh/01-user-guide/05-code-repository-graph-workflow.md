@@ -11,11 +11,10 @@
 ```bash
 relay-knowledge repo register /path/to/repo \
   --path src \
-  --language rust \
   --format json
 ```
 
-省略 `--alias` 时，后续命令使用的短名默认是解析后的 Git root 目录名。对于 `/path/to/repo`，后续命令默认使用 `repo`，除非注册时显式传入 `--alias` 覆盖。`--path` 和 `--language` 可以重复；注册时定义的范围会限制索引、查询和影响分析，后续请求只能收窄范围，不能扩大范围。
+省略 `--alias` 时，后续命令使用的短名默认是解析后的 Git root 目录名。对于 `/path/to/repo`，后续命令默认使用 `repo`，除非注册时显式传入 `--alias` 覆盖。`--path` 可以重复；注册会拒绝 `--language`，确保混合语言仓库保留完整语言面；后续 `repo query --language` 可以收窄结果，但不会缩小已索引快照。
 
 注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径必须指向本机可读 Git worktree；索引时再解析目标 ref 或 worktree overlay。再次注册同一个 Git root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
 
@@ -33,7 +32,7 @@ relay-knowledge repo scope preview repo --ref HEAD --format json
 relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
-preview 适合在收窄 `--path` 或 `--language` 后确认不会把无关目录写入代码图谱。默认 source preset 会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
+preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。默认 source preset 会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
 
 ## 5.3 建立代码图谱索引
 

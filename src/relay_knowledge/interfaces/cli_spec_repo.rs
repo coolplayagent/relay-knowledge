@@ -3,7 +3,7 @@ use super::{CliCommandSpec, CommandEffect, arg, command_syntax, opt};
 pub(super) fn repo_register() -> CliCommandSpec {
     command!(
         &["repo", "register"],
-        "relay-knowledge repo register <path> [--alias <name>] [--path <filter>] [--language <id>]",
+        "relay-knowledge repo register <path> [--alias <name>] [--path <filter>]",
         "Register a code repository scope.",
         "code.repo.register",
         CommandEffect::WritesOperationalState,
@@ -27,22 +27,13 @@ pub(super) fn repo_register() -> CliCommandSpec {
                 None,
                 &[],
             ),
-            opt(
-                "--language",
-                Some("id"),
-                false,
-                true,
-                "Language id included in indexing.",
-                None,
-                &[],
-            ),
         ],
         &[
             "relay-knowledge repo register /path/to/relay-knowledge --format json",
-            "relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json",
+            "relay-knowledge repo register /path/to/repo --alias core --path src --format json",
         ],
         &[
-            "Stores repository registration metadata; indexing is a separate command. When `--alias` is omitted or blank, the resolved Git root directory name is used so later agent sessions can reuse the same repository. Registering the same repository root with another alias preserves existing aliases for that repository id."
+            "Stores repository registration metadata; indexing is a separate command. When `--alias` is omitted or blank, the resolved Git root directory name is used so later agent sessions can reuse the same repository. Registration rejects language filters so mixed-language repositories keep their full language surface; use repo query --language to narrow results. Registering the same repository root with another alias preserves existing aliases for that repository id."
         ],
     )
 }

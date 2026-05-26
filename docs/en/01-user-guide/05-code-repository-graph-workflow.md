@@ -11,11 +11,10 @@ Register a Git repository as a code retrieval source:
 ```bash
 relay-knowledge repo register /path/to/repo \
   --path src \
-  --language rust \
   --format json
 ```
 
-When `--alias` is omitted, the short name used by later commands defaults to the resolved Git root directory name. For `/path/to/repo`, later commands use `repo` unless an explicit `--alias` override is supplied. `--path` and `--language` can be repeated. Registration scope limits indexing, queries, and impact analysis; later requests can narrow the scope but cannot widen it.
+When `--alias` is omitted, the short name used by later commands defaults to the resolved Git root directory name. For `/path/to/repo`, later commands use `repo` unless an explicit `--alias` override is supplied. `--path` can be repeated. Registration rejects `--language` so mixed-language repositories keep their full language surface; later `repo query --language` requests can narrow results without shrinking the indexed snapshot.
 
 Registration records the repository root, alias, and allowed scope. It does not parse files immediately. The path must point to a readable local Git worktree; the target ref or worktree overlay is resolved during indexing. Registering the same Git root again adds an alias to the same repository id. If an alias already belongs to another repository id, registration fails.
 
@@ -33,7 +32,7 @@ relay-knowledge repo scope preview repo --ref HEAD --format json
 relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
-Preview is useful after narrowing `--path` or `--language` so unrelated directories are not written into the code graph. The default source preset excludes dependency/cache/vendor/build/out/target directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Git-tracked source-language runtime subtrees under `dist`, such as `dist/js/core` or `dist/js/app`, are indexed, while minified files, CSS/assets, and other distribution subtrees remain excluded by default. Use a precise `--path` registration or request when other default-excluded files are intentionally needed.
+Preview is useful after narrowing registered `--path` values so unrelated directories are not written into the code graph. The default source preset excludes dependency/cache/vendor/build/out/target directories, binary/media assets, `*.jsonl` dataset dumps, and lockfile snapshots such as `uv.lock`. Git-tracked source-language runtime subtrees under `dist`, such as `dist/js/core` or `dist/js/app`, are indexed, while minified files, CSS/assets, and other distribution subtrees remain excluded by default. Use a precise `--path` registration or request when other default-excluded files are intentionally needed.
 
 ## 5.3 Build the Code Graph Index
 

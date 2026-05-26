@@ -485,7 +485,7 @@ async fn register_and_index(service: &RelayKnowledgeService, repo: &FixtureRepo,
                 root_path: repo.path.display().to_string(),
                 alias: alias.to_owned(),
                 path_filters: Vec::new(),
-                language_filters: vec!["rust".to_owned()],
+                language_filters: Vec::new(),
             },
             context(&format!("register-{alias}")),
         )

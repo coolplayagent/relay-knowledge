@@ -62,6 +62,11 @@ use languages::language_id;
 #[cfg(test)]
 use scope::{path_is_selected, path_scope_allows};
 
+pub(crate) const REGISTRATION_LANGUAGE_FILTER_ERROR: &str = concat!(
+    "registration language filters are not supported; ",
+    "register the full language surface and use query-time --language filters to narrow results"
+);
+
 /// Blocking code index failure.
 #[derive(Debug)]
 pub enum CodeIndexError {
@@ -99,6 +104,11 @@ pub fn register_repository(
     path_filters: Vec<String>,
     language_filters: Vec<String>,
 ) -> Result<CodeRepositoryRegistration, CodeIndexError> {
+    if !language_filters.is_empty() {
+        return Err(CodeIndexError::InvalidInput(
+            REGISTRATION_LANGUAGE_FILTER_ERROR.to_owned(),
+        ));
+    }
     let root = resolve_git_root(path.as_ref())?;
     let root_identity = root.display().to_string();
     let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?

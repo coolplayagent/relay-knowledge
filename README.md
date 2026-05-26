@@ -205,14 +205,15 @@ cargo llvm-cov --all-targets --all-features --fail-under-lines 90
 The self-iteration harness runs its own product and harness quality checks in
 parallel dependency stages and defaults `--jobs auto` to the local CPU count.
 The default `fast` profile also includes targeted `code_index_recovery_cases`
-so expired code-index leases, stale worker completions, dead-letter recovery,
-and checkpoint lease renewal cannot regress without running exhaustive
+and a registration-language guardrail, so expired code-index leases, stale
+worker completions, dead-letter recovery, checkpoint lease renewal, and
+mixed-language registration safety cannot regress without running exhaustive
 large-repository workloads.
 
 The binary starts a Tokio runtime, and the shared application service exposes async entrypoints from the CLI boundary inward.
 SQLite storage is opened through the storage boundary, and blocking database work is isolated behind Tokio blocking workers.
 The storage contract also includes the v1 code graph data surface for tree-sitter output: versioned code files, symbols, references, chunks, and parse-status diagnostics are committed through storage traits rather than direct SQLite access.
-Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. C/C++ macro-heavy files can be conservatively recovered as parsed when errors are isolated to macro expansions, bounded preprocessor directives, or recognized decorator-bearing declarations with declaration-shaped bodies, and reliable structured facts such as symbols, references, or imports are still extracted. Full repository indexing uses resource-bounded SQLite batches with durable checkpoints and a finalize phase for cross-batch references, includes, and call edges, so large scopes expose `indexing` progress without replacing the previous fresh scope until finalization succeeds. A cold full `repo index` queues a durable code-index task and returns a `task` handle immediately; the CLI starts a bounded single-shot worker, while `service run` drains the same queue with one repository index worker and one repository-set overlay refresh worker. `repo status` reports `active_task`, checkpoint counters, and scope retention; successful background tasks retain the active scope, the two latest completed scopes, and unfinished task scopes while pruning older repository scopes. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
+Code repository indexing currently parses Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, Java, Kotlin, Scala, C, C++, C#, Ruby, PHP, Swift, and Bash with tree-sitter grammars, falling back to text chunks for unsupported or degraded files. Registration rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results. C/C++ macro-heavy files can be conservatively recovered as parsed when errors are isolated to macro expansions, bounded preprocessor directives, or recognized decorator-bearing declarations with declaration-shaped bodies, and reliable structured facts such as symbols, references, or imports are still extracted. Full repository indexing uses resource-bounded SQLite batches with durable checkpoints and a finalize phase for cross-batch references, includes, and call edges, so large scopes expose `indexing` progress without replacing the previous fresh scope until finalization succeeds. A cold full `repo index` queues a durable code-index task and returns a `task` handle immediately; the CLI starts a bounded single-shot worker, while `service run` drains the same queue with one repository index worker and one repository-set overlay refresh worker. `repo status` reports `active_task`, checkpoint counters, and scope retention; successful background tasks retain the active scope, the two latest completed scopes, and unfinished task scopes while pruning older repository scopes. Git branch, tag, and worktree selectors resolve to scoped commit/tree snapshots; indexed scopes remain queryable by explicit ref, rebase or force-moved heads require a new index before query, and same-tree branches reuse the same scope while preserving requested-ref audit metadata. Registering the same repository root with an additional alias preserves prior aliases and resolves all aliases to the same repository id.
 Code-index task leases are attempt-scoped: expired running leases are recovered to retry or dead-letter before claim/status paths report them, stale workers cannot complete or fail a reclaimed task, and active workers renew the lease before expensive batch parsing, after each committed checkpoint batch, around finalization, and before task completion. Stores that do not implement the optional lease recovery/renewal hooks keep status and indexing reads compatible by treating those hooks as no-ops. Checkpoints expose `updated_at_ms` in JSON status so operators can distinguish slow progress from a stuck task.
 Code graph v1 responses distinguish stable `canonical_symbol_id` values from snapshot-bound `symbol_snapshot_id` values. Reference, call, import, and SBOM dependency hits expose `target_hint`, `resolution_state`, confidence basis points, and confidence tier so unresolved, ambiguous, declared, or locked edges are visible instead of being reported as certain calls.
 Repository source scope is not limited to a top-level `src/` layout: real source under `external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `Sources/`, `lib/`, and nested JVM source roots is indexed by default, while broad `vendor/` and `third_party/` dependency dumps still require explicit path opt-in. Call graph retrieval also resolves static same-repository cross-language edges for C/C++, Go cgo `C.*`, and Rust FFI/bindings paths; this is code-graph evidence, not full build-system or linker analysis.
@@ -230,7 +231,7 @@ relay-knowledge status --format json
 relay-knowledge help repo query --format json
 relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
-relay-knowledge repo register /path/to/relay-knowledge --path src --language rust --format json
+relay-knowledge repo register /path/to/relay-knowledge --path src --format json
 relay-knowledge repo index relay-knowledge --ref main --format json
 relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
@@ -238,10 +239,10 @@ relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD 
 relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
 relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 --format json
-relay-knowledge repo-set remove workspace core --format json
+relay-knowledge repo-set remove workspace relay-knowledge --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
-relay-knowledge repo impact core --base main --head HEAD --format json
-relay-knowledge repo status core --format json
+relay-knowledge repo impact relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo status relay-knowledge --format json
 relay-knowledge graph inspect --format json
 relay-knowledge index refresh --kind bm25 --format json
 RELAY_KNOWLEDGE_FILE_INDEX_ROOTS=/opt/docs relay-knowledge files index --root /opt/docs --source local-files --format json

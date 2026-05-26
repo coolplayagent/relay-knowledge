@@ -13,6 +13,18 @@
       "query_p95_budget_ms": 220
     }
   },
+  "registration_cases": [
+    {
+      "id": "cross_language_register_rejects_cpp_only_language_filter",
+      "repository": "cross_language_syntax_fixture",
+      "expect_failure": true,
+      "language_filters": ["cpp"],
+      "stderr_contains": "registration language filters are not supported",
+      "guardrail": true,
+      "objective": "foundational_capability",
+      "case_group": "registration_scope_guardrails"
+    }
+  ],
   "query_cases": [
     {
       "id": "cross_language_c_callees_cpp_bridge_score",

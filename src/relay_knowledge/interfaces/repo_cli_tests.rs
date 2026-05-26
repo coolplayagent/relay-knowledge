@@ -90,8 +90,6 @@ fn parses_repo_command_forms_and_validation_errors() {
         "core".to_owned(),
         "--path".to_owned(),
         "src".to_owned(),
-        "--language".to_owned(),
-        "rust".to_owned(),
     ])
     .expect("register command should parse");
     assert_eq!(
@@ -100,7 +98,7 @@ fn parses_repo_command_forms_and_validation_errors() {
             root_path: "/work/repo".to_owned(),
             alias: "core".to_owned(),
             path_filters: vec!["src".to_owned()],
-            language_filters: vec!["rust".to_owned()],
+            language_filters: Vec::new(),
         }
     );
     assert_eq!(
@@ -319,7 +317,7 @@ fn run_worker() {
             root_path: repo.path.display().to_string(),
             alias: "fixture".to_owned(),
             path_filters: vec!["src".to_owned()],
-            language_filters: vec!["rust".to_owned()],
+            language_filters: Vec::new(),
         },
         context("register"),
         OutputFormat::Json,
@@ -583,6 +581,35 @@ pub fn stable_project_entry() -> &'static str {
         .expect("query should run through each alias");
         assert_eq!(json_value(&output)["results"][0]["path"], "src/lib.rs");
     }
+}
+
+#[tokio::test]
+async fn repo_register_rejects_language_filters() {
+    let repo = FixtureRepo::create("repo-register-language-rejected");
+    repo.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    let error = run_repo(
+        &service,
+        RepoCommand::Register {
+            root_path: repo.path.display().to_string(),
+            alias: "fixture".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: vec!["rust".to_owned()],
+        },
+        context("register-language-rejected"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect_err("register --language should be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("registration language filters are not supported")
+    );
 }
 
 fn json_value(output: &str) -> serde_json::Value {

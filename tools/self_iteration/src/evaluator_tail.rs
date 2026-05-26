@@ -501,6 +501,150 @@ fn fast_repository_set_names() -> Vec<String> {
         .unwrap_or_else(|| vec!["temporal_go_workspace".to_owned()])
 }
 
+fn evaluate_registration_cases(
+    runtime: &EvalRuntime,
+    run_home: &Path,
+    repository_configs: &BTreeMap<String, Value>,
+    cases_config: &Value,
+    profile: &str,
+    categories: Option<&CategorySet>,
+) -> Result<RegistrationCaseReport, String> {
+    let selected_cases = select_registration_cases_for_profile(
+        profile,
+        categories,
+        array_field(cases_config, "registration_cases").to_vec(),
+    );
+    let mut commands = Vec::new();
+    let mut cases = Vec::new();
+    let mut gates = Vec::new();
+    if selected_cases.is_empty() {
+        return Ok(RegistrationCaseReport {
+            commands,
+            cases,
+            gates,
+        });
+    }
+    eprintln!(
+        "[self-iterate] registration guardrail workload start cases={}",
+        selected_cases.len()
+    );
+    for case in selected_cases {
+        let repo_name = string_or(&case, "repository", "");
+        let Some(repo_config) = repository_configs.get(repo_name) else {
+            let command = CommandResult {
+                name: format!(
+                    "registration_case_{}_repository_config",
+                    string_or(&case, "id", "case")
+                ),
+                command: vec!["validate".to_owned(), "repository_config".to_owned()],
+                exit_code: 1,
+                duration_ms: 0,
+                stdout: String::new(),
+                stderr: format!("registration case repository is not configured: {repo_name}"),
+            };
+            let observation = score_registration_case(repo_name, &case, &command);
+            if let Some(gate) = guardrail_gate_from_case(&observation, command.duration_ms) {
+                gates.push(gate);
+            }
+            commands.push(command);
+            cases.push(observation);
+            continue;
+        };
+        let (path, setup_commands) =
+            prepare_repository_path(runtime, run_home, repo_name, repo_config)?;
+        let setup_passed = setup_commands.iter().all(CommandResult::passed);
+        commands.extend(setup_commands);
+        if !setup_passed {
+            let failed = CommandResult {
+                name: format!(
+                    "registration_case_{}_setup",
+                    string_or(&case, "id", "case")
+                ),
+                command: vec!["prepare".to_owned(), repo_name.to_owned()],
+                exit_code: 1,
+                duration_ms: 0,
+                stdout: String::new(),
+                stderr: "registration case fixture setup failed".to_owned(),
+            };
+            let observation = score_registration_case(repo_name, &case, &failed);
+            if let Some(gate) = guardrail_gate_from_case(&observation, failed.duration_ms) {
+                gates.push(gate);
+            }
+            commands.push(failed);
+            cases.push(observation);
+            continue;
+        }
+        let alias = registration_case_alias(repo_config, &case);
+        let register = run_writer_limited(
+            runtime,
+            CommandSpec::new(
+                format!("registration_case_{}", string_or(&case, "id", "case")),
+                registration_case_command(&runtime.binary, &path, &alias, &case),
+                &runtime.workspace,
+                Some(runtime.env.clone()),
+                runtime.timeout,
+            ),
+        );
+        let observation = score_registration_case(repo_name, &case, &register);
+        if let Some(gate) = guardrail_gate_from_case(&observation, register.duration_ms) {
+            gates.push(gate);
+        }
+        commands.push(register);
+        cases.push(observation);
+    }
+
+    Ok(RegistrationCaseReport {
+        commands,
+        cases,
+        gates,
+    })
+}
+
+fn select_registration_cases_for_profile(
+    profile: &str,
+    categories: Option<&CategorySet>,
+    cases: Vec<Value>,
+) -> Vec<Value> {
+    cases
+        .into_iter()
+        .filter(|case| string_field(case, "profile") != Some("exhaustive") || profile == "exhaustive")
+        .filter(|case| {
+            categories
+                .map(|items| focused_repository_case(items, case))
+                .unwrap_or(true)
+        })
+        .collect()
+}
+
+fn registration_case_alias(repo_config: &Value, case: &Value) -> String {
+    string_field(case, "alias").map(ToOwned::to_owned).unwrap_or_else(|| {
+        format!(
+            "{}-{}",
+            string_or(repo_config, "alias", "registration-case"),
+            string_or(case, "id", "case")
+        )
+    })
+}
+
+fn registration_case_command(binary: &Path, path: &Path, alias: &str, case: &Value) -> Vec<String> {
+    let mut command = vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "register".to_owned(),
+        path.display().to_string(),
+        "--alias".to_owned(),
+        alias.to_owned(),
+    ];
+    for path_filter in string_vec(case, "path_filters") {
+        command.extend(["--path".to_owned(), path_filter]);
+    }
+    for language in string_vec(case, "language_filters") {
+        command.extend(["--language".to_owned(), language]);
+    }
+    command.extend(["--format".to_owned(), "json".to_owned()]);
+    command
+}
+
 fn register_command(binary: &Path, path: &Path, alias: Option<&str>) -> Vec<String> {
     let mut command = vec![
         binary.display().to_string(),
@@ -540,6 +684,60 @@ fn query_command(binary: &Path, alias: &str, ref_selector: &str, case: &Value) -
     }
     command.extend(["--format".to_owned(), "json".to_owned()]);
     command
+}
+
+fn score_registration_case(
+    repo_name: &str,
+    case: &Value,
+    result: &CommandResult,
+) -> CaseObservation {
+    let objective = repository_case_objective(case);
+    let expect_failure = case
+        .get("expect_failure")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let output = format!("{}\n{}", result.stdout, result.stderr);
+    let required_output = string_field(case, "output_contains")
+        .or_else(|| string_field(case, "stderr_contains"));
+    let output_matches = required_output.is_none_or(|expected| output.contains(expected));
+    let passed = if expect_failure {
+        !result.passed() && output_matches
+    } else {
+        result.passed() && output_matches
+    };
+    let message = if passed {
+        format!(
+            "exit_code={} expected_failure={} output_contains={:?}",
+            result.exit_code, expect_failure, required_output
+        )
+    } else if let Some(expected) = required_output {
+        format!(
+            "exit_code={} expected_failure={} missing_output={expected:?} tail={}",
+            result.exit_code,
+            expect_failure,
+            result.gate_message()
+        )
+    } else {
+        format!(
+            "exit_code={} expected_failure={} tail={}",
+            result.exit_code,
+            expect_failure,
+            result.gate_message()
+        )
+    };
+
+    CaseObservation {
+        case_id: string_or(case, "id", "case").to_owned(),
+        repository: repo_name.to_owned(),
+        passed,
+        guardrail: is_guardrail_case(case),
+        rank: passed.then_some(0),
+        max_rank: 1,
+        false_positive_count: 0,
+        message,
+        objective,
+        score_override: Some(if passed { 1.0 } else { 0.0 }),
+    }
 }
 
 fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> CaseObservation {
@@ -2225,6 +2423,7 @@ version = 3
 [[package]]
 name = "tokio"
 version = "1.36.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 "#;
 
 const NONSTANDARD_PACKAGE_JSON: &str = r#"

@@ -363,6 +363,52 @@ mod tests {
     }
 
     #[test]
+    fn registration_guardrail_cases_are_preserved_for_fast() {
+        let cases = vec![
+            serde_json::json!({"id": "regular", "repository": "fixture"}),
+            serde_json::json!({
+                "id": "reject_register_language",
+                "repository": "fixture",
+                "expect_failure": true,
+                "language_filters": ["cpp"],
+                "guardrail": true
+            }),
+        ];
+
+        let selected = select_registration_cases_for_profile("fast", None, cases);
+
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "") == "reject_register_language"
+                && case.get("guardrail").and_then(Value::as_bool) == Some(true)
+        }));
+    }
+
+    #[test]
+    fn registration_case_scores_expected_failure_message() {
+        let case = serde_json::json!({
+            "id": "reject_register_language",
+            "expect_failure": true,
+            "stderr_contains": "registration language filters are not supported",
+            "guardrail": true
+        });
+        let result = CommandResult {
+            name: "register".to_owned(),
+            command: vec!["relay-knowledge".to_owned()],
+            exit_code: 1,
+            duration_ms: 1,
+            stdout: String::new(),
+            stderr: "registration language filters are not supported; use query-time --language"
+                .to_owned(),
+        };
+
+        let observation = score_registration_case("fixture", &case, &result);
+
+        assert!(observation.passed);
+        assert!(observation.guardrail);
+        assert_eq!(observation.score_override, Some(1.0));
+    }
+
+    #[test]
     fn fast_preserves_grep_and_external_import_guardrail_cases() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),

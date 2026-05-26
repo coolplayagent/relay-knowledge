@@ -31,7 +31,7 @@
 
 现有实现已经具备多仓库能力的底座：
 
-- `CodeRepository` 有稳定 `repository_id`、alias、root path 和注册时的 path/language scope。
+- `CodeRepository` 有稳定 `repository_id`、alias、root path 和注册时的 path scope；language filter 是请求期收窄控制，不是注册默认值。
 - `repository_snapshot` scope 由 `repository_id`、tree hash、path filter 和 language filter 生成。
 - SQLite 代码事实表按 `source_scope` 分区，并保留 `repository_id`。
 - `repo register/index/query/impact/status/report` 当前都以一个 repository selector 为入口。
