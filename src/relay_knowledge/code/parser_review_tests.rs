@@ -190,11 +190,58 @@ MODULE_ACCESS_PHASE(ngx_http_demo_access)
         snapshot.symbols
     );
     assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "MODULE_ACCESS_PHASE"),
+        "generic block macro names should not fall back to function definitions: {:?}",
+        snapshot.symbols
+    );
+    assert!(
         !snapshot.calls.iter().any(|call| {
             call.caller_name.as_deref() == Some("ngx_http_demo_access")
                 && call.callee_name == "ngx_http_demo_init"
         }),
         "generic block macros should not own call graph edges: {:?}",
+        snapshot.calls
+    );
+}
+
+#[test]
+fn c_macro_body_recovery_reads_continued_function_macro_definition() {
+    let snapshot = parse_source_snapshot(
+        "src/continued_macro_module.c",
+        br#"
+#define KONG_ACCESS_PHASE(name) \
+    static ngx_int_t name(ngx_http_request_t *request)
+
+static ngx_int_t
+ngx_http_demo_init(ngx_pool_t *pool)
+{
+    return ngx_array_init(pool);
+}
+
+KONG_ACCESS_PHASE(ngx_http_demo_access)
+{
+    return ngx_http_demo_init(request->pool);
+}
+"#,
+    );
+
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "ngx_http_demo_access"),
+        "continued function macro definitions should recover the handler symbol: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot.calls.iter().any(|call| {
+            call.caller_name.as_deref() == Some("ngx_http_demo_access")
+                && call.callee_name == "ngx_http_demo_init"
+        }),
+        "continued function macro definitions should own calls in the body: {:?}",
         snapshot.calls
     );
 }

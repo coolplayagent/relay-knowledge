@@ -79,12 +79,27 @@ fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFun
         return MacroBodyFunctionDefinition::Rejected;
     };
     let name = if definition_like_macro_name(macro_name) {
-        macro_generated_function_name_from_groups(&arguments, macro_name)
+        match macro_generated_function_name_from_groups(&arguments, macro_name) {
+            Some(name) => {
+                return MacroBodyFunctionDefinition::Recovered((
+                    name,
+                    "function",
+                    syntax_range(node),
+                ));
+            }
+            None => return MacroBodyFunctionDefinition::Rejected,
+        }
     } else {
-        local_macro_generated_function_name(content, macro_name, &arguments, node.start_byte())
-    };
-    let Some(name) = name else {
-        return MacroBodyFunctionDefinition::Rejected;
+        match local_macro_generated_function_name(
+            content,
+            macro_name,
+            &arguments,
+            node.start_byte(),
+        ) {
+            LocalMacroFunctionName::Recovered(name) => name,
+            LocalMacroFunctionName::Rejected => return MacroBodyFunctionDefinition::Rejected,
+            LocalMacroFunctionName::NotMacro => return MacroBodyFunctionDefinition::NotMacroBody,
+        }
     };
 
     MacroBodyFunctionDefinition::Recovered((name, "function", syntax_range(node)))
@@ -283,12 +298,15 @@ fn macro_generated_function_definition(
     let name = if definition_like_macro_name(&macro_name) {
         macro_generated_function_name_from_groups(&argument_groups, &macro_name)
     } else if range.has_following_body {
-        local_macro_generated_function_name(
+        match local_macro_generated_function_name(
             content,
             &macro_name,
             &argument_groups,
             call.start_byte(),
-        )
+        ) {
+            LocalMacroFunctionName::Recovered(name) => Some(name),
+            LocalMacroFunctionName::Rejected | LocalMacroFunctionName::NotMacro => None,
+        }
     } else {
         None
     }?;
@@ -371,38 +389,84 @@ fn local_macro_generated_function_name(
     macro_name: &str,
     argument_groups: &[MacroArgument],
     limit_byte: usize,
-) -> Option<String> {
-    let definition = local_function_macro_definition(content, macro_name, limit_byte)?;
+) -> LocalMacroFunctionName {
+    let Some(definition) = local_function_macro_definition(content, macro_name, limit_byte) else {
+        return LocalMacroFunctionName::NotMacro;
+    };
     let argument_index = macro_definition_function_name_parameter_index(
-        definition.replacement,
+        &definition.replacement,
         &definition.parameters,
-    )?;
-    let argument = argument_groups.get(argument_index)?;
+    );
+    let Some(argument_index) = argument_index else {
+        return LocalMacroFunctionName::Rejected;
+    };
+    let Some(argument) = argument_groups.get(argument_index) else {
+        return LocalMacroFunctionName::Rejected;
+    };
 
-    macro_argument_symbol_candidate(argument)
+    match macro_argument_symbol_candidate(argument) {
+        Some(name) => LocalMacroFunctionName::Recovered(name),
+        None => LocalMacroFunctionName::Rejected,
+    }
 }
 
-struct MacroFunctionDefinition<'a> {
-    parameters: Vec<&'a str>,
-    replacement: &'a str,
+enum LocalMacroFunctionName {
+    Recovered(String),
+    Rejected,
+    NotMacro,
 }
 
-fn local_function_macro_definition<'a>(
-    content: &'a str,
+struct MacroFunctionDefinition {
+    parameters: Vec<String>,
+    replacement: String,
+}
+
+fn local_function_macro_definition(
+    content: &str,
     macro_name: &str,
     limit_byte: usize,
-) -> Option<MacroFunctionDefinition<'a>> {
+) -> Option<MacroFunctionDefinition> {
     let search_end = limit_byte.min(content.len());
-    content[..search_end]
-        .lines()
-        .rev()
-        .find_map(|line| parse_function_macro_definition_line(line, macro_name))
+    let mut latest = None;
+    let mut logical_line = String::new();
+    for line in content[..search_end].lines() {
+        let trimmed_start = line.trim_start();
+        if logical_line.is_empty() && !trimmed_start.starts_with("#define") {
+            continue;
+        }
+        append_preprocessor_logical_line(&mut logical_line, line);
+        if !line_continues_preprocessor_definition(line) {
+            latest = parse_function_macro_definition_line(&logical_line, macro_name).or(latest);
+            logical_line.clear();
+        }
+    }
+    if !logical_line.is_empty() {
+        latest = parse_function_macro_definition_line(&logical_line, macro_name).or(latest);
+    }
+
+    latest
 }
 
-fn parse_function_macro_definition_line<'a>(
-    line: &'a str,
+fn append_preprocessor_logical_line(logical_line: &mut String, line: &str) {
+    if !logical_line.is_empty() {
+        logical_line.push(' ');
+    }
+    let segment = line
+        .trim_end()
+        .strip_suffix('\\')
+        .unwrap_or_else(|| line.trim_end())
+        .trim();
+    logical_line.push_str(segment);
+}
+
+fn line_continues_preprocessor_definition(line: &str) -> bool {
+    line.trim_end().ends_with('\\')
+}
+
+fn parse_function_macro_definition_line(
+    line: &str,
     macro_name: &str,
-) -> Option<MacroFunctionDefinition<'a>> {
+) -> Option<MacroFunctionDefinition> {
     let directive = line
         .trim_start()
         .strip_prefix('#')?
@@ -429,6 +493,7 @@ fn parse_function_macro_definition_line<'a>(
         .split(',')
         .map(str::trim)
         .filter(|parameter| !parameter.is_empty() && *parameter != "...")
+        .map(str::to_owned)
         .collect::<Vec<_>>();
     if parameters.is_empty() {
         return None;
@@ -436,7 +501,7 @@ fn parse_function_macro_definition_line<'a>(
 
     Some(MacroFunctionDefinition {
         parameters,
-        replacement,
+        replacement: replacement.to_owned(),
     })
 }
 
@@ -463,7 +528,7 @@ fn closing_parenthesis_index(text: &str) -> Option<usize> {
 
 fn macro_definition_function_name_parameter_index(
     replacement: &str,
-    parameters: &[&str],
+    parameters: &[String],
 ) -> Option<usize> {
     parameters
         .iter()
@@ -816,4 +881,33 @@ fn has_parenthesized_pointer_declarator(root: Node<'_>) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_macro_recovery_distinguishes_unknown_and_non_function_macros() {
+        let arguments = vec![MacroArgument {
+            text: "ngx_http_demo_access".to_owned(),
+            identifiers: vec!["ngx_http_demo_access".to_owned()],
+        }];
+
+        assert!(matches!(
+            local_macro_generated_function_name("", "NGX_HTTP_DEMO", &arguments, 0,),
+            LocalMacroFunctionName::NotMacro
+        ));
+
+        let content = "#define MODULE_ACCESS_PHASE(name) name\n";
+        assert!(matches!(
+            local_macro_generated_function_name(
+                content,
+                "MODULE_ACCESS_PHASE",
+                &arguments,
+                content.len(),
+            ),
+            LocalMacroFunctionName::Rejected
+        ));
+    }
 }
