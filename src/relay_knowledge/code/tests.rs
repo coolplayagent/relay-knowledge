@@ -433,6 +433,24 @@ fn repository_id_includes_local_root_with_remote_origin() {
 }
 
 #[test]
+fn blank_repository_alias_defaults_to_git_root_directory_name() {
+    let repo = TempGitRepo::create("project-default-alias");
+    let nested = repo.path.join("src");
+    let expected_alias = repo
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("fixture root should have a directory name")
+        .to_owned();
+
+    let registration =
+        register_repository(nested, "   ", Vec::new(), Vec::new()).expect("repo should register");
+
+    assert_eq!(registration.alias, expected_alias);
+    assert_eq!(registration.root_path, repo.path.display().to_string());
+}
+
+#[test]
 fn diff_refs_reject_dash_prefixed_values() {
     let repo = TempGitRepo::create("dash-ref");
     repo.write("src/lib.rs", "fn value() {}\n");

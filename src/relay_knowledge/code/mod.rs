@@ -104,6 +104,7 @@ pub fn register_repository(
     let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?
         .unwrap_or_else(|| root_identity.clone());
     let repository_id = stable_id("repo", [origin.as_str(), root_identity.as_str()]);
+    let alias = explicit_or_project_alias(alias, &root)?;
 
     CodeRepositoryRegistration::new(
         repository_id,
@@ -113,6 +114,27 @@ pub fn register_repository(
         language_filters,
     )
     .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))
+}
+
+fn explicit_or_project_alias(
+    alias: impl Into<String>,
+    root: &Path,
+) -> Result<String, CodeIndexError> {
+    let alias = alias.into();
+    if !alias.trim().is_empty() {
+        return Ok(alias);
+    }
+
+    root.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            CodeIndexError::InvalidInput(
+                "repository alias is empty and Git root has no project directory name".to_owned(),
+            )
+        })
 }
 
 /// Builds a code index snapshot from a clean Git commit or incremental diff.

@@ -490,7 +490,15 @@ fn evaluate_repository(
         runtime,
         CommandSpec::new(
             format!("{repo_name}_register"),
-            register_command(&runtime.binary, &path, alias),
+            register_command(
+                &runtime.binary,
+                &path,
+                (!repo_config
+                    .get("register_without_alias")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false))
+                .then_some(alias),
+            ),
             &runtime.workspace,
             Some(runtime.env.clone()),
             runtime.timeout,
@@ -506,6 +514,29 @@ fn evaluate_repository(
             metrics,
             Value::Null,
         ));
+    }
+    for additional_alias in string_vec(repo_config, "additional_aliases") {
+        let additional_register = run_writer_limited(
+            runtime,
+            CommandSpec::new(
+                format!("{repo_name}_register_alias_{additional_alias}"),
+                register_command(&runtime.binary, &path, Some(&additional_alias)),
+                &runtime.workspace,
+                Some(runtime.env.clone()),
+                runtime.timeout,
+            ),
+        );
+        commands.push(additional_register.clone());
+        if !additional_register.passed() {
+            return Ok(repo_report(
+                repo_name,
+                scope,
+                commands,
+                cases,
+                metrics,
+                Value::Null,
+            ));
+        }
     }
     let index = run_writer_limited(
         runtime,
@@ -554,11 +585,12 @@ fn evaluate_repository(
         let ref_selector = ref_selector.to_owned();
         let repo_name = repo_name.to_owned();
         move |case| {
+            let query_alias = string_or(&case, "repository_alias", &alias).to_owned();
             let query = run_limited(
                 &runtime.limiter,
                 CommandSpec::new(
                     format!("{}_{}", repo_name, string_or(&case, "id", "case")),
-                    query_command(&runtime.binary, &alias, &ref_selector, &case),
+                    query_command(&runtime.binary, &query_alias, &ref_selector, &case),
                     &runtime.workspace,
                     Some(runtime.env.clone()),
                     runtime.timeout,

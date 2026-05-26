@@ -13,13 +13,18 @@ Code repository basics let users register Git repositories as first-class source
 ## User-visible Behavior
 
 ```bash
-relay-knowledge repo register /path/to/repo --alias core --path src --language rust
-relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
-relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
-relay-knowledge repo update core --base main --head HEAD --format json
-relay-knowledge repo status core --format json
+relay-knowledge repo register /path/to/relay-knowledge --path src --language rust
+relay-knowledge repo index relay-knowledge --ref HEAD --format json
+relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo status relay-knowledge --format json
 ```
+
+When `--alias` is omitted or blank, registration uses the resolved Git root
+directory name as the stable repository alias. Agents should prefer this default
+for first-time project registration so later sessions reuse the same index;
+`--alias` remains available as an explicit override.
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy.
 

@@ -230,14 +230,14 @@ relay-knowledge status --format json
 relay-knowledge help repo query --format json
 relay-knowledge ingest --source docs --content "Rust async services isolate blocking SQLite work" --entity Rust
 relay-knowledge query SQLite --freshness wait-until-fresh --format json
-relay-knowledge repo register /path/to/repo --alias core --path src --language rust --format json
-relay-knowledge repo index core --ref main --format json
-relay-knowledge repo update core --base main --head HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
-relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
-relay-knowledge repo feature-flags core --query checkout --ref HEAD --format json
+relay-knowledge repo register /path/to/relay-knowledge --path src --language rust --format json
+relay-knowledge repo index relay-knowledge --ref main --format json
+relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
 relay-knowledge repo-set create workspace --format json
-relay-knowledge repo-set add workspace core --ref HEAD --priority 10 --format json
+relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 --format json
 relay-knowledge repo-set remove workspace core --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json
 relay-knowledge repo impact core --base main --head HEAD --format json

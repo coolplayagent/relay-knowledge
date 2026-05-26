@@ -56,7 +56,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `source_scope is required by the MCP access policy`: the MCP graph tool request lacks a scope, or unspecified scope is not allowed.
 
-`source_scope '<scope>' is not authorized for this MCP policy`: the requested scope is not in `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` and is not a code repository alias registered in the current runtime. Register the repository alias and index it, or add `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` and restart the service.
+`source_scope '<scope>' is not authorized for this MCP policy`: the requested scope is not in `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` and is not a code repository alias registered in the current runtime. Register the repository with `relay-knowledge repo register <path>` so the Git root directory name becomes the default alias, or pass `--alias <scope>` when a custom scope is required, then index it. Otherwise add `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` and restart the service.
 
 Path configuration error: advanced directory overrides and `RELAY_KNOWLEDGE_HOME` must be absolute paths and must not contain `..`. See [Chapter 12](12-advanced-configuration.md) for the full variable list.
 

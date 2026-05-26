@@ -13,13 +13,15 @@
 ## 用户可见行为
 
 ```bash
-relay-knowledge repo register /path/to/repo --alias core --path src --language rust
-relay-knowledge repo index core --ref HEAD --format json
-relay-knowledge repo query core --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
-relay-knowledge repo query core --query serde --kind sbom --ref HEAD --format json
-relay-knowledge repo update core --base main --head HEAD --format json
-relay-knowledge repo status core --format json
+relay-knowledge repo register /path/to/relay-knowledge --path src --language rust
+relay-knowledge repo index relay-knowledge --ref HEAD --format json
+relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
+relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
+relay-knowledge repo update relay-knowledge --base main --head HEAD --format json
+relay-knowledge repo status relay-knowledge --format json
 ```
+
+省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。
 

@@ -602,6 +602,7 @@ pub struct EmbeddingProviderProbeResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryRegisterRequest {
     pub root_path: String,
+    #[serde(default)]
     pub alias: String,
     #[serde(default)]
     pub path_filters: Vec<String>,

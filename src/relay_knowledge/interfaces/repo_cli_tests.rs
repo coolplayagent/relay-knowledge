@@ -103,6 +103,16 @@ fn parses_repo_command_forms_and_validation_errors() {
             language_filters: vec!["rust".to_owned()],
         }
     );
+    assert_eq!(
+        parse_repo(&["register".to_owned(), "/work/repo".to_owned()])
+            .expect("register without alias should parse"),
+        RepoCommand::Register {
+            root_path: "/work/repo".to_owned(),
+            alias: String::new(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        }
+    );
 
     assert_eq!(
         parse_repo(&["index".to_owned(), "core".to_owned()]).expect("index command should parse"),
@@ -485,6 +495,94 @@ pub fn retry_policy_v2() -> u32 {
     .await
     .expect("status should run");
     assert!(status.contains("code.repo.status"));
+}
+
+#[tokio::test]
+async fn default_register_alias_uses_project_name_and_survives_session_aliases() {
+    let repo = FixtureRepo::create("repo-cli-default-alias");
+    repo.write(
+        "src/lib.rs",
+        r#"
+pub fn stable_project_entry() -> &'static str {
+    "ready"
+}
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let default_alias = repo
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("fixture root should have a directory name")
+        .to_owned();
+    let service = service_with_memory_store().await;
+
+    let registered = run_repo(
+        &service,
+        RepoCommand::Register {
+            root_path: repo.path.display().to_string(),
+            alias: String::new(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        },
+        context("register-default-alias"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("default alias registration should run");
+    assert_eq!(
+        json_value(&registered)["registration"]["alias"],
+        default_alias
+    );
+
+    run_repo(
+        &service,
+        RepoCommand::Register {
+            root_path: repo.path.display().to_string(),
+            alias: "session-generated-alias".to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+        },
+        context("register-session-alias"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("secondary alias registration should run");
+
+    run_repo(
+        &service,
+        RepoCommand::Index {
+            alias: default_alias.clone(),
+            ref_selector: "HEAD".to_owned(),
+            dry_run: false,
+        },
+        context("index-default-alias"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("index should run through default alias");
+
+    for alias in [default_alias, "session-generated-alias".to_owned()] {
+        let output = run_repo(
+            &service,
+            RepoCommand::Query {
+                alias,
+                query: "stable_project_entry".to_owned(),
+                kind: CodeQueryKind::Definition,
+                limit: 5,
+                ref_selector: "HEAD".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+                freshness: FreshnessPolicy::AllowStale,
+            },
+            context("query-alias"),
+            OutputFormat::Json,
+        )
+        .await
+        .expect("query should run through each alias");
+        assert_eq!(json_value(&output)["results"][0]["path"], "src/lib.rs");
+    }
 }
 
 fn json_value(output: &str) -> serde_json::Value {

@@ -396,7 +396,7 @@ fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
 
     Ok(RepoCommand::Register {
         root_path,
-        alias: alias.ok_or(CliError::MissingValue("--alias"))?,
+        alias: alias.unwrap_or_default(),
         path_filters,
         language_filters,
     })
