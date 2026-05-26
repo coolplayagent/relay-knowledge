@@ -4,6 +4,8 @@
 
 This chapter is an executable command index. Workflow details live in later chapters; use this page to find entry points and diagnostics quickly.
 
+When `--format json` or `--format streaming-json` is requested, parse diagnostics and runtime API failures written to stderr are JSON. Runtime API failures use the stable API error shape with `error_kind`, `message`, and optional `metadata`; text and markdown formats keep human-readable stderr messages.
+
 ## 3.1 Common Status Commands
 
 Project status:

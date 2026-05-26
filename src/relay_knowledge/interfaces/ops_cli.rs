@@ -20,7 +20,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .worker_status(WorkerStatusRequest { kind }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "worker.status",
@@ -33,7 +33,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .run_worker_once(WorkerRunRequest { kind }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "worker.run_once",
@@ -46,7 +46,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .list_proposals(ProposalListApiRequest { state, limit }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "proposal.list",
@@ -59,7 +59,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .show_proposal(proposal_id, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "proposal.show",
@@ -80,7 +80,7 @@ pub(super) async fn run_operational_action(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "proposal.accept",
@@ -102,7 +102,7 @@ pub(super) async fn run_operational_action(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "proposal.reject",
@@ -124,7 +124,7 @@ pub(super) async fn run_operational_action(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "proposal.supersede",
@@ -137,7 +137,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .query_audit(AuditQueryApiRequest { operation, limit }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response("audit.query", response.metadata.clone(), &response, format)?
         }
@@ -145,7 +145,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .service_status(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.status",
@@ -158,7 +158,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .service_plan(ServicePlanRequest { action }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response("service.plan", response.metadata.clone(), &response, format)?
         }
@@ -166,7 +166,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .write_service_definition(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.definition.write",
@@ -179,7 +179,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .service_operator_status(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.operator.status",
@@ -192,7 +192,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .set_service_operator_state(ServiceOperatorState::Paused, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.operator.pause",
@@ -205,7 +205,7 @@ pub(super) async fn run_operational_action(
             let response = service
                 .set_service_operator_state(ServiceOperatorState::Enabled, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.operator.resume",

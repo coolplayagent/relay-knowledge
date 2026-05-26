@@ -3,7 +3,7 @@ use super::{CliDiagnostic, CliError, OutputFormat, cli_spec};
 pub(super) fn diagnose(tokens: &[String], error: CliError, format: OutputFormat) -> CliError {
     if matches!(
         error,
-        CliError::RuntimeConfigFailed(_) | CliError::ApiFailed(_)
+        CliError::RuntimeConfigFailed(_) | CliError::ApiFailed(_) | CliError::ApiError { .. }
     ) {
         return error;
     }

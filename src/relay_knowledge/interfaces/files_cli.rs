@@ -35,7 +35,7 @@ pub(super) async fn run_files(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response("files.index", response.metadata.clone(), &response, format).map(Some)
         }
@@ -56,7 +56,7 @@ pub(super) async fn run_files(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response("files.query", response.metadata.clone(), &response, format).map(Some)
         }

@@ -112,7 +112,7 @@ pub async fn run_repo(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.register",
@@ -126,7 +126,7 @@ pub async fn run_repo(
             ref_selector,
             dry_run,
         } => {
-            let selector = selector(alias, ref_selector, Vec::new(), Vec::new())?;
+            let selector = selector(alias, ref_selector, Vec::new(), Vec::new(), format)?;
             let request = CodeIndexRequest {
                 repository: selector.clone(),
                 mode: CodeIndexMode::Full,
@@ -136,7 +136,7 @@ pub async fn run_repo(
                 let response = service
                     .preview_code_repository_scope(request, context)
                     .await
-                    .map_err(|error| CliError::ApiFailed(error.message))?;
+                    .map_err(|error| CliError::api_failed(error, format))?;
 
                 return render_response(
                     "code.repo.scope_preview",
@@ -149,8 +149,9 @@ pub async fn run_repo(
             let mut response = service
                 .start_code_repository_index(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
-            finish_started_index_task(service, &mut response, selector, worker_context).await?;
+                .map_err(|error| CliError::api_failed(error, format))?;
+            finish_started_index_task(service, &mut response, selector, worker_context, format)
+                .await?;
 
             render_response(
                 "code.repo.index",
@@ -163,11 +164,11 @@ pub async fn run_repo(
             let completed = service
                 .run_code_index_task_once(task_id, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
             Ok(match completed {
                 Some(task) => serde_json::to_string(&task)
                     .map(|json| format!("{json}\n"))
-                    .map_err(|error| CliError::ApiFailed(error.to_string()))?,
+                    .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?,
                 None => String::new(),
             })
         }
@@ -178,14 +179,14 @@ pub async fn run_repo(
             let response = service
                 .preview_code_repository_scope(
                     CodeIndexRequest {
-                        repository: selector(alias, ref_selector, Vec::new(), Vec::new())?,
+                        repository: selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
                         mode: CodeIndexMode::Full,
                         freshness_policy: FreshnessPolicy::AllowStale,
                     },
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.scope_preview",
@@ -202,15 +203,22 @@ pub async fn run_repo(
             let response = service
                 .index_code_repository(
                     CodeIndexRequest {
-                        repository: selector(alias, head_ref.clone(), Vec::new(), Vec::new())?,
-                        mode: CodeIndexMode::incremental(base_ref, head_ref)
-                            .map_err(|error| CliError::ApiFailed(error.to_string()))?,
+                        repository: selector(
+                            alias,
+                            head_ref.clone(),
+                            Vec::new(),
+                            Vec::new(),
+                            format,
+                        )?,
+                        mode: CodeIndexMode::incremental(base_ref, head_ref).map_err(|error| {
+                            CliError::invalid_api_argument(error.to_string(), format)
+                        })?,
                         freshness_policy: FreshnessPolicy::WaitUntilFresh,
                     },
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.update",
@@ -231,16 +239,16 @@ pub async fn run_repo(
         } => {
             let request = CodeRetrievalRequest::new(
                 query,
-                selector(alias, ref_selector, path_filters, language_filters)?,
+                selector(alias, ref_selector, path_filters, language_filters, format)?,
                 kind,
                 limit,
                 freshness,
             )
-            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.query",
@@ -260,15 +268,15 @@ pub async fn run_repo(
         } => {
             let request = CodeFeatureFlagRequest::new(
                 query,
-                selector(alias, ref_selector, path_filters, language_filters)?,
+                selector(alias, ref_selector, path_filters, language_filters, format)?,
                 limit,
                 freshness,
             )
-            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .query_code_repository_feature_flags(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.feature_flags",
@@ -284,16 +292,16 @@ pub async fn run_repo(
             limit,
         } => {
             let request = CodeImpactRequest::new(
-                selector(alias, head_ref.clone(), Vec::new(), Vec::new())?,
+                selector(alias, head_ref.clone(), Vec::new(), Vec::new(), format)?,
                 base_ref,
                 head_ref,
                 limit,
             )
-            .map_err(|error| CliError::ApiFailed(error.to_string()))?;
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
             let response = service
                 .impact_code_repository(request, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.impact",
@@ -304,9 +312,12 @@ pub async fn run_repo(
         }
         RepoCommand::Status { alias } => {
             let response = service
-                .code_repository_status(selector(alias, "HEAD", Vec::new(), Vec::new())?, context)
+                .code_repository_status(
+                    selector(alias, "HEAD", Vec::new(), Vec::new(), format)?,
+                    context,
+                )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "code.repo.status",
@@ -317,9 +328,12 @@ pub async fn run_repo(
         }
         RepoCommand::Report { alias } => {
             let response = service
-                .code_repository_report(selector(alias, "HEAD", Vec::new(), Vec::new())?, context)
+                .code_repository_report(
+                    selector(alias, "HEAD", Vec::new(), Vec::new(), format)?,
+                    context,
+                )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
             if format == OutputFormat::Markdown {
                 return render_markdown_report(&response);
             }
@@ -339,6 +353,7 @@ async fn finish_started_index_task(
     response: &mut CodeRepositoryIndexStartResponse,
     selector: CodeRepositorySelector,
     context: RequestContext,
+    format: OutputFormat,
 ) -> Result<(), CliError> {
     let Some(task_id) = response.task.as_ref().map(|task| task.task_id.clone()) else {
         return Ok(());
@@ -346,7 +361,7 @@ async fn finish_started_index_task(
     let completed = service
         .run_code_index_task_once(Some(task_id), context.clone())
         .await
-        .map_err(|error| CliError::ApiFailed(error.message))?;
+        .map_err(|error| CliError::api_failed(error, format))?;
     if let Some(task) = completed {
         response.task = Some(task);
     }
@@ -354,7 +369,7 @@ async fn finish_started_index_task(
     let status = service
         .code_repository_status(selector.clone(), context)
         .await
-        .map_err(|error| CliError::ApiFailed(error.message))?;
+        .map_err(|error| CliError::api_failed(error, format))?;
     response.status = status.status;
     response.scope = crate::api::CodeRepositoryScopeMetadata::from_status(
         &response.status,
@@ -722,9 +737,10 @@ fn selector(
     ref_selector: impl Into<String>,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
+    format: OutputFormat,
 ) -> Result<CodeRepositorySelector, CliError> {
     CodeRepositorySelector::new(alias, ref_selector, path_filters, language_filters)
-        .map_err(|error| CliError::ApiFailed(error.to_string()))
+        .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))
 }
 
 fn render_markdown_report(response: &CodeRepositoryReportResponse) -> Result<String, CliError> {

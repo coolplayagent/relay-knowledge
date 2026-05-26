@@ -16,6 +16,8 @@ mod ops_cli;
 mod repo_cli;
 #[path = "repo_set_cli.rs"]
 mod repo_set_cli;
+#[path = "service_cli.rs"]
+mod service_cli;
 #[path = "setup_cli.rs"]
 mod setup_cli;
 #[path = "version_cli.rs"]
@@ -25,13 +27,11 @@ use std::{error::Error, fmt};
 
 use crate::{
     api::{
-        GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest, IngestEvidence,
-        IngestRequest, InterfaceKind, RequestContext,
+        ApiError, GraphInspectionRequest, HybridRetrievalRequest, IndexRefreshRequest,
+        IngestEvidence, IngestRequest, InterfaceKind, RequestContext,
     },
-    application::{RelayKnowledgeService, RuntimeConfiguration},
+    application::RelayKnowledgeService,
     domain::{FreshnessPolicy, IndexKind, ProposalState, ServiceManagerAction, WorkerKind},
-    interfaces::{agent::mcp::McpServer, web},
-    net::qos::QosRuntime,
 };
 
 use cli_render::{render_project_status, render_response, serialize_line};
@@ -54,6 +54,10 @@ impl OutputFormat {
             Self::Markdown => "markdown",
             Self::StreamingJson => "streaming-json",
         }
+    }
+
+    fn is_machine_readable(self) -> bool {
+        matches!(self, Self::Json | Self::StreamingJson)
     }
 
     /// Parses a CLI output format value.
@@ -323,6 +327,10 @@ pub enum CliError {
     UnexpectedArgument(String),
     RuntimeConfigFailed(String),
     ApiFailed(String),
+    ApiError {
+        error: Box<ApiError>,
+        format: OutputFormat,
+    },
     ServiceRunFailed(String),
     RenderFailed(String),
 }
@@ -330,6 +338,17 @@ pub enum CliError {
 impl CliError {
     fn invalid_format(format: &str) -> Self {
         Self::InvalidFormat(format.to_owned())
+    }
+
+    pub(super) fn api_failed(error: ApiError, format: OutputFormat) -> Self {
+        Self::ApiError {
+            error: Box::new(error),
+            format,
+        }
+    }
+
+    pub(super) fn invalid_api_argument(message: impl Into<String>, format: OutputFormat) -> Self {
+        Self::api_failed(ApiError::invalid_argument(message), format)
     }
 
     /// Returns the process exit code for the error.
@@ -351,6 +370,7 @@ impl CliError {
             | Self::UnexpectedArgument(_) => 2,
             Self::RuntimeConfigFailed(_)
             | Self::ApiFailed(_)
+            | Self::ApiError { .. }
             | Self::ServiceRunFailed(_)
             | Self::RenderFailed(_) => 1,
         }
@@ -360,6 +380,9 @@ impl CliError {
     pub fn render_stderr(&self) -> String {
         match self {
             Self::Diagnostic(diagnostic) => diagnostic.render_stderr(),
+            Self::ApiError { error, format } if format.is_machine_readable() => {
+                serde_json::to_string(error).unwrap_or_else(|_| error.message.clone())
+            }
             _ => self.to_string(),
         }
     }
@@ -415,6 +438,7 @@ impl fmt::Display for CliError {
                 write!(formatter, "failed to load runtime configuration: {message}")
             }
             Self::ApiFailed(message) => write!(formatter, "{message}"),
+            Self::ApiError { error, .. } => write!(formatter, "{}", error.message),
             Self::ServiceRunFailed(message) => write!(formatter, "{message}"),
             Self::RenderFailed(message) => write!(formatter, "failed to render output: {message}"),
         }
@@ -471,7 +495,7 @@ impl CliDiagnostic {
     }
 
     fn render_stderr(&self) -> String {
-        if self.format == OutputFormat::Json {
+        if self.format.is_machine_readable() {
             return serde_json::json!({
                 "error": self.message,
                 "usage": self.usage,
@@ -540,7 +564,7 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
         return version_cli::render_version(command.format);
     }
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
-        return run_service(mcp, web).await;
+        return service_cli::run_service(mcp, web).await;
     }
 
     let service = RelayKnowledgeService::from_process_environment()
@@ -578,7 +602,7 @@ pub async fn run_with_service(
             let response = service
                 .project_status(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_project_status(&response, format)
         }
@@ -608,7 +632,7 @@ pub async fn run_with_service(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "knowledge.ingest",
@@ -634,7 +658,7 @@ pub async fn run_with_service(
                     context,
                 )
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "knowledge.retrieve_context",
@@ -647,7 +671,7 @@ pub async fn run_with_service(
             let response = service
                 .inspect_graph(GraphInspectionRequest { source_scope: None }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "graph.inspect",
@@ -660,7 +684,7 @@ pub async fn run_with_service(
             let response = service
                 .refresh_indexes(IndexRefreshRequest { kinds }, context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "index.refresh",
@@ -677,7 +701,7 @@ pub async fn run_with_service(
             let response = service
                 .health(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "service.health",
@@ -690,7 +714,7 @@ pub async fn run_with_service(
             let response = service
                 .probe_embedding_provider(context)
                 .await
-                .map_err(|error| CliError::ApiFailed(error.message))?;
+                .map_err(|error| CliError::api_failed(error, format))?;
 
             render_response(
                 "provider.embedding.probe",
@@ -804,178 +828,8 @@ pub(super) fn parse_freshness(value: &str) -> Result<FreshnessPolicy, CliError> 
     }
 }
 
-async fn run_service(mcp: ServiceMcpTransport, web_enabled: bool) -> Result<String, CliError> {
-    let mut runtime = RuntimeConfiguration::from_process_environment()
-        .await
-        .map_err(|error| CliError::RuntimeConfigFailed(error.to_string()))?;
-    if mcp == ServiceMcpTransport::StreamableHttp {
-        runtime.agent = runtime.agent.clone().with_streamable_http_enabled();
-    }
-    runtime.observability.initialize();
-
-    let service = RelayKnowledgeService::new(runtime.clone());
-    service
-        .reconcile_startup_indexes(RequestContext::for_interface(InterfaceKind::Cli))
-        .await
-        .map_err(|error| CliError::ServiceRunFailed(error.message))?;
-    let (file_index_shutdown, file_index_shutdown_receiver) = tokio::sync::watch::channel(false);
-    let file_index_task = if runtime.file_index.enabled {
-        Some(tokio::spawn(files_cli::run_file_index_loop(
-            service.clone(),
-            runtime.file_index.scan_interval,
-            file_index_shutdown_receiver,
-        )))
-    } else {
-        None
-    };
-    let (code_index_shutdown, code_index_shutdown_receiver) = tokio::sync::watch::channel(false);
-    let code_index_task = tokio::spawn(run_code_index_loop(
-        service.clone(),
-        std::time::Duration::from_secs(5),
-        code_index_shutdown_receiver,
-    ));
-    let (repo_set_refresh_shutdown, repo_set_refresh_shutdown_receiver) =
-        tokio::sync::watch::channel(false);
-    let repo_set_refresh_task = tokio::spawn(run_code_repository_set_refresh_loop(
-        service.clone(),
-        std::time::Duration::from_secs(5),
-        repo_set_refresh_shutdown_receiver,
-    ));
-    if web_enabled {
-        let network_config = runtime.network.current();
-        ensure_web_remote_bind_allowed(
-            &network_config.http,
-            runtime.agent.access_policy.allow_remote_clients,
-        )?;
-        let mut router = web::router(service.clone(), network_config.http.max_request_body_bytes);
-        if runtime.agent.mcp_streamable_http_enabled {
-            let mcp_router = McpServer::new(
-                service.clone(),
-                runtime.network.clone(),
-                runtime.agent.clone(),
-            )
-            .checked_router()
-            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
-            router = router.merge(mcp_router);
-        }
-        crate::net::http::serve_router_with_qos(
-            router,
-            network_config.http,
-            QosRuntime::default(),
-            network_config.qos,
-            service_shutdown_signal(),
-        )
-        .await
-        .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
-    } else if runtime.agent.mcp_streamable_http_enabled {
-        let server = McpServer::new(service, runtime.network.clone(), runtime.agent.clone());
-        server
-            .serve_until_shutdown(service_shutdown_signal())
-            .await
-            .map_err(|error| CliError::ServiceRunFailed(error.to_string()))?;
-    } else {
-        service_shutdown_signal().await;
-    }
-    if let Some(task) = file_index_task {
-        let _ = file_index_shutdown.send(true);
-        let _ = task.await;
-    }
-    let _ = code_index_shutdown.send(true);
-    let _ = code_index_task.await;
-    let _ = repo_set_refresh_shutdown.send(true);
-    let _ = repo_set_refresh_task.await;
-    runtime.observability.shutdown();
-
-    Ok(String::new())
-}
-
-async fn run_code_index_loop(
-    service: RelayKnowledgeService,
-    interval: std::time::Duration,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-) {
-    loop {
-        if *shutdown.borrow() {
-            break;
-        }
-        let context = RequestContext::for_interface(InterfaceKind::Cli);
-        if let Ok(Some(_)) = service.run_code_index_task_once(None, context).await {
-            continue;
-        }
-        tokio::select! {
-            _ = shutdown.changed() => {
-                if *shutdown.borrow() {
-                    break;
-                }
-            }
-            _ = tokio::time::sleep(interval) => {}
-        }
-    }
-}
-
-async fn run_code_repository_set_refresh_loop(
-    service: RelayKnowledgeService,
-    interval: std::time::Duration,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-) {
-    loop {
-        if *shutdown.borrow() {
-            break;
-        }
-        let context = RequestContext::for_interface(InterfaceKind::Cli);
-        if let Ok(Some(_)) = service
-            .run_code_repository_set_refresh_task_once(None, context)
-            .await
-        {
-            continue;
-        }
-        tokio::select! {
-            _ = shutdown.changed() => {
-                if *shutdown.borrow() {
-                    break;
-                }
-            }
-            _ = tokio::time::sleep(interval) => {}
-        }
-    }
-}
-
-fn ensure_web_remote_bind_allowed(
-    config: &crate::net::http::HttpConfig,
-    allow_remote_clients: bool,
-) -> Result<(), CliError> {
-    if crate::net::http::remote_clients_allowed(config, allow_remote_clients) {
-        Ok(())
-    } else {
-        Err(CliError::ServiceRunFailed(
-            "Web remote bind requires allow_remote_clients=true".to_owned(),
-        ))
-    }
-}
-
-async fn service_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        match signal(SignalKind::terminate()) {
-            Ok(mut terminate) => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = terminate.recv() => {}
-                }
-            }
-            Err(_) => {
-                let _ = tokio::signal::ctrl_c().await;
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
-}
+#[cfg(test)]
+use service_cli::ensure_web_remote_bind_allowed;
 
 #[cfg(test)]
 #[path = "cli_naming_tests.rs"]
