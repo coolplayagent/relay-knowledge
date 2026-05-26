@@ -17,7 +17,7 @@ cargo test --all-targets --all-features
 echo "Running skill metadata gate..."
 manifest_version="$(cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
-python3 tools/release/update_skill_metadata_version.py --check \
+python3 tools/release/update_skill_metadata_version.py --self-test --check \
   skills/relay-knowledge-cli/SKILL.md "$manifest_version"
 
 if ! cargo llvm-cov --version >/dev/null 2>&1; then

@@ -7,6 +7,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
@@ -68,11 +69,24 @@ def top_level_continuation_exists(lines: list[str], index: int, end_index: int) 
     return False
 
 
+def reject_invalid_plain_scalar(value: str) -> None:
+    for index, character in enumerate(value):
+        if character == ":" and (
+            index + 1 == len(value) or value[index + 1].isspace()
+        ):
+            raise ValueError(
+                "SKILL.md frontmatter description has invalid YAML text; "
+                "quote values that contain ': '"
+            )
+
+
 def plain_scalar_without_comment(raw_value: str) -> str:
     value = raw_value.strip()
     for index, character in enumerate(value):
         if character == "#" and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
+            value = value[:index].rstrip()
+            break
+    reject_invalid_plain_scalar(value)
     return value
 
 
@@ -244,22 +258,80 @@ def check_skill_metadata(path: Path, expected: str) -> None:
     check_frontmatter_description(path)
 
 
-def parse_args() -> argparse.Namespace:
+def expect_value_error(action: Callable[[], object], expected: str) -> None:
+    try:
+        action()
+    except ValueError as error:
+        if expected not in str(error):
+            raise AssertionError(f"expected {expected!r} in {error!s}") from error
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def run_self_test() -> None:
+    assert (
+        single_line_yaml_description('"repository knowledge graphs: hybrid"', False)
+        == "repository knowledge graphs: hybrid"
+    )
+    assert (
+        single_line_yaml_description("https://example.test/path # registry", False)
+        == "https://example.test/path"
+    )
+    assert single_line_yaml_description("repo query # comment", False) == "repo query"
+
+    expect_value_error(
+        lambda: single_line_yaml_description("repository knowledge graphs: hybrid", False),
+        "invalid YAML text",
+    )
+    expect_value_error(
+        lambda: single_line_yaml_description("repository knowledge graphs:", False),
+        "invalid YAML text",
+    )
+    expect_value_error(
+        lambda: single_line_yaml_description("repository knowledge graphs: # comment", False),
+        "invalid YAML text",
+    )
+
+    lines = [
+        "---",
+        "name: relay-knowledge-cli",
+        'description: "repository knowledge graphs: hybrid"',
+        "metadata:",
+        "  version: 1.1.0",
+        "---",
+    ]
+    assert frontmatter_description(lines, 5) == "repository knowledge graphs: hybrid"
+
+    print("self-test OK")
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="verify without rewriting")
-    parser.add_argument("skill_md", type=Path)
-    parser.add_argument("version")
-    return parser.parse_args()
+    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("skill_md", nargs="?", type=Path)
+    parser.add_argument("version", nargs="?")
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
     try:
-        if args.check:
-            check_skill_metadata(args.skill_md, args.version)
-        else:
-            write_metadata_version(args.skill_md, args.version)
-            check_skill_metadata(args.skill_md, args.version)
+        did_work = False
+        if args.self_test:
+            run_self_test()
+            did_work = True
+        if args.skill_md is not None or args.version is not None:
+            if args.skill_md is None or args.version is None:
+                raise ValueError("provide both SKILL.md path and expected version")
+            if args.check:
+                check_skill_metadata(args.skill_md, args.version)
+            else:
+                write_metadata_version(args.skill_md, args.version)
+                check_skill_metadata(args.skill_md, args.version)
+            did_work = True
+        if not did_work:
+            raise ValueError("provide SKILL.md/version, --self-test, or both")
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
@@ -267,4 +339,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

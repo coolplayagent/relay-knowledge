@@ -34,7 +34,8 @@ are not a `repo query --kind` value.
 
 Keep the `SKILL.md` frontmatter `description` at or below 1024 Unicode
 characters. Local checks, pre-commit, PR CI, release packaging, and ClawHub
-publish validation all run the shared skill metadata gate.
+publish validation all run the shared skill metadata gate. Quote the
+description when it contains YAML-sensitive punctuation such as `: `.
 
 ## Runtime Selection
 

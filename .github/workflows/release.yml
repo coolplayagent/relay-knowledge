@@ -105,7 +105,7 @@ jobs:
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/README.md
           grep -q 'does not configure MCP' skills/relay-knowledge-cli/README.md
           grep -q '^name: relay-knowledge-cli$' skills/relay-knowledge-cli/SKILL.md
-          python3 tools/release/update_skill_metadata_version.py --check \
+          python3 tools/release/update_skill_metadata_version.py --self-test --check \
             skills/relay-knowledge-cli/SKILL.md "$manifest_version"
           grep -q 'relay-knowledge version check --format json' skills/relay-knowledge-cli/SKILL.md
           grep -q 'assets/linux-x86_64/relay-knowledge' skills/relay-knowledge-cli/SKILL.md
