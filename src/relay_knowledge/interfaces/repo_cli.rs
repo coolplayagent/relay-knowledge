@@ -5,8 +5,9 @@ use crate::{
     },
     application::RelayKnowledgeService,
     domain::{
-        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
+        CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
+        FreshnessPolicy,
     },
 };
 
@@ -358,12 +359,14 @@ async fn finish_started_index_task(
     let Some(task_id) = response.task.as_ref().map(|task| task.task_id.clone()) else {
         return Ok(());
     };
-    let completed = service
-        .run_code_index_task_once(Some(task_id), context.clone())
-        .await
-        .map_err(|error| CliError::api_failed(error, format))?;
-    if let Some(task) = completed {
-        response.task = Some(task);
+    if response.task.as_ref().map(|task| task.state) != Some(CodeIndexTaskState::Running) {
+        let completed = service
+            .run_code_index_task_once(Some(task_id), context.clone())
+            .await
+            .map_err(|error| CliError::api_failed(error, format))?;
+        if let Some(task) = completed {
+            response.task = Some(task);
+        }
     }
     let requested_ref = selector.ref_selector.clone();
     let status = service

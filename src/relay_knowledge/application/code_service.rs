@@ -201,6 +201,7 @@ impl RelayKnowledgeService {
             let response = self.index_code_repository(request, context).await?;
             return Ok(index_start_from_completed(response, None));
         }
+        recover_code_index_task_leases(&store, now_millis()).await?;
 
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
@@ -219,6 +220,23 @@ impl RelayKnowledgeService {
             session.tree_hash,
             session.source_scope
         );
+        if let Some(active_task) = store
+            .active_code_index_task(session.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?
+            && active_task.state.is_unfinished()
+            && active_task.input_fingerprint == input_fingerprint
+        {
+            return self
+                .index_start_response_from_task(
+                    &store,
+                    status,
+                    active_task,
+                    request.repository.ref_selector,
+                    &context,
+                )
+                .await;
+        }
         let task = store
             .queue_code_index_task(crate::storage::CodeIndexTaskSeed {
                 repository_id: session.repository_id.clone(),
@@ -237,6 +255,24 @@ impl RelayKnowledgeService {
             })
             .await
             .map_err(storage_api_error)?;
+        self.index_start_response_from_task(
+            &store,
+            status,
+            task,
+            request.repository.ref_selector,
+            &context,
+        )
+        .await
+    }
+
+    async fn index_start_response_from_task(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+        fallback_status: CodeRepositoryStatus,
+        task: crate::domain::CodeIndexTaskRecord,
+        requested_ref: String,
+        context: &RequestContext,
+    ) -> Result<CodeRepositoryIndexStartResponse, ApiError> {
         let checkpoint = store
             .code_index_checkpoint(task.source_scope.clone())
             .await
@@ -249,14 +285,11 @@ impl RelayKnowledgeService {
             .code_repository_status(task.repository_id.clone())
             .await
             .map_err(storage_api_error)?
-            .unwrap_or(status);
+            .unwrap_or(fallback_status);
 
         Ok(CodeRepositoryIndexStartResponse {
-            metadata: ApiMetadata::graph_only(&context, graph_version),
-            scope: crate::api::CodeRepositoryScopeMetadata::from_index_task(
-                &task,
-                request.repository.ref_selector,
-            ),
+            metadata: ApiMetadata::graph_only(context, graph_version),
+            scope: crate::api::CodeRepositoryScopeMetadata::from_index_task(&task, requested_ref),
             summary: None,
             status,
             task: Some(task),

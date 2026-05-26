@@ -86,6 +86,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(gate_names.contains(&"cargo_build_debug"));
         assert!(gate_names.contains(&"code_index_recovery_cases"));
+        assert!(gate_names.contains(&"code_index_sqlite_lock_cases"));
         assert!(gate_names.contains(&"self_iteration_cargo_check"));
         assert!(gate_names.contains(&"linux_glibc_compatibility_policy"));
         assert!(!gate_names.contains(&"cargo_build_release"));

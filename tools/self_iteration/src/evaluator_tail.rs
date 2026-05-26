@@ -59,6 +59,11 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     300,
                 ),
                 quality_gate(
+                    "code_index_sqlite_lock_cases",
+                    ["cargo", "test", "--all-targets", "code_index_sqlite_lock_cases"],
+                    300,
+                ),
+                quality_gate(
                     "code_index_health_isolation_cases",
                     [
                         "cargo",
@@ -189,6 +194,7 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
     match name {
         "cargo_build_debug" => Some(90_000.0),
         "code_index_recovery_cases" => Some(60_000.0),
+        "code_index_sqlite_lock_cases" => Some(60_000.0),
         "self_iteration_cargo_check" => Some(30_000.0),
         "cargo_build_release" => Some(180_000.0),
         "self_iteration_cargo_build_release" => Some(60_000.0),
