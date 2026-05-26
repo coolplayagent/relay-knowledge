@@ -37,8 +37,8 @@ use crate::{
 };
 use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
 use read_pool::{
-    ReadConnectionPool, lock_any_read_connection_until, lock_connection_until,
-    try_lock_any_read_connection,
+    ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
+    lock_connection_until, try_lock_any_read_connection,
 };
 
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -105,10 +105,10 @@ impl SqliteGraphStore {
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
         if let Some(read_pool) = &self.read_pool {
-            let connection = read_pool.connection();
+            let connections = read_pool.connections();
             return Box::pin(async move {
                 tokio::task::spawn_blocking(move || {
-                    let mut guard = connection.lock().map_err(|_| StorageError::LockPoisoned)?;
+                    let mut guard = lock_any_read_connection(&connections)?;
 
                     operation(&mut guard)
                 })

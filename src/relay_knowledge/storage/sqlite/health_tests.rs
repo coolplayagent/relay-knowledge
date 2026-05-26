@@ -1,4 +1,9 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use rusqlite::Connection;
 
 use crate::storage::{FileSearchRequest, GraphStore, IndexStore, StorageError};
 
@@ -58,6 +63,30 @@ async fn file_query_timeout_includes_read_pool_wait() {
     );
     assert!(started.elapsed() < Duration::from_millis(500));
     locks.release();
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn file_backed_read_uses_idle_pool_lane_when_first_lane_is_busy() {
+    let path = unique_database_path();
+    let store = SqliteGraphStore::open(&path).expect("store should open");
+    let first_connection = store
+        .read_pool
+        .as_ref()
+        .expect("file-backed store should have read pool")
+        .connections()
+        .into_iter()
+        .next()
+        .expect("read pool should have a connection");
+    let lock = hold_read_connection(first_connection);
+
+    let version = tokio::time::timeout(Duration::from_millis(200), store.current_graph_version())
+        .await
+        .expect("read should use an idle lane instead of waiting behind the busy first lane")
+        .expect("graph version should be readable");
+
+    assert_eq!(version.get(), 0);
+    lock.release();
     let _ = std::fs::remove_file(path);
 }
 
@@ -132,6 +161,24 @@ fn hold_read_connections(store: &SqliteGraphStore) -> HeldReadConnections {
     }
 
     HeldReadConnections { releases, threads }
+}
+
+fn hold_read_connection(connection: Arc<Mutex<Connection>>) -> HeldReadConnections {
+    let (locked_sender, locked_receiver) = std::sync::mpsc::channel();
+    let (release_sender, release_receiver) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let _guard = connection.lock().expect("read connection lock");
+        locked_sender.send(()).expect("lock notice should send");
+        release_receiver
+            .recv()
+            .expect("release notice should arrive");
+    });
+    locked_receiver.recv().expect("lock notice should arrive");
+
+    HeldReadConnections {
+        releases: vec![release_sender],
+        threads: vec![thread],
+    }
 }
 
 fn unique_database_path() -> std::path::PathBuf {
