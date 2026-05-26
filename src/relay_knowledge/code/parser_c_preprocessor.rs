@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) struct MacroFunctionDefinition {
     pub(super) parameters: Vec<String>,
@@ -18,7 +18,7 @@ pub(super) fn local_function_macro_definition(
     limit_byte: usize,
 ) -> LocalFunctionMacroDefinition {
     let search_end = limit_byte.min(content.len());
-    let mut active_macros = HashSet::new();
+    let mut active_macros = HashMap::new();
     let mut branches = Vec::new();
     let mut latest = None;
     let mut active_non_function = false;
@@ -120,24 +120,23 @@ fn preprocessor_directive(line: &str) -> Option<PreprocessorDirective<'_>> {
 fn apply_define_logical_line(
     line: &str,
     macro_name: &str,
-    active_macros: &mut HashSet<String>,
+    active_macros: &mut HashMap<String, ActiveMacroDefinition>,
     latest: &mut Option<MacroFunctionDefinition>,
     active_non_function: &mut bool,
 ) {
-    let Some(directive) = preprocessor_directive(line.trim_start()) else {
+    let Some((name, active_macro)) = parse_active_macro_definition_line(line) else {
         return;
     };
-    if directive.keyword != "define" {
-        return;
-    }
-    let Some(name) = directive_identifier(directive.rest) else {
-        return;
-    };
-    active_macros.insert(name.to_owned());
+    active_macros.insert(name.clone(), active_macro);
     if name == macro_name {
         *latest = parse_function_macro_definition_line(line, macro_name);
         *active_non_function = latest.is_none();
     }
+}
+
+struct ActiveMacroDefinition {
+    replacement: String,
+    function_like: bool,
 }
 
 struct PreprocessorBranch {
@@ -148,7 +147,7 @@ struct PreprocessorBranch {
 
 fn update_preprocessor_branch(
     directive: &PreprocessorDirective<'_>,
-    active_macros: &HashSet<String>,
+    active_macros: &HashMap<String, ActiveMacroDefinition>,
     branches: &mut Vec<PreprocessorBranch>,
 ) -> bool {
     match directive.keyword {
@@ -161,13 +160,13 @@ fn update_preprocessor_branch(
         }
         "ifdef" => {
             let active = directive_identifier(directive.rest)
-                .is_some_and(|name| active_macros.contains(name));
+                .is_some_and(|name| active_macros.contains_key(name));
             push_preprocessor_branch(branches, active);
             true
         }
         "ifndef" => {
             let active = directive_identifier(directive.rest)
-                .is_none_or(|name| !active_macros.contains(name));
+                .is_none_or(|name| !active_macros.contains_key(name));
             push_preprocessor_branch(branches, active);
             true
         }
@@ -218,41 +217,288 @@ fn preprocessor_branches_active(branches: &[PreprocessorBranch]) -> bool {
     branches.last().is_none_or(|branch| branch.branch_active)
 }
 
-fn evaluate_if_condition(expression: &str, active_macros: &HashSet<String>) -> bool {
-    let expression = expression.trim();
-    if let Ok(value) = expression.parse::<i64>() {
-        return value != 0;
-    }
-    if let Some(name) = defined_expression_name(expression) {
-        return active_macros.contains(name);
-    }
-    if directive_identifier(expression).is_some_and(|name| name == expression) {
-        return active_macros.contains(expression);
-    }
-    if let Some(name) = expression
-        .strip_prefix('!')
-        .map(str::trim_start)
-        .and_then(|value| {
-            defined_expression_name(value)
-                .or_else(|| directive_identifier(value).filter(|name| *name == value))
-        })
-    {
-        return !active_macros.contains(name);
-    }
-
-    false
+fn evaluate_if_condition(
+    expression: &str,
+    active_macros: &HashMap<String, ActiveMacroDefinition>,
+) -> bool {
+    let mut visiting_macros = HashSet::new();
+    evaluate_if_condition_value(expression, active_macros, &mut visiting_macros)
+        .is_some_and(|value| value != 0)
 }
 
-fn defined_expression_name(expression: &str) -> Option<&str> {
-    let rest = expression.trim().strip_prefix("defined")?.trim_start();
-    if let Some(inner) = rest
-        .strip_prefix('(')
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        return directive_identifier(inner.trim());
+fn evaluate_if_condition_value(
+    expression: &str,
+    active_macros: &HashMap<String, ActiveMacroDefinition>,
+    visiting_macros: &mut HashSet<String>,
+) -> Option<i128> {
+    let expression = strip_c_comments(expression)?;
+    let tokens = tokenize_condition_expression(&expression)?;
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut parser = PreprocessorConditionParser {
+        tokens: &tokens,
+        active_macros,
+        visiting_macros,
+        position: 0,
+    };
+    let value = parser.parse_expression()?;
+    if parser.finished() { Some(value) } else { None }
+}
+
+#[derive(Clone, Copy)]
+enum ConditionToken<'a> {
+    Number(&'a str),
+    Identifier(&'a str),
+    Defined,
+    Bang,
+    AndAnd,
+    OrOr,
+    LeftParen,
+    RightParen,
+}
+
+struct PreprocessorConditionParser<'tokens, 'macros, 'visiting> {
+    tokens: &'tokens [ConditionToken<'tokens>],
+    active_macros: &'macros HashMap<String, ActiveMacroDefinition>,
+    visiting_macros: &'visiting mut HashSet<String>,
+    position: usize,
+}
+
+impl<'tokens, 'macros, 'visiting> PreprocessorConditionParser<'tokens, 'macros, 'visiting> {
+    fn parse_expression(&mut self) -> Option<i128> {
+        self.parse_logical_or()
     }
 
-    directive_identifier(rest)
+    fn parse_logical_or(&mut self) -> Option<i128> {
+        let mut value = self.parse_logical_and()?;
+        while matches!(self.peek(), Some(ConditionToken::OrOr)) {
+            self.position += 1;
+            let right = self.parse_logical_and()?;
+            value = bool_value(value != 0 || right != 0);
+        }
+        Some(value)
+    }
+
+    fn parse_logical_and(&mut self) -> Option<i128> {
+        let mut value = self.parse_unary()?;
+        while matches!(self.peek(), Some(ConditionToken::AndAnd)) {
+            self.position += 1;
+            let right = self.parse_unary()?;
+            value = bool_value(value != 0 && right != 0);
+        }
+        Some(value)
+    }
+
+    fn parse_unary(&mut self) -> Option<i128> {
+        if matches!(self.peek(), Some(ConditionToken::Bang)) {
+            self.position += 1;
+            return Some(bool_value(self.parse_unary()? == 0));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Option<i128> {
+        match self.peek()? {
+            ConditionToken::Number(literal) => {
+                self.position += 1;
+                parse_integer_literal(literal)
+            }
+            ConditionToken::Identifier(name) => {
+                self.position += 1;
+                macro_condition_value(name, self.active_macros, self.visiting_macros)
+            }
+            ConditionToken::Defined => {
+                self.position += 1;
+                self.parse_defined_expression()
+            }
+            ConditionToken::LeftParen => {
+                self.position += 1;
+                let value = self.parse_expression()?;
+                if matches!(self.peek(), Some(ConditionToken::RightParen)) {
+                    self.position += 1;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_defined_expression(&mut self) -> Option<i128> {
+        match self.peek()? {
+            ConditionToken::Identifier(name) => {
+                self.position += 1;
+                Some(bool_value(self.active_macros.contains_key(name)))
+            }
+            ConditionToken::LeftParen => {
+                self.position += 1;
+                let name = match self.peek()? {
+                    ConditionToken::Identifier(name) => {
+                        self.position += 1;
+                        name
+                    }
+                    _ => return None,
+                };
+                if !matches!(self.peek(), Some(ConditionToken::RightParen)) {
+                    return None;
+                }
+                self.position += 1;
+                Some(bool_value(self.active_macros.contains_key(name)))
+            }
+            _ => None,
+        }
+    }
+
+    fn peek(&self) -> Option<ConditionToken<'tokens>> {
+        self.tokens.get(self.position).copied()
+    }
+
+    fn finished(&self) -> bool {
+        self.position == self.tokens.len()
+    }
+}
+
+fn macro_condition_value(
+    name: &str,
+    active_macros: &HashMap<String, ActiveMacroDefinition>,
+    visiting_macros: &mut HashSet<String>,
+) -> Option<i128> {
+    let Some(definition) = active_macros.get(name) else {
+        return Some(0);
+    };
+    if definition.function_like {
+        return Some(0);
+    }
+    let replacement = definition.replacement.trim();
+    if replacement.is_empty() {
+        return Some(0);
+    }
+    if !visiting_macros.insert(name.to_owned()) {
+        return None;
+    }
+    let value = evaluate_if_condition_value(replacement, active_macros, visiting_macros);
+    visiting_macros.remove(name);
+    value
+}
+
+fn bool_value(value: bool) -> i128 {
+    i128::from(value)
+}
+
+fn tokenize_condition_expression(expression: &str) -> Option<Vec<ConditionToken<'_>>> {
+    let mut tokens = Vec::new();
+    let mut index = 0usize;
+    while index < expression.len() {
+        let rest = &expression[index..];
+        let Some(character) = rest.chars().next() else {
+            break;
+        };
+        if character.is_whitespace() {
+            index += character.len_utf8();
+            continue;
+        }
+        if rest.starts_with("&&") {
+            tokens.push(ConditionToken::AndAnd);
+            index += 2;
+            continue;
+        }
+        if rest.starts_with("||") {
+            tokens.push(ConditionToken::OrOr);
+            index += 2;
+            continue;
+        }
+        match character {
+            '!' => {
+                tokens.push(ConditionToken::Bang);
+                index += 1;
+            }
+            '(' => {
+                tokens.push(ConditionToken::LeftParen);
+                index += 1;
+            }
+            ')' => {
+                tokens.push(ConditionToken::RightParen);
+                index += 1;
+            }
+            '0'..='9' => {
+                let end = scan_condition_number(expression, index);
+                tokens.push(ConditionToken::Number(&expression[index..end]));
+                index = end;
+            }
+            _ if c_identifier_start(character) => {
+                let end = scan_condition_identifier(expression, index);
+                let name = &expression[index..end];
+                if name == "defined" {
+                    tokens.push(ConditionToken::Defined);
+                } else {
+                    tokens.push(ConditionToken::Identifier(name));
+                }
+                index = end;
+            }
+            _ => return None,
+        }
+    }
+    Some(tokens)
+}
+
+fn scan_condition_number(expression: &str, start: usize) -> usize {
+    expression[start..]
+        .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .map_or(expression.len(), |offset| start + offset)
+}
+
+fn scan_condition_identifier(expression: &str, start: usize) -> usize {
+    expression[start..]
+        .find(|character: char| !c_identifier_char(character))
+        .map_or(expression.len(), |offset| start + offset)
+}
+
+fn parse_integer_literal(literal: &str) -> Option<i128> {
+    let literal = literal.trim_end_matches(['u', 'U', 'l', 'L']);
+    if literal.is_empty() {
+        return None;
+    }
+    let (radix, digits) = if let Some(digits) = literal
+        .strip_prefix("0x")
+        .or_else(|| literal.strip_prefix("0X"))
+    {
+        (16, digits)
+    } else if let Some(digits) = literal
+        .strip_prefix("0b")
+        .or_else(|| literal.strip_prefix("0B"))
+    {
+        (2, digits)
+    } else if literal.len() > 1 && literal.starts_with('0') {
+        (8, &literal[1..])
+    } else {
+        (10, literal)
+    };
+    if digits.is_empty() || !digits.chars().all(|character| character.is_digit(radix)) {
+        return None;
+    }
+    i128::from_str_radix(digits, radix).ok()
+}
+
+fn strip_c_comments(expression: &str) -> Option<String> {
+    let mut stripped = String::with_capacity(expression.len());
+    let mut index = 0usize;
+    while index < expression.len() {
+        let rest = &expression[index..];
+        if rest.starts_with("/*") {
+            let end = rest.find("*/")?;
+            index += end + 2;
+            continue;
+        }
+        if rest.starts_with("//") {
+            break;
+        }
+        let character = rest.chars().next()?;
+        stripped.push(character);
+        index += character.len_utf8();
+    }
+    Some(stripped)
 }
 
 fn directive_identifier(text: &str) -> Option<&str> {
@@ -281,6 +527,30 @@ fn append_preprocessor_logical_line(logical_line: &mut String, line: &str) {
 
 fn line_continues_preprocessor_definition(line: &str) -> bool {
     line.trim_end().ends_with('\\')
+}
+
+fn parse_active_macro_definition_line(line: &str) -> Option<(String, ActiveMacroDefinition)> {
+    let directive = preprocessor_directive(line.trim_start())?;
+    if directive.keyword != "define" {
+        return None;
+    }
+    let name = directive_identifier(directive.rest)?;
+    let after_name = &directive.rest[name.len()..];
+    let function_like = after_name.starts_with('(');
+    let replacement = if function_like {
+        let parameters_end = closing_parenthesis_index(after_name)?;
+        after_name[parameters_end + 1..].trim()
+    } else {
+        after_name.trim()
+    };
+
+    Some((
+        name.to_owned(),
+        ActiveMacroDefinition {
+            replacement: replacement.to_owned(),
+            function_like,
+        },
+    ))
 }
 
 fn parse_function_macro_definition_line(
@@ -341,6 +611,10 @@ fn c_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
 }
 
+fn c_identifier_start(character: char) -> bool {
+    character == '_' || character.is_ascii_alphabetic()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,5 +663,84 @@ mod tests {
             local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len()),
             LocalFunctionMacroDefinition::Unavailable
         ));
+    }
+
+    #[test]
+    fn local_macro_lookup_evaluates_numeric_macro_conditions() {
+        let disabled = "\
+#define FEATURE_FLAG 0
+#if FEATURE_FLAG
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+
+        assert!(matches!(
+            local_function_macro_definition(disabled, "KONG_ACCESS_PHASE", disabled.len()),
+            LocalFunctionMacroDefinition::Unavailable
+        ));
+
+        let enabled_by_negation = "\
+#define FEATURE_FLAG 0
+#if !FEATURE_FLAG
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        let LocalFunctionMacroDefinition::Function(definition) = local_function_macro_definition(
+            enabled_by_negation,
+            "KONG_ACCESS_PHASE",
+            enabled_by_negation.len(),
+        ) else {
+            panic!("numeric macro expansion should make !FEATURE_FLAG active");
+        };
+
+        assert_eq!(definition.parameters, ["name"]);
+    }
+
+    #[test]
+    fn local_macro_lookup_requires_complete_defined_conditions() {
+        let missing_rhs = "\
+#define ENABLE_A 1
+#if defined(ENABLE_A) && defined(ENABLE_B)
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+
+        assert!(matches!(
+            local_function_macro_definition(missing_rhs, "KONG_ACCESS_PHASE", missing_rhs.len()),
+            LocalFunctionMacroDefinition::Unavailable
+        ));
+
+        let complete_condition = "\
+#define ENABLE_A 1
+#define ENABLE_B 1
+#if defined(ENABLE_A) && defined(ENABLE_B)
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        let LocalFunctionMacroDefinition::Function(definition) = local_function_macro_definition(
+            complete_condition,
+            "KONG_ACCESS_PHASE",
+            complete_condition.len(),
+        ) else {
+            panic!("complete defined conjunction should activate the branch");
+        };
+
+        assert_eq!(definition.parameters, ["name"]);
+    }
+
+    #[test]
+    fn local_macro_lookup_parses_standard_numeric_constants() {
+        let content = "\
+#if 1U && 0x1 && (1) && 1 /* comment */
+#define KONG_ACCESS_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+";
+        let LocalFunctionMacroDefinition::Function(definition) =
+            local_function_macro_definition(content, "KONG_ACCESS_PHASE", content.len())
+        else {
+            panic!("standard numeric constants should activate the branch");
+        };
+
+        assert_eq!(definition.parameters, ["name"]);
     }
 }

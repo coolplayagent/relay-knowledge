@@ -303,6 +303,16 @@ fn c_macro_body_recovery_ignores_undef_and_inactive_macro_definitions() {
 #define CONDITIONAL_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
 #endif
 
+#define FEATURE_FLAG 0
+#if FEATURE_FLAG
+#define NUMERIC_FALSE_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
+#define ENABLE_A 1
+#if defined(ENABLE_A) && defined(ENABLE_B)
+#define COMPOUND_DEFINED_PHASE(name) static ngx_int_t name(ngx_http_request_t *request)
+#endif
+
 static ngx_int_t
 ngx_http_demo_init(ngx_pool_t *pool)
 {
@@ -323,6 +333,16 @@ CONDITIONAL_PHASE(ngx_http_inactive_ifdef)
 {
     return ngx_http_demo_init(request->pool);
 }
+
+NUMERIC_FALSE_PHASE(ngx_http_numeric_false)
+{
+    return ngx_http_demo_init(request->pool);
+}
+
+COMPOUND_DEFINED_PHASE(ngx_http_compound_defined_false)
+{
+    return ngx_http_demo_init(request->pool);
+}
 "#,
     );
 
@@ -330,6 +350,8 @@ CONDITIONAL_PHASE(ngx_http_inactive_ifdef)
         "ngx_http_after_undef",
         "ngx_http_inactive_if",
         "ngx_http_inactive_ifdef",
+        "ngx_http_numeric_false",
+        "ngx_http_compound_defined_false",
     ] {
         assert!(
             !snapshot
