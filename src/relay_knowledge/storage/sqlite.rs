@@ -1,8 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{Arc, Mutex, TryLockError},
+    time::{Duration, Instant},
 };
 
 mod code;
@@ -16,6 +16,7 @@ mod file_index;
 mod helpers;
 mod indexing;
 mod operations;
+mod read_pool;
 mod retrieval;
 mod retry;
 mod schema_columns;
@@ -35,6 +36,10 @@ use crate::{
     },
 };
 use helpers::{count_rows, source_hash_for_evidence, stable_id, storage_version_range};
+use read_pool::{
+    ReadConnectionPool, lock_any_read_connection, lock_any_read_connection_until,
+    lock_connection_until, try_lock_any_read_connection,
+};
 
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -42,6 +47,7 @@ const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone)]
 pub struct SqliteGraphStore {
     connection: Arc<Mutex<Connection>>,
+    read_pool: Option<Arc<ReadConnectionPool>>,
 }
 
 impl SqliteGraphStore {
@@ -56,9 +62,11 @@ impl SqliteGraphStore {
         configure_connection(&connection)?;
         schema_migration::prepare_existing_database(&connection)?;
         initialize_schema(&connection)?;
+        let read_pool = ReadConnectionPool::open(&path)?;
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            read_pool: Some(Arc::new(read_pool)),
         })
     }
 
@@ -70,6 +78,7 @@ impl SqliteGraphStore {
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            read_pool: None,
         })
     }
 
@@ -83,6 +92,96 @@ impl SqliteGraphStore {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
                 let mut guard = connection.lock().map_err(|_| StorageError::LockPoisoned)?;
+
+                operation(&mut guard)
+            })
+            .await?
+        })
+    }
+
+    pub(super) fn run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        if let Some(read_pool) = &self.read_pool {
+            let connections = read_pool.connections();
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut guard = lock_any_read_connection(&connections)?;
+
+                    operation(&mut guard)
+                })
+                .await?
+            });
+        }
+
+        self.run(operation)
+    }
+
+    pub(super) fn run_read_until<T, F>(
+        &self,
+        deadline: Instant,
+        timeout_message: &'static str,
+        operation: F,
+    ) -> StorageFuture<'_, T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        if let Some(read_pool) = &self.read_pool {
+            let connections = read_pool.connections();
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut guard =
+                        lock_any_read_connection_until(&connections, deadline, timeout_message)?;
+
+                    operation(&mut guard)
+                })
+                .await?
+            });
+        }
+
+        let connection = Arc::clone(&self.connection);
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let mut guard = lock_connection_until(&connection, deadline, timeout_message)?;
+
+                operation(&mut guard)
+            })
+            .await?
+        })
+    }
+
+    pub(super) fn try_run_read<T, F>(&self, operation: F) -> StorageFuture<'_, T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        if let Some(read_pool) = &self.read_pool {
+            let connections = read_pool.connections();
+            return Box::pin(async move {
+                tokio::task::spawn_blocking(move || {
+                    let mut guard = try_lock_any_read_connection(&connections)?;
+
+                    operation(&mut guard)
+                })
+                .await?
+            });
+        }
+
+        let connection = Arc::clone(&self.connection);
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let mut guard = match connection.try_lock() {
+                    Ok(guard) => guard,
+                    Err(TryLockError::Poisoned(_)) => return Err(StorageError::LockPoisoned),
+                    Err(TryLockError::WouldBlock) => {
+                        return Err(StorageError::Busy(
+                            "sqlite write connection is currently occupied".to_owned(),
+                        ));
+                    }
+                };
 
                 operation(&mut guard)
             })
@@ -836,6 +935,10 @@ mod graphrag_phase4_tests;
 
 #[cfg(test)]
 mod index_refresh_tests;
+
+#[cfg(test)]
+#[path = "sqlite/health_tests.rs"]
+mod health_tests;
 
 #[cfg(test)]
 mod operations_tests;

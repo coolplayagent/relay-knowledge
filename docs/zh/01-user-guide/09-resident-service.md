@@ -30,6 +30,8 @@ target/release/relay-knowledge service run --web --mcp streamable-http
 
 `service run` 启动时会先执行 startup index reconciler，尽量在接受 resident adapter 请求前恢复落后的索引任务，然后用有界常驻 worker 消费持久化 code-index 队列和 repository-set overlay refresh 队列。没有启用 MCP 或 Web 时，命令仍会作为前台服务等待 shutdown signal。
 
+HTTP `/api/health` 和 CLI `health` 是 liveness-safe 入口：它只做短预算只读快照，不会排队 index refresh，也不会等待大型 repository indexing 完成。存储读通道繁忙时，health 会返回 cached 或最小 degraded 响应，并用 `storage_busy`、stale metadata 或 degraded reason 暴露压力。普通代码查询不会因此被排除；`allow-stale` 查询在目标 ref 和 filters 正在索引时读取最新兼容的已完成 committed scope，`wait-until-fresh` 查询才要求目标 scope 已 finalize。
+
 ## 9.2 Web 中的 Service Run
 
 Web 页面中的 service run 操作只通过 `/api/web/operations/execute` 返回当前 service runtime snapshot，用于检查即将运行的配置和 MCP 状态。实际常驻服务必须由 CLI、`run.sh` 或平台 service manager 启动。

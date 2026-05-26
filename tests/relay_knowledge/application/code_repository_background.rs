@@ -3,15 +3,15 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use relay_knowledge::{
     api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeIndexMode, CodeIndexRequest, CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexTaskState, CodeQueryKind,
+        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, KnowledgeStore, SqliteGraphStore},
@@ -239,6 +239,354 @@ async fn repository_status_recovers_expired_code_index_task_lease() {
     assert!(status.checkpoint.is_none());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_index_health_isolation_cases_health_and_query_respond_during_full_index() {
+    let repo = FixtureRepo::create("code-health-isolation");
+    repo.write("src/lib.rs", "pub fn stable_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_file_store("code-health-isolation").await;
+
+    register_fixture_repo_without_language_filter(&service, &repo, "register-health-isolation")
+        .await;
+    let initial = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-health-isolation-initial"),
+        )
+        .await
+        .expect("initial index should queue");
+    service
+        .run_code_index_task_once(
+            initial.task.map(|task| task.task_id),
+            context("run-health-isolation-initial"),
+        )
+        .await
+        .expect("initial worker should run");
+
+    for index in 0..260 {
+        repo.write(
+            &format!("src/generated/module_{index:03}.rs"),
+            &format!(
+                "pub fn generated_policy_{index:03}() -> u32 {{ {index} }}\n\
+                 pub fn generated_caller_{index:03}() -> u32 {{ generated_policy_{index:03}() }}\n"
+            ),
+        );
+    }
+    repo.write(
+        "src/lib.rs",
+        "pub fn stable_policy() -> u32 { 2 }\npub fn stable_policy_caller() -> u32 { stable_policy() }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "large-index"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-health-isolation-large"),
+        )
+        .await
+        .expect("large index should queue");
+    let task_id = started
+        .task
+        .expect("large index should return task")
+        .task_id;
+    let worker_service = service.clone();
+    let worker = tokio::spawn(async move {
+        worker_service
+            .run_code_index_task_once(Some(task_id), context("run-health-isolation-large"))
+            .await
+    });
+
+    let health = tokio::time::timeout(
+        Duration::from_secs(2),
+        service.health(context("health-while-indexing")),
+    )
+    .await
+    .expect("health should not hang during indexing")
+    .expect("health should return a response");
+    assert_eq!(health.metadata.request_id, "req-health-while-indexing");
+
+    let query = tokio::time::timeout(
+        Duration::from_secs(2),
+        service.query_code_repository(
+            CodeRetrievalRequest::new(
+                "stable_policy",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-while-indexing"),
+        ),
+    )
+    .await
+    .expect("query should not hang during indexing")
+    .expect("query should read a committed scope");
+    assert!(query.results.iter().any(|hit| hit.path == "src/lib.rs"));
+
+    worker
+        .await
+        .expect("worker task should join")
+        .expect("worker should complete");
+}
+
+#[tokio::test]
+async fn allow_stale_query_uses_matching_completed_scope_filters_during_active_index() {
+    let repo = FixtureRepo::create("code-stale-filtered-scope");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 1 }\n");
+    repo.write("src/b.rs", "pub fn stable_b_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(store.clone()).await;
+    register_fixture_repo(&service, &repo, "register-stale-filtered-scope").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-filtered-a"),
+        )
+        .await
+        .expect("a scope should index");
+    repo.write("src/b.rs", "pub fn stable_b_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-b"]);
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/b.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-filtered-b"),
+        )
+        .await
+        .expect("b scope should index");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 3 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-a"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-stale-filtered-a"),
+        )
+        .await
+        .expect("a refresh should queue");
+    assert!(started.task.is_some());
+    let active = service
+        .code_repository_status(
+            selector("fixture", "HEAD"),
+            context("status-stale-filtered-a"),
+        )
+        .await
+        .expect("status should load")
+        .active_task
+        .expect("active task should be visible");
+    assert_eq!(
+        active.path_filters,
+        vec!["src".to_owned(), "src/a.rs".to_owned()]
+    );
+    let compatible = store
+        .latest_code_repository_scope_status(
+            "fixture".to_owned(),
+            vec!["src/a.rs".to_owned()],
+            Vec::new(),
+        )
+        .await
+        .expect("latest compatible status should read")
+        .expect("compatible a scope should exist");
+    assert_eq!(
+        compatible.path_filters,
+        vec!["src".to_owned(), "src/a.rs".to_owned()]
+    );
+
+    let query = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "stable_a_policy",
+                filtered_selector("fixture", "HEAD", "src/a.rs"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-stale-filtered-a"),
+        )
+        .await
+        .expect("allow-stale should use the latest compatible a scope");
+
+    assert!(query.metadata.stale);
+    assert!(query.scope.stale);
+    assert!(query.results.iter().any(|hit| hit.path == "src/a.rs"));
+}
+
+#[tokio::test]
+async fn allow_stale_query_rejects_unmatched_active_narrow_scope_for_unfiltered_request() {
+    let repo = FixtureRepo::create("code-stale-unmatched-active-scope");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 1 }\n");
+    repo.write("src/b.rs", "pub fn stable_b_policy() -> u32 { 1 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-stale-unmatched-active").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-unmatched-a"),
+        )
+        .await
+        .expect("a scope should index");
+    repo.write("src/a.rs", "pub fn stable_a_policy() -> u32 { 2 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-a"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-stale-unmatched-a"),
+        )
+        .await
+        .expect("narrow refresh should queue");
+    assert!(started.task.is_some());
+
+    let error = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "stable_b_policy",
+                selector("fixture", "HEAD"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-stale-unmatched-unfiltered"),
+        )
+        .await
+        .expect_err("unfiltered request should not use a narrow active task as stale fallback");
+
+    assert!(error.message.contains("has no index for ref"));
+    assert!(error.message.contains("requested filters"));
+}
+
+#[tokio::test]
+async fn allow_stale_feature_flags_use_matching_completed_scope_filters_during_active_index() {
+    let repo = FixtureRepo::create("code-stale-feature-flag-scope");
+    repo.write(
+        "src/a.rs",
+        "pub fn stable_a_policy() -> bool { std::env::var(\"STALE_A_FLAG\").is_ok() }\n",
+    );
+    repo.write(
+        "src/b.rs",
+        "pub fn stable_b_policy() -> bool { std::env::var(\"STALE_B_FLAG\").is_ok() }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, "register-stale-feature-flag-scope").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-feature-flag-a"),
+        )
+        .await
+        .expect("a scope should index");
+    repo.write(
+        "src/b.rs",
+        "pub fn stable_b_policy() -> bool { std::env::var(\"STALE_B_FLAG_V2\").is_ok() }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-b"]);
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/b.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-stale-feature-flag-b"),
+        )
+        .await
+        .expect("b scope should index");
+    repo.write(
+        "src/a.rs",
+        "pub fn stable_a_policy() -> bool { std::env::var(\"STALE_A_FLAG_V2\").is_ok() }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "update-a"]);
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: filtered_selector("fixture", "HEAD", "src/a.rs"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-stale-feature-flag-a"),
+        )
+        .await
+        .expect("a refresh should queue");
+    assert!(started.task.is_some());
+
+    let flags = service
+        .query_code_repository_feature_flags(
+            CodeFeatureFlagRequest::new(
+                Some("STALE_A_FLAG".to_owned()),
+                filtered_selector("fixture", "HEAD", "src/a.rs"),
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("feature flag request should validate"),
+            context("query-stale-feature-flag-a"),
+        )
+        .await
+        .expect("allow-stale feature flags should use the latest compatible a scope");
+
+    assert!(flags.metadata.stale);
+    assert!(flags.scope.stale);
+    assert!(
+        flags
+            .flags
+            .iter()
+            .any(|flag| flag.source_key == "STALE_A_FLAG")
+    );
+    assert!(
+        flags
+            .flags
+            .iter()
+            .flat_map(|flag| flag.usages.iter())
+            .all(|usage| usage.path == "src/a.rs")
+    );
+}
+
 async fn query(
     service: &RelayKnowledgeService,
     query: &str,
@@ -284,8 +632,32 @@ async fn register_fixture_repo(service: &RelayKnowledgeService, repo: &FixtureRe
         .expect("repository should register");
 }
 
+async fn register_fixture_repo_without_language_filter(
+    service: &RelayKnowledgeService,
+    repo: &FixtureRepo,
+    name: &str,
+) {
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: Vec::new(),
+            },
+            context(name),
+        )
+        .await
+        .expect("repository should register");
+}
+
 fn selector(alias: &str, ref_selector: &str) -> CodeRepositorySelector {
     CodeRepositorySelector::new(alias, ref_selector, Vec::new(), Vec::new())
+        .expect("selector should validate")
+}
+
+fn filtered_selector(alias: &str, ref_selector: &str, path: &str) -> CodeRepositorySelector {
+    CodeRepositorySelector::new(alias, ref_selector, vec![path.to_owned()], Vec::new())
         .expect("selector should validate")
 }
 
@@ -300,6 +672,14 @@ fn context(name: &str) -> RequestContext {
 async fn service_with_memory_store() -> RelayKnowledgeService {
     service_with_store(Arc::new(
         SqliteGraphStore::open_in_memory().expect("store should open"),
+    ))
+    .await
+}
+
+async fn service_with_file_store(name: &str) -> RelayKnowledgeService {
+    let path = unique_database_path(name);
+    service_with_store(Arc::new(
+        SqliteGraphStore::open(path).expect("file store should open"),
     ))
     .await
 }
@@ -372,4 +752,14 @@ fn git_command<const N: usize>(path: &Path, args: [&str; N]) -> Command {
     let mut command = Command::new("git");
     command.current_dir(path).args(args);
     command
+}
+
+fn unique_database_path(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    std::env::temp_dir()
+        .join("relay-knowledge-tests")
+        .join(format!("{name}-{}-{nanos}.sqlite", std::process::id()))
 }

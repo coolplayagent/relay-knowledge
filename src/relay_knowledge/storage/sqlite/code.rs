@@ -19,7 +19,7 @@ mod code_query_scope;
 mod code_impact;
 
 #[path = "code_report.rs"]
-mod code_report;
+pub(super) mod code_report;
 
 #[path = "code_schema.rs"]
 mod code_schema;
@@ -147,7 +147,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        self.run(move |connection| code_status::repository_status(connection, &repository))
+        self.run_read(move |connection| code_status::repository_status(connection, &repository))
     }
 
     fn code_repository_scope_status(
@@ -157,11 +157,27 @@ impl CodeRepositoryStore for SqliteGraphStore {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             code_status::repository_scope_status(
                 connection,
                 &repository,
                 &resolved_commit_sha,
+                &path_filters,
+                &language_filters,
+            )
+        })
+    }
+
+    fn latest_code_repository_scope_status(
+        &self,
+        repository: String,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
+        self.run_read(move |connection| {
+            code_status::latest_repository_scope_status(
+                connection,
+                &repository,
                 &path_filters,
                 &language_filters,
             )
@@ -217,28 +233,28 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         task_id: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
-        self.run(move |connection| code_tasks::task_by_id(connection, &task_id))
+        self.run_read(move |connection| code_tasks::task_by_id(connection, &task_id))
     }
 
     fn active_code_index_task(
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeIndexTaskRecord>> {
-        self.run(move |connection| code_tasks::active_task(connection, &repository_id))
+        self.run_read(move |connection| code_tasks::active_task(connection, &repository_id))
     }
 
     fn code_index_checkpoint(
         &self,
         source_scope: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeIndexCheckpoint>> {
-        self.run(move |connection| code_tasks::checkpoint(connection, &source_scope))
+        self.run_read(move |connection| code_tasks::checkpoint(connection, &source_scope))
     }
 
     fn code_scope_retention(
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, crate::domain::CodeScopeRetentionSummary> {
-        self.run(move |connection| code_tasks::retention_status(connection, &repository_id))
+        self.run_read(move |connection| code_tasks::retention_status(connection, &repository_id))
     }
 
     fn prune_code_repository_scopes(
@@ -252,14 +268,16 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         repository_id: String,
     ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
-        self.run(move |connection| code_snapshot::file_fingerprints(connection, &repository_id))
+        self.run_read(move |connection| {
+            code_snapshot::file_fingerprints(connection, &repository_id)
+        })
     }
 
     fn code_file_fingerprints_for_scope(
         &self,
         source_scope: String,
     ) -> StorageFuture<'_, Vec<CodeFileFingerprint>> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             code_snapshot::file_fingerprints_for_scope(connection, &source_scope)
         })
     }
@@ -271,7 +289,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         language_filters: Vec<String>,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             code_snapshot::file_candidate_paths_for_scope(
                 connection,
                 &source_scope,
@@ -290,7 +308,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         language_filters: Vec<String>,
         limit: usize,
     ) -> StorageFuture<'_, Vec<String>> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             code_snapshot::file_candidate_paths_for_query_scope(
                 connection,
                 &source_scope,
@@ -334,14 +352,24 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        self.run(move |connection| code_query::search_code(connection, request))
+        self.run_read(move |connection| code_query::search_code(connection, request))
     }
 
     fn search_code_feature_flags(
         &self,
         request: CodeFeatureFlagRequest,
     ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
-        self.run(move |connection| code_feature_flags::search(connection, request))
+        self.run_read(move |connection| code_feature_flags::search(connection, request))
+    }
+
+    fn search_code_feature_flags_scope(
+        &self,
+        source_scope: String,
+        request: CodeFeatureFlagRequest,
+    ) -> StorageFuture<'_, Vec<CodeFeatureFlagGraph>> {
+        self.run_read(move |connection| {
+            code_feature_flags::search_scope(connection, &source_scope, request)
+        })
     }
 
     fn search_code_scope(
@@ -349,7 +377,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         source_scope: String,
         request: CodeRetrievalRequest,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             code_query::search_code_scope(connection, &source_scope, request)
         })
     }
@@ -359,18 +387,18 @@ impl CodeRepositoryStore for SqliteGraphStore {
         request: CodeImpactRequest,
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
-        self.run(move |connection| code_impact::analyze_impact(connection, request, changes))
+        self.run_read(move |connection| code_impact::analyze_impact(connection, request, changes))
     }
 
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
-        self.run(code_report::repository_totals)
+        self.run_read(code_report::repository_totals)
     }
 
     fn code_repository_report(
         &self,
         repository: String,
     ) -> StorageFuture<'_, CodeRepositoryReport> {
-        self.run(move |connection| code_report::repository_report(connection, &repository))
+        self.run_read(move |connection| code_report::repository_report(connection, &repository))
     }
 
     fn create_code_repository_set(
@@ -401,14 +429,14 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         set_alias: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySet>> {
-        self.run(move |connection| code_set::set_by_alias(connection, &set_alias))
+        self.run_read(move |connection| code_set::set_by_alias(connection, &set_alias))
     }
 
     fn code_repository_set_status(
         &self,
         set_alias: String,
     ) -> StorageFuture<'_, Option<crate::domain::CodeRepositorySetStatus>> {
-        self.run(move |connection| code_set::set_status(connection, &set_alias))
+        self.run_read(move |connection| code_set::set_status(connection, &set_alias))
     }
 
     fn refresh_code_repository_set_overlay(
@@ -423,7 +451,7 @@ impl CodeRepositoryStore for SqliteGraphStore {
         &self,
         set_id: String,
     ) -> StorageFuture<'_, Vec<crate::domain::CodeRepositoryCrossEdge>> {
-        self.run(move |connection| code_set::cross_edges_for_set(connection, &set_id))
+        self.run_read(move |connection| code_set::cross_edges_for_set(connection, &set_id))
     }
 
     fn queue_code_repository_set_refresh_task(

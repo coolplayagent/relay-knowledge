@@ -28,7 +28,7 @@
 
 业界代码搜索实践要求词法、结构和语义分层：Zoekt/Google Code Search 类 trigram candidate 适合 substring/regex 初筛，BM25 适合自然语言和文档 chunk，Tree-sitter capture 适合 symbol/edge，semantic/vector 适合概念性解释查询。排序不能用语义分数覆盖 exact symbol 或 resolved edge，也不能让宽泛 regex 结果绕过 scope、path、language 和 revision filter。
 
-代码仓库查询采用 AST 优先、精确 source fallback 兜底的内部协作。Definition、reference 和 hybrid 查询先访问版本化 tree-sitter 图和 SQLite FTS 读模型；当结构化路径存在明确召回缺口时，允许在同一已索引 revision scope 物化候选文件上执行有界内部精确文本检索。Import/dependency 查询先从 import edge 得到依赖集合；若依赖目标有代码地图或代码图 target，则使用结构化依赖证据；当 dependency library 未作为代码图 target 建立索引时，import 查询才可以用 unresolved external dependency target hint 作为 source fallback 词项。外部依赖源码缺失是 unresolved edge coverage metadata，不写入 `degraded_reason`。Source fallback 只属于词法层：它可以恢复精确源码行并提高召回，但不能返回 AST 图没有证明的 resolved edge 或 confidence。
+代码仓库查询采用 AST 优先、精确 source fallback 兜底的内部协作。Definition、reference 和 hybrid 查询先访问版本化 tree-sitter 图和 SQLite FTS 读模型；当请求 ref 正在 full indexing 且新 scope 尚未 finalize 时，`allow-stale` 查询读取上一个已完成 committed scope 并显式标记 stale/degraded，不能等待 writer 或读取部分索引数据；`wait-until-fresh` 才拒绝未完成的目标 scope。当结构化路径存在明确召回缺口时，允许在同一已索引 revision scope 物化候选文件上执行有界内部精确文本检索。Import/dependency 查询先从 import edge 得到依赖集合；若依赖目标有代码地图或代码图 target，则使用结构化依赖证据；当 dependency library 未作为代码图 target 建立索引时，import 查询才可以用 unresolved external dependency target hint 作为 source fallback 词项。外部依赖源码缺失是 unresolved edge coverage metadata，不写入 `degraded_reason`。Source fallback 只属于词法层：它可以恢复精确源码行并提高召回，但不能返回 AST 图没有证明的 resolved edge 或 confidence。
 
 面向 agent 和维护者的源码检查遵循独立工具策略：优先使用 `rg` 做本地仓库搜索；如果本机未安装 `rg`，继续使用有界 `grep -RIn --exclude-dir=.git --exclude-dir=target --exclude-dir=node_modules --exclude-dir=dist <pattern> <authorized-root>`。这条人工 grep 路径只用于调查和自迭代 prompt，不能接入产品查询热路径，也不能绕过已索引 scope、freshness 或 authorization。
 
