@@ -214,11 +214,8 @@ impl RelayKnowledgeService {
         let payload_json = serde_json::to_string(&request)
             .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let input_fingerprint = format!(
-            "full:{}:{}:{}:{}",
-            session.repository_id,
-            session.resolved_commit_sha,
-            session.tree_hash,
-            session.source_scope
+            "full:{}:{}:{}",
+            session.repository_id, session.tree_hash, session.source_scope
         );
         if let Some(active_task) = store
             .active_code_index_task(session.repository_id.clone())
@@ -410,12 +407,6 @@ impl RelayKnowledgeService {
             &status.language_filters,
             &request.repository.language_filters,
         );
-        let expected_source_scope = expected_scope_id(
-            &status.repository_id,
-            &tree_hash,
-            &path_filters,
-            &language_filters,
-        );
         let scoped_status = store
             .code_repository_scope_status(
                 request.repository.repository.clone(),
@@ -428,6 +419,12 @@ impl RelayKnowledgeService {
         let Some(scoped_status) = scoped_status else {
             return Ok(None);
         };
+        let expected_source_scope = expected_scope_id(
+            &status.repository_id,
+            &tree_hash,
+            &scoped_status.path_filters,
+            &scoped_status.language_filters,
+        );
         if scoped_status.stale
             || scoped_status.tree_hash.as_deref() != Some(tree_hash.as_str())
             || expected_source_scope.as_deref().is_some_and(|expected| {

@@ -44,7 +44,7 @@
 - 大多数生成式 fixture 现在提供 7 条基础语法 case：`symbol`、`definition`、`imports`、`callees` 或关系流、`hybrid`、语言支持时的显式 lambda/closure case，以及 `negative`。
 - `hybrid` 与关系类 case 使用 `expected_all`、`expected_sequence`、`forbidden` 或 `forbidden_rank_penalty` 保留连续评分空间，让通过后的排序、覆盖率和性能仍能继续优化。
 - Python 语法 fixture 还覆盖 text-only Markdown 文档引用：对 `ServiceRunner` 和 `dispatch_event` 的 `references` 查询必须能恢复文档描述行，并以 `text_fallback` 证据返回且不携带 graph-edge confidence。
-- 除默认 fast profile 已覆盖的 C/C++、cross-language、TypeScript、`nonstandard_layout_fixture` 和 `grep_budget_fixture` 外，其他生成式 fixture 默认不加入普通 fast repository 列表；其中 `grep_budget_fixture` 会生成超过 256 个 C 文件，并要求无 path filter 的 `references` 查询通过 query-aware fallback candidates 召回排序靠后的目标文件，且不能出现 source-fallback candidate budget exhaustion。需要定向验证时设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`，例如：
+- 除默认 fast profile 已覆盖的 C/C++、cross-language、TypeScript、`nonstandard_layout_fixture` 和 `grep_budget_fixture` 外，其他生成式 fixture 默认不加入普通 fast repository 列表；其中 `nonstandard_layout_fixture` 会执行无 path filter 的 `external_deps/` 与 `modules/` definition guardrail，防止索引创建或增量路径再次退回只看 `src/`；`grep_budget_fixture` 会生成超过 256 个 C 文件，并要求无 path filter 的 `references` 查询通过 query-aware fallback candidates 召回排序靠后的目标文件，且不能出现 source-fallback candidate budget exhaustion。需要定向验证时设置 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS`，例如：
 
 ```bash
 RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=python_syntax_fixture,typescript_syntax_fixture \

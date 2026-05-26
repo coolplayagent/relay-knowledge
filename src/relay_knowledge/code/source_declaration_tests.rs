@@ -1,4 +1,4 @@
-use super::{source_declarations_for_identity, tests::fixtures::TempGitRepo};
+use super::{source_declarations_for_identity, test_fixtures::TempGitRepo};
 
 #[test]
 fn source_declaration_fallback_reads_exact_committed_typedef() {

@@ -24,18 +24,30 @@ mod snapshot;
 pub(crate) mod source_roots;
 
 #[cfg(test)]
+#[path = "tests/fixtures.rs"]
+mod test_fixtures;
+
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 #[path = "source_declaration_tests.rs"]
 mod source_declaration_tests;
 
+#[cfg(test)]
+#[path = "source_layout_tests.rs"]
+mod source_layout_tests;
+
+#[cfg(test)]
+#[path = "worktree_overlay_tests.rs"]
+mod worktree_overlay_tests;
+
 use crate::domain::{
     CodeFileFingerprint, CodeIndexMode, CodeIndexSnapshot, CodePathTombstone,
     CodeRepositoryRegistration, CodeRepositorySelector, RepositoryCodeRange,
 };
 
-use changes::{GitChange, diff_changes, tracked_paths, worktree_changed_paths};
+use changes::{GitChange, diff_changes, tracked_entries, worktree_changed_paths};
 use git::{
     git_bytes, git_object_exists, git_optional, resolve_git_root, resolve_ref, resolve_tree,
 };
@@ -47,11 +59,12 @@ use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
 pub use pipeline::{CodeIndexPlan, prepare_full_index_plan};
 use scope::{
-    load_ignore_rules, load_ignore_rules_from_commit, path_is_selected_with_rules,
-    path_scope_overlaps, selection_exclusion_reason,
+    discover_source_layout, effective_index_path_filters, load_ignore_rules,
+    load_ignore_rules_from_commit, path_is_selected_with_layout, path_is_selected_with_rules,
+    path_scope_overlaps, selection_exclusion_reason_with_layout,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
-use snapshot::SnapshotBuild;
+use snapshot::{SnapshotBuild, SnapshotScopeFilters};
 
 #[cfg(test)]
 use identity::resolve_reference_targets;
@@ -391,9 +404,10 @@ pub fn deleted_symbol_names_for_diff(
 ) -> Result<Vec<String>, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let base_commit = resolve_ref(&root, base_ref)?;
-    let head_commit = resolve_ref(&root, head_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
-    let ignore_rules = load_ignore_rules_from_commit(&root, &head_commit)?;
+    let ignore_rules = load_ignore_rules_from_commit(&root, &base_commit)?;
+    let base_entries = tracked_entries(&root, &base_commit)?;
+    let source_layout = discover_source_layout(&base_entries);
     let mut names = Vec::new();
 
     for change in changes {
@@ -403,7 +417,13 @@ pub fn deleted_symbol_names_for_diff(
             | GitChange::Copied { .. }
             | GitChange::TypeChanged { .. } => continue,
         };
-        if !path_is_selected_with_rules(&deleted_path, registration, selector, &ignore_rules) {
+        if !path_is_selected_with_layout(
+            &deleted_path,
+            registration,
+            selector,
+            &ignore_rules,
+            &source_layout,
+        ) {
             continue;
         }
         let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
@@ -455,17 +475,33 @@ fn build_full_snapshot(
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
-    let paths = tracked_paths(root, &commit)?
+    let entries = tracked_entries(root, &commit)?;
+    let source_layout = discover_source_layout(&entries);
+    let path_filters = effective_index_path_filters(registration, selector, &source_layout);
+    let language_filters =
+        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let paths = entries
         .into_iter()
+        .map(|entry| entry.path)
         .filter(|path| {
-            selection_exclusion_reason(path, registration, selector, &ignore_rules).is_none()
+            selection_exclusion_reason_with_layout(
+                path,
+                registration,
+                selector,
+                &ignore_rules,
+                &source_layout,
+            )
+            .is_none()
         })
         .collect::<Vec<_>>();
-    let mut build = SnapshotBuild::new_with_selector(
+    let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
-        selector,
         commit,
         tree_hash,
+        SnapshotScopeFilters {
+            path_filters,
+            language_filters,
+        },
         true,
         paths.len(),
         0,
@@ -493,30 +529,55 @@ fn build_incremental_snapshot(
     let changes = diff_changes(root, base_ref, head_ref)?;
     let base_ignore_rules = load_ignore_rules_from_commit(root, &base_commit)?;
     let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
-    let mut build = SnapshotBuild::new_with_selector(
+    let base_entries = tracked_entries(root, &base_commit)?;
+    let base_source_layout = discover_source_layout(&base_entries);
+    let head_entries = tracked_entries(root, &commit)?;
+    let source_layout = discover_source_layout(&head_entries);
+    let path_filters = effective_index_path_filters(registration, selector, &source_layout);
+    let language_filters =
+        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let mut build = SnapshotBuild::new_with_scope_filters(
         registration,
-        selector,
         commit,
         tree_hash,
+        SnapshotScopeFilters {
+            path_filters,
+            language_filters,
+        },
         false,
         changes.len(),
         0,
     );
     build.base_resolved_commit_sha = Some(base_commit.clone());
+    let parse_context = ChangedPathParseContext {
+        registration,
+        selector,
+        root,
+        previous_hashes,
+        ignore_rules: &ignore_rules,
+        source_layout: &source_layout,
+    };
 
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
-                if path_is_selected_with_rules(&path, registration, selector, &base_ignore_rules) {
+                if path_is_selected_with_layout(
+                    &path,
+                    registration,
+                    selector,
+                    &base_ignore_rules,
+                    &base_source_layout,
+                ) {
                     build.deleted_paths.push(path);
                 }
             }
             GitChange::Renamed { old_path, new_path } => {
-                if path_is_selected_with_rules(
+                if path_is_selected_with_layout(
                     &old_path,
                     registration,
                     selector,
                     &base_ignore_rules,
+                    &base_source_layout,
                 ) {
                     build.deleted_paths.push(old_path.clone());
                     build.tombstones.push(CodePathTombstone {
@@ -528,18 +589,16 @@ fn build_incremental_snapshot(
                         head_ref: head_ref.to_owned(),
                     });
                 }
-                parse_changed_path(
-                    &mut build,
-                    registration,
-                    selector,
-                    root,
-                    &new_path,
-                    previous_hashes,
-                    &ignore_rules,
-                )?;
+                parse_changed_path(&mut build, &parse_context, &new_path)?;
             }
             GitChange::Copied { old_path, new_path } => {
-                if path_is_selected_with_rules(&new_path, registration, selector, &ignore_rules) {
+                if path_is_selected_with_layout(
+                    &new_path,
+                    registration,
+                    selector,
+                    &ignore_rules,
+                    &source_layout,
+                ) {
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
                         source_scope: build.source_scope.clone(),
@@ -549,26 +608,10 @@ fn build_incremental_snapshot(
                         head_ref: head_ref.to_owned(),
                     });
                 }
-                parse_changed_path(
-                    &mut build,
-                    registration,
-                    selector,
-                    root,
-                    &new_path,
-                    previous_hashes,
-                    &ignore_rules,
-                )?;
+                parse_changed_path(&mut build, &parse_context, &new_path)?;
             }
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
-                parse_changed_path(
-                    &mut build,
-                    registration,
-                    selector,
-                    root,
-                    &path,
-                    previous_hashes,
-                    &ignore_rules,
-                )?;
+                parse_changed_path(&mut build, &parse_context, &path)?;
             }
         }
     }
@@ -790,22 +833,33 @@ fn collect_worktree_directory_files(
     Ok(())
 }
 
+struct ChangedPathParseContext<'a> {
+    registration: &'a CodeRepositoryRegistration,
+    selector: &'a CodeRepositorySelector,
+    root: &'a Path,
+    previous_hashes: &'a BTreeMap<String, String>,
+    ignore_rules: &'a [scope::IgnoreRule],
+    source_layout: &'a scope::SourceLayoutDiscovery,
+}
+
 fn parse_changed_path(
     build: &mut SnapshotBuild,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-    root: &Path,
+    context: &ChangedPathParseContext<'_>,
     path: &str,
-    previous_hashes: &BTreeMap<String, String>,
-    ignore_rules: &[scope::IgnoreRule],
 ) -> Result<(), CodeIndexError> {
-    if !path_is_selected_with_rules(path, registration, selector, ignore_rules) {
+    if !path_is_selected_with_layout(
+        path,
+        context.registration,
+        context.selector,
+        context.ignore_rules,
+        context.source_layout,
+    ) {
         return Ok(());
     }
     let object = format!("{}:{path}", build.commit);
-    let bytes = git_bytes(root, ["show", &object])?;
+    let bytes = git_bytes(context.root, ["show", &object])?;
     let blob_hash = stable_content_hash(&bytes);
-    if previous_hashes.get(path) == Some(&blob_hash) {
+    if context.previous_hashes.get(path) == Some(&blob_hash) {
         build.skipped_unchanged_count += 1;
         return Ok(());
     }

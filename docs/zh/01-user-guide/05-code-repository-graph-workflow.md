@@ -32,7 +32,7 @@ relay-knowledge repo scope preview repo --ref HEAD --format json
 relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
-preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。默认 source preset 会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
+preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。默认 source preset 会先检查 Git tracked path 的目录结构，识别 `src/` 之外的真实源码目录，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root。默认 `--path src` 注册会在索引期扩展到这些已发现源码根，精确请求 path filter 仍只收窄查询。它仍会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产、`*.jsonl` 数据集转储和 `uv.lock` 这类锁文件快照；`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
 
 ## 5.3 建立代码图谱索引
 
@@ -48,11 +48,11 @@ relay-knowledge repo index repo --ref HEAD --format json
 relay-knowledge repo index repo --ref <commit-sha> --format json
 ```
 
-全量索引通过 Git 从 clean tree 读取普通 blob，tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
+全量索引通过 Git 从 clean tree 读取普通 blob，先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
-当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的单个仓库索引 worker 消费任务。同一仓库已有 queued/running task 时，重复索引请求会复用当前任务，不会并行启动多个 full rebuild。
+当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。
 
-已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束。
+已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
 
 ## 5.4 符号与关系查询
 

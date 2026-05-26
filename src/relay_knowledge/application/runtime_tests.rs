@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use super::*;
-use crate::env::PlatformKind;
+use crate::env::{PlatformKind, RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT};
 
 #[test]
 fn file_index_root_ids_use_canonical_paths_when_available() {
@@ -64,6 +64,39 @@ fn file_index_roots_accept_windows_drive_and_unc_paths() {
         r"D:Documents",
         PlatformKind::Windows
     ));
+}
+
+#[tokio::test]
+async fn resolves_code_index_worker_concurrency_from_environment() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT, "4")],
+    )
+    .expect("environment should parse");
+
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+
+    assert_eq!(runtime.workers.code_index_max_in_flight, 4);
+}
+
+#[tokio::test]
+async fn caps_code_index_worker_concurrency_from_environment() {
+    let environment = EnvironmentConfig::from_pairs(
+        PlatformKind::Unix,
+        [(RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT, "99")],
+    )
+    .expect("environment should parse");
+
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+
+    assert_eq!(
+        runtime.workers.code_index_max_in_flight,
+        WorkerRuntimeConfig::MAX_CODE_INDEX_MAX_IN_FLIGHT
+    );
 }
 
 #[tokio::test]

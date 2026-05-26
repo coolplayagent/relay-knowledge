@@ -144,17 +144,18 @@ async fn code_index_task_queue_claim_complete_and_checkpoint_round_trip() {
 }
 
 #[tokio::test]
-async fn code_index_sqlite_lock_cases_running_repository_blocks_second_task_claim() {
+async fn code_index_task_claim_skips_running_tasks_and_claims_independent_work() {
     let store = registered_store().await;
     let first = store
-        .run(|connection| code_tasks::queue_task(connection, seed("fp-first", "scope-first", 10)))
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-a", "scope-a", 100)))
         .await
         .expect("first task should queue");
     let second = store
-        .run(|connection| code_tasks::queue_task(connection, seed("fp-second", "scope-second", 11)))
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-b", "scope-b", 101)))
         .await
         .expect("second task should queue");
-    let running = store
+
+    let first_running = store
         .run({
             let task_id = first.task_id.clone();
             move |connection| {
@@ -165,7 +166,7 @@ async fn code_index_sqlite_lock_cases_running_repository_blocks_second_task_clai
                         lease_owner: "worker-a".to_owned(),
                         lease_duration_ms: 100,
                         max_attempts: 3,
-                        now_ms: 20,
+                        now_ms: 110,
                     },
                 )
             }
@@ -173,82 +174,28 @@ async fn code_index_sqlite_lock_cases_running_repository_blocks_second_task_clai
         .await
         .expect("first claim should query")
         .expect("first task should claim");
-
-    assert_eq!(running.task_id, first.task_id);
-    assert_eq!(running.state, CodeIndexTaskState::Running);
-
-    let explicit_second = store
-        .run({
-            let task_id = second.task_id.clone();
-            move |connection| {
-                code_tasks::claim_task(
-                    connection,
-                    CodeIndexTaskClaimRequest {
-                        task_id: Some(task_id),
-                        lease_owner: "worker-b".to_owned(),
-                        lease_duration_ms: 100,
-                        max_attempts: 3,
-                        now_ms: 30,
-                    },
-                )
-            }
-        })
-        .await
-        .expect("blocked explicit claim should query");
-    let implicit_second = store
+    let second_running = store
         .run(|connection| {
             code_tasks::claim_task(
                 connection,
                 CodeIndexTaskClaimRequest {
                     task_id: None,
-                    lease_owner: "worker-c".to_owned(),
+                    lease_owner: "worker-b".to_owned(),
                     lease_duration_ms: 100,
                     max_attempts: 3,
-                    now_ms: 30,
-                },
-            )
-        })
-        .await
-        .expect("blocked implicit claim should query");
-
-    assert!(explicit_second.is_none());
-    assert!(implicit_second.is_none());
-
-    store
-        .run({
-            let task_id = first.task_id;
-            move |connection| {
-                code_tasks::complete_task(
-                    connection,
-                    CodeIndexTaskCompletion {
-                        task_id,
-                        lease_owner: "worker-a".to_owned(),
-                        attempt_count: 1,
-                        now_ms: 40,
-                    },
-                )
-            }
-        })
-        .await
-        .expect("first task should complete");
-    let next = store
-        .run(|connection| {
-            code_tasks::claim_task(
-                connection,
-                CodeIndexTaskClaimRequest {
-                    task_id: None,
-                    lease_owner: "worker-d".to_owned(),
-                    lease_duration_ms: 100,
-                    max_attempts: 3,
-                    now_ms: 50,
+                    now_ms: 111,
                 },
             )
         })
         .await
         .expect("second claim should query")
-        .expect("second task should claim after first completes");
+        .expect("independent task should claim while first is running");
 
-    assert_eq!(next.task_id, second.task_id);
+    assert_eq!(first_running.task_id, first.task_id);
+    assert_eq!(second_running.task_id, second.task_id);
+    assert_eq!(first_running.lease_owner.as_deref(), Some("worker-a"));
+    assert_eq!(second_running.lease_owner.as_deref(), Some("worker-b"));
+    assert_ne!(first_running.source_scope, second_running.source_scope);
 }
 
 #[tokio::test]

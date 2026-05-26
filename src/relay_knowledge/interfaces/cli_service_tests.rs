@@ -89,6 +89,28 @@ async fn service_repo_set_refresh_loop_drains_queued_overlay_tasks() {
     );
 }
 
+#[tokio::test]
+async fn service_code_index_worker_pool_uses_configured_parallelism() {
+    let service = RelayKnowledgeService::with_store(
+        runtime().await,
+        Arc::new(SqliteGraphStore::open_in_memory().expect("store should open")),
+    );
+    let (shutdown, shutdown_receiver) = tokio::sync::watch::channel(false);
+
+    let workers = super::service_cli::run_code_index_worker_pool(
+        service,
+        3,
+        Duration::from_millis(10),
+        shutdown_receiver,
+    );
+
+    assert_eq!(workers.len(), 3);
+    let _ = shutdown.send(true);
+    for worker in workers {
+        worker.await.expect("worker should stop");
+    }
+}
+
 async fn runtime() -> RuntimeConfiguration {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
