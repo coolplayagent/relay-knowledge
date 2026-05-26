@@ -297,7 +297,7 @@ def run_self_test() -> None:
         "name: relay-knowledge-cli",
         'description: "repository knowledge graphs: hybrid"',
         "metadata:",
-        "  version: 1.1.0",
+        "  version: 1.1.1",
         "---",
     ]
     assert frontmatter_description(lines, 5) == "repository knowledge graphs: hybrid"
