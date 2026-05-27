@@ -4,7 +4,7 @@ use crate::domain::{
     CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
 };
 
-use super::*;
+use crate::code::{SnapshotBuild, parse_indexed_file};
 
 #[test]
 fn java_import_resolution_distinguishes_local_and_external_modules() {

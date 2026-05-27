@@ -6,7 +6,6 @@ use crate::domain::{CodeDependencyRecord, RepositoryCodeRange};
 
 use super::super::{CodeIndexError, SnapshotBuild, stable_id};
 
-#[path = "dependencies_support.rs"]
 mod support;
 
 use support::{
@@ -986,5 +985,5 @@ fn conan_reference(value: &str) -> Option<(String, Option<String>)> {
 }
 
 #[cfg(test)]
-#[path = "dependencies_tests.rs"]
+#[path = "dependencies/tests.rs"]
 mod tests;

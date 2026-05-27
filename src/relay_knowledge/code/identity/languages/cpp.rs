@@ -1,11 +1,11 @@
 use crate::domain::CodeImportRecord;
 
-use super::imports::{
+use super::super::import_resolution::{
     ImportContext, ImportResolution, ModuleFileResolution, normalize_join, parent_dir,
     parse_quoted_specifier,
 };
 
-pub(super) fn resolve_import(
+pub(in crate::code::identity) fn resolve_import(
     import: &CodeImportRecord,
     context: &ImportContext<'_>,
 ) -> Option<(ImportResolution, Option<String>)> {

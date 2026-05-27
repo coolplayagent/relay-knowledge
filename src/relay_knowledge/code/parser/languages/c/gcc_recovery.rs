@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use super::super::recovery::{
+use super::super::super::recovery::{
     c_family_typedef_like_function_signature, decorated_function_error_body_is_statement_like,
     decorated_function_head_has_recoverable_tail, decorated_function_head_has_recovery_decorator,
     decorated_function_head_text, scan::scan_code_line_indices,
