@@ -14,6 +14,8 @@ Tree-sitter is the entry point for code structure, not a complete semantic analy
 
 Each language registration includes language id, file extensions, tree-sitter grammar, capture queries, comment rules, identifier segmentation, and fallback chunker. When grammar is missing, files still enter text chunk and BM25 paths. Query-time source fallback is not a grammar substitute; it only adds exact-text evidence from indexed source candidates and cannot create graph facts.
 
+Parser implementation must keep language-specific rules under cohesive language directories. Node-kind classification, language-specific import extraction, and C/C++ manual recovery belong under `src/relay_knowledge/code/parser/languages/<language>/`; shared parsing flow, syntax helpers, text validation, dependency manifest parsing, and chunk construction remain in parser-level modules.
+
 ## 3. Capture Contract
 
 Query captures emit a common structure: definitions, references, calls, imports, feature flag/config usage, documentation comments, symbol spans, body spans, and chunk spans. Capture output is validated for scope, path, line/column, and content hash before write.

@@ -10,9 +10,11 @@ use super::super::recovery::{
 use preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
 mod gcc_recovery;
+mod node_kinds;
 mod preprocessor;
 
 use gcc_recovery::gcc_decorated_function_symbol;
+pub(in crate::code::parser) use node_kinds::{definition_kind, is_call_node};
 
 const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
 

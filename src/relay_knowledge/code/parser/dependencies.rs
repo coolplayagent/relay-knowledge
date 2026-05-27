@@ -1,18 +1,19 @@
-use std::{collections::HashSet, path::Path};
-
-use serde_json::Value;
+use std::path::Path;
 
 use crate::domain::{CodeDependencyRecord, RepositoryCodeRange};
 
 use super::super::{CodeIndexError, SnapshotBuild, stable_id};
 
+mod conan;
+mod go;
+mod jvm;
+mod npm;
+mod python;
+mod rust;
 mod support;
 
-use support::{
-    cargo_lock_source_is_external, gradle_coordinate_parts, gradle_dependency_call,
-    inline_table_bool_field, inline_table_field, npm_requirement_is_local,
-    package_lock_entry_is_local, package_lock_package_name, python_requirement,
-    requirements_dependency_line,
+pub(in crate::code::parser::dependencies) use support::{
+    inline_table_bool_field, inline_table_field, python_requirement,
 };
 
 pub(super) fn collect_dependencies(
@@ -26,18 +27,18 @@ pub(super) fn collect_dependencies(
     };
     let mut records = Vec::new();
     match kind {
-        DependencyFileKind::CargoToml => parse_cargo_toml(content, &mut records),
-        DependencyFileKind::CargoLock => parse_cargo_lock(content, &mut records),
-        DependencyFileKind::PackageJson => parse_package_json(content, &mut records),
-        DependencyFileKind::PackageLockJson => parse_package_lock(content, &mut records),
-        DependencyFileKind::GoMod => parse_go_mod(content, &mut records),
-        DependencyFileKind::GoSum => parse_go_sum(content, &mut records),
-        DependencyFileKind::PyprojectToml => parse_pyproject(content, &mut records),
-        DependencyFileKind::RequirementsTxt => parse_requirements(content, &mut records),
-        DependencyFileKind::PomXml => parse_pom(content, &mut records),
-        DependencyFileKind::Gradle => parse_gradle(content, &mut records),
-        DependencyFileKind::ConanfileTxt => parse_conanfile_txt(content, &mut records),
-        DependencyFileKind::ConanfilePy => parse_conanfile_py(content, &mut records),
+        DependencyFileKind::CargoToml => rust::parse_cargo_toml(content, &mut records),
+        DependencyFileKind::CargoLock => rust::parse_cargo_lock(content, &mut records),
+        DependencyFileKind::PackageJson => npm::parse_package_json(content, &mut records),
+        DependencyFileKind::PackageLockJson => npm::parse_package_lock(content, &mut records),
+        DependencyFileKind::GoMod => go::parse_go_mod(content, &mut records),
+        DependencyFileKind::GoSum => go::parse_go_sum(content, &mut records),
+        DependencyFileKind::PyprojectToml => python::parse_pyproject(content, &mut records),
+        DependencyFileKind::RequirementsTxt => python::parse_requirements(content, &mut records),
+        DependencyFileKind::PomXml => jvm::parse_pom(content, &mut records),
+        DependencyFileKind::Gradle => jvm::parse_gradle(content, &mut records),
+        DependencyFileKind::ConanfileTxt => conan::parse_conanfile_txt(content, &mut records),
+        DependencyFileKind::ConanfilePy => conan::parse_conanfile_py(content, &mut records),
     }
     Ok(records
         .into_iter()
@@ -146,7 +147,7 @@ fn python_requirements_path(path: &str, file_name: &str) -> bool {
 }
 
 #[derive(Clone)]
-struct DependencySeed {
+pub(in crate::code::parser::dependencies) struct DependencySeed {
     ecosystem: &'static str,
     language_id: &'static str,
     package_name: String,
@@ -204,513 +205,7 @@ fn record_from_seed(
     }
 }
 
-fn parse_cargo_toml(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut group = None::<String>;
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '#').trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            group = cargo_group(trimmed.trim_matches(['[', ']']));
-            continue;
-        }
-        let Some(group) = group.as_deref() else {
-            continue;
-        };
-        let Some((name, requirement)) = parse_cargo_assignment_dependency(trimmed) else {
-            continue;
-        };
-        push_seed(
-            records,
-            SeedInput::new(
-                "cargo",
-                "rust",
-                name,
-                requirement,
-                group,
-                "Cargo.toml",
-                false,
-            )
-            .line(index + 1)
-            .excerpt(trimmed),
-        );
-    }
-}
-
-fn cargo_group(section: &str) -> Option<String> {
-    if section == "dependencies" || section.ends_with(".dependencies") {
-        Some("dependencies".to_owned())
-    } else if section == "dev-dependencies" || section.ends_with(".dev-dependencies") {
-        Some("dev".to_owned())
-    } else if section == "build-dependencies" || section.ends_with(".build-dependencies") {
-        Some("build".to_owned())
-    } else {
-        None
-    }
-}
-
-fn parse_cargo_lock(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut in_package = false;
-    let mut name = None::<(String, usize)>;
-    let mut version = None::<String>;
-    let mut source = None::<String>;
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed == "[[package]]" {
-            push_cargo_lock_seed(records, name.take(), version.take(), source.take());
-            in_package = true;
-            continue;
-        }
-        if !in_package {
-            continue;
-        }
-        if let Some(value) = trimmed.strip_prefix("name = ") {
-            name = Some((unquote(value), index + 1));
-        } else if let Some(value) = trimmed.strip_prefix("version = ") {
-            version = Some(unquote(value));
-        } else if let Some(value) = trimmed.strip_prefix("source = ") {
-            source = Some(unquote(value));
-        }
-    }
-    push_cargo_lock_seed(records, name, version, source);
-}
-
-fn push_cargo_lock_seed(
-    records: &mut Vec<DependencySeed>,
-    name: Option<(String, usize)>,
-    version: Option<String>,
-    source: Option<String>,
-) {
-    if !cargo_lock_source_is_external(source.as_deref()) {
-        return;
-    }
-    push_lock_seed(records, "cargo", "rust", "Cargo.lock", name, version);
-}
-
-fn parse_package_json(content: &str, records: &mut Vec<DependencySeed>) {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
-        return;
-    };
-    for group in [
-        "dependencies",
-        "devDependencies",
-        "peerDependencies",
-        "optionalDependencies",
-    ] {
-        let Some(dependencies) = value.get(group).and_then(Value::as_object) else {
-            continue;
-        };
-        for (name, requirement) in dependencies {
-            let requirement = requirement.as_str().map(str::to_owned);
-            if requirement.as_deref().is_some_and(npm_requirement_is_local) {
-                continue;
-            }
-            let line = line_containing_json_key(content, name).unwrap_or(1);
-            push_seed(
-                records,
-                SeedInput::new(
-                    "npm",
-                    "javascript",
-                    name.to_owned(),
-                    requirement,
-                    npm_group(group),
-                    "package.json",
-                    false,
-                )
-                .line(line)
-                .excerpt(format!("{name} {}", value_as_text(dependencies.get(name)))),
-            );
-        }
-    }
-}
-
-fn parse_package_lock(content: &str, records: &mut Vec<DependencySeed>) {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
-        return;
-    };
-    if let Some(packages) = value.get("packages").and_then(Value::as_object) {
-        for (path, package) in packages {
-            if package_lock_entry_is_local(package) {
-                continue;
-            }
-            let Some(name) = package_lock_package_name(path, package) else {
-                continue;
-            };
-            let version = package
-                .get("version")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            let line = line_containing_json_key(content, &name).unwrap_or(1);
-            push_seed(
-                records,
-                SeedInput::new(
-                    "npm",
-                    "javascript",
-                    name.clone(),
-                    None,
-                    "locked",
-                    "package-lock.json",
-                    true,
-                )
-                .resolved(version)
-                .line(line)
-                .excerpt(name),
-            );
-        }
-        return;
-    }
-    if let Some(dependencies) = value.get("dependencies").and_then(Value::as_object) {
-        collect_package_lock_v1_dependencies(content, dependencies, records);
-    }
-}
-
-fn collect_package_lock_v1_dependencies(
-    content: &str,
-    dependencies: &serde_json::Map<String, Value>,
-    records: &mut Vec<DependencySeed>,
-) {
-    for (name, package) in dependencies {
-        let version = package
-            .get("version")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let line = line_containing_json_key(content, name).unwrap_or(1);
-        if !version.as_deref().is_some_and(npm_requirement_is_local) {
-            push_seed(
-                records,
-                SeedInput::new(
-                    "npm",
-                    "javascript",
-                    name.to_owned(),
-                    None,
-                    "locked",
-                    "package-lock.json",
-                    true,
-                )
-                .resolved(version)
-                .line(line)
-                .excerpt(name.as_str()),
-            )
-        }
-        if let Some(nested) = package.get("dependencies").and_then(Value::as_object) {
-            collect_package_lock_v1_dependencies(content, nested, records);
-        }
-    }
-}
-
-fn parse_go_mod(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut in_require_block = false;
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '/').trim();
-        if trimmed == "require (" {
-            in_require_block = true;
-            continue;
-        }
-        if in_require_block && trimmed == ")" {
-            in_require_block = false;
-            continue;
-        }
-        let require_line = if let Some(rest) = trimmed.strip_prefix("require ") {
-            rest
-        } else if in_require_block {
-            trimmed
-        } else {
-            continue;
-        };
-        let mut parts = require_line.split_whitespace();
-        let Some(name) = parts.next() else {
-            continue;
-        };
-        let version = parts.next().map(str::to_owned);
-        if !name.contains('.') {
-            continue;
-        }
-        push_seed(
-            records,
-            SeedInput::new(
-                "go",
-                "go",
-                name.to_owned(),
-                version,
-                "require",
-                "go.mod",
-                false,
-            )
-            .line(index + 1)
-            .excerpt(require_line),
-        );
-    }
-}
-
-fn parse_go_sum(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut seen = HashSet::new();
-    for (index, line) in content.lines().enumerate() {
-        let mut parts = line.split_whitespace();
-        let (Some(name), Some(version)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        let version = version.strip_suffix("/go.mod").unwrap_or(version);
-        if !name.contains('.') {
-            continue;
-        }
-        if !seen.insert((name.to_owned(), version.to_owned())) {
-            continue;
-        }
-        push_seed(
-            records,
-            SeedInput::new("go", "go", name.to_owned(), None, "locked", "go.sum", true)
-                .resolved(Some(version.to_owned()))
-                .line(index + 1)
-                .excerpt(line.trim()),
-        );
-    }
-}
-
-fn parse_pyproject(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut section = String::new();
-    let mut group = "dependencies".to_owned();
-    let mut poetry_group = None::<String>;
-    let mut in_array = false;
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '#').trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            section = trimmed.trim_matches(['[', ']']).to_owned();
-            group = pyproject_group(&section);
-            poetry_group = poetry_dependency_group(&section);
-            in_array = false;
-            continue;
-        }
-        if section == "project" && trimmed.starts_with("dependencies") {
-            in_array = trimmed.contains('[') && !trimmed.contains(']');
-            for item in quoted_values(trimmed) {
-                push_python_requirement(records, item, &group, "pyproject.toml", index + 1);
-            }
-            continue;
-        }
-        if section.starts_with("project.optional-dependencies") && trimmed.contains('=') {
-            group = trimmed
-                .split_once('=')
-                .map(|(left, _)| left.trim().to_owned())
-                .unwrap_or_else(|| "optional".to_owned());
-            in_array = trimmed.contains('[') && !trimmed.contains(']');
-            for item in quoted_values(trimmed) {
-                push_python_requirement(records, item, &group, "pyproject.toml", index + 1);
-            }
-            continue;
-        }
-        if in_array {
-            for item in quoted_values(trimmed) {
-                push_python_requirement(records, item, &group, "pyproject.toml", index + 1);
-            }
-            if trimmed.contains(']') {
-                in_array = false;
-            }
-        } else if let Some(group) = poetry_group.as_deref() {
-            let Some((name, requirement)) = parse_assignment_dependency(trimmed) else {
-                continue;
-            };
-            if name != "python" {
-                push_seed(
-                    records,
-                    SeedInput::new(
-                        "python",
-                        "python",
-                        name,
-                        requirement,
-                        group,
-                        "pyproject.toml",
-                        false,
-                    )
-                    .line(index + 1)
-                    .excerpt(trimmed),
-                );
-            }
-        }
-    }
-}
-
-fn parse_requirements(content: &str, records: &mut Vec<DependencySeed>) {
-    for (index, line) in content.lines().enumerate() {
-        let Some(requirement) = requirements_dependency_line(line) else {
-            continue;
-        };
-        push_python_requirement(
-            records,
-            requirement,
-            "requirements",
-            "requirements.txt",
-            index + 1,
-        );
-    }
-}
-
-fn parse_pom(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut in_dependency = false;
-    let mut in_dependency_management = false;
-    let mut start_line = 1usize;
-    let mut group_id = None::<String>;
-    let mut artifact_id = None::<String>;
-    let mut version = None::<String>;
-    let mut scope = None::<String>;
-    let mut dep_type = None::<String>;
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        let closes_dependency_management = trimmed.contains("</dependencyManagement>");
-        if trimmed.contains("<dependencyManagement>") {
-            in_dependency_management = true;
-        }
-        if trimmed.contains("<dependency>") {
-            in_dependency = true;
-            start_line = index + 1;
-            group_id = None;
-            artifact_id = None;
-            version = None;
-            scope = None;
-            dep_type = None;
-        }
-        if !in_dependency {
-            if closes_dependency_management {
-                in_dependency_management = false;
-            }
-            continue;
-        }
-        capture_xml_text(trimmed, "groupId", &mut group_id);
-        capture_xml_text(trimmed, "artifactId", &mut artifact_id);
-        capture_xml_text(trimmed, "version", &mut version);
-        capture_xml_text(trimmed, "scope", &mut scope);
-        capture_xml_text(trimmed, "type", &mut dep_type);
-        if !trimmed.contains("</dependency>") {
-            continue;
-        }
-        if let (Some(group_id), Some(artifact_id)) = (group_id.take(), artifact_id.take()) {
-            let bom = in_dependency_management
-                && dep_type.as_deref() == Some("pom")
-                && scope.as_deref() == Some("import");
-            if in_dependency_management && !bom {
-                in_dependency = false;
-                if closes_dependency_management {
-                    in_dependency_management = false;
-                }
-                continue;
-            }
-            let package_name = format!("{group_id}:{artifact_id}");
-            let dependency_group = if bom {
-                "bom".to_owned()
-            } else {
-                scope.clone().unwrap_or_else(|| "compile".to_owned())
-            };
-            push_seed(
-                records,
-                SeedInput::new(
-                    "maven",
-                    "java",
-                    package_name,
-                    version.take(),
-                    dependency_group.as_str(),
-                    "pom.xml",
-                    false,
-                )
-                .line(start_line)
-                .excerpt(format!("{group_id}:{artifact_id}")),
-            );
-        }
-        in_dependency = false;
-        if closes_dependency_management {
-            in_dependency_management = false;
-        }
-    }
-}
-
-fn parse_gradle(content: &str, records: &mut Vec<DependencySeed>) {
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '/').trim();
-        let Some((configuration, dependency)) = gradle_dependency_call(trimmed) else {
-            continue;
-        };
-        let (group, artifact, version) = gradle_coordinate_parts(&dependency);
-        let Some(group) = group else {
-            continue;
-        };
-        let Some(artifact) = artifact else {
-            continue;
-        };
-        let is_bom = trimmed.contains("platform(") || trimmed.contains("enforcedPlatform(");
-        let dependency_group = if is_bom { "bom" } else { &configuration };
-        push_seed(
-            records,
-            SeedInput::new(
-                "gradle",
-                "java",
-                format!("{group}:{artifact}"),
-                version,
-                dependency_group,
-                "build.gradle",
-                false,
-            )
-            .line(index + 1)
-            .excerpt(trimmed),
-        );
-    }
-}
-
-fn parse_conanfile_txt(content: &str, records: &mut Vec<DependencySeed>) {
-    let mut section = String::new();
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '#').trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            section = trimmed.trim_matches(['[', ']']).to_owned();
-            continue;
-        }
-        if !matches!(
-            section.as_str(),
-            "requires" | "tool_requires" | "build_requires"
-        ) {
-            continue;
-        }
-        if let Some((name, version)) = conan_reference(trimmed) {
-            push_seed(
-                records,
-                SeedInput::new(
-                    "conan",
-                    "cpp",
-                    name,
-                    version,
-                    section.as_str(),
-                    "conanfile.txt",
-                    false,
-                )
-                .line(index + 1)
-                .excerpt(trimmed),
-            );
-        }
-    }
-}
-
-fn parse_conanfile_py(content: &str, records: &mut Vec<DependencySeed>) {
-    for (index, line) in content.lines().enumerate() {
-        let trimmed = strip_comment(line, '#').trim();
-        let group = if trimmed.contains("build_requires(") || trimmed.contains("tool_requires(") {
-            Some("build_requires")
-        } else if trimmed.contains("requires(") || trimmed.starts_with("requires =") {
-            Some("requires")
-        } else {
-            None
-        };
-        let Some(group) = group else {
-            continue;
-        };
-        for quoted in quoted_values(trimmed) {
-            if let Some((name, version)) = conan_reference(quoted) {
-                push_seed(
-                    records,
-                    SeedInput::new("conan", "cpp", name, version, group, "conanfile.py", false)
-                        .line(index + 1)
-                        .excerpt(trimmed),
-                );
-            }
-        }
-    }
-}
-
-struct SeedInput<'a> {
+pub(in crate::code::parser::dependencies) struct SeedInput<'a> {
     ecosystem: &'static str,
     language_id: &'static str,
     package_name: String,
@@ -725,7 +220,7 @@ struct SeedInput<'a> {
 }
 
 impl<'a> SeedInput<'a> {
-    fn new(
+    pub(in crate::code::parser::dependencies) fn new(
         ecosystem: &'static str,
         language_id: &'static str,
         package_name: String,
@@ -749,23 +244,32 @@ impl<'a> SeedInput<'a> {
         }
     }
 
-    fn resolved(mut self, version: Option<String>) -> Self {
+    pub(in crate::code::parser::dependencies) fn resolved(
+        mut self,
+        version: Option<String>,
+    ) -> Self {
         self.resolved_version = version;
         self
     }
 
-    fn line(mut self, line: usize) -> Self {
+    pub(in crate::code::parser::dependencies) fn line(mut self, line: usize) -> Self {
         self.line = line;
         self
     }
 
-    fn excerpt(mut self, excerpt: impl Into<String>) -> Self {
+    pub(in crate::code::parser::dependencies) fn excerpt(
+        mut self,
+        excerpt: impl Into<String>,
+    ) -> Self {
         self.excerpt = excerpt.into();
         self
     }
 }
 
-fn push_seed(records: &mut Vec<DependencySeed>, input: SeedInput<'_>) {
+pub(in crate::code::parser::dependencies) fn push_seed(
+    records: &mut Vec<DependencySeed>,
+    input: SeedInput<'_>,
+) {
     if input.package_name.trim().is_empty() {
         return;
     }
@@ -783,7 +287,7 @@ fn push_seed(records: &mut Vec<DependencySeed>, input: SeedInput<'_>) {
     });
 }
 
-fn push_lock_seed(
+pub(in crate::code::parser::dependencies) fn push_lock_seed(
     records: &mut Vec<DependencySeed>,
     ecosystem: &'static str,
     language_id: &'static str,
@@ -811,7 +315,7 @@ fn push_lock_seed(
     );
 }
 
-fn push_python_requirement(
+pub(in crate::code::parser::dependencies) fn push_python_requirement(
     records: &mut Vec<DependencySeed>,
     value: &str,
     group: &str,
@@ -837,7 +341,9 @@ fn push_python_requirement(
     );
 }
 
-fn parse_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
+pub(in crate::code::parser::dependencies) fn parse_assignment_dependency(
+    line: &str,
+) -> Option<(String, Option<String>)> {
     let (name, value) = line.split_once('=')?;
     let name = name.trim().trim_matches('"').trim_matches('\'').to_owned();
     if name.is_empty() {
@@ -855,7 +361,9 @@ fn parse_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
     Some((name, requirement.filter(|value| !value.is_empty())))
 }
 
-fn parse_cargo_assignment_dependency(line: &str) -> Option<(String, Option<String>)> {
+pub(in crate::code::parser::dependencies) fn parse_cargo_assignment_dependency(
+    line: &str,
+) -> Option<(String, Option<String>)> {
     let (name, value) = line.split_once('=')?;
     let name = name.trim().trim_matches('"').trim_matches('\'').to_owned();
     if name.is_empty() {
@@ -882,7 +390,7 @@ fn cargo_inline_dependency_is_local(value: &str) -> bool {
         || inline_table_bool_field(value, "workspace") == Some(true)
 }
 
-fn unquote(value: &str) -> String {
+pub(in crate::code::parser::dependencies) fn unquote(value: &str) -> String {
     value
         .trim()
         .trim_matches('"')
@@ -891,14 +399,14 @@ fn unquote(value: &str) -> String {
         .to_owned()
 }
 
-fn strip_comment(line: &str, marker: char) -> &str {
+pub(in crate::code::parser::dependencies) fn strip_comment(line: &str, marker: char) -> &str {
     match marker {
         '/' => line.split("//").next().unwrap_or(line),
         _ => line.split(marker).next().unwrap_or(line),
     }
 }
 
-fn npm_group(group: &str) -> &str {
+pub(in crate::code::parser::dependencies) fn npm_group(group: &str) -> &str {
     match group {
         "devDependencies" => "dev",
         "peerDependencies" => "peer",
@@ -907,11 +415,10 @@ fn npm_group(group: &str) -> &str {
     }
 }
 
-fn value_as_text(value: Option<&Value>) -> String {
-    value.and_then(Value::as_str).unwrap_or_default().to_owned()
-}
-
-fn line_containing_json_key(content: &str, key: &str) -> Option<usize> {
+pub(in crate::code::parser::dependencies) fn line_containing_json_key(
+    content: &str,
+    key: &str,
+) -> Option<usize> {
     let needle = format!("\"{key}\"");
     content
         .lines()
@@ -919,7 +426,7 @@ fn line_containing_json_key(content: &str, key: &str) -> Option<usize> {
         .map(|index| index + 1)
 }
 
-fn pyproject_group(section: &str) -> String {
+pub(in crate::code::parser::dependencies) fn pyproject_group(section: &str) -> String {
     if let Some(rest) = section.strip_prefix("tool.poetry.group.") {
         rest.split('.').next().unwrap_or("dependencies").to_owned()
     } else if section == "tool.poetry.dev-dependencies" {
@@ -929,7 +436,9 @@ fn pyproject_group(section: &str) -> String {
     }
 }
 
-fn poetry_dependency_group(section: &str) -> Option<String> {
+pub(in crate::code::parser::dependencies) fn poetry_dependency_group(
+    section: &str,
+) -> Option<String> {
     if section == "tool.poetry.dependencies" {
         Some("dependencies".to_owned())
     } else if section == "tool.poetry.dev-dependencies" {
@@ -942,7 +451,7 @@ fn poetry_dependency_group(section: &str) -> Option<String> {
     }
 }
 
-fn quoted_values(value: &str) -> Vec<&str> {
+pub(in crate::code::parser::dependencies) fn quoted_values(value: &str) -> Vec<&str> {
     let mut values = Vec::new();
     let mut start = None::<usize>;
     let mut quote = '\0';
@@ -958,7 +467,11 @@ fn quoted_values(value: &str) -> Vec<&str> {
     values
 }
 
-fn capture_xml_text(line: &str, tag: &str, output: &mut Option<String>) {
+pub(in crate::code::parser::dependencies) fn capture_xml_text(
+    line: &str,
+    tag: &str,
+    output: &mut Option<String>,
+) {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     let Some(after_open) = line.split_once(&open).map(|(_, right)| right) else {
@@ -972,7 +485,9 @@ fn capture_xml_text(line: &str, tag: &str, output: &mut Option<String>) {
     }
 }
 
-fn conan_reference(value: &str) -> Option<(String, Option<String>)> {
+pub(in crate::code::parser::dependencies) fn conan_reference(
+    value: &str,
+) -> Option<(String, Option<String>)> {
     let value = value.trim().trim_matches(',').trim();
     let (name, rest) = value.split_once('/')?;
     let version = rest
