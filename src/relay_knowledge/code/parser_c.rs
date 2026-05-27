@@ -5,6 +5,11 @@ use super::nodes::{
 };
 use super::parser_c_preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
+#[path = "parser_c/gcc_recovery.rs"]
+mod gcc_recovery;
+
+use gcc_recovery::gcc_decorated_function_symbol;
+
 const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
 
 pub(super) fn manual_definitions(
@@ -15,15 +20,27 @@ pub(super) fn manual_definitions(
         "function_definition" => match macro_body_function_definition(content, node) {
             MacroBodyFunctionDefinition::Recovered(definition) => vec![definition],
             MacroBodyFunctionDefinition::Rejected => Vec::new(),
-            MacroBodyFunctionDefinition::NotMacroBody => decorated_cpp_class_symbol(content, node)
-                .map(|symbol| vec![symbol])
-                .or_else(|| {
-                    node.child_by_field_name("declarator")
-                        .and_then(|declarator| declarator_name(content, declarator))
-                        .map(|name| vec![(name, "function", syntax_range(node))])
-                })
-                .unwrap_or_default(),
+            MacroBodyFunctionDefinition::NotMacroBody => {
+                if let Some(symbol) = gcc_decorated_function_symbol(content, node) {
+                    return vec![symbol];
+                }
+                if let Some(symbol) = decorated_cpp_class_symbol(content, node) {
+                    return vec![symbol];
+                }
+                if syntax_error_descendant(node) {
+                    return Vec::new();
+                }
+                node.child_by_field_name("declarator")
+                    .and_then(|declarator| declarator_name(content, declarator))
+                    .map(|name| vec![(name, "function", syntax_range(node))])
+                    .unwrap_or_default()
+            }
         },
+        "ERROR" if !has_ancestor_kind(node, "compound_statement") => {
+            gcc_decorated_function_symbol(content, node)
+                .map(|symbol| vec![symbol])
+                .unwrap_or_default()
+        }
         "type_definition" if !has_ancestor_kind(node, "compound_statement") => {
             typedef_type_symbols(content, node)
         }
@@ -229,7 +246,19 @@ fn declaration_has_initializer_contract_type(content: &str, declaration: Node<'_
 fn typedef_like_contract_type(name: &str) -> bool {
     name.split_whitespace()
         .last()
-        .is_some_and(|token| token.ends_with("_t") && data_symbol_name(token))
+        .is_some_and(c_external_contract_type_token)
+}
+
+fn c_external_contract_type_token(token: &str) -> bool {
+    (token.ends_with("_t") && data_symbol_name(token))
+        || (token
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_uppercase())
+            && token
+                .chars()
+                .any(|character| character.is_ascii_lowercase())
+            && data_symbol_name(token))
 }
 
 fn data_symbol_name(name: &str) -> bool {
@@ -242,6 +271,49 @@ fn data_symbol_name(name: &str) -> bool {
 
 fn c_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn c_declaration_prefix_token(token: &str) -> bool {
+    matches!(
+        token,
+        "__always_inline"
+            | "__attribute__"
+            | "__attribute"
+            | "__declspec"
+            | "__declspec__"
+            | "__inline"
+            | "__inline__"
+            | "always_inline"
+            | "attribute"
+            | "const"
+            | "extern"
+            | "inline"
+            | "register"
+            | "restrict"
+            | "static"
+            | "volatile"
+    )
+}
+
+fn c_declaration_type_token(token: &str) -> bool {
+    matches!(
+        token,
+        "bool"
+            | "char"
+            | "double"
+            | "float"
+            | "int"
+            | "long"
+            | "short"
+            | "signed"
+            | "unsigned"
+            | "void"
+    ) || c_tag_type_keyword(token)
+        || c_external_contract_type_token(token)
+}
+
+fn c_tag_type_keyword(token: &str) -> bool {
+    matches!(token, "enum" | "struct" | "union")
 }
 
 fn decorated_cpp_class_symbol(
@@ -500,15 +572,22 @@ fn macro_replacement_return_type_token(token: &str) -> bool {
 fn macro_replacement_declaration_prefix_token(token: &str) -> bool {
     matches!(
         token,
-        "const"
+        "__always_inline"
+            | "__attribute__"
+            | "__attribute"
+            | "__declspec"
+            | "__declspec__"
+            | "__inline"
+            | "__inline__"
+            | "always_inline"
+            | "attribute"
+            | "const"
             | "extern"
             | "inline"
             | "register"
             | "restrict"
             | "static"
             | "volatile"
-            | "__attribute__"
-            | "__declspec"
     ) || uppercase_macro_token(token)
 }
 
@@ -777,6 +856,17 @@ fn has_ancestor_kind(mut node: Node<'_>, kind: &str) -> bool {
         node = parent;
     }
 
+    false
+}
+
+fn syntax_error_descendant(root: Node<'_>) -> bool {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.is_error() || node.is_missing() || node.kind() == "ERROR" {
+            return true;
+        }
+        push_children_reverse(node, &mut stack);
+    }
     false
 }
 

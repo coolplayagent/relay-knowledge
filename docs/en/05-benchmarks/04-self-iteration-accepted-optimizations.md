@@ -39,6 +39,12 @@ This page is the compact English companion for the self-iteration optimization l
 - Invariants and limits: missing Nginx/Kong-style headers stay unresolved import metadata with `target_hint`; they are not file degradation. Broken assignments, preprocessor-branch syntax errors, registration macros, and non-body data macros still surface diagnostics or stay out of the call graph.
 - Guardrails: the default fast `c_syntax_fixture` includes unresolved `ngx_*` headers, a `KONG_ACCESS_PHASE` handler, typedef-style module tables, symbol/definition/callee/import cases, and no repository/path/query special casing. Local macro lookup now accepts spaced `# define` directives, continued directives, and bounded numeric/comparison `#if` conditions, and treats `#undef` plus inactive branches as unavailable so stale macro bodies cannot create caller ownership.
 
+## Issue #185: GCC Extension Recovery
+
+- Algorithm and architecture: C/C++ parser recovery now recognizes GCC/Clang declaration attributes and inline extensions such as `__attribute__`, `attribute`, `always_inline`, and `__always_inline` when the surrounding function or table declaration is otherwise well shaped.
+- Invariants and limits: missing SDK headers such as `securec.h` stay unresolved import metadata, not `degraded_reason`; broken assignments and broken function bodies still report partial parser diagnostics.
+- Guardrails: the default fast `c_syntax_fixture` covers GCC/EulerOS-style attribute/inline functions, PascalCase SDK types, unresolved `securec.h`, and definition/callee/symbol/import retrieval without SDK path or query special casing.
+
 ## Documentation Maintenance
 
 - The primary Chinese accepted-optimization log is kept below the 1000-line hard cap by moving late detailed records to dated archive files.

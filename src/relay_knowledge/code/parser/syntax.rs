@@ -13,6 +13,7 @@ pub(super) struct TagCapture {
     pub(super) capture_kind: String,
     pub(super) name_node: SyntaxRange,
     pub(super) target_node: SyntaxRange,
+    pub(super) target_has_error: bool,
 }
 
 pub(super) fn parse_tree(
@@ -77,6 +78,7 @@ fn extract_tag_captures(
                 capture_kind,
                 name_node: syntax_range(name_node),
                 target_node: syntax_range(target_node),
+                target_has_error: target_node.has_error(),
             });
         }
     }

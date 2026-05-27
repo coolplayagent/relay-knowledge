@@ -165,6 +165,313 @@ ngx_module_t ngx_http_demo_module = {
 }
 
 #[test]
+fn c_gcc_attribute_inline_functions_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/policy_match.c",
+        br#"
+#include "securec.h"
+
+#define WILD_MULTI_CHAR '*'
+
+typedef struct PdpString {
+    const char *data;
+} PdpString;
+
+typedef struct PdpStack PdpStack;
+
+typedef struct PdpPolicyEntry {
+    const char *name;
+    int (*match)(PdpStack *stack, PdpString *pattern);
+} PdpPolicyEntry;
+
+static attribute((always_inline)) int pdp_wildcard_step(PdpString *pattern, int index)
+{
+    return pattern->data[index] == WILD_MULTI_CHAR;
+}
+
+static __attribute__((always_inline)) int pdp_secure_copy(PdpString *target, const PdpString *source)
+{
+    return memcpy_s((void *)target->data, 16, source->data, 16);
+}
+
+__always_inline int pdp_policy_regex_match(PdpStack *stack, PdpString *pattern)
+{
+    (void)stack;
+    return pdp_wildcard_step(pattern, 0) || pdp_secure_copy(pattern, pattern);
+}
+
+static PdpPolicyEntry pdp_policy_entries[] = {
+    { "wildcard", pdp_policy_regex_match },
+};
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "GCC compiler extension recovery should keep structured files non-degraded: {:?}",
+        snapshot.diagnostics
+    );
+    assert!(snapshot.files[0].degraded_reason.is_none());
+    for name in [
+        "pdp_wildcard_step",
+        "pdp_secure_copy",
+        "pdp_policy_regex_match",
+        "pdp_policy_entries",
+    ] {
+        assert!(
+            snapshot.symbols.iter().any(|symbol| symbol.name == name),
+            "{name} should be extracted as structured evidence: {:?}",
+            snapshot.symbols
+        );
+    }
+    assert!(
+        snapshot.calls.iter().any(|call| {
+            call.caller_name.as_deref() == Some("pdp_policy_regex_match")
+                && call.callee_name == "pdp_wildcard_step"
+        }),
+        "GCC-decorated function bodies should keep call ownership: {:?}",
+        snapshot.calls
+    );
+    assert!(
+        snapshot.imports.iter().any(|import| {
+            import.module.contains("securec.h") && import.resolution_state == "unresolved"
+        }),
+        "missing SDK headers should stay unresolved import metadata: {:?}",
+        snapshot.imports
+    );
+}
+
+#[test]
+fn c_gcc_attribute_broken_assignment_stays_partial() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/broken_policy.c",
+        br#"
+#include "securec.h"
+
+int valid_policy_symbol(void)
+{
+    return 1;
+}
+
+attribute((always_inline)) int broken_policy_value = ;
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "broken assignments must not be hidden by compiler-extension recovery"
+    );
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes"))
+    );
+}
+
+#[test]
+fn c_gcc_recovery_handles_postfix_attribute_and_pascal_return_prefix() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/postfix_policy.c",
+        br#"
+typedef struct PdpStack PdpStack;
+
+typedef struct PdpPolicyEntry {
+    int value;
+} PdpPolicyEntry;
+
+int pdp_postfix_policy(void) attribute((always_inline))
+{
+    return 1;
+}
+
+PdpPolicyEntry PdpPolicy(PdpStack *stack)
+{
+    (void)stack;
+    return (PdpPolicyEntry){ 7 };
+}
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "postfix attributes and PascalCase return prefixes should recover without degradation: {:?}",
+        snapshot.diagnostics
+    );
+    for name in ["pdp_postfix_policy", "PdpPolicy"] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "function" && symbol.name == name),
+            "{name} should be recovered from the real declarator slot: {:?}",
+            snapshot.symbols
+        );
+    }
+}
+
+#[test]
+fn c_gcc_recovery_handles_literals_tag_returns_and_tail_validation() {
+    let literal_snapshot = parse_source_snapshot(
+        "external_deps/sdk/literal_policy.c",
+        br#"
+struct PdpPolicyToken {
+    int value;
+};
+
+attribute((always_inline)) int pdp_literal_policy(int ch)
+{
+    const char *marker = "[";
+    return ch == '(' || marker[0] == '[';
+}
+
+__always_inline struct PdpPolicyToken *make_pdp_policy_token(void)
+{
+    return 0;
+}
+"#,
+    );
+
+    assert_eq!(
+        literal_snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "valid literals and C tag return types should not block GCC recovery: {:?}",
+        literal_snapshot.diagnostics
+    );
+    for name in ["pdp_literal_policy", "make_pdp_policy_token"] {
+        assert!(
+            literal_snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "function" && symbol.name == name),
+            "{name} should be recovered from GCC-decorated C code: {:?}",
+            literal_snapshot.symbols
+        );
+    }
+
+    let malformed_tail = parse_source_snapshot(
+        "external_deps/sdk/malformed_postfix_policy.c",
+        br#"
+int pdp_bad_tail(void) attribute((always_inline)) garbage
+@
+{
+    return 1;
+}
+"#,
+    );
+
+    assert_eq!(
+        malformed_tail.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "malformed postfix attribute tails must not be accepted as recoverable"
+    );
+    assert!(
+        !c_family_typedef_like_function_signature(
+            "int pdp_bad_tail(void) attribute((always_inline)) garbage"
+        ),
+        "postfix attribute tail validation must consume the full suffix"
+    );
+}
+
+#[test]
+fn c_gcc_recovery_rejects_malformed_function_body_lines() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/broken_body_policy.c",
+        br#"
+attribute((always_inline)) int pdp_broken_body_policy(void)
+{
+    int missing_semicolon
+    return 1;
+}
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "malformed function bodies must not be hidden by GCC recovery"
+    );
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("error nodes"))
+    );
+}
+
+#[test]
+fn cpp_gcc_inline_extension_functions_recover_as_parsed() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/PolicyStrRegexMatch.cpp",
+        br#"
+#include <string>
+
+template <typename T>
+class PdpStack {
+ public:
+    int Size() const;
+};
+
+class PdpString {};
+
+namespace ns {
+class PdpScopedStack {
+ public:
+    int Size() const;
+};
+}
+
+__always_inline int PolicyStrRegexMatch(PdpStack<PdpString> *stack)
+{
+    return stack->Size();
+}
+
+__always_inline int ns::QualifiedPolicyStrRegexMatch(ns::PdpScopedStack *stack)
+{
+    return stack->Size();
+}
+
+__always_inline std::string BuildPolicyName()
+{
+    return std::string();
+}
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "C++ GCC inline extensions should not force file degradation: {:?}",
+        snapshot.diagnostics
+    );
+    for name in [
+        "PolicyStrRegexMatch",
+        "QualifiedPolicyStrRegexMatch",
+        "BuildPolicyName",
+    ] {
+        assert!(
+            snapshot.symbols.iter().any(|symbol| {
+                matches!(symbol.kind.as_str(), "function" | "method") && symbol.name == name
+            }),
+            "{name} should be recovered from GCC-decorated C++ code: {:?}",
+            snapshot.symbols
+        );
+    }
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| {
+            symbol.kind == "function"
+                && symbol.name == "ns"
+                && symbol.signature.contains("QualifiedPolicyStrRegexMatch")
+        }),
+        "qualified declarators must not recover the namespace qualifier as a function: {:?}",
+        snapshot.symbols
+    );
+}
+
+#[test]
 fn c_macro_body_recovery_requires_definition_style_macro_name() {
     let snapshot = parse_source_snapshot(
         "src/generic_block_macro.c",

@@ -25,6 +25,12 @@ pub(super) fn records_from_captures(
             if context.language_id == "c" && capture.capture_kind == "definition.function" {
                 continue;
             }
+            if context.language_id == "cpp"
+                && capture.capture_kind == "definition.function"
+                && capture.target_has_error
+            {
+                continue;
+            }
             let kind = capture.capture_kind.trim_start_matches("definition.");
             let key = (
                 capture.name.clone(),

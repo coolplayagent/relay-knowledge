@@ -47,7 +47,11 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
         "c" => {
             matches!(
                 node_kind,
-                "declaration" | "preproc_def" | "preproc_function_def" | "call_expression"
+                "declaration"
+                    | "ERROR"
+                    | "preproc_def"
+                    | "preproc_function_def"
+                    | "call_expression"
             ) || language_nodes::definition_kind(language_id, node_kind).is_some()
         }
         "cpp" => {
