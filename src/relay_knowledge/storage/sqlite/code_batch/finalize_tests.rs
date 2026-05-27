@@ -29,7 +29,6 @@ fn symbol(name: &str, start: u32, end: u32) -> SymbolKey {
         symbol_snapshot_id: format!("symbol:{name}"),
         path: "src/lib.rs".to_owned(),
         name: name.to_owned(),
-        signature: format!("fn {name}()"),
         line_range: RepositoryCodeRange { start, end },
     }
 }

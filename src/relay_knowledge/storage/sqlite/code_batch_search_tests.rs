@@ -233,6 +233,75 @@ async fn checkpointed_call_search_uses_callee_signature_for_scoped_caller_querie
 }
 
 #[tokio::test]
+async fn checkpointed_call_search_documents_include_finalized_signatures() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:bulk-call-search-content";
+    let session = session_for_scope(source_scope);
+    let caller_path = "table/table.cc";
+    let callee_path = "table/block.cc";
+    let caller_file = file(source_scope, "table-file", caller_path, "cpp");
+    let callee_file = file(source_scope, "block-file", callee_path, "cpp");
+    let mut caller = symbol(
+        source_scope,
+        "internal-get-symbol",
+        "table-file",
+        caller_path,
+        "InternalGet",
+        "Status Table::InternalGet(const ReadOptions& options) {",
+    );
+    caller.line_range = RepositoryCodeRange { start: 20, end: 44 };
+    let callee = symbol(
+        source_scope,
+        "read-block-symbol",
+        "block-file",
+        callee_path,
+        "ReadBlock",
+        "Status BlockReader::ReadBlock(BlockContents* contents) {",
+    );
+    let mut call_reference = reference(
+        source_scope,
+        "read-block-reference",
+        "table-file",
+        caller_path,
+        "ReadBlock",
+    );
+    call_reference.line_range = RepositoryCodeRange { start: 30, end: 30 };
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            repository_id: "repo".to_owned(),
+            source_scope: source_scope.to_owned(),
+            batch_index: 1,
+            parsed_byte_count: 96,
+            files: vec![caller_file, callee_file],
+            symbols: vec![caller, callee],
+            references: vec![call_reference],
+            imports: Vec::new(),
+            dependencies: Vec::new(),
+            feature_flags: Vec::new(),
+            chunks: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let content = call_search_document_content(&store, source_scope).await;
+
+    assert!(content.contains("InternalGet"));
+    assert!(content.contains("ReadBlock"));
+    assert!(content.contains("Status Table::InternalGet"));
+    assert!(content.contains("Status BlockReader::ReadBlock"));
+}
+
+#[tokio::test]
 async fn active_scope_reindex_keeps_intermediate_edge_search_rows() {
     let store = registered_store().await;
     let source_scope = "git_snapshot:active-edge-languages";
@@ -527,4 +596,25 @@ async fn search_document_languages(
         })
         .await
         .expect("search document languages should load")
+}
+
+async fn call_search_document_content(store: &SqliteGraphStore, source_scope: &str) -> String {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT content
+                    FROM code_repository_search
+                    WHERE source_scope = ?1
+                      AND document_kind = 'call'
+                    ",
+                    [source_scope],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("call search document should load")
 }
