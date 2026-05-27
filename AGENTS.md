@@ -77,6 +77,8 @@ Delete empty or meaningless placeholder files instead of keeping them in the mod
 
 Keep project identity constants centralized in `src/relay_knowledge/project/mod.rs`. Product names, application directory names, database filenames, service definition filenames, and similar `relay-knowledge` identity strings should be added there and referenced from feature modules rather than duplicated in `paths`, `application`, `interfaces`, or adapters. Module-local operational defaults, such as HTTP, QoS, parser, storage, or indexing limits, should stay with the module that owns their behavior.
 
+Agent-facing skill and documentation command examples must be shell-specific. Do not place Windows `.exe`, drive-letter, or `assets/windows-*` commands in bash, sh, POSIX, or unlabeled code blocks. Put Windows examples only in PowerShell or cmd.exe blocks, and keep POSIX examples on POSIX binaries such as `assets/linux-x86_64/relay-knowledge` or a POSIX `PATH` install.
+
 No tracked file may exceed 1000 lines. Split Rust modules, tests, docs, scripts, and workflow files by responsibility before they cross that limit; do not use dense formatting or unrelated aggregation to bypass the cap. The self-iteration tool under `tools/self_iteration/` is exempt from this file-length limit so local iteration speed and operational simplicity can take priority there.
 
 Do not add shallow functions. A function must enforce an invariant, perform meaningful validation/transformation, isolate an external boundary, manage resource lifecycle, map errors, add observability, or coordinate a real workflow. Prefer constants, typed config, or direct calls over pass-through wrappers that only rename another call.

@@ -35,6 +35,7 @@ fn quality_gate_stages(profile: &str) -> Vec<QualityGateStage> {
                     120,
                 ),
                 linux_glibc_compatibility_policy_gate(),
+                skill_metadata_policy_gate(),
             ]),
             QualityGateStage::Parallel(vec![quality_gate(
                 "cargo_build_debug",
@@ -178,6 +179,18 @@ fn linux_glibc_compatibility_policy_gate() -> QualityGate {
     )
 }
 
+fn skill_metadata_policy_gate() -> QualityGate {
+    quality_gate(
+        "skill_metadata_policy_cases",
+        [
+            "bash",
+            "-lc",
+            "set -euo pipefail\nmanifest_version=\"$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"packages\"][0][\"version\"])')\"\npython3 tools/release/update_skill_metadata_version.py --self-test --check skills/relay-knowledge-cli/SKILL.md \"$manifest_version\"",
+        ],
+        60,
+    )
+}
+
 fn quality_gate<const N: usize>(
     name: &'static str,
     command: [&'static str; N],
@@ -201,6 +214,7 @@ fn quality_budget_ms(name: &str) -> Option<f64> {
         "cargo_fmt_check" => Some(20_000.0),
         "self_iteration_cargo_fmt_check" => Some(20_000.0),
         "linux_glibc_compatibility_policy" => Some(10_000.0),
+        "skill_metadata_policy_cases" => Some(10_000.0),
         "cargo_clippy" => Some(180_000.0),
         "self_iteration_cargo_clippy" => Some(60_000.0),
         "cargo_test" => Some(240_000.0),

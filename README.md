@@ -56,10 +56,12 @@ Each GitHub Release also includes
 `relay-knowledge-cli-skill-<tag>.tar.gz`, a ClawHub-compatible skill that
 teaches LLM agents to use the `relay-knowledge` CLI for local graph and
 code-repository workflows. The skill package includes Linux x64 and Windows x64
-binaries under `assets/`; agents prefer the matching bundled asset when it
-passes `version --format json`, and use `PATH` only as a fallback, when Linux
-glibc is older than 2.31, or when the user explicitly requests the system
-install. The generated `SKILL.md` metadata
+binaries under `assets/`; agents prefer the matching bundled asset for the
+current operating system, CPU, and active command runner when it passes
+`version --format json`, and use `PATH` only as a fallback, when Linux glibc is
+older than 2.31, or when the user explicitly requests the system install.
+Windows `.exe` asset examples stay in PowerShell or cmd.exe instructions, not
+bash/POSIX command blocks. The generated `SKILL.md` metadata
 records the same numeric version as `Cargo.toml`. The skill package also
 carries a root-level `README.md` for registry and package consumers. The
 release workflow can publish the same generated skill layout to ClawHub when
