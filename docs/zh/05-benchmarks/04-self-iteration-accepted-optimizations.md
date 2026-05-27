@@ -16,6 +16,10 @@
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
+## 候选优化说明：run-1779847089-api-dense-hybrid-symbol-fts-elision
+- 算法/架构：Hybrid symbol layer 先使用既有 API identity direct lookup；当查询含多个 API identity 且 direct lookup 未触发 per-identity 饱和时，跳过 broad OR symbol FTS 扫描，把剩余上下文词交给 chunk/reference/call/import layers 处理。Symbol-only 查询仍要求所有 identity 都有 direct row 且所有 query token 都是 closed API identity，避免把上下文词误当已覆盖。
+- 不变量/预期影响/风险：不改变 SQLite schema、FTS 文档、candidate window、parser facts、repo-set fanout、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；saturated identity lookup、单 identity、caller/callee/import/SBOM/definition 查询继续走原路径。预期降低 Temporal/OTel repo-set 和单仓 API-dense Hybrid 查询中外部 API 名与高频上下文词触发的 symbol FTS 成本，同时保留应用 usage chunk 与依赖 definition symbol 覆盖；风险是少量低价值上下文 symbol 不再参与 Hybrid symbol 层排序，受 API-dense gate、饱和 gate、后续 retrieval layers 和单测控制。
+- 策略关联：建立在 repository-set dependency symbol plan、API-dense Hybrid chunk recall 和 collective chunk gate 之上；明确避免 latest rejected `run-1779845791` 的 provider-gate 失效期间继续做 parser/ranking 小修，也不枚举仓库、路径、case id、query 字符串或 fixture symbol。
 ## 候选优化说明：manual-issue-170-project-default-repository-alias
 - 算法/架构：代码仓库注册路径在解析 Git root 后，如果 CLI/API/Web 请求没有提供 alias 或 alias 为空，则用 Git root 目录名生成稳定默认 alias；显式 `--alias` 保持原有覆盖语义，SQLite 既有多 alias 映射继续让同一 repository id 的项目名 alias 与 session 临时 alias 共存。CLI spec 拆出 repo command 模块以保持文件长度约束，业务入口仍共享同一 `register_repository` 归一化路径。
 - 不变量/预期影响/风险：不改变 repository id、scope id、索引事实版本、SQLite schema、查询 ranking、repo-set overlay、semantic/vector read model、env/paths/net、安装发布或服务后台任务；默认 alias 只来自本地已授权 Git root 的目录名，不读取 package manifest，也不枚举仓库、路径、case id 或查询字符串。预期解决 Issue #170 中 agent 初次注册每个 session 自造不同 alias 导致索引不可复用的问题，并让后续 session 默认用项目名命中同一索引；风险是根目录名为空或非 UTF-8 时返回显式注册错误，受代码单测、CLI/Web 请求测试和 fast `project_alias_fixture` guardrail 控制。
@@ -985,6 +989,16 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.974028->0.9974007392537516; score_component:performance 0.86014->0.9899880039057051; metric:cargo_fmt_check_ms 2462.0->866.0; metric:self_iteration_cargo_fmt_check_ms 383.0->121.0; metric:linux_glibc_compatibility_policy_ms 141.0->40.0; metric:skill_metadata_policy_cases_ms 262.0->80.0; metric:cargo_build_debug_ms 20167.0->120.0; metric:self_iteration_cargo_check_ms 584.0->121.0
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=866ms; self_iteration_cargo_fmt_check_ms=121ms; linux_glibc_compatibility_policy_ms=40ms; skill_metadata_policy_cases_ms=80ms; cargo_build_debug_ms=120ms; self_iteration_cargo_check_ms=121ms; code_index_recovery_cases_ms=301ms; code_index_sqlite_lock_cases_ms=482ms
+
+## run-1779847089
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779847089.patch`
+- score: 0.960406 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.784462, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: score_component:score 0.842703->0.96040614541092; score_component:semantic_vector 0.0->1.0; gate:semantic_vector_provider_probe false->true; metric:self_iteration_cargo_check_ms 3352.0->564.0; metric:code_index_recovery_cases_ms 887.0->846.0; metric:code_index_sqlite_lock_cases_ms 1692.0->1168.0; metric:code_index_health_isolation_cases_ms 3371.0->2803.0; metric:temporal_samples_go_index_ms 15054.0->14002.0
+- known degradations: score_component:performance 0.859586->0.7844624825566405; metric:cargo_fmt_check_ms 2158.0->2561.0; metric:self_iteration_cargo_fmt_check_ms 344.0->403.0; metric:temporal_sdk_go_index_ms 63471.0->108316.0; metric:temporal_sdk_go_register_index_ms 63552.0->108377.0; metric:grep_budget_fixture_index_ms 61.0->202.0; metric:grep_budget_fixture_register_index_ms 102.0->585.0; metric:grep_budget_fixture_query_p50_ms 61.0->142.0
+- latency metrics: cargo_fmt_check_ms=2561ms; self_iteration_cargo_fmt_check_ms=403ms; linux_glibc_compatibility_policy_ms=122ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=564ms; code_index_recovery_cases_ms=846ms; code_index_sqlite_lock_cases_ms=1168ms; code_index_health_isolation_cases_ms=2803ms
 
 Adopted optimization notes:
 
