@@ -170,13 +170,6 @@ fn resolve_imports(
     } else {
         BTreeMap::new()
     };
-    transaction.execute(
-        "
-        DELETE FROM code_repository_search
-        WHERE source_scope = ?1 AND document_kind = 'import'
-        ",
-        params![source_scope],
-    )?;
     let mut update_import = transaction.prepare(
         "
         UPDATE code_repository_imports
@@ -187,7 +180,6 @@ fn resolve_imports(
         WHERE source_scope = ?1 AND import_id = ?2
         ",
     )?;
-    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     for import in imports {
         let language = files.get(&import.path).map(String::as_str);
         let resolution = match language {
@@ -220,21 +212,9 @@ fn resolve_imports(
             confidence,
             tier
         ])?;
-        search_documents.insert(
-            source_scope,
-            "import",
-            &import.import_id,
-            &import.path,
-            language.unwrap_or_default(),
-            [
-                import.module.as_str(),
-                target_hint.as_str(),
-                import.path.as_str(),
-            ],
-        )?;
     }
 
-    Ok(())
+    search_documents::rebuild_import_search_documents(transaction, source_scope)
 }
 
 fn rebuild_calls(

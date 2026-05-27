@@ -16,6 +16,10 @@
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
+## 候选优化说明：run-1779854865-bulk-import-search-finalize
+- 算法/架构：checkpointed full-index finalize 保持逐条 import resolution、target_hint、resolution_state 与 confidence 更新，但 finalized import FTS read model 改为在 resolution 完成后用一次 `INSERT INTO code_repository_search ... SELECT` 批量重建；content 继续包含 import statement、resolved/unresolved target hint 与 source path，language_id 从 finalized file 表关联获取。
+- 不变量/影响/风险：不改变 parser facts、import/module resolution、SQLite schema、ranking 权重、candidate window、repo-set overlay、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；active/retained scope 的中间 edge search rows 仍走 batch 插入路径。预期降低 Python/Go/Java/TypeScript 等 import-heavy repository 在 finalize 阶段的 Rust 循环 FTS 写入与 SQLite statement 调用次数，改善 register/full-index throughput 和锁占用；风险是 SQL 拼接的空 target_hint 空格与原 inserter 有细微差异，受 import search language/content 回归和既有 import 查询测试控制。
+- 策略关联：建立在 accepted `run-1779850939` bulk call-search finalize 策略之上，把同一 read-model materialization 原则推广到 import edges；明确避开 rejected `run-1779853058` 的 query-row/ranking 局部调权路径和 cargo build/index recovery regression，不枚举仓库、路径、case id、query 字符串或 fixture symbol。
 ## 候选优化说明：run-1779850939-bulk-call-search-finalize
 - 算法/架构：checkpointed full-index finalize 仍按既有 resolved reference 与 caller ownership 规则构建 `code_repository_calls`，但 call FTS read model 从 Rust 循环逐条写入改为在 call 表完成后用一次 `INSERT INTO code_repository_search ... SELECT` 批量重建；content 继续包含 caller name、callee name、target hint、caller signature、callee signature 与 path，language_id 从 finalized file 表关联获取。
 - 不变量/预期影响/风险：不改变 parser facts、reference/call resolution、SQLite table schema、call id、ranking 权重、candidate window、repo-set overlay、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；call search rows 仍只在 finalize 边界重建，active/retained scope 的 reference/import 中间 search rows 保持原路径。预期降低 relay-teams、Temporal SDK Go、LevelDB 等 call-heavy repository 在 finalize 阶段的 FTS 写入解释器开销和 SQLite statement 调用次数，改善 full-index/register-index throughput；风险是 SQL 拼接的 search content 与原逐条 builder 在空字段空格上有细微差异，受 FTS tokenizer、签名召回测试、language_id 测试和 call search content 回归控制。
@@ -1035,6 +1039,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:performance 0.796416->0.8186792443475324; metric:self_iteration_cargo_fmt_check_ms 443.0->383.0; metric:leveldb_cpp_index_ms 282.0->202.0; metric:leveldb_cpp_register_index_ms 363.0->303.0; metric:leveldb_cpp_query_p50_ms 342.0->183.0; metric:leveldb_cpp_query_p95_ms 669.0->243.0; metric:grep_budget_fixture_register_index_ms 465.0->384.0; metric:relay_teams_index_ms 346495.0->289934.0
 - known degradations: metric:cargo_fmt_check_ms 2720.0->3038.0; metric:cargo_build_debug_ms 444.0->544.0; metric:self_iteration_cargo_check_ms 604.0->894.0; metric:code_index_recovery_cases_ms 966.0->2039.0; metric:code_index_sqlite_lock_cases_ms 1227.0->3260.0; metric:code_index_health_isolation_cases_ms 2976.0->5899.0; metric:temporal_samples_go_index_ms 13749.0->24850.0; metric:temporal_samples_go_register_index_ms 13831.0->24973.0
 - latency metrics: cargo_fmt_check_ms=3038ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=102ms; cargo_build_debug_ms=544ms; self_iteration_cargo_check_ms=894ms; code_index_recovery_cases_ms=2039ms; code_index_sqlite_lock_cases_ms=3260ms; code_index_health_isolation_cases_ms=5899ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779854865
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779854865.patch`
+- score: 0.971385 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.845455, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`
+- key improvements: score_component:score 0.953379->0.9713848177515554; score_component:performance 0.745421->0.845455106671282; metric:cargo_fmt_check_ms 885.0->846.0; metric:cargo_build_debug_ms 19470.0->141.0; metric:self_iteration_cargo_check_ms 463.0->80.0; metric:code_index_recovery_cases_ms 4510.0->342.0; metric:code_index_sqlite_lock_cases_ms 5162.0->462.0; metric:code_index_health_isolation_cases_ms 7158.0->1026.0
+- known degradations: metric:leveldb_cpp_query_p95_ms 849.0->1286.0; metric:cross_language_syntax_fixture_query_p95_ms 406.0->525.0; metric:c_syntax_fixture_register_index_ms 505.0->547.0; metric:c_syntax_fixture_query_p50_ms 362.0->509.0; metric:c_syntax_fixture_query_p95_ms 814.0->1150.0; metric:cpp_syntax_fixture_index_ms 81.0->202.0; metric:cpp_syntax_fixture_query_p50_ms 364.0->488.0; metric:cpp_syntax_fixture_query_p95_ms 786.0->1502.0
+- latency metrics: cargo_fmt_check_ms=846ms; self_iteration_cargo_fmt_check_ms=120ms; linux_glibc_compatibility_policy_ms=40ms; cargo_build_debug_ms=141ms; self_iteration_cargo_check_ms=80ms; code_index_recovery_cases_ms=342ms; code_index_sqlite_lock_cases_ms=462ms; code_index_health_isolation_cases_ms=1026ms
 
 Adopted optimization notes:
 

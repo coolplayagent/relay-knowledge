@@ -34,6 +34,44 @@ pub(super) fn rebuild_reference_search_documents(
     Ok(())
 }
 
+pub(super) fn rebuild_import_search_documents(
+    transaction: &Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search
+        WHERE source_scope = ?1 AND document_kind = 'import'
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        INSERT INTO code_repository_search (
+            source_scope, document_kind, record_id, path, language_id, content
+        )
+        SELECT import.source_scope, 'import', import.import_id, import.path,
+               coalesce(file.language_id, ''),
+               trim(
+                   import.module ||
+                   CASE
+                       WHEN coalesce(import.target_hint, '') = '' THEN ''
+                       ELSE ' ' || import.target_hint
+                   END ||
+                   ' ' || import.path
+               )
+        FROM code_repository_imports import
+        LEFT JOIN code_repository_files file
+          ON file.source_scope = import.source_scope
+         AND file.path = import.path
+        WHERE import.source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
+
+    Ok(())
+}
+
 pub(super) fn rebuild_call_search_documents(
     transaction: &Transaction<'_>,
     source_scope: &str,
