@@ -153,14 +153,14 @@ fn search_symbol_identity_rows_by_name(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
-               (
+               CASE WHEN code_repository_symbols.kind = 'class' THEN (
                    SELECT MIN(previous.line_start)
                    FROM code_repository_symbols previous
                    WHERE previous.source_scope = code_repository_symbols.source_scope
                      AND previous.path = code_repository_symbols.path
                      AND previous.line_end < code_repository_symbols.line_start
                      AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
-               ) AS previous_symbol_context_start
+               ) ELSE NULL END AS previous_symbol_context_start
         FROM code_repository_symbols
         WHERE source_scope = ?
           AND name = ?
@@ -277,14 +277,14 @@ fn search_symbol_fts_rows(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
                byte_start, byte_end, line_start, line_end, name, qualified_name, kind,
-               (
+               CASE WHEN code_repository_symbols.kind = 'class' THEN (
                    SELECT MIN(previous.line_start)
                    FROM code_repository_symbols previous
                    WHERE previous.source_scope = code_repository_symbols.source_scope
                      AND previous.path = code_repository_symbols.path
                      AND previous.line_end < code_repository_symbols.line_start
                      AND code_repository_symbols.line_start - previous.line_end <= {SYMBOL_CONTEXT_PREAMBLE_MAX_LINES}
-               ) AS previous_symbol_context_start
+               ) ELSE NULL END AS previous_symbol_context_start
         FROM code_repository_symbols
         WHERE source_scope = ?
           AND symbol_snapshot_id IN (

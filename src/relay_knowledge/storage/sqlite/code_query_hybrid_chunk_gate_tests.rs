@@ -91,11 +91,25 @@ fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
         "\"RegisterWorkflow\" \"RegisterActivity\" \"InterruptCh\""
     );
     assert!(strict_hybrid_chunk_fts_match_query("RK_PIPELINE_NOTE").is_none());
+    let member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+    )
+    .expect("member-access API leaves should complete a strict recall pair");
+    assert_eq!(
+        member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
+    let sparse_member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial MustLoadDefaultClientOptions setup call target api",
+    )
+    .expect("member-access leaves should allow strict recall with one structured API anchor");
+    assert_eq!(
+        sparse_member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
     assert!(
-        strict_hybrid_chunk_fts_match_query(
-            "client.Dial envconfig MustLoadDefaultClientOptions workflow client"
-        )
-        .is_none()
+        strict_hybrid_chunk_fts_match_query("client.Dial workflow client path/to/client.go")
+            .is_none()
     );
 }
 
@@ -106,14 +120,47 @@ fn strict_hybrid_chunk_candidate_limit_stays_bounded() {
             "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
             10,
         )),
-        120
+        60
     );
     assert_eq!(
         strict_hybrid_chunk_candidate_limit(&hybrid_gate_request(
             "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
             40,
         )),
-        180
+        120
+    );
+}
+
+#[test]
+fn strict_and_broad_chunk_merge_keeps_union_bounded_and_deduped() {
+    let mut strict_hit = chunk_gate_hit("client.Dial MustLoadDefaultClientOptions");
+    strict_hit.score = 12.0;
+    let mut duplicate_broad_hit = chunk_gate_hit("client.Dial MustLoadDefaultClientOptions");
+    duplicate_broad_hit.score = 1.0;
+    let mut broad_hit = chunk_gate_hit("worker.New RegisterWorkflow");
+    broad_hit.score = 10.0;
+    let mut tail_hit = chunk_gate_hit("RegisterActivity InterruptCh");
+    tail_hit.score = 2.0;
+
+    let merged = merge_strict_and_broad_chunk_hits(
+        vec![strict_hit],
+        vec![duplicate_broad_hit, broad_hit, tail_hit],
+        2,
+    );
+
+    assert_eq!(merged.len(), 2);
+    assert_eq!(
+        merged
+            .iter()
+            .filter(|hit| hit.excerpt.contains("MustLoadDefaultClientOptions"))
+            .count(),
+        1
+    );
+    assert!(merged.iter().any(|hit| hit.score == 12.0));
+    assert!(
+        !merged
+            .iter()
+            .any(|hit| hit.excerpt == "RegisterActivity InterruptCh")
     );
 }
 
