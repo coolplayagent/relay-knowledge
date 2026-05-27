@@ -117,9 +117,12 @@ Register a Git worktree:
 relay-knowledge repo register /path/to/repo \
   --alias core \
   --path src \
-  --language rust \
   --format json
 ```
+
+Registration keeps the full language surface of the selected paths. Apply
+language filters at query time instead of passing `--language` to
+`repo register`.
 
 Preview and index:
 

@@ -216,7 +216,6 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
   --alias linux-checkpoint-smoke \
   --path init/main.c \
   --path include/linux/module.h \
-  --language c \
   --format json
 
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
@@ -224,7 +223,7 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
 
 RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
   target/debug/relay-knowledge repo query linux-checkpoint-smoke \
-  --query module_init --kind definition --ref HEAD --limit 3 --format json
+  --query module_init --kind definition --ref HEAD --language c --limit 3 --format json
 ```
 
 结果：
