@@ -106,7 +106,8 @@ fn delete_batch_path_indexes_if_needed(
     }
 
     let should_delete = !batch_is_new
-        || path_indexes_exist(transaction, &batch.source_scope, paths.iter().copied())?;
+        || (batch.batch_index > 1
+            && path_indexes_exist(transaction, &batch.source_scope, paths.iter().copied())?);
     if should_delete {
         delete_path_indexes(transaction, &batch.source_scope, paths)?;
     }

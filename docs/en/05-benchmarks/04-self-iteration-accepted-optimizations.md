@@ -4,6 +4,12 @@
 
 This page is the compact English companion for the self-iteration optimization log. The Chinese primary log keeps the full rolling record and archives old detailed entries before they exceed the repository file-length cap.
 
+## Issue #168: Large-Repository Register-To-Index Throughput
+
+- Algorithm and architecture: the default full-code-index batch now covers 512 files while retaining the 16 MiB blob and 50k row caps. Checkpointed SQLite batch apply skips the empty-scope path-index existence probe for the first new batch, while later batches still keep collision cleanup and replay idempotency.
+- Guardrails: the default fast self-iteration profile includes the generated `index_performance_many_files` repository with 1024 small Rust files, recording both `*_index_ms` and `*_register_index_ms` through the real `repo register` plus `repo index` path.
+- Limits: no CLI/API shape, SQLite schema, parser fact, FTS document semantics, edge finalization, freshness/status, task lease, checkpoint, or source-fallback budget changed. Performance fixes must not skip indexing work, hide degraded states, use unbounded timeouts, or special-case repositories, paths, queries, symbols, or case ids.
+
 ## Issue #147: Cross-Language Call Graph
 
 - Algorithm and architecture: call-target resolution keeps the original target hint and adds only constrained same-repository leaf candidates for cross-language boundaries. C/C++ calls keep direct symbol names, Go cgo maps `C.<name>` to `<name>` only from `.go` files, and Rust FFI/bindings paths add a leaf candidate only for `ffi`, `bindings`, `libc`, or `*_sys` prefixes.

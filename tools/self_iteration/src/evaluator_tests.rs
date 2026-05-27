@@ -316,6 +316,9 @@ mod tests {
 
         assert!(names.iter().any(|name| name == "typescript_syntax_fixture"));
         assert!(names.iter().any(|name| name == "grep_budget_fixture"));
+        assert!(names
+            .iter()
+            .any(|name| name == "index_performance_many_files"));
         assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
         assert!(names.iter().any(|name| name == "project_alias_fixture"));
     }
@@ -551,6 +554,11 @@ mod tests {
             .expect("project alias fixture should write");
         create_generated_repository_files(&root.join("nonstandard"), "nonstandard_layout_v1")
             .expect("nonstandard fixture should write");
+        create_generated_repository_files(
+            &root.join("index_performance"),
+            "index_performance_many_files_v1",
+        )
+        .expect("index performance fixture should write");
 
         assert!(!root.join("c/.relay-knowledge-fixture-version").exists());
         assert!(!root.join("typescript/.relay-knowledge-fixture-version").exists());
@@ -591,6 +599,10 @@ mod tests {
             root.join("nonstandard/external_deps/cpp_sdk/session_client.cpp"),
         )
         .expect("nonstandard C++ source");
+        let performance_tail = std::fs::read_to_string(
+            root.join("index_performance/src/shard_015/file_1023.rs"),
+        )
+        .expect("index performance tail source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(c_macro_source.contains("RK_HTTP_HANDLER(rk_http_access_handler)"));
@@ -614,6 +626,7 @@ mod tests {
         assert!(project_alias_source.contains("stable_project_entry"));
         assert!(nonstandard_ts.contains("ExternalTypeScriptSessionClient"));
         assert!(nonstandard_cpp.contains("#include <external_session_client.hpp>"));
+        assert!(performance_tail.contains("rk_perf_target_1023"));
 
         std::fs::remove_dir_all(&root).expect("cleanup fixture");
     }

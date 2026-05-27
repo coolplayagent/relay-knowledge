@@ -81,7 +81,7 @@ fn code_ranges_must_be_ordered() {
 fn default_code_index_budget_batches_more_small_files_without_raising_row_or_byte_caps() {
     let budget = CodeIndexResourceBudget::default();
 
-    assert_eq!(budget.max_files_per_batch, 256);
+    assert_eq!(budget.max_files_per_batch, 512);
     assert_eq!(
         budget.max_bytes_per_batch,
         CodeIndexResourceBudget::DEFAULT_MAX_BYTES_PER_BATCH

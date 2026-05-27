@@ -1,5 +1,17 @@
 {
   "repositories": {
+    "index_performance_many_files": {
+      "generated_fixture": "index_performance_many_files_v1",
+      "alias": "index-performance-many-files-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": ["rust"],
+      "index_budget_ms": 12000,
+      "register_index_budget_ms": 13000,
+      "query_p50_budget_ms": 120,
+      "query_p95_budget_ms": 240
+    },
     "relay_teams": {
       "index_budget_ms": 45000,
       "register_index_budget_ms": 46000
@@ -28,5 +40,25 @@
       "index_budget_ms": 120000,
       "register_index_budget_ms": 121000
     }
-  }
+  },
+  "query_cases": [
+    {
+      "id": "index_performance_many_files_tail_symbol",
+      "repository": "index_performance_many_files",
+      "kind": "symbol",
+      "query": "rk_perf_target_1023",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "src/shard_015/file_1023.rs",
+          "excerpt_contains": "rk_perf_target_1023"
+        }
+      ],
+      "degraded_reason": false,
+      "case_group": "index_performance"
+    }
+  ]
 }
