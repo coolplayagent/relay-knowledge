@@ -16,6 +16,26 @@
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
+## 候选优化说明：run-1779856832-filtered-call-identity-fast-path
+- 算法/架构：Callers/Callees 查询在 exact call identity lookup 已命中、未触发 direct lookup 饱和、且命中数落入请求 limit 时，如果请求带 path 或 language selector 过滤，则把结构化 call graph edge 视为完整候选集并跳过后续 broad call FTS expansion；unfiltered broad identity 仍要求长标识符、snake_case 或 camel/Pascal case boundary 才能早停，scoped identity 保持原有直接回答规则。
+- 不变量/影响/风险：不改变 parser facts、call resolution、SQLite schema、FTS 文档、candidate window、ranking 权重、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net 或 CLI/API shape；只在 callers/callees exact graph rows 已经 bounded 且 selector 已收窄查询面时减少 FTS 层扩展。预期降低 C/C++/Go/Rust syntax fixture 与多语言 bridge 中 path/language-scoped callers/callees 查询的 p95 延迟，同时保留未过滤短词查询通过 FTS 补充上下文召回；风险是少量 filtered 短标识符查询不再返回 FTS-only call-text 候选，受 fast-path 单测、既有 call ranking/query 回归和未过滤 broad identity gate 控制。
+- 策略关联：建立在 accepted `run-1779847089` API-dense direct lookup elision 与 accepted `run-1779850939`/`run-1779854865` bulk read-model materialization 的“结构化证据优先、必要时跳过 broad FTS”策略之上；明确避开 rejected `run-1779855553` 的 candidate-limit/support 局部调参和全局 build/fmt/index recovery regression，不枚举仓库、路径、case id、query 字符串或 fixture symbol。
+## 候选优化说明：run-1779854865-bulk-import-search-finalize
+- 算法/架构：checkpointed full-index finalize 保持逐条 import resolution、target_hint、resolution_state 与 confidence 更新，但 finalized import FTS read model 改为在 resolution 完成后用一次 `INSERT INTO code_repository_search ... SELECT` 批量重建；content 继续包含 import statement、resolved/unresolved target hint 与 source path，language_id 从 finalized file 表关联获取。
+- 不变量/影响/风险：不改变 parser facts、import/module resolution、SQLite schema、ranking 权重、candidate window、repo-set overlay、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；active/retained scope 的中间 edge search rows 仍走 batch 插入路径。预期降低 Python/Go/Java/TypeScript 等 import-heavy repository 在 finalize 阶段的 Rust 循环 FTS 写入与 SQLite statement 调用次数，改善 register/full-index throughput 和锁占用；风险是 SQL 拼接的空 target_hint 空格与原 inserter 有细微差异，受 import search language/content 回归和既有 import 查询测试控制。
+- 策略关联：建立在 accepted `run-1779850939` bulk call-search finalize 策略之上，把同一 read-model materialization 原则推广到 import edges；明确避开 rejected `run-1779853058` 的 query-row/ranking 局部调权路径和 cargo build/index recovery regression，不枚举仓库、路径、case id、query 字符串或 fixture symbol。
+## 候选优化说明：run-1779850939-bulk-call-search-finalize
+- 算法/架构：checkpointed full-index finalize 仍按既有 resolved reference 与 caller ownership 规则构建 `code_repository_calls`，但 call FTS read model 从 Rust 循环逐条写入改为在 call 表完成后用一次 `INSERT INTO code_repository_search ... SELECT` 批量重建；content 继续包含 caller name、callee name、target hint、caller signature、callee signature 与 path，language_id 从 finalized file 表关联获取。
+- 不变量/预期影响/风险：不改变 parser facts、reference/call resolution、SQLite table schema、call id、ranking 权重、candidate window、repo-set overlay、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；call search rows 仍只在 finalize 边界重建，active/retained scope 的 reference/import 中间 search rows 保持原路径。预期降低 relay-teams、Temporal SDK Go、LevelDB 等 call-heavy repository 在 finalize 阶段的 FTS 写入解释器开销和 SQLite statement 调用次数，改善 full-index/register-index throughput；风险是 SQL 拼接的 search content 与原逐条 builder 在空字段空格上有细微差异，受 FTS tokenizer、签名召回测试、language_id 测试和 call search content 回归控制。
+- 策略关联：建立在 latest accepted `run-1779849444` parser reference dedup 的索引吞吐方向之上，但把后续候选扩展到 storage read-model materialization，而不是继续做 parser 局部小修；同时避开 rejected `run-1779845791` 的 provider gate 回退模式，不触碰 semantic/vector provider、ranking 特权路径，也不枚举仓库、路径、case id、query 字符串或 fixture symbol。
+## 候选优化说明：run-1779849444-parser-reference-dedup-index
+- 算法/架构：parser 的 per-file `FileParseOutput` 新增 reference dedup key set，把 reference upsert 从扫描已收集 `Vec<RepositoryCodeReferenceRecord>` 改为按 `(name, path, line_start, byte_start, byte_end)` 哈希判重；tree-sitter captures、manual call extraction、C/C++ 手工 reference extraction 仍共享同一 upsert 入口，因此重复 call/type/value evidence 保持单行单 range 一条 reference，同行不同 byte range 的真实多次调用继续保留。
+- 不变量/预期影响/风险：不改变 parser capture query、manual extractor 语义、SQLite schema、FTS 文档、reference/call/import resolution、ranking、candidate window、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net 或 CLI/API shape；dedup key 与既有线性比较完全一致，不把 reference kind 纳入判重，避免改变旧的重复合并规则。预期降低大型 Go、TypeScript、Rust、Java 等源码文件在重复 tag/manual call capture 和高 reference 密度下的 per-file 解析成本，改善 checkpointed full-index throughput 与 SQLite batch 到达延迟；风险是 dedup key set 与 reference vector 若未来被绕过手工修改可能失配，受私有 `FileParseOutput` 构造器、upsert 单测和现有 parser/call graph 回归控制。
+- 策略关联：建立在 latest accepted `run-1779847089` 已保护 semantic/vector provider gate 和 API-dense repo-set query 策略之上，把后续候选转向通用索引吞吐结构，而不是继续调单个 ranking 分数；明确避开 rejected `run-1779845791` 的 parser/ranking 小修在 provider gate 失效时被拒模式，也不枚举仓库、路径、case id、query 字符串或 fixture symbol。
+## 候选优化说明：run-1779847089-api-dense-hybrid-symbol-fts-elision
+- 算法/架构：Hybrid symbol layer 先使用既有 API identity direct lookup；当查询含多个 API identity 且 direct lookup 未触发 per-identity 饱和时，跳过 broad OR symbol FTS 扫描，把剩余上下文词交给 chunk/reference/call/import layers 处理。Symbol-only 查询仍要求所有 identity 都有 direct row 且所有 query token 都是 closed API identity，避免把上下文词误当已覆盖。
+- 不变量/预期影响/风险：不改变 SQLite schema、FTS 文档、candidate window、parser facts、repo-set fanout、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；saturated identity lookup、单 identity、caller/callee/import/SBOM/definition 查询继续走原路径。预期降低 Temporal/OTel repo-set 和单仓 API-dense Hybrid 查询中外部 API 名与高频上下文词触发的 symbol FTS 成本，同时保留应用 usage chunk 与依赖 definition symbol 覆盖；风险是少量低价值上下文 symbol 不再参与 Hybrid symbol 层排序，受 API-dense gate、饱和 gate、后续 retrieval layers 和单测控制。
+- 策略关联：建立在 repository-set dependency symbol plan、API-dense Hybrid chunk recall 和 collective chunk gate 之上；明确避免 latest rejected `run-1779845791` 的 provider-gate 失效期间继续做 parser/ranking 小修，也不枚举仓库、路径、case id、query 字符串或 fixture symbol。
 ## 候选优化说明：manual-issue-170-project-default-repository-alias
 - 算法/架构：代码仓库注册路径在解析 Git root 后，如果 CLI/API/Web 请求没有提供 alias 或 alias 为空，则用 Git root 目录名生成稳定默认 alias；显式 `--alias` 保持原有覆盖语义，SQLite 既有多 alias 映射继续让同一 repository id 的项目名 alias 与 session 临时 alias 共存。CLI spec 拆出 repo command 模块以保持文件长度约束，业务入口仍共享同一 `register_repository` 归一化路径。
 - 不变量/预期影响/风险：不改变 repository id、scope id、索引事实版本、SQLite schema、查询 ranking、repo-set overlay、semantic/vector read model、env/paths/net、安装发布或服务后台任务；默认 alias 只来自本地已授权 Git root 的目录名，不读取 package manifest，也不枚举仓库、路径、case id 或查询字符串。预期解决 Issue #170 中 agent 初次注册每个 session 自造不同 alias 导致索引不可复用的问题，并让后续 session 默认用项目名命中同一索引；风险是根目录名为空或非 UTF-8 时返回显式注册错误，受代码单测、CLI/Web 请求测试和 fast `project_alias_fixture` guardrail 控制。
@@ -949,43 +969,8 @@
 - 2026-05-26 code-index SQLite lock guardrail: fast self-iteration adds `code_index_sqlite_lock_cases` so duplicate-process file-backed SQLite indexing reuses the active task/checkpoint and distinct task fingerprints can claim independent leases without waiting behind another running task. Architecture invariants: keep one bounded SQLite writer lane, do not kill competing processes, do not add unbounded busy waits, and keep parsing outside write transactions.
 - 2026-05-27 CLI skill shell-policy guardrail: fast self-iteration adds `skill_metadata_policy_cases` through the shared skill metadata validator so Windows `.exe`, drive-letter, and `assets/windows-*` command examples cannot appear in bash/POSIX code fences. Algorithm and architecture: keep the fix in agent-facing docs plus a deterministic parser over fenced code blocks, not in ad hoc release grep checks. Invariants: POSIX examples must use POSIX binaries or `PATH`; Windows examples must stay in PowerShell or cmd.exe fences; metadata version and description checks remain unchanged. Expected impact: issue #173-style bash execution of Windows asset paths is rejected locally, in fast self-iteration, PR CI, and release validation. Risk: the validator may require docs to spell shell examples more explicitly, which is intentional for agent safety.
 
-## run-1779847461
+## run-1779847461-to-run-1779852601 compacted
+- summary: accepted #191 code-query self-iteration ranking records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.972124 to 0.997401 with 92/92 cases passing; full metrics and changed paths are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779847461.patch`
-- score: 0.972124 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.849559, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=3586ms; self_iteration_cargo_fmt_check_ms=524ms; linux_glibc_compatibility_policy_ms=142ms; skill_metadata_policy_cases_ms=423ms; cargo_build_debug_ms=33465ms; self_iteration_cargo_check_ms=684ms; code_index_recovery_cases_ms=19506ms; code_index_sqlite_lock_cases_ms=20449ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-## run-1779849943
-
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779849943.patch`
-- score: 0.979772 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.892052, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
-- key improvements: score_component:score 0.972124->0.9797723323836461; score_component:performance 0.849559->0.8920524101828967; metric:self_iteration_cargo_fmt_check_ms 524.0->424.0; metric:skill_metadata_policy_cases_ms 423.0->302.0; metric:cargo_build_debug_ms 33465.0->627.0; metric:self_iteration_cargo_check_ms 684.0->542.0; metric:code_index_recovery_cases_ms 19506.0->1067.0; metric:code_index_sqlite_lock_cases_ms 20449.0->1770.0
-- known degradations: metric:cargo_fmt_check_ms 3586.0->4517.0; metric:temporal_samples_go_index_ms 262.0->342.0; metric:temporal_samples_go_register_index_ms 363.0->423.0; metric:cross_language_syntax_fixture_register_index_ms 346.0->890.0; metric:cpp_syntax_fixture_query_p50_ms 302.0->339.0; metric:cpp_syntax_fixture_query_p95_ms 645.0->792.0; metric:c_syntax_fixture_index_ms 162.0->404.0; metric:c_syntax_fixture_register_index_ms 324.0->585.0
-- latency metrics: cargo_fmt_check_ms=4517ms; self_iteration_cargo_fmt_check_ms=424ms; linux_glibc_compatibility_policy_ms=141ms; skill_metadata_policy_cases_ms=302ms; cargo_build_debug_ms=627ms; self_iteration_cargo_check_ms=542ms; code_index_recovery_cases_ms=1067ms; code_index_sqlite_lock_cases_ms=1770ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779852601
-
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779852601.patch`
-- score: 0.997401 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.989988, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:score 0.974028->0.9974007392537516; score_component:performance 0.86014->0.9899880039057051; metric:cargo_fmt_check_ms 2462.0->866.0; metric:self_iteration_cargo_fmt_check_ms 383.0->121.0; metric:linux_glibc_compatibility_policy_ms 141.0->40.0; metric:skill_metadata_policy_cases_ms 262.0->80.0; metric:cargo_build_debug_ms 20167.0->120.0; metric:self_iteration_cargo_check_ms 584.0->121.0
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=866ms; self_iteration_cargo_fmt_check_ms=121ms; linux_glibc_compatibility_policy_ms=40ms; skill_metadata_policy_cases_ms=80ms; cargo_build_debug_ms=120ms; self_iteration_cargo_check_ms=121ms; code_index_recovery_cases_ms=301ms; code_index_sqlite_lock_cases_ms=482ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1779847089-to-run-1779856832 compacted
+- summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.

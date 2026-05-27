@@ -14,6 +14,8 @@ mod records;
 mod syntax;
 mod text;
 
+use std::collections::HashSet;
+
 use crate::domain::{
     CodeFileDiagnostic, CodeImportRecord, CodeParseStatus, RepositoryCodeFileRecord,
     RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
@@ -213,10 +215,7 @@ fn parse_syntax_file(
         language_id: input.language.id,
         content: input.content,
     };
-    let mut output = FileParseOutput {
-        symbols: Vec::new(),
-        references: Vec::new(),
-    };
+    let mut output = FileParseOutput::new();
     records_from_captures(&context, captures, &mut output)?;
     collect_manual_nodes(&context, root, &mut output)?;
     let imports = collect_imports(
@@ -798,6 +797,19 @@ struct FileParseContext<'a> {
 struct FileParseOutput {
     symbols: Vec<RepositoryCodeSymbolRecord>,
     references: Vec<RepositoryCodeReferenceRecord>,
+    reference_keys: HashSet<ReferenceDedupKey>,
+}
+
+type ReferenceDedupKey = (String, String, u32, u32, u32);
+
+impl FileParseOutput {
+    fn new() -> Self {
+        Self {
+            symbols: Vec::new(),
+            references: Vec::new(),
+            reference_keys: HashSet::new(),
+        }
+    }
 }
 
 #[cfg(test)]

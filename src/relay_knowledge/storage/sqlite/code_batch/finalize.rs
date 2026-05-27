@@ -44,13 +44,7 @@ pub(super) fn resolve_scope(
     imported_references::resolve_references(transaction, source_scope, &mut symbol_cache)?;
     call_targets::resolve_references(transaction, source_scope)?;
     search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
-    rebuild_calls(
-        transaction,
-        source_scope,
-        repository_id,
-        &file_languages,
-        &mut symbol_cache,
-    )
+    rebuild_calls(transaction, source_scope, repository_id, &mut symbol_cache)
 }
 
 fn resolve_references(
@@ -176,13 +170,6 @@ fn resolve_imports(
     } else {
         BTreeMap::new()
     };
-    transaction.execute(
-        "
-        DELETE FROM code_repository_search
-        WHERE source_scope = ?1 AND document_kind = 'import'
-        ",
-        params![source_scope],
-    )?;
     let mut update_import = transaction.prepare(
         "
         UPDATE code_repository_imports
@@ -193,7 +180,6 @@ fn resolve_imports(
         WHERE source_scope = ?1 AND import_id = ?2
         ",
     )?;
-    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     for import in imports {
         let language = files.get(&import.path).map(String::as_str);
         let resolution = match language {
@@ -226,39 +212,19 @@ fn resolve_imports(
             confidence,
             tier
         ])?;
-        search_documents.insert(
-            source_scope,
-            "import",
-            &import.import_id,
-            &import.path,
-            language.unwrap_or_default(),
-            [
-                import.module.as_str(),
-                target_hint.as_str(),
-                import.path.as_str(),
-            ],
-        )?;
     }
 
-    Ok(())
+    search_documents::rebuild_import_search_documents(transaction, source_scope)
 }
 
 fn rebuild_calls(
     transaction: &Transaction<'_>,
     source_scope: &str,
     repository_id: &str,
-    file_languages: &BTreeMap<String, String>,
     symbol_cache: &mut Option<Vec<SymbolKey>>,
 ) -> Result<(), StorageError> {
     transaction.execute(
         "DELETE FROM code_repository_calls WHERE source_scope = ?1",
-        params![source_scope],
-    )?;
-    transaction.execute(
-        "
-        DELETE FROM code_repository_search
-        WHERE source_scope = ?1 AND document_kind = 'call'
-        ",
         params![source_scope],
     )?;
     let mut by_path = HashMap::<&str, Vec<&SymbolKey>>::new();
@@ -280,7 +246,6 @@ fn rebuild_calls(
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
         ",
     )?;
-    let mut search_documents = super::super::SearchDocumentInserter::new(transaction)?;
     let mut select_references = transaction.prepare(
         "
         SELECT reference_id, file_id, path, name, line_start, line_end,
@@ -330,26 +295,9 @@ fn rebuild_calls(
             reference.line_start,
             reference.line_end,
         ])?;
-        search_documents::insert_call_search_document(
-            &mut search_documents,
-            search_documents::CallSearchDocument {
-                source_scope,
-                record_id: &call_id,
-                path: &reference.path,
-                language_id: file_languages
-                    .get(reference.path.as_str())
-                    .map(String::as_str)
-                    .unwrap_or_default(),
-                caller_name: caller.map(|symbol| symbol.name.as_str()),
-                callee_name,
-                target_hint: reference.target_hint.as_deref(),
-                caller_signature: caller.map(|symbol| symbol.signature.as_str()),
-                callee_signature: callee.map(|symbol| symbol.signature.as_str()),
-            },
-        )?;
     }
 
-    Ok(())
+    search_documents::rebuild_call_search_documents(transaction, source_scope)
 }
 
 #[derive(Clone, Debug)]
@@ -357,7 +305,6 @@ struct SymbolKey {
     symbol_snapshot_id: String,
     path: String,
     name: String,
-    signature: String,
     line_range: RepositoryCodeRange,
 }
 
@@ -413,7 +360,7 @@ fn load_symbol_keys(
 ) -> Result<Vec<SymbolKey>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT symbol_snapshot_id, path, name, signature, line_start, line_end
+        SELECT symbol_snapshot_id, path, name, line_start, line_end
         FROM code_repository_symbols
         WHERE source_scope = ?1
         ORDER BY path ASC, line_start ASC, line_end DESC, name ASC
@@ -424,10 +371,9 @@ fn load_symbol_keys(
             symbol_snapshot_id: row.get(0)?,
             path: row.get(1)?,
             name: row.get(2)?,
-            signature: row.get(3)?,
             line_range: RepositoryCodeRange {
-                start: row.get(4)?,
-                end: row.get(5)?,
+                start: row.get(3)?,
+                end: row.get(4)?,
             },
         })
     })?;

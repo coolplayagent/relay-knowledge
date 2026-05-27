@@ -860,6 +860,8 @@ fn call_identity_hits_can_answer_without_fts(
     hit_count: usize,
     saturated: bool,
 ) -> bool {
+    let selector_is_narrow = !request.repository.path_filters.is_empty()
+        || !request.repository.language_filters.is_empty();
     hit_count > 0
         && !saturated
         && matches!(
@@ -867,7 +869,8 @@ fn call_identity_hits_can_answer_without_fts(
             CodeQueryKind::Callers | CodeQueryKind::Callees
         )
         && (identity.is_scoped()
-            || (hit_count <= request.limit && specific_call_identity_leaf(identity.leaf_name())))
+            || (hit_count <= request.limit
+                && (specific_call_identity_leaf(identity.leaf_name()) || selector_is_narrow)))
 }
 
 fn call_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
@@ -962,6 +965,31 @@ mod tests {
             &callees_request,
             &broad_identity,
             1,
+            false
+        ));
+
+        let narrowed_selector = CodeRepositorySelector::new(
+            "repo",
+            "commit",
+            vec!["src/table.cc".to_owned()],
+            vec!["cpp".to_owned()],
+        )
+        .expect("selector should validate");
+        let narrowed_request = CodeRetrievalRequest::new(
+            "Run",
+            narrowed_selector,
+            CodeQueryKind::Callees,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+        let narrowed_identity =
+            call_identity_query(&narrowed_request).expect("identity query should parse");
+
+        assert!(call_identity_hits_can_answer_without_fts(
+            &narrowed_request,
+            &narrowed_identity,
+            2,
             false
         ));
     }

@@ -1,4 +1,7 @@
-use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange, RepositoryCodeSymbolRecord};
+use crate::domain::{
+    CodeRepositoryRegistration, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+    RepositoryCodeSymbolRecord,
+};
 
 use super::*;
 
@@ -100,16 +103,24 @@ impl IAMAuth { fn new() -> Self { IAMAuth } }
 
 #[test]
 fn duplicate_symbol_snapshot_identity_keeps_single_symbol_record() {
-    let mut output = FileParseOutput {
-        symbols: Vec::new(),
-        references: Vec::new(),
-    };
+    let mut output = FileParseOutput::new();
 
     records::upsert_symbol(&mut output, duplicate_identity_symbol("class"));
     records::upsert_symbol(&mut output, duplicate_identity_symbol("module"));
 
     assert_eq!(output.symbols.len(), 1);
     assert_eq!(output.symbols[0].symbol_snapshot_id, "symbol:Session");
+}
+
+#[test]
+fn duplicate_reference_identity_keeps_single_reference_record() {
+    let mut output = FileParseOutput::new();
+
+    records::upsert_reference(&mut output, duplicate_reference("call"));
+    records::upsert_reference(&mut output, duplicate_reference("implementation"));
+
+    assert_eq!(output.references.len(), 1);
+    assert_eq!(output.references[0].reference_id, "reference:run");
 }
 
 #[test]
@@ -233,6 +244,27 @@ fn duplicate_identity_symbol(kind: &str) -> RepositoryCodeSymbolRecord {
         byte_range: RepositoryCodeRange::new("byte_range", 0, 14)
             .expect("byte range should validate"),
         line_range: RepositoryCodeRange::new("line_range", 1, 1)
+            .expect("line range should validate"),
+    }
+}
+
+fn duplicate_reference(kind: &str) -> RepositoryCodeReferenceRecord {
+    RepositoryCodeReferenceRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: "scope".to_owned(),
+        reference_id: "reference:run".to_owned(),
+        file_id: "file:run".to_owned(),
+        path: "src/lib.rs".to_owned(),
+        name: "run".to_owned(),
+        kind: kind.to_owned(),
+        target_symbol_snapshot_id: None,
+        target_hint: Some("run".to_owned()),
+        resolution_state: "unresolved".to_owned(),
+        confidence_basis_points: 5_000,
+        confidence_tier: "ambiguous".to_owned(),
+        byte_range: RepositoryCodeRange::new("byte_range", 10, 13)
+            .expect("byte range should validate"),
+        line_range: RepositoryCodeRange::new("line_range", 2, 2)
             .expect("line range should validate"),
     }
 }

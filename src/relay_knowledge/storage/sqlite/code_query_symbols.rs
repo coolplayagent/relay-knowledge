@@ -247,11 +247,18 @@ fn api_identity_rows_can_answer_without_fts(
     identities: &[ApiSymbolIdentity],
     rows: &ApiIdentityRows,
 ) -> bool {
-    request.code_query_kind == CodeQueryKind::Symbol
-        && identities.len() >= 2
-        && rows.matched_identity_count == identities.len()
-        && !rows.saturated
-        && api_identity_query_terms_are_closed(&request.query, identities)
+    if identities.len() < 2 || rows.saturated {
+        return false;
+    }
+
+    match request.code_query_kind {
+        CodeQueryKind::Symbol => {
+            rows.matched_identity_count == identities.len()
+                && api_identity_query_terms_are_closed(&request.query, identities)
+        }
+        CodeQueryKind::Hybrid => rows.matched_identity_count == identities.len(),
+        _ => false,
+    }
 }
 
 fn api_identity_query_terms_are_closed(query: &str, identities: &[ApiSymbolIdentity]) -> bool {
@@ -669,4 +676,120 @@ fn symbol_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
 
 fn hybrid_api_identity_candidate_limit(request: &CodeRetrievalRequest) -> usize {
     request.limit.clamp(10, 40)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
+
+    #[test]
+    fn api_dense_hybrid_query_skips_broad_symbol_fts_when_identities_cover() {
+        let request = make_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+        );
+        let identities = hybrid_api_symbol_identities(&request.query, &request);
+        let rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: identities.len(),
+            saturated: false,
+        };
+
+        assert!(api_identity_rows_can_answer_without_fts(
+            &request,
+            &identities,
+            &rows
+        ));
+    }
+
+    #[test]
+    fn api_dense_symbol_query_still_requires_closed_identity_terms() {
+        let request = make_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Symbol,
+        );
+        let identities = hybrid_api_symbol_identities(&request.query, &request);
+        let rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: identities.len(),
+            saturated: false,
+        };
+
+        assert!(!api_identity_rows_can_answer_without_fts(
+            &request,
+            &identities,
+            &rows
+        ));
+
+        let closed_request = make_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh",
+            CodeQueryKind::Symbol,
+        );
+        let closed_identities =
+            hybrid_api_symbol_identities(&closed_request.query, &closed_request);
+        let closed_rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: closed_identities.len(),
+            saturated: false,
+        };
+
+        assert!(api_identity_rows_can_answer_without_fts(
+            &closed_request,
+            &closed_identities,
+            &closed_rows
+        ));
+    }
+
+    #[test]
+    fn api_dense_hybrid_query_keeps_broad_symbol_fts_for_partial_or_empty_identity_lookup() {
+        let request = make_request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+        );
+        let identities = hybrid_api_symbol_identities(&request.query, &request);
+        let partial_rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: identities.len() - 1,
+            saturated: false,
+        };
+        let empty_rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: 0,
+            saturated: false,
+        };
+        let saturated_rows = ApiIdentityRows {
+            rows: Vec::new(),
+            matched_identity_count: identities.len(),
+            saturated: true,
+        };
+
+        assert!(!api_identity_rows_can_answer_without_fts(
+            &request,
+            &identities,
+            &partial_rows
+        ));
+        assert!(!api_identity_rows_can_answer_without_fts(
+            &request,
+            &identities,
+            &empty_rows
+        ));
+        assert!(!api_identity_rows_can_answer_without_fts(
+            &request,
+            &identities,
+            &saturated_rows
+        ));
+    }
+
+    fn make_request(query: &str, kind: CodeQueryKind) -> CodeRetrievalRequest {
+        CodeRetrievalRequest::new(
+            query,
+            CodeRepositorySelector::new("repo", "HEAD", Vec::new(), vec!["go".to_owned()])
+                .expect("selector should validate"),
+            kind,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate")
+    }
 }
