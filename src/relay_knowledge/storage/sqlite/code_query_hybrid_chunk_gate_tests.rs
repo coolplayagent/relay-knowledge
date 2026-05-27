@@ -123,6 +123,39 @@ fn strict_hybrid_chunk_candidate_limit_stays_bounded() {
     );
 }
 
+#[test]
+fn strict_and_broad_chunk_merge_keeps_union_bounded_and_deduped() {
+    let mut strict_hit = chunk_gate_hit("client.Dial MustLoadDefaultClientOptions");
+    strict_hit.score = 12.0;
+    let mut duplicate_broad_hit = chunk_gate_hit("client.Dial MustLoadDefaultClientOptions");
+    duplicate_broad_hit.score = 1.0;
+    let mut broad_hit = chunk_gate_hit("worker.New RegisterWorkflow");
+    broad_hit.score = 10.0;
+    let mut tail_hit = chunk_gate_hit("RegisterActivity InterruptCh");
+    tail_hit.score = 2.0;
+
+    let merged = merge_strict_and_broad_chunk_hits(
+        vec![strict_hit],
+        vec![duplicate_broad_hit, broad_hit, tail_hit],
+        2,
+    );
+
+    assert_eq!(merged.len(), 2);
+    assert_eq!(
+        merged
+            .iter()
+            .filter(|hit| hit.excerpt.contains("MustLoadDefaultClientOptions"))
+            .count(),
+        1
+    );
+    assert!(merged.iter().any(|hit| hit.score == 12.0));
+    assert!(
+        !merged
+            .iter()
+            .any(|hit| hit.excerpt == "RegisterActivity InterruptCh")
+    );
+}
+
 fn hybrid_gate_request(query: &str, limit: usize) -> CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should be valid");

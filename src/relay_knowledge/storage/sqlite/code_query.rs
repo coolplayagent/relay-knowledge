@@ -670,27 +670,56 @@ fn search_chunks(
     status: &CodeRepositoryStatus,
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
-        let hits = search_chunks_with_fts_query(
-            connection,
-            status,
-            request,
-            &strict_fts_query,
-            strict_hybrid_chunk_candidate_limit(request),
-        )?;
-        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
-            return Ok(hits);
+    let strict_hits = if request.code_query_kind == CodeQueryKind::Hybrid {
+        if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
+            let hits = search_chunks_with_fts_query(
+                connection,
+                status,
+                request,
+                &strict_fts_query,
+                strict_hybrid_chunk_candidate_limit(request),
+            )?;
+            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
+                return Ok(hits);
+            }
+            Some(hits)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     let fts_query = hybrid_chunk_fts_match_query(&request.query);
-    search_chunks_with_fts_query(
+    let mut hits = search_chunks_with_fts_query(
         connection,
         status,
         request,
         &fts_query,
         candidate_limit(request, CandidateLayer::Chunk),
-    )
+    )?;
+    if let Some(strict_hits) = strict_hits {
+        hits = merge_strict_and_broad_chunk_hits(
+            strict_hits,
+            hits,
+            candidate_limit(request, CandidateLayer::Chunk),
+        );
+    }
+
+    Ok(hits)
+}
+
+fn merge_strict_and_broad_chunk_hits(
+    strict_hits: Vec<CodeRetrievalHit>,
+    mut broad_hits: Vec<CodeRetrievalHit>,
+    candidate_limit: usize,
+) -> Vec<CodeRetrievalHit> {
+    if strict_hits.is_empty() {
+        return broad_hits;
+    }
+    broad_hits.extend(strict_hits);
+    dedupe_sort_truncate(&mut broad_hits, candidate_limit);
+    broad_hits
 }
 
 fn search_chunks_with_fts_query(
