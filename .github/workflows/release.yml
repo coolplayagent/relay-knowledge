@@ -451,7 +451,7 @@ jobs:
 
           ## CLI Skill
 
-          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance plus Linux x64 and Windows x64 binaries under `assets/`; agents prefer the matching bundled asset when `version --format json` succeeds, and use PATH only as a fallback or when explicitly requested. It is intentionally separate from MCP protocol access.
+          This release includes `relay-knowledge-cli-skill-${{ needs.verify.outputs.tag }}.tar.gz`, a ClawHub-compatible skill that teaches LLM agents to use the `relay-knowledge` CLI for local graph and code-repository workflows. The skill package includes root-level `README.md` guidance plus Linux x64 and Windows x64 binaries under `assets/`; agents prefer the matching bundled asset for the current operating system, CPU, and active command runner when `version --format json` succeeds, and use PATH only as a fallback or when explicitly requested. Windows `.exe` asset examples stay in PowerShell or cmd.exe instructions, not bash/POSIX command blocks. It is intentionally separate from MCP protocol access.
 
           Registry maintainers can publish the same generated skill layout with:
 

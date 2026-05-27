@@ -2,17 +2,20 @@
 
 ## Installation and Upgrade Checks
 
-Use the skill's bundled binary first for the current platform. Released skill
-packages include `assets/linux-x86_64/relay-knowledge` and
+Use the skill's bundled binary first for the current operating system, CPU, and
+active command runner. Released skill packages include
+`assets/linux-x86_64/relay-knowledge` and
 `assets/windows-x86_64/relay-knowledge.exe`. The Linux x64 asset is built and
 checked against a glibc 2.31 baseline. If that asset exists, is executable, and
 `version --format json` succeeds, run the workflow commands through that
 resolved executable. The examples below keep the command as `relay-knowledge`
 for readability; when executing them, substitute the bundled asset path if it
-was selected. Use `PATH` only when the asset is absent, unusable, unsupported on
-the current OS or CPU, incompatible with the host Linux glibc version, or
-explicitly requested by the user. Treat version comparisons as diagnostics, not
-as the default selection rule.
+was selected. Do not run the Windows bundled asset from POSIX shells; use
+PowerShell or cmd.exe for Windows `.exe` examples. Use `PATH` only when the
+asset is absent, unusable, unsupported on the current OS, CPU, or shell boundary,
+incompatible with the host Linux glibc version, or explicitly requested by the
+user. Treat version comparisons as diagnostics, not as the default selection
+rule.
 
 Use a GitHub Release archive when the bundled asset is absent, unusable, or the
 user requested a specific published version that is not available in the skill
@@ -55,7 +58,7 @@ the runtime cache directory.
 ## Safe Agent Defaults
 
 - Resolve the executable before running workflow commands. Check the matching
-  bundled asset first:
+  bundled asset for the active OS, CPU, and shell boundary first:
   `assets/linux-x86_64/relay-knowledge` on Linux x64 or
   `assets/windows-x86_64/relay-knowledge.exe` on Windows x64. If the bundled
   asset passes `version --format json`, use it even when `PATH` has another
@@ -67,7 +70,8 @@ the runtime cache directory.
   is the selected published package channel. Do not use source-checkout build
   artifacts or source builds as the installation path for this published skill.
   Command examples use `relay-knowledge` as shorthand for the resolved
-  executable.
+  executable, and Windows `.exe` commands must stay in PowerShell or cmd.exe
+  command blocks rather than bash/POSIX command blocks.
 - Prefer `--format json` for commands whose output will be parsed.
 - Inspect `relay-knowledge help --format json` and command-specific help before
   exposing or automating a command.

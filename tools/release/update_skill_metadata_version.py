@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import re
 import sys
 from pathlib import Path
@@ -17,6 +18,18 @@ MAX_DESCRIPTION_CHARS = 1024
 METADATA_HEADER = "metadata:"
 METADATA_VERSION_PREFIX = "  version:"
 YAML_NULL_VALUES = {"null", "Null", "NULL", "~"}
+FENCE_PATTERN = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/]")
+WINDOWS_ASSET_PATTERN = re.compile(r"assets[\\/]+windows[-_][A-Za-z0-9_-]+", re.I)
+WINDOWS_EXE_PATTERN = re.compile(r"\brelay-knowledge\.exe\b", re.I)
+WINDOWS_EXE_COMMAND_PATTERN = re.compile(r"\brelay-knowledge\.exe\s+\S", re.I)
+POSIX_SHELL_FENCES = {"", "bash", "sh", "shell", "zsh", "fish"}
+WINDOWS_SHELL_FENCES = {"powershell", "pwsh", "ps1", "cmd", "bat", "batch"}
+REQUIRED_SHELL_POLICY_PHRASES = (
+    "Do not run the Windows bundled asset from POSIX shells",
+    "PowerShell",
+    "cmd.exe",
+)
 DOUBLE_QUOTED_ESCAPES = {
     "0": "\0",
     "a": "\x07",
@@ -36,6 +49,13 @@ DOUBLE_QUOTED_ESCAPES = {
     "P": "\u2029",
 }
 DOUBLE_QUOTED_HEX_ESCAPE_WIDTHS = {"x": 2, "u": 4, "U": 8}
+
+
+@dataclass(frozen=True)
+class CodeBlock:
+    language: str
+    start_line: int
+    lines: list[str]
 
 
 def validate_version(version: str) -> None:
@@ -203,6 +223,107 @@ def validate_description(path: Path, description: str) -> None:
         )
 
 
+def fence_language(raw_info: str) -> str:
+    info = raw_info.strip()
+    if not info:
+        return ""
+    return info.split(None, 1)[0].lower()
+
+
+def fenced_code_blocks(text: str) -> list[CodeBlock]:
+    blocks = []
+    current_language = ""
+    current_start = 0
+    current_lines: list[str] = []
+    current_fence = ""
+    for line_number, line in enumerate(text.splitlines(), 1):
+        match = FENCE_PATTERN.match(line)
+        if current_fence:
+            if match and match.group(1).startswith(current_fence):
+                blocks.append(
+                    CodeBlock(current_language, current_start, current_lines)
+                )
+                current_language = ""
+                current_start = 0
+                current_lines = []
+                current_fence = ""
+            else:
+                current_lines.append(line)
+            continue
+        if match:
+            fence = match.group(1)
+            current_fence = fence[0] * len(fence)
+            current_language = fence_language(match.group(2))
+            current_start = line_number
+    return blocks
+
+
+def windows_command_evidence(text: str) -> str | None:
+    if WINDOWS_EXE_PATTERN.search(text):
+        return "relay-knowledge.exe"
+    if WINDOWS_ASSET_PATTERN.search(text):
+        return "assets/windows-*"
+    if WINDOWS_DRIVE_PATH_PATTERN.search(text):
+        return "Windows drive path"
+    return None
+
+
+def ensure_required_shell_policy(path: Path, text: str) -> None:
+    normalized_text = " ".join(text.split())
+    for phrase in REQUIRED_SHELL_POLICY_PHRASES:
+        if phrase not in normalized_text:
+            raise ValueError(f"{path} is missing required shell policy phrase: {phrase}")
+
+
+def check_code_block_shell_policy(path: Path, block: CodeBlock) -> None:
+    body = "\n".join(block.lines)
+    evidence = windows_command_evidence(body)
+    if evidence is None:
+        return
+    if block.language in WINDOWS_SHELL_FENCES:
+        return
+    shell = block.language or "unlabeled"
+    if block.language in POSIX_SHELL_FENCES:
+        raise ValueError(
+            f"{path}:{block.start_line} contains {evidence} in a {shell} code "
+            "fence; put Windows CLI examples in powershell or cmd fences"
+        )
+    raise ValueError(
+        f"{path}:{block.start_line} contains {evidence} in a {shell} code fence; "
+        "Windows CLI examples must use powershell or cmd fences"
+    )
+
+
+def check_unfenced_shell_policy(path: Path, text: str) -> None:
+    current_fence = ""
+    for line_number, line in enumerate(text.splitlines(), 1):
+        match = FENCE_PATTERN.match(line)
+        if current_fence:
+            if match and match.group(1).startswith(current_fence):
+                current_fence = ""
+            continue
+        if match:
+            fence = match.group(1)
+            current_fence = fence[0] * len(fence)
+            continue
+        if WINDOWS_EXE_COMMAND_PATTERN.search(line):
+            raise ValueError(
+                f"{path}:{line_number} contains a Windows CLI command outside "
+                "a code fence; put it in a powershell or cmd fence"
+            )
+
+
+def check_skill_shell_policy_text(path: Path, text: str) -> None:
+    ensure_required_shell_policy(path, text)
+    for block in fenced_code_blocks(text):
+        check_code_block_shell_policy(path, block)
+    check_unfenced_shell_policy(path, text)
+
+
+def check_skill_shell_policy(path: Path) -> None:
+    check_skill_shell_policy_text(path, path.read_text(encoding="utf-8"))
+
+
 def metadata_version_index(lines: list[str], metadata_index: int, end_index: int) -> int | None:
     for index in range(metadata_index + 1, end_index):
         line = lines[index]
@@ -256,6 +377,7 @@ def check_metadata_version(path: Path, expected: str) -> None:
 def check_skill_metadata(path: Path, expected: str) -> None:
     check_metadata_version(path, expected)
     check_frontmatter_description(path)
+    check_skill_shell_policy(path)
 
 
 def expect_value_error(action: Callable[[], object], expected: str) -> None:
@@ -301,6 +423,45 @@ def run_self_test() -> None:
         "---",
     ]
     assert frontmatter_description(lines, 5) == "repository knowledge graphs: hybrid"
+
+    valid_skill = "\n".join(
+        [
+            "Do not run the Windows bundled asset from POSIX shells.",
+            "Use PowerShell for Windows examples.",
+            "Use cmd.exe for Windows examples.",
+            "```bash",
+            "/opt/relay-knowledge-cli/assets/linux-x86_64/relay-knowledge version --format json",
+            "```",
+            "```powershell",
+            '& "C:\\Users\\me\\.relay-knowledge\\skills\\relay-knowledge-cli\\assets\\windows-x86_64\\relay-knowledge.exe" version --format json',
+            "```",
+            "```cmd",
+            '"C:\\Users\\me\\.relay-knowledge\\skills\\relay-knowledge-cli\\assets\\windows-x86_64\\relay-knowledge.exe" version --format json',
+            "```",
+        ]
+    )
+    check_skill_shell_policy_text(Path("SKILL.md"), valid_skill)
+
+    invalid_bash = valid_skill + "\n```bash\nC:\\Users\\me\\relay-knowledge.exe version --format json\n```"
+    expect_value_error(
+        lambda: check_skill_shell_policy_text(Path("SKILL.md"), invalid_bash),
+        "powershell or cmd fences",
+    )
+
+    invalid_text = (
+        valid_skill
+        + "\n```text\nassets\\windows-x86_64\\relay-knowledge.exe version --format json\n```"
+    )
+    expect_value_error(
+        lambda: check_skill_shell_policy_text(Path("SKILL.md"), invalid_text),
+        "must use powershell or cmd fences",
+    )
+
+    invalid_unfenced = valid_skill + "\nC:\\Users\\me\\relay-knowledge.exe version --format json"
+    expect_value_error(
+        lambda: check_skill_shell_policy_text(Path("SKILL.md"), invalid_unfenced),
+        "outside a code fence",
+    )
 
     print("self-test OK")
 

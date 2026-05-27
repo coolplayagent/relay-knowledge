@@ -16,22 +16,26 @@ Use the compiled `relay-knowledge` binary as the control surface. Resolve the
 executable before the first operation. Prefer JSON output for automation and
 read command metadata before issuing unfamiliar commands.
 
-Prefer the bundled `assets` binary for the current platform whenever it exists
-and `version --format json` succeeds. Released skill packages include Linux x64
-and Windows x64 binaries at `assets/linux-x86_64/relay-knowledge` and
+Prefer the bundled `assets` binary for the current operating system, CPU, and
+active command runner whenever it exists and `version --format json` succeeds.
+Released skill packages include Linux x64 and Windows x64 binaries at
+`assets/linux-x86_64/relay-knowledge` and
 `assets/windows-x86_64/relay-knowledge.exe`. Use the published `PATH` install
 only when the bundled asset is missing, not executable, fails its version check,
-has no matching OS or CPU architecture, the Linux host is older than the glibc
-2.31 baseline, or the user explicitly asks for the system-installed binary.
-Version comparisons are diagnostic only; do not choose a newer `PATH` binary
-over a working bundled asset by default.
+has no matching OS or CPU architecture, has no matching shell boundary, the
+Linux host is older than the glibc 2.31 baseline, or the user explicitly asks
+for the system-installed binary. Version comparisons are diagnostic only; do
+not choose a newer `PATH` binary over a working bundled asset by default.
 
 The command examples below use `relay-knowledge` as readable shorthand for the
 resolved executable. When the bundled asset is selected, substitute that asset
 path for `relay-knowledge` while keeping the same arguments.
 
-Use the command form that matches the active shell. On POSIX, check the asset
-first and fall back to `PATH` only when the asset is unusable:
+Use the command form that matches the active shell. Do not run the Windows
+bundled asset from POSIX shells. That includes bash, sh, zsh, fish, and WSL bash
+unless the command intentionally crosses into a Windows shell boundary. On
+POSIX, check only the POSIX asset first and fall back to `PATH` only when that
+asset is unusable:
 
 ```bash
 /absolute/path/to/relay-knowledge-cli/assets/linux-x86_64/relay-knowledge version --format json
@@ -44,13 +48,15 @@ If the Linux asset fails before printing JSON with an error that mentions
 published install path built for the host instead of retrying the same asset.
 
 ```powershell
-C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe version --format json
+$relayKnowledge = "C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe"
+& $relayKnowledge version --format json
 Get-Command relay-knowledge
 relay-knowledge version --format json
 ```
 
 ```cmd
-C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe version --format json
+set "RELAY_KNOWLEDGE=C:\absolute\path\to\relay-knowledge-cli\assets\windows-x86_64\relay-knowledge.exe"
+"%RELAY_KNOWLEDGE%" version --format json
 where.exe relay-knowledge
 relay-knowledge version --format json
 ```
