@@ -228,7 +228,6 @@ feature flags are indexed graph facts, not a normal query kind.
 relay-knowledge repo register /path/to/repo \
   --alias core \
   --path src \
-  --language rust \
   --format json
 
 relay-knowledge repo scope preview core --ref HEAD --format json
@@ -244,6 +243,8 @@ relay-knowledge repo query core \
   --query retry_policy \
   --kind hybrid \
   --ref HEAD \
+  --path src \
+  --language rust \
   --freshness wait-until-fresh \
   --limit 10 \
   --format json
