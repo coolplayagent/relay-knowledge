@@ -9,7 +9,9 @@ use super::super::{
     languages::{doc_comment_text, strip_supported_extension},
     stable_id,
 };
-use super::{FileParseContext, FileParseOutput, nodes::SyntaxRange, syntax::TagCapture};
+use super::{
+    FileParseContext, FileParseOutput, ReferenceDedupKey, nodes::SyntaxRange, syntax::TagCapture,
+};
 
 pub(super) fn records_from_captures(
     context: &FileParseContext<'_>,
@@ -136,17 +138,24 @@ pub(super) fn upsert_reference(
     output: &mut FileParseOutput,
     reference: RepositoryCodeReferenceRecord,
 ) {
-    if output.references.iter().any(|existing| {
-        existing.name == reference.name
-            && existing.path == reference.path
-            && existing.line_range.start == reference.line_range.start
-            && existing.byte_range.start == reference.byte_range.start
-            && existing.byte_range.end == reference.byte_range.end
-    }) {
+    if !output
+        .reference_keys
+        .insert(reference_dedup_key(&reference))
+    {
         return;
     }
 
     output.references.push(reference);
+}
+
+fn reference_dedup_key(reference: &RepositoryCodeReferenceRecord) -> ReferenceDedupKey {
+    (
+        reference.name.clone(),
+        reference.path.clone(),
+        reference.line_range.start,
+        reference.byte_range.start,
+        reference.byte_range.end,
+    )
 }
 
 pub(super) fn symbol_record(

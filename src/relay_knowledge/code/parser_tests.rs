@@ -671,10 +671,7 @@ fn manual_call_extraction_preserves_same_line_calls() {
         language_id: language.id,
         content,
     };
-    let mut output = FileParseOutput {
-        symbols: Vec::new(),
-        references: Vec::new(),
-    };
+    let mut output = FileParseOutput::new();
 
     collect_manual_nodes(&context, parsed.root_node(), &mut output)
         .expect("manual extraction should succeed");

@@ -16,6 +16,10 @@
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
+## 候选优化说明：run-1779849444-parser-reference-dedup-index
+- 算法/架构：parser 的 per-file `FileParseOutput` 新增 reference dedup key set，把 reference upsert 从扫描已收集 `Vec<RepositoryCodeReferenceRecord>` 改为按 `(name, path, line_start, byte_start, byte_end)` 哈希判重；tree-sitter captures、manual call extraction、C/C++ 手工 reference extraction 仍共享同一 upsert 入口，因此重复 call/type/value evidence 保持单行单 range 一条 reference，同行不同 byte range 的真实多次调用继续保留。
+- 不变量/预期影响/风险：不改变 parser capture query、manual extractor 语义、SQLite schema、FTS 文档、reference/call/import resolution、ranking、candidate window、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net 或 CLI/API shape；dedup key 与既有线性比较完全一致，不把 reference kind 纳入判重，避免改变旧的重复合并规则。预期降低大型 Go、TypeScript、Rust、Java 等源码文件在重复 tag/manual call capture 和高 reference 密度下的 per-file 解析成本，改善 checkpointed full-index throughput 与 SQLite batch 到达延迟；风险是 dedup key set 与 reference vector 若未来被绕过手工修改可能失配，受私有 `FileParseOutput` 构造器、upsert 单测和现有 parser/call graph 回归控制。
+- 策略关联：建立在 latest accepted `run-1779847089` 已保护 semantic/vector provider gate 和 API-dense repo-set query 策略之上，把后续候选转向通用索引吞吐结构，而不是继续调单个 ranking 分数；明确避开 rejected `run-1779845791` 的 parser/ranking 小修在 provider gate 失效时被拒模式，也不枚举仓库、路径、case id、query 字符串或 fixture symbol。
 ## 候选优化说明：run-1779847089-api-dense-hybrid-symbol-fts-elision
 - 算法/架构：Hybrid symbol layer 先使用既有 API identity direct lookup；当查询含多个 API identity 且 direct lookup 未触发 per-identity 饱和时，跳过 broad OR symbol FTS 扫描，把剩余上下文词交给 chunk/reference/call/import layers 处理。Symbol-only 查询仍要求所有 identity 都有 direct row 且所有 query token 都是 closed API identity，避免把上下文词误当已覆盖。
 - 不变量/预期影响/风险：不改变 SQLite schema、FTS 文档、candidate window、parser facts、repo-set fanout、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；saturated identity lookup、单 identity、caller/callee/import/SBOM/definition 查询继续走原路径。预期降低 Temporal/OTel repo-set 和单仓 API-dense Hybrid 查询中外部 API 名与高频上下文词触发的 symbol FTS 成本，同时保留应用 usage chunk 与依赖 definition symbol 覆盖；风险是少量低价值上下文 symbol 不再参与 Hybrid symbol 层排序，受 API-dense gate、饱和 gate、后续 retrieval layers 和单测控制。
@@ -999,6 +1003,20 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 - key improvements: score_component:score 0.842703->0.96040614541092; score_component:semantic_vector 0.0->1.0; gate:semantic_vector_provider_probe false->true; metric:self_iteration_cargo_check_ms 3352.0->564.0; metric:code_index_recovery_cases_ms 887.0->846.0; metric:code_index_sqlite_lock_cases_ms 1692.0->1168.0; metric:code_index_health_isolation_cases_ms 3371.0->2803.0; metric:temporal_samples_go_index_ms 15054.0->14002.0
 - known degradations: score_component:performance 0.859586->0.7844624825566405; metric:cargo_fmt_check_ms 2158.0->2561.0; metric:self_iteration_cargo_fmt_check_ms 344.0->403.0; metric:temporal_sdk_go_index_ms 63471.0->108316.0; metric:temporal_sdk_go_register_index_ms 63552.0->108377.0; metric:grep_budget_fixture_index_ms 61.0->202.0; metric:grep_budget_fixture_register_index_ms 102.0->585.0; metric:grep_budget_fixture_query_p50_ms 61.0->142.0
 - latency metrics: cargo_fmt_check_ms=2561ms; self_iteration_cargo_fmt_check_ms=403ms; linux_glibc_compatibility_policy_ms=122ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=564ms; code_index_recovery_cases_ms=846ms; code_index_sqlite_lock_cases_ms=1168ms; code_index_health_isolation_cases_ms=2803ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1779849444
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779849444.patch`
+- score: 0.962558 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.796416, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/records.rs`, `src/relay_knowledge/code/parser_identity_tests.rs`, `src/relay_knowledge/code/parser_tests.rs`
+- key improvements: score_component:performance 0.784462->0.7964158487184357; metric:temporal_sdk_go_index_ms 108316.0->98164.0; metric:temporal_sdk_go_register_index_ms 108377.0->98247.0; metric:typescript_syntax_fixture_index_ms 101.0->61.0; metric:typescript_syntax_fixture_register_index_ms 162.0->123.0; metric:typescript_syntax_fixture_query_p50_ms 385.0->222.0; metric:typescript_syntax_fixture_query_p95_ms 2334.0->2036.0; metric:grep_budget_fixture_index_ms 202.0->101.0
+- known degradations: metric:cargo_fmt_check_ms 2561.0->2720.0; metric:self_iteration_cargo_fmt_check_ms 403.0->443.0; metric:cargo_build_debug_ms 343.0->444.0; metric:self_iteration_cargo_check_ms 564.0->604.0; metric:code_index_recovery_cases_ms 846.0->966.0; metric:code_index_sqlite_lock_cases_ms 1168.0->1227.0; metric:code_index_health_isolation_cases_ms 2803.0->2976.0; metric:leveldb_cpp_register_index_ms 323.0->363.0
+- latency metrics: cargo_fmt_check_ms=2720ms; self_iteration_cargo_fmt_check_ms=443ms; linux_glibc_compatibility_policy_ms=121ms; cargo_build_debug_ms=444ms; self_iteration_cargo_check_ms=604ms; code_index_recovery_cases_ms=966ms; code_index_sqlite_lock_cases_ms=1227ms; code_index_health_isolation_cases_ms=2976ms
 
 Adopted optimization notes:
 
