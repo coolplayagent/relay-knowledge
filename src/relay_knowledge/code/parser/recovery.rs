@@ -1,15 +1,16 @@
-use tree_sitter::Node;
-
 use super::nodes::{self, push_children_reverse};
-
+use tree_sitter::Node;
 pub(in crate::code::parser) mod scan;
-
+mod type_body;
 use scan::{
     CodeScanState, first_code_char_index, line_has_balanced_delimiters,
     scan_code_line_indices_with_state,
 };
-pub(super) use scan::{scan_code_line_indices, token_starts_in_angle_arguments};
-
+pub(super) use scan::{
+    code_contains_char, parameter_list_has_empty_slot, scan_code_line_indices,
+    token_starts_in_angle_arguments,
+};
+use type_body::decorated_type_error_body_is_declaration_like;
 const MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES: usize = 120;
 
 pub(super) fn recoverable_c_family_parse(
@@ -48,20 +49,19 @@ fn recoverable_c_family_error(language_id: &str, content: &str, node: Node<'_>) 
     if recoverable_decorated_function_error(language_id, content, node) {
         return true;
     }
-    if language_id == "cpp" {
-        let mut ancestor = node;
-        while let Some(parent) = ancestor.parent() {
-            if recoverable_decorated_function_error(language_id, content, parent) {
-                return true;
-            }
-            if parent.kind() == "qualified_identifier"
-                && source_line(content, nodes::syntax_range(parent).line_start)
-                    .is_some_and(c_family_typedef_like_error_line)
-            {
-                return true;
-            }
-            ancestor = parent;
+    let mut ancestor = node;
+    while let Some(parent) = ancestor.parent() {
+        if recoverable_decorated_function_error(language_id, content, parent) {
+            return true;
         }
+        if language_id == "cpp"
+            && parent.kind() == "qualified_identifier"
+            && source_line(content, nodes::syntax_range(parent).line_start)
+                .is_some_and(c_family_typedef_like_error_line)
+        {
+            return true;
+        }
+        ancestor = parent;
     }
     if range.line_end.saturating_sub(range.line_start) > 2 {
         return recoverable_decorated_type_error(content, node, &range);
@@ -76,18 +76,25 @@ fn recoverable_decorated_function_error(language_id: &str, content: &str, node: 
     content
         .get(node.start_byte()..node.end_byte())
         .is_some_and(|text| {
-            recoverable_decorated_function_error_text_with_defaults(text, language_id == "cpp")
+            recoverable_decorated_function_error_text_with_options(
+                text,
+                language_id == "cpp",
+                language_id == "cpp",
+                language_id == "cpp",
+            )
         })
 }
 
 #[cfg(test)]
 pub(super) fn recoverable_decorated_function_error_text(text: &str) -> bool {
-    recoverable_decorated_function_error_text_with_defaults(text, true)
+    recoverable_decorated_function_error_text_with_options(text, true, true, true)
 }
 
-fn recoverable_decorated_function_error_text_with_defaults(
+fn recoverable_decorated_function_error_text_with_options(
     text: &str,
     allow_default_arguments: bool,
+    allow_cpp_method_suffix: bool,
+    allow_operator_declarator: bool,
 ) -> bool {
     let trimmed = text.trim_end();
     if !trimmed.contains('{') || !trimmed.ends_with('}') {
@@ -96,13 +103,32 @@ fn recoverable_decorated_function_error_text_with_defaults(
     let Some(head) = decorated_function_head_text(trimmed) else {
         return false;
     };
-    if !c_family_function_head_has_recovery_decorator(head) {
+    if !decorated_function_head_has_recovery_decorator(head) {
         return false;
     }
-    if !c_family_typedef_like_function_signature_with_defaults(head, allow_default_arguments) {
+    if !c_family_typedef_like_function_signature_with_options(
+        head,
+        allow_default_arguments,
+        allow_cpp_method_suffix,
+        allow_operator_declarator,
+    ) {
         return false;
     }
     decorated_function_error_body_is_statement_like(trimmed)
+}
+
+pub(in crate::code::parser) fn decorated_function_head_has_recoverable_tail(
+    head: &str,
+    allow_default_arguments: bool,
+    allow_cpp_method_suffix: bool,
+    allow_operator_declarator: bool,
+) -> bool {
+    c_family_function_signature_tail_is_recoverable(
+        head,
+        allow_default_arguments,
+        allow_cpp_method_suffix,
+        allow_operator_declarator,
+    )
 }
 
 pub(super) fn decorated_function_head_text(text: &str) -> Option<&str> {
@@ -110,7 +136,7 @@ pub(super) fn decorated_function_head_text(text: &str) -> Option<&str> {
     Some(text[..open_brace].trim())
 }
 
-fn decorated_function_error_body_is_statement_like(text: &str) -> bool {
+pub(in crate::code::parser) fn decorated_function_error_body_is_statement_like(text: &str) -> bool {
     let Some(open_brace) = first_code_char_index(text, '{') else {
         return false;
     };
@@ -125,12 +151,12 @@ fn decorated_function_error_body_is_statement_like(text: &str) -> bool {
     let mut parentheses = 0isize;
     let mut brackets = 0isize;
     let mut scan_state = CodeScanState::default();
+    let mut pending_assignment = false;
     for line in text[open_brace + 1..close_brace].lines() {
         let continued_before = parentheses > 0 || brackets > 0;
         let mut code = String::new();
         let mut invalid_order = false;
         let mut empty_assignment = false;
-        let mut pending_assignment = false;
         scan_code_line_indices_with_state(line, &mut scan_state, |_, character| {
             code.push(character);
             match character {
@@ -172,16 +198,21 @@ fn decorated_function_error_body_is_statement_like(text: &str) -> bool {
         }
     }
 
-    scan_state.closed() && brace_depth == 0 && parentheses == 0 && brackets == 0
+    scan_state.closed()
+        && !pending_assignment
+        && brace_depth == 0
+        && parentheses == 0
+        && brackets == 0
 }
 
 fn decorated_function_error_body_line_is_statement_like(line: &str) -> bool {
-    line.starts_with('#')
-        || line.ends_with(';')
-        || line.ends_with('{')
-        || line.ends_with('}')
-        || line.starts_with('}')
-        || c_family_statement_label_line(line)
+    !line.chars().any(|character| matches!(character, '@' | '`'))
+        && (line.starts_with('#')
+            || line.ends_with(';')
+            || line.ends_with('{')
+            || line.ends_with('}')
+            || line.starts_with('}')
+            || c_family_statement_label_line(line))
 }
 
 fn c_family_statement_label_line(line: &str) -> bool {
@@ -209,116 +240,13 @@ fn recoverable_decorated_type_error(
         .is_some_and(recoverable_decorated_type_error_text)
 }
 
-fn recoverable_decorated_type_error_text(text: &str) -> bool {
+pub(super) fn recoverable_decorated_type_error_text(text: &str) -> bool {
     let trimmed = text.trim_end();
     if !trimmed.contains('{') || !(trimmed.ends_with("};") || trimmed.ends_with('}')) {
         return false;
     }
 
     decorated_type_error_body_is_declaration_like(trimmed)
-}
-
-fn decorated_type_error_body_is_declaration_like(text: &str) -> bool {
-    let Some(open_brace) = text.find('{') else {
-        return false;
-    };
-    let Some(close_brace) = text.rfind('}') else {
-        return false;
-    };
-    if close_brace <= open_brace {
-        return false;
-    }
-
-    let mut brace_depth = 0isize;
-    let mut parentheses = 0isize;
-    let mut brackets = 0isize;
-    let mut scan_state = CodeScanState::default();
-    for line in text[open_brace + 1..close_brace].lines() {
-        let continued_before = parentheses > 0 || brackets > 0;
-        let brace_depth_before = brace_depth;
-        let mut code = String::new();
-        let mut invalid_order = false;
-        let mut empty_assignment = false;
-        let mut pending_assignment = false;
-        scan_code_line_indices_with_state(line, &mut scan_state, |_, character| {
-            code.push(character);
-            match character {
-                '(' => parentheses += 1,
-                ')' => parentheses -= 1,
-                '[' => brackets += 1,
-                ']' => brackets -= 1,
-                '{' => brace_depth += 1,
-                '}' => brace_depth -= 1,
-                _ => {}
-            }
-            if pending_assignment && !character.is_ascii_whitespace() {
-                empty_assignment |= character == ';';
-                pending_assignment = false;
-            }
-            if character == '=' {
-                pending_assignment = true;
-            }
-            if parentheses < 0 || brackets < 0 || brace_depth < 0 {
-                invalid_order = true;
-            }
-        });
-        if invalid_order || !scan_state.line_complete() {
-            return false;
-        }
-        let trimmed = code.trim();
-        if trimmed.is_empty() || matches!(trimmed, "public:" | "protected:" | "private:") {
-            continue;
-        }
-        if empty_assignment {
-            return false;
-        }
-        let continued_after = parentheses > 0 || brackets > 0;
-        if !continued_before
-            && !continued_after
-            && !decorated_type_error_body_line_is_declaration_like(trimmed, brace_depth_before)
-        {
-            return false;
-        }
-    }
-
-    scan_state.closed() && brace_depth == 0 && parentheses == 0 && brackets == 0
-}
-
-fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
-    if line.contains("=;") || line.contains("= ;") {
-        return false;
-    }
-    if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {
-        return false;
-    }
-    if brace_depth > 0 {
-        return line.ends_with(';') || line.ends_with('{') || line.ends_with('}');
-    }
-
-    line.ends_with(';') || line.ends_with('{') || line.starts_with('}')
-}
-
-fn decorated_type_error_body_top_level_statement(line: &str) -> bool {
-    let first_token = line
-        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
-        .find(|token| !token.is_empty());
-    first_token.is_some_and(|token| {
-        matches!(
-            token,
-            "break"
-                | "case"
-                | "continue"
-                | "default"
-                | "do"
-                | "else"
-                | "for"
-                | "goto"
-                | "if"
-                | "return"
-                | "switch"
-                | "while"
-        )
-    })
 }
 
 fn recoverable_missing_declarator_after_decorated_type(content: &str, node: Node<'_>) -> bool {
@@ -416,47 +344,84 @@ fn c_family_typedef_like_error_line(trimmed: &str) -> bool {
         || c_family_typedef_like_initializer_declaration(trimmed)
 }
 
-pub(super) fn c_family_typedef_like_function_signature(trimmed: &str) -> bool {
-    c_family_typedef_like_function_signature_with_defaults(trimmed, false)
+pub(in crate::code::parser) fn c_family_typedef_like_function_signature(trimmed: &str) -> bool {
+    c_family_typedef_like_function_signature_with_options(trimmed, false, true, false)
 }
 
-fn c_family_typedef_like_function_signature_with_defaults(
+fn c_family_typedef_like_function_signature_with_options(
     trimmed: &str,
     allow_default_arguments: bool,
+    allow_cpp_method_suffix: bool,
+    allow_operator_declarator: bool,
 ) -> bool {
     if !line_has_balanced_delimiters(trimmed) {
         return false;
     }
-    let Some(parameter_start) = c_family_top_level_parameter_start(trimmed) else {
-        return false;
-    };
-    let head = &trimmed[..parameter_start];
-    if head.contains('=') && !c_family_operator_before_open(trimmed, parameter_start) {
-        return false;
-    }
-    let Some(parameter_end) = c_family_closing_parenthesis_index(&trimmed[parameter_start..])
+    let Some(parameter_start) =
+        c_family_top_level_parameter_start(trimmed, allow_operator_declarator)
     else {
         return false;
     };
-    if !allow_default_arguments
-        && trimmed[parameter_start..parameter_start + parameter_end].contains('=')
-    {
+    let head = &trimmed[..parameter_start];
+    if code_contains_char(head, '=') && !c_family_operator_before_open(trimmed, parameter_start) {
         return false;
     }
-    let tail = trimmed[parameter_start + parameter_end + 1..].trim();
-    if !c_family_typedef_signature_tail_is_declaration_shaped(tail) {
+    if !c_family_function_signature_tail_is_recoverable(
+        trimmed,
+        allow_default_arguments,
+        allow_cpp_method_suffix,
+        allow_operator_declarator,
+    ) {
         return false;
     }
 
     c_family_typedef_declaration_head(head)
 }
 
-fn c_family_top_level_parameter_start(text: &str) -> Option<usize> {
+fn c_family_function_signature_tail_is_recoverable(
+    trimmed: &str,
+    allow_default_arguments: bool,
+    allow_cpp_method_suffix: bool,
+    allow_operator_declarator: bool,
+) -> bool {
+    if !line_has_balanced_delimiters(trimmed) {
+        return false;
+    }
+    let Some(parameter_start) =
+        c_family_top_level_parameter_start(trimmed, allow_operator_declarator)
+    else {
+        return false;
+    };
+    let Some(parameter_end) = c_family_closing_parenthesis_index(&trimmed[parameter_start..])
+    else {
+        return false;
+    };
+    let parameter_text = &trimmed[parameter_start + 1..parameter_start + parameter_end];
+    if parameter_list_has_empty_slot(parameter_text) {
+        return false;
+    }
+    if !allow_default_arguments && code_contains_char(parameter_text, '=') {
+        return false;
+    }
+    let tail = trimmed[parameter_start + parameter_end + 1..].trim();
+    c_family_typedef_signature_tail_is_declaration_shaped(tail, allow_cpp_method_suffix)
+}
+
+fn c_family_top_level_parameter_start(
+    text: &str,
+    allow_operator_declarator: bool,
+) -> Option<usize> {
     let mut depth = 0usize;
     let mut candidate = None;
     let literals_closed = scan_code_line_indices(text, |index, character| match character {
         '(' => {
-            if depth == 0 && c_family_parameter_open_looks_like_declarator(text, index) {
+            if depth == 0
+                && c_family_parameter_open_looks_like_declarator(
+                    text,
+                    index,
+                    allow_operator_declarator,
+                )
+            {
                 candidate = Some(index);
             }
             depth += 1;
@@ -468,13 +433,17 @@ fn c_family_top_level_parameter_start(text: &str) -> Option<usize> {
     literals_closed.then_some(candidate).flatten()
 }
 
-fn c_family_parameter_open_looks_like_declarator(text: &str, parameter_start: usize) -> bool {
+fn c_family_parameter_open_looks_like_declarator(
+    text: &str,
+    parameter_start: usize,
+    allow_operator_declarator: bool,
+) -> bool {
     c_identifier_before_open(text, parameter_start).is_some_and(|token| {
         c_identifier_name(token)
             && !c_declaration_qualifier_token(token)
             && !c_family_known_decorator_token(token)
             && !c_family_decorator_payload_token(token)
-    }) || c_family_operator_before_open(text, parameter_start)
+    }) || (allow_operator_declarator && c_family_operator_before_open(text, parameter_start))
 }
 
 fn c_identifier_before_open(text: &str, parameter_start: usize) -> Option<&str> {
@@ -500,21 +469,43 @@ fn c_family_operator_before_open(text: &str, parameter_start: usize) -> bool {
         return false;
     }
     let suffix = prefix[operator_start + "operator".len()..].trim();
+    c_family_punctuation_operator_suffix(suffix) || c_family_conversion_operator_suffix(suffix)
+}
+
+fn c_family_punctuation_operator_suffix(suffix: &str) -> bool {
     !suffix.is_empty()
         && suffix
             .chars()
             .all(|character| character.is_ascii_punctuation() || character.is_ascii_whitespace())
 }
 
-fn c_family_typedef_signature_tail_is_declaration_shaped(tail: &str) -> bool {
+fn c_family_conversion_operator_suffix(suffix: &str) -> bool {
+    let tokens = c_family_head_tokens(suffix);
+    !tokens.is_empty()
+        && tokens.iter().all(|token| {
+            c_declaration_qualifier_token(token.text)
+                || c_identifier_name(token.text)
+                || c_family_builtin_type_token(token.text)
+        })
+        && suffix.chars().all(|character| {
+            c_identifier_char(character)
+                || character.is_ascii_whitespace()
+                || matches!(character, ':' | '*' | '&' | '<' | '>' | ',')
+        })
+}
+
+fn c_family_typedef_signature_tail_is_declaration_shaped(
+    tail: &str,
+    allow_cpp_method_suffix: bool,
+) -> bool {
     tail.is_empty()
         || matches!(tail, ";" | "{")
-        || c_family_cpp_method_suffix_tail(tail)
+        || (allow_cpp_method_suffix && c_family_cpp_method_suffix_tail(tail))
         || c_family_postfix_attribute_tail(tail)
 }
 
-fn c_family_function_head_has_recovery_decorator(head: &str) -> bool {
-    let Some(parameter_start) = c_family_top_level_parameter_start(head) else {
+pub(in crate::code::parser) fn decorated_function_head_has_recovery_decorator(head: &str) -> bool {
+    let Some(parameter_start) = c_family_top_level_parameter_start(head, true) else {
         return false;
     };
     let parameter_end = c_family_closing_parenthesis_index(&head[parameter_start..])
@@ -729,7 +720,9 @@ fn c_family_typedef_declaration_head(head: &str) -> bool {
     }
     let type_start = c_family_qualified_type_start(head, &tokens, type_index);
     if !tokens[..type_start].iter().all(|token| {
-        c_declaration_qualifier_token(token.text) || c_family_typedef_like_type_token(token.text)
+        c_declaration_qualifier_token(token.text)
+            || c_family_typedef_like_type_token(token.text)
+            || c_family_decorator_payload_token(token.text)
     }) {
         return false;
     }
@@ -971,7 +964,13 @@ fn c_family_known_decorator_token(token: &str) -> bool {
 fn c_family_decorator_payload_token(token: &str) -> bool {
     matches!(
         token,
-        "always_inline" | "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
+        "always_inline"
+            | "annotate"
+            | "dllimport"
+            | "dllexport"
+            | "visibility"
+            | "default"
+            | "hidden"
     )
 }
 

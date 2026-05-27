@@ -2,7 +2,8 @@ use tree_sitter::Node;
 
 use super::nodes::{SyntaxRange, node_text, push_children_reverse, syntax_range};
 use super::recovery::{
-    decorated_function_head_text, scan_code_line_indices, token_starts_in_angle_arguments,
+    code_contains_char, decorated_function_head_has_recoverable_tail, decorated_function_head_text,
+    scan_code_line_indices, token_starts_in_angle_arguments,
 };
 
 pub(super) fn manual_definitions(
@@ -37,6 +38,7 @@ pub(super) fn manual_definitions(
                 .map(|symbol| vec![symbol])
                 .unwrap_or_default()
         }
+        "function_definition" if cpp_function_definition_is_destructor(content, node) => Vec::new(),
         "function_definition" if node.has_error() => gcc_decorated_function_symbol(content, node)
             .map(|symbol| vec![symbol])
             .unwrap_or_default(),
@@ -316,7 +318,13 @@ fn cpp_type_name_decorator_prefix(token: &str) -> bool {
 fn cpp_decorator_payload_token(token: &str) -> bool {
     matches!(
         token,
-        "always_inline" | "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
+        "always_inline"
+            | "annotate"
+            | "dllimport"
+            | "dllexport"
+            | "visibility"
+            | "default"
+            | "hidden"
     )
 }
 
@@ -396,6 +404,21 @@ fn gcc_decorated_function_symbol(
     gcc_decorated_function_name(content, node).map(|name| (name, "function", syntax_range(node)))
 }
 
+fn cpp_function_definition_is_destructor(content: &str, node: Node<'_>) -> bool {
+    let text = node_text(content, node);
+    let Some(head) = decorated_function_head_text(&text) else {
+        return false;
+    };
+    let Some(parameter_start) = cpp_top_level_parameter_start(head) else {
+        return false;
+    };
+    head[..parameter_start]
+        .trim_end()
+        .rsplit("::")
+        .next()
+        .is_some_and(|tail| tail.trim_start().starts_with('~'))
+}
+
 fn gcc_decorated_function_name(content: &str, node: Node<'_>) -> Option<String> {
     let text = node_text(content, node);
     if !text.contains('{') {
@@ -403,6 +426,12 @@ fn gcc_decorated_function_name(content: &str, node: Node<'_>) -> Option<String> 
     }
     let head = decorated_function_head_text(&text)?;
     if !cpp_function_head_has_recovery_decorator(head) {
+        return None;
+    }
+    if !decorated_function_head_has_recoverable_tail(head, true, true, true) {
+        return None;
+    }
+    if head.contains("::~") {
         return None;
     }
     let (name_start, name_end) = cpp_function_name_bounds_from_decorated_head(head)?;
@@ -472,6 +501,9 @@ fn cpp_name_bounds_before_open(head: &str, parameter_start: usize) -> Option<(us
         .rev()
         .find(|(_, character)| !(character.is_ascii_alphanumeric() || *character == '_'))
         .map_or(0, |(index, character)| index + character.len_utf8());
+    if head[..name_start].trim_end().ends_with('~') {
+        return None;
+    }
     (name_start < name_end).then_some((name_start, name_end))
 }
 
@@ -487,11 +519,30 @@ fn cpp_operator_bounds_before_open(head: &str, parameter_start: usize) -> Option
         return None;
     }
     let suffix = prefix[operator_start + "operator".len()..].trim();
-    (!suffix.is_empty()
+    (cpp_punctuation_operator_suffix(suffix) || cpp_conversion_operator_suffix(suffix))
+        .then_some((operator_start, name_end))
+}
+
+fn cpp_punctuation_operator_suffix(suffix: &str) -> bool {
+    !suffix.is_empty()
         && suffix
             .chars()
-            .all(|character| character.is_ascii_punctuation() || character.is_ascii_whitespace()))
-    .then_some((operator_start, name_end))
+            .all(|character| character.is_ascii_punctuation() || character.is_ascii_whitespace())
+}
+
+fn cpp_conversion_operator_suffix(suffix: &str) -> bool {
+    let tokens = cpp_head_tokens(suffix);
+    !tokens.is_empty()
+        && tokens.iter().all(|token| {
+            cpp_declaration_prefix_token(token.text)
+                || cpp_type_name_candidate(token.text)
+                || cpp_builtin_type_token(token.text)
+        })
+        && suffix.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character.is_ascii_whitespace()
+                || matches!(character, '_' | ':' | '*' | '&' | '<' | '>' | ',')
+        })
 }
 
 fn cpp_function_head_is_declaration(head: &str, name: &str) -> bool {
@@ -504,11 +555,16 @@ fn cpp_function_head_is_declaration(head: &str, name: &str) -> bool {
     if &head[name_start..name_end] != name {
         return false;
     }
-    if head[..name_start].contains('=') {
+    if code_contains_char(&head[..name_start], '=') {
         return false;
     }
     let prefix = cpp_strip_trailing_qualified_declarator_scope(&head[..name_start]);
     let tokens = cpp_head_tokens(prefix);
+    if cpp_conversion_operator_name(name) {
+        return tokens
+            .iter()
+            .all(|token| cpp_declaration_prefix_token(token.text));
+    }
     let Some(type_index) = tokens.iter().rposition(|token| {
         !cpp_declaration_prefix_token(token.text)
             && !token_starts_in_angle_arguments(prefix, token.start)
@@ -604,6 +660,16 @@ fn cpp_qualified_return_type_start(
 
 fn cpp_function_name_candidate(name: &str) -> bool {
     cpp_type_name_candidate(name) || name.starts_with("operator")
+}
+
+fn cpp_conversion_operator_name(name: &str) -> bool {
+    name.strip_prefix("operator").is_some_and(|suffix| {
+        suffix
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+    })
 }
 
 fn cpp_function_return_type_token(token: &str) -> bool {

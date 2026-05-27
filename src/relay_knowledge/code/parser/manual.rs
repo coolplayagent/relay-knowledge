@@ -347,12 +347,25 @@ fn generic_manual_definition(
     language_id: &str,
     node: Node<'_>,
 ) -> Option<(String, &'static str, SyntaxRange)> {
+    if language_id == "cpp"
+        && node.kind() == "function_definition"
+        && cpp_function_definition_is_destructor(content, node)
+    {
+        return None;
+    }
     let kind = language_nodes::definition_kind(language_id, node.kind())?;
     let name = node.child_by_field_name("name")?;
     let range = javascript_like_exported_declaration_range(language_id, node)
         .unwrap_or_else(|| syntax_range(node));
 
     Some((node_text(content, name), kind, range))
+}
+
+fn cpp_function_definition_is_destructor(content: &str, node: Node<'_>) -> bool {
+    let text = node_text(content, node);
+    text.split('{')
+        .next()
+        .is_some_and(|head| head.contains("::~") || head.trim_start().starts_with('~'))
 }
 
 fn enum_member_definition(

@@ -31,6 +31,17 @@ pub(super) fn records_from_captures(
             {
                 continue;
             }
+            if context.language_id == "cpp"
+                && capture.capture_kind == "definition.function"
+                && capture
+                    .target_node
+                    .line_start
+                    .checked_sub(1)
+                    .and_then(|index| context.content.lines().nth(index))
+                    .is_some_and(|line| line.contains(&format!("~{}", capture.name)))
+            {
+                continue;
+            }
             let kind = capture.capture_kind.trim_start_matches("definition.");
             let key = (
                 capture.name.clone(),
@@ -65,6 +76,9 @@ pub(super) fn records_from_captures(
 }
 
 pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCodeSymbolRecord) {
+    if symbol.kind == "function" && symbol.signature.contains("::~") {
+        return;
+    }
     if let Some(existing) = output.symbols.iter_mut().find(|existing| {
         existing.symbol_snapshot_id == symbol.symbol_snapshot_id
             || (existing.name == symbol.name

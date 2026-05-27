@@ -96,6 +96,48 @@ pub(in crate::code::parser) fn token_starts_in_angle_arguments(
     angle_depth > 0
 }
 
+pub(in crate::code::parser) fn code_contains_char(text: &str, wanted: char) -> bool {
+    let mut found = false;
+    scan_code_line_indices(text, |_, character| found |= character == wanted);
+    found
+}
+
+pub(in crate::code::parser) fn parameter_list_has_empty_slot(parameters: &str) -> bool {
+    let mut paren_depth = 0isize;
+    let mut bracket_depth = 0isize;
+    let mut angle_depth = 0isize;
+    let mut segment_has_code = false;
+    let mut empty_slot = false;
+    let literals_closed = scan_code_line_indices(parameters, |_, character| {
+        if empty_slot {
+            return;
+        }
+        match character {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '<' if paren_depth == 0 && bracket_depth == 0 => angle_depth += 1,
+            '>' if angle_depth > 0 => angle_depth -= 1,
+            ',' if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 => {
+                if !segment_has_code {
+                    empty_slot = true;
+                }
+                segment_has_code = false;
+                return;
+            }
+            _ => {}
+        }
+        if !character.is_ascii_whitespace() {
+            segment_has_code = true;
+        }
+    });
+
+    !literals_closed
+        || empty_slot
+        || (parameters.trim_end().ends_with(',') && !parameters.is_empty())
+}
+
 pub(super) fn scan_code_line_indices_with_state(
     mut line: &str,
     state: &mut CodeScanState,
@@ -147,7 +189,12 @@ pub(super) fn scan_code_line_indices_with_state(
         }
 
         if character == '/' && rest.starts_with('/') {
-            break;
+            let Some(newline_index) = rest.find('\n') else {
+                break;
+            };
+            line = &rest[newline_index + 1..];
+            offset += width + newline_index + 1;
+            continue;
         }
         if character == '/' && rest.starts_with('*') {
             line = &rest[1..];

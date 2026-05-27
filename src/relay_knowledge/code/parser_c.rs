@@ -4,6 +4,10 @@ use super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
 use super::parser_c_preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
+use super::recovery::{
+    decorated_function_error_body_is_statement_like, decorated_function_head_has_recoverable_tail,
+    decorated_function_head_has_recovery_decorator, decorated_function_head_text,
+};
 
 #[path = "parser_c/gcc_recovery.rs"]
 mod gcc_recovery;
@@ -26,6 +30,9 @@ pub(super) fn manual_definitions(
                 }
                 if let Some(symbol) = decorated_cpp_class_symbol(content, node) {
                     return vec![symbol];
+                }
+                if function_definition_has_unrecoverable_decorator_shape(content, node) {
+                    return Vec::new();
                 }
                 if syntax_error_descendant(node) {
                     return Vec::new();
@@ -73,6 +80,15 @@ enum MacroBodyFunctionDefinition {
     Recovered((String, &'static str, SyntaxRange)),
     Rejected,
     NotMacroBody,
+}
+
+fn function_definition_has_unrecoverable_decorator_shape(content: &str, node: Node<'_>) -> bool {
+    let text = node_text(content, node);
+    decorated_function_head_text(&text).is_some_and(|head| {
+        decorated_function_head_has_recovery_decorator(head)
+            && (!decorated_function_head_has_recoverable_tail(head, false, false, false)
+                || !decorated_function_error_body_is_statement_like(&text))
+    })
 }
 
 fn macro_body_function_definition(content: &str, node: Node<'_>) -> MacroBodyFunctionDefinition {
@@ -293,27 +309,6 @@ fn c_declaration_prefix_token(token: &str) -> bool {
             | "static"
             | "volatile"
     )
-}
-
-fn c_declaration_type_token(token: &str) -> bool {
-    matches!(
-        token,
-        "bool"
-            | "char"
-            | "double"
-            | "float"
-            | "int"
-            | "long"
-            | "short"
-            | "signed"
-            | "unsigned"
-            | "void"
-    ) || c_tag_type_keyword(token)
-        || c_external_contract_type_token(token)
-}
-
-fn c_tag_type_keyword(token: &str) -> bool {
-    matches!(token, "enum" | "struct" | "union")
 }
 
 fn decorated_cpp_class_symbol(

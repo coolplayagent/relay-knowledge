@@ -42,7 +42,7 @@ use records::records_from_captures;
 #[cfg(test)]
 use recovery::{
     c_family_typedef_like_function_signature, recoverable_c_family_error_line,
-    recoverable_decorated_function_error_text,
+    recoverable_decorated_function_error_text, recoverable_decorated_type_error_text,
 };
 #[cfg(test)]
 use syntax::parse_tree;
