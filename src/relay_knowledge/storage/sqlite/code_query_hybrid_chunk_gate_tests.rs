@@ -91,11 +91,17 @@ fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
         "\"RegisterWorkflow\" \"RegisterActivity\" \"InterruptCh\""
     );
     assert!(strict_hybrid_chunk_fts_match_query("RK_PIPELINE_NOTE").is_none());
+    let member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial envconfig MustLoadDefaultClientOptions workflow client",
+    )
+    .expect("member-access API leaves should complete a strict recall pair");
+    assert_eq!(
+        member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
     assert!(
-        strict_hybrid_chunk_fts_match_query(
-            "client.Dial envconfig MustLoadDefaultClientOptions workflow client"
-        )
-        .is_none()
+        strict_hybrid_chunk_fts_match_query("client.Dial workflow client path/to/client.go")
+            .is_none()
     );
 }
 
@@ -106,14 +112,14 @@ fn strict_hybrid_chunk_candidate_limit_stays_bounded() {
             "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
             10,
         )),
-        120
+        60
     );
     assert_eq!(
         strict_hybrid_chunk_candidate_limit(&hybrid_gate_request(
             "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
             40,
         )),
-        180
+        120
     );
 }
 

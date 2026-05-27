@@ -95,9 +95,9 @@ use code_query_sbom::search_sbom;
 use code_query_support::*;
 use code_query_symbols::search_symbols;
 
-const STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER: usize = 12;
+const STRICT_HYBRID_CHUNK_LIMIT_MULTIPLIER: usize = 6;
 const STRICT_HYBRID_CHUNK_MIN_CANDIDATES: usize = 40;
-const STRICT_HYBRID_CHUNK_MAX_CANDIDATES: usize = 180;
+const STRICT_HYBRID_CHUNK_MAX_CANDIDATES: usize = 120;
 
 pub(super) fn search_code(
     connection: &mut Connection,

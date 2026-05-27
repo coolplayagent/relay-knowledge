@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-api-member-strict-hybrid-chunk-recall
+- 算法/架构：Hybrid chunk 严格 FTS pass 在 API-dense 查询只有一个结构化长标识符 anchor 时，可从 `client.Dial`、`pkg::Type::method` 这类 dotted/scoped token 中抽取 bounded member leaf 作为第二个 AND anchor；已有多个结构化 anchor 的查询保持原排序与候选选择。严格 AND pass 的候选窗口从 `limit * 12`/180 收紧到 `limit * 6`/120，仍保留 40 条下限，并且只有通过既有 dense coverage gate 才会早停，否则继续回落 broad OR recall、graph expansion 和 source fallback。该 planner 仍在 SQLite FTS 读路径内完成，不增加 source fallback、repo-set fanout 或外部进程。
+- 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS 文档写入、symbol/reference/call/import ranking 权重、source `text_fallback` 语义、semantic/vector read model、env/paths/net、CLI/API 或安装发布；member leaf 仅来自当前 query token 结构，不枚举仓库、路径、case id、query 字符串或符号清单。预期改善多仓 Go workspace 中 `client.Dial + MustLoadDefaultClientOptions`、`worker.New + RegisterWorkflow`、RPC/client API flow 等 strict API-anchor 查询的 chunk materialization 与 repo-set query latency，同时保留单一 token、path-like token 和普通自然语言查询的 broad recall；风险是更小 strict 窗口未覆盖长尾候选时多一次 strict 读后回落，受至少两个 anchor、API-dense gate、path-extension gate、既有 broad fallback 和 focused strict-planner tests 控制。
+- 策略关联：建立在已采纳的 API-dense strict hybrid chunk recall、collective dense coverage gate 和 repository-set overlay priority 策略之上；明确避开 rejected `run-1779661306`/`run-1779660072` 一类局部 ranking/fallback scorer 调整，改为改进通用 FTS 查询规划，并继续避免 fixture 特判。
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
@@ -936,3 +940,18 @@
 - 2026-05-26 registration language guardrail: application and lower code registration now reject non-empty language filters so mixed C/C++ repositories cannot silently drop `.c` or `.cpp` files at registration; query-time `--language` remains the supported narrowing mechanism. Fast self-iteration adds a cross-language generated fixture guardrail that expects `repo register --language cpp` to fail with the stable registration-language error.
 - 2026-05-26 code-index SQLite lock guardrail: fast self-iteration adds `code_index_sqlite_lock_cases` so duplicate-process file-backed SQLite indexing reuses the active task/checkpoint and distinct task fingerprints can claim independent leases without waiting behind another running task. Architecture invariants: keep one bounded SQLite writer lane, do not kill competing processes, do not add unbounded busy waits, and keep parsing outside write transactions.
 - 2026-05-27 CLI skill shell-policy guardrail: fast self-iteration adds `skill_metadata_policy_cases` through the shared skill metadata validator so Windows `.exe`, drive-letter, and `assets/windows-*` command examples cannot appear in bash/POSIX code fences. Algorithm and architecture: keep the fix in agent-facing docs plus a deterministic parser over fenced code blocks, not in ad hoc release grep checks. Invariants: POSIX examples must use POSIX binaries or `PATH`; Windows examples must stay in PowerShell or cmd.exe fences; metadata version and description checks remain unchanged. Expected impact: issue #173-style bash execution of Windows asset paths is rejected locally, in fast self-iteration, PR CI, and release validation. Risk: the validator may require docs to spell shell examples more explicitly, which is intentional for agent safety.
+
+## run-1779847461
+
+- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779847461.patch`
+- score: 0.972124 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.849559, stability=1.000000)
+- cases: 92/92 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=3586ms; self_iteration_cargo_fmt_check_ms=524ms; linux_glibc_compatibility_policy_ms=142ms; skill_metadata_policy_cases_ms=423ms; cargo_build_debug_ms=33465ms; self_iteration_cargo_check_ms=684ms; code_index_recovery_cases_ms=19506ms; code_index_sqlite_lock_cases_ms=20449ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
