@@ -83,6 +83,18 @@ async fn hybrid_symbols_rank_header_declarations_above_matching_implementations(
 #[tokio::test]
 async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor() {
     let path = "include/store/cache.hpp";
+    let mut previous = symbol(
+        "previous-helper",
+        "cache-file",
+        path,
+        "function",
+        "void PreviousHelper();",
+        range(4, 4),
+    );
+    previous.name = "PreviousHelper".to_owned();
+    previous.qualified_name = "rk::store::PreviousHelper".to_owned();
+    previous.canonical_symbol_id =
+        "repo://repo/include::store::cache::rk::store.PreviousHelper".to_owned();
     let mut class = symbol(
         "cache-class",
         "cache-file",
@@ -121,7 +133,7 @@ async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor
         deleted_paths: Vec::new(),
         tombstones: Vec::new(),
         files: vec![file("cache-file", path)],
-        symbols: vec![constructor, class],
+        symbols: vec![previous, constructor, class],
         references: Vec::new(),
         imports: Vec::new(),
         calls: Vec::new(),
@@ -138,6 +150,16 @@ async fn exact_symbol_queries_rank_type_declaration_above_same_named_constructor
         .expect("symbol query should succeed");
 
     assert_eq!(hits[0].symbol_snapshot_id.as_deref(), Some("cache-class"));
+    let class_hit = hits
+        .iter()
+        .find(|hit| hit.symbol_snapshot_id.as_deref() == Some("cache-class"))
+        .expect("class hit should be returned");
+    assert_eq!(class_hit.line_range.start, 4);
+    let constructor_hit = hits
+        .iter()
+        .find(|hit| hit.symbol_snapshot_id.as_deref() == Some("cache-constructor"))
+        .expect("constructor hit should be returned");
+    assert_eq!(constructor_hit.line_range.start, 20);
     let class_score = score_for_symbol(&hits, "cache-class").expect("class should match");
     let constructor_score =
         score_for_symbol(&hits, "cache-constructor").expect("constructor should match");

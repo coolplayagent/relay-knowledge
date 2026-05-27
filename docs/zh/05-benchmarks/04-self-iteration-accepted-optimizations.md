@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1779852601-class-only-symbol-context-lookup
+- 算法/架构：Symbol direct/FTS 查询仍返回同一 `SymbolRow` 结构，但 `previous_symbol_context_start` 的 correlated SQLite lookup 只在 outer row `kind = 'class'` 时执行；非 class symbol 直接返回 `NULL`，与 `symbol_result_line_range` 只消费 class preamble context 的投影规则保持一致。该变化位于单仓 SQLite read path，不改变 repo-set fanout、chunk strict/broad union、source fallback、semantic/vector read model 或索引写入。
+- 不变量/预期影响/风险：不改变 schema、parser facts、FTS 文档、candidate limit、ranking 权重、Definition/Symbol/Hybrid 结果字段、freshness/stale 语义、task lease/checkpoint、env/paths/net 或 CLI/API；class 命中仍可扩展到相邻 preamble，method/function/constructor/type_alias 等非 class 命中保持原 line range。预期降低 C/C++/Go/TS 符号密集查询中每个候选行重复执行 previous-symbol 子查询的 CPU 与 SQLite btree 访问，改善 LevelDB、syntax fixture 和 multi-repo dependency symbol 查询 p50/p95；风险是未来若其他 kind 需要 preamble context 会拿不到该列，受 focused symbol-ranking test 和 `symbol_result_line_range` 的 class-only消费边界控制。
+- 策略关联：建立在 `run-1779849943` 的 Hybrid chunk 候选保全之上，把本轮优化放在共享 symbol read SQL 的冗余工作削减；明确避开 rejected `run-1779850923` 的 strict-backed broad 窗口收缩，以及 `run-1779850340` 的 repo-set partial dependency fallback 形态。
 ## 候选优化说明：run-1779849943-strict-broad-hybrid-chunk-union
 - 算法/架构：Hybrid chunk planner 继续先跑 API-dense strict AND FTS pass；当 strict hit 不足以通过 dense chunk gate 时，不再丢弃这些高精度候选，而是与 broad OR FTS pass 做有界 union，经既有 `dedupe_sort_truncate` 合并 provenance 并保持 chunk candidate 上限。strict pass 只在 `CodeQueryKind::Hybrid` 中启用，Definition/References 的 chunk fallback 不再为 dense API 查询执行无效 strict read。
 - 不变量/预期影响/风险：不改变 SQLite schema、parser facts、FTS 写入、chunk scorer 权重、graph expansion、source `text_fallback`、semantic/vector read model、repo-set fanout、env/paths/net 或 CLI/API；候选 union 只复用当前查询生成的 strict/broad FTS 计划，不枚举仓库、路径、case id、query 或符号。预期改善多仓 API flow 查询中 strict 高精度 chunk 被 broad OR 噪声挤出候选窗的问题，并小幅降低非 Hybrid fallback 延迟；风险是合并后候选排序更早看到 strict 命中，受原 strict gate、broad fallback、dedupe/top-k 上限和 focused merge test 控制。
@@ -958,7 +962,6 @@
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
 ## run-1779849943
 
 - patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779849943.patch`
@@ -973,3 +976,16 @@ Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
 
+## run-1779852601
+
+- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779852601.patch`
+- score: 0.997401 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.989988, stability=1.000000)
+- cases: 92/92 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: score_component:score 0.974028->0.9974007392537516; score_component:performance 0.86014->0.9899880039057051; metric:cargo_fmt_check_ms 2462.0->866.0; metric:self_iteration_cargo_fmt_check_ms 383.0->121.0; metric:linux_glibc_compatibility_policy_ms 141.0->40.0; metric:skill_metadata_policy_cases_ms 262.0->80.0; metric:cargo_build_debug_ms 20167.0->120.0; metric:self_iteration_cargo_check_ms 584.0->121.0
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=866ms; self_iteration_cargo_fmt_check_ms=121ms; linux_glibc_compatibility_policy_ms=40ms; skill_metadata_policy_cases_ms=80ms; cargo_build_debug_ms=120ms; self_iteration_cargo_check_ms=121ms; code_index_recovery_cases_ms=301ms; code_index_sqlite_lock_cases_ms=482ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.

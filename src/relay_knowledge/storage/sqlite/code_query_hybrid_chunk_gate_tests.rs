@@ -99,6 +99,14 @@ fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
         member_access_strict,
         "\"MustLoadDefaultClientOptions\" \"Dial\""
     );
+    let sparse_member_access_strict = strict_hybrid_chunk_fts_match_query(
+        "client.Dial MustLoadDefaultClientOptions setup call target api",
+    )
+    .expect("member-access leaves should allow strict recall with one structured API anchor");
+    assert_eq!(
+        sparse_member_access_strict,
+        "\"MustLoadDefaultClientOptions\" \"Dial\""
+    );
     assert!(
         strict_hybrid_chunk_fts_match_query("client.Dial workflow client path/to/client.go")
             .is_none()

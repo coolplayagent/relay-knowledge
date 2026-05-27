@@ -39,10 +39,14 @@ pub(in crate::storage::sqlite::code::code_query) fn strict_hybrid_chunk_fts_matc
     query: &str,
 ) -> Option<String> {
     let terms = dedupe_terms(super::fts_query_terms(query));
-    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS || !api_dense_hybrid_query(&terms) {
+    if terms.len() <= MAX_HYBRID_CHUNK_SIMPLE_RECALL_TERMS {
         return None;
     }
     let strict_terms = strict_hybrid_chunk_recall_terms(query, &terms);
+    if !api_dense_hybrid_query(&terms) && !strict_member_access_recall_allowed(query, &strict_terms)
+    {
+        return None;
+    }
     (strict_terms.len() >= STRICT_HYBRID_CHUNK_MIN_STRUCTURED_TERMS)
         .then(|| fts_match_query_with_operator(&strict_terms, " ", false))
 }
@@ -220,6 +224,20 @@ fn strict_hybrid_chunk_recall_terms(query: &str, terms: &[String]) -> Vec<String
     }
 
     recall_terms
+}
+
+fn strict_member_access_recall_allowed(query: &str, recall_terms: &[String]) -> bool {
+    let member_leaves = member_access_leaf_terms(query);
+    !member_leaves.is_empty()
+        && recall_terms.iter().any(|term| {
+            identifier_term_has_structure(term)
+                && hybrid_chunk_term_priority(term) >= MIN_HIGH_SIGNAL_TERM_PRIORITY
+        })
+        && member_leaves.iter().any(|leaf| {
+            recall_terms
+                .iter()
+                .any(|term| term.eq_ignore_ascii_case(leaf))
+        })
 }
 
 fn member_access_leaf_terms(query: &str) -> Vec<String> {
