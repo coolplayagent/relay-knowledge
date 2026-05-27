@@ -31,15 +31,15 @@ mod test_fixtures;
 mod tests;
 
 #[cfg(test)]
-#[path = "source_declaration_tests.rs"]
+#[path = "tests/source/declarations.rs"]
 mod source_declaration_tests;
 
 #[cfg(test)]
-#[path = "source_layout_tests.rs"]
+#[path = "tests/source/layout.rs"]
 mod source_layout_tests;
 
 #[cfg(test)]
-#[path = "worktree_overlay_tests.rs"]
+#[path = "tests/source/worktree_overlay.rs"]
 mod worktree_overlay_tests;
 
 use crate::domain::{

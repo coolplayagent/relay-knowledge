@@ -1,22 +1,22 @@
 use tree_sitter::Node;
 
-use super::nodes::{
+use super::super::nodes::{
     SyntaxRange, first_named_child_of_kind, node_text, push_children_reverse, syntax_range,
 };
-use super::parser_c_preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
-use super::recovery::{
+use super::super::recovery::{
     decorated_function_error_body_is_statement_like, decorated_function_head_has_recoverable_tail,
     decorated_function_head_has_recovery_decorator, decorated_function_head_text,
 };
+use preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
-#[path = "parser_c/gcc_recovery.rs"]
 mod gcc_recovery;
+mod preprocessor;
 
 use gcc_recovery::gcc_decorated_function_symbol;
 
 const MAX_TOP_LEVEL_DATA_SYMBOL_LINES: usize = 80;
 
-pub(super) fn manual_definitions(
+pub(in crate::code::parser) fn manual_definitions(
     content: &str,
     node: Node<'_>,
 ) -> Vec<(String, &'static str, SyntaxRange)> {

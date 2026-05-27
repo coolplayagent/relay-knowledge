@@ -1,8 +1,8 @@
 use crate::domain::CodeImportRecord;
 
-use super::imports::{ImportContext, ImportResolution, ModuleFileResolution};
+use super::super::import_resolution::{ImportContext, ImportResolution, ModuleFileResolution};
 
-pub(super) fn resolve_import(
+pub(in crate::code::identity) fn resolve_import(
     import: &CodeImportRecord,
     context: &ImportContext<'_>,
 ) -> Option<(ImportResolution, Option<String>)> {

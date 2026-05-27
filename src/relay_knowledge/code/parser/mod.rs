@@ -1,15 +1,10 @@
 mod chunks;
 mod dependencies;
 mod imports;
-mod language_nodes;
+mod languages;
 mod manual;
+mod node_kinds;
 mod nodes;
-#[path = "parser_c.rs"]
-mod parser_c;
-#[path = "parser_c_preprocessor.rs"]
-mod parser_c_preprocessor;
-#[path = "parser_cpp.rs"]
-mod parser_cpp;
 mod records;
 mod recovery;
 mod syntax;
@@ -382,33 +377,37 @@ impl FileParseOutput {
 }
 
 #[cfg(test)]
-#[path = "parser_tests.rs"]
+#[path = "tests/general.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "parser_exported_value_tests.rs"]
+#[path = "tests/exported_value.rs"]
 mod exported_value_tests;
 
 #[cfg(test)]
-#[path = "parser_identity_tests.rs"]
+#[path = "tests/identity.rs"]
 mod identity_tests;
 
 #[cfg(test)]
-#[path = "parser_c_tests.rs"]
+#[path = "languages/c/tests.rs"]
 mod c_tests;
 
 #[cfg(test)]
-#[path = "parser_enum_tests.rs"]
+#[path = "tests/enum_symbols.rs"]
 mod enum_tests;
 
 #[cfg(test)]
-#[path = "parser_review_tests.rs"]
+#[path = "tests/review.rs"]
 mod review_tests;
 
 #[cfg(test)]
-#[path = "parser_gcc_recovery_tests.rs"]
+#[path = "languages/c/gcc_recovery_tests.rs"]
 mod gcc_recovery_tests;
 
 #[cfg(test)]
-#[path = "parser_import_resolution_tests.rs"]
-mod import_resolution_tests;
+#[path = "languages/cpp_tests.rs"]
+mod cpp_tests;
+
+#[cfg(test)]
+#[path = "tests/manual.rs"]
+mod manual_tests;

@@ -3,7 +3,9 @@ use unicode_ident::{is_xid_continue, is_xid_start};
 
 use super::{
     super::CodeIndexError,
-    FileParseContext, FileParseOutput, language_nodes,
+    FileParseContext, FileParseOutput,
+    languages::{c, cpp},
+    node_kinds,
     nodes::{SyntaxRange, last_identifier_text, node_text, push_children_reverse, syntax_range},
     records::{reference_record, symbol_record, upsert_reference, upsert_symbol},
 };
@@ -52,7 +54,7 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
                     | "preproc_def"
                     | "preproc_function_def"
                     | "call_expression"
-            ) || language_nodes::definition_kind(language_id, node_kind).is_some()
+            ) || node_kinds::definition_kind(language_id, node_kind).is_some()
         }
         "cpp" => {
             matches!(
@@ -64,7 +66,7 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
                     | "function_definition"
                     | "struct_specifier"
                     | "union_specifier"
-            ) || language_nodes::definition_kind(language_id, node_kind).is_some()
+            ) || node_kinds::definition_kind(language_id, node_kind).is_some()
         }
         "javascript" | "jsx" | "typescript" | "tsx" => {
             matches!(
@@ -73,9 +75,9 @@ fn manual_definition_candidate(language_id: &str, node_kind: &str) -> bool {
                     | "pair"
                     | "public_field_definition"
                     | "variable_declarator"
-            ) || language_nodes::definition_kind(language_id, node_kind).is_some()
+            ) || node_kinds::definition_kind(language_id, node_kind).is_some()
         }
-        _ => language_nodes::definition_kind(language_id, node_kind).is_some(),
+        _ => node_kinds::definition_kind(language_id, node_kind).is_some(),
     }
 }
 
@@ -85,13 +87,13 @@ pub(super) fn manual_definitions(
     node: Node<'_>,
 ) -> Vec<(String, &'static str, SyntaxRange)> {
     if language_id == "c" {
-        let definitions = super::parser_c::manual_definitions(content, node);
+        let definitions = c::manual_definitions(content, node);
         if !definitions.is_empty() {
             return definitions;
         }
     }
     if language_id == "cpp" {
-        let definitions = super::parser_cpp::manual_definitions(content, node);
+        let definitions = cpp::manual_definitions(content, node);
         if !definitions.is_empty() {
             return definitions;
         }
@@ -353,7 +355,7 @@ fn generic_manual_definition(
     {
         return None;
     }
-    let kind = language_nodes::definition_kind(language_id, node.kind())?;
+    let kind = node_kinds::definition_kind(language_id, node.kind())?;
     let name = node.child_by_field_name("name")?;
     let range = javascript_like_exported_declaration_range(language_id, node)
         .unwrap_or_else(|| syntax_range(node));
@@ -460,7 +462,7 @@ fn manual_call(context: &FileParseContext<'_>, node: Node<'_>) -> Option<(String
             .or_else(|| super::nodes::first_named_child_of_kind(node, "identifier"))?;
         return Some((node_text(context.content, name), syntax_range(name)));
     }
-    if !language_nodes::is_call_node(context.language_id, node.kind()) {
+    if !node_kinds::is_call_node(context.language_id, node.kind()) {
         return None;
     }
     if let Some(call) = constructed_type_call(context.content, node) {
