@@ -942,6 +942,7 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("src/driver_ops.c", C_DRIVER_OPS_C),
             ("src/dispatch.c", C_DISPATCH_C),
             ("src/generated_table.c", C_GENERATED_TABLE_C),
+            ("src/gcc_extension_policy.c", C_GCC_EXTENSION_POLICY_C),
             ("src/http_macro_module.c", C_HTTP_MACRO_MODULE_C),
             ("src/nginx_external_module.c", C_NGINX_EXTERNAL_MODULE_C),
             ("tests/fake_driver.c", C_FAKE_DRIVER_C),
@@ -1408,6 +1409,42 @@ ngx_module_t ngx_http_demo_module = {
     NULL,
     NULL,
     NGX_MODULE_V1_PADDING
+};
+"#;
+
+const C_GCC_EXTENSION_POLICY_C: &str = r#"#include "securec.h"
+
+#define WILD_MULTI_CHAR '*'
+
+typedef struct PdpString {
+    const char *data;
+} PdpString;
+
+typedef struct PdpStack PdpStack;
+
+typedef struct PdpPolicyEntry {
+    const char *name;
+    int (*match)(PdpStack *stack, PdpString *pattern);
+} PdpPolicyEntry;
+
+static attribute((always_inline)) int pdp_wildcard_step(PdpString *pattern, int index)
+{
+    return pattern->data[index] == WILD_MULTI_CHAR;
+}
+
+static __attribute__((always_inline)) int pdp_secure_copy(PdpString *target, const PdpString *source)
+{
+    return memcpy_s((void *)target->data, 16, source->data, 16);
+}
+
+__always_inline int pdp_policy_regex_match(PdpStack *stack, PdpString *pattern)
+{
+    (void)stack;
+    return pdp_wildcard_step(pattern, 0) || pdp_secure_copy(pattern, pattern);
+}
+
+static PdpPolicyEntry pdp_policy_entries[] = {
+    { "wildcard", pdp_policy_regex_match },
 };
 "#;
 

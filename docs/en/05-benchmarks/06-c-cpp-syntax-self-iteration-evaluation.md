@@ -25,7 +25,7 @@ The evaluator creates two small git repositories under the evaluation home, comm
 
 | Repository key | Fixture version | Syntax focus | Fast profile |
 | --- | --- | --- | --- |
-| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedefs, operation tables, designated initializers, compound initializers, function-like macros, token paste, macro-generated handlers, Nginx/Kong-style external-header typedefs and module tables, local and unresolved external includes, callback dispatch, negative symbols | Yes |
+| `c_syntax_fixture` | `c_syntax_v1` | function pointer typedefs, operation tables, designated initializers, compound initializers, function-like macros, token paste, macro-generated handlers, Nginx/Kong-style external-header typedefs and module tables, GCC `attribute((always_inline))` / `__attribute__((always_inline))` / `__always_inline` recovery, local and unresolved external includes, callback dispatch, negative symbols | Yes |
 | `cpp_syntax_fixture` | `cpp_syntax_v1` | namespaces, template classes, out-of-line template methods, virtual overrides, overloaded operators, lambda captures, namespace aliases, using aliases, export-macro-decorated classes, unresolved external includes, header/source split, test fake demotion | Yes |
 
 The fixture sources are generated from constants in `tools/self_iteration/src/evaluator_tail.rs`; the git author and committer dates are fixed so the generated commits are repeatable for unchanged content.
@@ -39,6 +39,7 @@ C cases live in `tools/self_iteration/cases/repository_c_syntax_fixture_targets.
 - `symbol`/`definition`: `struct rk_driver_ops`, `rk_driver_read`, and `rk_read_fn`.
 - Recoverable C macro definitions: `RK_HTTP_HANDLER(rk_http_access_handler)` must be extracted as a definition without marking the file partial.
 - External-header macro recovery: `KONG_ACCESS_PHASE(ngx_http_demo_access)`, `ngx_module_t ngx_http_demo_module`, and unresolved `#include <ngx_http.h>` must stay structured and non-degraded even though the external Nginx headers are not part of the indexed scope. Parser regression tests also cover spaced `# define`, continued definitions and conditions, `#undef`, inactive preprocessor branches, and bounded numeric/comparison `#if` condition evaluation for this local macro recovery path.
+- GCC/EulerOS-style compiler extension recovery: `attribute((always_inline))`, `__attribute__((always_inline))`, and `__always_inline` functions, PascalCase SDK types, and unresolved `#include "securec.h"` must remain structured parser/import evidence without `degraded_reason`.
 - `references`: `.read = rk_driver_read`, `rk_pipeline[index](dev)`, and `RK_TRACE_VALUE(dev->fd)`.
 - `callers`/`callees`: function pointer dispatch, operation-table callbacks, and dispatch call sequences.
 - `imports`: local `#include "driver_ops.h"` and unresolved external `#include <openssl/ssl.h>` with no `degraded_reason`.

@@ -10,7 +10,13 @@ use super::super::{
     stable_id,
 };
 use super::{
-    FileParseContext, FileParseOutput, ReferenceDedupKey, nodes::SyntaxRange, syntax::TagCapture,
+    FileParseContext, FileParseOutput, ReferenceDedupKey,
+    nodes::SyntaxRange,
+    recovery::{
+        decorated_function_error_body_is_statement_like,
+        decorated_function_head_has_recovery_decorator, decorated_function_head_text,
+    },
+    syntax::TagCapture,
 };
 
 pub(super) fn records_from_captures(
@@ -25,6 +31,23 @@ pub(super) fn records_from_captures(
             if context.language_id == "c" && capture.capture_kind == "definition.function" {
                 continue;
             }
+            if context.language_id == "cpp"
+                && capture.capture_kind == "definition.function"
+                && capture.target_has_error
+            {
+                continue;
+            }
+            if context.language_id == "cpp"
+                && capture.capture_kind == "definition.function"
+                && capture
+                    .target_node
+                    .line_start
+                    .checked_sub(1)
+                    .and_then(|index| context.content.lines().nth(index))
+                    .is_some_and(|line| line.contains(&format!("~{}", capture.name)))
+            {
+                continue;
+            }
             let kind = capture.capture_kind.trim_start_matches("definition.");
             let key = (
                 capture.name.clone(),
@@ -33,10 +56,11 @@ pub(super) fn records_from_captures(
                 kind.to_owned(),
             );
             if seen_symbols.insert(key) {
-                upsert_symbol(
-                    output,
-                    symbol_record(context, &capture.name, kind, &capture.target_node)?,
-                );
+                let symbol = symbol_record(context, &capture.name, kind, &capture.target_node)?;
+                if cpp_function_capture_should_be_skipped(context, &capture, &symbol) {
+                    continue;
+                }
+                upsert_symbol(output, symbol);
             }
         } else if capture.capture_kind.starts_with("reference.") {
             let kind = capture.capture_kind.trim_start_matches("reference.");
@@ -58,7 +82,79 @@ pub(super) fn records_from_captures(
     Ok(())
 }
 
+fn cpp_function_capture_should_be_skipped(
+    context: &FileParseContext<'_>,
+    capture: &TagCapture,
+    symbol: &RepositoryCodeSymbolRecord,
+) -> bool {
+    context.language_id == "cpp"
+        && symbol.kind == "function"
+        && (cpp_function_signature_is_destructor(&symbol.signature, &symbol.name)
+            || cpp_decorated_capture_has_invalid_body(context.content, &capture.target_node))
+}
+
+fn cpp_function_signature_is_destructor(signature: &str, name: &str) -> bool {
+    let head = signature.split(['{', ';']).next().unwrap_or(signature);
+    head.contains(&format!("::~{name}("))
+}
+
+fn cpp_decorated_capture_has_invalid_body(content: &str, range: &SyntaxRange) -> bool {
+    let Some(start) = decorated_capture_start(content, range.byte_start) else {
+        return false;
+    };
+    let Some(end) = function_body_end(content, range.byte_end) else {
+        return false;
+    };
+    let text = &content[start..end];
+    decorated_function_head_text(text).is_some_and(|head| {
+        decorated_function_head_has_recovery_decorator(head)
+            && !decorated_function_error_body_is_statement_like(text)
+    })
+}
+
+fn decorated_capture_start(content: &str, byte_start: usize) -> Option<usize> {
+    let prefix = content.get(..byte_start)?;
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let previous_line_end = line_start.checked_sub(1)?;
+    let previous_line_start = content[..previous_line_end]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let previous = content[previous_line_start..previous_line_end].trim();
+    if previous.contains("__always_inline")
+        || previous.contains("__attribute")
+        || previous.contains("__declspec")
+        || previous.contains("attribute")
+    {
+        Some(previous_line_start)
+    } else {
+        Some(line_start)
+    }
+}
+
+fn function_body_end(content: &str, byte_start: usize) -> Option<usize> {
+    let body_start = content.get(byte_start..)?.find('{')? + byte_start;
+    let mut depth = 0isize;
+    for (offset, character) in content[body_start..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(body_start + offset + character.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCodeSymbolRecord) {
+    if symbol.kind == "function"
+        && cpp_function_signature_is_destructor(&symbol.signature, &symbol.name)
+    {
+        return;
+    }
     if let Some(existing) = output.symbols.iter_mut().find(|existing| {
         existing.symbol_snapshot_id == symbol.symbol_snapshot_id
             || (existing.name == symbol.name

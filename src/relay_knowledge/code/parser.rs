@@ -11,6 +11,7 @@ mod parser_c_preprocessor;
 #[path = "parser_cpp.rs"]
 mod parser_cpp;
 mod records;
+mod recovery;
 mod syntax;
 mod text;
 
@@ -35,16 +36,20 @@ use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]
 use manual::manual_definitions;
+#[cfg(test)]
 use nodes::push_children_reverse;
 use records::records_from_captures;
+#[cfg(test)]
+use recovery::{
+    c_family_typedef_like_function_signature, recoverable_c_family_error_line,
+    recoverable_decorated_function_error_text, recoverable_decorated_type_error_text,
+};
 #[cfg(test)]
 use syntax::parse_tree;
 use syntax::{extract_tag_captures_safely, parse_tree_safely};
 #[cfg(test)]
 use text::MAX_TEXT_FILE_BYTES;
 use text::{count_lines, validate_text_content};
-
-const MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES: usize = 120;
 
 pub(in crate::code) fn parse_indexed_file(
     build: &mut SnapshotBuild,
@@ -276,7 +281,9 @@ fn syntax_parse_status(
     if !root.has_error() {
         return (CodeParseStatus::Parsed, None);
     }
-    if recoverable_c_family_parse(language_id, root, content, output, imports) {
+    let has_structured_facts =
+        !(output.symbols.is_empty() && output.references.is_empty() && imports.is_empty());
+    if recovery::recoverable_c_family_parse(language_id, root, content, has_structured_facts) {
         return (CodeParseStatus::Parsed, None);
     }
 
@@ -284,444 +291,6 @@ fn syntax_parse_status(
         CodeParseStatus::Partial,
         Some("tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned()),
     )
-}
-
-fn recoverable_c_family_parse(
-    language_id: &str,
-    root: Node<'_>,
-    content: &str,
-    output: &FileParseOutput,
-    imports: &[CodeImportRecord],
-) -> bool {
-    if !matches!(language_id, "c" | "cpp") {
-        return false;
-    }
-    if output.symbols.is_empty() && output.references.is_empty() && imports.is_empty() {
-        return false;
-    }
-
-    let mut saw_error = false;
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if syntax_error_node(node) {
-            saw_error = true;
-            if !recoverable_c_family_error(content, node) {
-                return false;
-            }
-        }
-        push_children_reverse(node, &mut stack);
-    }
-
-    saw_error
-}
-
-fn syntax_error_node(node: Node<'_>) -> bool {
-    node.is_error() || node.is_missing() || node.kind() == "ERROR"
-}
-
-fn recoverable_c_family_error(content: &str, node: Node<'_>) -> bool {
-    let range = nodes::syntax_range(node);
-    if recoverable_missing_declarator_after_decorated_type(content, node) {
-        return true;
-    }
-    if range.line_end.saturating_sub(range.line_start) > 2 {
-        return recoverable_decorated_type_error(content, node, &range);
-    }
-    if recoverable_preprocessor_error(content, node, &range) {
-        return true;
-    }
-
-    source_line(content, range.line_start).is_some_and(recoverable_c_family_error_line)
-}
-
-fn recoverable_decorated_type_error(
-    content: &str,
-    node: Node<'_>,
-    range: &nodes::SyntaxRange,
-) -> bool {
-    if range.line_end.saturating_sub(range.line_start) > MAX_RECOVERABLE_DECORATED_TYPE_ERROR_LINES
-    {
-        return false;
-    }
-    if !source_line(content, range.line_start).is_some_and(c_family_decorated_type_line) {
-        return false;
-    }
-
-    content
-        .get(node.start_byte()..node.end_byte())
-        .is_some_and(recoverable_decorated_type_error_text)
-}
-
-fn recoverable_decorated_type_error_text(text: &str) -> bool {
-    let trimmed = text.trim_end();
-    if !trimmed.contains('{') || !(trimmed.ends_with("};") || trimmed.ends_with('}')) {
-        return false;
-    }
-
-    decorated_type_error_body_is_declaration_like(trimmed)
-}
-
-fn decorated_type_error_body_is_declaration_like(text: &str) -> bool {
-    let Some(open_brace) = text.find('{') else {
-        return false;
-    };
-    let Some(close_brace) = text.rfind('}') else {
-        return false;
-    };
-    if close_brace <= open_brace {
-        return false;
-    }
-
-    let mut brace_depth = 0isize;
-    for line in text[open_brace + 1..close_brace].lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || matches!(trimmed, "public:" | "protected:" | "private:") {
-            continue;
-        }
-        if !decorated_type_error_body_line_is_declaration_like(trimmed, brace_depth) {
-            return false;
-        }
-        brace_depth += trimmed
-            .chars()
-            .filter(|character| *character == '{')
-            .count() as isize;
-        brace_depth -= trimmed
-            .chars()
-            .filter(|character| *character == '}')
-            .count() as isize;
-        if brace_depth < 0 {
-            return false;
-        }
-    }
-
-    brace_depth == 0
-}
-
-fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
-    if !line_has_balanced_delimiters(line) || line.contains("=;") || line.contains("= ;") {
-        return false;
-    }
-    if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {
-        return false;
-    }
-    if brace_depth > 0 {
-        return line.ends_with(';') || line.ends_with('{') || line.ends_with('}');
-    }
-
-    line.ends_with(';') || line.ends_with('{') || line.starts_with('}')
-}
-
-fn decorated_type_error_body_top_level_statement(line: &str) -> bool {
-    let first_token = line
-        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
-        .find(|token| !token.is_empty());
-    first_token.is_some_and(|token| {
-        matches!(
-            token,
-            "break"
-                | "case"
-                | "continue"
-                | "default"
-                | "do"
-                | "else"
-                | "for"
-                | "goto"
-                | "if"
-                | "return"
-                | "switch"
-                | "while"
-        )
-    })
-}
-
-fn line_has_balanced_delimiters(line: &str) -> bool {
-    let mut parentheses = 0isize;
-    let mut brackets = 0isize;
-    for character in line.chars() {
-        match character {
-            '(' => parentheses += 1,
-            ')' => parentheses -= 1,
-            '[' => brackets += 1,
-            ']' => brackets -= 1,
-            _ => {}
-        }
-        if parentheses < 0 || brackets < 0 {
-            return false;
-        }
-    }
-
-    parentheses == 0 && brackets == 0
-}
-
-fn recoverable_missing_declarator_after_decorated_type(content: &str, node: Node<'_>) -> bool {
-    if !node.is_missing() || node.kind() != "identifier" {
-        return false;
-    }
-    let Some(parent) = node
-        .parent()
-        .filter(|parent| parent.kind() == "declaration")
-    else {
-        return false;
-    };
-    content
-        .get(parent.start_byte()..parent.end_byte())
-        .is_some_and(|text| {
-            text.lines()
-                .find(|line| !line.trim().is_empty())
-                .is_some_and(c_family_decorated_type_line)
-                && text.contains('{')
-                && text.trim_end().ends_with("};")
-        })
-}
-
-fn recoverable_preprocessor_error(
-    content: &str,
-    mut node: Node<'_>,
-    range: &nodes::SyntaxRange,
-) -> bool {
-    let line_starts_with_directive = source_line(content, range.line_start)
-        .is_some_and(|line| line.trim_start().starts_with('#'));
-    loop {
-        if node.kind().starts_with("preproc") {
-            if matches!(
-                node.kind(),
-                "preproc_def" | "preproc_function_def" | "preproc_include" | "preproc_call"
-            ) {
-                let preprocessor_range = nodes::syntax_range(node);
-                return preprocessor_range
-                    .line_end
-                    .saturating_sub(preprocessor_range.line_start)
-                    <= 2;
-            }
-            return line_starts_with_directive;
-        }
-        let Some(parent) = node.parent() else {
-            return false;
-        };
-        node = parent;
-    }
-}
-
-fn source_line(content: &str, line_number: usize) -> Option<&str> {
-    line_number
-        .checked_sub(1)
-        .and_then(|index| content.lines().nth(index))
-}
-
-fn recoverable_c_family_error_line(line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if trimmed.starts_with('#') {
-        return true;
-    }
-    if (trimmed.starts_with("template class ") || trimmed.starts_with("template struct "))
-        && trimmed.contains('<')
-        && trimmed.contains('>')
-        && trimmed.ends_with(';')
-    {
-        return true;
-    }
-    if c_family_decorated_type_line(trimmed) {
-        return true;
-    }
-    if c_family_typedef_like_error_line(trimmed) {
-        return true;
-    }
-
-    let Some(token) = trimmed
-        .split(|character: char| !c_identifier_char(character))
-        .next()
-    else {
-        return false;
-    };
-    c_family_macro_name(token) && trimmed.contains('(')
-}
-
-fn c_family_typedef_like_error_line(trimmed: &str) -> bool {
-    if trimmed.contains("=;") || trimmed.contains("= ;") {
-        return false;
-    }
-
-    c_family_typedef_like_function_signature(trimmed)
-        || c_family_typedef_like_initializer_declaration(trimmed)
-}
-
-fn c_family_typedef_like_function_signature(trimmed: &str) -> bool {
-    if trimmed.contains('=') || !line_has_balanced_delimiters(trimmed) {
-        return false;
-    }
-    let Some(parameter_start) = trimmed.find('(') else {
-        return false;
-    };
-    let head = &trimmed[..parameter_start];
-    let Some(parameter_end) = c_family_closing_parenthesis_index(&trimmed[parameter_start..])
-    else {
-        return false;
-    };
-    let tail = trimmed[parameter_start + parameter_end + 1..].trim();
-    if !c_family_typedef_signature_tail_is_declaration_shaped(tail) {
-        return false;
-    }
-
-    c_family_typedef_declaration_head(head).is_some()
-}
-
-fn c_family_typedef_signature_tail_is_declaration_shaped(tail: &str) -> bool {
-    tail.is_empty()
-        || matches!(tail, ";" | "{")
-        || tail.starts_with("__attribute__")
-        || tail.starts_with("__attribute")
-        || tail.starts_with("__declspec")
-}
-
-fn c_family_closing_parenthesis_index(text: &str) -> Option<usize> {
-    if !text.starts_with('(') {
-        return None;
-    }
-    let mut depth = 0usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-fn c_family_typedef_like_initializer_declaration(trimmed: &str) -> bool {
-    let Some((head, initializer)) = trimmed.split_once('=') else {
-        return false;
-    };
-    let initializer = initializer.trim_start();
-    if !initializer.starts_with('{') {
-        return false;
-    }
-
-    c_family_typedef_declaration_head(head).is_some()
-}
-
-fn c_family_typedef_declaration_head(head: &str) -> Option<(&str, &str)> {
-    let tokens = head
-        .split(|character: char| !c_identifier_char(character))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    let name = tokens
-        .last()
-        .copied()
-        .filter(|token| c_identifier_name(token))?;
-    if c_family_typedef_like_type_token(name) {
-        return None;
-    }
-    let type_index = tokens[..tokens.len().saturating_sub(1)]
-        .iter()
-        .rposition(|token| !c_declaration_qualifier_token(token))?;
-    if !tokens[..type_index]
-        .iter()
-        .all(|token| c_declaration_qualifier_token(token))
-    {
-        return None;
-    }
-    let type_token = tokens
-        .get(type_index)
-        .copied()
-        .filter(|token| c_family_typedef_like_type_token(token))?;
-
-    Some((type_token, name))
-}
-
-fn c_family_typedef_like_type_token(token: &str) -> bool {
-    token.ends_with("_t") && c_identifier_name(token)
-}
-
-fn c_declaration_qualifier_token(token: &str) -> bool {
-    matches!(
-        token,
-        "const" | "extern" | "inline" | "register" | "restrict" | "static" | "volatile"
-    )
-}
-
-fn c_family_decorated_type_line(trimmed: &str) -> bool {
-    let tokens = trimmed
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    tokens.iter().enumerate().any(|(index, token)| {
-        matches!(*token, "class" | "struct" | "enum" | "union")
-            && (c_family_decorator_before_type(&tokens, index)
-                || c_family_decorator_after_type(&tokens, index))
-    })
-}
-
-fn c_family_decorator_before_type(tokens: &[&str], index: usize) -> bool {
-    let mut cursor = index;
-    while let Some(previous_index) = cursor.checked_sub(1) {
-        let Some(previous) = tokens.get(previous_index) else {
-            return false;
-        };
-        if c_family_known_decorator_token(previous) {
-            return true;
-        }
-        if !c_family_decorator_payload_token(previous) {
-            return false;
-        }
-        cursor = previous_index;
-    }
-
-    false
-}
-
-fn c_family_decorator_after_type(tokens: &[&str], index: usize) -> bool {
-    tokens
-        .get(index + 1)
-        .is_some_and(|candidate| c_family_known_decorator_token(candidate))
-}
-
-fn c_family_known_decorator_token(token: &str) -> bool {
-    matches!(
-        token,
-        "__attribute__" | "__attribute" | "__declspec" | "__declspec__"
-    ) || token.ends_with("_API")
-        || token.ends_with("_EXPORT")
-        || token.ends_with("_EXPORTS")
-}
-
-fn c_family_decorator_payload_token(token: &str) -> bool {
-    matches!(
-        token,
-        "dllimport" | "dllexport" | "visibility" | "default" | "hidden"
-    )
-}
-
-fn c_family_macro_name(token: &str) -> bool {
-    !token.is_empty()
-        && token.chars().all(|character| {
-            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
-        })
-        && token.chars().any(|character| character == '_')
-        && token
-            .chars()
-            .any(|character| character.is_ascii_uppercase())
-}
-
-fn c_identifier_char(character: char) -> bool {
-    character == '_' || character.is_ascii_alphanumeric()
-}
-
-fn c_identifier_name(token: &str) -> bool {
-    let mut characters = token.chars();
-    characters
-        .next()
-        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        && characters.all(c_identifier_char)
 }
 
 fn record_dependencies(
@@ -835,6 +404,10 @@ mod enum_tests;
 #[cfg(test)]
 #[path = "parser_review_tests.rs"]
 mod review_tests;
+
+#[cfg(test)]
+#[path = "parser_gcc_recovery_tests.rs"]
+mod gcc_recovery_tests;
 
 #[cfg(test)]
 #[path = "parser_import_resolution_tests.rs"]
