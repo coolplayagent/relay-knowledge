@@ -116,6 +116,98 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
 }
 
 #[tokio::test]
+async fn dense_hybrid_chunk_plan_answers_before_symbol_noise() {
+    let path = "src/worker.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("worker-file", path)],
+        symbols: vec![
+            qualified_symbol("new-symbol", "worker-file", path, "New", "worker.New"),
+            qualified_symbol(
+                "register-symbol",
+                "worker-file",
+                path,
+                "RegisterWorkflow",
+                "worker.RegisterWorkflow",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "worker-flow-start",
+                "worker-file",
+                path,
+                "worker.New(client, taskQueue)\nw.RegisterWorkflow(flow)\nw.RegisterActivity(activity)\nworker.InterruptCh() closes the task queue",
+            ),
+            chunk(
+                "worker-flow-middle",
+                "worker-file",
+                path,
+                "RegisterWorkflow and RegisterActivity bind the worker task queue before InterruptCh",
+            ),
+            chunk(
+                "worker-flow-shutdown",
+                "worker-file",
+                path,
+                "worker.New setup keeps RegisterWorkflow RegisterActivity and InterruptCh in task queue order",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("dense hybrid query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter()
+            .all(|hit| hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]),
+        "dense chunk coverage should avoid symbol-layer fanout: {hits:?}",
+    );
+}
+
+#[test]
+fn chunk_first_plan_requires_multi_api_identity_query() {
+    assert!(hybrid_query_prefers_chunk_first(&request(
+        "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "typed arrow payload projector trim provider record",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "ConnectorService",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+}
+
+#[tokio::test]
 async fn multi_api_symbol_query_keeps_direct_identity_facets() {
     let path = "src/worker.ts";
     let store = store_with_snapshot(CodeIndexSnapshot {

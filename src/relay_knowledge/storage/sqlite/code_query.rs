@@ -145,6 +145,19 @@ fn search_code_with_status(
         return search_sbom(connection, status, request);
     }
     let mut hits = Vec::new();
+    let mut searched_chunks = false;
+    if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
+    {
+        if let Ok(chunk_hits) = search_chunks(connection, status, request) {
+            searched_chunks = true;
+            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits) {
+                hits.extend(chunk_hits);
+                dedupe_sort_truncate(&mut hits, request.limit);
+                return Ok(hits);
+            }
+            hits.extend(chunk_hits);
+        }
+    }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
@@ -164,11 +177,13 @@ fn search_code_with_status(
         }
     }
     if request.code_query_kind == CodeQueryKind::Hybrid {
-        let chunk_hits = search_chunks(connection, status, request);
-        if let Some(partial_hits) =
-            append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
-        {
-            return Ok(partial_hits);
+        if !searched_chunks {
+            let chunk_hits = search_chunks(connection, status, request);
+            if let Some(partial_hits) =
+                append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
+            {
+                return Ok(partial_hits);
+            }
         }
         if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
@@ -213,6 +228,14 @@ fn search_code_with_status(
     dedupe_sort_truncate(&mut hits, request.limit);
 
     Ok(hits)
+}
+
+fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -> bool {
+    request.code_query_kind == CodeQueryKind::Hybrid
+        && !query_is_single_symbol_identity(&request.query)
+        && !code_query_api_identities::hybrid_api_symbol_identities(&request.query, request)
+            .is_empty()
+        && hybrid_sequence_terms(&request.query).len() >= 4
 }
 
 fn append_hits_or_return_partial_on_search_outage(
