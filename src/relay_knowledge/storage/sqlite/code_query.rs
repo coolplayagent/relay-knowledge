@@ -20,6 +20,8 @@ mod code_query_designated_initializer_scoring;
 mod code_query_excerpts;
 #[path = "code_query_flow_scoring.rs"]
 mod code_query_flow_scoring;
+#[path = "code_query_hybrid_planning.rs"]
+mod code_query_hybrid_planning;
 #[path = "code_query_identifiers.rs"]
 mod code_query_identifiers;
 #[path = "code_query_import_scoring.rs"]
@@ -73,6 +75,7 @@ use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
+use code_query_hybrid_planning::{hybrid_query_prefers_chunk_first, hybrid_sequence_terms};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
     import_public_dependency_surface_bonus, import_same_file_usage_bonus,
@@ -145,6 +148,19 @@ fn search_code_with_status(
         return search_sbom(connection, status, request);
     }
     let mut hits = Vec::new();
+    let mut searched_chunks = false;
+    if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
+    {
+        if let Ok(chunk_hits) = search_chunks(connection, status, request) {
+            searched_chunks = true;
+            if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits) {
+                hits.extend(chunk_hits);
+                dedupe_sort_truncate(&mut hits, request.limit);
+                return Ok(hits);
+            }
+            hits.extend(chunk_hits);
+        }
+    }
     if matches!(
         request.code_query_kind,
         CodeQueryKind::Hybrid | CodeQueryKind::Symbol | CodeQueryKind::Definition
@@ -164,11 +180,13 @@ fn search_code_with_status(
         }
     }
     if request.code_query_kind == CodeQueryKind::Hybrid {
-        let chunk_hits = search_chunks(connection, status, request);
-        if let Some(partial_hits) =
-            append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
-        {
-            return Ok(partial_hits);
+        if !searched_chunks {
+            let chunk_hits = search_chunks(connection, status, request);
+            if let Some(partial_hits) =
+                append_hits_or_return_partial_on_search_outage(&mut hits, request, chunk_hits)?
+            {
+                return Ok(partial_hits);
+            }
         }
         if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
             dedupe_sort_truncate(&mut hits, request.limit);
@@ -437,21 +455,6 @@ fn hybrid_chunk_results_have_collective_dense_coverage(
     }
 
     supporting_hits >= required_hits && has_dense_hit && covered_terms.len() >= required_coverage
-}
-
-fn hybrid_sequence_terms(query: &str) -> Vec<String> {
-    let mut terms = Vec::new();
-    for term in query_terms(query) {
-        if term.len() < 4 {
-            continue;
-        }
-        let term = term.to_ascii_lowercase();
-        if !terms.contains(&term) {
-            terms.push(term);
-        }
-    }
-
-    terms
 }
 
 fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {

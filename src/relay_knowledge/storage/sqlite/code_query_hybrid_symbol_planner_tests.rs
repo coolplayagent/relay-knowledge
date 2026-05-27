@@ -116,6 +116,215 @@ async fn hybrid_symbol_plan_keeps_multi_term_flow_retrieval() {
 }
 
 #[tokio::test]
+async fn dense_hybrid_chunk_plan_answers_before_symbol_noise() {
+    let path = "src/worker.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("worker-file", path)],
+        symbols: vec![
+            qualified_symbol("new-symbol", "worker-file", path, "New", "worker.New"),
+            qualified_symbol(
+                "register-symbol",
+                "worker-file",
+                path,
+                "RegisterWorkflow",
+                "worker.RegisterWorkflow",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "worker-flow-start",
+                "worker-file",
+                path,
+                "worker.New(client, taskQueue)\nw.RegisterWorkflow(flow)\nw.RegisterActivity(activity)\nworker.InterruptCh() closes the task queue",
+            ),
+            chunk(
+                "worker-flow-middle",
+                "worker-file",
+                path,
+                "RegisterWorkflow and RegisterActivity bind the worker task queue before InterruptCh",
+            ),
+            chunk(
+                "worker-flow-shutdown",
+                "worker-file",
+                path,
+                "worker.New setup keeps RegisterWorkflow RegisterActivity and InterruptCh in task queue order",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("dense hybrid query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter()
+            .all(|hit| hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]),
+        "dense chunk coverage should avoid symbol-layer fanout: {hits:?}",
+    );
+}
+
+#[test]
+fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
+    assert!(hybrid_query_prefers_chunk_first(&request(
+        "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+    assert!(hybrid_query_prefers_chunk_first(&request(
+        "SYSCALL_DEFINE6 mmap_pgoff do_mmap mmap_region",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "EvalCheckpointStore signature mismatch append result",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "Recover descriptor save_manifest VersionEdit",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "typed arrow payload projector trim provider record",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "operation table read callback dispatch designated initializer",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["c".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "templated cache insert lambda pipeline writer append",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["cpp".to_owned()],
+        )
+    ));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "operation table read callback dispatch designated initializer",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "ConnectorService",
+        CodeQueryKind::Hybrid,
+        10,
+    )));
+}
+
+#[tokio::test]
+async fn dense_structured_hybrid_chunk_plan_answers_before_symbol_noise() {
+    let path = "mm/mmap.c";
+    let noise_path = "include/linux/mmap_region.h";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("mmap-file", path), file("noise-file", noise_path)],
+        symbols: vec![
+            qualified_symbol(
+                "mmap-symbol",
+                "mmap-file",
+                path,
+                "mmap_region",
+                "mmap_region",
+            ),
+            qualified_symbol(
+                "noise-symbol",
+                "noise-file",
+                noise_path,
+                "mmap_region",
+                "mmap_region",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "mmap-flow-start",
+                "mmap-file",
+                path,
+                "SYSCALL_DEFINE6(mmap_pgoff) validates flags before do_mmap calls mmap_region",
+            ),
+            chunk(
+                "mmap-flow-middle",
+                "mmap-file",
+                path,
+                "do_mmap carries mmap_pgoff arguments into mmap_region after accounting",
+            ),
+            chunk(
+                "mmap-flow-end",
+                "mmap-file",
+                path,
+                "mmap_region completes the SYSCALL_DEFINE6 mmap_pgoff allocation flow",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "SYSCALL_DEFINE6 mmap_pgoff do_mmap mmap_region",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("structured hybrid query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter().all(
+            |hit| hit.path == path && hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]
+        ),
+        "dense structured chunks should avoid symbol-layer fanout: {hits:?}",
+    );
+}
+
+#[tokio::test]
 async fn multi_api_symbol_query_keeps_direct_identity_facets() {
     let path = "src/worker.ts";
     let store = store_with_snapshot(CodeIndexSnapshot {
@@ -282,7 +491,16 @@ fn hybrid_symbol_plan_requires_unambiguous_symbol_window() {
 }
 
 fn request(query: &str, kind: CodeQueryKind, limit: usize) -> CodeRetrievalRequest {
-    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+    request_with_language_filters(query, kind, limit, Vec::new())
+}
+
+fn request_with_language_filters(
+    query: &str,
+    kind: CodeQueryKind,
+    limit: usize,
+    language_filters: Vec<String>,
+) -> CodeRetrievalRequest {
+    let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), language_filters)
         .expect("selector should be valid");
 
     CodeRetrievalRequest::new(query, selector, kind, limit, FreshnessPolicy::AllowStale)

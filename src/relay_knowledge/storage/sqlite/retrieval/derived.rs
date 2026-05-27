@@ -355,11 +355,7 @@ fn derived_candidate_filter(
     query_terms: &BTreeSet<String>,
     fields: &[DerivedCandidateField],
 ) -> (String, String, Vec<Value>) {
-    let terms = query_terms
-        .iter()
-        .take(MAX_DERIVED_QUERY_TERMS)
-        .map(String::as_str)
-        .collect::<Vec<_>>();
+    let terms = derived_candidate_terms(query_terms);
     let mut values = Vec::new();
 
     let candidate_groups = terms
@@ -392,6 +388,55 @@ fn derived_candidate_filter(
         ranking_terms.join(" + "),
         values,
     )
+}
+
+fn derived_candidate_terms(query_terms: &BTreeSet<String>) -> Vec<&str> {
+    if query_terms.len() <= MAX_DERIVED_QUERY_TERMS {
+        return query_terms.iter().map(String::as_str).collect();
+    }
+
+    let mut ranked = query_terms
+        .iter()
+        .map(|term| (derived_query_term_priority(term), term.as_str()))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(right.1)));
+
+    ranked
+        .into_iter()
+        .take(MAX_DERIVED_QUERY_TERMS)
+        .map(|(_, term)| term)
+        .collect()
+}
+
+fn derived_query_term_priority(term: &str) -> usize {
+    let length = term.chars().count();
+    let length_score = if length >= 16 {
+        8
+    } else if length >= 12 {
+        6
+    } else if length >= 8 {
+        4
+    } else if length >= 5 {
+        2
+    } else {
+        1
+    };
+    if term.contains('_') || term_has_alpha_digit_mix(term) {
+        length_score + 8
+    } else {
+        length_score
+    }
+}
+
+fn term_has_alpha_digit_mix(term: &str) -> bool {
+    let mut has_alpha = false;
+    let mut has_digit = false;
+    for character in term.chars() {
+        has_alpha |= character.is_alphabetic();
+        has_digit |= character.is_ascii_digit();
+    }
+
+    has_alpha && has_digit
 }
 
 fn escape_like_pattern(value: &str) -> String {
@@ -503,6 +548,28 @@ mod tests {
         assert!(condition.contains("lower(content) LIKE ? ESCAPE '\\'"));
         assert!(ranking.contains("CASE WHEN lower(content) LIKE ? ESCAPE '\\'"));
         assert_eq!(values.len(), MAX_DERIVED_QUERY_TERMS * fields.len() * 2);
+    }
+
+    #[test]
+    fn derived_candidate_filter_prefers_high_signal_terms_when_capped() {
+        let mut query_terms = (0..20)
+            .map(|index| format!("a{}", char::from(b'a' + index as u8)))
+            .collect::<BTreeSet<_>>();
+        query_terms.insert("zzcriticalidentity".to_owned());
+        let fields = [DerivedCandidateField::contains("lower(content)")];
+
+        let (_, _, values) = derived_candidate_filter(&query_terms, &fields);
+        let patterns = values
+            .iter()
+            .filter_map(|value| match value {
+                Value::Text(pattern) => Some(pattern.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(patterns.contains(&"%zzcriticalidentity%"));
+        assert!(!patterns.contains(&"%at%"));
+        assert_eq!(patterns.len(), MAX_DERIVED_QUERY_TERMS * 2);
     }
 
     #[test]
