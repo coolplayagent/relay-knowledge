@@ -1,7 +1,12 @@
 use super::nodes::{self, push_children_reverse};
 use tree_sitter::Node;
+mod line_classification;
 pub(in crate::code::parser) mod scan;
 mod type_body;
+use line_classification::{
+    c_family_decorated_type_line, c_family_macro_name,
+    c_family_recoverable_error_function_signature,
+};
 use scan::{
     CodeScanState, first_code_char_index, line_has_balanced_delimiters,
     scan_code_line_indices_with_state,
@@ -206,13 +211,17 @@ pub(in crate::code::parser) fn decorated_function_error_body_is_statement_like(t
 }
 
 fn decorated_function_error_body_line_is_statement_like(line: &str) -> bool {
-    !line.chars().any(|character| matches!(character, '@' | '`'))
+    !c_family_invalid_code_token_line(line)
         && (line.starts_with('#')
             || line.ends_with(';')
             || line.ends_with('{')
             || line.ends_with('}')
             || line.starts_with('}')
             || c_family_statement_label_line(line))
+}
+
+pub(super) fn c_family_invalid_code_token_line(line: &str) -> bool {
+    line.chars().any(|character| matches!(character, '@' | '`'))
 }
 
 fn c_family_statement_label_line(line: &str) -> bool {
@@ -340,7 +349,7 @@ fn c_family_typedef_like_error_line(trimmed: &str) -> bool {
         return false;
     }
 
-    c_family_typedef_like_function_signature(trimmed)
+    c_family_recoverable_error_function_signature(trimmed)
         || c_family_typedef_like_initializer_declaration(trimmed)
 }
 
@@ -439,21 +448,26 @@ fn c_family_parameter_open_looks_like_declarator(
     allow_operator_declarator: bool,
 ) -> bool {
     c_identifier_before_open(text, parameter_start).is_some_and(|token| {
-        c_identifier_name(token)
-            && !c_declaration_qualifier_token(token)
-            && !c_family_known_decorator_token(token)
-            && !c_family_decorator_payload_token(token)
+        c_identifier_name(token.text)
+            && !c_declaration_qualifier_token(token.text)
+            && !c_family_known_decorator_token(token.text)
+            && !c_family_decorator_payload_token(token.text)
+            && !c_family_token_starts_in_decorator_payload(text, token.start)
     }) || (allow_operator_declarator && c_family_operator_before_open(text, parameter_start))
 }
 
-fn c_identifier_before_open(text: &str, parameter_start: usize) -> Option<&str> {
+fn c_identifier_before_open(text: &str, parameter_start: usize) -> Option<CFamilyHeadToken<'_>> {
     let name_end = text[..parameter_start].trim_end().len();
     let name_start = text[..name_end]
         .char_indices()
         .rev()
         .find(|(_, character)| !c_identifier_char(*character))
         .map_or(0, |(index, character)| index + character.len_utf8());
-    (name_start < name_end).then_some(&text[name_start..name_end])
+    (name_start < name_end).then_some(CFamilyHeadToken {
+        text: &text[name_start..name_end],
+        start: name_start,
+        end: name_end,
+    })
 }
 
 fn c_family_operator_before_open(text: &str, parameter_start: usize) -> bool {
@@ -607,6 +621,25 @@ fn c_family_parenthesized_prefix_end(text: &str) -> Option<usize> {
     literals_closed.then_some(matched_end).flatten()
 }
 
+fn c_family_token_starts_in_decorator_payload(head: &str, token_start: usize) -> bool {
+    c_family_head_tokens(head)
+        .iter()
+        .filter(|token| c_family_known_decorator_token(token.text))
+        .any(|decorator| {
+            let after_decorator = &head[decorator.end..];
+            let leading_whitespace = after_decorator
+                .char_indices()
+                .find(|(_, character)| !character.is_ascii_whitespace())
+                .map_or(after_decorator.len(), |(index, _)| index);
+            let payload_start = decorator.end + leading_whitespace;
+            if payload_start >= token_start {
+                return false;
+            }
+            c_family_parenthesized_prefix_end(&head[payload_start..])
+                .is_some_and(|payload_len| token_start < payload_start + payload_len)
+        })
+}
+
 fn c_family_cpp_method_suffix_tail(tail: &str) -> bool {
     let mut tail = tail.trim();
     if let Some(stripped) = tail.strip_suffix("= 0;") {
@@ -723,6 +756,7 @@ fn c_family_typedef_declaration_head(head: &str) -> bool {
         c_declaration_qualifier_token(token.text)
             || c_family_typedef_like_type_token(token.text)
             || c_family_decorator_payload_token(token.text)
+            || c_family_token_starts_in_decorator_payload(head, token.start)
     }) {
         return false;
     }
@@ -916,42 +950,6 @@ fn c_declaration_qualifier_token(token: &str) -> bool {
     )
 }
 
-fn c_family_decorated_type_line(trimmed: &str) -> bool {
-    let tokens = trimmed
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    tokens.iter().enumerate().any(|(index, token)| {
-        matches!(*token, "class" | "struct" | "enum" | "union")
-            && (c_family_decorator_before_type(&tokens, index)
-                || c_family_decorator_after_type(&tokens, index))
-    })
-}
-
-fn c_family_decorator_before_type(tokens: &[&str], index: usize) -> bool {
-    let mut cursor = index;
-    while let Some(previous_index) = cursor.checked_sub(1) {
-        let Some(previous) = tokens.get(previous_index) else {
-            return false;
-        };
-        if c_family_known_decorator_token(previous) {
-            return true;
-        }
-        if !c_family_decorator_payload_token(previous) {
-            return false;
-        }
-        cursor = previous_index;
-    }
-
-    false
-}
-
-fn c_family_decorator_after_type(tokens: &[&str], index: usize) -> bool {
-    tokens
-        .get(index + 1)
-        .is_some_and(|candidate| c_family_known_decorator_token(candidate))
-}
-
 fn c_family_known_decorator_token(token: &str) -> bool {
     matches!(
         token,
@@ -972,17 +970,6 @@ fn c_family_decorator_payload_token(token: &str) -> bool {
             | "default"
             | "hidden"
     )
-}
-
-fn c_family_macro_name(token: &str) -> bool {
-    !token.is_empty()
-        && token.chars().all(|character| {
-            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
-        })
-        && token.chars().any(|character| character == '_')
-        && token
-            .chars()
-            .any(|character| character.is_ascii_uppercase())
 }
 
 fn c_identifier_char(character: char) -> bool {

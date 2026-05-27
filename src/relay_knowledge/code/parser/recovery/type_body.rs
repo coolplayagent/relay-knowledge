@@ -1,5 +1,5 @@
 use super::{
-    first_code_char_index,
+    c_family_invalid_code_token_line, first_code_char_index,
     scan::{CodeScanState, scan_code_line_indices_with_state},
 };
 
@@ -71,6 +71,9 @@ pub(super) fn decorated_type_error_body_is_declaration_like(text: &str) -> bool 
 
 fn decorated_type_error_body_line_is_declaration_like(line: &str, brace_depth: isize) -> bool {
     if line.contains("=;") || line.contains("= ;") {
+        return false;
+    }
+    if c_family_invalid_code_token_line(line) {
         return false;
     }
     if brace_depth == 0 && decorated_type_error_body_top_level_statement(line) {

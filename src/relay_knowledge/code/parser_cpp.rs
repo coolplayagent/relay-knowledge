@@ -2,7 +2,8 @@ use tree_sitter::Node;
 
 use super::nodes::{SyntaxRange, node_text, push_children_reverse, syntax_range};
 use super::recovery::{
-    code_contains_char, decorated_function_head_has_recoverable_tail, decorated_function_head_text,
+    code_contains_char, decorated_function_error_body_is_statement_like,
+    decorated_function_head_has_recoverable_tail, decorated_function_head_text,
     scan_code_line_indices, token_starts_in_angle_arguments,
 };
 
@@ -422,6 +423,9 @@ fn cpp_function_definition_is_destructor(content: &str, node: Node<'_>) -> bool 
 fn gcc_decorated_function_name(content: &str, node: Node<'_>) -> Option<String> {
     let text = node_text(content, node);
     if !text.contains('{') {
+        return None;
+    }
+    if !decorated_function_error_body_is_statement_like(&text) {
         return None;
     }
     let head = decorated_function_head_text(&text)?;

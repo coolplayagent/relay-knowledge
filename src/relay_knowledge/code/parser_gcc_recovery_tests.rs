@@ -488,6 +488,23 @@ __attribute__((annotate("{"))) class LiteralWidget {
         ),
         "expression statements inside decorated type bodies must not be recoverable"
     );
+
+    let invalid_inline_body_snapshot = parse_source_snapshot(
+        "include/broken_inline_exported.hpp",
+        br#"
+RK_API class BrokenWidget {
+ public:
+    int Run() { return @; }
+};
+"#,
+    );
+    assert_eq!(
+        invalid_inline_body_snapshot.files[0].parse_status,
+        CodeParseStatus::Partial,
+        "invalid inline method bodies should keep diagnostics visible: symbols={:?}; diagnostics={:?}",
+        invalid_inline_body_snapshot.symbols,
+        invalid_inline_body_snapshot.diagnostics
+    );
 }
 
 #[test]
@@ -532,6 +549,8 @@ void cleanup()
 {
     log("~cleanup");
 }
+
+void cleanup_inline() { log("Policy::~Policy"); }
 "#,
     );
     assert!(
@@ -550,6 +569,14 @@ void cleanup()
         "normal functions mentioning destructor-like text in the body should still be indexed: {:?}",
         destructor_snapshot.symbols
     );
+    assert!(
+        destructor_snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "function" && symbol.name == "cleanup_inline"),
+        "one-line functions mentioning destructor-like text in the signature excerpt should still be indexed: {:?}",
+        destructor_snapshot.symbols
+    );
 }
 
 #[test]
@@ -558,6 +585,8 @@ fn gcc_recovery_rejects_malformed_parameter_lists_and_c_suffixes() {
         "external_deps/sdk/malformed_tail.c",
         br#"
 int valid_c_symbol(void) { return 1; }
+
+int broken_plain_prototype(void)
 
 int postfix_garbage(void) attribute((always_inline)) garbage
 {
@@ -642,6 +671,10 @@ __always_inline int pending_assignment(void)
         "ordinary valid C functions near invalid operator syntax should still be indexed: {:?}",
         c_snapshot.symbols
     );
+    assert!(
+        !recoverable_c_family_error_line("int broken_plain_prototype(void)"),
+        "plain builtin prototypes without a terminator are ordinary syntax errors"
+    );
 }
 
 #[test]
@@ -667,6 +700,11 @@ __always_inline int malformed_slots(int left,, int right)
 {
     return left + right;
 }
+
+__always_inline int invalid_body_token()
+{
+    return @;
+}
 "#,
     );
 
@@ -679,13 +717,48 @@ __always_inline int malformed_slots(int left,, int right)
         "conversion operator should be recovered: {:?}",
         snapshot.symbols
     );
-    for name in ["malformed_tail", "malformed_slots"] {
+    for name in ["malformed_tail", "malformed_slots", "invalid_body_token"] {
         assert!(
             !snapshot
                 .symbols
                 .iter()
                 .any(|symbol| symbol.kind == "function" && symbol.name == name),
             "{name} should not be indexed from malformed C++ syntax: {:?}",
+            snapshot.symbols
+        );
+    }
+}
+
+#[test]
+fn gcc_recovery_accepts_arbitrary_attribute_payload_tokens() {
+    let snapshot = parse_source_snapshot(
+        "external_deps/sdk/attribute_payloads.c",
+        br#"
+__attribute__((nonnull(1))) int accepts_nonnull(char *value)
+{
+    return value != 0;
+}
+
+__attribute__((section(".init"))) int accepts_section(void)
+{
+    return 1;
+}
+"#,
+    );
+
+    assert_eq!(
+        snapshot.files[0].parse_status,
+        CodeParseStatus::Parsed,
+        "valid attribute payloads should not block recovery: {:?}",
+        snapshot.diagnostics
+    );
+    for name in ["accepts_nonnull", "accepts_section"] {
+        assert!(
+            snapshot
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "function" && symbol.name == name),
+            "{name} should be recovered from valid GCC attribute payloads: {:?}",
             snapshot.symbols
         );
     }
