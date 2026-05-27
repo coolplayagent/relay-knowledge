@@ -16,6 +16,10 @@
 ## 候选优化说明：manual-issue-168-large-repository-index-throughput
 - 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
 - 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
+## 候选优化说明：run-1779856832-filtered-call-identity-fast-path
+- 算法/架构：Callers/Callees 查询在 exact call identity lookup 已命中、未触发 direct lookup 饱和、且命中数落入请求 limit 时，如果请求带 path 或 language selector 过滤，则把结构化 call graph edge 视为完整候选集并跳过后续 broad call FTS expansion；unfiltered broad identity 仍要求长标识符、snake_case 或 camel/Pascal case boundary 才能早停，scoped identity 保持原有直接回答规则。
+- 不变量/影响/风险：不改变 parser facts、call resolution、SQLite schema、FTS 文档、candidate window、ranking 权重、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net 或 CLI/API shape；只在 callers/callees exact graph rows 已经 bounded 且 selector 已收窄查询面时减少 FTS 层扩展。预期降低 C/C++/Go/Rust syntax fixture 与多语言 bridge 中 path/language-scoped callers/callees 查询的 p95 延迟，同时保留未过滤短词查询通过 FTS 补充上下文召回；风险是少量 filtered 短标识符查询不再返回 FTS-only call-text 候选，受 fast-path 单测、既有 call ranking/query 回归和未过滤 broad identity gate 控制。
+- 策略关联：建立在 accepted `run-1779847089` API-dense direct lookup elision 与 accepted `run-1779850939`/`run-1779854865` bulk read-model materialization 的“结构化证据优先、必要时跳过 broad FTS”策略之上；明确避开 rejected `run-1779855553` 的 candidate-limit/support 局部调参和全局 build/fmt/index recovery regression，不枚举仓库、路径、case id、query 字符串或 fixture symbol。
 ## 候选优化说明：run-1779854865-bulk-import-search-finalize
 - 算法/架构：checkpointed full-index finalize 保持逐条 import resolution、target_hint、resolution_state 与 confidence 更新，但 finalized import FTS read model 改为在 resolution 完成后用一次 `INSERT INTO code_repository_search ... SELECT` 批量重建；content 继续包含 import statement、resolved/unresolved target hint 与 source path，language_id 从 finalized file 表关联获取。
 - 不变量/影响/风险：不改变 parser facts、import/module resolution、SQLite schema、ranking 权重、candidate window、repo-set overlay、source `text_fallback`、semantic/vector read model、env/paths/net 或 CLI/API shape；active/retained scope 的中间 edge search rows 仍走 batch 插入路径。预期降低 Python/Go/Java/TypeScript 等 import-heavy repository 在 finalize 阶段的 Rust 循环 FTS 写入与 SQLite statement 调用次数，改善 register/full-index throughput 和锁占用；风险是 SQL 拼接的空 target_hint 空格与原 inserter 有细微差异，受 import search language/content 回归和既有 import 查询测试控制。
@@ -965,95 +969,8 @@
 - 2026-05-26 code-index SQLite lock guardrail: fast self-iteration adds `code_index_sqlite_lock_cases` so duplicate-process file-backed SQLite indexing reuses the active task/checkpoint and distinct task fingerprints can claim independent leases without waiting behind another running task. Architecture invariants: keep one bounded SQLite writer lane, do not kill competing processes, do not add unbounded busy waits, and keep parsing outside write transactions.
 - 2026-05-27 CLI skill shell-policy guardrail: fast self-iteration adds `skill_metadata_policy_cases` through the shared skill metadata validator so Windows `.exe`, drive-letter, and `assets/windows-*` command examples cannot appear in bash/POSIX code fences. Algorithm and architecture: keep the fix in agent-facing docs plus a deterministic parser over fenced code blocks, not in ad hoc release grep checks. Invariants: POSIX examples must use POSIX binaries or `PATH`; Windows examples must stay in PowerShell or cmd.exe fences; metadata version and description checks remain unchanged. Expected impact: issue #173-style bash execution of Windows asset paths is rejected locally, in fast self-iteration, PR CI, and release validation. Risk: the validator may require docs to spell shell examples more explicitly, which is intentional for agent safety.
 
-## run-1779847461
+## run-1779847461-to-run-1779852601 compacted
+- summary: accepted #191 code-query self-iteration ranking records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.972124 to 0.997401 with 92/92 cases passing; full metrics and changed paths are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779847461.patch`
-- score: 0.972124 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.849559, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=3586ms; self_iteration_cargo_fmt_check_ms=524ms; linux_glibc_compatibility_policy_ms=142ms; skill_metadata_policy_cases_ms=423ms; cargo_build_debug_ms=33465ms; self_iteration_cargo_check_ms=684ms; code_index_recovery_cases_ms=19506ms; code_index_sqlite_lock_cases_ms=20449ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-## run-1779849943
-
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779849943.patch`
-- score: 0.979772 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.892052, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
-- key improvements: score_component:score 0.972124->0.9797723323836461; score_component:performance 0.849559->0.8920524101828967; metric:self_iteration_cargo_fmt_check_ms 524.0->424.0; metric:skill_metadata_policy_cases_ms 423.0->302.0; metric:cargo_build_debug_ms 33465.0->627.0; metric:self_iteration_cargo_check_ms 684.0->542.0; metric:code_index_recovery_cases_ms 19506.0->1067.0; metric:code_index_sqlite_lock_cases_ms 20449.0->1770.0
-- known degradations: metric:cargo_fmt_check_ms 3586.0->4517.0; metric:temporal_samples_go_index_ms 262.0->342.0; metric:temporal_samples_go_register_index_ms 363.0->423.0; metric:cross_language_syntax_fixture_register_index_ms 346.0->890.0; metric:cpp_syntax_fixture_query_p50_ms 302.0->339.0; metric:cpp_syntax_fixture_query_p95_ms 645.0->792.0; metric:c_syntax_fixture_index_ms 162.0->404.0; metric:c_syntax_fixture_register_index_ms 324.0->585.0
-- latency metrics: cargo_fmt_check_ms=4517ms; self_iteration_cargo_fmt_check_ms=424ms; linux_glibc_compatibility_policy_ms=141ms; skill_metadata_policy_cases_ms=302ms; cargo_build_debug_ms=627ms; self_iteration_cargo_check_ms=542ms; code_index_recovery_cases_ms=1067ms; code_index_sqlite_lock_cases_ms=1770ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779852601
-
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779852601.patch`
-- score: 0.997401 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.989988, stability=1.000000)
-- cases: 92/92 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:score 0.974028->0.9974007392537516; score_component:performance 0.86014->0.9899880039057051; metric:cargo_fmt_check_ms 2462.0->866.0; metric:self_iteration_cargo_fmt_check_ms 383.0->121.0; metric:linux_glibc_compatibility_policy_ms 141.0->40.0; metric:skill_metadata_policy_cases_ms 262.0->80.0; metric:cargo_build_debug_ms 20167.0->120.0; metric:self_iteration_cargo_check_ms 584.0->121.0
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=866ms; self_iteration_cargo_fmt_check_ms=121ms; linux_glibc_compatibility_policy_ms=40ms; skill_metadata_policy_cases_ms=80ms; cargo_build_debug_ms=120ms; self_iteration_cargo_check_ms=121ms; code_index_recovery_cases_ms=301ms; code_index_sqlite_lock_cases_ms=482ms
-
-## run-1779847089
-
-- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779847089.patch`
-- score: 0.960406 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.784462, stability=1.000000)
-- cases: 91/91 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: score_component:score 0.842703->0.96040614541092; score_component:semantic_vector 0.0->1.0; gate:semantic_vector_provider_probe false->true; metric:self_iteration_cargo_check_ms 3352.0->564.0; metric:code_index_recovery_cases_ms 887.0->846.0; metric:code_index_sqlite_lock_cases_ms 1692.0->1168.0; metric:code_index_health_isolation_cases_ms 3371.0->2803.0; metric:temporal_samples_go_index_ms 15054.0->14002.0
-- known degradations: score_component:performance 0.859586->0.7844624825566405; metric:cargo_fmt_check_ms 2158.0->2561.0; metric:self_iteration_cargo_fmt_check_ms 344.0->403.0; metric:temporal_sdk_go_index_ms 63471.0->108316.0; metric:temporal_sdk_go_register_index_ms 63552.0->108377.0; metric:grep_budget_fixture_index_ms 61.0->202.0; metric:grep_budget_fixture_register_index_ms 102.0->585.0; metric:grep_budget_fixture_query_p50_ms 61.0->142.0
-- latency metrics: cargo_fmt_check_ms=2561ms; self_iteration_cargo_fmt_check_ms=403ms; linux_glibc_compatibility_policy_ms=122ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=564ms; code_index_recovery_cases_ms=846ms; code_index_sqlite_lock_cases_ms=1168ms; code_index_health_isolation_cases_ms=2803ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779849444
-
-- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779849444.patch`
-- score: 0.962558 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.796416, stability=1.000000)
-- cases: 91/91 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/records.rs`, `src/relay_knowledge/code/parser_identity_tests.rs`, `src/relay_knowledge/code/parser_tests.rs`
-- key improvements: score_component:performance 0.784462->0.7964158487184357; metric:temporal_sdk_go_index_ms 108316.0->98164.0; metric:temporal_sdk_go_register_index_ms 108377.0->98247.0; metric:typescript_syntax_fixture_index_ms 101.0->61.0; metric:typescript_syntax_fixture_register_index_ms 162.0->123.0; metric:typescript_syntax_fixture_query_p50_ms 385.0->222.0; metric:typescript_syntax_fixture_query_p95_ms 2334.0->2036.0; metric:grep_budget_fixture_index_ms 202.0->101.0
-- known degradations: metric:cargo_fmt_check_ms 2561.0->2720.0; metric:self_iteration_cargo_fmt_check_ms 403.0->443.0; metric:cargo_build_debug_ms 343.0->444.0; metric:self_iteration_cargo_check_ms 564.0->604.0; metric:code_index_recovery_cases_ms 846.0->966.0; metric:code_index_sqlite_lock_cases_ms 1168.0->1227.0; metric:code_index_health_isolation_cases_ms 2803.0->2976.0; metric:leveldb_cpp_register_index_ms 323.0->363.0
-- latency metrics: cargo_fmt_check_ms=2720ms; self_iteration_cargo_fmt_check_ms=443ms; linux_glibc_compatibility_policy_ms=121ms; cargo_build_debug_ms=444ms; self_iteration_cargo_check_ms=604ms; code_index_recovery_cases_ms=966ms; code_index_sqlite_lock_cases_ms=1227ms; code_index_health_isolation_cases_ms=2976ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779850939
-
-- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779850939.patch`
-- score: 0.966565 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.818679, stability=1.000000)
-- cases: 91/91 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`
-- key improvements: score_component:performance 0.796416->0.8186792443475324; metric:self_iteration_cargo_fmt_check_ms 443.0->383.0; metric:leveldb_cpp_index_ms 282.0->202.0; metric:leveldb_cpp_register_index_ms 363.0->303.0; metric:leveldb_cpp_query_p50_ms 342.0->183.0; metric:leveldb_cpp_query_p95_ms 669.0->243.0; metric:grep_budget_fixture_register_index_ms 465.0->384.0; metric:relay_teams_index_ms 346495.0->289934.0
-- known degradations: metric:cargo_fmt_check_ms 2720.0->3038.0; metric:cargo_build_debug_ms 444.0->544.0; metric:self_iteration_cargo_check_ms 604.0->894.0; metric:code_index_recovery_cases_ms 966.0->2039.0; metric:code_index_sqlite_lock_cases_ms 1227.0->3260.0; metric:code_index_health_isolation_cases_ms 2976.0->5899.0; metric:temporal_samples_go_index_ms 13749.0->24850.0; metric:temporal_samples_go_register_index_ms 13831.0->24973.0
-- latency metrics: cargo_fmt_check_ms=3038ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=102ms; cargo_build_debug_ms=544ms; self_iteration_cargo_check_ms=894ms; code_index_recovery_cases_ms=2039ms; code_index_sqlite_lock_cases_ms=3260ms; code_index_health_isolation_cases_ms=5899ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1779854865
-
-- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779854865.patch`
-- score: 0.971385 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.845455, stability=1.000000)
-- cases: 91/91 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`
-- key improvements: score_component:score 0.953379->0.9713848177515554; score_component:performance 0.745421->0.845455106671282; metric:cargo_fmt_check_ms 885.0->846.0; metric:cargo_build_debug_ms 19470.0->141.0; metric:self_iteration_cargo_check_ms 463.0->80.0; metric:code_index_recovery_cases_ms 4510.0->342.0; metric:code_index_sqlite_lock_cases_ms 5162.0->462.0; metric:code_index_health_isolation_cases_ms 7158.0->1026.0
-- known degradations: metric:leveldb_cpp_query_p95_ms 849.0->1286.0; metric:cross_language_syntax_fixture_query_p95_ms 406.0->525.0; metric:c_syntax_fixture_register_index_ms 505.0->547.0; metric:c_syntax_fixture_query_p50_ms 362.0->509.0; metric:c_syntax_fixture_query_p95_ms 814.0->1150.0; metric:cpp_syntax_fixture_index_ms 81.0->202.0; metric:cpp_syntax_fixture_query_p50_ms 364.0->488.0; metric:cpp_syntax_fixture_query_p95_ms 786.0->1502.0
-- latency metrics: cargo_fmt_check_ms=846ms; self_iteration_cargo_fmt_check_ms=120ms; linux_glibc_compatibility_policy_ms=40ms; cargo_build_debug_ms=141ms; self_iteration_cargo_check_ms=80ms; code_index_recovery_cases_ms=342ms; code_index_sqlite_lock_cases_ms=462ms; code_index_health_isolation_cases_ms=1026ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1779847089-to-run-1779856832 compacted
+- summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.

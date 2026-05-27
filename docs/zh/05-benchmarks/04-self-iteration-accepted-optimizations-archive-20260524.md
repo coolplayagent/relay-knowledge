@@ -91,3 +91,83 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 ## run-1779722194 compacted
 
 - summary: accepted internal exact-text source fallback, query-aware candidate recovery, external dependency source diagnostics, and self-iteration guardrails. Score 0.972946 with 68/68 cases passing; key gains included competitive capability 0.979592->0.994898, stability 0.993506->1.0, and the late comment source-fallback budget guardrail passing. Known tradeoffs were lower performance score 0.894786->0.855934 and one TypeScript import case rank drop, with full run details retained in the self-iteration patch/report artifacts.
+
+## run-1779847461
+
+- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779847461.patch`
+- score: 0.972124 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.849559, stability=1.000000)
+- cases: 92/92 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_fts.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=3586ms; self_iteration_cargo_fmt_check_ms=524ms; linux_glibc_compatibility_policy_ms=142ms; skill_metadata_policy_cases_ms=423ms; cargo_build_debug_ms=33465ms; self_iteration_cargo_check_ms=684ms; code_index_recovery_cases_ms=19506ms; code_index_sqlite_lock_cases_ms=20449ms
+
+## run-1779849943
+
+- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779849943.patch`
+- score: 0.979772 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.892052, stability=1.000000)
+- cases: 92/92 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`
+- key improvements: score_component:score 0.972124->0.9797723323836461; score_component:performance 0.849559->0.8920524101828967; metric:self_iteration_cargo_fmt_check_ms 524.0->424.0; metric:skill_metadata_policy_cases_ms 423.0->302.0; metric:cargo_build_debug_ms 33465.0->627.0; metric:self_iteration_cargo_check_ms 684.0->542.0; metric:code_index_recovery_cases_ms 19506.0->1067.0; metric:code_index_sqlite_lock_cases_ms 20449.0->1770.0
+- known degradations: metric:cargo_fmt_check_ms 3586.0->4517.0; metric:temporal_samples_go_index_ms 262.0->342.0; metric:temporal_samples_go_register_index_ms 363.0->423.0; metric:cross_language_syntax_fixture_register_index_ms 346.0->890.0; metric:cpp_syntax_fixture_query_p50_ms 302.0->339.0; metric:cpp_syntax_fixture_query_p95_ms 645.0->792.0; metric:c_syntax_fixture_index_ms 162.0->404.0; metric:c_syntax_fixture_register_index_ms 324.0->585.0
+- latency metrics: cargo_fmt_check_ms=4517ms; self_iteration_cargo_fmt_check_ms=424ms; linux_glibc_compatibility_policy_ms=141ms; skill_metadata_policy_cases_ms=302ms; cargo_build_debug_ms=627ms; self_iteration_cargo_check_ms=542ms; code_index_recovery_cases_ms=1067ms; code_index_sqlite_lock_cases_ms=1770ms
+
+## run-1779852601
+
+- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1779852601.patch`
+- score: 0.997401 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.989988, stability=1.000000)
+- cases: 92/92 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbol_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: score_component:score 0.974028->0.9974007392537516; score_component:performance 0.86014->0.9899880039057051; metric:cargo_fmt_check_ms 2462.0->866.0; metric:self_iteration_cargo_fmt_check_ms 383.0->121.0; metric:linux_glibc_compatibility_policy_ms 141.0->40.0; metric:skill_metadata_policy_cases_ms 262.0->80.0; metric:cargo_build_debug_ms 20167.0->120.0; metric:self_iteration_cargo_check_ms 584.0->121.0
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=866ms; self_iteration_cargo_fmt_check_ms=121ms; linux_glibc_compatibility_policy_ms=40ms; skill_metadata_policy_cases_ms=80ms; cargo_build_debug_ms=120ms; self_iteration_cargo_check_ms=121ms; code_index_recovery_cases_ms=301ms; code_index_sqlite_lock_cases_ms=482ms
+
+## run-1779847089
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779847089.patch`
+- score: 0.960406 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.784462, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: score_component:score 0.842703->0.96040614541092; score_component:semantic_vector 0.0->1.0; gate:semantic_vector_provider_probe false->true; metric:self_iteration_cargo_check_ms 3352.0->564.0; metric:code_index_recovery_cases_ms 887.0->846.0; metric:code_index_sqlite_lock_cases_ms 1692.0->1168.0; metric:code_index_health_isolation_cases_ms 3371.0->2803.0; metric:temporal_samples_go_index_ms 15054.0->14002.0
+- known degradations: score_component:performance 0.859586->0.7844624825566405; metric:cargo_fmt_check_ms 2158.0->2561.0; metric:self_iteration_cargo_fmt_check_ms 344.0->403.0; metric:temporal_sdk_go_index_ms 63471.0->108316.0; metric:temporal_sdk_go_register_index_ms 63552.0->108377.0; metric:grep_budget_fixture_index_ms 61.0->202.0; metric:grep_budget_fixture_register_index_ms 102.0->585.0; metric:grep_budget_fixture_query_p50_ms 61.0->142.0
+- latency metrics: cargo_fmt_check_ms=2561ms; self_iteration_cargo_fmt_check_ms=403ms; linux_glibc_compatibility_policy_ms=122ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=564ms; code_index_recovery_cases_ms=846ms; code_index_sqlite_lock_cases_ms=1168ms; code_index_health_isolation_cases_ms=2803ms
+
+## run-1779849444
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779849444.patch`
+- score: 0.962558 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.796416, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser.rs`, `src/relay_knowledge/code/parser/records.rs`, `src/relay_knowledge/code/parser_identity_tests.rs`, `src/relay_knowledge/code/parser_tests.rs`
+- key improvements: score_component:performance 0.784462->0.7964158487184357; metric:temporal_sdk_go_index_ms 108316.0->98164.0; metric:temporal_sdk_go_register_index_ms 108377.0->98247.0; metric:typescript_syntax_fixture_index_ms 101.0->61.0; metric:typescript_syntax_fixture_register_index_ms 162.0->123.0; metric:typescript_syntax_fixture_query_p50_ms 385.0->222.0; metric:typescript_syntax_fixture_query_p95_ms 2334.0->2036.0; metric:grep_budget_fixture_index_ms 202.0->101.0
+- known degradations: metric:cargo_fmt_check_ms 2561.0->2720.0; metric:self_iteration_cargo_fmt_check_ms 403.0->443.0; metric:cargo_build_debug_ms 343.0->444.0; metric:self_iteration_cargo_check_ms 564.0->604.0; metric:code_index_recovery_cases_ms 846.0->966.0; metric:code_index_sqlite_lock_cases_ms 1168.0->1227.0; metric:code_index_health_isolation_cases_ms 2803.0->2976.0; metric:leveldb_cpp_register_index_ms 323.0->363.0
+- latency metrics: cargo_fmt_check_ms=2720ms; self_iteration_cargo_fmt_check_ms=443ms; linux_glibc_compatibility_policy_ms=121ms; cargo_build_debug_ms=444ms; self_iteration_cargo_check_ms=604ms; code_index_recovery_cases_ms=966ms; code_index_sqlite_lock_cases_ms=1227ms; code_index_health_isolation_cases_ms=2976ms
+
+## run-1779850939
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779850939.patch`
+- score: 0.966565 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.818679, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_tests.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`
+- key improvements: score_component:performance 0.796416->0.8186792443475324; metric:self_iteration_cargo_fmt_check_ms 443.0->383.0; metric:leveldb_cpp_index_ms 282.0->202.0; metric:leveldb_cpp_register_index_ms 363.0->303.0; metric:leveldb_cpp_query_p50_ms 342.0->183.0; metric:leveldb_cpp_query_p95_ms 669.0->243.0; metric:grep_budget_fixture_register_index_ms 465.0->384.0; metric:relay_teams_index_ms 346495.0->289934.0
+- known degradations: metric:cargo_fmt_check_ms 2720.0->3038.0; metric:cargo_build_debug_ms 444.0->544.0; metric:self_iteration_cargo_check_ms 604.0->894.0; metric:code_index_recovery_cases_ms 966.0->2039.0; metric:code_index_sqlite_lock_cases_ms 1227.0->3260.0; metric:code_index_health_isolation_cases_ms 2976.0->5899.0; metric:temporal_samples_go_index_ms 13749.0->24850.0; metric:temporal_samples_go_register_index_ms 13831.0->24973.0
+- latency metrics: cargo_fmt_check_ms=3038ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=102ms; cargo_build_debug_ms=544ms; self_iteration_cargo_check_ms=894ms; code_index_recovery_cases_ms=2039ms; code_index_sqlite_lock_cases_ms=3260ms; code_index_health_isolation_cases_ms=5899ms
+
+## run-1779854865
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779854865.patch`
+- score: 0.971385 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.845455, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_batch/finalize.rs`, `src/relay_knowledge/storage/sqlite/code_batch/finalize_search.rs`, `src/relay_knowledge/storage/sqlite/code_batch_search_tests.rs`
+- key improvements: score_component:score 0.953379->0.9713848177515554; score_component:performance 0.745421->0.845455106671282; metric:cargo_fmt_check_ms 885.0->846.0; metric:cargo_build_debug_ms 19470.0->141.0; metric:self_iteration_cargo_check_ms 463.0->80.0; metric:code_index_recovery_cases_ms 4510.0->342.0; metric:code_index_sqlite_lock_cases_ms 5162.0->462.0; metric:code_index_health_isolation_cases_ms 7158.0->1026.0
+- known degradations: metric:leveldb_cpp_query_p95_ms 849.0->1286.0; metric:cross_language_syntax_fixture_query_p95_ms 406.0->525.0; metric:c_syntax_fixture_register_index_ms 505.0->547.0; metric:c_syntax_fixture_query_p50_ms 362.0->509.0; metric:c_syntax_fixture_query_p95_ms 814.0->1150.0; metric:cpp_syntax_fixture_index_ms 81.0->202.0; metric:cpp_syntax_fixture_query_p50_ms 364.0->488.0; metric:cpp_syntax_fixture_query_p95_ms 786.0->1502.0
+- latency metrics: cargo_fmt_check_ms=846ms; self_iteration_cargo_fmt_check_ms=120ms; linux_glibc_compatibility_policy_ms=40ms; cargo_build_debug_ms=141ms; self_iteration_cargo_check_ms=80ms; code_index_recovery_cases_ms=342ms; code_index_sqlite_lock_cases_ms=462ms; code_index_health_isolation_cases_ms=1026ms
+
+## run-1779856832
+
+- patch: `/opt/workspace/relay-kownledge-process/.git/relay-knowledge-self-iteration/patches-v2/run-1779856832.patch`
+- score: 0.979657 (foundational=1.000000, competitive=0.996377, accuracy=0.998188, semantic_vector=1.000000, research_judge=n/a, performance=0.891409, stability=1.000000)
+- cases: 91/91 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_calls.rs`
+- key improvements: score_component:score 0.965217->0.9796565281799409; score_component:performance 0.811191->0.8914090534956454; metric:cargo_fmt_check_ms 2853.0->2254.0; metric:self_iteration_cargo_fmt_check_ms 549.0->261.0; metric:linux_glibc_compatibility_policy_ms 203.0->80.0; metric:cargo_build_debug_ms 41352.0->342.0; metric:code_index_recovery_cases_ms 6288.0->824.0; metric:code_index_sqlite_lock_cases_ms 7013.0->1205.0
+- known degradations: metric:self_iteration_cargo_check_ms 524.0->563.0; metric:temporal_sdk_go_index_ms 77853.0->91550.0; metric:temporal_sdk_go_register_index_ms 77955.0->91633.0; metric:nonstandard_layout_fixture_query_p95_ms 625.0->847.0; metric:cross_language_syntax_fixture_index_ms 5357.0->6140.0; metric:cross_language_syntax_fixture_register_index_ms 5598.0->6241.0; metric:temporal_go_workspace_repo_set_refresh_ms 1209.0->1267.0
+- latency metrics: cargo_fmt_check_ms=2254ms; self_iteration_cargo_fmt_check_ms=261ms; linux_glibc_compatibility_policy_ms=80ms; cargo_build_debug_ms=342ms; self_iteration_cargo_check_ms=563ms; code_index_recovery_cases_ms=824ms; code_index_sqlite_lock_cases_ms=1205ms; code_index_health_isolation_cases_ms=3773ms

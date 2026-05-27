@@ -256,7 +256,7 @@ fn api_identity_rows_can_answer_without_fts(
             rows.matched_identity_count == identities.len()
                 && api_identity_query_terms_are_closed(&request.query, identities)
         }
-        CodeQueryKind::Hybrid => true,
+        CodeQueryKind::Hybrid => rows.matched_identity_count == identities.len(),
         _ => false,
     }
 }
@@ -742,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn api_dense_hybrid_query_skips_broad_symbol_fts_for_partial_or_empty_identity_lookup() {
+    fn api_dense_hybrid_query_keeps_broad_symbol_fts_for_partial_or_empty_identity_lookup() {
         let request = make_request(
             "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",
             CodeQueryKind::Hybrid,
@@ -764,12 +764,12 @@ mod tests {
             saturated: true,
         };
 
-        assert!(api_identity_rows_can_answer_without_fts(
+        assert!(!api_identity_rows_can_answer_without_fts(
             &request,
             &identities,
             &partial_rows
         ));
-        assert!(api_identity_rows_can_answer_without_fts(
+        assert!(!api_identity_rows_can_answer_without_fts(
             &request,
             &identities,
             &empty_rows
