@@ -515,7 +515,7 @@ pub struct CodeIndexResourceBudget {
 }
 
 impl CodeIndexResourceBudget {
-    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 256;
+    pub const DEFAULT_MAX_FILES_PER_BATCH: usize = 512;
     pub const DEFAULT_MAX_BYTES_PER_BATCH: usize = 16 * 1024 * 1024;
     pub const DEFAULT_MAX_ROWS_PER_BATCH: usize = 50_000;
 

@@ -122,13 +122,15 @@ distinct task fingerprints can claim independent leases without waiting behind
 another running task.
 `fast` also runs a registration guardrail proving `repo register --language`
 is rejected so mixed C/C++ repositories cannot be narrowed at registration.
-`fast` evaluates `c_syntax_fixture`, `cpp_syntax_fixture`,
+`fast` evaluates `index_performance_many_files`, `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
 `nonstandard_layout_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`,
 `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
-runs the semantic/vector guardrail query. The project alias fixture registers a
+runs the semantic/vector guardrail query. The generated index-performance
+fixture creates 1024 small Rust files and guards cold register-to-index
+throughput without depending on an external checkout. The project alias fixture registers a
 generated repository without `--alias`, adds a session-style explicit alias to
 the same root before indexing, and verifies both aliases reuse the same indexed
 scope. The TypeScript, C, and C++ syntax
@@ -154,7 +156,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
@@ -449,10 +451,13 @@ enumerating cases.
   `opentelemetry-collector-contrib` to `opentelemetry-collector` usage.
 - Repository register-to-index performance targets in
   `cases/repository_index_performance_targets.json` tighten `index_budget_ms`
-  and add combined `register_index_budget_ms` budgets. The evaluator records
-  both `*_index_ms` and `*_register_index_ms` so self-iteration prioritizes cold
-  indexing wall time after `repo register`, including batching, parser
-  throughput, SQLite writes, finalize work, and incremental reuse.
+  and add combined `register_index_budget_ms` budgets. The default fast profile
+  includes the generated `index_performance_many_files` repository so cold
+  throughput regressions are visible even when external large repositories are
+  absent. The evaluator records both `*_index_ms` and `*_register_index_ms` so
+  self-iteration prioritizes cold indexing wall time after `repo register`,
+  including batching, parser throughput, SQLite writes, finalize work, and
+  incremental reuse.
 - The fast profile runs `code_index_health_isolation_cases` as a product gate.
   The case indexes a no-language-filter repository update while checking that
   health remains bounded and `repo query --freshness allow-stale` can read the

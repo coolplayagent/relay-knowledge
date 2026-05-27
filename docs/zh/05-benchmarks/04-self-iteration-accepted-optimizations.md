@@ -1,6 +1,9 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-issue-168-large-repository-index-throughput
+- 算法/架构：全量代码索引默认批次从 256 个文件提升到 512 个文件，但继续受 16 MiB blob 和 50k row 双预算约束；checkpointed SQLite apply path 在首个新 batch 上跳过空 scope 的 path-index existence probe，后续 batch 仍保留碰撞检测和重放清理，避免破坏幂等性。self-iteration 默认 fast 新增 `index_performance_many_files` 生成式仓库，创建 1024 个小 Rust 文件并测量真实 `repo register` + `repo index` 的 `*_register_index_ms` 与 `*_index_ms`。
+- 不变量/预期影响/风险：不改变 CLI/API wire shape、SQLite schema、parser facts、FTS 文档语义、edge finalize、freshness/status、task lease/checkpoint 或 source fallback 预算；性能优化不得通过跳过索引、扩大无界 timeout、禁用 FTS、隐藏 degraded 状态或枚举仓库/路径/query/case 获得。预期改善 Issue #168 的大仓冷索引吞吐，并让 fast/performance profile 在外部大仓缺失时仍能捕获回归；风险是单批内存占用上升，受 byte/row cap、现有 batch replay/path collision 测试和新增 self-iteration guardrail 控制。
 ## 候选优化说明：manual-issue-170-project-default-repository-alias
 - 算法/架构：代码仓库注册路径在解析 Git root 后，如果 CLI/API/Web 请求没有提供 alias 或 alias 为空，则用 Git root 目录名生成稳定默认 alias；显式 `--alias` 保持原有覆盖语义，SQLite 既有多 alias 映射继续让同一 repository id 的项目名 alias 与 session 临时 alias 共存。CLI spec 拆出 repo command 模块以保持文件长度约束，业务入口仍共享同一 `register_repository` 归一化路径。
 - 不变量/预期影响/风险：不改变 repository id、scope id、索引事实版本、SQLite schema、查询 ranking、repo-set overlay、semantic/vector read model、env/paths/net、安装发布或服务后台任务；默认 alias 只来自本地已授权 Git root 的目录名，不读取 package manifest，也不枚举仓库、路径、case id 或查询字符串。预期解决 Issue #170 中 agent 初次注册每个 session 自造不同 alias 导致索引不可复用的问题，并让后续 session 默认用项目名命中同一索引；风险是根目录名为空或非 UTF-8 时返回显式注册错误，受代码单测、CLI/Web 请求测试和 fast `project_alias_fixture` guardrail 控制。

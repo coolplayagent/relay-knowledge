@@ -505,6 +505,7 @@ fn fast_repository_names() -> Vec<String> {
         .unwrap_or_else(|| {
             vec![
                 "grep_budget_fixture".to_owned(),
+                "index_performance_many_files".to_owned(),
                 "c_syntax_fixture".to_owned(),
                 "cpp_syntax_fixture".to_owned(),
                 "cross_language_syntax_fixture".to_owned(),
@@ -924,6 +925,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "grep_budget_v1" {
         return write_grep_budget_fixture(root);
     }
+    if fixture == "index_performance_many_files_v1" {
+        return write_index_performance_many_files_fixture(root);
+    }
     for (path, content) in generated_repository_files(fixture)? {
         write_fixture_file(&root.join(path), content)?;
     }
@@ -1104,6 +1108,23 @@ int late_budget_target(void)
 }
 "#,
     )
+}
+
+fn write_index_performance_many_files_fixture(root: &Path) -> Result<(), String> {
+    for index in 0..1024 {
+        let shard = index / 64;
+        write_fixture_file(
+            &root
+                .join("src")
+                .join(format!("shard_{shard:03}"))
+                .join(format!("file_{index:04}.rs")),
+            &format!(
+                "pub fn rk_perf_target_{index:04}(input: u64) -> u64 {{ input + {index} }}\n"
+            ),
+        )?;
+    }
+
+    Ok(())
 }
 
 fn commit_generated_repository(
