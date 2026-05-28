@@ -1,4 +1,7 @@
-use crate::api::{ApiMetadata, ApiStreamEvent, ProjectStatusResponse, StreamEventKind};
+use crate::{
+    api::{ApiMetadata, ApiStreamEvent, ProjectStatusResponse, StreamEventKind},
+    project::KNOWLEDGE_MAP_RELATIVE_PATH,
+};
 
 use super::{CliError, OutputFormat};
 
@@ -88,6 +91,36 @@ where
             "refreshed_indexes={}",
             value["indexes"].as_array().map_or(0, Vec::len)
         ),
+        "knowledge.map.init"
+        | "knowledge.map.source.add"
+        | "knowledge.map.source.update"
+        | "knowledge.map.source.remove" => format!(
+            "knowledge_map={} version={}",
+            value["path"]
+                .as_str()
+                .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
+            value["map_version"].as_u64().unwrap_or(0)
+        ),
+        "knowledge.map.show" => format!(
+            "knowledge_map={} topics={} sources={} routes={}",
+            value["path"]
+                .as_str()
+                .unwrap_or(KNOWLEDGE_MAP_RELATIVE_PATH),
+            value["map"]["topics"].as_array().map_or(0, Vec::len),
+            value["map"]["sources"].as_array().map_or(0, Vec::len),
+            value["map"]["routes"].as_array().map_or(0, Vec::len)
+        ),
+        "knowledge.map.route" => format!(
+            "topic={} sources={}",
+            value["topic"].as_str().unwrap_or("unknown"),
+            value["sources"].as_array().map_or(0, Vec::len)
+        ),
+        "knowledge.map.validate" => format!(
+            "knowledge_map_valid={} diagnostics={}",
+            value["valid"].as_bool().unwrap_or(false),
+            value["diagnostics"].as_array().map_or(0, Vec::len)
+        ),
+        "knowledge.map.agent_snippet" => value["snippet"].as_str().unwrap_or("").to_owned(),
         "worker.status" => format!(
             "workers={}",
             value["workers"].as_array().map_or(0, Vec::len)

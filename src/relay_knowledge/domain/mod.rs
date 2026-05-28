@@ -11,6 +11,7 @@ mod entity;
 mod error;
 mod graph_version;
 mod index;
+mod knowledge_map;
 mod multimodal;
 mod mutation;
 mod operational;
@@ -50,6 +51,10 @@ pub use entity::KnowledgeEntity;
 pub use error::DomainError;
 pub use graph_version::GraphVersion;
 pub use index::{IndexKind, IndexModality, IndexState, IndexStatus};
+pub use knowledge_map::{
+    KnowledgeMap, KnowledgeMapChange, KnowledgeMapHistoryEntry, KnowledgeMapRoute,
+    KnowledgeMapSource, KnowledgeMapSourceKind, KnowledgeMapTopic,
+};
 pub use multimodal::{
     EvidenceExtractionMetadata, EvidenceModality, ExtractionDiagnostic, ExtractionStatus,
     LayoutRegion,

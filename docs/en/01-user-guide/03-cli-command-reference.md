@@ -84,6 +84,14 @@ relay-knowledge status
 relay-knowledge help [command...] [--format text|json]
 relay-knowledge ingest --source <scope> --content <text> [--entity <label>]
 relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]
+relay-knowledge map init
+relay-knowledge map show [--topic <id>]
+relay-knowledge map route <topic>
+relay-knowledge map source add --id <id> --topic <id> --kind repo|file|doc|config|db|ci|runtime|wiki|monitoring --uri <uri> [--scope <source_scope>] [--description <text>]
+relay-knowledge map source update --id <id> [--topic <id>] [--kind repo|file|doc|config|db|ci|runtime|wiki|monitoring] [--uri <uri>] [--scope <source_scope>] [--description <text>]
+relay-knowledge map source remove --id <id>
+relay-knowledge map validate
+relay-knowledge map agent-snippet
 relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
@@ -123,9 +131,11 @@ Cold full `repo index` requests return a durable task handle immediately and sta
 
 `repo software` reads the software global-model projection for the selected repository scope. `--kind dependencies` returns package components derived from manifests and lockfiles; `--kind sdks` returns unresolved external import/include targets as SDK or API-surface usage candidates with `resolution_state`, `target_hint`, evidence path, and line range. The command does not scan package caches, SDK directories, or unindexed external source; rerun `repo index` or `repo update` to refresh the projection after source-scope changes.
 
+`map` commands maintain the repository-local `.knowledge/knowledge-map.yaml` knowledge navigation contract. The YAML stores topic, source, route, and history metadata only; it does not copy authoritative knowledge out of documents, code, config, CI, runtime systems, or external sources. One topic can contain multiple sources, and `map source add` appends distinct source ids to that topic route order. LLM agents should use `map show` and `map route` to locate sources, maintain the contract through `map source add/update/remove`, and run `map validate --format json` after changes. AGENTS.md should keep only a stable reference such as `Knowledge map: .knowledge/knowledge-map.yaml`.
+
 ## 3.5 Read and Write Impact
 
-Status, health, help, setup doctor/profile, provider probe, version check, report, and audit query are diagnostic entry points and should not mutate graph facts. `health` is a liveness fast path: it does not queue index refresh work and does not wait for a code-index writer to finish; when storage is busy it may return stale/degraded `storage_busy`. `version check` may only refresh the version-check cache under the runtime cache directory. `ingest`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, or service definitions.
+Status, health, help, setup doctor/profile, provider probe, version check, report, map show/route/validate/agent-snippet, and audit query are diagnostic entry points and should not mutate graph facts. `health` is a liveness fast path: it does not queue index refresh work and does not wait for a code-index writer to finish; when storage is busy it may return stale/degraded `storage_busy`. `version check` may only refresh the version-check cache under the runtime cache directory. `ingest`, `map init`, `map source add/update/remove`, `repo index`, `repo update`, `index refresh`, `worker run-once`, proposal state changes, and service definition write can write runtime state, derived indexes, proposals/audit, the knowledge navigation contract, or service definitions.
 
 Automated callers should read operation and read/write metadata from `help --format json` before exposing a command in CI, agents, or the Web operation surface.
 

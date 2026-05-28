@@ -27,6 +27,8 @@ are not a `repo query --kind` value.
 - `SKILL.md`: agent instructions and skill metadata.
 - `agents/openai.yaml`: UI metadata for OpenAI-compatible agent surfaces.
 - `references/cli-workflows.md`: detailed CLI workflows and safety defaults.
+- `references/knowledge-map-workflows.md`: agent workflow for CRUD operations
+  on the `.knowledge/knowledge-map.yaml` navigation contract.
 - `assets/linux-x86_64/relay-knowledge`: Linux x64 release binary in generated
   release packages, built and checked against the glibc 2.31 baseline.
 - `assets/windows-x86_64/relay-knowledge.exe`: Windows x64 release binary in

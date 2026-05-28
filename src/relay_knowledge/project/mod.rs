@@ -18,6 +18,15 @@ pub const MODEL_FALLBACK_FILE_NAME: &str = "model-fallback.json";
 /// Model catalog cache filename stored under the cache directory.
 pub const MODEL_CATALOG_CACHE_FILE_NAME: &str = "model-catalog-cache.json";
 
+/// Repository-relative directory that stores shared agent contracts.
+pub const AGENT_CONTRACT_DIR_NAME: &str = ".knowledge";
+
+/// Repository-relative knowledge navigation contract filename.
+pub const KNOWLEDGE_MAP_FILE_NAME: &str = "knowledge-map.yaml";
+
+/// Repository-relative knowledge navigation contract path referenced by agents.
+pub const KNOWLEDGE_MAP_RELATIVE_PATH: &str = ".knowledge/knowledge-map.yaml";
+
 /// Version-check cache filename stored under the cache directory.
 pub const VERSION_CHECK_CACHE_FILE_NAME: &str = "version-check-cache.json";
 

@@ -119,6 +119,8 @@ fn option_value_width(option: &str, next: Option<&str>) -> usize {
             | "--base"
             | "--head"
             | "--query"
+            | "--description"
+            | "--id"
             | "--mcp"
             | "--state"
             | "--by"
@@ -126,6 +128,9 @@ fn option_value_width(option: &str, next: Option<&str>) -> usize {
             | "--operation"
             | "--input"
             | "--root"
+            | "--scope"
+            | "--topic"
+            | "--uri"
     ) {
         2
     } else {
@@ -196,6 +201,7 @@ fn unexpected_token(error: &CliError) -> Option<String> {
         | CliError::InvalidCodeQueryKind(value)
         | CliError::InvalidFreshness(value)
         | CliError::InvalidIndexKind(value)
+        | CliError::InvalidMapSourceKind(value)
         | CliError::InvalidWorkerKind(value)
         | CliError::InvalidProposalState(value)
         | CliError::InvalidServiceAction(value)
@@ -224,6 +230,7 @@ fn suggestion_for(
         CliError::InvalidCodeQueryKind(value)
         | CliError::InvalidFreshness(value)
         | CliError::InvalidIndexKind(value)
+        | CliError::InvalidMapSourceKind(value)
         | CliError::InvalidWorkerKind(value)
         | CliError::InvalidProposalState(value)
         | CliError::InvalidServiceAction(value) => enum_value_suggestion(command, value)

@@ -943,6 +943,7 @@ fn service_definition_filename() -> &'static str {
 }
 
 mod health;
+pub(crate) mod knowledge_map;
 
 #[cfg(test)]
 mod id_tests;

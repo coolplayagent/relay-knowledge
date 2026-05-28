@@ -81,6 +81,14 @@ relay-knowledge status
 relay-knowledge help [command...] [--format text|json]
 relay-knowledge ingest --source <scope> --content <text> [--entity <label>]
 relay-knowledge query <text> [--source <scope>] [--limit <n>] [--freshness allow-stale|wait-until-fresh|graph-only]
+relay-knowledge map init
+relay-knowledge map show [--topic <id>]
+relay-knowledge map route <topic>
+relay-knowledge map source add --id <id> --topic <id> --kind repo|file|doc|config|db|ci|runtime|wiki|monitoring --uri <uri> [--scope <source_scope>] [--description <text>]
+relay-knowledge map source update --id <id> [--topic <id>] [--kind repo|file|doc|config|db|ci|runtime|wiki|monitoring] [--uri <uri>] [--scope <source_scope>] [--description <text>]
+relay-knowledge map source remove --id <id>
+relay-knowledge map validate
+relay-knowledge map agent-snippet
 relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
@@ -120,9 +128,11 @@ relay-knowledge version check
 
 `repo software` 读取所选 repository scope 的软件全域模型投影。`--kind dependencies` 返回由 manifest 和 lockfile 生成的包组件；`--kind sdks` 返回 unresolved external import/include 目标，作为 SDK 或 API surface 使用候选，并保留 `resolution_state`、`target_hint`、证据路径和行号。该命令不会扫描包缓存、SDK 目录或未索引外部源码；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
 
+`map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。该 YAML 文件只保存 topic、source、route 和 history 元数据，不复制真实知识内容；真实知识仍以文档、代码、配置、CI、运行态系统或外部知识源为准。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
+
 ## 3.5 读写影响
 
-状态、健康、帮助、setup doctor/profile、provider probe、version check、report 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit 或 service definition。
+状态、健康、帮助、setup doctor/profile、provider probe、version check、report、map show/route/validate/agent-snippet 和 audit query 是诊断入口，不应修改图谱事实。`health` 是 liveness 快路径，不会排队 index refresh，也不会等待 code-index writer 完成；存储繁忙时它可以返回 stale/degraded `storage_busy`。`version check` 只可能刷新 runtime cache 下的版本检查缓存。`ingest`、`map init`、`map source add/update/remove`、`repo index`、`repo update`、`index refresh`、`worker run-once`、proposal 状态变更和 service definition write 会写入运行时状态、派生索引、proposal/audit、知识导航契约或 service definition。
 
 自动化调用方应优先读取 `help --format json` 中的 operation 和 read/write 说明，再决定是否在 CI、agent 或 Web 操作面中开放命令。
 
