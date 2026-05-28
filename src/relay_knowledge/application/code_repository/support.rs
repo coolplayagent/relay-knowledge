@@ -463,7 +463,7 @@ pub(super) fn now_millis() -> u64 {
         })
 }
 
-async fn indexed_commit_for_ref(
+pub(super) async fn indexed_commit_for_ref(
     status: &CodeRepositoryStatus,
     ref_selector: String,
 ) -> Result<String, ApiError> {

@@ -17,7 +17,8 @@ use crate::{
         IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
         ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorStatus, WorkerKind, WorkerStatus, WorkerTaskRecord,
+        ServiceManagerAction, ServiceOperatorStatus, SoftwareComponent, SoftwareGlobalRequest,
+        SoftwareGlobalStatus, SoftwareSdkUsage, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -761,6 +762,17 @@ pub struct CodeRepositoryReportResponse {
     pub metadata: ApiMetadata,
     pub scope: CodeRepositoryScopeMetadata,
     pub report: CodeRepositoryReport,
+}
+
+/// Repository-scoped software global model projection response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareGlobalResponse {
+    pub metadata: ApiMetadata,
+    pub scope: CodeRepositoryScopeMetadata,
+    pub request: SoftwareGlobalRequest,
+    pub status: SoftwareGlobalStatus,
+    pub components: Vec<SoftwareComponent>,
+    pub sdk_usages: Vec<SoftwareSdkUsage>,
 }
 
 /// Repository-set creation response.

@@ -20,6 +20,9 @@ pub(super) fn delete_scope_index(
         "code_repository_symbols",
         "code_repository_files",
         "code_repository_search",
+        "software_components",
+        "software_sdk_usages",
+        "software_global_status",
     ] {
         transaction.execute(
             &format!("DELETE FROM {table} WHERE source_scope = ?1"),
@@ -154,6 +157,95 @@ mod tests {
         "code_repository_symbols",
         "code_repository_files",
     ];
+
+    const SCOPE_TABLES: &[&str] = &[
+        "code_repository_path_tombstones",
+        "code_repository_file_diagnostics",
+        "code_repository_chunks",
+        "code_repository_calls",
+        "code_repository_feature_flags",
+        "code_repository_dependencies",
+        "code_repository_imports",
+        "code_repository_references",
+        "code_repository_symbols",
+        "code_repository_files",
+        "software_components",
+        "software_sdk_usages",
+        "software_global_status",
+    ];
+
+    #[test]
+    fn delete_scope_index_removes_software_projection_tables() {
+        let mut connection = Connection::open_in_memory().expect("connection should open");
+        for table in SCOPE_TABLES {
+            connection
+                .execute(
+                    &format!("CREATE TABLE {table} (source_scope TEXT NOT NULL)"),
+                    [],
+                )
+                .expect("table should create");
+            connection
+                .execute(
+                    &format!("INSERT INTO {table} (source_scope) VALUES ('scope'), ('other')"),
+                    [],
+                )
+                .expect("rows should insert");
+        }
+        connection
+            .execute(
+                "
+                CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                    source_scope UNINDEXED,
+                    document_kind UNINDEXED,
+                    record_id UNINDEXED,
+                    path UNINDEXED,
+                    language_id UNINDEXED,
+                    content
+                )
+                ",
+                [],
+            )
+            .expect("search table should create");
+        connection
+            .execute(
+                "
+                INSERT INTO code_repository_search (
+                    source_scope, document_kind, record_id, path, language_id, content
+                )
+                VALUES ('scope', 'symbol', 'a', 'src/a.rs', 'rust', 'target'),
+                       ('other', 'symbol', 'b', 'src/b.rs', 'rust', 'target')
+                ",
+                [],
+            )
+            .expect("search rows should insert");
+
+        let transaction = connection.transaction().expect("transaction should open");
+        delete_scope_index(&transaction, "scope").expect("scope should delete");
+        transaction.commit().expect("transaction should commit");
+
+        for table in SCOPE_TABLES
+            .iter()
+            .copied()
+            .chain(["code_repository_search"])
+        {
+            let deleted_remaining = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'scope'"),
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .expect("deleted row count should load");
+            let retained_remaining = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE source_scope = 'other'"),
+                    [],
+                    |row| row.get::<_, usize>(0),
+                )
+                .expect("retained row count should load");
+            assert_eq!(deleted_remaining, 0, "{table} should delete pruned scope");
+            assert_eq!(retained_remaining, 1, "{table} should keep other scope");
+        }
+    }
 
     #[test]
     fn delete_path_indexes_removes_multiple_paths_from_all_path_tables() {

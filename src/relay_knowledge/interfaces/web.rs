@@ -33,7 +33,8 @@ use crate::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest, CodeQueryKind,
         CodeRepositorySelector, CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
         CodeRepositorySetQueryRequest, CodeRepositorySetRemoveMemberRequest, CodeRetrievalRequest,
-        FreshnessPolicy, IndexKind, ProposalState, WorkerKind,
+        FreshnessPolicy, IndexKind, ProposalState, SoftwareGlobalKind, SoftwareGlobalRequest,
+        WorkerKind,
     },
 };
 
@@ -330,6 +331,12 @@ async fn dispatch_operation(
                 .await?;
             Ok((response.metadata.clone(), json!(response)))
         }
+        "code.repo.software" => {
+            let response = service
+                .software_global_projection(code_software_request(payload)?, context)
+                .await?;
+            Ok((response.metadata.clone(), json!(response)))
+        }
         "code.repo.status" => {
             let response = service
                 .code_repository_status(code_selector(payload)?, context)
@@ -589,6 +596,16 @@ fn code_impact_request(payload: &Value) -> Result<CodeImpactRequest, WebError> {
     .map_err(|error| WebError::bad_request(error.to_string()))
 }
 
+fn code_software_request(payload: &Value) -> Result<SoftwareGlobalRequest, WebError> {
+    SoftwareGlobalRequest::new(
+        code_selector(payload)?,
+        parse_software_kind(string_field(payload, "kind")?)?,
+        parse_freshness(string_field(payload, "freshness")?)?,
+        usize_field(payload, "limit")?,
+    )
+    .map_err(|error| WebError::bad_request(error.to_string()))
+}
+
 fn code_selector(payload: &Value) -> Result<CodeRepositorySelector, WebError> {
     CodeRepositorySelector::new(
         string_field(payload, "alias")?,
@@ -766,6 +783,17 @@ fn parse_code_query_kind(value: &str) -> Result<CodeQueryKind, WebError> {
         "sbom" => Ok(CodeQueryKind::Sbom),
         other => Err(WebError::bad_request(format!(
             "unsupported code query kind '{other}'"
+        ))),
+    }
+}
+
+fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
+    match value {
+        "dependencies" => Ok(SoftwareGlobalKind::Dependencies),
+        "sdks" => Ok(SoftwareGlobalKind::Sdks),
+        "all" => Ok(SoftwareGlobalKind::All),
+        other => Err(WebError::bad_request(format!(
+            "unsupported software kind '{other}'"
         ))),
     }
 }

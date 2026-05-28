@@ -214,6 +214,15 @@ where
                 .as_str()
                 .unwrap_or("unknown")
         ),
+        "code.repo.software" => format!(
+            "software scope={} components={} sdk_usages={} stale={}",
+            value["status"]["source_scope"]
+                .as_str()
+                .unwrap_or("unknown"),
+            value["components"].as_array().map_or(0, Vec::len),
+            value["sdk_usages"].as_array().map_or(0, Vec::len),
+            value["status"]["stale"].as_bool().unwrap_or(true)
+        ),
         "service.plan" => format!(
             "service_plan={} path={}",
             value["plan"]["action"].as_str().unwrap_or("install"),

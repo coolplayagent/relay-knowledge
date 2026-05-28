@@ -126,6 +126,10 @@ impl RelayKnowledgeService {
             .await
             .map_err(storage_api_error)?
             .ok_or_else(|| ApiError::storage_unavailable("code repository status is missing"))?;
+        let software_projection = store
+            .refresh_software_global_projection(summary.source_scope.clone())
+            .await
+            .map_err(storage_api_error)?;
         let graph_version = store
             .current_graph_version()
             .await
@@ -139,7 +143,12 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector.clone(),
             ),
             summary,
-            status,
+            status: CodeRepositoryStatus {
+                degraded_reason: status
+                    .degraded_reason
+                    .or(software_projection.status.last_error.clone()),
+                ..status
+            },
         })
     }
 
@@ -438,16 +447,21 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
+        let source_scope = scoped_status
+            .last_indexed_scope_id
+            .clone()
+            .unwrap_or_default();
+        let software_projection = store
+            .refresh_software_global_projection(source_scope.clone())
+            .await
+            .map_err(storage_api_error)?;
         let report = store
             .code_repository_report(scoped_status.repository_id.clone())
             .await
             .map_err(storage_api_error)?;
         let summary = crate::domain::CodeIndexSummary {
             repository_id: scoped_status.repository_id.clone(),
-            source_scope: scoped_status
-                .last_indexed_scope_id
-                .clone()
-                .unwrap_or_default(),
+            source_scope,
             resolved_commit_sha,
             tree_hash,
             indexed_file_count: scoped_status.indexed_file_count,
@@ -479,7 +493,12 @@ impl RelayKnowledgeService {
                 request.repository.ref_selector.clone(),
             ),
             summary,
-            status: scoped_status,
+            status: CodeRepositoryStatus {
+                degraded_reason: scoped_status
+                    .degraded_reason
+                    .or(software_projection.status.last_error.clone()),
+                ..scoped_status
+            },
         }))
     }
 

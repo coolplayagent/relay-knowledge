@@ -92,6 +92,7 @@ relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definiti
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
+relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|all] [--freshness allow-stale|wait-until-fresh|graph-only] [--limit <n>]
 relay-knowledge repo status <alias>
 relay-knowledge graph inspect
 relay-knowledge index refresh [--kind bm25|semantic|vector]
@@ -119,6 +120,8 @@ Cold full `repo index` requests return a durable task handle immediately and sta
 `repo query` runs `definition`, `references`, and `hybrid` queries through the indexed tree-sitter graph and SQLite FTS read model first. With `--freshness allow-stale`, if the target ref is still being full-indexed and has not finalized, the query reads the previous completed committed scope and marks the response stale/degraded; `wait-until-fresh` still requires the target scope to be fresh. Only when those structured layers leave a specific recall gap does the query start bounded internal exact-text source fallback against the same indexed commit. JSON hits are marked with `retrieval_layers=["lexical","text_fallback"]`; definition fallback may also include `definition`. Candidate-path lookup, candidate-file, materialized-byte, or line-length budget exhaustion degrades only the fallback layer and appears in `degraded_reason`; structured code graph results remain valid.
 
 `repo feature-flags` reads configuration-driven feature-flag graph facts written during indexing. By default it lists flags, configuration sources, and code-usage edges in the selected repository scope; `--query` filters by flag name, config key, path, or excerpt. The command does not scan the whole source tree at query time; after extractor changes or newly added flags, run `repo index` or `repo update` before expecting new facts.
+
+`repo software` reads the software global-model projection for the selected repository scope. `--kind dependencies` returns package components derived from manifests and lockfiles; `--kind sdks` returns unresolved external import/include targets as SDK or API-surface usage candidates with `resolution_state`, `target_hint`, evidence path, and line range. The command does not scan package caches, SDK directories, or unindexed external source; rerun `repo index` or `repo update` to refresh the projection after source-scope changes.
 
 ## 3.5 Read and Write Impact
 

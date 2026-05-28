@@ -33,8 +33,8 @@ pub use operations::{
     MultimodalExtractionRequest, MultimodalExtractionResponse, ProposalDecisionApiRequest,
     ProposalDecisionResponse, ProposalListApiRequest, ProposalListResponse, ProposalShowResponse,
     ServiceDefinitionWriteResponse, ServiceOperatorResponse, ServicePlanRequest,
-    ServicePlanResponse, ServiceRecoveryReport, ServiceStatusResponse, WorkerRunRequest,
-    WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
+    ServicePlanResponse, ServiceRecoveryReport, ServiceStatusResponse, SoftwareGlobalResponse,
+    WorkerRunRequest, WorkerRunResponse, WorkerStatusRequest, WorkerStatusResponse,
 };
 pub use status::{ProjectStatusResponse, RuntimeStatus};
 pub use stream::{ApiStreamEvent, StreamEventKind};
