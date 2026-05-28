@@ -2,8 +2,8 @@
 
 [English](../../en/03-architecture-specs/01-architecture-vision-and-algorithm-map.md) | [中文](../../zh/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 
-> Document version: 2.0
-> Date: 2026-05-17
+> Document version: 2.1
+> Date: 2026-05-28
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -40,6 +40,15 @@ Domain Model: source scope, evidence, facts, code graph, errors
 ```
 
 Dependencies move inward only. UI surfaces, protocol adapters, and workers must not directly access SQLite, tree-sitter parsers, embedding clients, or index writers; they request application services that enforce budgets, authorization, and freshness policy.
+
+The `src/relay_knowledge/domain` source tree is organized by cohesive domain
+responsibility while keeping the crate-level `crate::domain::{...}` API stable:
+`core/` owns source scopes, graph versions, indexes, errors, and base entities;
+`graph/` owns mutation facts, evidence extraction metadata, and retrieval
+context contracts; `code/` owns code graph facts, repository indexing/query
+requests, repository sets, dependencies, and call-target rules; `operations/`
+owns worker, proposal, service-operation, audit, and software global-modeling
+types; `knowledge/` owns knowledge-map topics, sources, routes, and history.
 
 ## 3. Algorithm Map
 
