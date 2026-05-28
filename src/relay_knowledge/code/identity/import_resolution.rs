@@ -125,6 +125,30 @@ impl<'a> ImportContext<'a> {
         )
     }
 
+    pub(super) fn resolve_directory_with_language_files(
+        &self,
+        directory_path: &str,
+        language_id: &str,
+    ) -> ModuleFileResolution {
+        resolve_directory_from_modules(
+            &self.module_paths,
+            &normalized_module_candidates(directory_path),
+            language_id,
+        )
+    }
+
+    pub(super) fn resolve_directory_tree_with_language_files(
+        &self,
+        directory_path: &str,
+        language_id: &str,
+    ) -> ModuleFileResolution {
+        resolve_directory_tree_from_modules(
+            &self.module_paths,
+            &normalized_module_candidates(directory_path),
+            language_id,
+        )
+    }
+
     pub(super) fn resolve_name_in_paths(
         &self,
         name: &str,
@@ -143,6 +167,143 @@ impl<'a> ImportContext<'a> {
                 module_paths
                     .iter()
                     .any(|module_path| path_matches_candidate(&symbol.path, module_path))
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_paths_for_language_and_kinds(
+        &self,
+        name: &str,
+        module_paths: &[String],
+        language_id: &str,
+        allowed_kinds: &[&str],
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let module_paths = module_paths
+            .iter()
+            .flat_map(|module_path| normalized_module_candidates(module_path))
+            .collect::<Vec<_>>();
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && allowed_kinds.contains(&symbol.kind.as_str())
+                    && module_paths
+                        .iter()
+                        .any(|module_path| path_matches_candidate(&symbol.path, module_path))
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_directory_tree(
+        &self,
+        name: &str,
+        directory_path: &str,
+        language_id: &str,
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let directory_paths = normalized_module_candidates(directory_path);
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && directory_paths.iter().any(|directory| {
+                        source_module_candidates(&symbol.path).iter().any(|path| {
+                            path == directory || path.starts_with(&format!("{directory}/"))
+                        })
+                    })
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_directory(
+        &self,
+        name: &str,
+        directory_path: &str,
+        language_id: &str,
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let directory_paths = normalized_module_candidates(directory_path);
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && directory_paths.iter().any(|directory| {
+                        source_module_candidates(&symbol.path)
+                            .iter()
+                            .any(|path| parent_dir(path) == directory)
+                    })
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_directory_for_language_and_kinds(
+        &self,
+        name: &str,
+        directory_path: &str,
+        language_id: &str,
+        allowed_kinds: &[&str],
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let directory_paths = normalized_module_candidates(directory_path);
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && allowed_kinds.contains(&symbol.kind.as_str())
+                    && directory_paths.iter().any(|directory| {
+                        source_module_candidates(&symbol.path)
+                            .iter()
+                            .any(|path| parent_dir(path) == directory)
+                    })
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_directory_tree_for_language_and_kinds(
+        &self,
+        name: &str,
+        directory_path: &str,
+        language_id: &str,
+        allowed_kinds: &[&str],
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let directory_paths = normalized_module_candidates(directory_path);
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && allowed_kinds.contains(&symbol.kind.as_str())
+                    && directory_paths.iter().any(|directory| {
+                        source_module_candidates(&symbol.path).iter().any(|path| {
+                            path == directory || path.starts_with(&format!("{directory}/"))
+                        })
+                    })
             })
             .take(2)
             .count();
@@ -178,6 +339,54 @@ impl<'a> ImportContext<'a> {
         resolution_from_count(match_count)
     }
 
+    pub(super) fn resolve_name_in_namespace_for_language(
+        &self,
+        namespace: &str,
+        name: &str,
+        language_id: &str,
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let namespace = namespace.replace("::", ".");
+        let suffix = format!(".{namespace}.{name}");
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && normalize_qualified_name(&symbol.qualified_name).ends_with(&suffix)
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_namespace_for_language_and_kinds(
+        &self,
+        namespace: &str,
+        name: &str,
+        language_id: &str,
+        allowed_kinds: &[&str],
+    ) -> ImportResolution {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return ImportResolution::Unresolved;
+        };
+        let namespace = namespace.replace("::", ".");
+        let suffix = format!(".{namespace}.{name}");
+        let match_count = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && allowed_kinds.contains(&symbol.kind.as_str())
+                    && normalize_qualified_name(&symbol.qualified_name).ends_with(&suffix)
+            })
+            .take(2)
+            .count();
+
+        resolution_from_count(match_count)
+    }
+
     pub(super) fn namespace_exists(&self, namespace: &str) -> bool {
         let last_segment = namespace
             .rsplit("::")
@@ -198,6 +407,49 @@ impl<'a> ImportContext<'a> {
             normalize_qualified_name(&symbol.qualified_name).contains(marker.as_str())
         })
     }
+
+    pub(super) fn namespace_exists_for_language(&self, namespace: &str, language_id: &str) -> bool {
+        let normalized_namespace = namespace.replace("::", ".");
+        let suffix = format!(".{normalized_namespace}");
+        self.symbols_by_name.values().flatten().any(|symbol| {
+            if symbol.language_id != language_id {
+                return false;
+            }
+            let qualified_name = normalize_qualified_name(&symbol.qualified_name);
+            symbol.kind == "module"
+                && (qualified_name == normalized_namespace
+                    || qualified_name.ends_with(suffix.as_str()))
+        })
+    }
+
+    pub(super) fn package_declaration_conflicts_for_language(
+        &self,
+        package_path: &str,
+        language_id: &str,
+    ) -> bool {
+        let expected_package = package_path.replace('/', ".");
+        let expected_leaf = expected_package
+            .rsplit('.')
+            .next()
+            .filter(|segment| !segment.is_empty())
+            .unwrap_or(expected_package.as_str());
+        self.symbols_by_name.values().flatten().any(|symbol| {
+            if symbol.language_id != language_id
+                || symbol.kind != "module"
+                || !symbol.signature.trim_start().starts_with("package ")
+                || !package_declaration_matches(symbol, package_path)
+            {
+                return false;
+            }
+            symbol.name != expected_package && symbol.name != expected_leaf
+        })
+    }
+}
+
+fn package_declaration_matches(symbol: &RepositoryCodeSymbolRecord, package_path: &str) -> bool {
+    source_module_candidates(&symbol.path)
+        .iter()
+        .any(|path| parent_dir(path) == package_path)
 }
 
 impl ImportContext<'_> {
@@ -295,6 +547,18 @@ pub(super) fn combined_resolution(
     }
 
     ImportResolution::Unresolved
+}
+
+pub(super) fn module_file_resolution(
+    resolution: ModuleFileResolution,
+) -> (ImportResolution, Option<String>) {
+    match resolution {
+        ModuleFileResolution::Resolved(target_hint) => {
+            (ImportResolution::Resolved, Some(target_hint))
+        }
+        ModuleFileResolution::Ambiguous => (ImportResolution::Ambiguous, None),
+        ModuleFileResolution::Unresolved => (ImportResolution::Unresolved, None),
+    }
 }
 
 pub(super) fn parse_quoted_specifier(statement: &str) -> Option<&str> {
@@ -425,8 +689,67 @@ fn directory_has_language_files(
         .any(|(_, files)| files.iter().any(|file| file.language_id == language_id))
 }
 
+fn resolve_directory_tree_from_modules(
+    module_paths: &BTreeMap<String, Vec<&RepositoryCodeFileRecord>>,
+    directories: &[String],
+    language_id: &str,
+) -> ModuleFileResolution {
+    let mut matching_roots = Vec::new();
+    for directory in directories {
+        let prefix = if directory.is_empty() {
+            String::new()
+        } else {
+            format!("{directory}/")
+        };
+        for (module_path, files) in module_paths
+            .range(prefix.clone()..)
+            .take_while(|(path, _)| prefix.is_empty() || path.starts_with(&prefix))
+        {
+            for file in files.iter().filter(|file| file.language_id == language_id) {
+                let Some(root) = physical_directory_tree_root(&file.path, module_path, directory)
+                else {
+                    continue;
+                };
+                if !matching_roots.contains(&root) {
+                    matching_roots.push(root);
+                }
+                if matching_roots.len() > 1 {
+                    return ModuleFileResolution::Ambiguous;
+                }
+            }
+        }
+    }
+
+    match matching_roots.as_slice() {
+        [root] => ModuleFileResolution::Resolved(root.clone()),
+        [] => ModuleFileResolution::Unresolved,
+        _ => ModuleFileResolution::Ambiguous,
+    }
+}
+
+fn physical_directory_tree_root(
+    file_path: &str,
+    module_path: &str,
+    directory: &str,
+) -> Option<String> {
+    let suffix = module_path.strip_prefix(directory)?.trim_start_matches('/');
+    if suffix.is_empty() {
+        return Some(file_path.to_owned());
+    }
+    let root_len = file_path.len().checked_sub(suffix.len() + 1)?;
+    Some(file_path[..root_len].to_owned())
+}
+
 fn normalize_qualified_name(value: &str) -> String {
-    value.replace("::", ".")
+    let mut normalized = value.replace("::", ".").replace(['/', '\\'], ".");
+    for extension in [
+        ".rs.", ".py.", ".js.", ".jsx.", ".ts.", ".tsx.", ".php.", ".phtml.", ".cs.", ".kt.",
+        ".kts.", ".scala.", ".swift.",
+    ] {
+        normalized = normalized.replace(extension, ".");
+    }
+
+    normalized
 }
 
 fn resolution_from_count(count: usize) -> ImportResolution {

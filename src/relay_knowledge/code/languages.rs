@@ -10,6 +10,9 @@ pub(super) struct LanguageSpec {
 }
 
 const KOTLIN_TAGS_QUERY: &str = r#"
+(package_header
+  (qualified_identifier) @name) @definition.module
+
 (function_declaration
   name: (identifier) @name) @definition.function
 
