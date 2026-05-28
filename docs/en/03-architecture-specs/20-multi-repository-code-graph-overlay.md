@@ -320,4 +320,4 @@ Phase three optimizes performance and recovery:
 
 ---
 
-Navigation: Previous: [19. Installation, Release, and Upgrade](19-installation-release-and-upgrade.md)
+Navigation: Previous: [19. Installation, Release, and Upgrade](19-installation-release-and-upgrade.md) | Next: [21. Software Global Domain Modeling Architecture](21-software-global-domain-modeling.md)

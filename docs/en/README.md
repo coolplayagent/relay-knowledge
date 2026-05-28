@@ -76,6 +76,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 18: Observability, Diagnostics, and SLO](03-architecture-specs/18-observability-diagnostics-and-slo.md)
 - [Chapter 19: Installation, Release, and Upgrade](03-architecture-specs/19-installation-release-and-upgrade.md)
 - [Chapter 20: Multi-Repository Code Graph Overlay](03-architecture-specs/20-multi-repository-code-graph-overlay.md)
+- [Chapter 21: Software Global Domain Modeling Architecture](03-architecture-specs/21-software-global-domain-modeling.md)
 
 ## Book 4: Research
 
@@ -89,6 +90,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 7: relay-knowledge Implementation Reference](04-research/07-relay-knowledge-implementation-reference.md)
 - [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](04-research/08-competitive-performance-research-2026.md)
 - [Chapter 9: GitNexus Feature and UI Implementation Research 2026](04-research/09-gitnexus-reference-analysis-2026.md)
+- [Chapter 10: Software Global Domain Modeling Research 2026](04-research/10-software-global-domain-modeling-research-2026.md)
 
 ## Appendix A: Benchmarks
 
@@ -105,3 +107,4 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix B.3: Documentation Refresh Audit 2026-05-14](06-verification/03-documentation-refresh-audit-2026-05-14.md): current documentation status, refreshed gaps, and open productization work.
 - [Appendix B.4: relay-teams E2E Verification 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
 - [Appendix B.7: Grep Fallback Documentation Refresh Audit 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md): chapter sync record for code retrieval exact-text fallback.
+- [Appendix B.8: Software Global Modeling Documentation Refresh Audit 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md): verification record for the software global modeling research and architecture archive.

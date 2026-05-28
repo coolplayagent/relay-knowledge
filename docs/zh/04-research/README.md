@@ -57,3 +57,4 @@
 - [第 7 章 relay-knowledge 实现借鉴落地路线](07-relay-knowledge-implementation-reference.md): 将研究结论收敛为实现优先级和差距关闭路线。
 - [第 8 章 竞争力、高性能与本机文件检索研究 2026](08-competitive-performance-research-2026.md): 从 GraphRAG、混合搜索、向量索引、代码搜索、本机文件检索、图存储和 SRE 实践中提炼优化建议。
 - [第 9 章 GitNexus 功能与界面实现研究 2026](09-gitnexus-reference-analysis-2026.md): 分析 GitNexus 的 CLI/MCP/HTTP 后端、代码图谱、Web 图谱界面、Agent 工作流和后续改进点。
+- [第 10 章 软件全域建模研究 2026](10-software-global-domain-modeling-research-2026.md): 从软件工程 KG、代码知识图、SBOM、SDK/依赖版本、动态图谱和代码生成研究中提炼全域建模路线。
