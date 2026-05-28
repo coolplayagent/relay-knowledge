@@ -1,22 +1,39 @@
 //! Pure domain model types.
 
+#[path = "code/graph_records.rs"]
 mod code;
+#[path = "code/call_targets.rs"]
 pub(crate) mod code_call_targets;
+#[path = "code/dependencies.rs"]
 mod code_dependency;
+#[path = "code/repository.rs"]
 mod code_repository;
+#[path = "code/repository_set.rs"]
 mod code_repository_set;
 #[cfg(test)]
+#[path = "code/repository_tests.rs"]
 mod code_repository_tests;
+#[path = "core/entity.rs"]
 mod entity;
+#[path = "core/error.rs"]
 mod error;
+#[path = "core/graph_version.rs"]
 mod graph_version;
+#[path = "core/index.rs"]
 mod index;
+#[path = "knowledge/map.rs"]
 mod knowledge_map;
+#[path = "graph/multimodal.rs"]
 mod multimodal;
+#[path = "graph/mutation.rs"]
 mod mutation;
+#[path = "operations/runtime.rs"]
 mod operational;
+#[path = "graph/retrieval.rs"]
 mod retrieval;
+#[path = "operations/software.rs"]
 mod software;
+#[path = "core/source.rs"]
 mod source;
 
 pub use code::{

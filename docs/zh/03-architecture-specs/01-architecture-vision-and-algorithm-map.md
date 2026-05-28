@@ -2,8 +2,8 @@
 
 [中文](../../zh/03-architecture-specs/01-architecture-vision-and-algorithm-map.md) | [English](../../en/03-architecture-specs/01-architecture-vision-and-algorithm-map.md)
 
-> 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 文档版本: 2.1
+> 编制日期: 2026-05-28
 > 适用范围: 第三卷架构与算法白皮书
 
 ## 1. 设计结论
@@ -40,6 +40,14 @@ Domain Model: source scope, evidence, facts, code graph, errors
 ```
 
 依赖方向必须单向向内。任何 UI、协议 adapter 或 worker 都不能直接访问 SQLite、tree-sitter parser、embedding client 或 index writer；它们只能请求应用服务执行受预算、权限和 freshness policy 约束的工作。
+
+`src/relay_knowledge/domain` 源码树按高内聚领域职责组织，同时保持
+`crate::domain::{...}` 的 crate 级 API 稳定：`core/` 负责 source scope、graph
+version、index、error 和基础 entity；`graph/` 负责 mutation fact、evidence
+extraction metadata 和 retrieval context contract；`code/` 负责 code graph fact、
+repository indexing/query request、repository set、dependency 和 call-target 规则；
+`operations/` 负责 worker、proposal、service operation、audit 和软件全域建模类型；
+`knowledge/` 负责 knowledge map topic、source、route 和 history。
 
 ## 3. 算法版图
 
