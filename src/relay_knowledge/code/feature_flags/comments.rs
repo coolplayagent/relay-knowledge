@@ -3,6 +3,8 @@ use super::FeatureFlagFileInput;
 #[derive(Default)]
 pub(super) struct CommentState {
     block_depth: usize,
+    template_literal_open: bool,
+    template_interpolation_depth: usize,
 }
 
 impl CommentState {
@@ -17,6 +19,14 @@ impl CommentState {
         let mut quote = None;
         let mut escaped = false;
         let mut index = 0usize;
+        if self.template_literal_open {
+            let continuation = self.consume_template_continuation(line);
+            scan_line.push_str(&continuation.scan_line);
+            index = continuation.next_index;
+            if self.template_literal_open {
+                return (!scan_line.trim().is_empty()).then_some(scan_line);
+            }
+        }
 
         while index < line.len() {
             let rest = &line[index..];
@@ -42,11 +52,26 @@ impl CommentState {
                 break;
             };
             if let Some(quote_character) = quote {
+                if quote_character == '`' && rest.starts_with("${") {
+                    self.template_interpolation_depth =
+                        self.template_interpolation_depth.saturating_add(1);
+                    scan_line.push_str("${");
+                    index = index.saturating_add(2);
+                    continue;
+                }
                 scan_line.push(character);
                 if escaped {
                     escaped = false;
                 } else if character == '\\' {
                     escaped = true;
+                } else if quote_character == '`' && self.template_interpolation_depth > 0 {
+                    if character == '{' {
+                        self.template_interpolation_depth =
+                            self.template_interpolation_depth.saturating_add(1);
+                    } else if character == '}' {
+                        self.template_interpolation_depth =
+                            self.template_interpolation_depth.saturating_sub(1);
+                    }
                 } else if character == quote_character {
                     quote = None;
                 }
@@ -59,7 +84,7 @@ impl CommentState {
                 index = index.saturating_add(lifetime_len);
                 continue;
             }
-            if character == '"' || character == '\'' {
+            if character == '"' || character == '\'' || character == '`' {
                 quote = Some(character);
                 scan_line.push(character);
                 index = index.saturating_add(character.len_utf8());
@@ -77,9 +102,145 @@ impl CommentState {
             scan_line.push(character);
             index = index.saturating_add(character.len_utf8());
         }
+        if quote == Some('`') {
+            self.template_literal_open = true;
+        }
 
         (!scan_line.trim().is_empty()).then_some(scan_line)
     }
+
+    fn consume_template_continuation(&mut self, line: &str) -> TemplateContinuation {
+        let mut scan_line = String::new();
+        let mut index = 0usize;
+        let mut escaped = false;
+        while index < line.len() {
+            if self.template_interpolation_depth > 0 {
+                let interpolation = self.consume_template_interpolation(line, index);
+                scan_line.push_str(&interpolation.scan_line);
+                index = interpolation.next_index;
+                if self.template_interpolation_depth > 0 {
+                    return TemplateContinuation {
+                        scan_line,
+                        next_index: index,
+                    };
+                }
+                continue;
+            }
+            let rest = &line[index..];
+            let Some(character) = rest.chars().next() else {
+                break;
+            };
+            if escaped {
+                scan_line.push(' ');
+                escaped = false;
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if character == '\\' {
+                scan_line.push(' ');
+                escaped = true;
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if character == '`' {
+                self.template_literal_open = false;
+                scan_line.push(' ');
+                index = index.saturating_add(character.len_utf8());
+                return TemplateContinuation {
+                    scan_line,
+                    next_index: index,
+                };
+            }
+            if rest.starts_with("${") {
+                self.template_interpolation_depth =
+                    self.template_interpolation_depth.saturating_add(1);
+                scan_line.push_str("  ");
+                index = index.saturating_add(2);
+                let interpolation = self.consume_template_interpolation(line, index);
+                scan_line.push_str(&interpolation.scan_line);
+                index = interpolation.next_index;
+                continue;
+            }
+            scan_line.push(' ');
+            index = index.saturating_add(character.len_utf8());
+        }
+
+        TemplateContinuation {
+            scan_line,
+            next_index: index,
+        }
+    }
+
+    fn consume_template_interpolation(&mut self, line: &str, start: usize) -> TemplateContinuation {
+        let mut scan_line = String::new();
+        let mut quote = None;
+        let mut escaped = false;
+        let mut index = start;
+        while index < line.len() {
+            let rest = &line[index..];
+            let Some(character) = rest.chars().next() else {
+                break;
+            };
+            if let Some(quote_character) = quote {
+                scan_line.push(character);
+                if escaped {
+                    escaped = false;
+                } else if character == '\\' {
+                    escaped = true;
+                } else if character == quote_character {
+                    quote = None;
+                }
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if character == '"' || character == '\'' {
+                quote = Some(character);
+                scan_line.push(character);
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if rest.starts_with("${") {
+                self.template_interpolation_depth =
+                    self.template_interpolation_depth.saturating_add(1);
+                scan_line.push_str("  ");
+                index = index.saturating_add(2);
+                continue;
+            }
+            if character == '{' {
+                self.template_interpolation_depth =
+                    self.template_interpolation_depth.saturating_add(1);
+                scan_line.push(character);
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            if character == '}' {
+                self.template_interpolation_depth =
+                    self.template_interpolation_depth.saturating_sub(1);
+                if self.template_interpolation_depth == 0 {
+                    index = index.saturating_add(character.len_utf8());
+                    return TemplateContinuation {
+                        scan_line,
+                        next_index: index,
+                    };
+                }
+                scan_line.push(character);
+                index = index.saturating_add(character.len_utf8());
+                continue;
+            }
+            scan_line.push(character);
+            index = index.saturating_add(character.len_utf8());
+        }
+
+        TemplateContinuation {
+            scan_line,
+            next_index: index,
+        }
+    }
+}
+
+struct TemplateContinuation {
+    scan_line: String,
+    next_index: usize,
 }
 
 fn nested_block_comments(language_id: &str) -> bool {

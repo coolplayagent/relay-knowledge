@@ -115,7 +115,7 @@ relay-knowledge version check
 
 `repo query` 的 `definition`、`references` 和 `hybrid` 查询先走已索引 tree-sitter 图和 SQLite FTS 读模型。`--freshness allow-stale` 在目标 ref 正在 full indexing 且尚未 finalize 时，会继续读取上一个已完成 committed scope，并在响应中标记 stale/degraded reason；`wait-until-fresh` 仍会要求目标 scope 新鲜。只有这些结构化层存在明确召回缺口时，查询才会在同一 indexed commit 上启动有界内部 exact-text source fallback；命中会在 JSON 中标记 `retrieval_layers=["lexical","text_fallback"]`，definition 兜底还会带 `definition`。候选路径查询、候选文件数、物化字节或单行长度预算耗尽只会降级兜底层，并通过 `degraded_reason` 暴露，不会让结构化代码图结果失效。
 
-`repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
+`repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
 
 ## 3.5 读写影响
 

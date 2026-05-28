@@ -40,7 +40,7 @@ Internal exact-text source fallback runs behind the same blocking-worker boundar
 
 Candidate windows expose observability fields: pre-filter count, post-filter count, scored count, truncation reason, and elapsed time for each layer. Impact, caller/callee, and import queries expand with changed paths, seed symbols, module hints, and edge confidence rather than full scope table size.
 
-Feature-flag queries enumerate structured flag facts in the indexed scope by default. When `--query` is present, they filter only indexed flag names, source keys, paths, and excerpts. Ranking prioritizes guarded-code relationships, configuration definitions, ordinary reads, then query matches and path/language filters. The query must not use query-time grep to enumerate unknown flags or hardcode known product, repository, or benchmark flag names to improve ranking.
+Feature-flag queries enumerate structured flag facts in the indexed scope by default. When `--query` is present, they filter only indexed flag names, source keys, paths, and excerpts. Ranking prioritizes guarded-code relationships, configuration definitions, ordinary reads and SDK evaluations, then query matches and path/language filters. The query must not use query-time grep to enumerate unknown flags, sync provider control-plane state, or hardcode known product, repository, or benchmark flag names to improve ranking.
 
 ## 5. Impact Analysis
 
