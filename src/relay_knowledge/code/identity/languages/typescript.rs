@@ -5,13 +5,27 @@ use super::super::import_resolution::{
     parse_quoted_specifier,
 };
 
-const MODULE_EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+const MODULE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 pub(in crate::code::identity) fn resolve_import(
     import: &CodeImportRecord,
     context: &ImportContext<'_>,
 ) -> Option<ImportResolution> {
-    let request = TypeScriptImportRequest::parse(&import.path, &import.module)?;
+    resolve_import_with_extensions(import, context, MODULE_EXTENSIONS, true)
+}
+
+pub(super) fn resolve_import_with_extensions(
+    import: &CodeImportRecord,
+    context: &ImportContext<'_>,
+    module_extensions: &[&str],
+    replace_explicit_extensions: bool,
+) -> Option<ImportResolution> {
+    let request = TypeScriptImportRequest::parse(
+        &import.path,
+        &import.module,
+        module_extensions,
+        replace_explicit_extensions,
+    )?;
     if request.module_paths.is_empty() {
         return Some(ImportResolution::Unresolved);
     }
@@ -34,25 +48,57 @@ struct TypeScriptImportRequest {
 }
 
 impl TypeScriptImportRequest {
-    fn parse(import_path: &str, statement: &str) -> Option<Self> {
+    fn parse(
+        import_path: &str,
+        statement: &str,
+        module_extensions: &[&str],
+        replace_explicit_extensions: bool,
+    ) -> Option<Self> {
         let statement = statement.trim().trim_end_matches(';').trim();
         if let Some(specifier) = dynamic_import_specifier(statement) {
-            return Some(Self::for_specifier(import_path, specifier, Vec::new()));
+            return Some(Self::for_specifier(
+                import_path,
+                specifier,
+                Vec::new(),
+                module_extensions,
+                replace_explicit_extensions,
+            ));
         }
         if let Some(body) = statement.strip_prefix("import ") {
-            return Self::parse_import_body(import_path, body);
+            return Self::parse_import_body(
+                import_path,
+                body,
+                module_extensions,
+                replace_explicit_extensions,
+            );
         }
         if let Some(body) = statement.strip_prefix("export ") {
-            return Self::parse_export_body(import_path, body);
+            return Self::parse_export_body(
+                import_path,
+                body,
+                module_extensions,
+                replace_explicit_extensions,
+            );
         }
 
         None
     }
 
-    fn parse_import_body(import_path: &str, body: &str) -> Option<Self> {
+    fn parse_import_body(
+        import_path: &str,
+        body: &str,
+        module_extensions: &[&str],
+        replace_explicit_extensions: bool,
+    ) -> Option<Self> {
         if !body.contains(" from ") {
             let specifier = parse_quoted_specifier(body)?;
-            return Some(Self::for_specifier(import_path, specifier, Vec::new()));
+            return Some(Self::for_specifier(
+                import_path,
+                specifier,
+                Vec::new(),
+                module_extensions,
+                replace_explicit_extensions,
+            ));
         }
 
         let (imports, module) = body.rsplit_once(" from ")?;
@@ -62,10 +108,17 @@ impl TypeScriptImportRequest {
             import_path,
             specifier,
             parse_named_imports(imports),
+            module_extensions,
+            replace_explicit_extensions,
         ))
     }
 
-    fn parse_export_body(import_path: &str, body: &str) -> Option<Self> {
+    fn parse_export_body(
+        import_path: &str,
+        body: &str,
+        module_extensions: &[&str],
+        replace_explicit_extensions: bool,
+    ) -> Option<Self> {
         let body = body.trim().strip_prefix("type ").unwrap_or(body.trim());
         let (exports, module) = body.rsplit_once(" from ")?;
         let specifier = parse_quoted_specifier(module)?;
@@ -74,12 +127,25 @@ impl TypeScriptImportRequest {
             import_path,
             specifier,
             parse_named_imports(exports),
+            module_extensions,
+            replace_explicit_extensions,
         ))
     }
 
-    fn for_specifier(import_path: &str, specifier: &str, imported_names: Vec<String>) -> Self {
+    fn for_specifier(
+        import_path: &str,
+        specifier: &str,
+        imported_names: Vec<String>,
+        module_extensions: &[&str],
+        replace_explicit_extensions: bool,
+    ) -> Self {
         Self {
-            module_paths: relative_module_candidates(import_path, specifier),
+            module_paths: relative_module_candidates(
+                import_path,
+                specifier,
+                module_extensions,
+                replace_explicit_extensions,
+            ),
             imported_names,
         }
     }
@@ -122,12 +188,17 @@ fn parse_named_imports(imports: &str) -> Vec<String> {
                 .unwrap_or(part.trim())
                 .split_once(" as ")
                 .map_or(part.trim(), |(name, _)| name.trim());
-            (!name.is_empty()).then(|| name.to_owned())
+            (!name.is_empty() && name != "default").then(|| name.to_owned())
         })
         .collect()
 }
 
-fn relative_module_candidates(import_path: &str, specifier: &str) -> Vec<String> {
+fn relative_module_candidates(
+    import_path: &str,
+    specifier: &str,
+    module_extensions: &[&str],
+    replace_explicit_extensions: bool,
+) -> Vec<String> {
     let base_path = if specifier.starts_with("./") || specifier.starts_with("../") {
         let Some(base_path) = normalize_join(parent_dir(import_path), specifier) else {
             return Vec::new();
@@ -139,8 +210,13 @@ fn relative_module_candidates(import_path: &str, specifier: &str) -> Vec<String>
         return Vec::new();
     };
     let mut candidates = Vec::new();
-    push_module_file_candidates(&mut candidates, &base_path);
-    for extension in MODULE_EXTENSIONS {
+    push_module_file_candidates(
+        &mut candidates,
+        &base_path,
+        module_extensions,
+        replace_explicit_extensions,
+    );
+    for extension in module_extensions {
         candidates.push(format!("{base_path}/index.{extension}"));
     }
     candidates.sort();
@@ -149,17 +225,25 @@ fn relative_module_candidates(import_path: &str, specifier: &str) -> Vec<String>
     candidates
 }
 
-fn push_module_file_candidates(candidates: &mut Vec<String>, base_path: &str) {
+fn push_module_file_candidates(
+    candidates: &mut Vec<String>,
+    base_path: &str,
+    module_extensions: &[&str],
+    replace_explicit_extensions: bool,
+) {
     if let Some((stem, extension)) = base_path.rsplit_once('.') {
-        if MODULE_EXTENSIONS.contains(&extension) {
+        if module_extensions.contains(&extension) {
             candidates.push(base_path.to_owned());
-            for replacement in MODULE_EXTENSIONS {
+            if !replace_explicit_extensions {
+                return;
+            }
+            for replacement in module_extensions {
                 candidates.push(format!("{stem}.{replacement}"));
             }
             return;
         }
     }
-    for extension in MODULE_EXTENSIONS {
+    for extension in module_extensions {
         candidates.push(format!("{base_path}.{extension}"));
     }
 }
