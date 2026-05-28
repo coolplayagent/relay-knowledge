@@ -6,13 +6,13 @@ use crate::{
 const MAX_MULTIMODAL_EXTRACTION_ITEMS: usize = 64;
 
 #[derive(Debug)]
-pub(super) struct MultimodalExtractionIngest {
+pub(in crate::application) struct MultimodalExtractionIngest {
     pub parent_evidence_id: String,
     pub derived_evidence_count: usize,
     pub ingest: IngestRequest,
 }
 
-pub(super) fn extraction_ingest_request(
+pub(in crate::application) fn extraction_ingest_request(
     request: MultimodalExtractionRequest,
 ) -> Result<MultimodalExtractionIngest, String> {
     let source_scope = SourceScope::parse(request.source_scope)

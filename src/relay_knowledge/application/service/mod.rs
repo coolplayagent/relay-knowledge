@@ -43,18 +43,21 @@ use crate::{
 
 use super::{
     RuntimeConfiguration, RuntimeConfigurationError,
-    index_refresh::{
-        index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
-        recover_index_kinds, refresh_index_kinds,
+    knowledge::{
+        index_refresh::{
+            index_refresh_outcome, metadata_for_indexes, reconcile_index_refreshes,
+            recover_index_kinds, refresh_index_kinds,
+        },
+        ingest::mutation_batch_from_request,
+        multimodal::extraction_ingest_request,
     },
-    ingest::mutation_batch_from_request,
-    multimodal::extraction_ingest_request,
     status::{agent_protocol_status, runtime_status, runtime_status_with_model_profiles},
     update::{VersionCheckResponse, check_for_updates},
+    worker::operations::overlay_worker_runtime,
 };
 
 #[cfg(test)]
-use super::ingest::generated_evidence_id;
+use super::knowledge::ingest::generated_evidence_id;
 
 /// Shared application service used by CLI, Web, and future API adapters.
 #[derive(Clone)]
@@ -708,7 +711,7 @@ impl RelayKnowledgeService {
             .service_operator_status()
             .await
             .map_err(storage_api_error)?;
-        let workers = super::operations::overlay_worker_runtime(
+        let workers = overlay_worker_runtime(
             store.worker_statuses().await.map_err(storage_api_error)?,
             &self.runtime.workers,
         );
@@ -938,6 +941,8 @@ fn service_definition_filename() -> &'static str {
         LINUX_SERVICE_DEFINITION_FILE_NAME
     }
 }
+
+mod health;
 
 #[cfg(test)]
 mod id_tests;

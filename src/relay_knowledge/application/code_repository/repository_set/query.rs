@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use super::code_repository_set_identity_coverage::select_identity_coverage_results;
+use super::identity_coverage::select_identity_coverage_results;
 use crate::domain::{
     CodeRepositoryCrossEdge, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
     CodeRetrievalHit,
@@ -541,12 +541,12 @@ fn evidence_origin(evidence_json: &str) -> Option<(String, u32, u32)> {
 }
 
 #[cfg(test)]
-#[path = "code_repository_set_query_test_support.rs"]
-mod code_repository_set_query_test_support;
+#[path = "query_test_support.rs"]
+mod query_test_support;
 
 #[cfg(test)]
 mod tests {
-    use super::code_repository_set_query_test_support::{edge, hit, member_status, set_hit};
+    use super::query_test_support::{edge, hit, member_status, set_hit};
     use super::*;
     use crate::domain::CodeRetrievalLayer;
 

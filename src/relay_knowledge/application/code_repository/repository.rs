@@ -23,8 +23,9 @@ use crate::{
     storage::CodeImpactChanges,
 };
 
-use super::RelayKnowledgeService;
-use super::code_service_support::{
+use crate::application::service::RelayKnowledgeService;
+
+use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
     apply_code_grep_fallback, feature_flag_request_at_indexed_ref, index_start_from_completed,

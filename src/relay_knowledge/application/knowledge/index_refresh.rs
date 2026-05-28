@@ -47,13 +47,13 @@ const DIAGNOSTIC_RECONCILE_QUEUE: QueuePolicy = QueuePolicy {
     reset_dead_letter_tasks: false,
 };
 
-pub(super) struct IndexRefreshOutcome {
+pub(in crate::application) struct IndexRefreshOutcome {
     pub indexes: Vec<IndexStatus>,
     pub cursors: Vec<IndexCursor>,
     pub diagnostics: IndexRefreshDiagnostics,
 }
 
-pub(super) async fn refresh_index_kinds(
+pub(in crate::application) async fn refresh_index_kinds(
     store: &Arc<dyn KnowledgeStore>,
     kinds: impl IntoIterator<Item = IndexKind>,
     graph_version: GraphVersion,
@@ -69,7 +69,7 @@ pub(super) async fn refresh_index_kinds(
     .await
 }
 
-pub(super) async fn recover_index_kinds(
+pub(in crate::application) async fn recover_index_kinds(
     store: &Arc<dyn KnowledgeStore>,
     kinds: impl IntoIterator<Item = IndexKind>,
     graph_version: GraphVersion,
@@ -115,7 +115,7 @@ async fn refresh_index_kinds_with_policy(
     Ok(filter_outcome_to_kinds(outcome, &refreshable_kinds))
 }
 
-pub(super) async fn reconcile_index_refreshes(
+pub(in crate::application) async fn reconcile_index_refreshes(
     store: &Arc<dyn KnowledgeStore>,
     graph_version: GraphVersion,
     read_models: &ReadModelBackendConfig,
@@ -143,7 +143,7 @@ pub(super) async fn reconcile_index_refreshes(
     Ok(filter_diagnostics_to_kinds(diagnostics, &refreshable_kinds))
 }
 
-pub(super) async fn index_refresh_outcome(
+pub(in crate::application) async fn index_refresh_outcome(
     store: &Arc<dyn KnowledgeStore>,
 ) -> Result<IndexRefreshOutcome, ApiError> {
     let indexes = store.index_statuses().await.map_err(storage_api_error)?;
@@ -160,7 +160,7 @@ pub(super) async fn index_refresh_outcome(
     })
 }
 
-pub(super) fn metadata_for_indexes(
+pub(in crate::application) fn metadata_for_indexes(
     context: &RequestContext,
     graph_version: GraphVersion,
     indexes: &[IndexStatus],
@@ -183,7 +183,7 @@ pub(super) fn metadata_for_indexes(
     )
 }
 
-pub(super) fn filter_outcome_to_read_models(
+pub(in crate::application) fn filter_outcome_to_read_models(
     outcome: IndexRefreshOutcome,
     read_models: &ReadModelBackendConfig,
 ) -> IndexRefreshOutcome {

@@ -7,7 +7,7 @@ use crate::{
     },
 };
 
-pub(super) fn mutation_batch_from_request(
+pub(in crate::application) fn mutation_batch_from_request(
     request: IngestRequest,
 ) -> Result<GraphMutationBatch, DomainError> {
     let source_scope = SourceScope::parse(request.source_scope)?;
@@ -111,7 +111,7 @@ pub(super) fn mutation_batch_from_request(
     GraphMutationBatch::with_facts(records, relations, claims, events)
 }
 
-pub(super) fn generated_evidence_id(
+pub(in crate::application) fn generated_evidence_id(
     scope: &str,
     source_path: Option<&str>,
     span: Option<EvidenceSpan>,

@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-use super::{FileIndexRootConfig, service::RelayKnowledgeService};
+use crate::application::{FileIndexRootConfig, service::RelayKnowledgeService};
 
 pub const DEFAULT_FILE_QUERY_LIMIT: usize = 20;
 const MAX_FILE_QUERY_LIMIT: usize = 500;
@@ -579,6 +579,7 @@ mod tests {
     };
 
     use crate::{
+        application::RuntimeConfiguration,
         env::{EnvironmentConfig, PlatformKind},
         storage::{KnowledgeStore, SqliteGraphStore},
     };
@@ -791,7 +792,7 @@ mod tests {
             ],
         )
         .expect("environment should parse");
-        let runtime = super::super::RuntimeConfiguration::from_environment(&environment)
+        let runtime = RuntimeConfiguration::from_environment(&environment)
             .await
             .expect("runtime should compose");
         assert_eq!(runtime.file_index.scan_timeout, Duration::from_secs(120));
@@ -864,7 +865,7 @@ mod tests {
             ],
         )
         .expect("environment should parse");
-        let runtime = super::super::RuntimeConfiguration::from_environment(&environment)
+        let runtime = RuntimeConfiguration::from_environment(&environment)
             .await
             .expect("runtime should compose");
         let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"))
