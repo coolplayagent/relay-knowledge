@@ -217,6 +217,11 @@ relay-knowledge repo query core --query retry_policy --ref worktree --format jso
 
 ## Knowledge Graph Query Flow
 
+For the repository knowledge navigation contract, use
+`references/knowledge-map-workflows.md`. The contract lives at
+`.knowledge/knowledge-map.yaml` and should be maintained through
+`relay-knowledge map` commands rather than direct YAML edits.
+
 Ingest scoped evidence:
 
 ```bash

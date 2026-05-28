@@ -81,6 +81,12 @@ Do not start or configure MCP from this skill. If a task asks for MCP,
 Streamable HTTP, resources, prompts, sessions, or protocol tools, use the
 project MCP documentation or a separate MCP skill instead.
 
+For repository knowledge navigation contracts, use
+`references/knowledge-map-workflows.md`. Prefer `relay-knowledge map` commands
+to create, read, update, delete, validate, and route the shared
+`.knowledge/knowledge-map.yaml` contract. Do not hand-edit the YAML unless the CLI is
+unavailable and the user explicitly asks for manual repair.
+
 When the user asks for a test, smoke check, or reproduction that should not
 touch existing runtime state, set an explicit temporary `RELAY_KNOWLEDGE_HOME`
 and clean it up after the scenario. Prefer local deterministic retrieval

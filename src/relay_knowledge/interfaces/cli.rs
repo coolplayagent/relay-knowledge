@@ -10,6 +10,8 @@ mod cli_spec;
 mod files_cli;
 #[path = "knowledge_cli.rs"]
 mod knowledge_cli;
+#[path = "map_cli.rs"]
+mod map_cli;
 #[path = "ops_cli.rs"]
 mod ops_cli;
 #[path = "repo_cli.rs"]
@@ -179,6 +181,7 @@ fn option_consumes_value(option: &str) -> bool {
             | "--head"
             | "--query"
             | "--description"
+            | "--id"
             | "--priority"
             | "--mcp"
             | "--state"
@@ -187,6 +190,9 @@ fn option_consumes_value(option: &str) -> bool {
             | "--operation"
             | "--input"
             | "--root"
+            | "--scope"
+            | "--topic"
+            | "--uri"
     )
 }
 
@@ -199,6 +205,7 @@ fn is_command_word(token: &str) -> bool {
             | "repo"
             | "repo-set"
             | "files"
+            | "map"
             | "graph"
             | "index"
             | "worker"
@@ -242,6 +249,7 @@ pub enum CliAction {
     IndexRefresh {
         kinds: Vec<IndexKind>,
     },
+    Map(map_cli::MapCommand),
     WorkerStatus {
         kind: Option<WorkerKind>,
     },
@@ -316,6 +324,7 @@ pub enum CliError {
     InvalidCodeQueryKind(String),
     InvalidFreshness(String),
     InvalidIndexKind(String),
+    InvalidMapSourceKind(String),
     InvalidWorkerKind(String),
     InvalidProposalState(String),
     InvalidServiceAction(String),
@@ -359,6 +368,7 @@ impl CliError {
             | Self::InvalidCodeQueryKind(_)
             | Self::InvalidFreshness(_)
             | Self::InvalidIndexKind(_)
+            | Self::InvalidMapSourceKind(_)
             | Self::InvalidWorkerKind(_)
             | Self::InvalidProposalState(_)
             | Self::InvalidServiceAction(_)
@@ -407,6 +417,10 @@ impl fmt::Display for CliError {
             Self::InvalidIndexKind(value) => write!(
                 formatter,
                 "invalid --kind value '{value}', expected bm25, semantic, or vector"
+            ),
+            Self::InvalidMapSourceKind(value) => write!(
+                formatter,
+                "invalid --kind value '{value}', expected repo, file, doc, config, db, ci, runtime, wiki, or monitoring"
             ),
             Self::InvalidWorkerKind(value) => write!(
                 formatter,
@@ -566,6 +580,10 @@ async fn run_command(command: CliCommand) -> Result<String, CliError> {
     if let CliAction::ServiceRun { mcp, web } = command.action.clone() {
         return service_cli::run_service(mcp, web).await;
     }
+    if let CliAction::Map(map_command) = command.action.clone() {
+        let context = RequestContext::for_interface(InterfaceKind::Cli);
+        return map_cli::run_map(map_command, context, command.format).await;
+    }
 
     let service = RelayKnowledgeService::from_process_environment()
         .await
@@ -693,6 +711,7 @@ pub async fn run_with_service(
                 format,
             )
         }
+        CliAction::Map(command) => map_cli::run_map(command, context, format).await,
         CliAction::Repo(command) => repo_cli::run_repo(service, command, context, format).await,
         CliAction::RepoSet(command) => {
             repo_set_cli::run_repo_set(service, command, context, format).await
@@ -767,6 +786,7 @@ fn parse_action(tokens: Vec<String>) -> Result<CliAction, CliError> {
         "ingest" => knowledge_cli::parse_ingest(&tokens[1..]),
         "query" => knowledge_cli::parse_query(&tokens[1..]),
         "files" => files_cli::parse_files(&tokens[1..]),
+        "map" => map_cli::parse_map(&tokens[1..]),
         "repo" => repo_cli::parse_repo(&tokens[1..]).map(CliAction::Repo),
         "repo-set" => repo_set_cli::parse_repo_set(&tokens[1..]).map(CliAction::RepoSet),
         "graph" => knowledge_cli::parse_graph(&tokens[1..]),
@@ -838,6 +858,10 @@ mod cli_naming_tests;
 #[cfg(test)]
 #[path = "cli_tests.rs"]
 mod cli_tests;
+
+#[cfg(test)]
+#[path = "cli_map_tests.rs"]
+mod cli_map_tests;
 
 #[cfg(test)]
 #[path = "cli_service_tests.rs"]
