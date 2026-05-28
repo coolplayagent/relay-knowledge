@@ -6,13 +6,9 @@ use crate::domain::{CodeImportRecord, RepositoryCodeRange};
 
 use super::{
     super::{CodeIndexError, SnapshotBuild, stable_id},
+    languages,
     nodes::{SyntaxRange, compact_whitespace, node_text, push_children_reverse, syntax_range},
 };
-
-mod bash;
-mod go;
-mod javascript_like;
-mod ruby;
 
 pub(super) fn collect_imports(
     build: &SnapshotBuild,
@@ -26,9 +22,12 @@ pub(super) fn collect_imports(
     let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
     stack.push(root);
     while let Some(node) = stack.pop() {
-        if let Some((module, range)) = javascript_like::dynamic_import(language_id, content, node) {
+        if let Some((module, range)) =
+            languages::javascript_like_dynamic_import(language_id, content, node)
+        {
             imports.push_record(module, &range)?;
-        } else if let Some((module, range)) = javascript_like::re_export(language_id, content, node)
+        } else if let Some((module, range)) =
+            languages::javascript_like_re_export(language_id, content, node)
         {
             imports.push_record(module, &range)?;
         } else if is_import_node(language_id, node) {
@@ -72,7 +71,7 @@ impl<'a> ImportCollector<'a> {
     ) -> Result<(), CodeIndexError> {
         let module_text = node_text(content, node);
         let modules = if language_id == "go" {
-            go::import_specs(&module_text)
+            languages::go::import_specs(&module_text)
         } else {
             Vec::new()
         };
@@ -139,8 +138,8 @@ impl<'a> ImportCollector<'a> {
         content: &str,
     ) -> Result<(), CodeIndexError> {
         let imports = match language_id {
-            "bash" => bash::line_imports(content),
-            "ruby" => ruby::line_imports(content),
+            "bash" => languages::bash::line_imports(content),
+            "ruby" => languages::ruby::line_imports(content),
             _ => Vec::new(),
         };
         for import in imports {
@@ -151,19 +150,19 @@ impl<'a> ImportCollector<'a> {
     }
 }
 
-pub(super) struct ScriptLine<'a> {
-    number: usize,
-    byte_start: usize,
-    byte_end: usize,
-    text: &'a str,
+pub(in crate::code::parser) struct ScriptLine<'a> {
+    pub(in crate::code::parser) number: usize,
+    pub(in crate::code::parser) byte_start: usize,
+    pub(in crate::code::parser) byte_end: usize,
+    pub(in crate::code::parser) text: &'a str,
 }
 
-pub(super) struct ScriptLineImport {
-    module: String,
-    range: SyntaxRange,
+pub(in crate::code::parser) struct ScriptLineImport {
+    pub(in crate::code::parser) module: String,
+    pub(in crate::code::parser) range: SyntaxRange,
 }
 
-pub(super) fn source_lines(content: &str) -> Vec<ScriptLine<'_>> {
+pub(in crate::code::parser) fn source_lines(content: &str) -> Vec<ScriptLine<'_>> {
     let mut lines = Vec::new();
     let mut byte_start = 0usize;
     for (index, raw_line) in content.split_inclusive('\n').enumerate() {
@@ -181,7 +180,10 @@ pub(super) fn source_lines(content: &str) -> Vec<ScriptLine<'_>> {
     lines
 }
 
-pub(super) fn line_range(start: &ScriptLine<'_>, end: &ScriptLine<'_>) -> SyntaxRange {
+pub(in crate::code::parser) fn line_range(
+    start: &ScriptLine<'_>,
+    end: &ScriptLine<'_>,
+) -> SyntaxRange {
     SyntaxRange {
         byte_start: start.byte_start,
         byte_end: end.byte_end,
@@ -190,7 +192,7 @@ pub(super) fn line_range(start: &ScriptLine<'_>, end: &ScriptLine<'_>) -> Syntax
     }
 }
 
-pub(super) fn quoted_specifier(statement: &str) -> Option<&str> {
+pub(in crate::code::parser) fn quoted_specifier(statement: &str) -> Option<&str> {
     let start = statement.find(['"', '\''])?;
     let quote = statement.as_bytes()[start] as char;
     let rest = &statement[start + 1..];

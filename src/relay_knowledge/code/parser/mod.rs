@@ -3,7 +3,6 @@ mod dependencies;
 mod imports;
 mod languages;
 mod manual;
-mod node_kinds;
 mod nodes;
 mod records;
 mod recovery;
@@ -405,7 +404,7 @@ mod review_tests;
 mod gcc_recovery_tests;
 
 #[cfg(test)]
-#[path = "languages/cpp_tests.rs"]
+#[path = "languages/cpp/tests.rs"]
 mod cpp_tests;
 
 #[cfg(test)]
