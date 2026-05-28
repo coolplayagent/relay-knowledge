@@ -103,6 +103,15 @@ source or manifest changed
 - 查询、CLI、Web 和 Agent context pack 能展示全域要素的新鲜度、解析状态和证据来源。
 - 全域模型不复制单仓代码事实，不破坏 repository snapshot 作为代码事实最小分区。
 
+## 7. 首版实现切片
+
+首版基础能力以 repository snapshot/source scope 为边界，把现有代码索引事实投影为软件全域读模型：
+
+- `software_components` 从 `code_repository_dependencies` 生成，区分 manifest `declared` 和 lockfile `locked`，保留 ecosystem、package name、requirement、resolved version、dependency group、证据路径和行号。
+- `software_sdk_usages` 从 unresolved、ambiguous 或 external 的 `code_repository_imports` 生成，用于表达 SDK/API surface 使用候选，保留 `resolution_state` 和 `target_hint`，但不解析未授权外部源码。
+- `software_global_status` 记录每个 source scope 的 projected graph version、stale 状态、组件数、SDK usage 数和最后错误。
+- CLI 通过 `relay-knowledge repo software <alias> --kind dependencies|sdks|all` 暴露投影结果；查询只读取已提交投影，不在热路径扫描包缓存、SDK 目录或全仓源码。
+
 ---
 
 导航: 上一章: [20. 多仓库代码图谱薄覆盖层](20-multi-repository-code-graph-overlay.md)

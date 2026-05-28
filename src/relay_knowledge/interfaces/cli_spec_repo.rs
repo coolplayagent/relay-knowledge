@@ -416,3 +416,63 @@ pub(super) fn repo_report() -> CliCommandSpec {
         &[],
     )
 }
+
+pub(super) fn repo_software() -> CliCommandSpec {
+    command!(
+        &["repo", "software"],
+        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|all] [--freshness <policy>] [--limit <n>]",
+        "Read repository-scoped software dependency and SDK/API facts.",
+        "code.repo.software",
+        CommandEffect::ReadOnly,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias.",
+            None,
+            &[],
+        )],
+        &[
+            opt(
+                "--ref",
+                Some("ref"),
+                false,
+                false,
+                "Indexed Git ref or worktree selector.",
+                Some("HEAD"),
+                &[],
+            ),
+            opt(
+                "--kind",
+                Some("kind"),
+                false,
+                false,
+                "Software global projection slice.",
+                Some("all"),
+                &["dependencies", "sdks", "all"],
+            ),
+            opt(
+                "--freshness",
+                Some("policy"),
+                false,
+                false,
+                "Controls projection freshness.",
+                Some("allow-stale"),
+                &["allow-stale", "wait-until-fresh", "graph-only"],
+            ),
+            opt(
+                "--limit",
+                Some("n"),
+                false,
+                false,
+                "Maximum rows per returned projection slice.",
+                Some("100"),
+                &[],
+            ),
+        ],
+        &["relay-knowledge repo software core --kind all --format json"],
+        &[
+            "The projection is built from authorized repository index facts: dependency manifests, lockfiles, and unresolved import/include targets."
+        ],
+    )
+}

@@ -15,6 +15,7 @@ mod multimodal;
 mod mutation;
 mod operational;
 mod retrieval;
+mod software;
 mod source;
 
 pub use code::{
@@ -69,5 +70,9 @@ pub use retrieval::{
     FusionDiagnostics, RECIPROCAL_RANK_FUSION_K, RankingSignal, RerankDiagnostics, RerankMode,
     RerankModeError, RerankSignal, RetrievalBackendState, RetrievalBackendStatus,
     RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
+};
+pub use software::{
+    SoftwareComponent, SoftwareComponentInput, SoftwareGlobalKind, SoftwareGlobalProjection,
+    SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareSdkUsage, SoftwareSdkUsageInput,
 };
 pub use source::SourceScope;

@@ -7,7 +7,7 @@ use crate::{
     domain::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
         CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector, CodeRetrievalRequest,
-        FreshnessPolicy,
+        FreshnessPolicy, SoftwareGlobalKind, SoftwareGlobalRequest,
     },
 };
 
@@ -70,6 +70,13 @@ pub enum RepoCommand {
     Report {
         alias: String,
     },
+    Software {
+        alias: String,
+        ref_selector: String,
+        kind: SoftwareGlobalKind,
+        freshness: FreshnessPolicy,
+        limit: usize,
+    },
 }
 
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -84,6 +91,7 @@ pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
         Some("impact") => parse_impact(&tokens[1..]),
         Some("status") => parse_status(&tokens[1..]),
         Some("report") => parse_report(&tokens[1..]),
+        Some("software") => parse_software(&tokens[1..]),
         Some(other) => Err(CliError::UnexpectedArgument(other.to_owned())),
         None => Err(CliError::UnexpectedArgument("repo".to_owned())),
     }
@@ -341,6 +349,32 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.report",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::Software {
+            alias,
+            ref_selector,
+            kind,
+            freshness,
+            limit,
+        } => {
+            let request = SoftwareGlobalRequest::new(
+                selector(alias, ref_selector, Vec::new(), Vec::new(), format)?,
+                kind,
+                freshness,
+                limit,
+            )
+            .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?;
+            let response = service
+                .software_global_projection(request, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.software",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -653,6 +687,47 @@ fn parse_report(tokens: &[String]) -> Result<RepoCommand, CliError> {
     })
 }
 
+fn parse_software(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    let mut ref_selector = "HEAD".to_owned();
+    let mut kind = SoftwareGlobalKind::All;
+    let mut freshness = FreshnessPolicy::AllowStale;
+    let mut limit = 100;
+    let mut index = 1;
+    while index < tokens.len() {
+        match tokens[index].as_str() {
+            "--ref" => {
+                ref_selector = value_after(tokens, index, "--ref")?;
+                index += 2;
+            }
+            "--kind" => {
+                kind = parse_software_kind(&value_after(tokens, index, "--kind")?)?;
+                index += 2;
+            }
+            "--freshness" => {
+                freshness = parse_freshness(&value_after(tokens, index, "--freshness")?)?;
+                index += 2;
+            }
+            "--limit" => {
+                let value = value_after(tokens, index, "--limit")?;
+                limit = value
+                    .parse::<usize>()
+                    .map_err(|_| CliError::InvalidLimit(value.clone()))?;
+                index += 2;
+            }
+            other => return Err(CliError::UnexpectedArgument(other.to_owned())),
+        }
+    }
+
+    Ok(RepoCommand::Software {
+        alias,
+        ref_selector,
+        kind,
+        freshness,
+        limit,
+    })
+}
+
 fn collect_query_value(
     tokens: &[String],
     index: usize,
@@ -731,6 +806,15 @@ fn parse_query_kind(value: &str) -> Result<CodeQueryKind, CliError> {
         "callees" => Ok(CodeQueryKind::Callees),
         "imports" => Ok(CodeQueryKind::Imports),
         "sbom" => Ok(CodeQueryKind::Sbom),
+        other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
+    }
+}
+
+fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
+    match value {
+        "dependencies" => Ok(SoftwareGlobalKind::Dependencies),
+        "sdks" => Ok(SoftwareGlobalKind::Sdks),
+        "all" => Ok(SoftwareGlobalKind::All),
         other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
     }
 }

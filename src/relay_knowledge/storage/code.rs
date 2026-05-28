@@ -7,6 +7,7 @@ use crate::domain::{
     CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetRefreshSummary,
     CodeRepositorySetRefreshTaskRecord, CodeRepositorySetStatus, CodeRepositoryStatus,
     CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, CodeScopeRetentionSummary,
+    SoftwareGlobalProjection, SoftwareGlobalRequest,
 };
 
 use super::{StorageError, StorageFuture};
@@ -397,6 +398,41 @@ pub trait CodeRepositoryStore: Send + Sync {
         Box::pin(async move {
             Err(StorageError::InvalidInput(format!(
                 "code repository report for '{repository}' is unavailable"
+            )))
+        })
+    }
+
+    fn refresh_software_global_projection(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "software global projection for source scope '{source_scope}' is unavailable"
+            )))
+        })
+    }
+
+    fn software_global_projection(
+        &self,
+        request: SoftwareGlobalRequest,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "software global projection for repository '{}' is unavailable",
+                request.repository.repository
+            )))
+        })
+    }
+
+    fn software_global_projection_for_scope(
+        &self,
+        source_scope: String,
+        _request: SoftwareGlobalRequest,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "software global projection for source scope '{source_scope}' is unavailable"
             )))
         })
     }

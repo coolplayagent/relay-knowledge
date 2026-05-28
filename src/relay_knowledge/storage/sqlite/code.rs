@@ -48,6 +48,9 @@ mod code_set;
 #[path = "code_set_tasks.rs"]
 mod code_set_tasks;
 
+#[path = "software.rs"]
+mod software;
+
 #[cfg(test)]
 #[path = "code_tests.rs"]
 mod code_tests;
@@ -121,7 +124,8 @@ use crate::{
         CodeFeatureFlagGraph, CodeFeatureFlagRequest, CodeFileFingerprint, CodeImpactRequest,
         CodeIndexBatch, CodeIndexCheckpoint, CodeIndexSession, CodeIndexSnapshot, CodeIndexSummary,
         CodeRepositoryRegistration, CodeRepositoryReport, CodeRepositoryStatus,
-        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest,
+        CodeRepositoryTotals, CodeRetrievalHit, CodeRetrievalRequest, SoftwareGlobalProjection,
+        SoftwareGlobalRequest,
     },
     storage::{CodeImpactChanges, CodeRepositoryStore, StorageError, StorageFuture},
 };
@@ -132,7 +136,8 @@ pub(super) use code_search::SearchDocumentInserter;
 const MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT: usize = 500;
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
-    code_schema::initialize_code_schema(connection)
+    code_schema::initialize_code_schema(connection)?;
+    software::initialize_schema(connection)
 }
 
 impl CodeRepositoryStore for SqliteGraphStore {
@@ -399,6 +404,30 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository: String,
     ) -> StorageFuture<'_, CodeRepositoryReport> {
         self.run_read(move |connection| code_report::repository_report(connection, &repository))
+    }
+
+    fn refresh_software_global_projection(
+        &self,
+        source_scope: String,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        self.run(move |connection| software::refresh_projection(connection, &source_scope))
+    }
+
+    fn software_global_projection(
+        &self,
+        request: SoftwareGlobalRequest,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        self.run_read(move |connection| software::projection(connection, request))
+    }
+
+    fn software_global_projection_for_scope(
+        &self,
+        source_scope: String,
+        request: SoftwareGlobalRequest,
+    ) -> StorageFuture<'_, SoftwareGlobalProjection> {
+        self.run_read(move |connection| {
+            software::projection_for_scope(connection, &source_scope, request)
+        })
     }
 
     fn create_code_repository_set(

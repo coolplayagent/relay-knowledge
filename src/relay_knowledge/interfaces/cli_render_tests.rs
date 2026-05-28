@@ -112,6 +112,18 @@ fn render_text_covers_operational_and_code_repository_summaries() {
             "repo=repo files=2 freshness=fresh\n",
         ),
         (
+            "code.repo.software",
+            serde_json::json!({
+                "status": {
+                    "source_scope": "scope-1",
+                    "stale": false,
+                },
+                "components": [{"component_id": "component:1"}],
+                "sdk_usages": [{"usage_id": "sdk_usage:1"}, {"usage_id": "sdk_usage:2"}],
+            }),
+            "software scope=scope-1 components=1 sdk_usages=2 stale=false\n",
+        ),
+        (
             "setup.doctor",
             serde_json::json!({
                 "configuration_ready": true,

@@ -573,6 +573,30 @@ async fn web_operation_endpoint_maps_bad_payloads_to_http_errors() {
         "code repository 'missing' is not registered"
     );
 
+    let missing_software_repository = execute_json(
+        service.clone(),
+        json!({
+            "snapshot": {
+                "name": "Software global",
+                "command": "relay-knowledge repo software missing",
+                "payload": {
+                    "operation": "code.repo.software",
+                    "alias": "missing",
+                    "ref": "HEAD",
+                    "kind": "all",
+                    "freshness": "allow-stale",
+                    "limit": 10
+                }
+            }
+        }),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        missing_software_repository["error"],
+        "code repository 'missing' is not registered"
+    );
+
     let bad_repo_set_priority = execute_json(
         service.clone(),
         json!({
@@ -720,6 +744,19 @@ fn request_builders_parse_web_payload_variants() {
     let impact = code_impact_request(&payload).expect("impact");
     assert_eq!(impact.base_ref, "main");
     assert_eq!(impact.head_ref, "feature");
+
+    let software_payload = json!({
+        "alias": "relay",
+        "ref": "main",
+        "path_filters": [" src/ ", "tests"],
+        "language_filters": [" rust "],
+        "kind": "dependencies",
+        "freshness": "wait-until-fresh",
+        "limit": 7
+    });
+    let software = code_software_request(&software_payload).expect("software");
+    assert_eq!(software.kind, SoftwareGlobalKind::Dependencies);
+    assert_eq!(software.freshness_policy, FreshnessPolicy::WaitUntilFresh);
 
     let index = code_index_request(&payload, CodeIndexMode::Full).expect("index");
     assert!(matches!(index.mode, CodeIndexMode::Full));
