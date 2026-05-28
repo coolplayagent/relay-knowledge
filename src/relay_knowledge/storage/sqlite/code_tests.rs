@@ -59,6 +59,41 @@ async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
 }
 
 #[tokio::test]
+async fn feature_flag_query_filters_sdk_flag_keys() {
+    let store = store_with_repository_snapshot(snapshot_with_chunk(
+        "repo",
+        "src/flags.ts",
+        "if (openFeature.getBooleanValue(\"checkout_v2\", false)) {}\nlet variant = ldClient.variation(\"payment_flow\", false);",
+    ))
+    .await;
+    let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
+        .expect("selector should validate");
+
+    let flags = store
+        .search_code_feature_flags(
+            CodeFeatureFlagRequest::new(
+                Some("checkout".to_owned()),
+                selector,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("feature flag request should validate"),
+        )
+        .await
+        .expect("feature flags should query");
+
+    assert_eq!(flags.len(), 1);
+    assert_eq!(flags[0].source_kind, "sdk_flag_key");
+    assert_eq!(flags[0].source_key, "checkout_v2");
+    assert!(
+        flags[0]
+            .usages
+            .iter()
+            .any(|usage| usage.edge_kind == "guards_code")
+    );
+}
+
+#[tokio::test]
 async fn text_only_chunk_hits_are_marked_as_text_fallback() {
     let store = store_with_repository_snapshot(snapshot_with_chunk_status(
         "repo",

@@ -1,0 +1,75 @@
+pub(super) const SDK_FLAG_METHODS: &[&str] = &[
+    ".getBooleanValue(",
+    ".getStringValue(",
+    ".getIntegerValue(",
+    ".getFloatValue(",
+    ".getNumberValue(",
+    ".getObjectValue(",
+    ".get_boolean_value(",
+    ".get_string_value(",
+    ".get_integer_value(",
+    ".get_float_value(",
+    ".get_number_value(",
+    ".get_object_value(",
+    ".GetBooleanValue(",
+    ".GetBooleanValueAsync(",
+    ".GetStringValue(",
+    ".GetStringValueAsync(",
+    ".GetIntegerValue(",
+    ".GetIntegerValueAsync(",
+    ".GetFloatValue(",
+    ".GetFloatValueAsync(",
+    ".GetNumberValue(",
+    ".GetNumberValueAsync(",
+    ".GetObjectValue(",
+    ".GetObjectValueAsync(",
+    ".BooleanValue(",
+    ".StringValue(",
+    ".IntValue(",
+    ".FloatValue(",
+    ".ObjectValue(",
+    ".getBooleanDetails(",
+    ".getStringDetails(",
+    ".getIntegerDetails(",
+    ".getFloatDetails(",
+    ".getNumberDetails(",
+    ".getObjectDetails(",
+    ".variation(",
+    ".boolVariation(",
+    ".BoolVariation(",
+    ".BoolVariationCtx(",
+    ".stringVariation(",
+    ".StringVariation(",
+    ".StringVariationCtx(",
+    ".jsonVariation(",
+    ".JsonVariation(",
+    ".JSONVariation(",
+    ".JSONVariationCtx(",
+    ".intVariation(",
+    ".IntVariation(",
+    ".IntVariationCtx(",
+    ".doubleVariation(",
+    ".DoubleVariation(",
+    ".DoubleVariationCtx(",
+    ".Float64Variation(",
+    ".Float64VariationCtx(",
+    ".isEnabled(",
+    ".is_enabled(",
+    ".IsEnabled(",
+    ".getVariant(",
+    ".get_variant(",
+    ".GetVariant(",
+];
+
+pub(super) fn sdk_flag_argument_index(pattern: &str) -> usize {
+    if pattern.ends_with("Ctx(")
+        || matches!(
+            pattern,
+            ".BooleanValue(" | ".StringValue(" | ".IntValue(" | ".FloatValue(" | ".ObjectValue("
+        )
+    {
+        1
+    } else {
+        0
+    }
+}

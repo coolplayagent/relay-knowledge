@@ -42,7 +42,7 @@ Repository-set 查询必须把每个 member 视为独立的有界 retrieval work
 
 候选窗口应输出可观测字段：每个 layer 的 pre-filter count、post-filter count、score count、truncation reason 和耗时。影响分析、caller/callee 和 import 查询必须随 changed path、seed symbol、module hint 和 edge confidence 扩展，而不是随完整 scope table size 扩展。
 
-Feature flag 查询默认枚举 indexed scope 内的结构化开关事实；带 `--query` 时只过滤已索引 flag name、source key、path 和 excerpt。排序优先级为 guarded-code 关系、配置定义、普通读取，再结合 query 命中和路径/language 过滤。该查询不能用 query-time grep 枚举未知开关，也不能通过硬编码产品、仓库或 benchmark 中的已知开关名提升排名。
+Feature flag 查询默认枚举 indexed scope 内的结构化开关事实；带 `--query` 时只过滤已索引 flag name、source key、path 和 excerpt。排序优先级为 guarded-code 关系、配置定义、普通读取和 SDK evaluation，再结合 query 命中和路径/language 过滤。该查询不能用 query-time grep 枚举未知开关，不能同步 provider 控制面状态，也不能通过硬编码产品、仓库或 benchmark 中的已知开关名提升排名。
 
 ## 5. 影响分析
 
