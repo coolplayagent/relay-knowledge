@@ -28,11 +28,13 @@ use crate::{
     },
 };
 
-use super::{
-    index_refresh::{metadata_for_indexes, refresh_index_kinds},
-    ingest::mutation_batch_from_request,
+use super::proposals::{fallback_proposal, proposal_from_worker_response, worker_request_payload};
+use crate::application::{
+    knowledge::{
+        index_refresh::{metadata_for_indexes, refresh_index_kinds},
+        ingest::mutation_batch_from_request,
+    },
     service::RelayKnowledgeService,
-    worker_proposals::{fallback_proposal, proposal_from_worker_response, worker_request_payload},
 };
 
 const WORKER_LEASE_MS: u64 = 30_000;
@@ -453,7 +455,7 @@ impl RelayKnowledgeService {
         })
     }
 
-    pub(super) async fn queue_worker_tasks_for_evidence(
+    pub(in crate::application) async fn queue_worker_tasks_for_evidence(
         &self,
         store: &Arc<dyn KnowledgeStore>,
         evidence: &[EvidenceRecord],
@@ -624,9 +626,9 @@ fn worker_task_seeds(
         .collect()
 }
 
-pub(super) fn overlay_worker_runtime(
+pub(in crate::application) fn overlay_worker_runtime(
     mut statuses: Vec<WorkerStatus>,
-    runtime: &super::WorkerRuntimeConfig,
+    runtime: &crate::application::WorkerRuntimeConfig,
 ) -> Vec<WorkerStatus> {
     if statuses.is_empty() {
         statuses = WorkerKind::ALL

@@ -10,9 +10,13 @@ use crate::{
 };
 
 use super::{
-    RelayKnowledgeService,
-    index_refresh::{IndexRefreshOutcome, filter_outcome_to_read_models, metadata_for_indexes},
-    service::{current_time_millis, graph_with_repository_code_totals, storage_api_error},
+    RelayKnowledgeService, current_time_millis, graph_with_repository_code_totals,
+    storage_api_error,
+};
+use crate::application::{
+    knowledge::index_refresh::{
+        IndexRefreshOutcome, filter_outcome_to_read_models, metadata_for_indexes,
+    },
     status::runtime_status_with_model_profiles,
 };
 

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::code_repository_set_plan::api_query_identity_leaves;
+use super::plan::api_query_identity_leaves;
 use crate::domain::{CodeRepositorySetQueryHit, CodeRetrievalLayer};
 
 const MIN_IDENTITY_COVERAGE_IDENTITIES: usize = 2;

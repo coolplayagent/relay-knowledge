@@ -3,10 +3,8 @@ use crate::{
     domain::CodeRepositorySetRemoveMemberRequest,
 };
 
-use super::{
-    RelayKnowledgeService,
-    code_repository_set_service::{required_set_status, storage_api_error},
-};
+use super::service::{required_set_status, storage_api_error};
+use crate::application::service::RelayKnowledgeService;
 
 impl RelayKnowledgeService {
     /// Removes one member snapshot from a repository set and releases its retention pin.

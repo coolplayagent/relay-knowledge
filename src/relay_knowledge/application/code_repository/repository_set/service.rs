@@ -20,17 +20,19 @@ use crate::{
 use futures_util::{StreamExt, stream};
 use std::{path::PathBuf, sync::Arc};
 
+use crate::application::{
+    code_repository::support::apply_code_grep_fallback, service::RelayKnowledgeService,
+};
+
 use super::{
-    RelayKnowledgeService,
-    code_repository_set_plan::{
+    plan::{
         dependency_symbol_plan_needs_hybrid_fallback, merge_dependency_symbol_fallback_hits,
         repository_set_member_query_plan,
     },
-    code_repository_set_query::{
+    query::{
         OverlayEvidenceIndex, apply_bridge_support_bonus, dedupe_sort_truncate,
         per_member_candidate_limit, prune_returned_overlay_evidence, repository_set_score,
     },
-    code_service_support::apply_code_grep_fallback,
 };
 
 const REPOSITORY_SET_REFRESH_TASK_LEASE_MS: u64 = 10 * 60 * 1000;

@@ -1,28 +1,15 @@
 //! Application services that orchestrate domain behavior behind stable API types.
 
-mod code_query_source_fallback;
-mod code_query_source_surface;
-mod code_repository_set_identity_coverage;
-mod code_repository_set_lifecycle;
-mod code_repository_set_plan;
-mod code_repository_set_query;
-mod code_repository_set_service;
-mod code_service;
-mod code_service_support;
-mod file_index;
-mod index_refresh;
-mod ingest;
-mod model_provider_config;
-mod multimodal;
-mod operations;
+mod code_repository;
+mod knowledge;
+mod model_provider;
 mod runtime;
 mod service;
-mod service_health;
 mod status;
 mod update;
-mod worker_proposals;
+mod worker;
 
-pub use file_index::DEFAULT_FILE_QUERY_LIMIT;
+pub use knowledge::DEFAULT_FILE_QUERY_LIMIT;
 pub use runtime::{
     AgentRuntimeConfig, FileIndexRootConfig, FileIndexRuntimeConfig, RetrievalRuntimeConfigError,
     RuntimeConfiguration, RuntimeConfigurationError, WorkerRuntimeConfig,

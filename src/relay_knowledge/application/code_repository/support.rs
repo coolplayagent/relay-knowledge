@@ -16,7 +16,7 @@ use crate::{
     },
 };
 
-use super::code_query_source_fallback::{
+use super::source_fallback::{
     append_code_grep_fallback, append_definition_source_fallback, plan_code_grep_fallback,
 };
 

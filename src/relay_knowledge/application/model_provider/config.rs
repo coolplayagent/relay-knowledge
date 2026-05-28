@@ -7,7 +7,7 @@ use crate::{
     },
 };
 
-use super::RelayKnowledgeService;
+use crate::application::service::RelayKnowledgeService;
 
 impl RelayKnowledgeService {
     /// Lists redacted model provider profiles.

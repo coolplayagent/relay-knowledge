@@ -11,7 +11,7 @@ use crate::{
     },
 };
 
-use super::code_query_source_surface::hit_has_complete_source_surface;
+use super::source_surface::hit_has_complete_source_surface;
 
 const MAX_DEFINITION_SOURCE_CANDIDATE_PATHS: usize = 8;
 const MAX_IMPORT_SOURCE_CANDIDATE_PATHS: usize = 32;
@@ -964,5 +964,5 @@ fn dedupe_sort_truncate(results: &mut Vec<CodeRetrievalHit>, limit: usize) {
 }
 
 #[cfg(test)]
-#[path = "code_query_source_fallback_tests.rs"]
+#[path = "source_fallback_tests.rs"]
 mod tests;
