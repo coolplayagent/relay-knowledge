@@ -102,17 +102,17 @@ Source benchmark: [relay-teams baseline](01-relay-teams-baseline-2026-05-14.md)
 
 - Baseline: scope selected large JSONL fixtures and `uv.lock` as unknown files.
 - Root cause: source preset includes some large non-code text-like assets.
-- Fix: exclude `*.jsonl` dataset dumps and `uv.lock` from the default source
-  preset while allowing explicit path-filter opt-in for users who need those
-  assets as retrieval targets.
-- Acceptance: scope preview reports these paths under `excluded_paths` with
-  reason `excluded by source preset`; they no longer contribute to selected,
-  unsupported, large/heavy, or degraded counts unless explicitly selected.
+- Fix: exclude `*.jsonl` dataset dumps from the default source preset and keep
+  `uv.lock` as SBOM-only metadata so it does not produce unknown source chunks.
+- Acceptance: scope preview reports dataset dumps under `excluded_paths` with
+  reason `excluded by source preset`; `uv.lock` may be selected for SBOM facts
+  but does not contribute source chunks, unsupported, large/heavy, or degraded
+  retrieval counts.
 - Tests: scope selection and preview tests cover `.jsonl`, `uv.lock`, and
   explicit opt-in.
-- Status: implemented and re-verified. Relay-teams selected bytes dropped from
-  32,888,900 to 22,063,153, and the large JSONL dataset dumps plus `uv.lock`
-  were absent from the largest selected files list.
+- Status: implemented and re-verified. Relay-teams source retrieval bytes
+  dropped from 32,888,900 to 22,063,153, and the large JSONL dataset dumps plus
+  `uv.lock` were absent from the largest selected source-file list.
 
 ## RK-PERF-008: Re-registering an existing repository root replaces the alias
 

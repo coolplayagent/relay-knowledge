@@ -258,5 +258,5 @@ Headless Chromium 对 `http://127.0.0.1:8791/` 的实时页面加载基准测试
 - 重复全量索引现在使用无操作快速路径：0.38 秒，blob 读取、解析和 SQLite 写入均为 0。
 - Web 无操作 `code.repo.index` 现在会在 162ms 内返回 HTTP 200，而不是 30 秒后超时。
 - 顶层 CLI GraphRAG 查询现在接受多词位置参数输入。
-- 默认 scope 不再包含大型 JSONL 数据集 dump 或 `uv.lock`；选中字节数从 32,888,900 降至 22,063,153。
+- 默认 source chunk 不再包含大型 JSONL 数据集 dump，`uv.lock` 只保留为 SBOM metadata，不再作为 unknown source file 展开。
 - 实时 Web 仪表盘在仓库索引后不再显示代码图为空。

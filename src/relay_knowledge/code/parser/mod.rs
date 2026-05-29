@@ -24,8 +24,10 @@ use super::{
     stable_content_hash, stable_id,
 };
 use chunks::{add_file_chunk, chunks_for_symbols};
-use dependencies::collect_dependencies;
-pub(in crate::code) use dependencies::dependency_manifest_language_ids;
+use dependencies::{collect_dependencies, dependency_manifest_is_facts_only};
+pub(in crate::code) use dependencies::{
+    dependency_manifest_language_ids, dependency_manifest_overrides_default_exclusion,
+};
 use imports::collect_imports;
 use manual::collect_manual_nodes;
 #[cfg(test)]
@@ -89,6 +91,10 @@ pub(in crate::code) fn parse_indexed_file(
                 degraded_reason,
             },
         );
+        if dependency_manifest_is_facts_only(path) {
+            record_dependencies(build, path, &file_id, &content)?;
+            return Ok(());
+        }
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
         record_dependencies(build, path, &file_id, &content)?;
         record_feature_flags(build, path, &file_id, "unknown", &content)?;

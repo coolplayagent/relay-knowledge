@@ -283,7 +283,7 @@ Headless Chromium live page-load baseline against `http://127.0.0.1:8791/`,
 - Web no-op `code.repo.index` now returns HTTP 200 in 162ms instead of timing
   out after 30s.
 - Top-level CLI GraphRAG query now accepts multi-word positional input.
-- Default scope no longer includes the large JSONL dataset dumps or `uv.lock`;
-  selected bytes dropped from 32,888,900 to 22,063,153.
+- Default source chunking no longer includes the large JSONL dataset dumps, and
+  `uv.lock` is retained only as SBOM metadata instead of an unknown source file.
 - Live Web dashboard no longer shows the code graph as empty after repository
   indexing.

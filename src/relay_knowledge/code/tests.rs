@@ -335,12 +335,12 @@ fn full_index_plan_preserves_order_across_bounded_parallel_parse_chunks() {
 }
 
 #[test]
-fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() {
+fn explicit_default_exclusion_opt_in_supports_dataset_paths() {
     let registration = CodeRepositoryRegistration::new(
         "repo",
         "alias",
         "/tmp/repo",
-        vec!["data/events.jsonl".to_owned(), "uv.lock".to_owned()],
+        vec!["data/events.jsonl".to_owned()],
         Vec::new(),
     )
     .expect("registration should validate");
@@ -352,7 +352,6 @@ fn explicit_default_exclusion_opt_in_supports_dataset_and_lock_paths() {
         &registration,
         &selector
     ));
-    assert!(path_is_selected("uv.lock", &registration, &selector));
     assert!(!path_is_selected(
         "other/events.jsonl",
         &registration,
@@ -631,20 +630,25 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
 
     let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
 
-    assert_eq!(preview.selected_file_count, 1);
-    assert_eq!(preview.language_distribution[0].language_id, "rust");
+    assert_eq!(preview.selected_file_count, 2);
+    assert!(
+        preview
+            .language_distribution
+            .iter()
+            .any(|language| language.language_id == "rust")
+    );
+    assert!(
+        preview
+            .language_distribution
+            .iter()
+            .any(|language| language.language_id == "python")
+    );
     assert!(preview.excluded_paths.iter().any(|path| {
         path.path == "dist/bundle.js" && path.reason == "excluded by source preset"
     }));
     assert!(preview.excluded_paths.iter().any(|path| {
         path.path == "data/events.jsonl" && path.reason == "excluded by source preset"
     }));
-    assert!(
-        preview
-            .excluded_paths
-            .iter()
-            .any(|path| { path.path == "uv.lock" && path.reason == "excluded by source preset" })
-    );
     assert!(preview.excluded_paths.iter().any(|path| {
         path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
     }));

@@ -1,6 +1,7 @@
 pub(super) mod bash;
 pub(super) mod c;
 mod c_family_references;
+mod config;
 pub(super) mod cpp;
 pub(super) mod csharp;
 mod enum_members;
@@ -29,6 +30,7 @@ pub(super) fn definition_kind(language_id: &str, node_kind: &str) -> Option<&'st
         "go" => go::definition_kind(node_kind),
         "java" => java::definition_kind(node_kind),
         "javascript" | "jsx" => javascript::definition_kind(node_kind),
+        "json" | "yaml" | "properties" => config::definition_kind(language_id, node_kind),
         "kotlin" => kotlin::definition_kind(node_kind),
         "php" => php::definition_kind(node_kind),
         "python" => python::definition_kind(node_kind),
@@ -50,6 +52,7 @@ pub(super) fn is_call_node(language_id: &str, node_kind: &str) -> bool {
         "go" => go::is_call_node(node_kind),
         "java" => java::is_call_node(node_kind),
         "javascript" | "jsx" => javascript::is_call_node(node_kind),
+        "json" | "yaml" | "properties" => false,
         "kotlin" => kotlin::is_call_node(node_kind),
         "php" => php::is_call_node(node_kind),
         "python" => python::is_call_node(node_kind),
@@ -106,6 +109,9 @@ pub(super) fn manual_definition_candidate(language_id: &str, node_kind: &str) ->
             javascript::manual_definition_candidate(node_kind)
                 || definition_kind(language_id, node_kind).is_some()
         }
+        "json" | "yaml" | "properties" => {
+            config::manual_definition_candidate(language_id, node_kind)
+        }
         _ => definition_kind(language_id, node_kind).is_some(),
     }
 }
@@ -118,6 +124,7 @@ pub(super) fn language_manual_definitions(
     match language_id {
         "c" => c::manual_definitions(content, node),
         "cpp" => cpp::manual_definitions(content, node),
+        "json" | "yaml" | "properties" => config::manual_definitions(content, language_id, node),
         "javascript" | "jsx" | "typescript" | "tsx" => javascript::manual_definition(content, node)
             .into_iter()
             .collect(),

@@ -16,6 +16,7 @@ use super::{
     git_bytes, git_object_exists,
     languages::language_id,
     parser::dependency_manifest_language_ids,
+    parser::dependency_manifest_overrides_default_exclusion,
     resolve_ref, resolve_tree,
     source_roots::{NESTED_SOURCE_MARKERS, STRIPPABLE_SOURCE_ROOTS},
 };
@@ -102,7 +103,7 @@ pub fn preview_repository_scope(
             }
             continue;
         }
-        let language = language_id(&entry.path).unwrap_or("unknown");
+        let language = preview_language_id(&entry.path);
         selected_file_count += 1;
         selected_byte_count = selected_byte_count.saturating_add(entry.byte_count);
         let bucket = language_distribution
@@ -273,6 +274,7 @@ pub(super) fn selection_exclusion_reason_with_layout(
         return Some("excluded by .relay-knowledgeignore".to_owned());
     }
     if default_source_preset_excludes(path)
+        && !dependency_manifest_overrides_default_exclusion(path)
         && !source_layout.keeps_default_excluded_source(path)
         && !explicit_path_filter_opts_into_default_exclusion(
             path,
@@ -356,6 +358,14 @@ pub(super) fn effective_index_path_filters(
 
 fn source_path_has_indexable_content(path: &str) -> bool {
     language_id(path).is_some() || dependency_manifest_language_ids(path).is_some()
+}
+
+fn preview_language_id(path: &str) -> &'static str {
+    language_id(path).unwrap_or_else(|| {
+        dependency_manifest_language_ids(path)
+            .and_then(|languages| languages.first().copied())
+            .unwrap_or("unknown")
+    })
 }
 
 fn path_contains_broad_dependency_segment(path: &str) -> bool {
@@ -742,7 +752,8 @@ mod tests {
             &registration,
             &selector
         ));
-        assert!(!path_is_selected("uv.lock", &registration, &selector));
+        assert!(default_source_preset_excludes("uv.lock"));
+        assert!(path_is_selected("uv.lock", &registration, &selector));
     }
 
     #[test]

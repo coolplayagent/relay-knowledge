@@ -476,6 +476,93 @@ retry_policy
     }
 }
 
+#[test]
+fn configuration_languages_extract_nested_keys_as_symbols() {
+    let json = parse_source_snapshot(
+        "package.json",
+        br#"{"scripts":{"build":"vite build"},"dependencies":{"react":"^18"}}"#,
+    );
+    assert_eq!(json.files[0].language_id, "json");
+    assert_eq!(json.files[0].parse_status, CodeParseStatus::Parsed);
+    assert_symbol_and_chunk(&json, "scripts.build");
+    assert_symbol_and_chunk(&json, "dependencies.react");
+
+    let yaml = parse_source_snapshot(
+        ".github/workflows/ci.yml",
+        b"jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\nservices:\n  api:\n    image: ghcr.io/org/app:1.2.3\n",
+    );
+    assert_eq!(yaml.files[0].language_id, "yaml");
+    assert_eq!(yaml.files[0].parse_status, CodeParseStatus::Parsed);
+    assert_symbol_and_chunk(&yaml, "jobs.build");
+    assert_symbol_and_chunk(&yaml, "services.api.image");
+
+    let properties = parse_source_snapshot(
+        "src/main/resources/application.properties",
+        b"spring.datasource.url=jdbc:postgresql://localhost/app\nlogging.level.root: INFO\n",
+    );
+    assert_eq!(properties.files[0].language_id, "properties");
+    assert_eq!(properties.files[0].parse_status, CodeParseStatus::Parsed);
+    assert_symbol_and_chunk(&properties, "spring.datasource.url");
+    assert_symbol_and_chunk(&properties, "logging.level.root");
+}
+
+#[test]
+fn dependency_only_lockfiles_emit_sbom_without_chunks() {
+    let snapshot = parse_source_snapshot(
+        "package-lock.json",
+        br#"{"packages":{"node_modules/react":{"version":"18.2.0"}}}"#,
+    );
+
+    assert_eq!(snapshot.files[0].language_id, "unknown");
+    assert!(snapshot.symbols.is_empty());
+    assert!(snapshot.chunks.is_empty());
+    assert!(
+        snapshot
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.package_name == "react")
+    );
+
+    let uv = parse_source_snapshot(
+        "uv.lock",
+        br#"[[package]]
+name = "httpx"
+version = "0.27.2"
+source = { registry = "https://pypi.org/simple" }
+"#,
+    );
+    assert_eq!(uv.files[0].language_id, "unknown");
+    assert!(uv.chunks.is_empty());
+    assert!(
+        uv.dependencies
+            .iter()
+            .any(|dependency| dependency.package_name == "httpx")
+    );
+}
+
+fn assert_symbol_and_chunk(snapshot: &crate::domain::CodeIndexSnapshot, name: &str) {
+    assert!(
+        snapshot.symbols.iter().any(|symbol| symbol.name == name),
+        "missing config symbol {name}; got {:?}",
+        snapshot
+            .symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        snapshot.chunks.iter().any(|chunk| chunk
+            .content
+            .contains(name.rsplit('.').next().unwrap_or(name))),
+        "missing chunk for {name}; got {:?}",
+        snapshot
+            .chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
 struct LanguageFixture {
     path: &'static str,
     source: &'static [u8],
