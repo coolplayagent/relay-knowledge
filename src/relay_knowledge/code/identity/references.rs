@@ -62,15 +62,126 @@ fn resolve_reference<'a>(
         return resolve_call_reference_target(reference, by_name, by_name_and_path);
     }
 
-    resolve_reference_target(
-        reference.name.as_str(),
-        by_name
-            .get(reference.name.as_str())
-            .map(std::vec::Vec::as_slice),
-        by_name_and_path
-            .get(&(reference.name.as_str(), reference.path.as_str()))
-            .map(std::vec::Vec::as_slice),
-    )
+    let candidates = by_name
+        .get(reference.name.as_str())
+        .map(std::vec::Vec::as_slice);
+    let same_path_candidates = by_name_and_path
+        .get(&(reference.name.as_str(), reference.path.as_str()))
+        .map(std::vec::Vec::as_slice);
+    if matches!(reference.kind.as_str(), "target" | "variable")
+        && make_reference_path(&reference.path)
+    {
+        return resolve_same_path_reference_target(
+            reference.name.as_str(),
+            compatible_scoped_symbols(same_path_candidates, &reference.kind).as_deref(),
+        );
+    }
+    if reference.kind == "variable" && cmake_reference_path(&reference.path) {
+        return resolve_same_path_reference_target(
+            reference.name.as_str(),
+            compatible_scoped_symbols(same_path_candidates, &reference.kind).as_deref(),
+        );
+    }
+    if reference.kind == "stage" && dockerfile_reference_path(&reference.path) {
+        return resolve_same_path_reference_target(
+            reference.name.as_str(),
+            compatible_scoped_symbols(same_path_candidates, &reference.kind).as_deref(),
+        );
+    }
+    if reference.kind == "template" {
+        return resolve_reference_target(
+            reference.name.as_str(),
+            compatible_template_symbols(candidates, &reference.path).as_deref(),
+            compatible_template_symbols(same_path_candidates, &reference.path).as_deref(),
+        );
+    }
+    if scoped_reference_kind(&reference.kind) {
+        return resolve_reference_target(
+            reference.name.as_str(),
+            compatible_scoped_symbols(candidates, &reference.kind).as_deref(),
+            compatible_scoped_symbols(same_path_candidates, &reference.kind).as_deref(),
+        );
+    }
+
+    resolve_reference_target(reference.name.as_str(), candidates, same_path_candidates)
+}
+
+fn scoped_reference_kind(kind: &str) -> bool {
+    matches!(kind, "target" | "variable" | "dependency" | "template")
+}
+
+fn make_reference_path(path: &str) -> bool {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    matches!(file_name, "Makefile" | "GNUmakefile" | "BSDmakefile") || file_name.ends_with(".mk")
+}
+
+fn cmake_reference_path(path: &str) -> bool {
+    path.rsplit('/').next().unwrap_or(path) == "CMakeLists.txt" || path.ends_with(".cmake")
+}
+
+fn dockerfile_reference_path(path: &str) -> bool {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    matches!(file_name, "Dockerfile" | "Containerfile")
+        || file_name.starts_with("Dockerfile.")
+        || file_name.starts_with("Containerfile.")
+        || file_name.ends_with(".Dockerfile")
+        || file_name.ends_with(".Containerfile")
+}
+
+fn compatible_template_symbols<'a>(
+    candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+    reference_path: &str,
+) -> Option<Vec<&'a RepositoryCodeSymbolRecord>> {
+    let candidates = compatible_scoped_symbols(candidates, "template")?;
+    let Some(template_root) = nearest_template_root(reference_path) else {
+        return Some(candidates);
+    };
+    let symbols = candidates
+        .into_iter()
+        .filter(|symbol| path_in_directory_tree(&symbol.path, template_root))
+        .collect::<Vec<_>>();
+
+    (!symbols.is_empty()).then_some(symbols)
+}
+
+fn compatible_scoped_symbols<'a>(
+    candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+    reference_kind: &str,
+) -> Option<Vec<&'a RepositoryCodeSymbolRecord>> {
+    let symbols = candidates?
+        .iter()
+        .copied()
+        .filter(|symbol| scoped_symbol_matches(reference_kind, &symbol.kind))
+        .collect::<Vec<_>>();
+    (!symbols.is_empty()).then_some(symbols)
+}
+
+fn scoped_symbol_matches(reference_kind: &str, symbol_kind: &str) -> bool {
+    match reference_kind {
+        "dependency" => matches!(symbol_kind, "dependency" | "module"),
+        _ => symbol_kind == reference_kind,
+    }
+}
+
+fn nearest_template_root(path: &str) -> Option<&str> {
+    let mut root_end = None;
+    let mut offset = 0usize;
+    for segment in path.split('/') {
+        let end = offset + segment.len();
+        if segment == "templates" {
+            root_end = Some(end);
+        }
+        offset = end + 1;
+    }
+
+    root_end.map(|end| &path[..end])
+}
+
+fn path_in_directory_tree(path: &str, directory: &str) -> bool {
+    path == directory
+        || path
+            .strip_prefix(directory)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn resolve_call_reference_target<'a>(
@@ -147,6 +258,20 @@ fn resolve_reference_target<'a>(
     }
 
     if let Some(same_path) = same_path_candidates.and_then(unique_candidate) {
+        return Resolution::Resolved(same_path, target_hint.to_owned());
+    }
+
+    Resolution::Ambiguous(target_hint.to_owned())
+}
+
+fn resolve_same_path_reference_target<'a>(
+    target_hint: &str,
+    same_path_candidates: Option<&[&'a RepositoryCodeSymbolRecord]>,
+) -> Resolution<'a> {
+    let Some(candidates) = same_path_candidates else {
+        return Resolution::Unresolved;
+    };
+    if let Some(same_path) = unique_candidate(candidates) {
         return Resolution::Resolved(same_path, target_hint.to_owned());
     }
 
@@ -340,6 +465,22 @@ mod tests {
         assert_eq!(references[0].target_symbol_snapshot_id, None);
         assert_eq!(references[0].target_hint.as_deref(), Some("ffi::connect"));
         assert_eq!(references[0].resolution_state, "unresolved");
+    }
+
+    #[test]
+    fn dependency_references_can_resolve_to_module_symbols() {
+        let mut symbols = vec![symbol("go-module", "libs/lib/go.mod", "example.com/lib")];
+        symbols[0].kind = "module".to_owned();
+        let mut references = vec![reference("go-require", "go.mod", "example.com/lib")];
+        references[0].kind = "dependency".to_owned();
+
+        resolve_reference_targets(&symbols, &mut references);
+
+        assert_eq!(
+            references[0].target_symbol_snapshot_id.as_deref(),
+            Some("go-module")
+        );
+        assert_eq!(references[0].resolution_state, "resolved");
     }
 
     #[test]

@@ -14,6 +14,8 @@ Tree-sitter is the entry point for code structure, not a complete semantic analy
 
 Each language registration includes language id, file extensions, tree-sitter grammar, capture queries, comment rules, identifier segmentation, and fallback chunker. When grammar is missing, files still enter text chunk and BM25 paths. Query-time source fallback is not a grammar substitute; it only adds exact-text evidence from indexed source candidates and cannot create graph facts.
 
+Configuration, build, and template grammars are registered under the code configuration module rather than runtime configuration. The supported surface includes Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java properties, TOML, INI, YAML, JSON, Go module files, Ninja, Jinja2, and Go templates. These formats emit ordinary file, symbol, reference, import, dependency, feature-flag, and chunk facts so query APIs do not need a separate schema for configuration search.
+
 Parser implementation must keep language-specific rules under cohesive language directories. Node-kind classification, language-specific import extraction, and C/C++ manual recovery belong under `src/relay_knowledge/code/parser/languages/<language>/`; shared parsing flow, syntax helpers, text validation, dependency manifest parsing, and chunk construction remain in parser-level modules.
 
 ## 3. Capture Contract
@@ -44,6 +46,8 @@ Incremental indexing first narrows the work set:
 4. Refresh only affected code facts, chunks, and index families.
 
 Import dependency expansion prioritizes indexed code maps and versioned import edges. If an import points to an external dependency or cross-repository target without a code map, the indexer records only the unresolved target hint, resolution reason, and affected current-repository facts; it does not trigger an unauthorized full scan to fill that dependency. This coverage gap is not parser, file, scope, or response degradation. The query layer may use the hint inside the same scope to trigger bounded internal source fallback.
+
+Local configuration relationships resolve only inside the same indexed source scope. Finalization may resolve deterministic local file references, template includes, and build-target references after all files in that scope have been written. Ambiguous local matches and external images, packages, remote labels, or templates remain unresolved or ambiguous metadata rather than degraded parser state.
 
 Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
 

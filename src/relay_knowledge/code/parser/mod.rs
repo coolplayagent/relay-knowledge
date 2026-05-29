@@ -18,7 +18,7 @@ use crate::domain::{
 use tree_sitter::Node;
 
 use super::{
-    CodeIndexError, SnapshotBuild,
+    CodeIndexError, SnapshotBuild, configuration,
     feature_flags::{FeatureFlagFileInput, extract_feature_flags},
     languages::{LanguageSpec, detect_language},
     stable_content_hash, stable_id,
@@ -283,10 +283,15 @@ fn syntax_parse_status(
     }
     let has_structured_facts =
         !(output.symbols.is_empty() && output.references.is_empty() && imports.is_empty());
+    if configuration::manual_parse_status(language_id, content) {
+        return (CodeParseStatus::Parsed, None);
+    }
     if recovery::recoverable_c_family_parse(language_id, root, content, has_structured_facts) {
         return (CodeParseStatus::Parsed, None);
     }
-
+    if has_structured_facts && configuration::recoverable_parse_error(language_id, content) {
+        return (CodeParseStatus::Parsed, None);
+    }
     (
         CodeParseStatus::Partial,
         Some("tree-sitter produced error nodes; indexed syntax facts may be partial".to_owned()),
@@ -384,6 +389,14 @@ impl FileParseOutput {
 #[cfg(test)]
 #[path = "tests/general.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/configuration.rs"]
+mod configuration_tests;
+
+#[cfg(test)]
+#[path = "tests/configuration_review.rs"]
+mod configuration_review_tests;
 
 #[cfg(test)]
 #[path = "tests/exported_value.rs"]

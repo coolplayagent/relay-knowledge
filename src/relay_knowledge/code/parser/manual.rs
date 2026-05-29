@@ -1,5 +1,7 @@
 use tree_sitter::Node;
 
+use crate::code::configuration;
+
 use super::{
     super::CodeIndexError,
     FileParseContext, FileParseOutput, languages,
@@ -35,8 +37,43 @@ pub(super) fn collect_manual_nodes(
         }
         push_children_reverse(node, &mut stack);
     }
+    let (definitions, references) =
+        configuration::structured_facts(context.path, context.language_id, context.content);
+    for definition in definitions {
+        upsert_symbol(
+            output,
+            symbol_record(
+                context,
+                &definition.name,
+                definition.kind,
+                &definition.range.into(),
+            )?,
+        );
+    }
+    for reference in references {
+        upsert_reference(
+            output,
+            reference_record(
+                context,
+                &reference.name,
+                reference.kind,
+                &reference.range.into(),
+            )?,
+        );
+    }
 
     Ok(())
+}
+
+impl From<configuration::ConfigRange> for SyntaxRange {
+    fn from(range: configuration::ConfigRange) -> Self {
+        Self {
+            byte_start: range.byte_start,
+            byte_end: range.byte_end,
+            line_start: range.line_start,
+            line_end: range.line_end,
+        }
+    }
 }
 
 pub(super) fn manual_definitions(

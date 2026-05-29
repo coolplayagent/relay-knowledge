@@ -11,6 +11,7 @@ use std::{
 };
 
 mod changes;
+mod configuration;
 pub(crate) mod feature_flags;
 mod git;
 mod grep;

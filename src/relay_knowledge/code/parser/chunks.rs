@@ -40,11 +40,32 @@ pub(super) fn chunks_for_symbols(
             symbol_snapshot_id: Some(symbol.symbol_snapshot_id.clone()),
         });
     }
-    if chunks.is_empty() {
+    if chunks.is_empty() || keeps_file_chunk_with_symbol_chunks(language_id) {
         add_file_chunk_to_vec(build, path, file_id, language_id, content, &mut chunks)?;
     }
 
     Ok(chunks)
+}
+
+fn keeps_file_chunk_with_symbol_chunks(language_id: &str) -> bool {
+    matches!(
+        language_id,
+        "cmake"
+            | "dockerfile"
+            | "gomod"
+            | "gotemplate"
+            | "ini"
+            | "jinja2"
+            | "json"
+            | "make"
+            | "markdown"
+            | "ninja"
+            | "properties"
+            | "starlark"
+            | "toml"
+            | "xml"
+            | "yaml"
+    )
 }
 
 pub(super) fn add_file_chunk(

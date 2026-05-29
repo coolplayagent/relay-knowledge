@@ -102,6 +102,19 @@ impl<'a> ImportContext<'a> {
         ModuleFileResolution::Unresolved
     }
 
+    pub(super) fn resolve_first_exact_module_file(
+        &self,
+        module_paths: &[String],
+    ) -> ModuleFileResolution {
+        for module_path in module_paths {
+            if self.file_languages.contains_key(module_path.as_str()) {
+                return ModuleFileResolution::Resolved(module_path.clone());
+            }
+        }
+
+        ModuleFileResolution::Unresolved
+    }
+
     pub(super) fn directory_has_language_files(
         &self,
         directory_path: &str,
@@ -309,6 +322,38 @@ impl<'a> ImportContext<'a> {
             .count();
 
         resolution_from_count(match_count)
+    }
+
+    pub(super) fn resolve_name_in_directory_tree_for_language_and_kinds_with_hint(
+        &self,
+        name: &str,
+        directory_path: &str,
+        language_id: &str,
+        allowed_kinds: &[&str],
+    ) -> (ImportResolution, Option<String>) {
+        let Some(candidates) = self.symbols_by_name.get(name) else {
+            return (ImportResolution::Unresolved, None);
+        };
+        let directory_paths = normalized_module_candidates(directory_path);
+        let matches = candidates
+            .iter()
+            .filter(|symbol| {
+                symbol.language_id == language_id
+                    && allowed_kinds.contains(&symbol.kind.as_str())
+                    && directory_paths.iter().any(|directory| {
+                        source_module_candidates(&symbol.path).iter().any(|path| {
+                            path == directory || path.starts_with(&format!("{directory}/"))
+                        })
+                    })
+            })
+            .take(2)
+            .collect::<Vec<_>>();
+
+        match matches.as_slice() {
+            [symbol] => (ImportResolution::Resolved, Some(symbol.path.clone())),
+            [.., _] => (ImportResolution::Ambiguous, None),
+            [] => (ImportResolution::Unresolved, None),
+        }
     }
 
     pub(super) fn resolve_name(&self, name: &str) -> ImportResolution {
