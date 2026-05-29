@@ -48,7 +48,7 @@ relay-knowledge repo index repo --ref HEAD --format json
 relay-knowledge repo index repo --ref <commit-sha> --format json
 ```
 
-全量索引通过 Git 从 clean tree 读取普通 blob，先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift 和 Bash。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
+全量索引通过 Git 从 clean tree 读取普通 blob，先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash，以及常见项目配置、构建和模板文件。配置面覆盖 Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template。同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的引用保留为 unresolved metadata。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。
 

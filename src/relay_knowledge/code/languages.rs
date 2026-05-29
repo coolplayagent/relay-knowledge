@@ -2,6 +2,8 @@ use std::path::Path;
 
 use tree_sitter::Language;
 
+use super::configuration;
+
 #[derive(Clone, Copy)]
 pub(super) struct LanguageSpec {
     pub(super) id: &'static str,
@@ -74,6 +76,9 @@ pub(super) fn detect_language(path: &str) -> Option<LanguageSpec> {
     if dependency_only_manifest_file(file_name) {
         return None;
     }
+    if let Some(language) = configuration::detect(path) {
+        return Some(language);
+    }
 
     let extension = Path::new(path).extension()?.to_str()?;
     language_for_extension(extension)
@@ -84,15 +89,28 @@ fn dependency_only_manifest_file(file_name: &str) -> bool {
 }
 
 pub(super) fn strip_supported_extension(path: &str) -> &str {
+    if dockerfile_prefix_variant(path) {
+        return path;
+    }
     let Some(extension) = Path::new(path).extension().and_then(|value| value.to_str()) else {
         return path;
     };
-    if language_for_extension(extension).is_none() {
+    if language_for_extension(extension)
+        .or_else(|| configuration::detect(path))
+        .is_none()
+    {
         return path;
     }
     let extension_start = path.len().saturating_sub(extension.len() + 1);
 
     &path[..extension_start]
+}
+
+fn dockerfile_prefix_variant(path: &str) -> bool {
+    let Some(file_name) = Path::new(path).file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    file_name.starts_with("Dockerfile.") || file_name.starts_with("Containerfile.")
 }
 
 pub(super) fn doc_comment_text<'a>(trimmed: &'a str, language_id: &str) -> Option<&'a str> {
@@ -102,7 +120,7 @@ pub(super) fn doc_comment_text<'a>(trimmed: &'a str, language_id: &str) -> Optio
         "php" => strip_comment_prefix(trimmed, &["///", "//", "#"]),
         "c" | "cpp" | "csharp" | "go" | "java" | "javascript" | "jsx" | "kotlin" | "scala"
         | "swift" | "typescript" | "tsx" => strip_comment_prefix(trimmed, &["///", "//!", "//"]),
-        _ => None,
+        _ => configuration::doc_comment_text(trimmed, language_id),
     }
 }
 
@@ -243,7 +261,7 @@ mod tests {
     fn strips_supported_extensions_without_rewriting_unknown_paths() {
         assert_eq!(strip_supported_extension("src/app.tsx"), "src/app");
         assert_eq!(strip_supported_extension("Gemfile"), "Gemfile");
-        assert_eq!(strip_supported_extension("README.md"), "README.md");
+        assert_eq!(strip_supported_extension("README.md"), "README");
     }
 
     #[test]

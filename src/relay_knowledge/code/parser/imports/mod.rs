@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 
 use tree_sitter::Node;
 
-use crate::domain::{CodeImportRecord, RepositoryCodeRange};
+use crate::{
+    code::configuration,
+    domain::{CodeImportRecord, RepositoryCodeRange},
+};
 
 use super::{
     super::{CodeIndexError, SnapshotBuild, stable_id},
@@ -36,6 +39,7 @@ pub(super) fn collect_imports(
         push_children_reverse(node, &mut stack);
     }
     imports.push_line_imports(language_id, content)?;
+    imports.push_configuration_imports(language_id, content)?;
 
     Ok(imports.into_records())
 }
@@ -144,6 +148,24 @@ impl<'a> ImportCollector<'a> {
         };
         for import in imports {
             self.push_record(import.module, &import.range)?;
+        }
+
+        Ok(())
+    }
+
+    fn push_configuration_imports(
+        &mut self,
+        language_id: &str,
+        content: &str,
+    ) -> Result<(), CodeIndexError> {
+        for import in configuration::structured_imports(self.path, language_id, content) {
+            let range = SyntaxRange {
+                byte_start: import.range.byte_start,
+                byte_end: import.range.byte_end,
+                line_start: import.range.line_start,
+                line_end: import.range.line_end,
+            };
+            self.push_record(import.module, &range)?;
         }
 
         Ok(())

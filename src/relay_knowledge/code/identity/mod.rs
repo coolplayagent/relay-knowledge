@@ -65,12 +65,139 @@ pub(super) fn resolve_import_targets(
                 Some(output) => resolved_with_hint(import, output),
                 None => None,
             },
+            "cmake" | "jinja2" | "make" | "ninja" | "starlark" | "xml" => {
+                let candidates =
+                    config_import_candidates(language_id, &import.path, &import.module);
+                resolved_with_hint(
+                    import,
+                    import_resolution::module_file_resolution(
+                        context.resolve_first_exact_module_file(&candidates),
+                    ),
+                )
+            }
+            "gotemplate" => {
+                let candidates =
+                    config_import_candidates(language_id, &import.path, &import.module);
+                let file_resolution = context.resolve_first_exact_module_file(&candidates);
+                match import_resolution::module_file_resolution(file_resolution) {
+                    (import_resolution::ImportResolution::Unresolved, _) => {
+                        resolved_with_hint(import, gotemplate_symbol_resolution(import, &context))
+                    }
+                    output => resolved_with_hint(import, output),
+                }
+            }
             _ => None,
         };
         if let Some(resolution) = resolution {
             import_resolution::apply_resolution(import, resolution);
         }
     }
+}
+
+fn config_import_candidates(language_id: &str, path: &str, module: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some(label_path) = starlark_label_path(path, module) {
+        candidates.push(label_path);
+    }
+    if !module.starts_with('/')
+        && !module.contains("://")
+        && !already_joined_with_parent(path, module)
+    {
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            if let Some(candidate) = import_resolution::normalize_join(parent, module) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    if language_id == "jinja2"
+        && let Some(root) = nearest_template_root(path)
+        && let Some(candidate) = import_resolution::normalize_join(root, module)
+    {
+        push_unique_candidate(&mut candidates, candidate);
+    }
+    if should_add_root_config_candidate(language_id, path, module) {
+        if let Some(candidate) = import_resolution::normalize_join("", module) {
+            push_unique_candidate(&mut candidates, candidate);
+        } else {
+            push_unique_candidate(&mut candidates, module.to_owned());
+        }
+    }
+
+    candidates
+}
+
+fn should_add_root_config_candidate(language_id: &str, path: &str, module: &str) -> bool {
+    language_id != "cmake" || !path.contains('/') || already_joined_with_parent(path, module)
+}
+
+fn push_unique_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
+}
+
+fn already_joined_with_parent(path: &str, module: &str) -> bool {
+    path.rsplit_once('/').is_some_and(|(parent, _)| {
+        module
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+fn gotemplate_symbol_resolution(
+    import: &CodeImportRecord,
+    context: &import_resolution::ImportContext<'_>,
+) -> (import_resolution::ImportResolution, Option<String>) {
+    let parent = import_resolution::parent_dir(&import.path);
+    let local = context.resolve_name_in_directory_tree_for_language_and_kinds_with_hint(
+        &import.module,
+        parent,
+        "gotemplate",
+        &["template"],
+    );
+    if local.0 != import_resolution::ImportResolution::Unresolved {
+        return local;
+    }
+
+    let Some(template_root) = nearest_template_root(&import.path).filter(|root| *root != parent)
+    else {
+        return local;
+    };
+    context.resolve_name_in_directory_tree_for_language_and_kinds_with_hint(
+        &import.module,
+        template_root,
+        "gotemplate",
+        &["template"],
+    )
+}
+
+fn nearest_template_root(path: &str) -> Option<&str> {
+    let mut root_end = None;
+    let mut offset = 0usize;
+    for segment in path.split('/') {
+        let end = offset + segment.len();
+        if segment == "templates" {
+            root_end = Some(end);
+        }
+        offset = end + 1;
+    }
+
+    root_end.map(|end| &path[..end])
+}
+
+fn starlark_label_path(path: &str, module: &str) -> Option<String> {
+    if module.starts_with('@') {
+        return None;
+    }
+    if let Some(rest) = module.strip_prefix("//") {
+        let (package, file) = rest.split_once(':')?;
+        return import_resolution::normalize_join(package, file);
+    }
+    if let Some(file) = module.strip_prefix(':') {
+        return import_resolution::normalize_join(import_resolution::parent_dir(path), file);
+    }
+
+    None
 }
 
 fn resolved_with_hint(
