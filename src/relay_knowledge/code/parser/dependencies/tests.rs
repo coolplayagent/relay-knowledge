@@ -418,6 +418,143 @@ fn extracts_conan_txt_and_python_dependencies() {
 }
 
 #[test]
+fn extracts_cmake_uv_and_iac_yaml_dependencies() {
+    let cmake = collect(
+        "CMakeLists.txt",
+        r#"
+	find_package(ZLIB 1.2 REQUIRED)
+	pkg_check_modules(GTK REQUIRED gtk4>=4.0)
+	pkg_check_modules(GTK4 gtk4)
+	pkg_check_modules(SSL IMPORTED_TARGET GLOBAL openssl)
+	pkg_search_module(CRYPTO openssl>=3 libssl)
+	FetchContent_Declare(fmt GIT_REPOSITORY https://example.invalid/fmt.git GIT_TAG 10.2.1)
+ExternalProject_Add(absl URL https://example.invalid/absl.tar.gz URL_HASH SHA256=abc)
+CPMAddPackage("gh:nlohmann/json#3.11.3")
+add_subdirectory(vendor/local)
+"#,
+    );
+    assert_dependency(&cmake, "ZLIB", "find_package", Some("1.2"), None);
+    assert_dependency(&cmake, "gtk4", "pkg_check_modules", Some(">=4.0"), None);
+    assert_dependency(&cmake, "gtk4", "pkg_check_modules", None, None);
+    assert_dependency(&cmake, "openssl", "pkg_check_modules", None, None);
+    assert_dependency(&cmake, "openssl", "pkg_search_module", Some(">=3"), None);
+    assert_dependency(&cmake, "libssl", "pkg_search_module", None, None);
+    assert_dependency(&cmake, "fmt", "FetchContent_Declare", Some("10.2.1"), None);
+    assert_dependency(
+        &cmake,
+        "absl",
+        "ExternalProject_Add",
+        Some("SHA256=abc"),
+        None,
+    );
+    assert_dependency(&cmake, "json", "CPMAddPackage", Some("3.11.3"), None);
+    assert!(
+        !cmake
+            .iter()
+            .any(|dependency| dependency.package_name == "vendor/local")
+    );
+
+    let uv_lock = collect(
+        "uv.lock",
+        r#"[[package]]
+name = "httpx"
+version = "0.27.2"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "local-app"
+version = "0.1.0"
+source = { path = "." }
+
+[[package]]
+name = "git-subdir"
+version = "1.2.3"
+source = { git = "https://example.invalid/repo.git", subdirectory = "packages/git-subdir" }
+"#,
+    );
+    assert_dependency(&uv_lock, "httpx", "locked", None, Some("0.27.2"));
+    assert_dependency(&uv_lock, "git-subdir", "locked", None, Some("1.2.3"));
+    assert!(
+        !uv_lock
+            .iter()
+            .any(|dependency| dependency.package_name == "local-app")
+    );
+
+    let pyproject = collect(
+        "pyproject.toml",
+        r#"[dependency-groups]
+dev = [{ include-group = "lint" }, "pytest>=8"]
+lint = ["ruff==0.6.0"]
+docs = [
+  "mkdocs>=1",
+]
+[tool.uv]
+dev-dependencies = ["mypy==1.10.0"]
+"#,
+    );
+    assert_dependency(&pyproject, "pytest", "dev", Some(">=8"), None);
+    assert_dependency(&pyproject, "ruff", "lint", Some("==0.6.0"), None);
+    assert_dependency(&pyproject, "mkdocs", "docs", Some(">=1"), None);
+    assert_dependency(&pyproject, "mypy", "dev", Some("==1.10.0"), None);
+    assert!(
+        !pyproject
+            .iter()
+            .any(|dependency| dependency.package_name == "lint")
+    );
+
+    let workflow = collect(
+        ".github/workflows/ci.yml",
+        "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: ./local-action\n    container:\n      image: rust:1.85\n",
+    );
+    assert_dependency(&workflow, "actions/checkout", "uses", Some("v4"), None);
+    assert_dependency(&workflow, "rust", "github-actions", Some("1.85"), None);
+    assert!(
+        !workflow
+            .iter()
+            .any(|dependency| dependency.package_name == "./local-action")
+    );
+
+    let compose = collect(
+        "docker-compose.yml",
+        "services:\n  db:\n    image: postgres:16\n  cache:\n    image: redis@sha256:abcdef\n  app:\n    build: .\n",
+    );
+    assert_dependency(&compose, "postgres", "compose", Some("16"), None);
+    assert_dependency(&compose, "redis", "compose", Some("@sha256:abcdef"), None);
+
+    let chart = collect(
+        "Chart.yaml",
+        "dependencies:\n  - name: redis\n    version: 18.1.0\n    repository: https://charts.bitnami.com/bitnami\n  - version: 1.0.0\n    name: nginx\nmaintainers:\n  - name: platform-team\n",
+    );
+    assert_dependency(&chart, "redis", "dependencies", Some("18.1.0"), None);
+    assert_dependency(&chart, "nginx", "dependencies", Some("1.0.0"), None);
+    assert!(
+        !chart
+            .iter()
+            .any(|dependency| dependency.package_name == "platform-team")
+    );
+
+    let ansible = collect(
+        "requirements.yml",
+        "collections:\n  - community.general\n  - name: ansible.posix\n    version: \">=1.5.0\"\nroles:\n  - name: geerlingguy.redis\n    version: 1.2.3\n",
+    );
+    assert_dependency(&ansible, "community.general", "requirements", None, None);
+    assert_dependency(
+        &ansible,
+        "ansible.posix",
+        "requirements",
+        Some(">=1.5.0"),
+        None,
+    );
+    assert_dependency(
+        &ansible,
+        "geerlingguy.redis",
+        "requirements",
+        Some("1.2.3"),
+        None,
+    );
+}
+
+#[test]
 fn preserves_shared_manifest_language_scope_for_dependency_records() {
     let package = collect_with_languages(
         "package.json",

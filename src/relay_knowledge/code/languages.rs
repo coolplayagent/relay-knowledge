@@ -54,6 +54,8 @@ const BASH_TAGS_QUERY: &str = r#"
   name: (command_name) @name) @reference.call
 "#;
 
+const CONFIG_TAGS_QUERY: &str = "";
+
 pub(super) fn language_id(path: &str) -> Option<&'static str> {
     detect_language(path).map(|language| language.id)
 }
@@ -69,9 +71,16 @@ pub(super) fn detect_language(path: &str) -> Option<LanguageSpec> {
     if matches!(file_name, "Gemfile" | "Rakefile") {
         return Some(ruby());
     }
+    if dependency_only_manifest_file(file_name) {
+        return None;
+    }
 
     let extension = Path::new(path).extension()?.to_str()?;
     language_for_extension(extension)
+}
+
+fn dependency_only_manifest_file(file_name: &str) -> bool {
+    matches!(file_name, "package-lock.json")
 }
 
 pub(super) fn strip_supported_extension(path: &str) -> &str {
@@ -116,6 +125,21 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             tags_query: tree_sitter_python::TAGS_QUERY,
         }),
         "js" | "mjs" | "cjs" => Some(javascript()),
+        "json" => Some(LanguageSpec {
+            id: "json",
+            language: || tree_sitter_json::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
+        "yaml" | "yml" => Some(LanguageSpec {
+            id: "yaml",
+            language: || tree_sitter_yaml::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
+        "properties" => Some(LanguageSpec {
+            id: "properties",
+            language: || tree_sitter_properties::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
         "jsx" => Some(LanguageSpec {
             id: "jsx",
             language: || tree_sitter_javascript::LANGUAGE.into(),

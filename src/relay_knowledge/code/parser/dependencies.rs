@@ -4,6 +4,7 @@ use crate::domain::{CodeDependencyRecord, RepositoryCodeRange};
 
 use super::super::{CodeIndexError, SnapshotBuild, stable_id};
 
+mod cmake;
 mod conan;
 mod go;
 mod jvm;
@@ -11,6 +12,7 @@ mod npm;
 mod python;
 mod rust;
 mod support;
+mod yaml;
 
 pub(in crate::code::parser::dependencies) use support::{
     inline_table_bool_field, inline_table_field, python_requirement,
@@ -34,11 +36,14 @@ pub(super) fn collect_dependencies(
         DependencyFileKind::GoMod => go::parse_go_mod(content, &mut records),
         DependencyFileKind::GoSum => go::parse_go_sum(content, &mut records),
         DependencyFileKind::PyprojectToml => python::parse_pyproject(content, &mut records),
+        DependencyFileKind::UvLock => python::parse_uv_lock(content, &mut records),
         DependencyFileKind::RequirementsTxt => python::parse_requirements(content, &mut records),
         DependencyFileKind::PomXml => jvm::parse_pom(content, &mut records),
         DependencyFileKind::Gradle => jvm::parse_gradle(content, &mut records),
         DependencyFileKind::ConanfileTxt => conan::parse_conanfile_txt(content, &mut records),
         DependencyFileKind::ConanfilePy => conan::parse_conanfile_py(content, &mut records),
+        DependencyFileKind::CMakeLists => cmake::parse_cmake_lists(content, &mut records),
+        DependencyFileKind::IacYaml => yaml::parse_iac_yaml(path, content, &mut records),
     }
     Ok(records
         .into_iter()
@@ -61,6 +66,14 @@ pub(in crate::code) fn dependency_manifest_language_ids(
     DependencyFileKind::from_path(path).map(DependencyFileKind::language_ids)
 }
 
+pub(in crate::code::parser) fn dependency_manifest_is_facts_only(path: &str) -> bool {
+    DependencyFileKind::from_path(path).is_some_and(DependencyFileKind::facts_only)
+}
+
+pub(in crate::code) fn dependency_manifest_overrides_default_exclusion(path: &str) -> bool {
+    DependencyFileKind::from_path(path).is_some_and(DependencyFileKind::overrides_default_exclusion)
+}
+
 #[derive(Clone, Copy)]
 enum DependencyFileKind {
     CargoToml,
@@ -70,11 +83,14 @@ enum DependencyFileKind {
     GoMod,
     GoSum,
     PyprojectToml,
+    UvLock,
     RequirementsTxt,
     PomXml,
     Gradle,
     ConanfileTxt,
     ConanfilePy,
+    CMakeLists,
+    IacYaml,
 }
 
 impl DependencyFileKind {
@@ -88,10 +104,13 @@ impl DependencyFileKind {
             "go.mod" => Some(Self::GoMod),
             "go.sum" => Some(Self::GoSum),
             "pyproject.toml" => Some(Self::PyprojectToml),
+            "uv.lock" => Some(Self::UvLock),
             "pom.xml" => Some(Self::PomXml),
             "build.gradle" | "build.gradle.kts" => Some(Self::Gradle),
             "conanfile.txt" => Some(Self::ConanfileTxt),
             "conanfile.py" => Some(Self::ConanfilePy),
+            "CMakeLists.txt" => Some(Self::CMakeLists),
+            _ if yaml::iac_yaml_path(path, file_name) => Some(Self::IacYaml),
             _ if python_requirements_path(path, file_name) => Some(Self::RequirementsTxt),
             _ => None,
         }
@@ -104,10 +123,20 @@ impl DependencyFileKind {
                 &["javascript", "jsx", "typescript", "tsx"]
             }
             Self::GoMod | Self::GoSum => &["go"],
-            Self::PyprojectToml | Self::RequirementsTxt => &["python"],
+            Self::PyprojectToml | Self::UvLock | Self::RequirementsTxt => &["python"],
             Self::PomXml | Self::Gradle => &["java", "kotlin", "scala"],
             Self::ConanfileTxt | Self::ConanfilePy => &["c", "cpp"],
+            Self::CMakeLists => &["c", "cpp"],
+            Self::IacYaml => &["yaml"],
         }
+    }
+
+    fn facts_only(self) -> bool {
+        matches!(self, Self::PackageLockJson | Self::UvLock)
+    }
+
+    fn overrides_default_exclusion(self) -> bool {
+        matches!(self, Self::UvLock)
     }
 }
 

@@ -223,6 +223,113 @@ async fn query_language_filters_preserve_shared_dependency_manifest_languages() 
         dependency_query: "zlib",
     })
     .await;
+    assert_language_scoped_sbom(LanguageScopedSbomFixture {
+        repo_name: "code-query-cmake-sbom",
+        alias: "fixture-cmake",
+        source_path: "src/app.cpp",
+        source_content: "int main() { return 0; }\n",
+        manifest_path: "CMakeLists.txt",
+        manifest_content: "find_package(ZLIB REQUIRED)\n",
+        language: "cpp",
+        dependency_query: "ZLIB",
+    })
+    .await;
+    assert_language_scoped_sbom(LanguageScopedSbomFixture {
+        repo_name: "code-query-yaml-sbom",
+        alias: "fixture-yaml",
+        source_path: "config/app.yaml",
+        source_content: "service:\n  enabled: true\n",
+        manifest_path: ".github/workflows/ci.yml",
+        manifest_content: "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+        language: "yaml",
+        dependency_query: "actions/checkout",
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn query_configuration_languages_returns_nested_keys() {
+    let repo = FixtureRepo::create("code-query-config-languages");
+    repo.write(
+        "config/app.yaml",
+        "services:\n  api:\n    image: ghcr.io/org/app:1.2.3\n",
+    );
+    repo.write(
+        "config/application.properties",
+        "spring.datasource.url=jdbc:postgresql://localhost/app\n",
+    );
+    repo.write(
+        "package.json",
+        r#"{"scripts":{"build":"vite build"},"dependencies":{"react":"^18"}}"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: repo.path.display().to_string(),
+                alias: "fixture-config".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-config-languages"),
+        )
+        .await
+        .expect("repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-config", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-config-languages"),
+        )
+        .await
+        .expect("repository should index");
+
+    let yaml = query_language_key(&service, "fixture-config", "services.api.image", "yaml").await;
+    assert!(yaml.results.iter().any(|hit| hit.path == "config/app.yaml"));
+    let properties = query_language_key(
+        &service,
+        "fixture-config",
+        "spring.datasource.url",
+        "properties",
+    )
+    .await;
+    assert!(
+        properties
+            .results
+            .iter()
+            .any(|hit| hit.path == "config/application.properties")
+    );
+    let json = query_language_key(&service, "fixture-config", "scripts.build", "json").await;
+    assert!(json.results.iter().any(|hit| hit.path == "package.json"));
+}
+
+async fn query_language_key(
+    service: &RelayKnowledgeService,
+    alias: &str,
+    query: &str,
+    language: &str,
+) -> relay_knowledge::api::CodeRepositoryQueryResponse {
+    service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                query,
+                CodeRepositorySelector::new(alias, "HEAD", Vec::new(), vec![language.to_owned()])
+                    .expect("selector should validate"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context(&format!("query-config-{language}")),
+        )
+        .await
+        .expect("configuration key query should succeed")
 }
 
 #[tokio::test]
