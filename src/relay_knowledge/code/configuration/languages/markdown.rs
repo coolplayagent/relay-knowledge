@@ -1,11 +1,20 @@
-use super::{ConfigRange, source_lines};
+use super::super::{
+    model::{ConfigFact, ConfigRange},
+    source::{push_definition, source_lines},
+};
 
-pub(super) struct Heading {
-    pub(super) name: String,
-    pub(super) range: ConfigRange,
+pub(in crate::code::configuration) fn facts(content: &str, definitions: &mut Vec<ConfigFact>) {
+    for heading in headings(content) {
+        push_definition(definitions, heading.name, "heading", heading.range);
+    }
 }
 
-pub(super) fn headings(content: &str) -> Vec<Heading> {
+struct Heading {
+    name: String,
+    range: ConfigRange,
+}
+
+fn headings(content: &str) -> Vec<Heading> {
     let mut headings = Vec::new();
     let mut fence = None;
 

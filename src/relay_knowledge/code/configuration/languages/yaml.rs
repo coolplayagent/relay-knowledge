@@ -1,10 +1,14 @@
 #[derive(Default)]
-pub(super) struct BlockScalarTracker {
+pub(in crate::code::configuration) struct BlockScalarTracker {
     parent_indent: Option<usize>,
 }
 
 impl BlockScalarTracker {
-    pub(super) fn should_skip(&mut self, line: &str, trimmed: &str) -> bool {
+    pub(in crate::code::configuration) fn should_skip(
+        &mut self,
+        line: &str,
+        trimmed: &str,
+    ) -> bool {
         if trimmed.is_empty() {
             return self.parent_indent.is_some();
         }
@@ -40,7 +44,7 @@ fn block_scalar_starts(trimmed: &str) -> bool {
             .all(|character| matches!(character, '+' | '-') || character.is_ascii_digit())
 }
 
-pub(super) fn mapping_key(trimmed: &str) -> Option<&str> {
+pub(in crate::code::configuration) fn mapping_key(trimmed: &str) -> Option<&str> {
     let candidate = trimmed
         .strip_prefix('-')
         .map(str::trim_start)

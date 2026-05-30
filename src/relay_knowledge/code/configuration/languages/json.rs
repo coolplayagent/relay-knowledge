@@ -1,4 +1,4 @@
-pub(super) fn object_keys(line: &str) -> Vec<&str> {
+pub(in crate::code::configuration) fn object_keys(line: &str) -> Vec<&str> {
     let bytes = line.as_bytes();
     let mut keys = Vec::new();
     let mut index = 0usize;

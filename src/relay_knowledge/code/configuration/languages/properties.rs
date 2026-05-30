@@ -1,4 +1,8 @@
-pub(super) fn skip_continued_value_line(line: &str, trimmed: &str, active: &mut bool) -> bool {
+pub(in crate::code::configuration) fn skip_continued_value_line(
+    line: &str,
+    trimmed: &str,
+    active: &mut bool,
+) -> bool {
     if *active {
         *active = value_continues(line);
         return true;

@@ -1,6 +1,8 @@
 use super::{
-    ConfigLine, ConfigRange, call_args_prefix, source_lines, strip_inline_hash_comment,
-    valid_config_key,
+    model::ConfigRange,
+    source::{
+        ConfigLine, call_args_prefix, source_lines, strip_inline_hash_comment, valid_config_key,
+    },
 };
 
 pub(super) struct TextCall {

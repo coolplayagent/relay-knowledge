@@ -1,11 +1,34 @@
+use super::super::{
+    model::{ConfigFact, ConfigImport},
+    source::{push_definition, push_import, source_lines},
+};
+
+pub(in crate::code::configuration) fn facts(content: &str, definitions: &mut Vec<ConfigFact>) {
+    let mut state = ScanState::default();
+    for line in source_lines(content) {
+        for name in element_names(line.text, &mut state) {
+            push_definition(definitions, name, "element", line.range());
+        }
+    }
+}
+
+pub(in crate::code::configuration) fn imports(content: &str, imports: &mut Vec<ConfigImport>) {
+    let mut state = ScanState::default();
+    for line in source_lines(content) {
+        for module in import_modules(line.text, &mut state) {
+            push_import(imports, module, line.range());
+        }
+    }
+}
+
 #[derive(Default)]
-pub(super) struct ScanState {
+struct ScanState {
     in_comment: bool,
     in_cdata: bool,
     pending_start_tag: String,
 }
 
-pub(super) fn element_names<'a>(line: &'a str, state: &mut ScanState) -> Vec<&'a str> {
+fn element_names<'a>(line: &'a str, state: &mut ScanState) -> Vec<&'a str> {
     let mut names = Vec::new();
     let mut rest = line;
     loop {
@@ -73,7 +96,7 @@ pub(super) fn element_names<'a>(line: &'a str, state: &mut ScanState) -> Vec<&'a
     }
 }
 
-pub(super) fn strip_ignored(value: &str, state: &mut ScanState) -> String {
+fn strip_ignored(value: &str, state: &mut ScanState) -> String {
     let mut output = String::new();
     let mut rest = value;
     loop {
@@ -109,7 +132,7 @@ pub(super) fn strip_ignored(value: &str, state: &mut ScanState) -> String {
     }
 }
 
-pub(super) fn import_modules(line: &str, state: &mut ScanState) -> Vec<String> {
+fn import_modules(line: &str, state: &mut ScanState) -> Vec<String> {
     let text = strip_ignored(line, state);
     let mut modules = Vec::new();
 
