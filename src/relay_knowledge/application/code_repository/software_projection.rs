@@ -47,6 +47,7 @@ impl RelayKnowledgeService {
                     last_error: Some("graph_only freshness policy selected".to_owned()),
                 },
                 components: Vec::new(),
+                dependency_usages: Vec::new(),
                 sdk_usages: Vec::new(),
             });
         }
@@ -130,6 +131,7 @@ impl RelayKnowledgeService {
             request,
             status,
             components: projection.components,
+            dependency_usages: projection.dependency_usages,
             sdk_usages: projection.sdk_usages,
         })
     }

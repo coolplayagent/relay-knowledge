@@ -108,6 +108,7 @@ source or manifest changed
 首版基础能力以 repository snapshot/source scope 为边界，把现有代码索引事实投影为软件全域读模型：
 
 - `software_components` 从 `code_repository_dependencies` 生成，区分 manifest `declared` 和 lockfile `locked`，保留 ecosystem、package name、requirement、resolved version、dependency group、证据路径和行号。
+- `software_dependency_usages` 把 declared 依赖组件与匹配的代码/配置 import 证据关联；匹配依据是 module root 与 package identity，保留 import 的 `resolution_state`、`target_hint`、证据路径和 confidence，但不解析未授权包源码。
 - `software_sdk_usages` 从 unresolved、ambiguous 或 external 的 `code_repository_imports` 生成，用于表达 SDK/API surface 使用候选，保留 `resolution_state` 和 `target_hint`，但不解析未授权外部源码。
 - `software_global_status` 记录每个 source scope 的 projected graph version、stale 状态、组件数、SDK usage 数和最后错误。
 - CLI 通过 `relay-knowledge repo software <alias> --kind dependencies|sdks|all` 暴露投影结果；查询只读取已提交投影，不在热路径扫描包缓存、SDK 目录或全仓源码。

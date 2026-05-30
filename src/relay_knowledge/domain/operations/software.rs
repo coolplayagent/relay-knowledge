@@ -88,6 +88,7 @@ impl SoftwareComponent {
         let name = required_text("component_name", input.name)?;
         let dependency_group = required_text("dependency_group", input.dependency_group)?;
         let source_kind = required_text("source_kind", input.source_kind)?;
+        let language_id = required_text("language_id", input.language_id)?;
         let evidence_path = required_text("evidence_path", input.evidence_path)?;
         let line_start = input.evidence_line_range.start.to_string();
         let identity_version = resolved_version
@@ -105,6 +106,7 @@ impl SoftwareComponent {
                     identity_version,
                     dependency_group.as_str(),
                     source_kind.as_str(),
+                    language_id.as_str(),
                     evidence_path.as_str(),
                     line_start.as_str(),
                 ],
@@ -118,7 +120,7 @@ impl SoftwareComponent {
             dependency_group,
             source_kind,
             relationship_state: required_text("relationship_state", input.relationship_state)?,
-            language_id: required_text("language_id", input.language_id)?,
+            language_id,
             evidence_path,
             evidence_line_range: input.evidence_line_range,
             confidence_basis_points: validate_confidence(input.confidence_basis_points)?,
@@ -215,6 +217,87 @@ pub struct SoftwareSdkUsageInput {
     pub created_graph_version: GraphVersion,
 }
 
+/// Import/include evidence that uses a declared dependency component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftwareDependencyUsage {
+    pub usage_id: String,
+    pub component_id: String,
+    pub repository_id: String,
+    pub source_scope: String,
+    pub ecosystem: String,
+    pub package_name: String,
+    pub language_id: String,
+    pub module: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_hint: Option<String>,
+    pub resolution_state: String,
+    pub evidence_path: String,
+    pub evidence_line_range: RepositoryCodeRange,
+    pub confidence_basis_points: u16,
+    pub created_graph_version: GraphVersion,
+}
+
+impl SoftwareDependencyUsage {
+    /// Creates a validated relationship between dependency metadata and import evidence.
+    pub fn new(input: SoftwareDependencyUsageInput) -> Result<Self, DomainError> {
+        let component_id = required_text("component_id", input.component_id)?;
+        let source_scope = required_text("source_scope", input.source_scope)?;
+        let ecosystem = required_text("ecosystem", input.ecosystem)?;
+        let package_name = required_text("package_name", input.package_name)?;
+        let language_id = required_text("language_id", input.language_id)?;
+        let module = required_text("module", input.module)?;
+        let target_hint = normalize_optional("target_hint", input.target_hint)?;
+        let resolution_state = required_text("resolution_state", input.resolution_state)?;
+        let evidence_path = required_text("evidence_path", input.evidence_path)?;
+        let line_start = input.evidence_line_range.start.to_string();
+
+        Ok(Self {
+            usage_id: stable_software_id(
+                "dependency_usage",
+                [
+                    source_scope.as_str(),
+                    component_id.as_str(),
+                    language_id.as_str(),
+                    evidence_path.as_str(),
+                    module.as_str(),
+                    line_start.as_str(),
+                ],
+            ),
+            component_id,
+            repository_id: required_text("repository_id", input.repository_id)?,
+            source_scope,
+            ecosystem,
+            package_name,
+            language_id,
+            module,
+            target_hint,
+            resolution_state,
+            evidence_path,
+            evidence_line_range: input.evidence_line_range,
+            confidence_basis_points: validate_confidence(input.confidence_basis_points)?,
+            created_graph_version: input.created_graph_version,
+        })
+    }
+}
+
+/// Constructor input for `SoftwareDependencyUsage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftwareDependencyUsageInput {
+    pub component_id: String,
+    pub repository_id: String,
+    pub source_scope: String,
+    pub ecosystem: String,
+    pub package_name: String,
+    pub language_id: String,
+    pub module: String,
+    pub target_hint: Option<String>,
+    pub resolution_state: String,
+    pub evidence_path: String,
+    pub evidence_line_range: RepositoryCodeRange,
+    pub confidence_basis_points: u16,
+    pub created_graph_version: GraphVersion,
+}
+
 /// Freshness and count summary for the software global projection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SoftwareGlobalStatus {
@@ -233,6 +316,7 @@ pub struct SoftwareGlobalStatus {
 pub struct SoftwareGlobalProjection {
     pub status: SoftwareGlobalStatus,
     pub components: Vec<SoftwareComponent>,
+    pub dependency_usages: Vec<SoftwareDependencyUsage>,
     pub sdk_usages: Vec<SoftwareSdkUsage>,
 }
 
@@ -295,6 +379,17 @@ mod tests {
     }
 
     #[test]
+    fn component_identity_includes_expanded_language_rows() {
+        let rust = SoftwareComponent::new(component_input("scope-a", Some("1.0.0")))
+            .expect("component should validate");
+        let mut tsx_input = component_input("scope-a", Some("1.0.0"));
+        tsx_input.language_id = "tsx".to_owned();
+        let tsx = SoftwareComponent::new(tsx_input).expect("component should validate");
+
+        assert_ne!(rust.component_id, tsx.component_id);
+    }
+
+    #[test]
     fn component_rejects_empty_name_and_invalid_confidence() {
         let mut input = component_input("scope-a", None);
         input.name = " ".to_owned();
@@ -342,6 +437,22 @@ mod tests {
         assert_ne!(first.usage_id, second.usage_id);
     }
 
+    #[test]
+    fn dependency_usage_identity_binds_component_and_import_evidence() {
+        let first =
+            SoftwareDependencyUsage::new(dependency_usage_input("component:serde", "serde", 3))
+                .expect("usage should validate");
+        let second =
+            SoftwareDependencyUsage::new(dependency_usage_input("component:serde", "serde", 9))
+                .expect("usage should validate");
+        let other_component =
+            SoftwareDependencyUsage::new(dependency_usage_input("component:tokio", "serde", 3))
+                .expect("usage should validate");
+
+        assert_ne!(first.usage_id, second.usage_id);
+        assert_ne!(first.usage_id, other_component.usage_id);
+    }
+
     fn component_input(scope: &str, version: Option<&str>) -> SoftwareComponentInput {
         SoftwareComponentInput {
             repository_id: "repo".to_owned(),
@@ -375,6 +486,31 @@ mod tests {
                 end: line,
             },
             confidence_basis_points: 2500,
+            created_graph_version: GraphVersion::new(7),
+        }
+    }
+
+    fn dependency_usage_input(
+        component_id: &str,
+        module: &str,
+        line: u32,
+    ) -> SoftwareDependencyUsageInput {
+        SoftwareDependencyUsageInput {
+            component_id: component_id.to_owned(),
+            repository_id: "repo".to_owned(),
+            source_scope: "scope".to_owned(),
+            ecosystem: "cargo".to_owned(),
+            package_name: "serde".to_owned(),
+            language_id: "rust".to_owned(),
+            module: module.to_owned(),
+            target_hint: Some(module.to_owned()),
+            resolution_state: "unresolved".to_owned(),
+            evidence_path: "src/lib.rs".to_owned(),
+            evidence_line_range: RepositoryCodeRange {
+                start: line,
+                end: line,
+            },
+            confidence_basis_points: 9000,
             created_graph_version: GraphVersion::new(7),
         }
     }
