@@ -17,9 +17,10 @@ use crate::{
         IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
         ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorStatus, SoftwareComponent, SoftwareDependencyUsage,
-        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareRelationship,
-        SoftwareSdkUsage, SoftwareTopic, WorkerKind, WorkerStatus, WorkerTaskRecord,
+        ServiceManagerAction, ServiceOperatorStatus, SoftwareBuildTarget, SoftwareComponent,
+        SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile, SoftwareGlobalRequest,
+        SoftwareGlobalStatus, SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage,
+        SoftwareTopic, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -778,6 +779,9 @@ pub struct SoftwareGlobalResponse {
     pub files: Vec<SoftwareFile>,
     pub topics: Vec<SoftwareTopic>,
     pub relationships: Vec<SoftwareRelationship>,
+    pub build_targets: Vec<SoftwareBuildTarget>,
+    pub iac_resources: Vec<SoftwareIacResource>,
+    pub design_elements: Vec<SoftwareDesignElement>,
 }
 
 /// Repository-set creation response.

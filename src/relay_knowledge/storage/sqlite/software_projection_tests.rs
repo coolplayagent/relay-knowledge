@@ -1,4 +1,4 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 use super::*;
 
@@ -127,6 +127,93 @@ fn projection_links_declared_dependencies_to_import_usage() {
 }
 
 #[test]
+fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    seed_lifecycle_chunks(&connection);
+    let refreshed =
+        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    assert!(refreshed.status.build_target_count >= 3);
+    assert!(refreshed.status.iac_resource_count >= 3);
+    assert!(refreshed.status.design_element_count >= 2);
+
+    let build_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Build,
+        crate::domain::FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request should validate");
+    let build_projection = projection(&mut connection, build_request).expect("scope should load");
+    assert!(build_projection.components.is_empty());
+    assert!(
+        build_projection
+            .build_targets
+            .iter()
+            .any(|target| target.ecosystem == "npm"
+                && target.kind == "script"
+                && target.name == "build")
+    );
+    assert!(
+        build_projection
+            .build_targets
+            .iter()
+            .any(|target| target.ecosystem == "rust" && target.kind == "package")
+    );
+
+    let iac_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Iac,
+        crate::domain::FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request should validate");
+    let iac_projection = projection(&mut connection, iac_request).expect("scope should load");
+    assert!(
+        iac_projection
+            .iac_resources
+            .iter()
+            .any(|resource| resource.provider == "terraform"
+                && resource.resource_kind == "resource"
+                && resource.name == "app")
+    );
+    assert!(
+        iac_projection
+            .iac_resources
+            .iter()
+            .any(|resource| resource.provider == "compose" && resource.name == "web")
+    );
+
+    let design_request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Design,
+        crate::domain::FreshnessPolicy::AllowStale,
+        20,
+    )
+    .expect("request should validate");
+    let design_projection = projection(&mut connection, design_request).expect("scope should load");
+    assert!(
+        design_projection
+            .design_elements
+            .iter()
+            .any(|element| element.element_kind == "architecture"
+                && element.name == "Architecture")
+    );
+    assert!(
+        design_projection
+            .design_elements
+            .iter()
+            .any(|element| element.element_kind == "module" && element.name == "relay-core")
+    );
+}
+
+#[test]
 fn projection_resolves_repository_id_before_alias() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
@@ -228,11 +315,11 @@ fn create_test_schema(connection: &Connection) {
                 repository_id TEXT NOT NULL,
                 source_scope TEXT NOT NULL,
                 chunk_id TEXT NOT NULL,
+                file_id TEXT NOT NULL,
                 path TEXT NOT NULL,
                 language_id TEXT NOT NULL,
                 content TEXT NOT NULL,
-                line_start INTEGER NOT NULL,
-                line_end INTEGER NOT NULL
+                line_start INTEGER NOT NULL
             );
             CREATE TABLE code_repository_feature_flags (
                 repository_id TEXT NOT NULL,
@@ -340,7 +427,84 @@ fn seed_scope(connection: &Connection) {
             ) VALUES ('repo', 'scope-1', 'file-2', 'src/app.js', 'import React from \"react\";', 'react', 'unresolved', 9000, 1, 1)",
             [],
         )
-        .expect("javascript import should insert");
+            .expect("javascript import should insert");
+}
+
+fn seed_lifecycle_chunks(connection: &Connection) {
+    insert_chunk(
+        connection,
+        "chunk-cargo",
+        "Cargo.toml",
+        "toml",
+        1,
+        "[package]\nname = \"relay-core\"\n\n[features]\nserver = []\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-package",
+        "package.json",
+        "json",
+        1,
+        "{\n  \"name\": \"relay-web\",\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest\"\n  }\n}\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-compose",
+        "docker-compose.yml",
+        "yaml",
+        1,
+        "services:\n  web:\n    image: relay/web:latest\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-tf",
+        "infra/main.tf",
+        "unknown",
+        1,
+        "provider \"aws\" {}\nresource \"aws_ecs_service\" \"app\" {}\nmodule \"network\" {}\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-k8s",
+        "deploy/app.yaml",
+        "yaml",
+        1,
+        "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: relay-api\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-doc",
+        "docs/architecture.md",
+        "unknown",
+        1,
+        "# Architecture\nRelay core separates indexing from query serving.\n\n## Module relay-core\nOwns software projection refresh.\n",
+    );
+}
+
+fn insert_chunk(
+    connection: &Connection,
+    chunk_id: &str,
+    path: &str,
+    language_id: &str,
+    line_start: u32,
+    content: &str,
+) {
+    connection
+        .execute(
+            "INSERT INTO code_repository_chunks (
+                repository_id, source_scope, chunk_id, file_id, path, language_id,
+                content, line_start
+            ) VALUES ('repo', 'scope-1', ?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                chunk_id,
+                format!("file-{chunk_id}"),
+                path,
+                language_id,
+                content,
+                line_start
+            ],
+        )
+        .expect("chunk should insert");
 }
 
 fn seed_alias_collision_scope(connection: &Connection) {

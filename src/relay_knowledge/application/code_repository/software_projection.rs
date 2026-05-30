@@ -47,6 +47,9 @@ impl RelayKnowledgeService {
                     file_count: 0,
                     topic_count: 0,
                     relationship_count: 0,
+                    build_target_count: 0,
+                    iac_resource_count: 0,
+                    design_element_count: 0,
                     last_error: Some("graph_only freshness policy selected".to_owned()),
                 },
                 components: Vec::new(),
@@ -55,6 +58,9 @@ impl RelayKnowledgeService {
                 files: Vec::new(),
                 topics: Vec::new(),
                 relationships: Vec::new(),
+                build_targets: Vec::new(),
+                iac_resources: Vec::new(),
+                design_elements: Vec::new(),
             });
         }
 
@@ -142,6 +148,9 @@ impl RelayKnowledgeService {
             files: projection.files,
             topics: projection.topics,
             relationships: projection.relationships,
+            build_targets: projection.build_targets,
+            iac_resources: projection.iac_resources,
+            design_elements: projection.design_elements,
         })
     }
 }

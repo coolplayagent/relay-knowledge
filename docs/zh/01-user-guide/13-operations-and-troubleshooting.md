@@ -52,7 +52,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `invalid --freshness value`: 只接受 `allow-stale`、`wait-until-fresh` 或 `graph-only`。
 
-`invalid --kind value`: `index refresh` 只接受 `bm25`、`semantic` 或 `vector`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees` 或 `imports`。
+`invalid --kind value`: `index refresh` 只接受 `bm25`、`semantic` 或 `vector`；`repo query` 只接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 或 `sbom`；`repo software` 只接受 `dependencies`、`sdks`、`build`、`iac`、`design` 或 `all`。
 
 `source_scope is required by the MCP access policy`: MCP graph tool 请求缺少 scope，或者未配置允许 unspecified scope。
 

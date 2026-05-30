@@ -794,6 +794,9 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, WebError> {
         "files" => Ok(SoftwareGlobalKind::Files),
         "topics" => Ok(SoftwareGlobalKind::Topics),
         "relationships" => Ok(SoftwareGlobalKind::Relationships),
+        "build" => Ok(SoftwareGlobalKind::Build),
+        "iac" => Ok(SoftwareGlobalKind::Iac),
+        "design" => Ok(SoftwareGlobalKind::Design),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(WebError::bad_request(format!(
             "unsupported software kind '{other}'"

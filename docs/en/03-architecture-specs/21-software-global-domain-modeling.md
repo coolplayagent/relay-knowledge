@@ -113,8 +113,11 @@ The first foundation slice remains bounded by repository snapshot/source scope a
 - `software_files` is derived from `code_repository_files` so code, config, docs, build manifests, deployments, tests, templates, and the knowledge map are whole-file nodes.
 - `software_topics` is derived from Markdown/spec headings and `.knowledge/knowledge-map.yaml` topic ids so repository documentation themes, architecture constraints, and knowledge routes are first-class nodes.
 - `software_relationships` is derived from committed dependency, SDK usage, feature-flag/config, and documentation-topic evidence to expose cross-domain edges such as `depends_on`, `uses_sdk`, `configures`, and `documents` with resolution state, target hints, confidence, evidence path, and line range.
-- `software_global_status` records projected graph version, stale state, component count, SDK usage count, file count, topic count, relationship count, and the last projection error for each source scope.
-- CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, unindexed external source, or the full repository documentation.
+- `software_build_targets` is derived from indexed chunk evidence in Cargo, npm, Python, Go, Gradle, CMake, Makefile, and CI workflow files, covering packages, scripts, targets, features, and jobs. It records evidence and command hints only; it does not execute build tools.
+- `software_iac_resources` is derived from indexed Dockerfile, Compose, Kubernetes YAML, Helm, Terraform, systemd, launchd, and CI workflow evidence, preserving provider, resource kind, name, scope hint, target hint, and resolution state. It does not call cloud APIs or resolve live cluster state.
+- `software_design_elements` is derived from README files, architecture/design Markdown, and package/module manifests so software systems, modules, components, interfaces, and capabilities remain evidence-backed. It does not infer undocumented architecture from arbitrary symbol names.
+- `software_global_status` records projected graph version, stale state, component count, SDK usage count, file count, topic count, relationship count, build target count, IaC resource count, design element count, and the last projection error for each source scope.
+- CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|build|iac|design|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, cloud APIs, unindexed external source, or the full repository documentation.
 
 ---
 

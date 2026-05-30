@@ -248,7 +248,7 @@ where
                 .unwrap_or("unknown")
         ),
         "code.repo.software" => format!(
-            "software scope={} components={} dependency_usages={} sdk_usages={} files={} topics={} relationships={} stale={}",
+            "software scope={} components={} dependency_usages={} sdk_usages={} files={} topics={} relationships={} build_targets={} iac_resources={} design_elements={} stale={}",
             value["status"]["source_scope"]
                 .as_str()
                 .unwrap_or("unknown"),
@@ -258,6 +258,9 @@ where
             value["files"].as_array().map_or(0, Vec::len),
             value["topics"].as_array().map_or(0, Vec::len),
             value["relationships"].as_array().map_or(0, Vec::len),
+            value["build_targets"].as_array().map_or(0, Vec::len),
+            value["iac_resources"].as_array().map_or(0, Vec::len),
+            value["design_elements"].as_array().map_or(0, Vec::len),
             value["status"]["stale"].as_bool().unwrap_or(true)
         ),
         "service.plan" => format!(

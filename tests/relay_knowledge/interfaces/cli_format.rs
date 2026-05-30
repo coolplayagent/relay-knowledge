@@ -252,6 +252,9 @@ fn binary_outputs_machine_readable_help() {
                         "files",
                         "topics",
                         "relationships",
+                        "build",
+                        "iac",
+                        "design",
                         "all"
                     ]))
     );

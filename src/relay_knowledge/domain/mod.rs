@@ -94,10 +94,11 @@ pub use retrieval::{
     RetrievalBudgetUsed, RetrievalHit, RetrievalMode, RetrievedContextPack, RetrieverSource,
 };
 pub use software::{
-    SoftwareComponent, SoftwareComponentInput, SoftwareDependencyUsage,
-    SoftwareDependencyUsageInput, SoftwareFile, SoftwareFileInput, SoftwareGlobalKind,
-    SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareRelationship,
-    SoftwareRelationshipInput, SoftwareSdkUsage, SoftwareSdkUsageInput, SoftwareTopic,
-    SoftwareTopicInput,
+    SoftwareBuildTarget, SoftwareBuildTargetInput, SoftwareComponent, SoftwareComponentInput,
+    SoftwareDependencyUsage, SoftwareDependencyUsageInput, SoftwareDesignElement,
+    SoftwareDesignElementInput, SoftwareFile, SoftwareFileInput, SoftwareGlobalKind,
+    SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareIacResource,
+    SoftwareIacResourceInput, SoftwareRelationship, SoftwareRelationshipInput, SoftwareSdkUsage,
+    SoftwareSdkUsageInput, SoftwareTopic, SoftwareTopicInput,
 };
 pub use source::SourceScope;
