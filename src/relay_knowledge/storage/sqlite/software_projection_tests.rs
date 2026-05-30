@@ -198,7 +198,8 @@ fn create_test_schema(connection: &Connection) {
                 source_scope TEXT NOT NULL,
                 file_id TEXT NOT NULL,
                 path TEXT NOT NULL,
-                language_id TEXT NOT NULL
+                language_id TEXT NOT NULL,
+                parse_status TEXT NOT NULL
             );
             CREATE TABLE code_repository_imports (
                 repository_id TEXT NOT NULL,
@@ -209,6 +210,43 @@ fn create_test_schema(connection: &Connection) {
                 target_hint TEXT,
                 resolution_state TEXT NOT NULL,
                 confidence_basis_points INTEGER NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL
+            );
+            CREATE TABLE code_repository_symbols (
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                symbol_snapshot_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL
+            );
+            CREATE TABLE code_repository_chunks (
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                chunk_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL
+            );
+            CREATE TABLE code_repository_feature_flags (
+                repository_id TEXT NOT NULL,
+                source_scope TEXT NOT NULL,
+                feature_flag_id TEXT NOT NULL,
+                usage_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                language_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_key TEXT NOT NULL,
+                edge_kind TEXT NOT NULL,
+                confidence_basis_points INTEGER NOT NULL,
+                confidence_tier TEXT NOT NULL,
                 line_start INTEGER NOT NULL,
                 line_end INTEGER NOT NULL
             );
@@ -271,13 +309,17 @@ fn seed_scope(connection: &Connection) {
         .expect("javascript dependency should insert");
     connection
         .execute(
-            "INSERT INTO code_repository_files (repository_id, source_scope, file_id, path, language_id) VALUES ('repo', 'scope-1', 'file-1', 'src/main.cc', 'cpp')",
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES ('repo', 'scope-1', 'file-1', 'src/main.cc', 'cpp', 'parsed')",
             [],
         )
         .expect("file should insert");
     connection
         .execute(
-            "INSERT INTO code_repository_files (repository_id, source_scope, file_id, path, language_id) VALUES ('repo', 'scope-1', 'file-2', 'src/app.js', 'javascript')",
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES ('repo', 'scope-1', 'file-2', 'src/app.js', 'javascript', 'parsed')",
             [],
         )
         .expect("javascript file should insert");

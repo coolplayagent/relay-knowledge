@@ -814,6 +814,9 @@ fn parse_software_kind(value: &str) -> Result<SoftwareGlobalKind, CliError> {
     match value {
         "dependencies" => Ok(SoftwareGlobalKind::Dependencies),
         "sdks" => Ok(SoftwareGlobalKind::Sdks),
+        "files" => Ok(SoftwareGlobalKind::Files),
+        "topics" => Ok(SoftwareGlobalKind::Topics),
+        "relationships" => Ok(SoftwareGlobalKind::Relationships),
         "all" => Ok(SoftwareGlobalKind::All),
         other => Err(CliError::InvalidCodeQueryKind(other.to_owned())),
     }

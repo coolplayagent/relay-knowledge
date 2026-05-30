@@ -32,6 +32,8 @@ Code edges include defines, references, calls, imports, implements, overrides, c
 
 `FeatureFlag` v1 covers only configuration-driven toggles: environment variable reads, common config/settings key reads, boolean config declarations, common SDK evaluation calls such as OpenFeature, LaunchDarkly, and Unleash clients, and guarded-code relationships when those reads participate in conditional expressions. Boolean config declarations are derived from the same structured configuration facts that produce config-key symbols, then recorded as `defines_config`; ordinary reads or SDK evaluations are recorded as `reads_config`, and conditional contexts as `guards_code`. Provider control-plane state such as rollout strategies, segments, and variants is outside this static code-index path. Queries must read versioned graph facts and FTS documents; they must not recursively scan source in the query hot path to enumerate repository-wide flags.
 
+Repository Markdown/spec documents and `.knowledge/knowledge-map.yaml` also participate in the software global projection: headings and knowledge-map topic ids form `software_topics`, documentation files form `documents` relationships to those topics, and configuration/feature-flag facts project relationships that connect documentation, config files, code files, and config keys. These relationships are derived from committed indexing and projection facts, not from whole-repository documentation or source scans on query hot paths.
+
 ## 4. Confidence
 
 Reference, call, and import resolution may be uncertain. Results expose target hints, confidence basis points, confidence tiers, and resolution reasons; inferred edges are not presented as certain calls.

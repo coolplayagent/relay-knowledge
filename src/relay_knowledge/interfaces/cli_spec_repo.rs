@@ -420,8 +420,8 @@ pub(super) fn repo_report() -> CliCommandSpec {
 pub(super) fn repo_software() -> CliCommandSpec {
     command!(
         &["repo", "software"],
-        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|all] [--freshness <policy>] [--limit <n>]",
-        "Read repository-scoped software dependency and SDK/API facts.",
+        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|all] [--freshness <policy>] [--limit <n>]",
+        "Read repository-scoped software dependency, SDK/API, file, topic, and relationship facts.",
         "code.repo.software",
         CommandEffect::ReadOnly,
         &[arg(
@@ -449,7 +449,14 @@ pub(super) fn repo_software() -> CliCommandSpec {
                 false,
                 "Software global projection slice.",
                 Some("all"),
-                &["dependencies", "sdks", "all"],
+                &[
+                    "dependencies",
+                    "sdks",
+                    "files",
+                    "topics",
+                    "relationships",
+                    "all",
+                ],
             ),
             opt(
                 "--freshness",

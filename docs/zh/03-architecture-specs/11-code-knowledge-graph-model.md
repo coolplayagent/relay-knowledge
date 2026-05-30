@@ -32,6 +32,8 @@
 
 `FeatureFlag` v1 只覆盖配置驱动开关：环境变量读取、常见 config/settings key 读取、布尔配置声明、OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用，以及这些读取参与条件表达式时产生的 guarded-code 关系。布尔配置声明来自同一套结构化 configuration fact 和 config-key symbol 抽取结果，并写成 `defines_config`；普通读取或 SDK evaluation 写成 `reads_config`，条件上下文写成 `guards_code`。provider 控制面的 rollout strategy、segment 和 variant 不属于这条静态代码索引路径。查询必须读取版本化图事实和 FTS 文档，不能为了列出全仓库开关在查询热路径递归扫描源码。
 
+代码仓库内 Markdown/spec 文档和 `.knowledge/knowledge-map.yaml` 同样参与软件全域投影：heading 和 knowledge map topic 会形成 `software_topics`，文档文件与主题形成 `documents` 关系，配置定义/读取和 feature flag facts 会进一步投影成连接文档、配置文件、代码文件与配置 key 的 `software_relationships`。这些关系来自索引和 projection 阶段的已提交事实，不在查询热路径扫描全仓文档或源码。
+
 ## 4. 置信度
 
 引用、调用和导入解析可能不确定。结果必须暴露 target hint、confidence basis points、confidence tier 和 resolution reason，不能把推断边伪装成确定调用。

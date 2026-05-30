@@ -44,11 +44,17 @@ impl RelayKnowledgeService {
                     stale: true,
                     component_count: 0,
                     sdk_usage_count: 0,
+                    file_count: 0,
+                    topic_count: 0,
+                    relationship_count: 0,
                     last_error: Some("graph_only freshness policy selected".to_owned()),
                 },
                 components: Vec::new(),
                 dependency_usages: Vec::new(),
                 sdk_usages: Vec::new(),
+                files: Vec::new(),
+                topics: Vec::new(),
+                relationships: Vec::new(),
             });
         }
 
@@ -133,6 +139,9 @@ impl RelayKnowledgeService {
             components: projection.components,
             dependency_usages: projection.dependency_usages,
             sdk_usages: projection.sdk_usages,
+            files: projection.files,
+            topics: projection.topics,
+            relationships: projection.relationships,
         })
     }
 }
