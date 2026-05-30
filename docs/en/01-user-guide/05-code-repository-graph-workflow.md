@@ -101,7 +101,7 @@ relay-knowledge repo feature-flags repo --ref HEAD --format json
 relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 --format json
 ```
 
-Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The indexer recognizes static code/config evidence from environment access, config/settings reads, boolean config files, and common OpenFeature, LaunchDarkly, and Unleash evaluation calls. Provider control-plane state such as rollout strategies, segments, and variants is not synchronized in this path. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
+Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The indexer recognizes static code/config evidence from environment access, config/settings reads, boolean config facts from supported configuration formats, and common OpenFeature, LaunchDarkly, and Unleash evaluation calls. Provider control-plane state such as rollout strategies, segments, and variants is not synchronized in this path. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
 
 ### Multi-Repository Repository Set Queries
 

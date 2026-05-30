@@ -101,7 +101,7 @@ relay-knowledge repo feature-flags repo --ref HEAD --format json
 relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 --format json
 ```
 
-响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、布尔配置文件，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
+响应按 feature flag 分组，包含配置来源、`defines_config`、`reads_config` 或 `guards_code` 关系、source range、置信度、相关符号和 excerpt。索引器识别环境访问、config/settings 读取、支持配置格式里的布尔 config fact，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用中的静态代码/配置证据；provider 控制面的 rollout strategy、segment 和 variant 不在该路径同步。该查询只读取当前 indexed scope 下的 feature-flag 表和 FTS 文档，不在查询时递归 grep 全仓库；新增开关或抽取规则变化后需要重新 `repo index` 或 `repo update`。
 
 ### 多仓库 Repository Set 查询
 

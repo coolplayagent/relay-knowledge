@@ -158,6 +158,75 @@ cc_library(name="runtime_lib", deps = [":core_lib"])"#,
 }
 
 #[test]
+fn boolean_configuration_facts_define_feature_flags() {
+    let (facts, _) = configuration::structured_facts(
+        "config/flags.yaml",
+        "yaml",
+        "server:\n  checkout_v2: true\nflags: { payments_v2: false }\nfeatures: [true, false]\n",
+    );
+
+    assert!(facts.iter().any(|fact| {
+        fact.name == "checkout_v2"
+            && fact.kind == "config_key"
+            && fact.value_kind == configuration::ConfigValueKind::Boolean
+    }));
+    assert!(facts.iter().any(|fact| {
+        fact.name == "payments_v2"
+            && fact.kind == "config_key"
+            && fact.value_kind == configuration::ConfigValueKind::Boolean
+    }));
+    assert!(!facts.iter().any(|fact| {
+        fact.name == "features" && fact.value_kind == configuration::ConfigValueKind::Boolean
+    }));
+
+    let snapshot = parse_source_snapshot(
+        "config/flags.yaml",
+        b"server:\n  checkout_v2: true\nflags: { payments_v2: false }\n",
+    );
+
+    for source_key in ["checkout_v2", "payments_v2"] {
+        assert!(
+            snapshot.feature_flags.iter().any(|record| {
+                record.source_key == source_key && record.edge_kind == "defines_config"
+            }),
+            "{source_key} should become a feature flag definition"
+        );
+    }
+}
+
+#[test]
+fn boolean_configuration_fact_detection_covers_common_key_value_formats() {
+    let fixtures = [
+        ("Cargo.toml", "toml", "checkout_v2 = true\n"),
+        (
+            "config.json",
+            "json",
+            "{\"checkout_v2\":true,\"docs\":\"true\"}\n",
+        ),
+        ("settings.ini", "ini", "checkout_v2=enabled\n"),
+        ("app.properties", "properties", "checkout_v2 disabled\n"),
+    ];
+
+    for (path, language_id, content) in fixtures {
+        let (facts, _) = configuration::structured_facts(path, language_id, content);
+        assert!(
+            facts.iter().any(|fact| {
+                fact.name == "checkout_v2"
+                    && fact.kind == "config_key"
+                    && fact.value_kind == configuration::ConfigValueKind::Boolean
+            }),
+            "{path} should mark checkout_v2 as a boolean config fact: {facts:?}"
+        );
+        assert!(
+            !facts.iter().any(|fact| {
+                fact.name == "docs" && fact.value_kind == configuration::ConfigValueKind::Boolean
+            }),
+            "{path} should not treat quoted boolean-looking strings as boolean config facts"
+        );
+    }
+}
+
+#[test]
 fn configuration_imports_resolve_project_files() {
     let registration =
         CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())

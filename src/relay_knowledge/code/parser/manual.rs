@@ -1,6 +1,6 @@
 use tree_sitter::Node;
 
-use crate::code::configuration;
+use crate::code::configuration::{self, ConfigFact, ConfigReference};
 
 use super::{
     super::CodeIndexError,
@@ -12,6 +12,8 @@ use super::{
 pub(super) fn collect_manual_nodes(
     context: &FileParseContext<'_>,
     root: Node<'_>,
+    config_definitions: &[ConfigFact],
+    config_references: &[ConfigReference],
     output: &mut FileParseOutput,
 ) -> Result<(), CodeIndexError> {
     let mut stack = Vec::with_capacity(root.child_count().saturating_add(1));
@@ -37,9 +39,7 @@ pub(super) fn collect_manual_nodes(
         }
         push_children_reverse(node, &mut stack);
     }
-    let (definitions, references) =
-        configuration::structured_facts(context.path, context.language_id, context.content);
-    for definition in definitions {
+    for definition in config_definitions {
         upsert_symbol(
             output,
             symbol_record(
@@ -50,7 +50,7 @@ pub(super) fn collect_manual_nodes(
             )?,
         );
     }
-    for reference in references {
+    for reference in config_references {
         upsert_reference(
             output,
             reference_record(

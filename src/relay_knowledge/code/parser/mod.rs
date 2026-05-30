@@ -97,7 +97,7 @@ pub(in crate::code) fn parse_indexed_file(
         }
         add_file_chunk(build, path, &file_id, "unknown", &content)?;
         record_dependencies(build, path, &file_id, &content)?;
-        record_feature_flags(build, path, &file_id, "unknown", &content)?;
+        record_feature_flags(build, path, &file_id, "unknown", &content, None)?;
         return Ok(());
     };
     if parse_status == CodeParseStatus::TextOnly {
@@ -116,7 +116,7 @@ pub(in crate::code) fn parse_indexed_file(
         );
         add_file_chunk(build, path, &file_id, language.id, &content)?;
         record_dependencies(build, path, &file_id, &content)?;
-        record_feature_flags(build, path, &file_id, language.id, &content)?;
+        record_feature_flags(build, path, &file_id, language.id, &content, None)?;
         return Ok(());
     }
 
@@ -194,6 +194,7 @@ fn parse_syntax_file(
                 input.file_id,
                 input.language.id,
                 input.content,
+                None,
             )?;
             return Ok(());
         }
@@ -209,6 +210,7 @@ fn parse_syntax_file(
                 input.file_id,
                 input.language.id,
                 input.content,
+                None,
             )?;
             return Ok(());
         }
@@ -221,8 +223,16 @@ fn parse_syntax_file(
         content: input.content,
     };
     let mut output = FileParseOutput::new();
+    let (config_definitions, config_references) =
+        configuration::structured_facts(input.path, input.language.id, input.content);
     records_from_captures(&context, captures, &mut output)?;
-    collect_manual_nodes(&context, root, &mut output)?;
+    collect_manual_nodes(
+        &context,
+        root,
+        &config_definitions,
+        &config_references,
+        &mut output,
+    )?;
     let imports = collect_imports(
         build,
         input.path,
@@ -265,6 +275,7 @@ fn parse_syntax_file(
         input.file_id,
         input.language.id,
         input.content,
+        Some(&config_definitions),
     )?;
     build.chunks.extend(chunks);
 
@@ -315,7 +326,16 @@ fn record_feature_flags(
     file_id: &str,
     language_id: &str,
     content: &str,
+    config_facts: Option<&[configuration::ConfigFact]>,
 ) -> Result<(), CodeIndexError> {
+    let owned_config_facts;
+    let config_facts = match config_facts {
+        Some(config_facts) => config_facts,
+        None => {
+            owned_config_facts = configuration::structured_facts(path, language_id, content).0;
+            &owned_config_facts
+        }
+    };
     let records = extract_feature_flags(FeatureFlagFileInput {
         repository_id: &build.repository_id,
         source_scope: &build.source_scope,
@@ -323,6 +343,7 @@ fn record_feature_flags(
         path,
         language_id,
         content,
+        config_facts,
     })
     .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?;
     build.feature_flags.extend(records);

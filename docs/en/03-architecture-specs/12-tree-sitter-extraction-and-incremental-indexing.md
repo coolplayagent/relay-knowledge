@@ -49,7 +49,7 @@ Import dependency expansion prioritizes indexed code maps and versioned import e
 
 Local configuration relationships resolve only inside the same indexed source scope. Finalization may resolve deterministic local file references, template includes, and build-target references after all files in that scope have been written. Ambiguous local matches and external images, packages, remote labels, or templates remain unresolved or ambiguous metadata rather than degraded parser state.
 
-Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
+Feature-flag extraction is an indexing-stage responsibility. Runtime config reads, boolean config declarations, and guarded-code relationships are written as versioned facts under the file scope; the query layer reads only those facts and their FTS documents. Boolean declarations in TOML, YAML, JSON, INI, Java properties, and related config formats reuse the configuration extractor's structured config-key facts instead of a separate feature-flag source. Changes to extractor rules, config files, or guarded branches require a full or incremental index refresh for the affected scope.
 
 ## 6. High-Performance Boundaries
 

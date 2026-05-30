@@ -1,4 +1,4 @@
-use super::model::{ConfigFact, ConfigImport, ConfigRange, ConfigReference};
+use super::model::{ConfigFact, ConfigImport, ConfigRange, ConfigReference, ConfigValueKind};
 
 pub(super) fn source_lines(content: &str) -> Vec<ConfigLine<'_>> {
     let mut lines = Vec::new();
@@ -50,14 +50,45 @@ pub(super) fn push_definition(
     kind: &'static str,
     range: ConfigRange,
 ) {
+    push_definition_with_value_kind(definitions, name, kind, ConfigValueKind::Unknown, range);
+}
+
+pub(super) fn push_boolean_definition(
+    definitions: &mut Vec<ConfigFact>,
+    name: impl AsRef<str>,
+    kind: &'static str,
+    range: ConfigRange,
+) {
+    push_definition_with_value_kind(definitions, name, kind, ConfigValueKind::Boolean, range);
+}
+
+fn push_definition_with_value_kind(
+    definitions: &mut Vec<ConfigFact>,
+    name: impl AsRef<str>,
+    kind: &'static str,
+    value_kind: ConfigValueKind,
+    range: ConfigRange,
+) {
     let name = clean_name(name.as_ref());
-    if !name.is_empty()
-        && !definitions.iter().any(|existing| {
-            existing.name == name && existing.kind == kind && existing.range == range
-        })
-    {
-        definitions.push(ConfigFact { name, kind, range });
+    if name.is_empty() {
+        return;
     }
+    if let Some(existing) = definitions
+        .iter_mut()
+        .find(|existing| existing.name == name && existing.kind == kind && existing.range == range)
+    {
+        if existing.value_kind == ConfigValueKind::Unknown {
+            existing.value_kind = value_kind;
+        }
+        return;
+    }
+
+    definitions.push(ConfigFact {
+        name,
+        kind,
+        value_kind,
+        range,
+    });
 }
 
 pub(super) fn push_reference(

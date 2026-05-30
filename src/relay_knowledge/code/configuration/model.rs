@@ -1,8 +1,16 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::code) struct ConfigFact {
+pub(crate) struct ConfigFact {
     pub(in crate::code) name: String,
     pub(in crate::code) kind: &'static str,
+    pub(in crate::code) value_kind: ConfigValueKind,
     pub(in crate::code) range: ConfigRange,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ConfigValueKind {
+    #[default]
+    Unknown,
+    Boolean,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
