@@ -211,6 +211,88 @@ fn refresh_projection_materializes_files_topics_and_config_relationships() {
 }
 
 #[test]
+fn projection_orders_operational_files_and_relationships_first() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    seed_documented_configuration(&connection);
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let files = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Files,
+        crate::domain::FreshnessPolicy::AllowStale,
+        4,
+    )
+    .expect("request should validate");
+    let file_projection = projection(&mut connection, files).expect("projection should load");
+    assert_eq!(file_projection.files[0].path, "Cargo.toml");
+    assert_eq!(file_projection.files[0].file_role, "dependency_manifest");
+
+    let relationships = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Relationships,
+        crate::domain::FreshnessPolicy::AllowStale,
+        4,
+    )
+    .expect("request should validate");
+    let relationship_projection =
+        projection(&mut connection, relationships).expect("projection should load");
+    assert_eq!(
+        relationship_projection.relationships[0].relationship_kind,
+        "depends_on"
+    );
+    assert_eq!(
+        relationship_projection.relationships[0].evidence_path,
+        "Cargo.toml"
+    );
+    assert_eq!(
+        relationship_projection.relationships[0]
+            .target_hint
+            .as_deref(),
+        Some("serde")
+    );
+}
+
+#[test]
+fn projection_orders_lifecycle_deployable_surfaces_first() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    seed_lifecycle_projection_rows(&connection);
+
+    let build = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Build,
+        crate::domain::FreshnessPolicy::AllowStale,
+        4,
+    )
+    .expect("request should validate");
+    let build_projection = projection(&mut connection, build).expect("projection should load");
+    assert_eq!(build_projection.build_targets[0].ecosystem, "npm");
+    assert_eq!(build_projection.build_targets[0].kind, "script");
+    assert_eq!(build_projection.build_targets[0].name, "build");
+
+    let iac = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Iac,
+        crate::domain::FreshnessPolicy::AllowStale,
+        4,
+    )
+    .expect("request should validate");
+    let iac_projection = projection(&mut connection, iac).expect("projection should load");
+    assert_eq!(iac_projection.iac_resources[0].provider, "kubernetes");
+    assert_eq!(iac_projection.iac_resources[0].resource_kind, "Deployment");
+    assert_eq!(iac_projection.iac_resources[0].name, "relay-api");
+}
+
+#[test]
 fn projection_configuration_relationship_targets_preserve_source_identity() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
@@ -678,6 +760,46 @@ fn seed_knowledge_map_file(connection: &Connection) {
             [],
         )
         .expect("knowledge map file should insert");
+}
+
+fn seed_lifecycle_projection_rows(connection: &Connection) {
+    connection
+        .execute_batch(
+            "
+            INSERT INTO software_build_targets (
+                target_id, repository_id, source_scope, ecosystem, language_id, name,
+                kind, command, output_hint, source_kind, evidence_path,
+                evidence_line_start, evidence_line_end, confidence_basis_points,
+                created_graph_version
+            ) VALUES
+                ('build-rust-package', 'repo', 'scope-1', 'rust', 'rust',
+                 'relay-core', 'package', NULL, NULL, 'Cargo.toml',
+                 'Cargo.toml', 1, 1, 9000, 1),
+                ('build-cmake-exe', 'repo', 'scope-1', 'cmake', 'cmake',
+                 'relay_agent', 'executable', NULL, NULL, 'CMakeLists.txt',
+                 'CMakeLists.txt', 4, 4, 9000, 1),
+                ('build-npm-script', 'repo', 'scope-1', 'npm', 'json',
+                 'build', 'script', 'vite build', NULL, 'package.json',
+                 'package.json', 8, 8, 9000, 1);
+
+            INSERT INTO software_iac_resources (
+                resource_id, repository_id, source_scope, language_id, provider,
+                resource_kind, name, scope_hint, target_hint, resolution_state,
+                source_kind, evidence_path, evidence_line_start, evidence_line_end,
+                confidence_basis_points, created_graph_version
+            ) VALUES
+                ('iac-container-base', 'repo', 'scope-1', 'dockerfile', 'container',
+                 'base_image', 'rust:1.76', NULL, 'rust:1.76', 'extracted',
+                 'Dockerfile', 'Dockerfile', 1, 1, 9000, 1),
+                ('iac-compose-web', 'repo', 'scope-1', 'yaml', 'compose',
+                 'service', 'web', NULL, NULL, 'extracted',
+                 'compose', 'docker-compose.yml', 3, 3, 9000, 1),
+                ('iac-kubernetes-api', 'repo', 'scope-1', 'yaml', 'kubernetes',
+                 'Deployment', 'relay-api', 'Deployment', NULL, 'extracted',
+                 'kubernetes-yaml', 'deploy/app.yaml', 4, 4, 9000, 1);
+            ",
+        )
+        .expect("lifecycle projection rows should insert");
 }
 
 fn seed_documented_configuration(connection: &Connection) {

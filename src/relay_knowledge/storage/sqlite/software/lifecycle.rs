@@ -257,7 +257,28 @@ pub(super) fn build_targets_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY ecosystem ASC, kind ASC, name ASC, evidence_path ASC
+        ORDER BY
+            CASE kind
+                WHEN 'script' THEN 0
+                WHEN 'job' THEN 1
+                WHEN 'executable' THEN 2
+                WHEN 'library' THEN 3
+                WHEN 'module' THEN 4
+                WHEN 'package' THEN 5
+                WHEN 'project' THEN 6
+                WHEN 'feature' THEN 7
+                ELSE 8
+            END ASC,
+            CASE name
+                WHEN 'build' THEN 0
+                WHEN 'verify' THEN 1
+                WHEN 'test' THEN 2
+                WHEN 'check' THEN 3
+                ELSE 4
+            END ASC,
+            ecosystem ASC,
+            name ASC,
+            evidence_path ASC
         LIMIT ?
         ",
     );
@@ -292,7 +313,32 @@ pub(super) fn iac_resources_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY provider ASC, resource_kind ASC, name ASC, evidence_path ASC
+        ORDER BY
+            CASE provider
+                WHEN 'kubernetes' THEN 0
+                WHEN 'terraform' THEN 1
+                WHEN 'compose' THEN 2
+                WHEN 'systemd' THEN 3
+                WHEN 'launchd' THEN 4
+                WHEN 'helm' THEN 5
+                WHEN 'github-actions' THEN 6
+                WHEN 'gitlab-ci' THEN 7
+                WHEN 'container' THEN 8
+                ELSE 9
+            END ASC,
+            CASE resource_kind
+                WHEN 'Deployment' THEN 0
+                WHEN 'StatefulSet' THEN 1
+                WHEN 'DaemonSet' THEN 2
+                WHEN 'service' THEN 3
+                WHEN 'resource' THEN 4
+                WHEN 'module' THEN 5
+                WHEN 'base_image' THEN 6
+                ELSE 7
+            END ASC,
+            confidence_basis_points DESC,
+            name ASC,
+            evidence_path ASC
         LIMIT ?
         ",
     );

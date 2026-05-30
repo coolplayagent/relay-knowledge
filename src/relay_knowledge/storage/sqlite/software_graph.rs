@@ -479,7 +479,37 @@ pub(super) fn files_for_scope(
         WHERE source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY file_role ASC, path ASC
+        ORDER BY
+            CASE file_role
+                WHEN 'dependency_manifest' THEN 0
+                WHEN 'source' THEN 1
+                WHEN 'documentation' THEN 2
+                WHEN 'configuration' THEN 3
+                WHEN 'deployment' THEN 4
+                WHEN 'test' THEN 5
+                WHEN 'template' THEN 6
+                WHEN 'build_manifest' THEN 7
+                WHEN 'knowledge_map' THEN 8
+                ELSE 9
+            END ASC,
+            CASE
+                WHEN path = 'Cargo.toml' OR path LIKE '%/Cargo.toml' THEN 0
+                WHEN path = 'package.json' OR path LIKE '%/package.json' THEN 1
+                WHEN path = 'pyproject.toml' OR path LIKE '%/pyproject.toml' THEN 2
+                WHEN path = 'go.mod' OR path LIKE '%/go.mod' THEN 3
+                WHEN path = 'pom.xml' OR path LIKE '%/pom.xml' THEN 4
+                WHEN path = 'build.gradle' OR path LIKE '%/build.gradle'
+                  OR path = 'build.gradle.kts' OR path LIKE '%/build.gradle.kts' THEN 5
+                WHEN path = 'CMakeLists.txt' OR path LIKE '%/CMakeLists.txt' THEN 6
+                WHEN path = 'Makefile' OR path LIKE '%/Makefile' THEN 7
+                WHEN path = 'Cargo.lock' OR path LIKE '%/Cargo.lock'
+                  OR path = 'package-lock.json' OR path LIKE '%/package-lock.json'
+                  OR path = 'go.sum' OR path LIKE '%/go.sum'
+                  OR path = 'uv.lock' OR path LIKE '%/uv.lock'
+                  OR path = 'gradle.lockfile' OR path LIKE '%/gradle.lockfile' THEN 20
+                ELSE 10
+            END ASC,
+            path ASC
         LIMIT ?
         ",
     );
@@ -565,8 +595,25 @@ pub(super) fn relationships_for_scope(
         WHERE relationships.source_scope = ?1
         {path_filter}
         {language_filter}
-        ORDER BY relationships.relationship_kind ASC, relationships.evidence_path ASC,
-                 relationships.evidence_line_start ASC
+        ORDER BY
+            CASE relationships.relationship_kind
+                WHEN 'depends_on' THEN 0
+                WHEN 'uses_sdk' THEN 1
+                WHEN 'documents' THEN 2
+                WHEN 'configures' THEN 3
+                ELSE 4
+            END ASC,
+            CASE relationships.resolution_state
+                WHEN 'declared' THEN 0
+                WHEN 'resolved' THEN 1
+                WHEN 'extracted' THEN 2
+                WHEN 'inferred' THEN 3
+                WHEN 'locked' THEN 4
+                ELSE 5
+            END ASC,
+            relationships.confidence_basis_points DESC,
+            relationships.evidence_path ASC,
+            relationships.evidence_line_start ASC
         LIMIT ?
         ",
     );
