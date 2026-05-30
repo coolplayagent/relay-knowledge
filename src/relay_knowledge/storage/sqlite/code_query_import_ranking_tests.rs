@@ -2,8 +2,8 @@ use super::*;
 use crate::{
     domain::{
         CodeImportRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
-        CodeRepositoryRegistration, CodeRepositorySelector, CodeRetrievalHit, FreshnessPolicy,
-        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRetrievalHit, CodeRetrievalLayer,
+        FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
         RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
@@ -215,6 +215,68 @@ async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
     assert_eq!(hits[0].path, importer_path);
     assert!(hits[0].excerpt.contains("leveldb/filter_policy.h"));
     assert!(hits[0].excerpt.contains("FilterPolicy"));
+}
+
+#[tokio::test]
+async fn path_import_queries_use_structured_rows_when_fts_is_unavailable() {
+    let importer_path = "src/http_macro_module.c";
+    let mut include_import = import(
+        "openssl-include",
+        "importer-file",
+        importer_path,
+        "#include <openssl/ssl.h>",
+    );
+    include_import.target_hint = Some("openssl/ssl.h".to_owned());
+    include_import.resolution_state = "unresolved".to_owned();
+    include_import.confidence_basis_points = 2_500;
+    include_import.confidence_tier = "ambiguous".to_owned();
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("importer-file", importer_path, "c")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: vec![include_import],
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let hits = store
+        .search_code(request("openssl/ssl.h", CodeQueryKind::Imports))
+        .await
+        .expect("structured import path lookup should not require FTS");
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, importer_path);
+    assert!(hits[0].excerpt.contains("#include <openssl/ssl.h>"));
+    assert!(
+        hits[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::ImportGraph)
+    );
+    assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("unresolved"));
+    assert_eq!(hits[0].edge_target_hint.as_deref(), Some("openssl/ssl.h"));
 }
 
 #[tokio::test]

@@ -30,6 +30,8 @@ mod code_query_identifiers;
 mod code_query_import_scoring;
 #[path = "code_query_import_targets.rs"]
 mod code_query_import_targets;
+#[path = "code_query_imports.rs"]
+mod code_query_imports;
 #[path = "code_query_line_ranges.rs"]
 mod code_query_line_ranges;
 #[path = "code_query_path_ranking.rs"]
@@ -79,24 +81,15 @@ use code_query_flow_scoring::{
 };
 use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
 use code_query_hybrid_planning::{hybrid_query_prefers_chunk_first, hybrid_sequence_terms};
-use code_query_import_scoring::{
-    hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
-    import_public_dependency_surface_bonus, import_same_file_usage_bonus,
-    import_statement_shape_bonus, import_surface_bonus, import_target_directory_bonus,
-    import_target_symbol_bonus, query_looks_like_import_path,
-};
+#[cfg(test)]
+use code_query_import_scoring::{import_surface_bonus, import_target_symbol_bonus};
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
-use code_query_import_targets::{
-    attach_import_query_usage_context, attach_import_target_symbols,
-    search_imports_by_target_symbols,
-};
-use code_query_path_ranking::{
-    declaration_surface_path_bonus, import_test_path_penalty, query_mentions_test_or_benchmark,
-};
+use code_query_imports::search_imports;
+use code_query_path_ranking::declaration_surface_path_bonus;
 use code_query_proximity_scoring::query_proximity_chunk_bonus;
 use code_query_references::{reference_usage_context_bonus, search_references};
-use code_query_rows::{ChunkRow, ImportRow};
+use code_query_rows::ChunkRow;
 use code_query_sbom::search_sbom;
 use code_query_support::*;
 use code_query_symbols::search_symbols;
@@ -494,183 +487,6 @@ fn line_contains_identifier(line: &str, identifier: &str) -> bool {
 
 fn is_identifier_char(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '_'
-}
-
-fn search_imports(
-    connection: &Connection,
-    status: &CodeRepositoryStatus,
-    request: &CodeRetrievalRequest,
-) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_query = fts_match_query(&request.query);
-    let fts_filter = fts_path_and_language_filter_sql(status, request);
-    let sql = format!(
-        "
-        SELECT i.file_id, i.path, f.language_id, i.module, i.line_start, i.line_end,
-               i.target_hint, i.resolution_state, i.confidence_basis_points, i.confidence_tier
-        FROM code_repository_imports i
-        INNER JOIN code_repository_files f
-            ON f.source_scope = i.source_scope AND f.path = i.path
-        WHERE i.source_scope = ?
-          AND i.import_id IN (
-              SELECT record_id
-              FROM code_repository_search
-              WHERE code_repository_search MATCH ?
-                AND source_scope = ?
-                AND document_kind = 'import'
-                {fts_filter}
-              ORDER BY bm25(code_repository_search) ASC, record_id ASC
-              LIMIT ?
-          )
-        ORDER BY i.path ASC, i.line_start ASC
-        LIMIT ?
-        "
-    );
-    let mut statement = prepare_code_search_statement(connection, &sql)?;
-    let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
-            required_scope(status)?,
-            status,
-            request,
-            &fts_query,
-            candidate_limit(request, CandidateLayer::Import),
-            candidate_limit(request, CandidateLayer::Import),
-        )),
-        |row| {
-            Ok(ImportRow {
-                file_id: row.get(0)?,
-                path: row.get(1)?,
-                language_id: row.get(2)?,
-                module: row.get(3)?,
-                matched_symbol_name: None,
-                target_symbol_names: None,
-                same_file_query_usage_count: 0,
-                line_range: RepositoryCodeRange {
-                    start: row.get(4)?,
-                    end: row.get(5)?,
-                },
-                target_hint: row.get(6)?,
-                resolution_state: row.get(7)?,
-                confidence_basis_points: row.get(8)?,
-                confidence_tier: row.get(9)?,
-            })
-        },
-    )?;
-    let query = request.query.to_lowercase();
-    let score_query = ScoreQuery::new(&request.query);
-    let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
-    let mut rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
-    rows.extend(search_imports_by_target_symbols(
-        connection, status, request,
-    )?);
-    attach_import_query_usage_context(connection, status, request, &mut rows)?;
-    if request.code_query_kind == CodeQueryKind::Imports
-        && query_looks_like_import_path(&request.query)
-    {
-        attach_import_target_symbols(connection, status, &mut rows)?;
-    }
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
-        .filter_map(|row| {
-            let base_score = score_query.score([
-                row.module.as_str(),
-                row.target_hint.as_deref().unwrap_or_default(),
-                row.matched_symbol_name.as_deref().unwrap_or_default(),
-            ]) + score_exact_path(&query, &row.path)
-                + scoped_identity_query_bonus(
-                    &request.query,
-                    [
-                        row.target_hint.as_deref().unwrap_or_default(),
-                        row.matched_symbol_name.as_deref().unwrap_or_default(),
-                    ],
-                )
-                + import_target_symbol_bonus(
-                    request.query.as_str(),
-                    row.matched_symbol_name.as_deref(),
-                );
-            let score = base_score
-                + import_same_file_usage_bonus(
-                    base_score,
-                    row.same_file_query_usage_count,
-                    request.code_query_kind,
-                )
-                + import_target_directory_bonus(
-                    base_score,
-                    &request.query,
-                    &row.path,
-                    row.target_hint.as_deref(),
-                    request.code_query_kind,
-                )
-                + import_binding_context_bonus(
-                    base_score,
-                    &request.query,
-                    &row.module,
-                    request.code_query_kind,
-                )
-                + import_statement_shape_bonus(
-                    base_score,
-                    &request.query,
-                    &row.module,
-                    request.code_query_kind,
-                )
-                + import_line_priority(base_score, row.line_range.start, &request.query)
-                + hybrid_import_sparse_query_penalty(
-                    base_score,
-                    &request.query,
-                    &row.path,
-                    &row.module,
-                    row.target_hint.as_deref(),
-                    row.matched_symbol_name.as_deref(),
-                    request.code_query_kind,
-                )
-                + import_public_dependency_surface_bonus(
-                    base_score,
-                    &request.query,
-                    &row.path,
-                    row.target_hint.as_deref(),
-                    request.code_query_kind,
-                )
-                + import_test_path_penalty(base_score, &row.path, request, query_has_test_intent)
-                + import_surface_bonus(base_score, &row.path);
-            (score > 0.0).then(|| {
-                hit_from_parts(
-                    status,
-                    HitParts {
-                        path: row.path,
-                        language_id: row.language_id,
-                        byte_range: RepositoryCodeRange { start: 0, end: 0 },
-                        line_range: row.line_range,
-                        symbol_snapshot_id: None,
-                        canonical_symbol_id: None,
-                        file_id: Some(row.file_id),
-                        retrieval_layers: vec![CodeRetrievalLayer::ImportGraph],
-                        score: score + 1.0,
-                        excerpt: import_excerpt(&row.module, row.target_symbol_names.as_deref()),
-                        degraded_reason: None,
-                        edge_kind: Some("import".to_owned()),
-                        edge_resolution_state: Some(row.resolution_state),
-                        edge_target_hint: row.target_hint,
-                        edge_confidence_basis_points: Some(row.confidence_basis_points),
-                        edge_confidence_tier: Some(row.confidence_tier),
-                    },
-                )
-            })
-        })
-        .collect())
-}
-
-fn import_excerpt(module: &str, target_symbol_names: Option<&str>) -> String {
-    let Some(target_symbol_names) = target_symbol_names
-        .map(str::trim)
-        .filter(|target_symbol_names| !target_symbol_names.is_empty())
-    else {
-        return module.to_owned();
-    };
-
-    format!("{module} target symbols: {target_symbol_names}")
 }
 
 fn search_chunks(

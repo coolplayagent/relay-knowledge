@@ -972,7 +972,7 @@ fn normalized_sql_path_filter(filter: &str) -> Option<String> {
     (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
 }
 
-fn escape_sql_like(value: &str) -> String {
+pub(super) fn escape_sql_like(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
         if matches!(character, '\\' | '%' | '_') {
