@@ -20,6 +20,8 @@ mod code_query_designated_initializer_scoring;
 mod code_query_excerpts;
 #[path = "code_query_flow_scoring.rs"]
 mod code_query_flow_scoring;
+#[path = "code_query_hybrid_direct_gate.rs"]
+mod code_query_hybrid_direct_gate;
 #[path = "code_query_hybrid_planning.rs"]
 mod code_query_hybrid_planning;
 #[path = "code_query_identifiers.rs"]
@@ -75,6 +77,7 @@ use code_query_flow_scoring::{
     compact_api_sequence_chunk_bonus, compact_high_coverage_chunk_bonus,
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
+use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
 use code_query_hybrid_planning::{hybrid_query_prefers_chunk_first, hybrid_sequence_terms};
 use code_query_import_scoring::{
     hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
@@ -188,7 +191,9 @@ fn search_code_with_status(
                 return Ok(partial_hits);
             }
         }
-        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
+        if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits)
+            || hybrid_direct_results_can_answer_without_graph_expansion(request, &hits)
+        {
             dedupe_sort_truncate(&mut hits, request.limit);
             return Ok(hits);
         }

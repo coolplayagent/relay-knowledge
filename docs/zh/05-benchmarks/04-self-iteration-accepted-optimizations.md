@@ -996,15 +996,21 @@
 ## run-1780149073 compacted
 - summary: accepted scoped symbol lookup pushdown scored 0.966044 with foundational=0.983173, competitive=0.967196, semantic_vector=1.0, stability=1.0, and 104/105 cases passed; full patch, metrics, and remaining LevelDB recovery-manifest miss are preserved in `.git/relay-knowledge-self-iteration/patches-v2/run-1780149073.patch`, reports, and progressive memory.
 
-## run-1780150399
+## run-1780150399 compacted
+- summary: accepted C/C++ header recovery scored 0.966879 with protected floors foundational=0.983173, competitive=0.967196, semantic_vector=1.0, stability=1.0 and 104/105 cases passed; full metrics, degradations, and patch remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1780150399.patch`, reports, and progressive memory.
 
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780150399.patch`
-- score: 0.966879 (foundational=0.983173, competitive=0.967196, accuracy=0.975184, semantic_vector=1.000000, research_judge=n/a, performance=0.876654, stability=1.000000)
-- cases: 104/105 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/languages/c/cpp_header_recovery.rs`, `src/relay_knowledge/code/parser/languages/c/mod.rs`, `src/relay_knowledge/code/parser/languages/c/tests.rs`, `src/relay_knowledge/code/parser/languages/mod.rs`, `src/relay_knowledge/code/parser/manual.rs`
-- key improvements: metric:cargo_fmt_check_ms 3604.0->3037.0; metric:self_iteration_cargo_fmt_check_ms 404.0->363.0; metric:cargo_build_debug_ms 563.0->343.0; metric:self_iteration_cargo_check_ms 672.0->604.0; metric:code_index_recovery_cases_ms 1460.0->926.0; metric:temporal_samples_go_index_ms 8668.0->1491.0; metric:temporal_samples_go_register_index_ms 8849.0->1592.0; metric:temporal_sdk_go_index_ms 357145.0->4228.0
-- known degradations: metric:code_index_sqlite_lock_cases_ms 1599.0->1933.0; metric:code_index_health_isolation_cases_ms 3334.0->3729.0; metric:leveldb_cpp_query_p50_ms 145.0->189.0; metric:leveldb_cpp_query_p95_ms 222.0->6244.0; metric:software_global_fixture_software_query_p50_ms 161.0->262.0; metric:software_global_fixture_software_query_p95_ms 183.0->330.0; metric:cross_language_syntax_fixture_query_p50_ms 141.0->207.0; metric:cross_language_syntax_fixture_query_p95_ms 181.0->307.0
-- latency metrics: cargo_fmt_check_ms=3037ms; self_iteration_cargo_fmt_check_ms=363ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=262ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=604ms; code_index_recovery_cases_ms=926ms; code_index_sqlite_lock_cases_ms=1933ms
+## run-1780153116 candidate
+- 2026-05-30 Hybrid direct-evidence graph-fanout gate: Hybrid repository query planning now returns after symbol/chunk phases when a non-`text_fallback`, non-edge direct hit densely covers the high-signal query terms. Algorithm: reuse the existing hybrid sequence terms and require a bounded 80%/4-to-6 term coverage threshold on direct lexical evidence or symbol+definition evidence before skipping reference/call/import graph fanout. Architecture invariants: no repository registration, durable task lease, SQLite schema, source fallback, semantic/vector backend, QoS, env/paths/net, or parser behavior changes; graph expansion remains mandatory for sparse hits, text-fallback-only evidence, call/import edges, and broad single-token queries. Expected impact: declaration-style C/C++ and multi-repository Hybrid queries with enough direct evidence avoid unnecessary graph fanout, reducing p50/p95 query latency while preserving competitive retrieval floors. Risks: overly broad documentation-heavy symbols could answer before graph context, so the gate is limited to direct non-edge evidence and covered by tests that reject `text_fallback` and call-graph-only hits.
+
+## run-1780153116
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780153116.patch`
+- score: 0.960929 (foundational=0.983173, competitive=0.980016, accuracy=0.981595, semantic_vector=1.000000, research_judge=n/a, performance=0.827932, stability=1.000000)
+- cases: 105/105 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_chunk_gate_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_direct_gate.rs`
+- key improvements: score_component:score 0.929111->0.9609293388541168; score_component:performance 0.663497->0.8279315573747681; gate:relay_teams_index false->true; metric:cargo_fmt_check_ms 3364.0->2460.0; metric:self_iteration_cargo_fmt_check_ms 463.0->363.0; metric:linux_glibc_compatibility_policy_ms 187.0->141.0; metric:skill_metadata_policy_cases_ms 322.0->242.0; metric:code_index_recovery_cases_ms 927.0->867.0
+- known degradations: metric:code_index_sqlite_lock_cases_ms 1148.0->1209.0; metric:leveldb_cpp_index_ms 17425.0->38922.0; metric:leveldb_cpp_register_index_ms 17486.0->38984.0; metric:temporal_samples_go_index_ms 14003.0->35693.0; metric:temporal_samples_go_register_index_ms 14064.0->35754.0; metric:relay_teams_index_ms 312957.0->431556.0; metric:relay_teams_register_index_ms 313019.0->431617.0; metric:typescript_syntax_fixture_index_ms 7968.0->16358.0
+- latency metrics: cargo_fmt_check_ms=2460ms; self_iteration_cargo_fmt_check_ms=363ms; linux_glibc_compatibility_policy_ms=141ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=525ms; code_index_recovery_cases_ms=867ms; code_index_sqlite_lock_cases_ms=1209ms
 
 Adopted optimization notes:
 
