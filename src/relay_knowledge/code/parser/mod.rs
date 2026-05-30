@@ -420,6 +420,10 @@ mod configuration_tests;
 mod configuration_review_tests;
 
 #[cfg(test)]
+#[path = "tests/configuration_paths.rs"]
+mod configuration_path_tests;
+
+#[cfg(test)]
 #[path = "tests/exported_value.rs"]
 mod exported_value_tests;
 
