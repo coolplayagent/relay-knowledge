@@ -208,6 +208,34 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         "file_name",
         "extension",
         "status",
+        "software_slice",
+        "name",
+        "ecosystem",
+        "language_id",
+        "kind",
+        "command",
+        "output_hint",
+        "source_kind",
+        "relationship_state",
+        "resolution_state",
+        "target_hint",
+        "file_role",
+        "parse_status",
+        "topic_kind",
+        "source_path",
+        "relationship_kind",
+        "target_kind",
+        "provider",
+        "resource_kind",
+        "element_kind",
+        "parent",
+        "scope_hint",
+        "evidence_path",
+        "package_name",
+        "module",
+        "dependency_group",
+        "requirement",
+        "resolved_version",
         "edge_resolution_state",
         "repository_alias",
         "source_scope",
@@ -219,17 +247,12 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         }
     }
     if let Some(expected) = pattern.get("line_start").and_then(Value::as_i64) {
-        let start = hit
-            .get("line_range")
-            .and_then(|range| range.get("start"))
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-        let end = hit
-            .get("line_range")
-            .and_then(|range| range.get("end"))
-            .and_then(Value::as_i64)
-            .unwrap_or(-1);
-        if !(start <= expected && expected <= end || start == expected) {
+        if !line_matches_any(hit, expected, &["line_range", "evidence_line_range"]) {
+            return false;
+        }
+    }
+    if let Some(expected) = pattern.get("evidence_line_start").and_then(Value::as_i64) {
+        if !line_matches_any(hit, expected, &["evidence_line_range"]) {
             return false;
         }
     }
@@ -246,6 +269,10 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
     for (key, hit_key) in [
         ("excerpt_contains", "excerpt"),
         ("content_contains", "content"),
+        ("summary_contains", "summary"),
+        ("command_contains", "command"),
+        ("target_hint_contains", "target_hint"),
+        ("module_contains", "module"),
     ] {
         if let Some(expected) = pattern.get(key).and_then(Value::as_str) {
             if !hit
@@ -291,6 +318,22 @@ fn hit_matches(hit: &Value, pattern: &Value) -> bool {
         return false;
     }
     true
+}
+
+fn line_matches_any(hit: &Value, expected: i64, fields: &[&str]) -> bool {
+    fields.iter().any(|field| {
+        let start = hit
+            .get(*field)
+            .and_then(|range| range.get("start"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        let end = hit
+            .get(*field)
+            .and_then(|range| range.get("end"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        start <= expected && expected <= end || start == expected
+    })
 }
 
 pub fn score_evaluation(

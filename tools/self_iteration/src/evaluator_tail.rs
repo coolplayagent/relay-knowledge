@@ -511,6 +511,7 @@ fn fast_repository_names() -> Vec<String> {
                 "cross_language_syntax_fixture".to_owned(),
                 "typescript_syntax_fixture".to_owned(),
                 "nonstandard_layout_fixture".to_owned(),
+                "software_global_fixture".to_owned(),
                 "project_alias_fixture".to_owned(),
                 "relay_teams".to_owned(),
                 "leveldb_cpp".to_owned(),
@@ -720,6 +721,30 @@ fn query_command(binary: &Path, alias: &str, ref_selector: &str, case: &Value) -
     command
 }
 
+fn software_query_command(
+    binary: &Path,
+    alias: &str,
+    ref_selector: &str,
+    case: &Value,
+) -> Vec<String> {
+    vec![
+        binary.display().to_string(),
+        "repo".to_owned(),
+        "software".to_owned(),
+        alias.to_owned(),
+        "--kind".to_owned(),
+        string_or(case, "kind", "all").to_owned(),
+        "--ref".to_owned(),
+        string_or(case, "ref", ref_selector).to_owned(),
+        "--freshness".to_owned(),
+        "wait-until-fresh".to_owned(),
+        "--limit".to_owned(),
+        number_or(case, "limit", 20).to_string(),
+        "--format".to_owned(),
+        "json".to_owned(),
+    ]
+}
+
 fn score_registration_case(
     repo_name: &str,
     case: &Value,
@@ -838,6 +863,118 @@ fn score_query_case(repo_name: &str, case: &Value, result: &CommandResult) -> Ca
         ),
         objective,
         score_override: Some(assessment.score),
+    }
+}
+
+fn score_software_case(repo_name: &str, case: &Value, result: &CommandResult) -> CaseObservation {
+    let objective = repository_case_objective(case);
+    if !result.passed() {
+        return failed_case(case, repo_name, &objective, result);
+    }
+    let payload = match parse_json_case_output(case, repo_name, &objective, result) {
+        Ok(payload) => payload,
+        Err(observation) => return *observation,
+    };
+    let hits = software_hits_for_kind(&payload, string_or(case, "kind", "all"));
+    let expected = score_array_field(case, "expected");
+    let forbidden = score_array_field(case, "forbidden");
+    let payload_failures = payload_constraint_failures(case, &payload, hits.len());
+    let mut assessment = assess_ranked_hits(case, &hits, expected, forbidden);
+    assessment.failures.extend(payload_failures.clone());
+    if !payload_failures.is_empty() {
+        assessment.details = format!(
+            "{} payload_failures={}",
+            assessment.details,
+            payload_failures.join("; ")
+        );
+    }
+    let mut rank = assessment.rank;
+    let mut passed = assessment.failures.is_empty();
+    if case
+        .get("expect_empty")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let mut failures = if hits.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("expected_empty_results={}", hits.len())]
+        };
+        failures.extend(payload_failures);
+        passed = failures.is_empty();
+        rank = passed.then_some(0);
+        assessment = RankedAssessment {
+            rank,
+            false_positive_count: 0,
+            score: if passed { 1.0 } else { 0.0 },
+            details: if failures.is_empty() {
+                "expect_empty".to_owned()
+            } else {
+                format!("expect_empty failures={}", failures.join("; "))
+            },
+            failures,
+        };
+    }
+    CaseObservation {
+        case_id: string_or(case, "id", "software_case").to_owned(),
+        repository: repo_name.to_owned(),
+        passed,
+        guardrail: is_guardrail_case(case),
+        rank,
+        max_rank: number_or(case, "max_rank", 1) as usize,
+        false_positive_count: assessment.false_positive_count,
+        message: format!(
+            "software_kind={} results={} rank={rank:?} {}",
+            string_or(case, "kind", "all"),
+            hits.len(),
+            assessment.details
+        ),
+        objective,
+        score_override: Some(assessment.score),
+    }
+}
+
+fn software_hits_for_kind(payload: &Value, kind: &str) -> Vec<Value> {
+    let mut hits = Vec::new();
+    match kind {
+        "dependencies" => {
+            append_software_hits(payload, "components", "component", &mut hits);
+            append_software_hits(payload, "dependency_usages", "dependency_usage", &mut hits);
+        }
+        "sdks" => append_software_hits(payload, "sdk_usages", "sdk_usage", &mut hits),
+        "files" => append_software_hits(payload, "files", "file", &mut hits),
+        "topics" => append_software_hits(payload, "topics", "topic", &mut hits),
+        "relationships" => {
+            append_software_hits(payload, "relationships", "relationship", &mut hits);
+        }
+        "build" => append_software_hits(payload, "build_targets", "build_target", &mut hits),
+        "iac" => append_software_hits(payload, "iac_resources", "iac_resource", &mut hits),
+        "design" => append_software_hits(payload, "design_elements", "design_element", &mut hits),
+        _ => {
+            append_software_hits(payload, "components", "component", &mut hits);
+            append_software_hits(payload, "dependency_usages", "dependency_usage", &mut hits);
+            append_software_hits(payload, "sdk_usages", "sdk_usage", &mut hits);
+            append_software_hits(payload, "files", "file", &mut hits);
+            append_software_hits(payload, "topics", "topic", &mut hits);
+            append_software_hits(payload, "relationships", "relationship", &mut hits);
+            append_software_hits(payload, "build_targets", "build_target", &mut hits);
+            append_software_hits(payload, "iac_resources", "iac_resource", &mut hits);
+            append_software_hits(payload, "design_elements", "design_element", &mut hits);
+        }
+    }
+    hits
+}
+
+fn append_software_hits(payload: &Value, field: &str, slice: &str, hits: &mut Vec<Value>) {
+    for item in score_array_field(payload, field) {
+        let mut hit = item.clone();
+        if let Some(object) = hit.as_object_mut() {
+            object.insert(
+                "software_slice".to_owned(),
+                Value::String(slice.to_owned()),
+            );
+        }
+        hits.push(hit);
     }
 }
 
@@ -1094,6 +1231,29 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("modules/java_sdk/build.gradle.kts", NONSTANDARD_BUILD_GRADLE_KTS),
             ("external_deps/cpp_sdk/conanfile.txt", NONSTANDARD_CONANFILE_TXT),
             ("external_deps/cpp_sdk/conanfile.py", NONSTANDARD_CONANFILE_PY),
+        ]),
+        "software_global_v1" => Ok(vec![
+            (".relay-knowledge-fixture-version", "software_global_v1\n"),
+            ("Cargo.toml", SOFTWARE_GLOBAL_CARGO_TOML),
+            ("Cargo.lock", SOFTWARE_GLOBAL_CARGO_LOCK),
+            ("src/lib.rs", SOFTWARE_GLOBAL_LIB_RS),
+            ("src/sdk_probe.c", SOFTWARE_GLOBAL_SDK_PROBE_C),
+            ("package.json", SOFTWARE_GLOBAL_PACKAGE_JSON),
+            ("web/app.js", SOFTWARE_GLOBAL_APP_JS),
+            ("go.mod", SOFTWARE_GLOBAL_GO_MOD),
+            ("CMakeLists.txt", SOFTWARE_GLOBAL_CMAKE),
+            ("Makefile", SOFTWARE_GLOBAL_MAKEFILE),
+            (".github/workflows/ci.yml", SOFTWARE_GLOBAL_WORKFLOW),
+            ("Dockerfile", SOFTWARE_GLOBAL_DOCKERFILE),
+            ("docker-compose.yml", SOFTWARE_GLOBAL_COMPOSE),
+            ("deploy/app.yaml", SOFTWARE_GLOBAL_K8S),
+            ("infra/main.tf", SOFTWARE_GLOBAL_TERRAFORM),
+            ("service/relay-global.service", SOFTWARE_GLOBAL_SYSTEMD),
+            ("docs/architecture.md", SOFTWARE_GLOBAL_ARCHITECTURE_MD),
+            (".knowledge/knowledge-map.yaml", SOFTWARE_GLOBAL_KNOWLEDGE_MAP),
+            ("config/flags.yaml", SOFTWARE_GLOBAL_FLAGS_YAML),
+            ("tests/smoke.rs", SOFTWARE_GLOBAL_SMOKE_RS),
+            ("templates/deployment.yaml.j2", SOFTWARE_GLOBAL_TEMPLATE),
         ]),
         other => Err(format!("unknown generated repository fixture: {other}")),
     }
@@ -2693,6 +2853,197 @@ from conan import ConanFile
 class NonstandardConan(ConanFile):
     def requirements(self):
         self.requires("openssl/3.2.1")
+"#;
+
+const SOFTWARE_GLOBAL_CARGO_TOML: &str = r#"
+[package]
+name = "software-global-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+observability = []
+
+[dependencies]
+serde = "1"
+"#;
+
+const SOFTWARE_GLOBAL_CARGO_LOCK: &str = r#"
+version = 3
+
+[[package]]
+name = "tokio"
+version = "1.36.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#;
+
+const SOFTWARE_GLOBAL_LIB_RS: &str = r#"
+use serde::Serialize;
+
+pub struct Config;
+
+impl Config {
+    pub fn get_bool(&self, key: &str) -> bool {
+        key == "payments.enabled"
+    }
+}
+
+#[derive(Serialize)]
+pub struct CheckoutEvent {
+    pub enabled: bool,
+}
+
+pub fn checkout_enabled(config: &Config) -> bool {
+    config.get_bool("payments.enabled")
+}
+"#;
+
+const SOFTWARE_GLOBAL_SDK_PROBE_C: &str = r#"
+#include <securec.h>
+
+int relay_secure_copy(void *dst, unsigned int dst_len, const void *src, unsigned int src_len)
+{
+    return memcpy_s(dst, dst_len, src, src_len);
+}
+"#;
+
+const SOFTWARE_GLOBAL_PACKAGE_JSON: &str = r#"
+{
+  "name": "relay-global-web",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.2.0"
+  }
+}
+"#;
+
+const SOFTWARE_GLOBAL_APP_JS: &str = r#"
+import React from "react";
+
+export function RelayGlobalPanel() {
+  return React.createElement("section", null, "relay global");
+}
+"#;
+
+const SOFTWARE_GLOBAL_GO_MOD: &str = r#"
+module example.com/relay/global
+
+go 1.22
+"#;
+
+const SOFTWARE_GLOBAL_CMAKE: &str = r#"
+cmake_minimum_required(VERSION 3.20)
+project(relay_global_agent)
+add_executable(relay_global_agent src/sdk_probe.c)
+"#;
+
+const SOFTWARE_GLOBAL_MAKEFILE: &str = r#"
+package:
+	cargo package
+
+diagnostics:
+	cargo test
+"#;
+
+const SOFTWARE_GLOBAL_WORKFLOW: &str = r#"
+name: Relay Global CI
+on: [push]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test
+"#;
+
+const SOFTWARE_GLOBAL_DOCKERFILE: &str = r#"
+FROM rust:1.76
+EXPOSE 8080
+"#;
+
+const SOFTWARE_GLOBAL_COMPOSE: &str = r#"
+services:
+  web:
+    image: relay/global-web:latest
+"#;
+
+const SOFTWARE_GLOBAL_K8S: &str = r#"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-global-api
+"#;
+
+const SOFTWARE_GLOBAL_TERRAFORM: &str = r#"
+provider "aws" {}
+resource "aws_ecs_service" "relay_global" {}
+module "network" {}
+"#;
+
+const SOFTWARE_GLOBAL_SYSTEMD: &str = r#"
+[Unit]
+Description=Relay global fixture
+
+[Service]
+ExecStart=/usr/bin/relay-global service run
+"#;
+
+const SOFTWARE_GLOBAL_ARCHITECTURE_MD: &str = r#"
+# Architecture
+Relay global separates repository indexing from software projection serving.
+
+## Module relay-core
+Owns software projection refresh and lifecycle extraction.
+
+## Capability Global software projection
+Provides dependency, SDK, build, IaC, and design context for generation.
+"#;
+
+const SOFTWARE_GLOBAL_KNOWLEDGE_MAP: &str = r#"
+schema_version: 1
+map_version: 1
+topics:
+- id: global-runtime
+  title: Global runtime knowledge
+  description: Runtime and software projection routing.
+sources:
+- id: global-runtime-doc
+  topic: global-runtime
+  kind: doc
+  uri: docs/architecture.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+routes:
+- topic: global-runtime
+  source_order:
+  - global-runtime-doc
+  fallback: bounded-search
+"#;
+
+const SOFTWARE_GLOBAL_FLAGS_YAML: &str = r#"
+payments:
+  enabled: true
+"#;
+
+const SOFTWARE_GLOBAL_SMOKE_RS: &str = r#"
+#[test]
+fn relay_global_smoke() {
+    assert!(true);
+}
+"#;
+
+const SOFTWARE_GLOBAL_TEMPLATE: &str = r#"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-global-template
 "#;
 
 fn create_file_fixture(root: &Path, fixture: &Value) -> Result<(), String> {

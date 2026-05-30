@@ -1,0 +1,256 @@
+{
+  "repositories": {
+    "software_global_fixture": {
+      "generated_fixture": "software_global_v1",
+      "alias": "software-global-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 100,
+      "query_p95_budget_ms": 250
+    }
+  },
+  "software_query_cases": [
+    {
+      "id": "software_global_dependencies_manifest_lock_and_usage",
+      "repository": "software_global_fixture",
+      "kind": "dependencies",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 6,
+      "expected": [
+        {
+          "software_slice": "component",
+          "ecosystem": "cargo",
+          "name": "serde",
+          "relationship_state": "declared",
+          "source_kind": "Cargo.toml",
+          "evidence_path": "Cargo.toml"
+        }
+      ],
+      "expected_all": [
+        {
+          "software_slice": "component",
+          "ecosystem": "cargo",
+          "name": "tokio",
+          "resolved_version": "1.36.0",
+          "relationship_state": "locked",
+          "evidence_path": "Cargo.lock"
+        },
+        {
+          "software_slice": "dependency_usage",
+          "ecosystem": "npm",
+          "package_name": "react",
+          "module": "import React from \"react\";",
+          "evidence_path": "web/app.js"
+        }
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_sdks_keep_unresolved_external_include",
+      "repository": "software_global_fixture",
+      "kind": "sdks",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 20,
+      "max_rank": 4,
+      "expected": [
+        {
+          "software_slice": "sdk_usage",
+          "language_id": "c",
+          "target_hint_contains": "securec.h",
+          "resolution_state": "unresolved",
+          "evidence_path": "src/sdk_probe.c"
+        }
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_files_cover_lifecycle_roles",
+      "repository": "software_global_fixture",
+      "kind": "files",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 10,
+      "expected": [
+        {"software_slice": "file", "path": "Cargo.toml", "file_role": "dependency_manifest"}
+      ],
+      "expected_all": [
+        {"software_slice": "file", "path": "src/lib.rs", "file_role": "source"},
+        {"software_slice": "file", "path": "docs/architecture.md", "file_role": "documentation"},
+        {"software_slice": "file", "path": "config/flags.yaml", "file_role": "configuration"},
+        {"software_slice": "file", "path": "tests/smoke.rs", "file_role": "test"},
+        {"software_slice": "file", "path": "Dockerfile", "file_role": "deployment"},
+        {"software_slice": "file", "path": "templates/deployment.yaml.j2", "file_role": "template"}
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_topics_include_docs_and_knowledge_map",
+      "repository": "software_global_fixture",
+      "kind": "topics",
+      "objective": "foundational_capability",
+      "guardrail": true,
+      "limit": 30,
+      "max_rank": 6,
+      "expected": [
+        {
+          "software_slice": "topic",
+          "name": "Architecture",
+          "topic_kind": "document_heading",
+          "source_path": "docs/architecture.md"
+        }
+      ],
+      "expected_all": [
+        {
+          "software_slice": "topic",
+          "name": "global-runtime",
+          "topic_kind": "knowledge_map_topic",
+          "source_path": ".knowledge/knowledge-map.yaml"
+        }
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_relationships_cross_domain_edges",
+      "repository": "software_global_fixture",
+      "kind": "relationships",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 12,
+      "expected": [
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "depends_on",
+          "target_hint": "serde",
+          "evidence_path": "Cargo.toml"
+        }
+      ],
+      "expected_all": [
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "documents",
+          "target_kind": "topic",
+          "evidence_path": "docs/architecture.md"
+        },
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "configures",
+          "target_hint": "payments.enabled"
+        },
+        {
+          "software_slice": "relationship",
+          "relationship_kind": "uses_sdk",
+          "target_hint_contains": "securec.h",
+          "resolution_state": "unresolved",
+          "evidence_path": "src/sdk_probe.c"
+        }
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_build_targets_from_manifests_and_ci",
+      "repository": "software_global_fixture",
+      "kind": "build",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 60,
+      "max_rank": 16,
+      "expected": [
+        {
+          "software_slice": "build_target",
+          "ecosystem": "npm",
+          "kind": "script",
+          "name": "build",
+          "command": "vite build",
+          "evidence_path": "package.json"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "build_target", "ecosystem": "rust", "kind": "package", "name": "software-global-fixture"},
+        {"software_slice": "build_target", "ecosystem": "go", "kind": "module", "name": "example.com/relay/global"},
+        {"software_slice": "build_target", "ecosystem": "cmake", "kind": "executable", "name": "relay_global_agent"},
+        {"software_slice": "build_target", "ecosystem": "github-actions", "kind": "job", "name": "verify"}
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_iac_resources_from_deployment_evidence",
+      "repository": "software_global_fixture",
+      "kind": "iac",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 80,
+      "max_rank": 12,
+      "expected": [
+        {
+          "software_slice": "iac_resource",
+          "provider": "kubernetes",
+          "resource_kind": "Deployment",
+          "name": "relay-global-api",
+          "evidence_path": "deploy/app.yaml"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "iac_resource", "provider": "container", "resource_kind": "base_image", "target_hint": "rust:1.76"},
+        {"software_slice": "iac_resource", "provider": "compose", "resource_kind": "service", "name": "web"},
+        {"software_slice": "iac_resource", "provider": "terraform", "resource_kind": "resource", "scope_hint": "aws_ecs_service", "name": "relay_global"},
+        {"software_slice": "iac_resource", "provider": "systemd", "resource_kind": "service", "name": "relay-global", "target_hint_contains": "service run"}
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_design_elements_from_docs_and_manifests",
+      "repository": "software_global_fixture",
+      "kind": "design",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 60,
+      "max_rank": 8,
+      "expected": [
+        {
+          "software_slice": "design_element",
+          "element_kind": "architecture",
+          "name": "Architecture",
+          "source_kind": "markdown",
+          "evidence_path": "docs/architecture.md"
+        }
+      ],
+      "expected_all": [
+        {"software_slice": "design_element", "element_kind": "module", "name": "Module relay-core", "summary_contains": "software projection refresh"},
+        {"software_slice": "design_element", "element_kind": "capability", "name": "Capability Global software projection"},
+        {"software_slice": "design_element", "element_kind": "module", "name": "software-global-fixture", "source_kind": "rust"}
+      ],
+      "case_group": "software_global_projection"
+    },
+    {
+      "id": "software_global_all_kind_combines_foundational_and_lifecycle_slices",
+      "repository": "software_global_fixture",
+      "kind": "all",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 200,
+      "max_rank": 20,
+      "expected": [
+        {"software_slice": "component", "ecosystem": "cargo", "name": "serde"}
+      ],
+      "expected_all": [
+        {"software_slice": "sdk_usage", "target_hint_contains": "securec.h"},
+        {"software_slice": "file", "path": "docs/architecture.md", "file_role": "documentation"},
+        {"software_slice": "topic", "name": "Architecture", "topic_kind": "document_heading"},
+        {"software_slice": "relationship", "relationship_kind": "documents", "evidence_path": "docs/architecture.md"},
+        {"software_slice": "build_target", "ecosystem": "npm", "kind": "script", "name": "build"},
+        {"software_slice": "iac_resource", "provider": "kubernetes", "name": "relay-global-api"},
+        {"software_slice": "design_element", "element_kind": "architecture", "name": "Architecture"}
+      ],
+      "case_group": "software_global_projection"
+    }
+  ]
+}

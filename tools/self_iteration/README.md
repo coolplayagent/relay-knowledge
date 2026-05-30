@@ -124,7 +124,7 @@ another running task.
 is rejected so mixed C/C++ repositories cannot be narrowed at registration.
 `fast` evaluates `index_performance_many_files`, `c_syntax_fixture`, `cpp_syntax_fixture`,
 `cross_language_syntax_fixture`, `typescript_syntax_fixture`,
-`nonstandard_layout_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`,
+`nonstandard_layout_fixture`, `software_global_fixture`, `project_alias_fixture`, `relay_teams`, `leveldb_cpp`,
 `temporal_samples_go`, and `temporal_sdk_go`, takes the first 8 normal query
 cases per repository while always preserving explicit guardrail cases, keeps 2
 cross-repository threshold cases from the `temporal_go_workspace` repo-set, and
@@ -144,7 +144,10 @@ sources outside a top-level `src/` covered by fast guardrails. The same
 nonstandard layout fixture also carries fast guardrails for
 `repo query --kind sbom` over Cargo, npm, Go, Python, Maven BOM, Gradle, and
 Conan manifest or lock files, so dependency-inventory regressions are rejected
-by the default loop. The C fixture also includes explicit source/text-fallback
+by the default loop. The software global fixture runs `repo software` over a
+generated repository and guards dependency, SDK, file, topic, relationship,
+build, IaC, design, and all-slice projection kinds without scanning package
+caches, cloud APIs, SDK directories, or unindexed external source. The C fixture also includes explicit source/text-fallback
 cases early in its fast case window, so exact source-text recovery stays covered
 without indexing another large repository or depending on an external `rg`
 binary. It reuses
@@ -156,7 +159,7 @@ full/exhaustive judge scores as fast regressions. Acceptance also checks the
 best accepted run for the same profile across category focuses, so a first run
 for a new category cannot be committed below the established profile-level bar.
 Override the subset with
-`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
+`RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPOS=index_performance_many_files,c_syntax_fixture,cpp_syntax_fixture,cross_language_syntax_fixture,typescript_syntax_fixture,nonstandard_layout_fixture,software_global_fixture,project_alias_fixture,relay_teams,leveldb_cpp,temporal_samples_go,temporal_sdk_go`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_CASE_LIMIT=12`,
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SETS=temporal_go_workspace`, and
 `RELAY_KNOWLEDGE_SELF_ITERATION_FAST_REPO_SET_CASE_LIMIT=2`. Pass
@@ -458,6 +461,13 @@ enumerating cases.
   self-iteration prioritizes cold indexing wall time after `repo register`,
   including batching, parser throughput, SQLite writes, finalize work, and
   incremental reuse.
+- Software global projection targets in
+  `cases/repository_software_global_targets.json` run `repo software` against a
+  generated full-scope repository after normal registration and indexing. They
+  cover `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`,
+  `iac`, `design`, and `all` projection kinds, including unresolved external
+  SDK metadata, documentation/config relationships, build targets, IaC
+  resources, and design elements derived from indexed evidence only.
 - The fast profile runs `code_index_health_isolation_cases` as a product gate.
   The case indexes a no-language-filter repository update while checking that
   health remains bounded and `repo query --freshness allow-stale` can read the
