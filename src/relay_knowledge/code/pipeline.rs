@@ -391,6 +391,7 @@ mod tests {
                 path: "src/lib.rs",
                 language_id: "rust",
                 content: "if env::var(\"CHECKOUT_V2\").is_ok() && env::var(\"PAYMENTS_V2\").is_ok() {}",
+                config_facts: &[],
             },
         )
         .expect("feature flags should extract");

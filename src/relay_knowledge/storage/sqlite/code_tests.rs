@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    code::feature_flags::{FeatureFlagFileInput, extract_feature_flags},
     domain::{
         CodeFeatureFlagRequest, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy,
@@ -17,12 +18,39 @@ pub(super) use code_snapshot_fixtures::*;
 
 #[tokio::test]
 async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
-    let store = store_with_repository_snapshot(snapshot_with_chunk(
+    let mut snapshot = snapshot_with_chunk(
         "repo",
         "src/flags.rs",
         "if std::env::var(\"CHECKOUT_V2\").is_ok() {\n    enable_checkout();\n}\nconfig.get_bool(\"payments.enabled\");",
-    ))
-    .await;
+    );
+    snapshot.files.push(code_test_support::file(
+        "config-file",
+        "config/flags.yaml",
+        "yaml",
+        CodeParseStatus::Parsed,
+        None,
+    ));
+    snapshot.chunks.push(code_test_support::chunk(
+        "config-chunk",
+        "config-file",
+        "config/flags.yaml",
+        "payments.enabled: true\n",
+        None,
+    ));
+    snapshot.feature_flags.extend(
+        extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: code_test_support::TEST_SOURCE_SCOPE,
+            file_id: "config-file",
+            path: "config/flags.yaml",
+            language_id: "yaml",
+            content: "payments.enabled: true\n",
+            config_facts: &[],
+        })
+        .expect("config feature flag fixture should extract"),
+    );
+    snapshot.changed_path_count = snapshot.files.len();
+    let store = store_with_repository_snapshot(snapshot).await;
     let selector = CodeRepositorySelector::new("fixture", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");
 
@@ -56,6 +84,17 @@ async fn feature_flag_query_groups_config_sources_and_guarded_usage() {
     }));
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].source_key, "payments.enabled");
+    assert!(
+        filtered[0].usages.iter().any(|usage| {
+            usage.path == "config/flags.yaml" && usage.edge_kind == "defines_config"
+        })
+    );
+    assert!(
+        filtered[0]
+            .usages
+            .iter()
+            .any(|usage| { usage.path == "src/flags.rs" && usage.edge_kind == "reads_config" })
+    );
 }
 
 #[tokio::test]

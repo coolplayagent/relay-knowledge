@@ -49,7 +49,7 @@ Import 依赖扩散必须优先使用已索引代码地图和版本化 import ed
 
 本地配置关系只在同一 indexed source scope 内解析。Finalize 可以在该 scope 的全部文件写入后解析确定性的本地文件引用、模板 include 和构建目标引用。有歧义的本地匹配以及外部 image、package、remote label 或 template 继续保留为 unresolved 或 ambiguous metadata，而不是 parser degraded state。
 
-Feature flag 抽取属于索引阶段。运行时配置读取、布尔配置声明和 guarded-code 关系必须随文件 scope 写入版本化事实；查询层只能读这些事实和对应 FTS 文档。更新抽取规则、配置文件或 guarded 分支后，必须通过 full 或 incremental index 刷新相关 scope。
+Feature flag 抽取属于索引阶段。运行时配置读取、布尔配置声明和 guarded-code 关系必须随文件 scope 写入版本化事实；查询层只能读这些事实和对应 FTS 文档。TOML、YAML、JSON、INI、Java properties 等配置格式中的布尔声明复用 configuration 抽取器产出的结构化 config-key fact，而不是维护第二套 feature-flag 来源。更新抽取规则、配置文件或 guarded 分支后，必须通过 full 或 incremental index 刷新相关 scope。
 
 ## 6. 高性能边界
 

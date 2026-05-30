@@ -69,6 +69,7 @@ fn snapshot_with_feature_flags() -> CodeIndexSnapshot {
             path: "src/flags.rs",
             language_id: "rust",
             content,
+            config_facts: &[],
         })
         .expect("feature flag fixture should extract"),
         chunks: vec![RepositoryCodeChunkRecord {

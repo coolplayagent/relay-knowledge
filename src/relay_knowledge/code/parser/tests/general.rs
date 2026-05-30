@@ -760,7 +760,7 @@ fn manual_call_extraction_preserves_same_line_calls() {
     };
     let mut output = FileParseOutput::new();
 
-    collect_manual_nodes(&context, parsed.root_node(), &mut output)
+    collect_manual_nodes(&context, parsed.root_node(), &[], &[], &mut output)
         .expect("manual extraction should succeed");
     let foo_ranges = output
         .references

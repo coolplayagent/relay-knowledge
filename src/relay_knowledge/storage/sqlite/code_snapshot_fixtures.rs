@@ -113,6 +113,7 @@ fn feature_flags(
         path,
         language_id,
         content,
+        config_facts: &[],
     })
     .expect("feature flag fixtures should extract")
 }

@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::domain::{CodeFeatureFlagRecord, DomainError, RepositoryCodeRange};
 
-use super::stable_id;
+use super::{
+    configuration::{ConfigFact, ConfigRange, ConfigValueKind},
+    stable_id,
+};
 
 mod comments;
 mod config;
@@ -23,6 +26,7 @@ pub(crate) struct FeatureFlagFileInput<'a> {
     pub(crate) path: &'a str,
     pub(crate) language_id: &'a str,
     pub(crate) content: &'a str,
+    pub(crate) config_facts: &'a [ConfigFact],
 }
 
 pub(crate) fn extract_feature_flags(
@@ -120,6 +124,7 @@ pub(crate) fn extract_feature_flags(
         expire_scoped_sdk_receivers(&mut sdk_receivers, brace_depth);
         byte_start = byte_start.saturating_add(segment.len());
     }
+    collect_config_fact_records(&mut records, &input)?;
 
     let mut deduped = BTreeMap::new();
     for record in records {
@@ -127,6 +132,27 @@ pub(crate) fn extract_feature_flags(
     }
 
     Ok(deduped.into_values().collect())
+}
+
+fn collect_config_fact_records(
+    records: &mut Vec<CodeFeatureFlagRecord>,
+    input: &FeatureFlagFileInput<'_>,
+) -> Result<(), DomainError> {
+    for fact in input.config_facts {
+        if fact.kind != "config_key" || fact.value_kind != ConfigValueKind::Boolean {
+            continue;
+        }
+        records.push(feature_flag_record_from_range(
+            input,
+            "config_key",
+            &fact.name,
+            "defines_config",
+            fact.range,
+            &excerpt_for_range(input.content, fact.range),
+        )?);
+    }
+
+    Ok(())
 }
 
 fn update_sdk_shadow_scope(
@@ -270,13 +296,33 @@ fn feature_flag_record(
 ) -> Result<CodeFeatureFlagRecord, DomainError> {
     let input = context.input;
     let byte_end = context.byte_start.saturating_add(context.line.len());
+    feature_flag_record_from_range(
+        input,
+        source_kind,
+        source_key,
+        edge_kind,
+        ConfigRange {
+            byte_start: context.byte_start,
+            byte_end,
+            line_start: context.line_number,
+            line_end: context.line_number,
+        },
+        context.line.trim(),
+    )
+}
+
+fn feature_flag_record_from_range(
+    input: &FeatureFlagFileInput<'_>,
+    source_kind: &str,
+    source_key: &str,
+    edge_kind: &str,
+    range: ConfigRange,
+    excerpt: &str,
+) -> Result<CodeFeatureFlagRecord, DomainError> {
     let byte_range =
-        RepositoryCodeRange::new("feature_flag_byte_range", context.byte_start, byte_end)?;
-    let line_range = RepositoryCodeRange::new(
-        "feature_flag_line_range",
-        context.line_number,
-        context.line_number,
-    )?;
+        RepositoryCodeRange::new("feature_flag_byte_range", range.byte_start, range.byte_end)?;
+    let line_range =
+        RepositoryCodeRange::new("feature_flag_line_range", range.line_start, range.line_end)?;
     let feature_flag_id = stable_id(
         "feature_flag",
         [
@@ -295,7 +341,7 @@ fn feature_flag_record(
             source_kind,
             source_key,
             edge_kind,
-            &context.line_number.to_string(),
+            &range.line_start.to_string(),
         ],
     );
 
@@ -315,8 +361,21 @@ fn feature_flag_record(
         confidence_tier: confidence_tier_for_edge(edge_kind).to_owned(),
         byte_range,
         line_range,
-        excerpt: context.line.trim().to_owned(),
+        excerpt: excerpt.to_owned(),
     })
+}
+
+fn excerpt_for_range(content: &str, range: ConfigRange) -> String {
+    if let Some(source) = content.get(range.byte_start..range.byte_end) {
+        return source.trim().to_owned();
+    }
+
+    content
+        .lines()
+        .nth(range.line_start.saturating_sub(1))
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
 }
 
 fn feature_flag_name(source_key: &str) -> String {
@@ -344,6 +403,7 @@ fn confidence_tier_for_edge(edge_kind: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{FeatureFlagFileInput, env_keys, extract_feature_flags};
+    use crate::code::configuration::{ConfigFact, ConfigRange, ConfigValueKind};
 
     fn input(content: &str) -> FeatureFlagFileInput<'_> {
         FeatureFlagFileInput {
@@ -353,6 +413,7 @@ mod tests {
             path: "src/lib.rs",
             language_id: "rust",
             content,
+            config_facts: &[],
         }
     }
 
@@ -389,6 +450,37 @@ mod tests {
     }
 
     #[test]
+    fn emits_definitions_from_structured_configuration_facts() {
+        let config_facts = [ConfigFact {
+            name: "checkout_v2".to_owned(),
+            kind: "config_key",
+            value_kind: ConfigValueKind::Boolean,
+            range: ConfigRange {
+                byte_start: 0,
+                byte_end: 17,
+                line_start: 1,
+                line_end: 1,
+            },
+        }];
+        let records = extract_feature_flags(FeatureFlagFileInput {
+            repository_id: "repo",
+            source_scope: "scope",
+            file_id: "file",
+            path: "docs/flags.txt",
+            language_id: "unknown",
+            content: "checkout_v2: true\n",
+            config_facts: &config_facts,
+        })
+        .expect("feature flag records should extract");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_key, "checkout_v2");
+        assert_eq!(records[0].source_kind, "config_key");
+        assert_eq!(records[0].edge_kind, "defines_config");
+        assert_eq!(records[0].excerpt, "checkout_v2: true");
+    }
+
+    #[test]
     fn ignores_comment_only_feature_flag_examples() {
         let records = extract_feature_flags(FeatureFlagFileInput {
             repository_id: "repo",
@@ -398,6 +490,7 @@ mod tests {
             language_id: "python",
             content:
                 "// std::env::var(\"COMMENTED_FLAG\")\n# config.get_bool(\"commented\")\nif config.get_bool(\"live\") {}\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -437,6 +530,7 @@ mod tests {
             language_id: "typescript",
             content:
                 "console.log(\"use process.env.CHECKOUT_V2\");\nif (process.env.PAYMENTS_V2) {}\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -453,6 +547,7 @@ mod tests {
             path: "src/lib.cc",
             language_id: "cpp",
             content: "*ptr = std::getenv(\"CHECKOUT_V2\");\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -492,6 +587,7 @@ mod tests {
                 path: "src/app.code",
                 language_id,
                 content: "/*\n/*\nconfig.get_bool(\"inner\")\n*/\nconfig.get_bool(\"outer\")\n*/\nif config.get_bool(\"live\") {}\n",
+                config_facts: &[],
             })
             .expect("feature flag records should extract");
 
@@ -509,6 +605,7 @@ mod tests {
             path: "src/lib.c",
             language_id: "c",
             content: "#ifdef FEATURE_X\n#endif\n#if FEATURE_Y && defined(FEATURE_Z)\n#endif\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -537,6 +634,7 @@ mod tests {
             path: "src/lib.c",
             language_id: "c",
             content: "#if FEATURE_A && FEATURE_B\n#elif FEATURE_C || defined(FEATURE_D)\n#endif\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -557,6 +655,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client = OpenFeature.getClient();\nif (client.getNumberValue(\"checkout_ratio\", 0) > 0) {}\nif (OpenFeature.getClient().getBooleanValue(\"factory_checkout\", false)) {}\nif (openFeature.getBooleanValue(\"checkout_v2\", false)) {}\nlet variant = ldClient.variation(\"payment_flow\", false);\nif (unleash.isEnabled(\"orders_v3\")) {}\nconst bucket = unleash.getVariant(\"search.experiment\");\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -601,6 +700,7 @@ mod tests {
             path: "src/flags.go",
             language_id: "go",
             content: "client := ldclient.NewClient(\"sdk-key\", 5*time.Second)\nif client.BoolVariationCtx(ctx, \"go_checkout\", user, false) {}\nname := ldClient.StringVariation(\"csharp_checkout\", user, \"off\")\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -623,6 +723,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client = OpenFeature.getClient();\nconst value = client.getStringValue(flagName, \"off\");\nconst name = ldClient.StringVariation(flagKey, user, \"fallback\");\nconst go = ldClient.BoolVariationCtx(ctx, \"go_checkout\", user, false);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -639,6 +740,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client = OpenFeature.getClient();\nclient.getBooleanValue(\"checkout_v2\", false);\nclient = chart.create();\nclient.variation(\"daily\", false);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -655,6 +757,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client: OpenFeatureClient = OpenFeature.getClient();\nclient?.getBooleanValue(\"typed_checkout\", false);\noptions.client = chart.create();\nclient.getStringValue(\"still_tracked\", \"off\");\nvar ld = new LDClient(sdkKey);\nld.BoolVariation(\"constructed_checkout\", user, false);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -679,6 +782,7 @@ mod tests {
             path: "src/flags.go",
             language_id: "go",
             content: "this.client = OpenFeature.getClient();\nthis.client.getBooleanValue(\"property_checkout\", false);\nchart.client.variation(\"daily\", false);\nclient, err := ldclient.NewClient(\"sdk-key\", 5*time.Second)\nclient.BoolVariationCtx(ctx, \"multi_binding_checkout\", user, false)\nopenClient := openfeature.NewClient(\"svc\")\nopenClient.BooleanValue(ctx, \"go_openfeature_client_checkout\", false, opts)\nif (client.getBooleanValue(\n  \"multiline_checkout\",\n  false,\n)) {}\nclient.BooleanValue(\n  ctx,\n  \"multiline_second_arg\",\n  false,\n)\nunleash.IsEnabled(\"pascal_unleash\", opts)\nunleash.GetVariant(\"pascal_variant\", opts)\nopenFeature.GetBooleanValueAsync(\"dotnet_checkout\", false);\nopenFeature.BooleanValue(ctx, \"go_openfeature_checkout\", false, opts);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -720,6 +824,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const primary = OpenFeature.getClient();\nconsole.log(`primary.getBooleanValue(\"docs_flag\", false)`);\nconst textClient = \"OpenFeature.getClient()\";\ntextClient.variation(\"text_daily\", false);\nconst statusClient = openFeatureInitialized ? chart.create() : fallback;\nstatusClient.variation(\"status_daily\", false);\nconst Client = OpenFeature.getClient();\nclient.variation(\"case_daily\", false);\nconsole.log(\"other = OpenFeature.getClient()\"); other.variation(\"daily\", false);\nchart.variation(\"chart_daily\", false); const chart = OpenFeature.getClient();\nchart.getBooleanValue(\"real_chart_flag\", false);\nprimary.getStringValue(\n  flagName,\n  \"off\",\n);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -751,6 +856,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client = OpenFeature.getClient(), enabled = client.getBooleanValue(\"comma_checkout\", false);\nclient.BooleanValue(ctx,\n  \"opener_arg_checkout\",\n  false,\n)\nOpenFeature.getClient().getBooleanValue(\"direct_factory_checkout\", false);\nwrap(OpenFeature.getClient()).variation(\"wrapped_daily\", false);\nfunction setup(){ const local = OpenFeature.getClient(); local.getBooleanValue(\"local_checkout\", false); }\nlocal.getBooleanValue(\"leaked_local_checkout\", false);\nfunction render(client){ client.variation(\"shadowed_daily\", false); }\nclient.getBooleanValue(\"outer_checkout\", false);\nconst templateFlag = `${client.getBooleanValue(\"template_checkout\", false)}`;\nconst commentTemplate = `${/* client.variation(\"comment_template\", false) */ client.getBooleanValue(\"real_template\", false)}`;\nconst nestedTemplate = `${`raw client.variation(\"nested_template_raw\", false) ${client.getBooleanValue(\"nested_template_real\", false)}`}`;\nconst docs = `\nclient.getBooleanValue(\"multiline_template_raw\", false)\n${client.getBooleanValue(\"multiline_template_real\", false)}\n`;\nfunction renderAgain(client) {\n  client.variation(\"multiline_shadowed\", false);\n}\nclient.getBooleanValue(\"after_multiline_shadow\", false);\nfunction renderLater(client)\n{\n  client.variation(\"next_line_shadowed\", false);\n}\nclient.getBooleanValue(\"after_next_line_shadow\", false);\nconst cb = (client) => client.variation(\"arrow_daily\", false);\nconst cb2 = (client) => {\n  client.variation(\"arrow_body_daily\", false);\n};\nclient.getBooleanValue(\"after_arrow\", false);\nif (ready) {\nfunction nested(client) {\n  client.variation(\"nested_shadow\", false);\n}\nclient.getBooleanValue(\"after_nested_shadow\", false);\n}\nchart.getBooleanValue(\"daily\"); client.getBooleanValue(\n  \"later_pending_checkout\",\n  false,\n)\nclient.getBooleanValue(\n// rollout key\n  \"comment_gap_checkout\",\n  false,\n)\nthis.client = OpenFeature.getClient(); this.client = chart; this.client.variation(\"property_daily\", false);\nconst services = { client: OpenFeature.getClient() }; services.variation(\"services_daily\", false);\nconst bogus = buildClient.newClient(); bogus.variation(\"builder_daily\", false);\nconst apiClient = OpenFeatureAPI.getInstance().getClient(); apiClient.getBooleanValue(\"java_api_checkout\", false);\nconst dotnet = OpenFeature.Api.Instance.GetClient(); dotnet.GetBooleanValueAsync(\"dotnet_api_checkout\", false);\nopenFeature.get_boolean_value(\"python_openfeature\", False);\nunleash.is_enabled(\"python_unleash\");\nunleash.get_variant(\"python_variant\");\nconst ldpy = ldclient.get(); ldpy.variation(\"python_ld\", user, false);\nldclient.get().variation(\"python_direct\", user, false);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -816,6 +922,7 @@ mod tests {
             path: "src/app.ts",
             language_id: "typescript",
             content: "const client = service.create();\nconsole.log(\"client.variation('string_only', false)\");\n// openFeature.getBooleanValue(\"commented\", false)\nchart.variation(\"daily\");\npermission.isEnabled(\"camera\");\nclient.variation(\"ordinary_client\", false);\nif (featureFlags.boolVariation(\"live_flag\", false)) {}\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -833,6 +940,7 @@ mod tests {
             path: "service/main.go",
             language_id: "go",
             content: "client := ldclient.NewClient()\nfunc render(client *http.Client) {\n  client.BoolVariation(\"go_shadowed\", user, false)\n}\nclient.BoolVariation(\"go_outer\", user, false)\nclient.BoolVariation(\"go_same_line\", user, false); audit(client);\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -858,6 +966,7 @@ mod tests {
             path: "src/env.ts",
             language_id: "typescript",
             content: "const a = Deno.env.get(\"DENO_FLAG\");\nconst b = Bun.env.BUN_FLAG;\nconst c = import.meta.env.VITE_FLAG;\nconst d = `${enabled ?\n  process.env.CHECKOUT_V2\n  : \"\"}`;\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -878,6 +987,7 @@ mod tests {
             path: "config/flags.yaml",
             language_id: "unknown",
             content: "flags: { checkout_v2: true, payments_v2: false }\n{\"docs_url\":\"https://example.test/true\",\"search_v2\":true,\"feed_v2\":false}\nfeatures: [true, false]\n{\"permissions\":[\"read\",true]}\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
@@ -913,6 +1023,7 @@ mod tests {
             path: ".env",
             language_id: "unknown",
             content: "# CHECKOUT_V2=true\nPAYMENTS_V2=true\n",
+            config_facts: &[],
         })
         .expect("feature flag records should extract");
 
