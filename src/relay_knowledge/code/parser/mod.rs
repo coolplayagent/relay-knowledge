@@ -769,6 +769,10 @@ mod enum_tests;
 mod review_tests;
 
 #[cfg(test)]
+#[path = "tests/sql.rs"]
+mod sql_tests;
+
+#[cfg(test)]
 #[path = "languages/c/gcc_recovery_tests.rs"]
 mod gcc_recovery_tests;
 

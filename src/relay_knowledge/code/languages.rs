@@ -224,6 +224,11 @@ fn language_for_extension(extension: &str) -> Option<LanguageSpec> {
             language: || tree_sitter_swift::LANGUAGE.into(),
             tags_query: tree_sitter_swift::TAGS_QUERY,
         }),
+        "sql" => Some(LanguageSpec {
+            id: "sql",
+            language: || tree_sitter_sequel::LANGUAGE.into(),
+            tags_query: CONFIG_TAGS_QUERY,
+        }),
         "sh" | "bash" | "bats" => Some(bash()),
         _ => None,
     }
