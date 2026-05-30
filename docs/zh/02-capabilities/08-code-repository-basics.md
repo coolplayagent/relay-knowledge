@@ -3,7 +3,7 @@
 [中文](./08-code-repository-basics.md) | [English](../../en/02-capabilities/08-code-repository-basics.md)
 
 > 文档版本: 2.0
-> 编制日期: 2026-05-17
+> 编制日期: 2026-05-30
 > 适用范围: 第二卷能力说明
 
 ## 能力定位
@@ -53,6 +53,8 @@ path filter 显式 opt in。
 Rust enum variant 和 C/C++ enumerator 会作为挂在 enum owner 下的结构化 `enum_member` symbol 写入索引，因此 `--kind symbol` 和 `--kind definition` 可以解析 `Color.Red` 或 `Direction.kForward` 这类身份，而不依赖 text fallback。其他语言的 enum case 形态应按语言补充 parser fixture 后再纳入结构化 enum-member 覆盖范围。
 
 `repo feature-flags` 是独立只读入口，用于枚举或过滤 indexed scope 内的配置驱动特性开关图。它返回按开关分组的配置来源和 `defines_config`、`reads_config`、`guards_code` 关系，而不是把 feature flag 作为普通 `repo query --kind` 值。
+
+通用配置和文档文件会进入同一代码图，而不是单独的文档索引。`.conf` 复用 INI/key-value 语法面，输出 section、config 和布尔 feature-flag facts；Markdown 输出 heading symbol，并把本地 inline link、图片链接和引用式链接定义写为 import facts；JSON 输出稳定点分配置路径，数组统一使用 `[]`。这些文件仍保留文件级 chunk，因此正文、配置值和局部 partial parse 内容可被 `hybrid` 与 BM25 召回。
 
 ## 降级与诊断
 

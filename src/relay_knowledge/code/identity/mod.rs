@@ -65,7 +65,7 @@ pub(super) fn resolve_import_targets(
                 Some(output) => resolved_with_hint(import, output),
                 None => None,
             },
-            "cmake" | "jinja2" | "make" | "ninja" | "starlark" | "xml" => {
+            "cmake" | "jinja2" | "make" | "markdown" | "ninja" | "starlark" | "xml" => {
                 let candidates =
                     config_import_candidates(language_id, &import.path, &import.module);
                 resolved_with_hint(
@@ -95,6 +95,10 @@ pub(super) fn resolve_import_targets(
 }
 
 fn config_import_candidates(language_id: &str, path: &str, module: &str) -> Vec<String> {
+    if language_id == "markdown" {
+        return markdown_import_candidates(path, module);
+    }
+
     let mut candidates = Vec::new();
     if let Some(label_path) = starlark_label_path(path, module) {
         candidates.push(label_path);
@@ -124,6 +128,54 @@ fn config_import_candidates(language_id: &str, path: &str, module: &str) -> Vec<
     }
 
     candidates
+}
+
+fn markdown_import_candidates(path: &str, module: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let Some(candidate) = module.strip_prefix('/').map_or_else(
+        || normalize_markdown_path(import_resolution::parent_dir(path), module),
+        |root_relative| normalize_markdown_path("", root_relative),
+    ) else {
+        return candidates;
+    };
+
+    if !candidate.is_empty() {
+        push_unique_candidate(&mut candidates, candidate.clone());
+    }
+    if should_add_markdown_index_candidates(module, &candidate) {
+        let directory = (!candidate.is_empty()).then(|| format!("{candidate}/"));
+        let directory = directory.as_deref().unwrap_or_default();
+        push_unique_candidate(&mut candidates, format!("{directory}README.md"));
+        push_unique_candidate(&mut candidates, format!("{directory}README.markdown"));
+        push_unique_candidate(&mut candidates, format!("{directory}index.md"));
+        push_unique_candidate(&mut candidates, format!("{directory}index.markdown"));
+    }
+    candidates
+}
+
+fn normalize_markdown_path(parent: &str, child: &str) -> Option<String> {
+    let mut parts = Vec::<&str>::new();
+    for part in parent
+        .split('/')
+        .chain(child.split('/'))
+        .filter(|part| !part.is_empty() && *part != ".")
+    {
+        if part == ".." {
+            parts.pop()?;
+        } else {
+            parts.push(part);
+        }
+    }
+
+    Some(parts.join("/"))
+}
+
+fn should_add_markdown_index_candidates(module: &str, candidate: &str) -> bool {
+    module.ends_with('/')
+        || candidate
+            .rsplit('/')
+            .next()
+            .is_some_and(|segment| !segment.contains('.'))
 }
 
 fn should_add_root_config_candidate(language_id: &str, path: &str, module: &str) -> bool {

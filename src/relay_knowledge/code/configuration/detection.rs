@@ -157,7 +157,7 @@ fn language_for_extension(path: &str, extension: &str) -> Option<LanguageSpec> {
             tree_sitter_properties::LANGUAGE.into()
         })),
         "toml" => Some(spec("toml", || tree_sitter_toml_ng::LANGUAGE.into())),
-        "ini" | "cfg" => Some(spec("ini", || tree_sitter_ini::LANGUAGE.into())),
+        "conf" | "ini" | "cfg" => Some(spec("ini", || tree_sitter_ini::LANGUAGE.into())),
         "yaml" | "yml" => Some(spec("yaml", || tree_sitter_yaml::LANGUAGE.into())),
         "json" => Some(spec("json", || tree_sitter_json::LANGUAGE.into())),
         "ninja" => Some(spec("ninja", || tree_sitter_make::LANGUAGE.into())),

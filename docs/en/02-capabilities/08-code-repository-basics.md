@@ -3,7 +3,7 @@
 [English](./08-code-repository-basics.md) | [中文](../../zh/02-capabilities/08-code-repository-basics.md)
 
 > Document version: 2.0
-> Date: 2026-05-17
+> Date: 2026-05-30
 > Scope: Book 2 capability guide
 
 ## Capability Positioning
@@ -59,6 +59,8 @@ Narrow query kinds include `symbol`, `definition`, `references`, `callers`, `cal
 Rust enum variants and C/C++ enumerators are indexed as structured `enum_member` symbols under their enum owner, so `--kind symbol` and `--kind definition` can resolve identities such as `Color.Red` or `Direction.kForward` without relying on text fallback. Other language enum-case forms should be added language by language with parser fixtures before they are treated as structured enum-member coverage.
 
 `repo feature-flags` is a separate read-only entry point for enumerating or filtering configuration-driven feature-flag graph facts in an indexed scope. It returns flags grouped with configuration sources and `defines_config`, `reads_config`, and `guards_code` relationships instead of adding feature flags as a normal `repo query --kind` value.
+
+General configuration and documentation files enter the same code graph rather than a separate documentation index. `.conf` reuses the INI/key-value surface and emits section, config, and boolean feature-flag facts; Markdown emits heading symbols and writes local inline links, image links, and reference link definitions as import facts; JSON emits stable dot-separated configuration paths with arrays normalized to `[]`. These files also keep file-level chunks so body text, config values, and local partial-parse content remain reachable through `hybrid` and BM25 retrieval.
 
 ## Degradation and Diagnostics
 

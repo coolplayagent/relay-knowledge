@@ -33,6 +33,8 @@ pub(super) fn collect_imports(
             languages::javascript_like_re_export(language_id, content, node)
         {
             imports.push_record(module, &range)?;
+        } else if language_id == "markdown" {
+            imports.push_markdown_imports(content, node)?;
         } else if is_import_node(language_id, node) {
             imports.push_records(language_id, content, node)?;
         }
@@ -132,6 +134,18 @@ impl<'a> ImportCollector<'a> {
             line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
                 .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
         });
+
+        Ok(())
+    }
+
+    fn push_markdown_imports(
+        &mut self,
+        content: &str,
+        node: Node<'_>,
+    ) -> Result<(), CodeIndexError> {
+        for (module, range) in languages::markdown::imports(content, node) {
+            self.push_record(module, &range)?;
+        }
 
         Ok(())
     }

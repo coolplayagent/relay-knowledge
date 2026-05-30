@@ -2,6 +2,7 @@
   "include_files": [
     "cases/file_background_targets.json",
     "cases/repository_grep_budget_targets.json",
+    "cases/repository_config_document_syntax_fixture_targets.json",
     "cases/repository_python_syntax_fixture_targets.json",
     "cases/repository_python_targets.json",
     "cases/repository_javascript_syntax_fixture_targets.json",

@@ -1044,6 +1044,12 @@ fn generated_repository_files(fixture: &str) -> Result<Vec<(&'static str, &'stat
             ("Sources/App/RequestPipeline.swift", SWIFT_REQUEST_PIPELINE),
             ("Tests/AppTests/FakeSessionClient.swift", SWIFT_FAKE_SESSION_CLIENT),
         ]),
+        "config_document_syntax_v1" => Ok(vec![
+            ("README.md", CONFIG_DOCUMENT_README_MD),
+            ("docs/reference.md", CONFIG_DOCUMENT_REFERENCE_MD),
+            ("config/service.conf", CONFIG_DOCUMENT_SERVICE_CONF),
+            ("config/runtime.json", CONFIG_DOCUMENT_RUNTIME_JSON),
+        ]),
         "nonstandard_layout_v1" => Ok(vec![
             (
                 ".relay-knowledge-fixture-version",
@@ -2462,6 +2468,56 @@ import Foundation
 
 final class SessionClient {
     func request() {}
+}
+"#;
+
+const CONFIG_DOCUMENT_README_MD: &str = r#"# Runtime Guide
+
+Install Notes
+=============
+
+[local install](docs/reference.md#install)
+![runtime diagram](assets/runtime.png)
+
+[ref]: docs/reference.md "Reference"
+
+```md
+# Disabled Fixture Heading
+[disabled](docs/disabled.md)
+```
+"#;
+
+const CONFIG_DOCUMENT_REFERENCE_MD: &str = r#"# Reference
+
+## Install
+
+The install reference backs local Markdown import extraction.
+"#;
+
+const CONFIG_DOCUMENT_SERVICE_CONF: &str = r#"[server]
+enabled=true
+port=8080
+
+[server.tls]
+cert=server.pem
+"#;
+
+const CONFIG_DOCUMENT_RUNTIME_JSON: &str = r#"{
+  "server": {
+    "port": 8080
+  },
+  "containers": [
+    {
+      "name": "app"
+    }
+  ],
+  "matrix": [
+    [
+      {
+        "name": "nested"
+      }
+    ]
+  ]
 }
 "#;
 

@@ -10,6 +10,7 @@ pub(in crate::code::parser) fn definition_kind(
         "json" if node_kind == "pair" => Some("config"),
         "ini" if node_kind == "section" => Some("section"),
         "ini" if node_kind == "setting" => Some("config"),
+        "markdown" if matches!(node_kind, "atx_heading" | "setext_heading") => Some("heading"),
         "toml" if matches!(node_kind, "table" | "table_array_element") => Some("section"),
         "toml" if node_kind == "pair" => Some("config"),
         "yaml" if matches!(node_kind, "block_mapping_pair" | "flow_pair") => Some("config"),
@@ -32,6 +33,7 @@ pub(in crate::code::parser) fn manual_definitions(
 ) -> Vec<(String, &'static str, SyntaxRange)> {
     match language_id {
         "ini" => return ini_definitions(content, node),
+        "markdown" => return markdown_definitions(content, node),
         "toml" => return toml_definitions(content, node),
         _ => {}
     }
@@ -47,6 +49,42 @@ pub(in crate::code::parser) fn manual_definitions(
         return Vec::new();
     };
     vec![(name, kind, syntax_range(node))]
+}
+
+fn markdown_definitions(content: &str, node: Node<'_>) -> Vec<(String, &'static str, SyntaxRange)> {
+    if !matches!(node.kind(), "atx_heading" | "setext_heading") {
+        return Vec::new();
+    }
+    markdown_heading_text(content, node)
+        .map(|name| vec![(name, "heading", syntax_range(node))])
+        .unwrap_or_default()
+}
+
+fn markdown_heading_text(content: &str, node: Node<'_>) -> Option<String> {
+    if let Some(content_node) = node.child_by_field_name("heading_content") {
+        return nonempty_markdown_heading(&node_text(content, content_node));
+    }
+
+    let source = node_text(content, node);
+    let name = source
+        .trim()
+        .trim_start_matches('#')
+        .trim()
+        .trim_end_matches('#')
+        .trim()
+        .to_owned();
+
+    (!name.is_empty()).then_some(name)
+}
+
+fn nonempty_markdown_heading(source: &str) -> Option<String> {
+    let name = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!name.is_empty()).then_some(name)
 }
 
 fn json_pair_path(content: &str, node: Node<'_>) -> Option<String> {
