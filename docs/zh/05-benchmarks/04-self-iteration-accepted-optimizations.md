@@ -4,6 +4,10 @@
 ## 候选优化说明：manual-otel-contrib-row-batch-throughput
 - 算法/架构：checkpointed full-index 的默认 row batch 上限从 50k 提升到仍有界的 150k；新解析 reference 直接写入最终 unresolved 基线 `2500/ambiguous`，finalize 只规范化违反该基线的 reference 行；generic reference resolution 只处理非 `call` reference，并先从待解析 reference 中取 distinct 名称/路径再用索引化 `IN` candidate set 和 `UPDATE ... FROM` 关联符号分组，避免对无关配置符号做全 scope GROUP BY 或逐行扫描 materialized CTE。调用引用继续由后续 `finalize_call_targets` 的 callable 规则解析，但 call-target index 只加载 callable symbol kinds，且 already-unresolved/ambiguous baseline rows 不再重写。
 - 不变量/预期影响/风险：不跳过任何源码、配置文档、symbol/reference/import/call/chunk/dependency/feature-flag fact，不改变 reference/call resolution 最终规则、SQLite schema 形状、FTS materialization、task lease、checkpoint replay、repo-set freshness、degraded/stale 状态或命令 timeout。预期减少 OpenTelemetry collector-contrib 这类 YAML/JSON/Go fact 密集仓库的 checkpoint batch 事务数和 finalize 对百万级 reference 的无效写放大，降低 `otel_collector_contrib_index` 超时及后续 repo-set add 因缺少 fresh scope 失败的风险；风险是单批 Rust/SQLite 工作集增大，仍受 byte、file、row 三重预算和现有 checkpoint replay/path-collision/self-iteration performance gate 约束。
+## 候选优化说明：run-1780150399-c-header-cpp-member-recovery
+- 算法/架构：C 语言解析在既有 tree-sitter C facts 之后增加一个文件级、线性扫描的 C++ class 成员声明恢复 pass；仅当 C-language 内容出现带 `{` 的 `class` 头或带继承标记的 `struct` 头时启用，在 class 顶层收集非嵌套、非 deleted/default、非数据成员的函数声明，并把紧邻 `//` 注释纳入 symbol/chunk range。它补齐 C 语法无法跨过 C++ nested type/access-label 后续 member declaration 的场景，仍复用现有 `symbol_record`、chunk materialization、FTS、ranking 与 source fallback。
+- 不变量/预期影响/风险：不改变语言扩展归属、SQLite schema、FTS 查询预算、ranking 权重、source `text_fallback` 语义、repo-set overlay、semantic/vector read model、task lease/checkpoint、env/paths/net 或 CLI/API；纯 C struct、函数指针变量、数据成员和 nested type body 不产生函数 symbol。预期让 LevelDB/类似 C++ `.h` 中 `Recover(VersionEdit*, save_manifest)` 这类声明面成为结构化 chunk，减少 query-time grep fallback 对已有候选路径的依赖；风险是文本扫描需避免把 C 数据声明识别成函数，受函数指针、nested type 和 recovered member chunk 单测控制。
+- 策略关联：建立在已采纳的 Hybrid chunk gate、declaration-surface ranking 和最新 scoped symbol lookup pushdown 之上，针对最新 accepted run 的 LevelDB recovery-manifest miss 改进通用 parser evidence；避免继续做局部 scorer 调权、扩大 grep/source fallback 窗口、枚举 LevelDB 路径/query/symbol 或弱化 semantic/vector 保护层。
 ## 候选优化说明：run-1780149073-scoped-symbol-lookup-pushdown
 - 算法/架构：Symbol/Definition/Hybrid 的 exact scoped identity 查询继续由 `SymbolIdentityQuery` 做最终匹配，但 direct symbol lookup 在 SQLite 中把 scoped terms 转成有界 literal `LIKE` prefilter，先按 `qualified_name`、`signature`、`canonical_symbol_id` 缩小同名 leaf 候选，再进入既有 Rust verifier、FTS fallback、chunk fallback 与 top-k 排序。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate 上限、ranking 权重、source `text_fallback`、repo-set overlay、semantic/vector read model、task lease/checkpoint、env/paths/net 或 CLI/API；simple identity 与 multi-API direct lookup 仍走原路径。预期改善 LevelDB、Spring、Kubernetes、Temporal 等大仓中大量同名 `Get`/`Open`/`New`/`refresh` leaf 使 scoped target 落到 direct cap 外的问题，并减少 scoped query 后续 FTS 噪声；风险是 SQL literal pattern 必须与 Rust scoped-token verifier 保持一致，受 underscore escape 单测、保留 FTS fallback 与既有 scoped identity/ranking tests 控制。
@@ -989,15 +993,18 @@
 ## run-1779847089-to-run-1779856832 compacted
 - summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 
-## run-1780149073
+## run-1780149073 compacted
+- summary: accepted scoped symbol lookup pushdown scored 0.966044 with foundational=0.983173, competitive=0.967196, semantic_vector=1.0, stability=1.0, and 104/105 cases passed; full patch, metrics, and remaining LevelDB recovery-manifest miss are preserved in `.git/relay-knowledge-self-iteration/patches-v2/run-1780149073.patch`, reports, and progressive memory.
 
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780149073.patch`
-- score: 0.966044 (foundational=0.983173, competitive=0.967196, accuracy=0.975184, semantic_vector=1.000000, research_judge=n/a, performance=0.872013, stability=1.000000)
+## run-1780150399
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780150399.patch`
+- score: 0.966879 (foundational=0.983173, competitive=0.967196, accuracy=0.975184, semantic_vector=1.000000, research_judge=n/a, performance=0.876654, stability=1.000000)
 - cases: 104/105 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_identity_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=3604ms; self_iteration_cargo_fmt_check_ms=404ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=563ms; self_iteration_cargo_check_ms=672ms; code_index_recovery_cases_ms=1460ms; code_index_sqlite_lock_cases_ms=1599ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/code/parser/languages/c/cpp_header_recovery.rs`, `src/relay_knowledge/code/parser/languages/c/mod.rs`, `src/relay_knowledge/code/parser/languages/c/tests.rs`, `src/relay_knowledge/code/parser/languages/mod.rs`, `src/relay_knowledge/code/parser/manual.rs`
+- key improvements: metric:cargo_fmt_check_ms 3604.0->3037.0; metric:self_iteration_cargo_fmt_check_ms 404.0->363.0; metric:cargo_build_debug_ms 563.0->343.0; metric:self_iteration_cargo_check_ms 672.0->604.0; metric:code_index_recovery_cases_ms 1460.0->926.0; metric:temporal_samples_go_index_ms 8668.0->1491.0; metric:temporal_samples_go_register_index_ms 8849.0->1592.0; metric:temporal_sdk_go_index_ms 357145.0->4228.0
+- known degradations: metric:code_index_sqlite_lock_cases_ms 1599.0->1933.0; metric:code_index_health_isolation_cases_ms 3334.0->3729.0; metric:leveldb_cpp_query_p50_ms 145.0->189.0; metric:leveldb_cpp_query_p95_ms 222.0->6244.0; metric:software_global_fixture_software_query_p50_ms 161.0->262.0; metric:software_global_fixture_software_query_p95_ms 183.0->330.0; metric:cross_language_syntax_fixture_query_p50_ms 141.0->207.0; metric:cross_language_syntax_fixture_query_p95_ms 181.0->307.0
+- latency metrics: cargo_fmt_check_ms=3037ms; self_iteration_cargo_fmt_check_ms=363ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=262ms; cargo_build_debug_ms=343ms; self_iteration_cargo_check_ms=604ms; code_index_recovery_cases_ms=926ms; code_index_sqlite_lock_cases_ms=1933ms
 
 Adopted optimization notes:
 

@@ -363,6 +363,66 @@ int declared(void);
 }
 
 #[test]
+fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
+    let snapshot = parse_source_snapshot(
+        "db/db_impl.h",
+        br#"
+class DBImpl : public DB {
+ public:
+  struct CompactionStats {
+    int64_t bytes_read;
+  };
+
+  // Recover the descriptor from persistent storage.  May do a significant
+  // amount of work to recover recently logged updates.  Any changes to
+  // be made to the descriptor are added to *edit.
+  Status Recover(VersionEdit* edit, bool* save_manifest)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
+                        VersionEdit* edit, SequenceNumber* max_sequence)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  int (*log_filter)(void*);
+  VersionEdit edit_;
+};
+"#,
+    );
+
+    let recover = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "Recover")
+        .expect("C++ class member declaration should be recovered from C header parse");
+    assert_eq!(recover.kind, "function_declaration");
+    assert!(recover.signature.contains("Status Recover"));
+    assert!(
+        !recover.signature.contains("EXCLUSIVE_LOCKS_REQUIRED"),
+        "trailing annotation macros should not become part of recovered declaration ranges"
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "RecoverLogFile" && symbol.kind == "function_declaration"
+    }));
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| symbol.name == "edit_"),
+        "data members should not become function declaration symbols"
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "int" || symbol.name == "log_filter"),
+        "function pointer members should not become function declaration symbols"
+    );
+    assert!(snapshot.chunks.iter().any(|chunk| {
+        chunk.path == "db/db_impl.h"
+            && chunk.content.contains("Recover the descriptor")
+            && chunk.content.contains("VersionEdit* edit")
+            && chunk.content.contains("save_manifest")
+    }));
+}
+
+#[test]
 fn c_function_pointer_parameters_are_not_global_function_symbols() {
     let snapshot = parse_source_snapshot(
         "include/linux/callbacks.h",

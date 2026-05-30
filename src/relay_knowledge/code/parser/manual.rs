@@ -39,6 +39,11 @@ pub(super) fn collect_manual_nodes(
         }
         push_children_reverse(node, &mut stack);
     }
+    for (name, kind, range) in
+        languages::language_manual_file_definitions(context.content, context.language_id)
+    {
+        upsert_symbol(output, symbol_record(context, &name, kind, &range)?);
+    }
     for definition in config_definitions {
         upsert_symbol(
             output,
