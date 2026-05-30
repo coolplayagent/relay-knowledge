@@ -2,21 +2,44 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::V
 
 use crate::{
     domain::{
-        GraphVersion, RepositoryCodeRange, SoftwareComponent, SoftwareComponentInput,
+        GraphVersion, RepositoryCodeRange, SoftwareBuildTarget, SoftwareComponent,
+        SoftwareComponentInput, SoftwareDependencyUsage, SoftwareDesignElement, SoftwareFile,
         SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus,
-        SoftwareSdkUsage, SoftwareSdkUsageInput,
+        SoftwareIacResource, SoftwareRelationship, SoftwareSdkUsage, SoftwareSdkUsageInput,
+        SoftwareTopic,
     },
     storage::StorageError,
 };
 
-use super::{super::current_graph_version, code_query_scope};
+use super::super::current_graph_version;
+use query_scope::{
+    language_filter_sql_for_column, path_filter_sql_for_column, push_language_filter_values,
+    push_path_filter_values, repository_id_for_scope, source_scope_for_request,
+};
 
-const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 2;
+const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 3;
 
 #[path = "software/dependency_usage.rs"]
 mod dependency_usage;
+#[path = "software/lifecycle.rs"]
+mod lifecycle;
+#[path = "software/query_scope.rs"]
+mod query_scope;
 #[path = "software_graph.rs"]
 mod software_graph;
+
+#[derive(Default)]
+struct ProjectionSlices {
+    components: Vec<SoftwareComponent>,
+    dependency_usages: Vec<SoftwareDependencyUsage>,
+    sdk_usages: Vec<SoftwareSdkUsage>,
+    files: Vec<SoftwareFile>,
+    topics: Vec<SoftwareTopic>,
+    relationships: Vec<SoftwareRelationship>,
+    build_targets: Vec<SoftwareBuildTarget>,
+    iac_resources: Vec<SoftwareIacResource>,
+    design_elements: Vec<SoftwareDesignElement>,
+}
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
@@ -124,7 +147,10 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             file_count INTEGER NOT NULL DEFAULT 0,
             topic_count INTEGER NOT NULL DEFAULT 0,
             relationship_count INTEGER NOT NULL DEFAULT 0,
-            projection_schema_version INTEGER NOT NULL DEFAULT 2,
+            build_target_count INTEGER NOT NULL DEFAULT 0,
+            iac_resource_count INTEGER NOT NULL DEFAULT 0,
+            design_element_count INTEGER NOT NULL DEFAULT 0,
+            projection_schema_version INTEGER NOT NULL DEFAULT 3,
             last_error TEXT
         );
         ",
@@ -155,7 +181,26 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
     )?;
     mark_legacy_projection_schema_stale(connection)?;
 
-    dependency_usage::initialize_schema(connection)
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "build_target_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "iac_resource_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "design_element_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    dependency_usage::initialize_schema(connection)?;
+    lifecycle::initialize_schema(connection)
 }
 
 pub(super) fn refresh_projection(
@@ -185,6 +230,7 @@ pub(super) fn refresh_projection(
         params![source_scope],
     )?;
     dependency_usage::delete_scope(&transaction, source_scope)?;
+    lifecycle::delete_scope(&transaction, source_scope)?;
 
     let components = dependency_components(&transaction, source_scope, graph_version)?;
     for component in &components {
@@ -205,6 +251,8 @@ pub(super) fn refresh_projection(
     for usage in &sdk_usages {
         insert_sdk_usage(&transaction, usage)?;
     }
+    let lifecycle_projection =
+        lifecycle::refresh_projection(&transaction, source_scope, graph_version)?;
 
     let file_count = software_graph::materialize_files(&transaction, source_scope, graph_version)?;
 
@@ -226,6 +274,9 @@ pub(super) fn refresh_projection(
         file_count,
         topic_count,
         relationship_count,
+        build_target_count: lifecycle_projection.build_targets.len(),
+        iac_resource_count: lifecycle_projection.iac_resources.len(),
+        design_element_count: lifecycle_projection.design_elements.len(),
         last_error: None,
     };
     upsert_status(&transaction, &status)?;
@@ -239,6 +290,9 @@ pub(super) fn refresh_projection(
         files: Vec::new(),
         topics: Vec::new(),
         relationships: Vec::new(),
+        build_targets: lifecycle_projection.build_targets,
+        iac_resources: lifecycle_projection.iac_resources,
+        design_elements: lifecycle_projection.design_elements,
     })
 }
 
@@ -269,140 +323,171 @@ pub(super) fn projection_for_scope(
             file_count: 0,
             topic_count: 0,
             relationship_count: 0,
+            build_target_count: 0,
+            iac_resource_count: 0,
+            design_element_count: 0,
             last_error: Some("software global projection has not been refreshed".to_owned()),
         });
-    let components = match request.kind {
-        SoftwareGlobalKind::Dependencies | SoftwareGlobalKind::All => {
-            components_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::Sdks
-        | SoftwareGlobalKind::Files
-        | SoftwareGlobalKind::Topics
-        | SoftwareGlobalKind::Relationships => Vec::new(),
-    };
-    let dependency_usages = match request.kind {
+    let slices = projection_slices(connection, source_scope, &request)?;
+
+    Ok(SoftwareGlobalProjection {
+        status,
+        components: slices.components,
+        dependency_usages: slices.dependency_usages,
+        sdk_usages: slices.sdk_usages,
+        files: slices.files,
+        topics: slices.topics,
+        relationships: slices.relationships,
+        build_targets: slices.build_targets,
+        iac_resources: slices.iac_resources,
+        design_elements: slices.design_elements,
+    })
+}
+
+fn projection_slices(
+    connection: &Connection,
+    source_scope: &str,
+    request: &SoftwareGlobalRequest,
+) -> Result<ProjectionSlices, StorageError> {
+    match request.kind {
         SoftwareGlobalKind::Dependencies => {
+            let components =
+                components_for_scope(connection, source_scope, request, request.limit)?;
             let remaining = request.limit.saturating_sub(components.len());
-            dependency_usage::usages_for_scope(connection, source_scope, &request, remaining)?
+            let dependency_usages =
+                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
+            Ok(ProjectionSlices {
+                components,
+                dependency_usages,
+                ..ProjectionSlices::default()
+            })
         }
+        SoftwareGlobalKind::Sdks => Ok(ProjectionSlices {
+            sdk_usages: sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Files => Ok(ProjectionSlices {
+            files: software_graph::files_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Topics => Ok(ProjectionSlices {
+            topics: software_graph::topics_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Relationships => Ok(ProjectionSlices {
+            relationships: software_graph::relationships_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Build => Ok(ProjectionSlices {
+            build_targets: lifecycle::build_targets_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Iac => Ok(ProjectionSlices {
+            iac_resources: lifecycle::iac_resources_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
+        SoftwareGlobalKind::Design => Ok(ProjectionSlices {
+            design_elements: lifecycle::design_elements_for_scope(
+                connection,
+                source_scope,
+                request,
+                request.limit,
+            )?,
+            ..ProjectionSlices::default()
+        }),
         SoftwareGlobalKind::All => {
+            let components =
+                components_for_scope(connection, source_scope, request, request.limit)?;
             let remaining = request.limit.saturating_sub(components.len());
-            if remaining == 0 {
+            let dependency_usages =
+                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
+            let remaining = remaining.saturating_sub(dependency_usages.len());
+            let sdk_usages = if remaining == 0 {
                 Vec::new()
             } else {
-                dependency_usage::usages_for_scope(connection, source_scope, &request, remaining)?
-            }
-        }
-        SoftwareGlobalKind::Sdks
-        | SoftwareGlobalKind::Files
-        | SoftwareGlobalKind::Topics
-        | SoftwareGlobalKind::Relationships => Vec::new(),
-    };
-    let sdk_usages = match request.kind {
-        SoftwareGlobalKind::Sdks => {
-            sdk_usages_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::All => {
-            let remaining = request
-                .limit
-                .saturating_sub(components.len())
-                .saturating_sub(dependency_usages.len());
-            if remaining == 0 {
+                sdk_usages_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(sdk_usages.len());
+            let files = if remaining == 0 {
                 Vec::new()
             } else {
-                sdk_usages_for_scope(connection, source_scope, &request, remaining)?
-            }
-        }
-        SoftwareGlobalKind::Dependencies
-        | SoftwareGlobalKind::Files
-        | SoftwareGlobalKind::Topics
-        | SoftwareGlobalKind::Relationships => Vec::new(),
-    };
-    let files = match request.kind {
-        SoftwareGlobalKind::Files => {
-            software_graph::files_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::All => {
-            let remaining = request
-                .limit
-                .saturating_sub(components.len())
-                .saturating_sub(dependency_usages.len())
-                .saturating_sub(sdk_usages.len());
-            if remaining == 0 {
+                software_graph::files_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(files.len());
+            let topics = if remaining == 0 {
                 Vec::new()
             } else {
-                software_graph::files_for_scope(connection, source_scope, &request, remaining)?
-            }
-        }
-        SoftwareGlobalKind::Dependencies
-        | SoftwareGlobalKind::Sdks
-        | SoftwareGlobalKind::Topics
-        | SoftwareGlobalKind::Relationships => Vec::new(),
-    };
-    let topics = match request.kind {
-        SoftwareGlobalKind::Topics => {
-            software_graph::topics_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::All => {
-            let remaining = request
-                .limit
-                .saturating_sub(components.len())
-                .saturating_sub(dependency_usages.len())
-                .saturating_sub(sdk_usages.len())
-                .saturating_sub(files.len());
-            if remaining == 0 {
-                Vec::new()
-            } else {
-                software_graph::topics_for_scope(connection, source_scope, &request, remaining)?
-            }
-        }
-        SoftwareGlobalKind::Dependencies
-        | SoftwareGlobalKind::Sdks
-        | SoftwareGlobalKind::Files
-        | SoftwareGlobalKind::Relationships => Vec::new(),
-    };
-    let relationships = match request.kind {
-        SoftwareGlobalKind::Relationships => software_graph::relationships_for_scope(
-            connection,
-            source_scope,
-            &request,
-            request.limit,
-        )?,
-        SoftwareGlobalKind::All => {
-            let remaining = request
-                .limit
-                .saturating_sub(components.len())
-                .saturating_sub(dependency_usages.len())
-                .saturating_sub(sdk_usages.len())
-                .saturating_sub(files.len())
-                .saturating_sub(topics.len());
-            if remaining == 0 {
+                software_graph::topics_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(topics.len());
+            let relationships = if remaining == 0 {
                 Vec::new()
             } else {
                 software_graph::relationships_for_scope(
                     connection,
                     source_scope,
-                    &request,
+                    request,
                     remaining,
                 )?
-            }
+            };
+            let remaining = remaining.saturating_sub(relationships.len());
+            let build_targets = if remaining == 0 {
+                Vec::new()
+            } else {
+                lifecycle::build_targets_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(build_targets.len());
+            let iac_resources = if remaining == 0 {
+                Vec::new()
+            } else {
+                lifecycle::iac_resources_for_scope(connection, source_scope, request, remaining)?
+            };
+            let remaining = remaining.saturating_sub(iac_resources.len());
+            let design_elements = if remaining == 0 {
+                Vec::new()
+            } else {
+                lifecycle::design_elements_for_scope(connection, source_scope, request, remaining)?
+            };
+            Ok(ProjectionSlices {
+                components,
+                dependency_usages,
+                sdk_usages,
+                files,
+                topics,
+                relationships,
+                build_targets,
+                iac_resources,
+                design_elements,
+            })
         }
-        SoftwareGlobalKind::Dependencies
-        | SoftwareGlobalKind::Sdks
-        | SoftwareGlobalKind::Files
-        | SoftwareGlobalKind::Topics => Vec::new(),
-    };
-
-    Ok(SoftwareGlobalProjection {
-        status,
-        components,
-        dependency_usages,
-        sdk_usages,
-        files,
-        topics,
-        relationships,
-    })
+    }
 }
+
 fn dependency_components(
     connection: &Connection,
     source_scope: &str,
@@ -572,9 +657,10 @@ fn upsert_status(
         INSERT INTO software_global_status (
             source_scope, repository_id, projected_graph_version, stale,
             component_count, sdk_usage_count, file_count, topic_count,
-            relationship_count, projection_schema_version, last_error
+            relationship_count, build_target_count, iac_resource_count,
+            design_element_count, projection_schema_version, last_error
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         ON CONFLICT(source_scope) DO UPDATE SET
             repository_id = excluded.repository_id,
             projected_graph_version = excluded.projected_graph_version,
@@ -584,6 +670,9 @@ fn upsert_status(
             file_count = excluded.file_count,
             topic_count = excluded.topic_count,
             relationship_count = excluded.relationship_count,
+            build_target_count = excluded.build_target_count,
+            iac_resource_count = excluded.iac_resource_count,
+            design_element_count = excluded.design_element_count,
             projection_schema_version = excluded.projection_schema_version,
             last_error = excluded.last_error
         ",
@@ -597,6 +686,9 @@ fn upsert_status(
             status.file_count,
             status.topic_count,
             status.relationship_count,
+            status.build_target_count,
+            status.iac_resource_count,
+            status.design_element_count,
             SOFTWARE_PROJECTION_SCHEMA_VERSION,
             status.last_error,
         ],
@@ -623,205 +715,6 @@ fn mark_legacy_projection_schema_stale(connection: &Connection) -> Result<(), St
     Ok(())
 }
 
-fn source_scope_for_request(
-    connection: &mut Connection,
-    request: &SoftwareGlobalRequest,
-) -> Result<String, StorageError> {
-    if let Ok(source_scope) = exact_source_scope_for_request(connection, request) {
-        return Ok(source_scope);
-    }
-    let repository_id = repository_id_for_request(connection, &request.repository.repository)?
-        .ok_or_else(|| {
-            StorageError::InvalidInput(format!(
-                "code repository '{}' is not registered",
-                request.repository.repository
-            ))
-        })?;
-    let mut statement = connection.prepare(
-        "
-        SELECT scope.source_scope, scope.path_filters_json, scope.language_filters_json
-        FROM code_repository_scopes scope
-        WHERE scope.repository_id = ?1
-          AND scope.resolved_commit_sha = ?2
-        ORDER BY scope.path_filters_json ASC, scope.language_filters_json ASC,
-                 scope.source_scope ASC
-        ",
-    )?;
-    let candidates = statement.query_map(
-        params![repository_id, request.repository.ref_selector],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    )?;
-    for candidate in candidates {
-        let (source_scope, path_filters_json, language_filters_json) = candidate?;
-        let path_filters = parse_filter_json(&path_filters_json)?;
-        let language_filters = parse_filter_json(&language_filters_json)?;
-        if code_query_scope::selector_filters_fit_indexed_scope(
-            &path_filters,
-            &language_filters,
-            &request.repository.path_filters,
-            &request.repository.language_filters,
-        ) {
-            return Ok(source_scope);
-        }
-    }
-
-    Err(StorageError::InvalidInput(format!(
-        "code repository '{}' does not have an indexed software projection scope for ref '{}'",
-        request.repository.repository, request.repository.ref_selector
-    )))
-}
-
-fn repository_id_for_request(
-    connection: &Connection,
-    repository: &str,
-) -> Result<Option<String>, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT repository_id
-            FROM (
-                SELECT repository_id, 0 AS precedence
-                FROM code_repositories
-                WHERE repository_id = ?1
-                UNION ALL
-                SELECT repository_id, 1 AS precedence
-                FROM code_repository_aliases
-                WHERE alias = ?1
-            )
-            ORDER BY precedence ASC
-            LIMIT 1
-            ",
-            params![repository],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StorageError::from)
-}
-
-fn parse_filter_json(value: &str) -> Result<Vec<String>, StorageError> {
-    serde_json::from_str(value).map_err(|error| StorageError::InvalidInput(error.to_string()))
-}
-
-fn path_filter_sql_for_column(column: &str, filters: &[String]) -> String {
-    let clauses = filters
-        .iter()
-        .filter_map(|filter| normalized_sql_path_filter(filter))
-        .map(|_| format!("({column} = ? OR {column} LIKE ? ESCAPE '\\')"))
-        .collect::<Vec<_>>();
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("AND ({})", clauses.join(" OR "))
-    }
-}
-
-fn language_filter_sql_for_column(column: &str, filters: &[String]) -> String {
-    let clauses = filters
-        .iter()
-        .map(|_| format!("{column} = ?"))
-        .collect::<Vec<_>>();
-    if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("AND ({})", clauses.join(" OR "))
-    }
-}
-
-fn push_path_filter_values(values: &mut Vec<Value>, filters: &[String]) {
-    for filter in filters
-        .iter()
-        .filter_map(|filter| normalized_sql_path_filter(filter))
-    {
-        values.push(Value::Text(filter.clone()));
-        values.push(Value::Text(format!("{}/%", escape_sql_like(&filter))));
-    }
-}
-
-fn push_language_filter_values(values: &mut Vec<Value>, filters: &[String]) {
-    values.extend(filters.iter().cloned().map(Value::Text));
-}
-
-fn normalized_sql_path_filter(filter: &str) -> Option<String> {
-    let mut filter = filter.trim_end_matches(['/', '\\']);
-    while let Some(stripped) = filter.strip_prefix("./") {
-        filter = stripped;
-    }
-
-    (!filter.is_empty() && filter != ".").then(|| filter.to_owned())
-}
-
-fn escape_sql_like(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
-}
-
-fn source_scope_filter_error(request: &SoftwareGlobalRequest) -> StorageError {
-    StorageError::InvalidInput(format!(
-        "code repository '{}' does not have an indexed software projection scope for ref '{}'",
-        request.repository.repository, request.repository.ref_selector
-    ))
-}
-
-fn exact_source_scope_for_request(
-    connection: &mut Connection,
-    request: &SoftwareGlobalRequest,
-) -> Result<String, StorageError> {
-    let path_filters_json = serde_json::to_string(&request.repository.path_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let language_filters_json = serde_json::to_string(&request.repository.language_filters)
-        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
-    let repository_id = repository_id_for_request(connection, &request.repository.repository)?
-        .ok_or_else(|| source_scope_filter_error(request))?;
-    connection
-        .query_row(
-            "
-        SELECT scope.source_scope
-        FROM code_repository_scopes scope
-        WHERE scope.repository_id = ?1
-          AND scope.resolved_commit_sha = ?2
-          AND scope.path_filters_json = ?3
-          AND scope.language_filters_json = ?4
-        ORDER BY scope.source_scope ASC
-        LIMIT 1
-        ",
-            params![
-                repository_id,
-                request.repository.ref_selector,
-                path_filters_json,
-                language_filters_json,
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .ok_or_else(|| source_scope_filter_error(request))
-}
-
-fn repository_id_for_scope(
-    connection: &Connection,
-    source_scope: &str,
-) -> Result<Option<String>, StorageError> {
-    connection
-        .query_row(
-            "
-            SELECT repository_id
-            FROM code_repository_scopes
-            WHERE source_scope = ?1
-            ",
-            params![source_scope],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(StorageError::from)
-}
-
 fn status_for_scope(
     connection: &Connection,
     source_scope: &str,
@@ -831,7 +724,8 @@ fn status_for_scope(
             "
             SELECT repository_id, source_scope, projected_graph_version, stale,
                    component_count, sdk_usage_count, file_count, topic_count,
-                   relationship_count, last_error
+                   relationship_count, build_target_count, iac_resource_count,
+                   design_element_count, last_error
             FROM software_global_status
             WHERE source_scope = ?1
             ",
@@ -847,7 +741,10 @@ fn status_for_scope(
                     file_count: row.get(6)?,
                     topic_count: row.get(7)?,
                     relationship_count: row.get(8)?,
-                    last_error: row.get(9)?,
+                    build_target_count: row.get(9)?,
+                    iac_resource_count: row.get(10)?,
+                    design_element_count: row.get(11)?,
+                    last_error: row.get(12)?,
                 })
             },
         )

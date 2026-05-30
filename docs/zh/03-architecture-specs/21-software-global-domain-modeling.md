@@ -113,8 +113,11 @@ source or manifest changed
 - `software_files` 从 `code_repository_files` 生成，把代码、配置、文档、构建、部署、测试、模板和 knowledge map 文件作为整体节点。
 - `software_topics` 从 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` 的 topic id 生成，用于表达仓库文档主题、架构约束和知识路由主题。
 - `software_relationships` 从已提交依赖、SDK usage、feature flag/config facts 和文档 topic evidence 生成 `depends_on`、`uses_sdk`、`configures`、`documents` 等跨域关系，保留 `resolution_state`、target hint、confidence、证据路径和行号。
-- `software_global_status` 记录每个 source scope 的 projected graph version、stale 状态、组件数、SDK usage 数、文件数、主题数、关系数和最后错误。
-- CLI 通过 `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|all` 暴露投影结果；查询只读取已提交投影，不在热路径扫描包缓存、SDK 目录、未索引外部源码或全仓文档。
+- `software_build_targets` 从已索引 chunk 中的构建证据生成，覆盖 Cargo、npm、Python、Go、Gradle、CMake、Makefile 和 CI workflow 的 package、script、target、feature、job 等入口；它只记录证据和命令提示，不执行构建工具。
+- `software_iac_resources` 从已索引 Dockerfile、Compose、Kubernetes YAML、Helm、Terraform、systemd、launchd 和 CI workflow 证据生成，保留 provider、resource kind、name、scope hint、target hint 和解析状态；它不访问云 API、不解析集群实时状态。
+- `software_design_elements` 从 README、架构/设计 Markdown 和 package/module manifest 生成，用于表达有文本证据的软件系统、模块、组件、接口和能力；它不从任意符号名推断未文档化架构。
+- `software_global_status` 记录每个 source scope 的 projected graph version、stale 状态、组件数、SDK usage 数、文件数、主题数、关系数、build target 数、IaC resource 数、design element 数和最后错误。
+- CLI 通过 `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|build|iac|design|all` 暴露投影结果；查询只读取已提交投影，不在热路径扫描包缓存、SDK 目录、云 API、未索引外部源码或全仓文档。
 
 ---
 

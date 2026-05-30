@@ -420,8 +420,8 @@ pub(super) fn repo_report() -> CliCommandSpec {
 pub(super) fn repo_software() -> CliCommandSpec {
     command!(
         &["repo", "software"],
-        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|all] [--freshness <policy>] [--limit <n>]",
-        "Read repository-scoped software dependency, SDK/API, file, topic, and relationship facts.",
+        "relay-knowledge repo software <alias> [--ref <ref>] [--kind dependencies|sdks|files|topics|relationships|build|iac|design|all] [--freshness <policy>] [--limit <n>]",
+        "Read repository-scoped software dependency, SDK/API, file, topic, relationship, build, IaC, and design facts.",
         "code.repo.software",
         CommandEffect::ReadOnly,
         &[arg(
@@ -455,6 +455,9 @@ pub(super) fn repo_software() -> CliCommandSpec {
                     "files",
                     "topics",
                     "relationships",
+                    "build",
+                    "iac",
+                    "design",
                     "all",
                 ],
             ),
@@ -479,7 +482,7 @@ pub(super) fn repo_software() -> CliCommandSpec {
         ],
         &["relay-knowledge repo software core --kind all --format json"],
         &[
-            "The projection is built from authorized repository index facts: dependency manifests, lockfiles, and unresolved import/include targets."
+            "The projection is built from authorized repository index facts: dependency manifests, lockfiles, unresolved import/include targets, build manifests, IaC files, and design documentation."
         ],
     )
 }

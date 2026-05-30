@@ -322,6 +322,7 @@ pub enum CliError {
     Diagnostic(Box<CliDiagnostic>),
     InvalidFormat(String),
     InvalidCodeQueryKind(String),
+    InvalidSoftwareKind(String),
     InvalidFreshness(String),
     InvalidIndexKind(String),
     InvalidMapSourceKind(String),
@@ -366,6 +367,7 @@ impl CliError {
             Self::Diagnostic(_)
             | Self::InvalidFormat(_)
             | Self::InvalidCodeQueryKind(_)
+            | Self::InvalidSoftwareKind(_)
             | Self::InvalidFreshness(_)
             | Self::InvalidIndexKind(_)
             | Self::InvalidMapSourceKind(_)
@@ -409,6 +411,10 @@ impl fmt::Display for CliError {
             Self::InvalidCodeQueryKind(value) => write!(
                 formatter,
                 "invalid --kind value '{value}', expected hybrid, symbol, definition, references, callers, callees, imports, or sbom"
+            ),
+            Self::InvalidSoftwareKind(value) => write!(
+                formatter,
+                "invalid --kind value '{value}', expected dependencies, sdks, build, iac, design, or all"
             ),
             Self::InvalidFreshness(value) => write!(
                 formatter,

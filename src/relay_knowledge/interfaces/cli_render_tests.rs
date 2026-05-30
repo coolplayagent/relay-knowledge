@@ -124,8 +124,11 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                 "files": [{"software_file_id": "file:1"}],
                 "topics": [{"topic_id": "topic:1"}],
                 "relationships": [{"relationship_id": "relationship:1"}],
+                "build_targets": [{"target_id": "build_target:1"}],
+                "iac_resources": [{"resource_id": "iac_resource:1"}],
+                "design_elements": [{"element_id": "design_element:1"}],
             }),
-            "software scope=scope-1 components=1 dependency_usages=1 sdk_usages=2 files=1 topics=1 relationships=1 stale=false\n",
+            "software scope=scope-1 components=1 dependency_usages=1 sdk_usages=2 files=1 topics=1 relationships=1 build_targets=1 iac_resources=1 design_elements=1 stale=false\n",
         ),
         (
             "setup.doctor",
