@@ -212,7 +212,9 @@ pub fn evaluate_candidate(
     };
 
     let query_cases = array_field(cases_config, "query_cases");
+    let software_query_cases = array_field(cases_config, "software_query_cases");
     let grouped_cases = objects_by_repository(query_cases);
+    let grouped_software_cases = objects_by_repository(software_query_cases);
     let repository_configs = object_field(cases_config, "repositories")
         .map(|object| {
             object
@@ -264,16 +266,32 @@ pub fn evaluate_candidate(
                         )
                     })
                     .unwrap_or_default();
-                if repo_cases.is_empty() && !needed_for_repo_set {
+                let software_cases = grouped_software_cases
+                    .get(name)
+                    .cloned()
+                    .map(|cases| {
+                        select_repository_cases_for_profile(
+                            &config.profile,
+                            config.categories.as_ref(),
+                            cases,
+                        )
+                    })
+                    .unwrap_or_default();
+                if repo_cases.is_empty() && software_cases.is_empty() && !needed_for_repo_set {
                     return None;
                 }
-                Some((name.clone(), repo_config.clone(), repo_cases))
+                Some((
+                    name.clone(),
+                    repo_config.clone(),
+                    repo_cases,
+                    software_cases,
+                ))
             })
             .collect::<Vec<_>>();
         let repo_jobs = job_plan.repositories.min(job_plan.global).max(1);
         let repository_case_count = repositories
             .iter()
-            .map(|(_, _, repo_cases)| repo_cases.len())
+            .map(|(_, _, repo_cases, software_cases)| repo_cases.len() + software_cases.len())
             .sum::<usize>();
         eprintln!(
             "[self-iterate] repository workload start repositories={} query_cases={} repo_jobs={} query_jobs={}",
@@ -285,8 +303,15 @@ pub fn evaluate_candidate(
         let repo_results = parallel_map(repositories, repo_jobs, {
             let runtime = runtime.clone();
             let run_home = run_home.clone();
-            move |(repo_name, repo_config, repo_cases)| {
-                evaluate_repository(&runtime, &run_home, &repo_name, &repo_config, repo_cases)
+            move |(repo_name, repo_config, repo_cases, software_cases)| {
+                evaluate_repository(
+                    &runtime,
+                    &run_home,
+                    &repo_name,
+                    &repo_config,
+                    repo_cases,
+                    software_cases,
+                )
             }
         });
         for report in repo_results {
@@ -436,6 +461,7 @@ fn evaluate_repository(
     repo_name: &str,
     repo_config: &Value,
     repo_cases: Vec<Value>,
+    software_cases: Vec<Value>,
 ) -> Result<RepoReport, String> {
     let alias = string_or(repo_config, "alias", repo_name);
     let ref_selector = string_or(repo_config, "ref", "HEAD");
@@ -449,12 +475,13 @@ fn evaluate_repository(
     let setup_passed = setup_commands.iter().all(CommandResult::passed);
     commands.extend(setup_commands);
     eprintln!(
-        "[self-iterate] repository start name={} alias={} path={} scope={} query_cases={}",
+        "[self-iterate] repository start name={} alias={} path={} scope={} query_cases={} software_query_cases={}",
         repo_name,
         alias,
         path.display(),
         scope,
-        repo_cases.len()
+        repo_cases.len(),
+        software_cases.len()
     );
     if !setup_passed {
         return Ok(repo_report(
@@ -638,6 +665,46 @@ fn evaluate_repository(
         repo_config,
         &format!("{repo_name}_query"),
         &query_durations,
+    );
+    let software_results = parallel_map(software_cases, runtime.query_jobs.max(1), {
+        let runtime = runtime.clone();
+        let alias = alias.to_owned();
+        let ref_selector = ref_selector.to_owned();
+        let repo_name = repo_name.to_owned();
+        move |case| {
+            let query_alias = string_or(&case, "repository_alias", &alias).to_owned();
+            let query = run_limited(
+                &runtime.limiter,
+                CommandSpec::new(
+                    format!("{}_{}", repo_name, string_or(&case, "id", "software_case")),
+                    software_query_command(&runtime.binary, &query_alias, &ref_selector, &case),
+                    &runtime.workspace,
+                    Some(runtime.env.clone()),
+                    runtime.timeout,
+                ),
+            );
+            let duration_ms = query.duration_ms;
+            let observation = score_software_case(&repo_name, &case, &query);
+            let guardrail_gate = guardrail_gate_from_case(&observation, duration_ms);
+            (query, observation, guardrail_gate)
+        }
+    });
+    let software_durations = software_results
+        .iter()
+        .map(|(command, _, _)| command.duration_ms)
+        .collect::<Vec<_>>();
+    for (command, observation, guardrail_gate) in software_results {
+        commands.push(command);
+        cases.push(observation);
+        if let Some(gate) = guardrail_gate {
+            guardrail_gates.push(gate);
+        }
+    }
+    push_latency_metrics(
+        &mut metrics,
+        repo_config,
+        &format!("{repo_name}_software_query"),
+        &software_durations,
     );
     let mut report = repo_report(repo_name, scope, commands, cases, metrics, index_json);
     report.gates = guardrail_gates;
