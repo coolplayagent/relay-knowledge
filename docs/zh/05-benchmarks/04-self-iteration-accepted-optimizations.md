@@ -4,6 +4,10 @@
 ## 候选优化说明：manual-otel-contrib-row-batch-throughput
 - 算法/架构：checkpointed full-index 的默认 row batch 上限从 50k 提升到仍有界的 150k；新解析 reference 直接写入最终 unresolved 基线 `2500/ambiguous`，finalize 只规范化违反该基线的 reference 行；generic reference resolution 只处理非 `call` reference，并先从待解析 reference 中取 distinct 名称/路径再用索引化 `IN` candidate set 和 `UPDATE ... FROM` 关联符号分组，避免对无关配置符号做全 scope GROUP BY 或逐行扫描 materialized CTE。调用引用继续由后续 `finalize_call_targets` 的 callable 规则解析，但 call-target index 只加载 callable symbol kinds，且 already-unresolved/ambiguous baseline rows 不再重写。
 - 不变量/预期影响/风险：不跳过任何源码、配置文档、symbol/reference/import/call/chunk/dependency/feature-flag fact，不改变 reference/call resolution 最终规则、SQLite schema 形状、FTS materialization、task lease、checkpoint replay、repo-set freshness、degraded/stale 状态或命令 timeout。预期减少 OpenTelemetry collector-contrib 这类 YAML/JSON/Go fact 密集仓库的 checkpoint batch 事务数和 finalize 对百万级 reference 的无效写放大，降低 `otel_collector_contrib_index` 超时及后续 repo-set add 因缺少 fresh scope 失败的风险；风险是单批 Rust/SQLite 工作集增大，仍受 byte、file、row 三重预算和现有 checkpoint replay/path-collision/self-iteration performance gate 约束。
+## 候选优化说明：run-1780149073-scoped-symbol-lookup-pushdown
+- 算法/架构：Symbol/Definition/Hybrid 的 exact scoped identity 查询继续由 `SymbolIdentityQuery` 做最终匹配，但 direct symbol lookup 在 SQLite 中把 scoped terms 转成有界 literal `LIKE` prefilter，先按 `qualified_name`、`signature`、`canonical_symbol_id` 缩小同名 leaf 候选，再进入既有 Rust verifier、FTS fallback、chunk fallback 与 top-k 排序。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate 上限、ranking 权重、source `text_fallback`、repo-set overlay、semantic/vector read model、task lease/checkpoint、env/paths/net 或 CLI/API；simple identity 与 multi-API direct lookup 仍走原路径。预期改善 LevelDB、Spring、Kubernetes、Temporal 等大仓中大量同名 `Get`/`Open`/`New`/`refresh` leaf 使 scoped target 落到 direct cap 外的问题，并减少 scoped query 后续 FTS 噪声；风险是 SQL literal pattern 必须与 Rust scoped-token verifier 保持一致，受 underscore escape 单测、保留 FTS fallback 与既有 scoped identity/ranking tests 控制。
+- 策略关联：在本 profile/category 没有已采纳历史的情况下选择通用查询规划 pushdown；借鉴已采纳的 bounded candidate/read-model materialization 思路，避免 fixture 字符串枚举、扩大无界 candidate window、弱化 source fallback 语义或跳过语义/向量保护层。
 ## 候选优化说明：run-1779852601-class-only-symbol-context-lookup
 - 算法/架构：Symbol direct/FTS 查询仍返回同一 `SymbolRow` 结构，但 `previous_symbol_context_start` 的 correlated SQLite lookup 只在 outer row `kind = 'class'` 时执行；非 class symbol 直接返回 `NULL`，与 `symbol_result_line_range` 只消费 class preamble context 的投影规则保持一致。该变化位于单仓 SQLite read path，不改变 repo-set fanout、chunk strict/broad union、source fallback、semantic/vector read model 或索引写入。
 - 不变量/预期影响/风险：不改变 schema、parser facts、FTS 文档、candidate limit、ranking 权重、Definition/Symbol/Hybrid 结果字段、freshness/stale 语义、task lease/checkpoint、env/paths/net 或 CLI/API；class 命中仍可扩展到相邻 preamble，method/function/constructor/type_alias 等非 class 命中保持原 line range。预期降低 C/C++/Go/TS 符号密集查询中每个候选行重复执行 previous-symbol 子查询的 CPU 与 SQLite btree 访问，改善 LevelDB、syntax fixture 和 multi-repo dependency symbol 查询 p50/p95；风险是未来若其他 kind 需要 preamble context 会拿不到该列，受 focused symbol-ranking test 和 `symbol_result_line_range` 的 class-only消费边界控制。
@@ -984,3 +988,17 @@
 
 ## run-1779847089-to-run-1779856832 compacted
 - summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
+
+## run-1780149073
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780149073.patch`
+- score: 0.966044 (foundational=0.983173, competitive=0.967196, accuracy=0.975184, semantic_vector=1.000000, research_judge=n/a, performance=0.872013, stability=1.000000)
+- cases: 104/105 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_identity_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`, `src/relay_knowledge/storage/sqlite/code_query_symbols.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=3604ms; self_iteration_cargo_fmt_check_ms=404ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=563ms; self_iteration_cargo_check_ms=672ms; code_index_recovery_cases_ms=1460ms; code_index_sqlite_lock_cases_ms=1599ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.

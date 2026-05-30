@@ -142,6 +142,17 @@ impl SymbolIdentityQuery {
         self.scoped_terms.is_some()
     }
 
+    pub(super) fn scoped_like_pattern(&self) -> Option<String> {
+        let scoped_terms = self.scoped_terms.as_ref()?;
+        let mut pattern = String::from("%");
+        for term in scoped_terms {
+            pattern.push_str(&escape_sql_like(term));
+            pattern.push('%');
+        }
+
+        Some(pattern)
+    }
+
     pub(super) fn matches_symbol(
         &self,
         name: &str,

@@ -131,12 +131,14 @@ fn search_symbol_identity_rows(
     request: &CodeRetrievalRequest,
     identity: &SymbolIdentityQuery,
 ) -> Result<SymbolIdentityRows, StorageError> {
+    let scoped_pattern = identity.scoped_like_pattern();
     search_symbol_identity_rows_by_name(
         connection,
         status,
         request,
         identity.leaf_name(),
         symbol_identity_candidate_limit(request),
+        scoped_pattern.as_deref(),
     )
 }
 
@@ -146,9 +148,19 @@ fn search_symbol_identity_rows_by_name(
     request: &CodeRetrievalRequest,
     name: &str,
     direct_limit: usize,
+    scoped_pattern: Option<&str>,
 ) -> Result<SymbolIdentityRows, StorageError> {
     let path_filter = path_filter_sql_for_column("path", status, request);
     let language_filter = language_filter_sql_for_column("language_id", status, request);
+    let scoped_filter = if scoped_pattern.is_some() {
+        "AND (
+                   lower(qualified_name) LIKE ? ESCAPE '\\'
+                OR lower(signature) LIKE ? ESCAPE '\\'
+                OR lower(canonical_symbol_id) LIKE ? ESCAPE '\\'
+            )"
+    } else {
+        ""
+    };
     let sql = format!(
         "
         SELECT symbol_snapshot_id, canonical_symbol_id, file_id, path, language_id, signature, doc_comment,
@@ -164,6 +176,7 @@ fn search_symbol_identity_rows_by_name(
         FROM code_repository_symbols
         WHERE source_scope = ?
           AND name = ?
+          {scoped_filter}
           {path_filter}
           {language_filter}
         ORDER BY path ASC, line_start ASC
@@ -174,6 +187,13 @@ fn search_symbol_identity_rows_by_name(
         rusqlite::types::Value::Text(required_scope(status)?.to_owned()),
         rusqlite::types::Value::Text(name.to_owned()),
     ];
+    if let Some(pattern) = scoped_pattern {
+        values.extend([
+            rusqlite::types::Value::Text(pattern.to_owned()),
+            rusqlite::types::Value::Text(pattern.to_owned()),
+            rusqlite::types::Value::Text(pattern.to_owned()),
+        ]);
+    }
     push_path_filter_values(&mut values, &status.path_filters);
     push_path_filter_values(&mut values, &request.repository.path_filters);
     push_language_filter_values(&mut values, &status.language_filters);
@@ -215,6 +235,7 @@ fn search_hybrid_api_identity_rows(
             request,
             identity.leaf_name(),
             hybrid_api_identity_candidate_limit(request),
+            None,
         )?;
         saturated |= identity_rows.saturated;
         let matched_rows = identity_rows
