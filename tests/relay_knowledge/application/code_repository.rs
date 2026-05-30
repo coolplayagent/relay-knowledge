@@ -211,6 +211,65 @@ pub fn retry_policy_v2() -> u32 {
 }
 
 #[tokio::test]
+async fn indexes_sql_schema_files_into_code_graph() {
+    let repo = FixtureRepo::create("code-sql-schema");
+    repo.write(
+        "src/schema.sql",
+        r#"
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    organization_id INTEGER REFERENCES organizations(id)
+);
+
+CREATE VIEW active_users AS
+SELECT id FROM users;
+"#,
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "schema"]);
+    let service = service_with_memory_store().await;
+
+    register_fixture_repo(&service, &repo, "register-sql-schema").await;
+    let indexed = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-sql-schema"),
+        )
+        .await
+        .expect("SQL repository should index");
+
+    assert_eq!(indexed.summary.indexed_file_count, 1);
+    assert!(indexed.summary.symbol_count >= 2);
+    assert!(indexed.summary.reference_count >= 2);
+
+    let table = query(&service, "users", CodeQueryKind::Definition).await;
+    let references = query(&service, "users", CodeQueryKind::References).await;
+
+    assert!(
+        table.results.iter().any(|hit| {
+            hit.path == "src/schema.sql"
+                && hit
+                    .canonical_symbol_id
+                    .as_deref()
+                    .is_some_and(|id| id.contains("users"))
+        }),
+        "SQL table definition should be queryable: {:?}",
+        table.results
+    );
+    assert!(
+        references.results.iter().any(|hit| {
+            hit.path == "src/schema.sql" && hit.edge_kind.as_deref() == Some("reference")
+        }),
+        "SQL object references should be queryable: {:?}",
+        references.results
+    );
+}
+
+#[tokio::test]
 async fn register_rejects_language_filters_to_preserve_full_language_surface() {
     let repo = FixtureRepo::create("code-register-language-rejected");
     repo.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");

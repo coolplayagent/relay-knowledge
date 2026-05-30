@@ -15,6 +15,7 @@ pub(super) mod python;
 pub(super) mod ruby;
 pub(super) mod rust;
 pub(super) mod scala;
+pub(super) mod sql;
 pub(super) mod swift;
 pub(super) mod typescript;
 
@@ -40,6 +41,7 @@ pub(super) fn definition_kind(language_id: &str, node_kind: &str) -> Option<&'st
         "ruby" => ruby::definition_kind(node_kind),
         "rust" => rust::definition_kind(node_kind),
         "scala" => scala::definition_kind(node_kind),
+        "sql" => sql::definition_kind(node_kind),
         "swift" => swift::definition_kind(node_kind),
         "typescript" | "tsx" => typescript::definition_kind(node_kind),
         _ => None,
@@ -62,6 +64,7 @@ pub(super) fn is_call_node(language_id: &str, node_kind: &str) -> bool {
         "ruby" => ruby::is_call_node(node_kind),
         "rust" => rust::is_call_node(node_kind),
         "scala" => scala::is_call_node(node_kind),
+        "sql" => sql::is_call_node(node_kind),
         "swift" => swift::is_call_node(node_kind),
         "typescript" | "tsx" => typescript::is_call_node(node_kind),
         _ => false,
@@ -115,6 +118,7 @@ pub(super) fn manual_definition_candidate(language_id: &str, node_kind: &str) ->
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definition_candidate(language_id, node_kind)
         }
+        "sql" => sql::manual_definition_candidate(node_kind),
         _ => definition_kind(language_id, node_kind).is_some(),
     }
 }
@@ -130,10 +134,22 @@ pub(super) fn language_manual_definitions(
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definitions(content, language_id, node)
         }
+        "sql" => sql::manual_definitions(content, node),
         "javascript" | "jsx" | "typescript" | "tsx" => javascript::manual_definition(content, node)
             .into_iter()
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+pub(super) fn language_manual_call(
+    content: &str,
+    language_id: &str,
+    node: Node<'_>,
+) -> Option<(String, SyntaxRange)> {
+    match language_id {
+        "sql" => sql::manual_call(content, node),
+        _ => None,
     }
 }
 
@@ -154,6 +170,7 @@ pub(super) fn language_manual_reference(
 ) -> Option<(String, &'static str, SyntaxRange)> {
     match language_id {
         "c" | "cpp" => c_family_references::manual_reference(content, node),
+        "sql" => sql::manual_reference(content, node),
         _ => None,
     }
 }

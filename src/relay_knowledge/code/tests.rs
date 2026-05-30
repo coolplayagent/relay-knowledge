@@ -46,6 +46,7 @@ fn detects_supported_languages_and_filters_paths() {
     assert_eq!(language_id("Gemfile"), Some("ruby"));
     assert_eq!(language_id("src/app.php"), Some("php"));
     assert_eq!(language_id("src/App.swift"), Some("swift"));
+    assert_eq!(language_id("schema/main.sql"), Some("sql"));
     assert_eq!(language_id("scripts/app.sh"), Some("bash"));
     assert_eq!(language_id(".bashrc"), Some("bash"));
     assert!(path_is_selected("src/lib.rs", &registration, &selector));

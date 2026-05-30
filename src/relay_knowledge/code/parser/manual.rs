@@ -123,6 +123,10 @@ fn manual_call(context: &FileParseContext<'_>, node: Node<'_>) -> Option<(String
             .or_else(|| super::nodes::first_named_child_of_kind(node, "identifier"))?;
         return Some((node_text(context.content, name), syntax_range(name)));
     }
+    if let Some(call) = languages::language_manual_call(context.content, context.language_id, node)
+    {
+        return Some(call);
+    }
     if !languages::is_call_node(context.language_id, node.kind()) {
         return None;
     }
