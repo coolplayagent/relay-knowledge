@@ -3,7 +3,7 @@
 [English](../../en/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md) | [中文](../../zh/03-architecture-specs/12-tree-sitter-extraction-and-incremental-indexing.md)
 
 > Document version: 2.0
-> Date: 2026-05-24
+> Date: 2026-05-30
 > Scope: Book 3 architecture and algorithm whitepaper
 
 ## 1. Design Conclusion
@@ -14,7 +14,9 @@ Tree-sitter is the entry point for code structure, not a complete semantic analy
 
 Each language registration includes language id, file extensions, tree-sitter grammar, capture queries, comment rules, identifier segmentation, and fallback chunker. When grammar is missing, files still enter text chunk and BM25 paths. Query-time source fallback is not a grammar substitute; it only adds exact-text evidence from indexed source candidates and cannot create graph facts.
 
-Configuration, build, and template grammars are registered under the code configuration module rather than runtime configuration. The supported surface includes Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java properties, TOML, INI, YAML, JSON, Go module files, Ninja, Jinja2, and Go templates. These formats emit ordinary file, symbol, reference, import, dependency, feature-flag, and chunk facts so query APIs do not need a separate schema for configuration search. Hierarchical configuration formats must emit stable dot-separated paths; arrays and array tables use `[]` instead of numeric indexes, for example `server.port`, `containers[].name`, and `bin[].name`.
+Configuration, build, and template grammars are registered under the code configuration module rather than runtime configuration. The supported surface includes Markdown, XML, Bazel/Starlark, Make, CMake, Dockerfile/Containerfile, Java properties, TOML, INI/`.conf`, YAML, JSON, Go module files, Ninja, Jinja2, and Go templates. These formats emit ordinary file, symbol, reference, import, dependency, feature-flag, and chunk facts so query APIs do not need a separate schema for configuration search. Hierarchical configuration formats must emit stable dot-separated paths; arrays and array tables use `[]` instead of numeric indexes, for example `server.port`, `containers[].name`, and `bin[].name`.
+
+Structured documentation and configuration files combine Tree-sitter AST extraction with product rules. Tree-sitter identifies Markdown headings, link definitions, inline links, JSON pair/array nodes, and INI section/setting nodes with ranges and error nodes; product rules normalize JSON arrays into `[]` paths, join INI sections and settings into dot-separated names, filter external or anchor-only Markdown links, and write local Markdown links as unresolved import metadata. Markdown and configuration files must keep a file-level chunk even when symbol-level chunks exist so body text, config values, and local parse failures remain retrievable through BM25/hybrid search.
 
 Parser implementation must keep language-specific rules under cohesive language directories. Node-kind classification, language-specific import extraction, and C/C++ manual recovery belong under `src/relay_knowledge/code/parser/languages/<language>/`; shared parsing flow, syntax helpers, text validation, dependency manifest parsing, and chunk construction remain in parser-level modules.
 

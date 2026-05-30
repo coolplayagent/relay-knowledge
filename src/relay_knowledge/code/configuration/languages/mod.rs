@@ -5,7 +5,6 @@ pub(super) mod go_template;
 pub(super) mod jinja;
 pub(super) mod json;
 pub(super) mod make;
-pub(super) mod markdown;
 pub(super) mod ninja;
 pub(super) mod properties;
 pub(super) mod starlark;

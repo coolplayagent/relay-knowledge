@@ -34,7 +34,6 @@ pub(super) fn structured_facts(
     let mut definitions = Vec::new();
     let mut references = Vec::new();
     match language_id {
-        "markdown" => languages::markdown::facts(content, &mut definitions),
         "xml" => languages::xml::facts(content, &mut definitions),
         "starlark" => languages::starlark::facts(path, content, &mut definitions, &mut references),
         "make" => languages::make::facts(content, &mut definitions, &mut references),

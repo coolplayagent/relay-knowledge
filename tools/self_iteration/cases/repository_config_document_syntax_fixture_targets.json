@@ -1,0 +1,74 @@
+{
+  "repositories": {
+    "config_document_syntax_fixture": {
+      "generated_fixture": "config_document_syntax_v1",
+      "alias": "config-document-syntax-fixture-self-iteration",
+      "ref": "HEAD",
+      "scope": "all",
+      "path_filters": [],
+      "language_filters": [],
+      "index_budget_ms": 15000,
+      "register_index_budget_ms": 18000,
+      "query_p50_budget_ms": 90,
+      "query_p95_budget_ms": 200
+    }
+  },
+  "query_cases": [
+    {
+      "id": "config_document_syntax_conf_definition",
+      "repository": "config_document_syntax_fixture",
+      "kind": "definition",
+      "query": "server.enabled",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["config/service.conf"],
+      "language_filters": ["ini"],
+      "expected": [{"path": "config/service.conf", "excerpt_contains": "enabled=true"}],
+      "case_group": "config_document_tree_sitter_syntax"
+    },
+    {
+      "id": "config_document_syntax_markdown_heading",
+      "repository": "config_document_syntax_fixture",
+      "kind": "definition",
+      "query": "Install Notes",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["README.md"],
+      "language_filters": ["markdown"],
+      "expected": [{"path": "README.md", "excerpt_contains": "Install Notes"}],
+      "case_group": "config_document_tree_sitter_syntax"
+    },
+    {
+      "id": "config_document_syntax_markdown_import",
+      "repository": "config_document_syntax_fixture",
+      "kind": "imports",
+      "query": "docs/reference.md",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["README.md"],
+      "language_filters": ["markdown"],
+      "expected": [{"path": "README.md", "excerpt_contains": "docs/reference.md"}],
+      "case_group": "config_document_tree_sitter_syntax"
+    },
+    {
+      "id": "config_document_syntax_json_array_path",
+      "repository": "config_document_syntax_fixture",
+      "kind": "definition",
+      "query": "containers[].name",
+      "objective": "competitive_capability",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 2,
+      "path_filters": ["config/runtime.json"],
+      "language_filters": ["json"],
+      "expected": [{"path": "config/runtime.json", "excerpt_contains": "\"name\": \"app\""}],
+      "case_group": "config_document_tree_sitter_syntax"
+    }
+  ]
+}
