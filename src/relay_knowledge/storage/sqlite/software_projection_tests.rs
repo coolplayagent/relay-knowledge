@@ -145,7 +145,7 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
             .expect("selector"),
         SoftwareGlobalKind::Build,
         crate::domain::FreshnessPolicy::AllowStale,
-        20,
+        50,
     )
     .expect("request should validate");
     let build_projection = projection(&mut connection, build_request).expect("scope should load");
@@ -163,6 +163,22 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
             .build_targets
             .iter()
             .any(|target| target.ecosystem == "rust" && target.kind == "package")
+    );
+    assert!(
+        build_projection
+            .build_targets
+            .iter()
+            .any(|target| target.ecosystem == "maven"
+                && target.kind == "project"
+                && target.name == "com.acme:relay-service:1.0.0")
+    );
+    assert!(
+        build_projection
+            .build_targets
+            .iter()
+            .any(|target| target.ecosystem == "maven"
+                && target.kind == "goal"
+                && target.name == "compiler:compile")
     );
 
     let iac_request = SoftwareGlobalRequest::new(
@@ -210,6 +226,48 @@ fn projection_materializes_build_iac_and_design_slices_from_indexed_chunks() {
             .design_elements
             .iter()
             .any(|element| element.element_kind == "module" && element.name == "relay-core")
+    );
+}
+
+#[test]
+fn projection_preserves_maven_build_targets_when_pom_chunk_is_truncated() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    insert_existing_maven_build_target(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_chunks (
+                repository_id, source_scope, chunk_id, file_id, path, language_id,
+                content, line_start, byte_start, byte_end
+            ) VALUES ('repo', 'scope-1', 'chunk-pom', 'file-pom', 'pom.xml', 'xml',
+                '<project><modelVersion>4.0.0</modelVersion>', 1, 0, 9000)",
+            [],
+        )
+        .expect("truncated pom chunk should seed");
+
+    let refreshed =
+        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    assert!(
+        refreshed
+            .build_targets
+            .iter()
+            .any(|target| target.ecosystem == "maven" && target.name == "com.acme:existing:1.0.0"),
+        "truncated POM refresh should preserve previous Maven build targets: {:?}",
+        refreshed.build_targets
+    );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM software_build_targets WHERE source_scope = 'scope-1'
+                 AND ecosystem = 'maven'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .expect("maven target count should load"),
+        1
     );
 }
 
@@ -319,7 +377,10 @@ fn create_test_schema(connection: &Connection) {
                 path TEXT NOT NULL,
                 language_id TEXT NOT NULL,
                 content TEXT NOT NULL,
-                line_start INTEGER NOT NULL
+                line_start INTEGER NOT NULL,
+                byte_start INTEGER NOT NULL DEFAULT 0,
+                byte_end INTEGER NOT NULL DEFAULT 0,
+                symbol_snapshot_id TEXT
             );
             CREATE TABLE code_repository_feature_flags (
                 repository_id TEXT NOT NULL,
@@ -430,6 +491,25 @@ fn seed_scope(connection: &Connection) {
             .expect("javascript import should insert");
 }
 
+fn insert_existing_maven_build_target(connection: &Connection) {
+    connection
+        .execute(
+            "
+            INSERT INTO software_build_targets (
+                target_id, repository_id, source_scope, ecosystem, language_id, name, kind,
+                command, output_hint, source_kind, evidence_path, evidence_line_start,
+                evidence_line_end, confidence_basis_points, created_graph_version
+            ) VALUES (
+                'maven-existing', 'repo', 'scope-1', 'maven', 'java',
+                'com.acme:existing:1.0.0', 'project', 'mvn package',
+                'target/', 'pom.xml', 'pom.xml', 1, 1, 9000, 1
+            )
+            ",
+            [],
+        )
+        .expect("existing Maven build target should insert");
+}
+
 fn seed_lifecycle_chunks(connection: &Connection) {
     insert_chunk(
         connection,
@@ -446,6 +526,33 @@ fn seed_lifecycle_chunks(connection: &Connection) {
         "json",
         1,
         "{\n  \"name\": \"relay-web\",\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest\"\n  }\n}\n",
+    );
+    insert_chunk(
+        connection,
+        "chunk-pom",
+        "pom.xml",
+        "xml",
+        1,
+        r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>relay-service</artifactId>
+  <version>1.0.0</version>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>compile</id>
+            <phase>compile</phase>
+            <goals><goal>compile</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>"#,
     );
     insert_chunk(
         connection,

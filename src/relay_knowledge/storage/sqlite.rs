@@ -15,6 +15,7 @@ mod code_graph;
 mod file_index;
 mod helpers;
 mod indexing;
+mod maven;
 mod operations;
 mod read_pool;
 mod retrieval;
