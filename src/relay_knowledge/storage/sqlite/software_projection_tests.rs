@@ -30,6 +30,7 @@ fn projection_filters_rows_when_serving_broader_scope() {
         dependency_projection.components[0].evidence_path,
         "crates/core/Cargo.toml"
     );
+    assert!(dependency_projection.dependency_usages.is_empty());
 
     let rust_dependencies = SoftwareGlobalRequest::new(
         crate::domain::CodeRepositorySelector::new(
@@ -58,6 +59,7 @@ fn projection_filters_rows_when_serving_broader_scope() {
             .iter()
             .any(|component| component.name == "react")
     );
+    assert!(rust_projection.dependency_usages.is_empty());
 
     let rust_sdk = SoftwareGlobalRequest::new(
         crate::domain::CodeRepositorySelector::new(
@@ -74,6 +76,54 @@ fn projection_filters_rows_when_serving_broader_scope() {
     .expect("request should validate");
     let projection = projection(&mut connection, rust_sdk).expect("scope should load");
     assert!(projection.sdk_usages.is_empty());
+}
+
+#[test]
+fn projection_links_declared_dependencies_to_import_usage() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let request = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Dependencies,
+        crate::domain::FreshnessPolicy::AllowStale,
+        10,
+    )
+    .expect("request should validate");
+    let full_projection = projection(&mut connection, request).expect("scope should load");
+
+    assert!(
+        full_projection
+            .dependency_usages
+            .iter()
+            .any(|usage| usage.package_name == "react"
+                && usage.module == "import React from \"react\";"
+                && usage.evidence_path == "src/app.js")
+    );
+    assert!(
+        full_projection
+            .dependency_usages
+            .iter()
+            .all(|usage| usage.package_name != "securec")
+    );
+
+    let limited = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Dependencies,
+        crate::domain::FreshnessPolicy::AllowStale,
+        3,
+    )
+    .expect("request should validate");
+    let limited_projection = projection(&mut connection, limited).expect("scope should load");
+    assert_eq!(
+        limited_projection.components.len() + limited_projection.dependency_usages.len(),
+        3
+    );
 }
 
 #[test]
@@ -140,7 +190,8 @@ fn create_test_schema(connection: &Connection) {
                 language_id TEXT NOT NULL,
                 path TEXT NOT NULL,
                 line_start INTEGER NOT NULL,
-                line_end INTEGER NOT NULL
+                line_end INTEGER NOT NULL,
+                excerpt TEXT NOT NULL
             );
             CREATE TABLE code_repository_files (
                 repository_id TEXT NOT NULL,
@@ -193,8 +244,8 @@ fn seed_scope(connection: &Connection) {
             "INSERT INTO code_repository_dependencies (
                 repository_id, source_scope, ecosystem, package_name, requirement,
                 resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                path, line_start, line_end
-            ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'Cargo.toml', 7, 7)",
+                path, line_start, line_end, excerpt
+            ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'Cargo.toml', 7, 7, 'serde = \"1\"')",
             [],
         )
         .expect("manifest dependency should insert");
@@ -203,8 +254,8 @@ fn seed_scope(connection: &Connection) {
             "INSERT INTO code_repository_dependencies (
                 repository_id, source_scope, ecosystem, package_name, requirement,
                 resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                path, line_start, line_end
-            ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'crates/core/Cargo.toml', 9, 9)",
+                path, line_start, line_end, excerpt
+            ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'crates/core/Cargo.toml', 9, 9, 'serde = \"1\"')",
             [],
         )
         .expect("duplicate manifest dependency should insert");
@@ -213,8 +264,8 @@ fn seed_scope(connection: &Connection) {
             "INSERT INTO code_repository_dependencies (
                 repository_id, source_scope, ecosystem, package_name, requirement,
                 resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                path, line_start, line_end
-            ) VALUES ('repo', 'scope-1', 'npm', 'react', '18', NULL, 'dependencies', 'manifest', 0, 'javascript', 'package.json', 11, 11)",
+                path, line_start, line_end, excerpt
+            ) VALUES ('repo', 'scope-1', 'npm', 'react', '18', NULL, 'dependencies', 'manifest', 0, 'javascript', 'package.json', 11, 11, '\"react\": \"18\"')",
             [],
         )
         .expect("javascript dependency should insert");
@@ -226,6 +277,12 @@ fn seed_scope(connection: &Connection) {
         .expect("file should insert");
     connection
         .execute(
+            "INSERT INTO code_repository_files (repository_id, source_scope, file_id, path, language_id) VALUES ('repo', 'scope-1', 'file-2', 'src/app.js', 'javascript')",
+            [],
+        )
+        .expect("javascript file should insert");
+    connection
+        .execute(
             "INSERT INTO code_repository_imports (
                 repository_id, source_scope, file_id, path, module, target_hint,
                 resolution_state, confidence_basis_points, line_start, line_end
@@ -233,6 +290,15 @@ fn seed_scope(connection: &Connection) {
             [],
         )
         .expect("import should insert");
+    connection
+        .execute(
+            "INSERT INTO code_repository_imports (
+                repository_id, source_scope, file_id, path, module, target_hint,
+                resolution_state, confidence_basis_points, line_start, line_end
+            ) VALUES ('repo', 'scope-1', 'file-2', 'src/app.js', 'import React from \"react\";', 'react', 'unresolved', 9000, 1, 1)",
+            [],
+        )
+        .expect("javascript import should insert");
 }
 
 fn seed_alias_collision_scope(connection: &Connection) {
@@ -262,8 +328,8 @@ fn seed_alias_collision_scope(connection: &Connection) {
             "INSERT INTO code_repository_dependencies (
                 repository_id, source_scope, ecosystem, package_name, requirement,
                 resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                path, line_start, line_end
-            ) VALUES ('core', 'scope-core', 'cargo', 'core-package', '1', NULL, 'normal', 'manifest', 0, 'rust', 'Cargo.toml', 7, 7)",
+                path, line_start, line_end, excerpt
+            ) VALUES ('core', 'scope-core', 'cargo', 'core-package', '1', NULL, 'normal', 'manifest', 0, 'rust', 'Cargo.toml', 7, 7, 'core-package = \"1\"')",
             [],
         )
         .expect("colliding dependency should insert");

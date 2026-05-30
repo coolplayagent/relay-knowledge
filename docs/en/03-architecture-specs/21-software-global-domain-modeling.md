@@ -108,6 +108,7 @@ If these constraints are missing, generation entry points must expose the gap as
 The first foundation slice remains bounded by repository snapshot/source scope and projects existing code-index facts into a software global read model:
 
 - `software_components` is derived from `code_repository_dependencies`, separates manifest `declared` and lockfile `locked` relationships, and preserves ecosystem, package name, requirement, resolved version, dependency group, evidence path, and line range.
+- `software_dependency_usages` links declared dependency components to matching code/config import evidence when the module root matches the package identity, preserving import `resolution_state`, `target_hint`, evidence path, and confidence without resolving unauthorized package source.
 - `software_sdk_usages` is derived from unresolved, ambiguous, or external `code_repository_imports` so SDK/API-surface usage candidates retain `resolution_state` and `target_hint` without resolving unauthorized external source.
 - `software_global_status` records projected graph version, stale state, component count, SDK usage count, and the last projection error for each source scope.
 - CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, or the full repository.

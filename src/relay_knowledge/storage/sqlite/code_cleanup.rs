@@ -21,6 +21,7 @@ pub(super) fn delete_scope_index(
         "code_repository_files",
         "code_repository_search",
         "software_components",
+        "software_dependency_usages",
         "software_sdk_usages",
         "software_global_status",
     ] {
@@ -170,6 +171,7 @@ mod tests {
         "code_repository_symbols",
         "code_repository_files",
         "software_components",
+        "software_dependency_usages",
         "software_sdk_usages",
         "software_global_status",
     ];

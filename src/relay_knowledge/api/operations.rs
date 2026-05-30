@@ -17,8 +17,9 @@ use crate::{
         IndexKind, IndexStatus, LayoutRegion, ProposalConflictRecord, ProposalRecord,
         ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
-        ServiceManagerAction, ServiceOperatorStatus, SoftwareComponent, SoftwareGlobalRequest,
-        SoftwareGlobalStatus, SoftwareSdkUsage, WorkerKind, WorkerStatus, WorkerTaskRecord,
+        ServiceManagerAction, ServiceOperatorStatus, SoftwareComponent, SoftwareDependencyUsage,
+        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareSdkUsage, WorkerKind, WorkerStatus,
+        WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -772,6 +773,7 @@ pub struct SoftwareGlobalResponse {
     pub request: SoftwareGlobalRequest,
     pub status: SoftwareGlobalStatus,
     pub components: Vec<SoftwareComponent>,
+    pub dependency_usages: Vec<SoftwareDependencyUsage>,
     pub sdk_usages: Vec<SoftwareSdkUsage>,
 }
 

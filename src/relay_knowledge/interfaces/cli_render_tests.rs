@@ -119,9 +119,10 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     "stale": false,
                 },
                 "components": [{"component_id": "component:1"}],
+                "dependency_usages": [{"usage_id": "dependency_usage:1"}],
                 "sdk_usages": [{"usage_id": "sdk_usage:1"}, {"usage_id": "sdk_usage:2"}],
             }),
-            "software scope=scope-1 components=1 sdk_usages=2 stale=false\n",
+            "software scope=scope-1 components=1 dependency_usages=1 sdk_usages=2 stale=false\n",
         ),
         (
             "setup.doctor",

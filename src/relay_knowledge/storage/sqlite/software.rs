@@ -3,15 +3,21 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::V
 use crate::{
     domain::{
         GraphVersion, RepositoryCodeRange, SoftwareComponent, SoftwareComponentInput,
-        SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus,
-        SoftwareSdkUsage, SoftwareSdkUsageInput,
+        SoftwareDependencyUsage, SoftwareGlobalKind, SoftwareGlobalProjection,
+        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareSdkUsage, SoftwareSdkUsageInput,
     },
     storage::StorageError,
 };
 
-use super::super::current_graph_version;
-use super::code_query_scope;
+use super::{super::current_graph_version, code_query_scope};
 
+#[path = "software/dependency_usage.rs"]
+mod dependency_usage;
+type ProjectionSlices = (
+    Vec<SoftwareComponent>,
+    Vec<SoftwareDependencyUsage>,
+    Vec<SoftwareSdkUsage>,
+);
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
@@ -67,7 +73,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         ",
     )?;
 
-    Ok(())
+    dependency_usage::initialize_schema(connection)
 }
 
 pub(super) fn refresh_projection(
@@ -84,10 +90,21 @@ pub(super) fn refresh_projection(
         "DELETE FROM software_sdk_usages WHERE source_scope = ?1",
         params![source_scope],
     )?;
+    dependency_usage::delete_scope(&transaction, source_scope)?;
 
     let components = dependency_components(&transaction, source_scope, graph_version)?;
     for component in &components {
         insert_component(&transaction, component)?;
+    }
+
+    let dependency_usages = dependency_usage::derive_dependency_usages(
+        &transaction,
+        source_scope,
+        graph_version,
+        &components,
+    )?;
+    for usage in &dependency_usages {
+        dependency_usage::insert_usage(&transaction, usage)?;
     }
 
     let sdk_usages = unresolved_sdk_usages(&transaction, source_scope, graph_version)?;
@@ -112,6 +129,7 @@ pub(super) fn refresh_projection(
     Ok(SoftwareGlobalProjection {
         status,
         components,
+        dependency_usages,
         sdk_usages,
     })
 }
@@ -142,34 +160,51 @@ pub(super) fn projection_for_scope(
             sdk_usage_count: 0,
             last_error: Some("software global projection has not been refreshed".to_owned()),
         });
-    let components = match request.kind {
-        SoftwareGlobalKind::Dependencies | SoftwareGlobalKind::All => {
-            components_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::Sdks => Vec::new(),
-    };
-    let sdk_usages = match request.kind {
-        SoftwareGlobalKind::Sdks => {
-            sdk_usages_for_scope(connection, source_scope, &request, request.limit)?
-        }
-        SoftwareGlobalKind::All => {
-            let remaining = request.limit.saturating_sub(components.len());
-            if remaining == 0 {
-                Vec::new()
-            } else {
-                sdk_usages_for_scope(connection, source_scope, &request, remaining)?
-            }
-        }
-        SoftwareGlobalKind::Dependencies => Vec::new(),
-    };
+    let (components, dependency_usages, sdk_usages) =
+        projection_slices(connection, source_scope, &request)?;
 
     Ok(SoftwareGlobalProjection {
         status,
         components,
+        dependency_usages,
         sdk_usages,
     })
 }
-
+fn projection_slices(
+    connection: &Connection,
+    source_scope: &str,
+    request: &SoftwareGlobalRequest,
+) -> Result<ProjectionSlices, StorageError> {
+    match request.kind {
+        SoftwareGlobalKind::Dependencies => {
+            let components =
+                components_for_scope(connection, source_scope, request, request.limit)?;
+            let remaining = request.limit.saturating_sub(components.len());
+            let dependency_usages =
+                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
+            Ok((components, dependency_usages, Vec::new()))
+        }
+        SoftwareGlobalKind::Sdks => Ok((
+            Vec::new(),
+            Vec::new(),
+            sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
+        )),
+        SoftwareGlobalKind::All => {
+            let components =
+                components_for_scope(connection, source_scope, request, request.limit)?;
+            let remaining = request.limit.saturating_sub(components.len());
+            let dependency_usages =
+                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
+            let remaining = remaining.saturating_sub(dependency_usages.len());
+            let sdk_usages = if remaining == 0 {
+                Vec::new()
+            } else {
+                sdk_usages_for_scope(connection, source_scope, request, remaining)?
+            };
+            Ok((components, dependency_usages, sdk_usages))
+        }
+    }
+}
 fn dependency_components(
     connection: &Connection,
     source_scope: &str,

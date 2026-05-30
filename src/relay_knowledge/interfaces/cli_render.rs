@@ -248,11 +248,12 @@ where
                 .unwrap_or("unknown")
         ),
         "code.repo.software" => format!(
-            "software scope={} components={} sdk_usages={} stale={}",
+            "software scope={} components={} dependency_usages={} sdk_usages={} stale={}",
             value["status"]["source_scope"]
                 .as_str()
                 .unwrap_or("unknown"),
             value["components"].as_array().map_or(0, Vec::len),
+            value["dependency_usages"].as_array().map_or(0, Vec::len),
             value["sdk_usages"].as_array().map_or(0, Vec::len),
             value["status"]["stale"].as_bool().unwrap_or(true)
         ),
