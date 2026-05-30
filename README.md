@@ -89,6 +89,9 @@ This skill-over-CLI path is separate from MCP/ACP protocol access.
   refresh, worktree overlay indexing, symbol/reference/chunk retrieval, impact
   analysis, and thin multi-repository `repo-set` overlay queries without
   copying base facts.
+- Software global projection for repository-scoped files, documentation topics,
+  config/code relationships, dependencies, and unresolved SDK/API usage, exposed
+  through `repo software` without query-time repository scans.
 - Local file-location indexing without Everything, Spotlight, Windows Search,
   locate, or other external search software: explicitly scan authorized roots
   and use SQLite/FTS5 to quickly find files by name, path, extension, and
@@ -241,6 +244,7 @@ relay-knowledge repo update relay-knowledge --base main --head HEAD --format jso
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
+relay-knowledge repo software relay-knowledge --kind relationships --ref HEAD --format json
 relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 --format json
 relay-knowledge repo-set remove workspace relay-knowledge --format json

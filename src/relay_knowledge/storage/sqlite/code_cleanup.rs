@@ -23,6 +23,9 @@ pub(super) fn delete_scope_index(
         "software_components",
         "software_dependency_usages",
         "software_sdk_usages",
+        "software_files",
+        "software_topics",
+        "software_relationships",
         "software_global_status",
     ] {
         transaction.execute(
@@ -173,6 +176,9 @@ mod tests {
         "software_components",
         "software_dependency_usages",
         "software_sdk_usages",
+        "software_files",
+        "software_topics",
+        "software_relationships",
         "software_global_status",
     ];
 

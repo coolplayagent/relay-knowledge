@@ -1,6 +1,7 @@
 mod calls;
 mod detection;
 mod key_values;
+mod knowledge_map;
 mod languages;
 mod model;
 mod source;
@@ -50,6 +51,7 @@ pub(super) fn structured_facts(
         }
         _ => {}
     }
+    knowledge_map::facts(path, language_id, content, &mut definitions);
 
     for definition in &mut definitions {
         if definition.name.is_empty() {

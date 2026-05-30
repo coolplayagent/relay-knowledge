@@ -103,6 +103,18 @@ relay-knowledge repo feature-flags repo --query checkout --path src --limit 20 -
 
 Responses are grouped by feature flag and include configuration source, `defines_config`, `reads_config`, or `guards_code` relationships, source ranges, confidence, related symbols, and excerpts. The indexer recognizes static code/config evidence from environment access, config/settings reads, boolean config facts from supported configuration formats, and common OpenFeature, LaunchDarkly, and Unleash evaluation calls. Provider control-plane state such as rollout strategies, segments, and variants is not synchronized in this path. The query reads only the feature-flag table and FTS documents for the selected indexed scope; it does not recursively grep the repository at query time. Re-run `repo index` or `repo update` after adding flags or changing extraction rules.
 
+### Software Global Projection
+
+`repo software` exposes repository-scoped software graph projections for dependencies, unresolved SDK/API usage, whole-file nodes, documentation topics, and cross-domain relationships:
+
+```bash
+relay-knowledge repo software repo --kind files --ref HEAD --format json
+relay-knowledge repo software repo --kind topics --ref HEAD --format json
+relay-knowledge repo software repo --kind relationships --ref HEAD --format json
+```
+
+The projection connects Markdown/spec headings and `.knowledge/knowledge-map.yaml` topics with documentation files, dependency manifests with package components, unresolved imports with SDK/API usage candidates, and config/feature-flag facts with code or config files. It reads committed projection tables for the selected indexed scope and does not scan package caches, SDK directories, unindexed external source, or whole-repository docs at query time.
+
 ### Multi-Repository Repository Set Queries
 
 Multi-repository query uses an explicit `repo-set` overlay. Index each member repository as a real single-repository snapshot first, then create a set and point members at those snapshots:

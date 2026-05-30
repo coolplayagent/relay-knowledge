@@ -3,21 +3,20 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::V
 use crate::{
     domain::{
         GraphVersion, RepositoryCodeRange, SoftwareComponent, SoftwareComponentInput,
-        SoftwareDependencyUsage, SoftwareGlobalKind, SoftwareGlobalProjection,
-        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareSdkUsage, SoftwareSdkUsageInput,
+        SoftwareGlobalKind, SoftwareGlobalProjection, SoftwareGlobalRequest, SoftwareGlobalStatus,
+        SoftwareSdkUsage, SoftwareSdkUsageInput,
     },
     storage::StorageError,
 };
 
 use super::{super::current_graph_version, code_query_scope};
 
+const SOFTWARE_PROJECTION_SCHEMA_VERSION: i64 = 2;
+
 #[path = "software/dependency_usage.rs"]
 mod dependency_usage;
-type ProjectionSlices = (
-    Vec<SoftwareComponent>,
-    Vec<SoftwareDependencyUsage>,
-    Vec<SoftwareSdkUsage>,
-);
+#[path = "software_graph.rs"]
+mod software_graph;
 pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
         "
@@ -61,6 +60,60 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
         CREATE INDEX IF NOT EXISTS software_sdk_usages_scope
             ON software_sdk_usages(source_scope, language_id, module);
 
+        CREATE TABLE IF NOT EXISTS software_files (
+            software_file_id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            path TEXT NOT NULL,
+            language_id TEXT NOT NULL,
+            file_role TEXT NOT NULL,
+            parse_status TEXT NOT NULL,
+            created_graph_version INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS software_files_scope
+            ON software_files(source_scope, file_role, path);
+
+        CREATE INDEX IF NOT EXISTS software_files_scope_path
+            ON software_files(source_scope, path);
+
+        CREATE TABLE IF NOT EXISTS software_topics (
+            topic_id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            name TEXT NOT NULL,
+            topic_kind TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            line_start INTEGER NOT NULL,
+            line_end INTEGER NOT NULL,
+            created_graph_version INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS software_topics_scope
+            ON software_topics(source_scope, topic_kind, source_path);
+
+        CREATE TABLE IF NOT EXISTS software_relationships (
+            relationship_id TEXT PRIMARY KEY,
+            repository_id TEXT NOT NULL,
+            source_scope TEXT NOT NULL,
+            relationship_kind TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_kind TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            target_kind TEXT NOT NULL,
+            target_hint TEXT,
+            resolution_state TEXT NOT NULL,
+            confidence_basis_points INTEGER NOT NULL,
+            confidence_tier TEXT NOT NULL,
+            evidence_path TEXT NOT NULL,
+            evidence_line_start INTEGER NOT NULL,
+            evidence_line_end INTEGER NOT NULL,
+            created_graph_version INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS software_relationships_scope
+            ON software_relationships(source_scope, relationship_kind, evidence_path);
+
         CREATE TABLE IF NOT EXISTS software_global_status (
             source_scope TEXT PRIMARY KEY,
             repository_id TEXT NOT NULL,
@@ -68,10 +121,39 @@ pub(super) fn initialize_schema(connection: &Connection) -> Result<(), StorageEr
             stale INTEGER NOT NULL,
             component_count INTEGER NOT NULL,
             sdk_usage_count INTEGER NOT NULL,
+            file_count INTEGER NOT NULL DEFAULT 0,
+            topic_count INTEGER NOT NULL DEFAULT 0,
+            relationship_count INTEGER NOT NULL DEFAULT 0,
+            projection_schema_version INTEGER NOT NULL DEFAULT 2,
             last_error TEXT
         );
         ",
     )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "file_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "topic_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "relationship_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    super::super::schema_columns::ensure_column(
+        connection,
+        "software_global_status",
+        "projection_schema_version",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    mark_legacy_projection_schema_stale(connection)?;
 
     dependency_usage::initialize_schema(connection)
 }
@@ -88,6 +170,18 @@ pub(super) fn refresh_projection(
     )?;
     transaction.execute(
         "DELETE FROM software_sdk_usages WHERE source_scope = ?1",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "DELETE FROM software_files WHERE source_scope = ?1",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "DELETE FROM software_topics WHERE source_scope = ?1",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "DELETE FROM software_relationships WHERE source_scope = ?1",
         params![source_scope],
     )?;
     dependency_usage::delete_scope(&transaction, source_scope)?;
@@ -112,6 +206,14 @@ pub(super) fn refresh_projection(
         insert_sdk_usage(&transaction, usage)?;
     }
 
+    let file_count = software_graph::materialize_files(&transaction, source_scope, graph_version)?;
+
+    let topic_count =
+        software_graph::materialize_topics(&transaction, source_scope, graph_version)?;
+
+    let relationship_count =
+        software_graph::materialize_relationships(&transaction, source_scope, graph_version)?;
+
     let repository_id = repository_id_for_scope(&transaction, source_scope)?
         .unwrap_or_else(|| "unknown".to_owned());
     let status = SoftwareGlobalStatus {
@@ -121,6 +223,9 @@ pub(super) fn refresh_projection(
         stale: false,
         component_count: components.len(),
         sdk_usage_count: sdk_usages.len(),
+        file_count,
+        topic_count,
+        relationship_count,
         last_error: None,
     };
     upsert_status(&transaction, &status)?;
@@ -131,6 +236,9 @@ pub(super) fn refresh_projection(
         components,
         dependency_usages,
         sdk_usages,
+        files: Vec::new(),
+        topics: Vec::new(),
+        relationships: Vec::new(),
     })
 }
 
@@ -158,52 +266,142 @@ pub(super) fn projection_for_scope(
             stale: true,
             component_count: 0,
             sdk_usage_count: 0,
+            file_count: 0,
+            topic_count: 0,
+            relationship_count: 0,
             last_error: Some("software global projection has not been refreshed".to_owned()),
         });
-    let (components, dependency_usages, sdk_usages) =
-        projection_slices(connection, source_scope, &request)?;
+    let components = match request.kind {
+        SoftwareGlobalKind::Dependencies | SoftwareGlobalKind::All => {
+            components_for_scope(connection, source_scope, &request, request.limit)?
+        }
+        SoftwareGlobalKind::Sdks
+        | SoftwareGlobalKind::Files
+        | SoftwareGlobalKind::Topics
+        | SoftwareGlobalKind::Relationships => Vec::new(),
+    };
+    let dependency_usages = match request.kind {
+        SoftwareGlobalKind::Dependencies => {
+            let remaining = request.limit.saturating_sub(components.len());
+            dependency_usage::usages_for_scope(connection, source_scope, &request, remaining)?
+        }
+        SoftwareGlobalKind::All => {
+            let remaining = request.limit.saturating_sub(components.len());
+            if remaining == 0 {
+                Vec::new()
+            } else {
+                dependency_usage::usages_for_scope(connection, source_scope, &request, remaining)?
+            }
+        }
+        SoftwareGlobalKind::Sdks
+        | SoftwareGlobalKind::Files
+        | SoftwareGlobalKind::Topics
+        | SoftwareGlobalKind::Relationships => Vec::new(),
+    };
+    let sdk_usages = match request.kind {
+        SoftwareGlobalKind::Sdks => {
+            sdk_usages_for_scope(connection, source_scope, &request, request.limit)?
+        }
+        SoftwareGlobalKind::All => {
+            let remaining = request
+                .limit
+                .saturating_sub(components.len())
+                .saturating_sub(dependency_usages.len());
+            if remaining == 0 {
+                Vec::new()
+            } else {
+                sdk_usages_for_scope(connection, source_scope, &request, remaining)?
+            }
+        }
+        SoftwareGlobalKind::Dependencies
+        | SoftwareGlobalKind::Files
+        | SoftwareGlobalKind::Topics
+        | SoftwareGlobalKind::Relationships => Vec::new(),
+    };
+    let files = match request.kind {
+        SoftwareGlobalKind::Files => {
+            software_graph::files_for_scope(connection, source_scope, &request, request.limit)?
+        }
+        SoftwareGlobalKind::All => {
+            let remaining = request
+                .limit
+                .saturating_sub(components.len())
+                .saturating_sub(dependency_usages.len())
+                .saturating_sub(sdk_usages.len());
+            if remaining == 0 {
+                Vec::new()
+            } else {
+                software_graph::files_for_scope(connection, source_scope, &request, remaining)?
+            }
+        }
+        SoftwareGlobalKind::Dependencies
+        | SoftwareGlobalKind::Sdks
+        | SoftwareGlobalKind::Topics
+        | SoftwareGlobalKind::Relationships => Vec::new(),
+    };
+    let topics = match request.kind {
+        SoftwareGlobalKind::Topics => {
+            software_graph::topics_for_scope(connection, source_scope, &request, request.limit)?
+        }
+        SoftwareGlobalKind::All => {
+            let remaining = request
+                .limit
+                .saturating_sub(components.len())
+                .saturating_sub(dependency_usages.len())
+                .saturating_sub(sdk_usages.len())
+                .saturating_sub(files.len());
+            if remaining == 0 {
+                Vec::new()
+            } else {
+                software_graph::topics_for_scope(connection, source_scope, &request, remaining)?
+            }
+        }
+        SoftwareGlobalKind::Dependencies
+        | SoftwareGlobalKind::Sdks
+        | SoftwareGlobalKind::Files
+        | SoftwareGlobalKind::Relationships => Vec::new(),
+    };
+    let relationships = match request.kind {
+        SoftwareGlobalKind::Relationships => software_graph::relationships_for_scope(
+            connection,
+            source_scope,
+            &request,
+            request.limit,
+        )?,
+        SoftwareGlobalKind::All => {
+            let remaining = request
+                .limit
+                .saturating_sub(components.len())
+                .saturating_sub(dependency_usages.len())
+                .saturating_sub(sdk_usages.len())
+                .saturating_sub(files.len())
+                .saturating_sub(topics.len());
+            if remaining == 0 {
+                Vec::new()
+            } else {
+                software_graph::relationships_for_scope(
+                    connection,
+                    source_scope,
+                    &request,
+                    remaining,
+                )?
+            }
+        }
+        SoftwareGlobalKind::Dependencies
+        | SoftwareGlobalKind::Sdks
+        | SoftwareGlobalKind::Files
+        | SoftwareGlobalKind::Topics => Vec::new(),
+    };
 
     Ok(SoftwareGlobalProjection {
         status,
         components,
         dependency_usages,
         sdk_usages,
+        files,
+        topics,
+        relationships,
     })
-}
-fn projection_slices(
-    connection: &Connection,
-    source_scope: &str,
-    request: &SoftwareGlobalRequest,
-) -> Result<ProjectionSlices, StorageError> {
-    match request.kind {
-        SoftwareGlobalKind::Dependencies => {
-            let components =
-                components_for_scope(connection, source_scope, request, request.limit)?;
-            let remaining = request.limit.saturating_sub(components.len());
-            let dependency_usages =
-                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
-            Ok((components, dependency_usages, Vec::new()))
-        }
-        SoftwareGlobalKind::Sdks => Ok((
-            Vec::new(),
-            Vec::new(),
-            sdk_usages_for_scope(connection, source_scope, request, request.limit)?,
-        )),
-        SoftwareGlobalKind::All => {
-            let components =
-                components_for_scope(connection, source_scope, request, request.limit)?;
-            let remaining = request.limit.saturating_sub(components.len());
-            let dependency_usages =
-                dependency_usage::usages_for_scope(connection, source_scope, request, remaining)?;
-            let remaining = remaining.saturating_sub(dependency_usages.len());
-            let sdk_usages = if remaining == 0 {
-                Vec::new()
-            } else {
-                sdk_usages_for_scope(connection, source_scope, request, remaining)?
-            };
-            Ok((components, dependency_usages, sdk_usages))
-        }
-    }
 }
 fn dependency_components(
     connection: &Connection,
@@ -373,15 +571,20 @@ fn upsert_status(
         "
         INSERT INTO software_global_status (
             source_scope, repository_id, projected_graph_version, stale,
-            component_count, sdk_usage_count, last_error
+            component_count, sdk_usage_count, file_count, topic_count,
+            relationship_count, projection_schema_version, last_error
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         ON CONFLICT(source_scope) DO UPDATE SET
             repository_id = excluded.repository_id,
             projected_graph_version = excluded.projected_graph_version,
             stale = excluded.stale,
             component_count = excluded.component_count,
             sdk_usage_count = excluded.sdk_usage_count,
+            file_count = excluded.file_count,
+            topic_count = excluded.topic_count,
+            relationship_count = excluded.relationship_count,
+            projection_schema_version = excluded.projection_schema_version,
             last_error = excluded.last_error
         ",
         params![
@@ -391,8 +594,30 @@ fn upsert_status(
             if status.stale { 1_i64 } else { 0_i64 },
             status.component_count,
             status.sdk_usage_count,
+            status.file_count,
+            status.topic_count,
+            status.relationship_count,
+            SOFTWARE_PROJECTION_SCHEMA_VERSION,
             status.last_error,
         ],
+    )?;
+
+    Ok(())
+}
+
+fn mark_legacy_projection_schema_stale(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        UPDATE software_global_status
+        SET stale = 1,
+            projection_schema_version = ?1,
+            last_error = COALESCE(
+                last_error,
+                'software global projection schema changed; refresh required'
+            )
+        WHERE projection_schema_version < ?1
+        ",
+        params![SOFTWARE_PROJECTION_SCHEMA_VERSION],
     )?;
 
     Ok(())
@@ -605,7 +830,8 @@ fn status_for_scope(
         .query_row(
             "
             SELECT repository_id, source_scope, projected_graph_version, stale,
-                   component_count, sdk_usage_count, last_error
+                   component_count, sdk_usage_count, file_count, topic_count,
+                   relationship_count, last_error
             FROM software_global_status
             WHERE source_scope = ?1
             ",
@@ -618,7 +844,10 @@ fn status_for_scope(
                     stale: row.get::<_, i64>(3)? != 0,
                     component_count: row.get(4)?,
                     sdk_usage_count: row.get(5)?,
-                    last_error: row.get(6)?,
+                    file_count: row.get(6)?,
+                    topic_count: row.get(7)?,
+                    relationship_count: row.get(8)?,
+                    last_error: row.get(9)?,
                 })
             },
         )
@@ -740,261 +969,5 @@ fn sdk_usage_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SoftwareSdkUs
 mod software_projection_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refresh_projection_materializes_dependencies_and_unresolved_imports() {
-        let mut connection = Connection::open_in_memory().expect("sqlite should open");
-        create_test_schema(&connection);
-        initialize_schema(&connection).expect("software schema should initialize");
-        seed_scope(&connection);
-
-        let projection =
-            refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
-
-        assert_eq!(projection.status.component_count, 3);
-        assert_eq!(projection.status.sdk_usage_count, 2);
-        assert!(projection.components.iter().any(
-            |component| component.name == "serde" && component.relationship_state == "declared"
-        ));
-        assert!(
-            projection
-                .components
-                .iter()
-                .any(|component| component.name == "serde"
-                    && component.relationship_state == "locked")
-        );
-        assert_eq!(
-            projection
-                .components
-                .iter()
-                .filter(|component| component.name == "serde"
-                    && component.relationship_state == "declared")
-                .count(),
-            2
-        );
-        assert_eq!(
-            projection.sdk_usages[0].target_hint.as_deref(),
-            Some("securec.h")
-        );
-    }
-
-    #[test]
-    fn projection_query_filters_kind_without_unrelated_graph_staleness() {
-        let mut connection = Connection::open_in_memory().expect("sqlite should open");
-        create_test_schema(&connection);
-        initialize_schema(&connection).expect("software schema should initialize");
-        seed_scope(&connection);
-        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
-        connection
-            .execute("UPDATE graph_state SET graph_version = 2 WHERE id = 1", [])
-            .expect("graph version should update");
-
-        let request = SoftwareGlobalRequest::new(
-            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
-                .expect("selector"),
-            SoftwareGlobalKind::Sdks,
-            crate::domain::FreshnessPolicy::AllowStale,
-            10,
-        )
-        .expect("request should validate");
-        let projection = projection(&mut connection, request).expect("projection should load");
-
-        assert!(!projection.status.stale);
-        assert!(projection.components.is_empty());
-        assert_eq!(projection.sdk_usages.len(), 2);
-    }
-
-    #[test]
-    fn projection_all_kind_keeps_combined_results_within_limit() {
-        let mut connection = Connection::open_in_memory().expect("sqlite should open");
-        create_test_schema(&connection);
-        initialize_schema(&connection).expect("software schema should initialize");
-        seed_scope(&connection);
-        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
-
-        let request = SoftwareGlobalRequest::new(
-            crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
-                .expect("selector"),
-            SoftwareGlobalKind::All,
-            crate::domain::FreshnessPolicy::AllowStale,
-            4,
-        )
-        .expect("request should validate");
-        let projection = projection(&mut connection, request).expect("projection should load");
-
-        assert_eq!(projection.components.len() + projection.sdk_usages.len(), 4);
-        assert_eq!(projection.components.len(), 3);
-        assert_eq!(projection.sdk_usages.len(), 1);
-    }
-
-    #[test]
-    fn projection_query_rejects_unindexed_refs() {
-        let mut connection = Connection::open_in_memory().expect("sqlite should open");
-        create_test_schema(&connection);
-        initialize_schema(&connection).expect("software schema should initialize");
-        seed_scope(&connection);
-        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
-
-        let missing_ref = SoftwareGlobalRequest::new(
-            crate::domain::CodeRepositorySelector::new(
-                "repo",
-                "missing-commit",
-                Vec::new(),
-                Vec::new(),
-            )
-            .expect("selector"),
-            SoftwareGlobalKind::All,
-            crate::domain::FreshnessPolicy::AllowStale,
-            10,
-        )
-        .expect("request should validate");
-        let missing_ref_error =
-            projection(&mut connection, missing_ref).expect_err("missing ref should fail");
-        assert!(
-            missing_ref_error
-                .to_string()
-                .contains("does not have an indexed software projection scope")
-        );
-    }
-
-    fn create_test_schema(connection: &Connection) {
-        connection
-            .execute_batch(
-                "
-                CREATE TABLE graph_state (id INTEGER PRIMARY KEY CHECK (id = 1), graph_version INTEGER NOT NULL);
-                INSERT INTO graph_state (id, graph_version) VALUES (1, 1);
-                CREATE TABLE code_repository_scopes (
-                    source_scope TEXT PRIMARY KEY,
-                    repository_id TEXT NOT NULL,
-                    resolved_commit_sha TEXT NOT NULL,
-                    path_filters_json TEXT NOT NULL,
-                    language_filters_json TEXT NOT NULL
-                );
-                CREATE TABLE code_repositories (
-                    repository_id TEXT PRIMARY KEY,
-                    alias TEXT NOT NULL,
-                    last_indexed_scope_id TEXT
-                );
-                CREATE TABLE code_repository_aliases (
-                    alias TEXT PRIMARY KEY,
-                    repository_id TEXT NOT NULL
-                );
-                CREATE TABLE code_repository_dependencies (
-                    repository_id TEXT NOT NULL,
-                    source_scope TEXT NOT NULL,
-                    ecosystem TEXT NOT NULL,
-                    package_name TEXT NOT NULL,
-                    requirement TEXT,
-                    resolved_version TEXT,
-                    dependency_group TEXT NOT NULL,
-                    source_kind TEXT NOT NULL,
-                    is_lockfile INTEGER NOT NULL,
-                    language_id TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    line_start INTEGER NOT NULL,
-                    line_end INTEGER NOT NULL
-                );
-                CREATE TABLE code_repository_files (
-                    repository_id TEXT NOT NULL,
-                    source_scope TEXT NOT NULL,
-                    file_id TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    language_id TEXT NOT NULL
-                );
-                CREATE TABLE code_repository_imports (
-                    repository_id TEXT NOT NULL,
-                    source_scope TEXT NOT NULL,
-                    file_id TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    module TEXT NOT NULL,
-                    target_hint TEXT,
-                    resolution_state TEXT NOT NULL,
-                    confidence_basis_points INTEGER NOT NULL,
-                    line_start INTEGER NOT NULL,
-                    line_end INTEGER NOT NULL
-                );
-                ",
-            )
-            .expect("test schema should initialize");
-    }
-
-    fn seed_scope(connection: &Connection) {
-        connection
-            .execute(
-                "INSERT INTO code_repository_scopes (
-                    source_scope, repository_id, resolved_commit_sha,
-                    path_filters_json, language_filters_json
-                ) VALUES ('scope-1', 'repo', 'commit-1', '[]', '[]')",
-                [],
-            )
-            .expect("scope should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repositories (repository_id, alias, last_indexed_scope_id) VALUES ('repo', 'core', 'scope-1')",
-                [],
-            )
-            .expect("repo should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_aliases (alias, repository_id) VALUES ('core', 'repo')",
-                [],
-            )
-            .expect("alias should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_dependencies (
-                    repository_id, source_scope, ecosystem, package_name, requirement,
-                    resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                    path, line_start, line_end
-                ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'Cargo.toml', 7, 7)",
-                [],
-            )
-            .expect("manifest dependency should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_dependencies (
-                    repository_id, source_scope, ecosystem, package_name, requirement,
-                    resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                    path, line_start, line_end
-                ) VALUES ('repo', 'scope-1', 'cargo', 'serde', '1', NULL, 'normal', 'manifest', 0, 'rust', 'crates/core/Cargo.toml', 9, 9)",
-                [],
-            )
-            .expect("duplicate manifest dependency should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_dependencies (
-                    repository_id, source_scope, ecosystem, package_name, requirement,
-                    resolved_version, dependency_group, source_kind, is_lockfile, language_id,
-                    path, line_start, line_end
-                ) VALUES ('repo', 'scope-1', 'cargo', 'serde', NULL, '1.0.0', 'normal', 'lockfile', 1, 'rust', 'Cargo.lock', 33, 33)",
-                [],
-            )
-            .expect("lock dependency should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_files (repository_id, source_scope, file_id, path, language_id) VALUES ('repo', 'scope-1', 'file-1', 'src/main.cc', 'cpp')",
-                [],
-            )
-            .expect("file should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_imports (
-                    repository_id, source_scope, file_id, path, module, target_hint,
-                    resolution_state, confidence_basis_points, line_start, line_end
-                ) VALUES ('repo', 'scope-1', 'file-1', 'src/main.cc', '#include <securec.h>', 'securec.h', 'unresolved', 2500, 3, 3)",
-                [],
-            )
-            .expect("import should insert");
-        connection
-            .execute(
-                "INSERT INTO code_repository_imports (
-                    repository_id, source_scope, file_id, path, module, target_hint,
-                    resolution_state, confidence_basis_points, line_start, line_end
-                ) VALUES ('repo', 'scope-1', 'file-1', 'src/main.cc', '#include <securec.h>', 'securec.h', 'unresolved', 2500, 9, 9)",
-                [],
-            )
-            .expect("repeated import should insert");
-    }
-}
+#[path = "software_tests.rs"]
+mod tests;

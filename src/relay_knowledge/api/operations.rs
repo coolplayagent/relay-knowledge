@@ -18,8 +18,8 @@ use crate::{
         ProposalState, RerankDiagnostics, RetrievalBackendStatus, RetrievalBudgetUsed,
         RetrievalHit, RetrievalMode, RetrievedContextPack, ServiceDefinitionPlan,
         ServiceManagerAction, ServiceOperatorStatus, SoftwareComponent, SoftwareDependencyUsage,
-        SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareSdkUsage, WorkerKind, WorkerStatus,
-        WorkerTaskRecord,
+        SoftwareFile, SoftwareGlobalRequest, SoftwareGlobalStatus, SoftwareRelationship,
+        SoftwareSdkUsage, SoftwareTopic, WorkerKind, WorkerStatus, WorkerTaskRecord,
     },
     storage::{GraphInspection, IndexCursor, IndexRefreshDiagnostics},
 };
@@ -775,6 +775,9 @@ pub struct SoftwareGlobalResponse {
     pub components: Vec<SoftwareComponent>,
     pub dependency_usages: Vec<SoftwareDependencyUsage>,
     pub sdk_usages: Vec<SoftwareSdkUsage>,
+    pub files: Vec<SoftwareFile>,
+    pub topics: Vec<SoftwareTopic>,
+    pub relationships: Vec<SoftwareRelationship>,
 }
 
 /// Repository-set creation response.

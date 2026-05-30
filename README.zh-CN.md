@@ -61,6 +61,7 @@ clawhub publish skills/relay-knowledge-cli \
 - 混合 GraphRAG 上下文包：包含 BM25、本地语义签名、本地哈希向量检索、图证据回退、schema 路径、时间/社区上下文、新鲜度元数据、截断状态和排序解释。
 - 结构化图事实：支持证据、实体、类型化关系、声明、事件、来源范围、置信度、图版本，以及已接受/提议的定位状态。
 - 代码仓库能力：支持仓库注册、tree-sitter 索引、全量和增量刷新、工作树覆盖索引、符号/引用/代码块检索、影响分析，以及不复制基础事实的多仓库 `repo-set` 薄覆盖查询。
+- 软件全域投影：按 repository scope 暴露文件整体节点、文档主题、配置/代码关系、依赖和 unresolved SDK/API 使用，`repo software` 读取投影表而不是查询时扫描仓库。
 - 本地文件定位索引：不依赖 Everything 等外部检索软件，显式扫描授权 roots，并用 SQLite/FTS5 快速按文件名、路径、扩展名和目录定位文件。
 - 有界索引刷新队列：支持持久租约、重试/死信、启动调和、过期诊断和作用域游标元数据。
 - 运维工作流：支持 worker 队列、确定性回退提案、人工提案接受、持久审计事件、静默更新操作员状态，以及平台服务管理器的服务定义生成。
@@ -171,6 +172,7 @@ relay-knowledge repo update relay-knowledge --base main --head HEAD --format jso
 relay-knowledge repo query relay-knowledge --query retry_policy --kind definition --ref HEAD --path src --language rust --freshness wait-until-fresh --limit 10 --format json
 relay-knowledge repo query relay-knowledge --query serde --kind sbom --ref HEAD --format json
 relay-knowledge repo feature-flags relay-knowledge --query checkout --ref HEAD --format json
+relay-knowledge repo software relay-knowledge --kind relationships --ref HEAD --format json
 relay-knowledge repo-set create workspace --format json
 relay-knowledge repo-set add workspace relay-knowledge --ref HEAD --priority 10 --format json
 relay-knowledge repo-set query workspace --query retry_policy --kind definition --format json

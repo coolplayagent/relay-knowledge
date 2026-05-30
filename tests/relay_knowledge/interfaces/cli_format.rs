@@ -207,11 +207,20 @@ fn binary_outputs_machine_readable_help() {
         .args(["help", "repo", "query", "--format", "json"])
         .output()
         .expect("binary should run");
+    let software = relay_command()
+        .env(RELAY_KNOWLEDGE_HOME, "")
+        .args(["help", "repo", "software", "--format", "json"])
+        .output()
+        .expect("binary should run");
 
     assert!(output.status.success());
+    assert!(software.status.success());
     assert!(output.stderr.is_empty());
+    assert!(software.stderr.is_empty());
 
     let value: Value = serde_json::from_slice(&output.stdout).expect("help JSON");
+    let software_value: Value =
+        serde_json::from_slice(&software.stdout).expect("software help JSON");
 
     assert_eq!(value["schema_version"], 2);
     assert_eq!(value["path"], serde_json::json!(["repo", "query"]));
@@ -229,6 +238,22 @@ fn binary_outputs_machine_readable_help() {
                     .expect("values")
                     .iter()
                     .any(|value| value == "definition"))
+    );
+    assert!(
+        software_value["options"]
+            .as_array()
+            .expect("software options")
+            .iter()
+            .any(|option| option["flag"] == "--kind"
+                && option["allowed_values"]
+                    == serde_json::json!([
+                        "dependencies",
+                        "sdks",
+                        "files",
+                        "topics",
+                        "relationships",
+                        "all"
+                    ]))
     );
 }
 

@@ -294,6 +294,60 @@ tokio = "1"
 }
 
 #[tokio::test]
+async fn software_projection_links_document_topics_config_and_code_files() {
+    let repo = FixtureRepo::create("code-software-doc-config");
+    repo.write(
+        "docs/runtime.md",
+        "# Runtime Configuration\n\n`payments.enabled` controls checkout rollout.\n",
+    );
+    repo.write("config/flags.yaml", "payments:\n  enabled: true\n");
+    repo.write(
+        "src/lib.rs",
+        "pub fn checkout_enabled(config: &Config) -> bool {\n    config.get_bool(\"payments.enabled\")\n}\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "document config software graph"]);
+    let service = service_with_memory_store().await;
+    register_fixture_repo(&service, &repo, Vec::new(), "register-software-doc-config").await;
+
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-software-doc-config"),
+        )
+        .await
+        .expect("doc/config scope should index");
+    let projection = software_projection(&service, "HEAD", FreshnessPolicy::WaitUntilFresh)
+        .await
+        .expect("software projection should load");
+
+    assert!(
+        projection
+            .files
+            .iter()
+            .any(|file| { file.path == "docs/runtime.md" && file.file_role == "documentation" })
+    );
+    assert!(
+        projection
+            .topics
+            .iter()
+            .any(|topic| topic.name == "Runtime Configuration")
+    );
+    assert!(projection.relationships.iter().any(|relationship| {
+        relationship.relationship_kind == "documents"
+            && relationship.evidence_path == "docs/runtime.md"
+    }));
+    assert!(projection.relationships.iter().any(|relationship| {
+        relationship.relationship_kind == "configures"
+            && relationship.target_hint.as_deref() == Some("payments.enabled")
+    }));
+}
+
+#[tokio::test]
 async fn moved_branch_requires_new_scope_and_queries_rebased_head() {
     let repo = FixtureRepo::create("code-rebase-scope");
     repo.write("src/lib.rs", "pub fn old_topic_policy() -> u32 { 1 }\n");

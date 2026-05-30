@@ -110,8 +110,11 @@ The first foundation slice remains bounded by repository snapshot/source scope a
 - `software_components` is derived from `code_repository_dependencies`, separates manifest `declared` and lockfile `locked` relationships, and preserves ecosystem, package name, requirement, resolved version, dependency group, evidence path, and line range.
 - `software_dependency_usages` links declared dependency components to matching code/config import evidence when the module root matches the package identity, preserving import `resolution_state`, `target_hint`, evidence path, and confidence without resolving unauthorized package source.
 - `software_sdk_usages` is derived from unresolved, ambiguous, or external `code_repository_imports` so SDK/API-surface usage candidates retain `resolution_state` and `target_hint` without resolving unauthorized external source.
-- `software_global_status` records projected graph version, stale state, component count, SDK usage count, and the last projection error for each source scope.
-- CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, or the full repository.
+- `software_files` is derived from `code_repository_files` so code, config, docs, build manifests, deployments, tests, templates, and the knowledge map are whole-file nodes.
+- `software_topics` is derived from Markdown/spec headings and `.knowledge/knowledge-map.yaml` topic ids so repository documentation themes, architecture constraints, and knowledge routes are first-class nodes.
+- `software_relationships` is derived from committed dependency, SDK usage, feature-flag/config, and documentation-topic evidence to expose cross-domain edges such as `depends_on`, `uses_sdk`, `configures`, and `documents` with resolution state, target hints, confidence, evidence path, and line range.
+- `software_global_status` records projected graph version, stale state, component count, SDK usage count, file count, topic count, relationship count, and the last projection error for each source scope.
+- CLI exposes the projection through `relay-knowledge repo software <alias> --kind dependencies|sdks|files|topics|relationships|all`; query hot paths read committed projection rows and do not scan package caches, SDK directories, unindexed external source, or the full repository documentation.
 
 ---
 
