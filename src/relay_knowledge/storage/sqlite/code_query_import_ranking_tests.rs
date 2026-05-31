@@ -280,6 +280,71 @@ async fn path_import_queries_use_structured_rows_when_fts_is_unavailable() {
 }
 
 #[tokio::test]
+async fn path_import_queries_fall_back_to_bounded_structured_rows_when_fts_is_unavailable() {
+    let mut files = Vec::new();
+    let mut imports = Vec::new();
+    for index in 0..205 {
+        let file_id = format!("importer-file-{index}");
+        let path = format!("src/generated/importer_{index:03}.cc");
+        files.push(file(&file_id, &path, "cpp"));
+        let mut include_import = import(
+            &format!("openssl-include-{index}"),
+            &file_id,
+            &path,
+            "#include <openssl/ssl.h>",
+        );
+        include_import.target_hint = Some("openssl/ssl.h".to_owned());
+        include_import.resolution_state = "unresolved".to_owned();
+        include_import.line_range = range(index + 1, index + 1);
+        imports.push(include_import);
+    }
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: files.len(),
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports,
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: Vec::new(),
+        diagnostics: Vec::new(),
+    })
+    .await;
+    store
+        .run(|connection| {
+            connection.execute_batch("DROP TABLE code_repository_search")?;
+            Ok(())
+        })
+        .await
+        .expect("search table should be removable");
+
+    let hits = store
+        .search_code(request("openssl/ssl.h", CodeQueryKind::Imports))
+        .await
+        .expect("bounded structured import rows should satisfy path query during FTS outage");
+
+    assert_eq!(hits.len(), 10);
+    assert!(hits.iter().all(|hit| {
+        hit.excerpt.contains("openssl/ssl.h")
+            && hit
+                .retrieval_layers
+                .contains(&CodeRetrievalLayer::ImportGraph)
+    }));
+}
+
+#[tokio::test]
 async fn path_import_queries_rank_public_header_importers_before_implementation_importers() {
     let header_path = "include/store/pipeline.hpp";
     let implementation_path = "src/cache.cpp";

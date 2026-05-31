@@ -106,8 +106,9 @@ fn collect_top_level_member_line(
     definitions: &mut Vec<(String, &'static str, SyntaxRange)>,
 ) {
     let trimmed = line.text.trim();
-    if trimmed.is_empty() || cpp_access_label(trimmed) {
-        if pending.is_none() {
+    let is_preprocessor_directive = cpp_preprocessor_directive(trimmed);
+    if trimmed.is_empty() || cpp_access_label(trimmed) || is_preprocessor_directive {
+        if pending.is_none() && !is_preprocessor_directive {
             *doc_start = None;
         }
         return;
@@ -182,6 +183,10 @@ fn cpp_access_label(trimmed: &str) -> bool {
     matches!(trimmed, "public:" | "private:" | "protected:")
 }
 
+fn cpp_preprocessor_directive(trimmed: &str) -> bool {
+    trimmed.starts_with('#')
+}
+
 fn brace_delta(code: &str) -> isize {
     let mut delta = 0isize;
     for character in code.chars() {
@@ -207,6 +212,9 @@ fn member_function_declaration_name(statement: &str) -> Option<String> {
     }
     let parameter_start = top_level_parameter_start(&code)?;
     let (name_start, name_end) = name_bounds_before_open(&code, parameter_start)?;
+    if code[..name_start].trim_end().ends_with('~') {
+        return None;
+    }
     let name = &code[name_start..name_end];
     function_name_candidate(name).then(|| name.to_owned())
 }

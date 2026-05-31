@@ -39,13 +39,21 @@ pub(super) fn search_imports(
     request: &CodeRetrievalRequest,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let direct_rows = search_import_path_rows(connection, status, request)?;
-    if import_path_rows_can_answer_without_fts(request, &direct_rows) {
+    let direct_rows_can_answer = import_path_rows_can_answer_without_fts(request, &direct_rows);
+    if direct_rows_can_answer && import_path_rows_fit_request(request, &direct_rows) {
         return import_rows_to_hits(connection, status, request, direct_rows.rows);
     }
 
-    let mut rows = search_import_fts_rows(connection, status, request)?;
-    rows.extend(direct_rows.rows);
-    import_rows_to_hits(connection, status, request, rows)
+    match search_import_fts_rows(connection, status, request) {
+        Ok(mut rows) => {
+            rows.extend(direct_rows.rows);
+            import_rows_to_hits(connection, status, request, rows)
+        }
+        Err(_) if direct_rows_can_answer => {
+            import_rows_to_hits(connection, status, request, direct_rows.rows)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn search_import_path_rows(
@@ -137,8 +145,11 @@ fn import_path_rows_can_answer_without_fts(
 ) -> bool {
     request.code_query_kind == CodeQueryKind::Imports
         && !rows.rows.is_empty()
-        && !rows.saturated
-        && rows.rows.len() <= request.limit.max(1)
+        && (!rows.saturated || rows.rows.len() >= request.limit.max(1))
+}
+
+fn import_path_rows_fit_request(request: &CodeRetrievalRequest, rows: &ImportPathRows) -> bool {
+    !rows.saturated && rows.rows.len() <= request.limit.max(1)
 }
 
 fn search_import_fts_rows(

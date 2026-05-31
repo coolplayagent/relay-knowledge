@@ -383,6 +383,12 @@ class DBImpl : public DB {
                         VersionEdit* edit, SequenceNumber* max_sequence)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
+  ~DBImpl();
+
+#if defined(ENABLE_RECOVERY)
+  Status GuardedRecover(VersionEdit* edit);
+#endif
+
   int (*log_filter)(void*);
   VersionEdit edit_;
 };
@@ -403,6 +409,17 @@ class DBImpl : public DB {
     assert!(snapshot.symbols.iter().any(|symbol| {
         symbol.name == "RecoverLogFile" && symbol.kind == "function_declaration"
     }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "GuardedRecover" && symbol.kind == "function_declaration"
+    }));
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| {
+            (symbol.name == "DBImpl" && symbol.kind == "function_declaration")
+                || symbol.name == "defined"
+        }),
+        "preprocessor guards and destructors should not become declaration symbols: {:?}",
+        snapshot.symbols
+    );
     assert!(
         !snapshot.symbols.iter().any(|symbol| symbol.name == "edit_"),
         "data members should not become function declaration symbols"

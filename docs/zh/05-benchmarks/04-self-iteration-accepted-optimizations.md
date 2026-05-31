@@ -983,33 +983,8 @@
 ## run-1779847089-to-run-1779856832 compacted
 - summary: accepted API-dense hybrid symbol FTS elision, parser reference dedup indexing, bulk call/import search finalize, and filtered call identity fast path records were archived on 2026-05-27 to keep this primary benchmark log under the 1000-line hard cap. Scores rose from 0.960406 to 0.979657 with 91/91 cases passing on each run; full metrics, changed paths, and degradations are preserved in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` and `.git/relay-knowledge-self-iteration/patches-v2/`.
 
-## run-1780149073 compacted
-- summary: accepted scoped symbol lookup pushdown scored 0.966044 with foundational=0.983173, competitive=0.967196, semantic_vector=1.0, stability=1.0, and 104/105 cases passed; full patch, metrics, and remaining LevelDB recovery-manifest miss are preserved in `.git/relay-knowledge-self-iteration/patches-v2/run-1780149073.patch`, reports, and progressive memory.
-
-## run-1780150399 compacted
-- summary: accepted C/C++ header recovery scored 0.966879 with protected floors foundational=0.983173, competitive=0.967196, semantic_vector=1.0, stability=1.0 and 104/105 cases passed; full metrics, degradations, and patch remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1780150399.patch`, reports, and progressive memory.
-
-## run-1780153116 candidate
-- 2026-05-30 Hybrid direct-evidence graph-fanout gate: Hybrid repository query planning now returns after symbol/chunk phases when a non-`text_fallback`, non-edge direct hit densely covers the high-signal query terms. Algorithm: reuse the existing hybrid sequence terms and require a bounded 80%/4-to-6 term coverage threshold on direct lexical evidence or symbol+definition evidence before skipping reference/call/import graph fanout. Architecture invariants: no repository registration, durable task lease, SQLite schema, source fallback, semantic/vector backend, QoS, env/paths/net, or parser behavior changes; graph expansion remains mandatory for sparse hits, text-fallback-only evidence, call/import edges, and broad single-token queries. Expected impact: declaration-style C/C++ and multi-repository Hybrid queries with enough direct evidence avoid unnecessary graph fanout, reducing p50/p95 query latency while preserving competitive retrieval floors. Risks: overly broad documentation-heavy symbols could answer before graph context, so the gate is limited to direct non-edge evidence and covered by tests that reject `text_fallback` and call-graph-only hits.
-
-## run-1780153116
-
-- summary: accepted Hybrid direct-evidence graph-fanout gate scored 0.960929 with 105/105 cases passed; changed `code_query.rs` plus Hybrid gate tests. Key improvements were score, performance, relay-teams index gate, fmt/check policy timings, and code-index recovery latency; known index-throughput degradations are preserved in `.git/relay-knowledge-self-iteration/patches-v2/run-1780153116.patch`, reports, and progressive memory.
-
-## run-1780155576
-
-- summary: accepted software-global evidence priority scored 0.971906 with protected floors foundational=1.0, semantic_vector=1.0, stability=1.0 and 105/105 cases passed; changed software lifecycle/projection/tests. Improvements, degradations, latency metrics, and the full adopted patch remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1780155576.patch`, reports, and progressive memory.
-
-## run-1780159030
-
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780159030.patch`
-- score: 0.978136 (foundational=1.000000, competitive=0.993590, accuracy=0.996795, semantic_vector=1.000000, research_judge=n/a, performance=0.886369, stability=1.000000)
-- cases: 105/105 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query.rs`, `src/relay_knowledge/storage/sqlite/code_query_import_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_imports.rs`, `src/relay_knowledge/storage/sqlite/code_query_support.rs`
-- key improvements: score_component:score 0.967886->0.9781361699494024; score_component:performance 0.825507->0.8863690353314381; metric:cargo_fmt_check_ms 3726.0->2880.0; metric:self_iteration_cargo_fmt_check_ms 362.0->323.0; metric:cargo_build_debug_ms 383.0->283.0; metric:self_iteration_cargo_check_ms 584.0->323.0; metric:code_index_recovery_cases_ms 966.0->846.0; metric:code_index_sqlite_lock_cases_ms 1329.0->1229.0
-- known degradations: case_score:typescript_syntax_imports_type_and_runtime_protocol 1.0->0.75; case_rank:typescript_syntax_imports_type_and_runtime_protocol 1->2; metric:leveldb_cpp_index_ms 19973.0->25156.0; metric:leveldb_cpp_register_index_ms 20034.0->25217.0; metric:cross_language_syntax_fixture_index_ms 121.0->445.0; metric:cross_language_syntax_fixture_register_index_ms 384.0->526.0; metric:semantic_vector_provider_probe_ms 343.0->586.0
-- latency metrics: cargo_fmt_check_ms=2880ms; self_iteration_cargo_fmt_check_ms=323ms; linux_glibc_compatibility_policy_ms=141ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=323ms; code_index_recovery_cases_ms=846ms; code_index_sqlite_lock_cases_ms=1229ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1780149073-to-run-1780159030 compacted
+- summary: accepted scoped symbol lookup pushdown (`run-1780149073`) and C/C++ header recovery (`run-1780150399`) records stayed under protected foundational, competitive, semantic_vector, and stability floors; full patches, metrics, and remaining LevelDB recovery-manifest miss remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
+- summary: Hybrid direct-evidence graph-fanout gate was proposed and accepted in `run-1780153116`, scoring 0.960929 with 105/105 cases passed; it gates only direct non-edge evidence and preserves graph expansion for sparse, fallback-only, call/import, and broad single-token queries.
+- summary: accepted software-global evidence priority (`run-1780155576`) scored 0.971906 with foundational=1.0, semantic_vector=1.0, stability=1.0, and 105/105 cases passed; changed software lifecycle/projection/tests and preserved full metrics in the self-iteration patch/report memory.
+- summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line cap.
