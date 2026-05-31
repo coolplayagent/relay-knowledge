@@ -14,6 +14,7 @@ pub(super) struct TagCapture {
     pub(super) name_node: SyntaxRange,
     pub(super) target_node: SyntaxRange,
     pub(super) target_has_error: bool,
+    pub(super) local_type_parameter: bool,
 }
 
 pub(super) fn parse_tree(
@@ -79,11 +80,88 @@ fn extract_tag_captures(
                 name_node: syntax_range(name_node),
                 target_node: syntax_range(target_node),
                 target_has_error: target_node.has_error(),
+                local_type_parameter: local_type_parameter_reference(
+                    language.id,
+                    content,
+                    name_node,
+                ),
             });
         }
     }
 
     Ok(captures)
+}
+
+fn local_type_parameter_reference(language_id: &str, content: &str, node: Node<'_>) -> bool {
+    if !matches!(language_id, "python" | "typescript" | "tsx") {
+        return false;
+    }
+    let name = node_text(content, node);
+    let mut current = node;
+    for _ in 0..12 {
+        let Some(parent) = current.parent() else {
+            return false;
+        };
+        if type_parameters_node(parent).is_some_and(|type_parameters| {
+            !node_contains(type_parameters, node)
+                && type_parameters_contain_name(content, type_parameters, &name)
+        }) {
+            return true;
+        }
+        current = parent;
+    }
+
+    false
+}
+
+fn type_parameters_node(parent: Node<'_>) -> Option<Node<'_>> {
+    parent.child_by_field_name("type_parameters").or_else(|| {
+        let mut cursor = parent.walk();
+        parent
+            .children(&mut cursor)
+            .find(|child| child.kind() == "type_parameters")
+    })
+}
+
+fn type_parameters_contain_name(content: &str, type_parameters: Node<'_>, name: &str) -> bool {
+    if type_parameters.kind() == "type_parameter" {
+        return type_parameter_name(content, type_parameters)
+            .is_some_and(|parameter_name| parameter_name == name);
+    }
+    let mut cursor = type_parameters.walk();
+    type_parameters.children(&mut cursor).any(|child| {
+        if child.kind() == "type_parameter" {
+            return type_parameter_name(content, child)
+                .is_some_and(|parameter_name| parameter_name == name);
+        }
+        matches!(child.kind(), "identifier" | "type_identifier")
+            && node_text(content, child) == name
+    })
+}
+
+fn type_parameter_name(content: &str, type_parameter: Node<'_>) -> Option<String> {
+    type_parameter
+        .child_by_field_name("name")
+        .map(|name| node_text(content, name))
+        .or_else(|| first_identifier_name(content, type_parameter))
+}
+
+fn first_identifier_name(content: &str, node: Node<'_>) -> Option<String> {
+    let mut stack = vec![node];
+    while let Some(current) = stack.pop() {
+        if matches!(current.kind(), "identifier" | "type_identifier") {
+            return Some(node_text(content, current));
+        }
+        let mut cursor = current.walk();
+        let children = current.children(&mut cursor).collect::<Vec<_>>();
+        stack.extend(children.into_iter().rev());
+    }
+
+    None
+}
+
+fn node_contains(parent: Node<'_>, child: Node<'_>) -> bool {
+    parent.start_byte() <= child.start_byte() && parent.end_byte() >= child.end_byte()
 }
 
 pub(super) fn extract_tag_captures_safely(

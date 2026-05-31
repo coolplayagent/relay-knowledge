@@ -122,6 +122,28 @@ impl QosRuntime {
         })
     }
 
+    /// Applies queue and active request budgets atomically for immediate admission.
+    pub fn admit_queued_request(&self, policy: &QosPolicy) -> Result<QosPermit, RejectReason> {
+        let mut usage = self
+            .usage
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if usage.queued_requests >= policy.max_queue_depth {
+            return Err(RejectReason::QueueBudgetExceeded);
+        }
+
+        if usage.in_flight_requests >= policy.max_in_flight_requests {
+            return Err(RejectReason::RequestBudgetExceeded);
+        }
+
+        usage.in_flight_requests += 1;
+        Ok(QosPermit {
+            runtime: self.clone(),
+            kind: QosPermitKind::Request,
+            released: false,
+        })
+    }
+
     /// Attempts to admit one inbound request and returns a release-on-drop permit.
     pub fn admit_request(&self, policy: &QosPolicy) -> Result<QosPermit, RejectReason> {
         let mut usage = self
@@ -380,5 +402,39 @@ mod tests {
 
         drop(queued);
         assert_eq!(runtime.snapshot().queued_requests, 0);
+    }
+
+    #[test]
+    fn queued_request_admission_preserves_budget_invariants() {
+        let runtime = QosRuntime::default();
+        let policy = QosPolicy::new(1, 1, 1).expect("policy should build");
+        let queued = runtime
+            .reserve_queue(&policy)
+            .expect("queued request should reserve budget");
+
+        assert_eq!(
+            runtime
+                .admit_queued_request(&policy)
+                .expect_err("full queue should reject admission"),
+            RejectReason::QueueBudgetExceeded
+        );
+        drop(queued);
+
+        let active = runtime
+            .admit_queued_request(&policy)
+            .expect("request should enter through queued admission");
+
+        assert_eq!(runtime.snapshot().queued_requests, 0);
+        assert_eq!(runtime.snapshot().in_flight_requests, 1);
+        assert_eq!(
+            runtime
+                .admit_queued_request(&policy)
+                .expect_err("active request budget should reject admission"),
+            RejectReason::RequestBudgetExceeded
+        );
+        assert_eq!(runtime.snapshot().queued_requests, 0);
+
+        drop(active);
+        assert_eq!(runtime.snapshot().in_flight_requests, 0);
     }
 }

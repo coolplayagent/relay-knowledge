@@ -80,6 +80,40 @@ pub(super) fn call_site_example_path_penalty(
     -0.6
 }
 
+pub(super) fn reference_source_path_bonus(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_test_intent
+        || request.code_query_kind != CodeQueryKind::References
+        || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    0.2
+}
+
+pub(super) fn reference_test_path_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0
+        || query_has_test_intent
+        || request.code_query_kind != CodeQueryKind::References
+        || !path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+
+    -0.35
+}
+
 pub(super) fn caller_result_assignment_bonus(
     base_score: f64,
     path: &str,

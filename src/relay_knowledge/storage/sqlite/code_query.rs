@@ -307,7 +307,13 @@ fn exact_reference_chunk_bonus(
         return 0.0;
     };
 
-    reference_usage_context_bonus(base_score, identity.leaf_name(), Some(content), request)
+    reference_usage_context_bonus(
+        base_score,
+        "value",
+        identity.leaf_name(),
+        Some(content),
+        request,
+    )
 }
 
 fn exact_definition_chunk_bonus(request: &CodeRetrievalRequest, content: &str) -> f64 {

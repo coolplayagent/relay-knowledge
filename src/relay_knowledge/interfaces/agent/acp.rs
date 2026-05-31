@@ -349,10 +349,7 @@ impl LocalAcpSessionAdapter {
 
     fn admit_request(&self) -> Result<QosPermit, AgentAdapterError> {
         let policy = self.network.current().qos;
-        let queued = self.qos.reserve_queue(&policy).map_err(qos_error)?;
-        let permit = self.qos.admit_request(&policy).map_err(qos_error);
-        drop(queued);
-        permit
+        self.qos.admit_queued_request(&policy).map_err(qos_error)
     }
 
     fn record_audit(&self, input: AcpAuditInput<'_>) {

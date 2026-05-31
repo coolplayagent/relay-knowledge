@@ -6,7 +6,10 @@ use crate::domain::{
 
 use super::super::{
     CodeIndexError,
-    languages::{doc_comment_text, strip_supported_extension},
+    languages::{
+        doc_comment_text, python_builtin_type_reference, strip_supported_extension,
+        typescript_builtin_type_reference,
+    },
     stable_id,
 };
 use super::{
@@ -64,6 +67,9 @@ pub(super) fn records_from_captures(
             }
         } else if capture.capture_kind.starts_with("reference.") {
             let kind = capture.capture_kind.trim_start_matches("reference.");
+            if reference_capture_should_be_skipped(context, &capture, kind) {
+                continue;
+            }
             let key = (
                 capture.name.clone(),
                 capture.name_node.byte_start,
@@ -80,6 +86,46 @@ pub(super) fn records_from_captures(
     }
 
     Ok(())
+}
+
+fn reference_capture_should_be_skipped(
+    context: &FileParseContext<'_>,
+    capture: &TagCapture,
+    kind: &str,
+) -> bool {
+    local_type_parameter_capture(context, capture, kind)
+        || typescript_builtin_type_capture(context, capture, kind)
+        || python_builtin_type_capture(context, capture, kind)
+}
+
+fn local_type_parameter_capture(
+    context: &FileParseContext<'_>,
+    capture: &TagCapture,
+    kind: &str,
+) -> bool {
+    kind == "type"
+        && matches!(context.language_id, "python" | "typescript" | "tsx")
+        && capture.local_type_parameter
+}
+
+fn typescript_builtin_type_capture(
+    context: &FileParseContext<'_>,
+    capture: &TagCapture,
+    kind: &str,
+) -> bool {
+    kind == "type"
+        && matches!(context.language_id, "typescript" | "tsx")
+        && typescript_builtin_type_reference(&capture.name)
+}
+
+fn python_builtin_type_capture(
+    context: &FileParseContext<'_>,
+    capture: &TagCapture,
+    kind: &str,
+) -> bool {
+    kind == "type"
+        && context.language_id == "python"
+        && python_builtin_type_reference(&capture.name)
 }
 
 fn cpp_function_capture_should_be_skipped(
@@ -213,7 +259,7 @@ fn function_like_symbol_kind(kind: &str) -> bool {
 }
 
 fn type_like_symbol_kind(kind: &str) -> bool {
-    matches!(kind, "class" | "interface" | "type")
+    matches!(kind, "class" | "interface" | "struct" | "type")
 }
 
 fn value_like_symbol_kind(kind: &str) -> bool {
@@ -229,6 +275,11 @@ fn symbol_preferred_over_existing(
             existing.kind.as_str(),
             "constructor" | "function" | "macro" | "method"
         ))
+        || (specific_type_symbol_kind(&symbol.kind) && existing.kind == "type")
+}
+
+fn specific_type_symbol_kind(kind: &str) -> bool {
+    matches!(kind, "class" | "interface" | "struct")
 }
 
 fn symbols_have_distinct_scoped_identities(

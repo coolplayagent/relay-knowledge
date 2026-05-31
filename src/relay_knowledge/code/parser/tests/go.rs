@@ -1,0 +1,98 @@
+use crate::domain::CodeRepositoryRegistration;
+
+use super::*;
+
+#[test]
+fn go_type_declarations_expose_interface_and_struct_surfaces() {
+    let snapshot = parse_source_snapshot(
+        "processor/worker.go",
+        br#"
+package processor
+
+type EventProcessor interface {
+    Process(ctx Context, event Event) error
+}
+
+type Worker struct {
+    processor EventProcessor
+}
+
+type (
+    GroupedProcessor interface {
+        Process(ctx Context, event Event) error
+    }
+
+    GroupedWorker struct {
+        processor GroupedProcessor
+    }
+)
+"#,
+    );
+
+    let event_processor = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "EventProcessor")
+        .expect("Go interface type should be indexed");
+    assert_eq!(event_processor.kind, "interface");
+    assert!(
+        event_processor
+            .signature
+            .contains("type EventProcessor interface")
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Worker"
+            && symbol.kind == "struct"
+            && symbol.signature.contains("type Worker struct")
+    }));
+    assert_eq!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == "Worker")
+            .count(),
+        1,
+        "Go struct type should replace the generic type capture, not duplicate it: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.name == "GroupedProcessor" && symbol.kind == "interface" })
+    );
+    assert!(
+        snapshot
+            .symbols
+            .iter()
+            .any(|symbol| { symbol.name == "GroupedWorker" && symbol.kind == "struct" })
+    );
+    assert_eq!(
+        snapshot
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == "GroupedWorker")
+            .count(),
+        1,
+        "grouped Go struct should prefer the manual kind over the generic type capture: {:?}",
+        snapshot.symbols
+    );
+}
+
+fn parse_source_snapshot(path: &str, source: &[u8]) -> crate::domain::CodeIndexSnapshot {
+    let registration =
+        CodeRepositoryRegistration::new("repo", "alias", "/tmp/repo", Vec::new(), Vec::new())
+            .expect("registration should validate");
+    let mut build = SnapshotBuild::new(
+        &registration,
+        "commit".to_owned(),
+        "tree".to_owned(),
+        true,
+        1,
+        0,
+    );
+
+    parse_indexed_file(&mut build, path, source).expect("file should parse");
+
+    build.finish()
+}

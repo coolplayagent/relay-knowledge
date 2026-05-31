@@ -11,7 +11,8 @@ use crate::{
 use super::{
     HitParts,
     code_query_import_scoring::{
-        hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
+        hybrid_import_sparse_query_penalty, import_binding_context_bonus,
+        import_importer_path_context_bonus, import_line_priority,
         import_public_dependency_surface_bonus, import_reexport_surface_penalty,
         import_same_file_usage_bonus, import_self_implementation_penalty,
         import_single_module_path_tiebreaker_bonus, import_source_path_query_overlap_bonus,
@@ -235,12 +236,12 @@ fn import_rows_to_hits(
     rows.extend(search_imports_by_target_symbols(
         connection, status, request,
     )?);
-    attach_import_query_usage_context(connection, status, request, &mut rows)?;
     if request.code_query_kind == CodeQueryKind::Imports
         && query_looks_like_import_path(&request.query)
     {
         attach_import_target_symbols(connection, status, &mut rows)?;
     }
+    attach_import_query_usage_context(connection, status, request, &mut rows)?;
 
     let scoring_query = import_scoring_query(request);
     let query = scoring_query.to_lowercase();
@@ -268,6 +269,13 @@ fn import_rows_to_hits(
                 + import_same_file_usage_bonus(
                     base_score,
                     row.same_file_query_usage_count,
+                    request.code_query_kind,
+                )
+                + import_importer_path_context_bonus(
+                    base_score,
+                    row.same_file_query_usage_count,
+                    scoring_query,
+                    &row.path,
                     request.code_query_kind,
                 )
                 + import_target_directory_bonus(
