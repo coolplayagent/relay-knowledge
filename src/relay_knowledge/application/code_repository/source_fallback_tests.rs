@@ -424,6 +424,8 @@ fn import_fallback_treats_import_call_queries_as_dynamic_import_intent() {
     for query in [
         "import(\"./protocol\")",
         "await import(\"./protocol\")",
+        "return import(\"./protocol\")",
+        "const protocol = import(\"./protocol\")",
         "await import(\"./protocol\", { with: { type: \"json\" } })",
     ] {
         let request = request(query, CodeQueryKind::Imports, Vec::new());

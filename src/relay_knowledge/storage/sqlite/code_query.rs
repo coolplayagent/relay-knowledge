@@ -80,7 +80,10 @@ use code_query_flow_scoring::{
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
 use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
-use code_query_hybrid_planning::{hybrid_query_prefers_chunk_first, hybrid_sequence_terms};
+use code_query_hybrid_planning::{
+    hybrid_query_prefers_chunk_first, hybrid_sequence_terms, query_only_workflow_language_scopes,
+    workflow_language_scope_matches,
+};
 #[cfg(test)]
 use code_query_import_scoring::{import_surface_bonus, import_target_symbol_bonus};
 #[cfg(test)]
@@ -398,6 +401,7 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
     if terms.len() < 3 {
         return false;
     }
+    let language_scopes = query_only_workflow_language_scopes(request);
     let required_matches = terms.len().clamp(3, 4);
     let required_hits = request.limit.clamp(1, 3);
     let dense_chunk_hits = hits
@@ -407,6 +411,7 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
                 && !hit
                     .retrieval_layers
                     .contains(&CodeRetrievalLayer::TextFallback)
+                && workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id)
                 && hybrid_sequence_match_count(&hit.excerpt, &terms) >= required_matches
         })
         .take(required_hits)
@@ -415,13 +420,19 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
         return true;
     }
 
-    hybrid_chunk_results_have_collective_dense_coverage(&terms, hits, required_hits)
+    hybrid_chunk_results_have_collective_dense_coverage(
+        &terms,
+        hits,
+        required_hits,
+        &language_scopes,
+    )
 }
 
 fn hybrid_chunk_results_have_collective_dense_coverage(
     terms: &[String],
     hits: &[CodeRetrievalHit],
     required_hits: usize,
+    language_scopes: &[&str],
 ) -> bool {
     let required_coverage = terms.len().saturating_mul(2).div_ceil(3).max(4);
     let required_dense_matches = terms.len().clamp(3, 4);
@@ -433,6 +444,7 @@ fn hybrid_chunk_results_have_collective_dense_coverage(
             || hit
                 .retrieval_layers
                 .contains(&CodeRetrievalLayer::TextFallback)
+            || !workflow_language_scopes_allow_hit(language_scopes, &hit.language_id)
         {
             continue;
         }
@@ -453,6 +465,13 @@ fn hybrid_chunk_results_have_collective_dense_coverage(
     }
 
     supporting_hits >= required_hits && has_dense_hit && covered_terms.len() >= required_coverage
+}
+
+fn workflow_language_scopes_allow_hit(language_scopes: &[&str], language_id: &str) -> bool {
+    language_scopes.is_empty()
+        || language_scopes
+            .iter()
+            .any(|scope| workflow_language_scope_matches(language_id, scope))
 }
 
 fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {

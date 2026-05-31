@@ -437,10 +437,15 @@ fn query_prefers_dynamic_import_source(query: &str) -> bool {
         return false;
     }
 
-    query.starts_with("import(")
-        || query.starts_with("import (")
-        || query.starts_with("await import(")
-        || query.starts_with("await import (")
+    query.match_indices("import").any(|(index, _)| {
+        let tail = &query[index + "import".len()..];
+        let has_call = tail.starts_with('(') || tail.starts_with(" (");
+        let has_token_boundary = query[..index].chars().last().is_none_or(|character| {
+            !character.is_ascii_alphanumeric() && character != '_' && character != '.'
+        });
+
+        has_call && has_token_boundary
+    })
 }
 
 fn source_line_starts_with_comment(line: &str) -> bool {

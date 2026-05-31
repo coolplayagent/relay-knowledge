@@ -42,6 +42,35 @@ pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
     hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str))
 }
 
+pub(super) fn query_only_workflow_language_scopes(
+    request: &CodeRetrievalRequest,
+) -> Vec<&'static str> {
+    if request
+        .repository
+        .language_filters
+        .iter()
+        .any(|language| workflow_chunk_first_language(language))
+    {
+        return Vec::new();
+    }
+
+    let raw_terms = query_terms(&request.query);
+    let mut scopes = Vec::new();
+    for term in raw_terms {
+        if let Some(scope) = workflow_chunk_first_query_scope(&term) {
+            if !scopes.contains(&scope) {
+                scopes.push(scope);
+            }
+        }
+    }
+
+    scopes
+}
+
+pub(super) fn workflow_language_scope_matches(language_id: &str, scope: &str) -> bool {
+    workflow_language_family(language_id).is_some_and(|language_scope| language_scope == scope)
+}
+
 fn hybrid_sequence_terms_from_raw<'a>(raw_terms: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut terms = Vec::new();
     for term in raw_terms {
@@ -145,36 +174,37 @@ fn query_has_workflow_language_scope(request: &CodeRetrievalRequest, raw_terms: 
 }
 
 fn workflow_chunk_first_query_term(term: &str) -> bool {
+    workflow_chunk_first_query_scope(term).is_some()
+}
+
+fn workflow_chunk_first_query_scope(term: &str) -> Option<&'static str> {
     let term = term.to_ascii_lowercase();
     if term == "go" {
-        return false;
+        return None;
     }
 
-    workflow_chunk_first_language(&term)
+    workflow_language_family(&term)
 }
 
 fn workflow_chunk_first_language(language: &str) -> bool {
-    matches!(
-        language.to_ascii_lowercase().as_str(),
-        "cs" | "csharp"
-            | "go"
-            | "java"
-            | "javascript"
-            | "js"
-            | "jsx"
-            | "kotlin"
-            | "kt"
-            | "php"
-            | "py"
-            | "python"
-            | "rb"
-            | "ruby"
-            | "scala"
-            | "swift"
-            | "ts"
-            | "tsx"
-            | "typescript"
-    )
+    workflow_language_family(language).is_some()
+}
+
+fn workflow_language_family(language: &str) -> Option<&'static str> {
+    Some(match language.to_ascii_lowercase().as_str() {
+        "cs" | "csharp" => "csharp",
+        "go" => "go",
+        "java" => "java",
+        "javascript" | "js" | "jsx" => "javascript",
+        "kotlin" | "kt" => "kotlin",
+        "php" => "php",
+        "py" | "python" => "python",
+        "rb" | "ruby" => "ruby",
+        "scala" => "scala",
+        "swift" => "swift",
+        "ts" | "tsx" | "typescript" => "typescript",
+        _ => return None,
+    })
 }
 
 fn workflow_surface_term(term: &str) -> bool {

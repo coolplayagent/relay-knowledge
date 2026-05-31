@@ -29,6 +29,29 @@ fn hybrid_chunk_gate_accepts_collective_dense_coverage_before_limit_is_full() {
         12,
     );
     let hits = vec![
+        chunk_gate_hit_with_language(
+            "typescript",
+            "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
+        ),
+        chunk_gate_hit_with_language("typescript", "export { ProviderPanel } from './component';"),
+        chunk_gate_hit_with_language(
+            "typescript",
+            "return sendEnvelope(runtime, payload) from provider flow",
+        ),
+    ];
+
+    assert!(hybrid_chunk_results_can_answer_without_graph_expansion(
+        &request, &hits
+    ));
+}
+
+#[test]
+fn hybrid_chunk_gate_rejects_query_language_scope_mismatches() {
+    let request = hybrid_gate_request(
+        "tsx provider panel effect run provider envelope payload",
+        12,
+    );
+    let hits = vec![
         chunk_gate_hit(
             "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
         ),
@@ -36,7 +59,7 @@ fn hybrid_chunk_gate_accepts_collective_dense_coverage_before_limit_is_full() {
         chunk_gate_hit("return sendEnvelope(runtime, payload) from provider flow"),
     ];
 
-    assert!(hybrid_chunk_results_can_answer_without_graph_expansion(
+    assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(
         &request, &hits
     ));
 }
@@ -225,13 +248,17 @@ fn hybrid_gate_request(query: &str, limit: usize) -> CodeRetrievalRequest {
 }
 
 fn chunk_gate_hit(excerpt: &str) -> CodeRetrievalHit {
+    chunk_gate_hit_with_language("go", excerpt)
+}
+
+fn chunk_gate_hit_with_language(language_id: &str, excerpt: &str) -> CodeRetrievalHit {
     CodeRetrievalHit {
         repository_id: "repo".to_owned(),
         scope_id: TEST_SCOPE.to_owned(),
         resolved_commit_sha: "commit".to_owned(),
         tree_hash: "tree".to_owned(),
         path: "src/main.go".to_owned(),
-        language_id: "go".to_owned(),
+        language_id: language_id.to_owned(),
         byte_range: RepositoryCodeRange { start: 0, end: 1 },
         line_range: RepositoryCodeRange { start: 1, end: 1 },
         symbol_snapshot_id: None,
