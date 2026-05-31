@@ -148,9 +148,14 @@ relay-knowledge repo query core \
 
 Kind selection:
 
-For user prompts about supported code query kinds, use
-`relay-knowledge repo query --kind ...` before plain text search. Select the
-kind from the user's intent:
+For user prompts about supported code query kinds, use graph-backed commands
+before plain text search. Select the command and command-local `--kind` from the
+user's intent.
+
+### `repo query --kind`
+
+Use `relay-knowledge repo query --kind ...` for code graph retrieval tied to one
+query string, symbol surface, or code edge:
 
 - `hybrid`: natural-language discovery, broad concepts, or ambiguous code
   questions.
@@ -160,14 +165,51 @@ kind from the user's intent:
 - `callers`: incoming call edges and "who calls this" questions.
 - `callees`: outgoing call edges and "what does this call" questions.
 - `imports`: import, include, module, and dependency edges.
+- `sbom`: package-manager dependency inventory from indexed manifests and
+  lockfiles.
+
+Use the selected kind directly when the user names it. If intent is ambiguous,
+start with `--kind hybrid`, then narrow based on the returned evidence. For
+call-chain prompts, expand `callers` or `callees` step by step and state that
+the CLI returns bounded one-hop edges when that limit matters.
+
+### `repo software --kind`
+
+Use `relay-knowledge repo software --kind ...` when the user asks for
+repository-wide graph relationships, architecture maps, dependency paths,
+software inventory, or "代码图关系":
+
+- `dependencies`: package and manifest dependency facts.
+- `sdks`: SDK/API usage and unresolved external target metadata.
+- `files`: file roles and indexed source/document surfaces.
+- `topics`: documentation and source topics discovered from indexed evidence.
+- `relationships`: cross-domain relationships between files, topics, configs,
+  dependencies, SDK/API usages, build targets, IaC resources, and design facts.
+- `build`: build target and build-manifest facts.
+- `iac`: infrastructure-as-code resource facts.
+- `design`: design documentation and design element facts.
+- `all`: all software graph slices for broad repository overviews.
+
+Prefer `--kind relationships` for prompts that explicitly ask for graph
+relationships. Prefer `--kind all` when the user asks for an inventory or
+overview that should include the relationship slice plus supporting facts.
+
+```bash
+relay-knowledge repo software core \
+  --kind relationships \
+  --ref HEAD \
+  --freshness wait-until-fresh \
+  --limit 100 \
+  --format json
+```
 
 Use `grep`, `ripgrep`, `rg`, or other text search only as a fallback after the
 CLI is unavailable, the target repository cannot be indexed, the supported
-query kinds cannot express the request, or the user explicitly asks for raw
-text or regular-expression matching. When falling back, say that text search
-is a fallback rather than the preferred code graph path.
+query or software kinds cannot express the request, or the user explicitly asks
+for raw text or regular-expression matching. When falling back, say that text
+search is a fallback rather than the preferred code graph path.
 
-Feature flag query flow:
+### Feature Flag Query Flow
 
 For prompts about feature flags, config keys, environment-variable gates,
 settings gates, gray-release switches, or code guarded by runtime configuration,
