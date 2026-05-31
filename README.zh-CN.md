@@ -228,7 +228,7 @@ CLI `ingest` 命令会写入 evidence 和 entity label。共享 API 还接受面
 
 Adapter 会校验 `initialize` 参数，然后签发不可预测的 `Mcp-Session-Id`。客户端必须发送 `notifications/initialized`，之后调用需要携带该 session header 和 `MCP-Protocol-Version`，确保 `ping`、工具请求和 `notifications/cancelled` 绑定到已签发的 session。缺少 session header 会返回 HTTP 400；未知或已驱逐的 session ID 会返回 HTTP 404。
 
-MCP 工具界面包含图检索、图检查、健康状况、服务状态、索引状态、授权代码图查询和授权代码影响分析。MCP 不暴露 index refresh 或 repository indexing；仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。MCP 服务器也会发布资源和提示：资源暴露服务状态、健康状况、索引状态和 Prometheus 文本指标；只有在 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` 时才发布全图摘要资源。提示提供检索和代码影响规划模板。`/mcp/metrics` 暴露 Prometheus 文本指标；MCP 客户端只使用原生 Streamable HTTP `/mcp` 入口。
+MCP 工具界面包含图检索、图检查、健康状况、服务状态、索引状态、授权代码图查询、授权软件全域模型查询、repository-set 代码图查询和授权代码影响分析。Agent-facing kind 选择复用现有产品 kind：`relay_code_query` 处理代码图谱 kind，`relay_software_query` 处理软件全域模型 kind，`relay_code_feature_flags` 处理配置驱动 feature flag。常见 agent 别名如 `dependency`、`configuration` 和 `models` 会归一到已有 `dependencies`、`relationships` 和 `design` kind，而不是新增重复 kind。MCP 不暴露 index refresh 或 repository indexing；仓库索引需要用户主动运行 `relay-knowledge repo index` 或 `relay-knowledge repo update`。MCP 服务器也会发布资源和提示：资源暴露服务状态、健康状况、索引状态和 Prometheus 文本指标；只有在 `RELAY_KNOWLEDGE_MCP_ALLOW_UNSPECIFIED_SCOPE=true` 时才发布全图摘要资源。提示提供检索和代码影响规划模板。`/mcp/metrics` 暴露 Prometheus 文本指标；MCP 客户端只使用原生 Streamable HTTP `/mcp` 入口。
 
 Agent 请求会写入有界进程内审计事件，包含运行时身份、作用域、新鲜度、QoS 决策、预算、截断、结果数和状态。设置 `RELAY_KNOWLEDGE_AGENT_AUDIT_SINK_ENABLED=true` 后，这些事件会镜像到由 `paths` 管理的 JSONL 文件 `logs/agent-audit.jsonl`；sink 使用由 `RELAY_KNOWLEDGE_AGENT_AUDIT_QUEUE_DEPTH` 控制的有界异步队列，最多允许 65536 条。
 
