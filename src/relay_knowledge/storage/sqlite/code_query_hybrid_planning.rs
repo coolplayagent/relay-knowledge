@@ -15,56 +15,82 @@ const WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS: usize = 4;
 const WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS: usize = 2;
 const HIGH_SIGNAL_TERM_LEN: usize = 5;
 
+enum HybridChunkFirstPlan {
+    ApiIdentities,
+    StructuredSequence,
+    FilteredProceduralSurface,
+    WorkflowSurface {
+        query_language_scopes: Vec<&'static str>,
+    },
+}
+
 pub(super) fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -> bool {
+    hybrid_chunk_first_plan(request).is_some()
+}
+
+pub(super) fn query_language_scoped_workflow_surface_scopes(
+    request: &CodeRetrievalRequest,
+) -> Vec<&'static str> {
+    match hybrid_chunk_first_plan(request) {
+        Some(HybridChunkFirstPlan::WorkflowSurface {
+            query_language_scopes,
+        }) => query_language_scopes,
+        Some(
+            HybridChunkFirstPlan::ApiIdentities
+            | HybridChunkFirstPlan::StructuredSequence
+            | HybridChunkFirstPlan::FilteredProceduralSurface,
+        )
+        | None => Vec::new(),
+    }
+}
+
+pub(super) fn workflow_language_scope_language_ids(scope: &str) -> &'static [&'static str] {
+    match scope {
+        "csharp" => &["cs", "csharp"],
+        "go" => &["go"],
+        "java" => &["java"],
+        "javascript" => &["javascript", "js", "jsx"],
+        "kotlin" => &["kotlin", "kt"],
+        "php" => &["php"],
+        "python" => &["py", "python"],
+        "ruby" => &["rb", "ruby"],
+        "scala" => &["scala"],
+        "swift" => &["swift"],
+        "typescript" => &["ts", "tsx", "typescript"],
+        _ => &[],
+    }
+}
+
+fn hybrid_chunk_first_plan(request: &CodeRetrievalRequest) -> Option<HybridChunkFirstPlan> {
     if request.code_query_kind != CodeQueryKind::Hybrid
         || query_is_single_symbol_identity(&request.query)
     {
-        return false;
+        return None;
     }
 
     let raw_terms = query_terms(&request.query);
     let terms = hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str));
     if terms.len() < API_CHUNK_FIRST_MIN_TERMS {
-        return false;
+        return None;
     }
     if !code_query_api_identities::hybrid_api_symbol_identities(&request.query, request).is_empty()
     {
-        return true;
+        return Some(HybridChunkFirstPlan::ApiIdentities);
     }
 
-    hybrid_query_has_structured_sequence(&raw_terms, &terms)
-        || hybrid_query_has_filtered_procedural_surface(request, &terms)
-        || hybrid_query_has_language_scoped_workflow_surface(request, &raw_terms, &terms)
+    if hybrid_query_has_structured_sequence(&raw_terms, &terms) {
+        return Some(HybridChunkFirstPlan::StructuredSequence);
+    }
+    if hybrid_query_has_filtered_procedural_surface(request, &terms) {
+        return Some(HybridChunkFirstPlan::FilteredProceduralSurface);
+    }
+
+    workflow_surface_chunk_first_plan(request, &raw_terms, &terms)
 }
 
 pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
     let raw_terms = query_terms(query);
     hybrid_sequence_terms_from_raw(raw_terms.iter().map(String::as_str))
-}
-
-pub(super) fn query_only_workflow_language_scopes(
-    request: &CodeRetrievalRequest,
-) -> Vec<&'static str> {
-    if request
-        .repository
-        .language_filters
-        .iter()
-        .any(|language| workflow_chunk_first_language(language))
-    {
-        return Vec::new();
-    }
-
-    let raw_terms = query_terms(&request.query);
-    let mut scopes = Vec::new();
-    for term in raw_terms {
-        if let Some(scope) = workflow_chunk_first_query_scope(&term) {
-            if !scopes.contains(&scope) {
-                scopes.push(scope);
-            }
-        }
-    }
-
-    scopes
 }
 
 pub(super) fn workflow_language_scope_matches(language_id: &str, scope: &str) -> bool {
@@ -113,36 +139,45 @@ fn hybrid_query_has_filtered_procedural_surface(
             >= PROCEDURAL_LANGUAGE_MIN_HIGH_SIGNAL_TERMS
 }
 
-fn hybrid_query_has_language_scoped_workflow_surface(
+fn workflow_surface_chunk_first_plan(
     request: &CodeRetrievalRequest,
     raw_terms: &[String],
     terms: &[String],
-) -> bool {
+) -> Option<HybridChunkFirstPlan> {
     if terms.len() < WORKFLOW_SURFACE_MIN_TERMS
         || terms
             .iter()
             .filter(|term| hybrid_sequence_term_has_high_signal(term))
             .count()
             < WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS
-        || !query_has_workflow_language_scope(request, raw_terms)
     {
-        return false;
+        return None;
+    }
+    let query_language_scopes = query_workflow_language_scopes(request, raw_terms);
+    let has_explicit_workflow_language = request
+        .repository
+        .language_filters
+        .iter()
+        .any(|language| workflow_chunk_first_language(language));
+    if !has_explicit_workflow_language && query_language_scopes.is_empty() {
+        return None;
     }
 
     let workflow_terms = raw_terms
         .iter()
         .filter(|term| workflow_surface_term(term))
         .count();
-    if workflow_terms >= 2 {
-        return true;
-    }
+    let workflow_surface_matches = workflow_terms >= 2
+        || workflow_terms == 1
+            && raw_terms
+                .iter()
+                .filter(|term| dataflow_surface_term(term))
+                .count()
+                >= WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS;
 
-    workflow_terms == 1
-        && raw_terms
-            .iter()
-            .filter(|term| dataflow_surface_term(term))
-            .count()
-            >= WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS
+    workflow_surface_matches.then_some(HybridChunkFirstPlan::WorkflowSurface {
+        query_language_scopes,
+    })
 }
 
 fn hybrid_sequence_term_has_high_signal(term: &str) -> bool {
@@ -162,19 +197,24 @@ fn procedural_chunk_first_language(language: &str) -> bool {
     )
 }
 
-fn query_has_workflow_language_scope(request: &CodeRetrievalRequest, raw_terms: &[String]) -> bool {
-    request
-        .repository
-        .language_filters
-        .iter()
-        .any(|language| workflow_chunk_first_language(language))
-        || raw_terms
-            .iter()
-            .any(|term| workflow_chunk_first_query_term(term))
-}
+fn query_workflow_language_scopes(
+    request: &CodeRetrievalRequest,
+    raw_terms: &[String],
+) -> Vec<&'static str> {
+    if !request.repository.language_filters.is_empty() {
+        return Vec::new();
+    }
 
-fn workflow_chunk_first_query_term(term: &str) -> bool {
-    workflow_chunk_first_query_scope(term).is_some()
+    let mut scopes = Vec::new();
+    for term in raw_terms {
+        if let Some(scope) = workflow_chunk_first_query_scope(term) {
+            if !scopes.contains(&scope) {
+                scopes.push(scope);
+            }
+        }
+    }
+
+    scopes
 }
 
 fn workflow_chunk_first_query_scope(term: &str) -> Option<&'static str> {
@@ -194,20 +234,22 @@ fn workflow_chunk_first_language(language: &str) -> bool {
 }
 
 fn workflow_language_family(language: &str) -> Option<&'static str> {
-    Some(match language.to_ascii_lowercase().as_str() {
-        "cs" | "csharp" => "csharp",
-        "go" => "go",
-        "java" => "java",
-        "javascript" | "js" | "jsx" => "javascript",
-        "kotlin" | "kt" => "kotlin",
-        "php" => "php",
-        "py" | "python" => "python",
-        "rb" | "ruby" => "ruby",
-        "scala" => "scala",
-        "swift" => "swift",
-        "ts" | "tsx" | "typescript" => "typescript",
-        _ => return None,
-    })
+    let language = language.to_ascii_lowercase();
+    [
+        "csharp",
+        "go",
+        "java",
+        "javascript",
+        "kotlin",
+        "php",
+        "python",
+        "ruby",
+        "scala",
+        "swift",
+        "typescript",
+    ]
+    .into_iter()
+    .find(|scope| workflow_language_scope_language_ids(scope).contains(&language.as_str()))
 }
 
 fn workflow_surface_term(term: &str) -> bool {

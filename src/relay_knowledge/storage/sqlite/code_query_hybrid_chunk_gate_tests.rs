@@ -81,10 +81,26 @@ fn hybrid_chunk_gate_retains_only_query_language_scoped_hits() {
         ),
     ];
 
-    retain_query_only_workflow_language_hits(&request, &mut hits);
+    retain_query_language_scoped_workflow_hits(&request, &mut hits);
 
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].language_id, "typescript");
+}
+
+#[test]
+fn hybrid_chunk_gate_keeps_structured_language_domain_terms_unscoped() {
+    let request = hybrid_gate_request("python Parser::parse_node visit_expr ASTNode", 1);
+    let mut hits = vec![chunk_gate_hit_with_language(
+        "cpp",
+        "Parser parse_node visit_expr ASTNode preserves the python extension tag",
+    )];
+
+    retain_query_language_scoped_workflow_hits(&request, &mut hits);
+
+    assert_eq!(hits.len(), 1);
+    assert!(hybrid_chunk_results_can_answer_without_graph_expansion(
+        &request, &hits
+    ));
 }
 
 #[test]
