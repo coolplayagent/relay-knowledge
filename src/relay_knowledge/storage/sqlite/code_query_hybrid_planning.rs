@@ -179,7 +179,10 @@ fn workflow_chunk_first_query_term(term: &str) -> bool {
 
 fn workflow_chunk_first_query_scope(term: &str) -> Option<&'static str> {
     let term = term.to_ascii_lowercase();
-    if term == "go" {
+    if matches!(
+        term.as_str(),
+        "cs" | "go" | "js" | "kt" | "py" | "rb" | "ts"
+    ) {
         return None;
     }
 

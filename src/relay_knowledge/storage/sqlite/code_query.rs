@@ -150,8 +150,9 @@ fn search_code_with_status(
     let mut searched_chunks = false;
     if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
     {
-        if let Ok(chunk_hits) = search_chunks(connection, status, request) {
+        if let Ok(mut chunk_hits) = search_chunks(connection, status, request) {
             searched_chunks = true;
+            retain_query_only_workflow_language_hits(request, &mut chunk_hits);
             if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits) {
                 hits.extend(chunk_hits);
                 dedupe_sort_truncate(&mut hits, request.limit);
@@ -474,6 +475,18 @@ fn workflow_language_scopes_allow_hit(language_scopes: &[&str], language_id: &st
             .any(|scope| workflow_language_scope_matches(language_id, scope))
 }
 
+fn retain_query_only_workflow_language_hits(
+    request: &CodeRetrievalRequest,
+    hits: &mut Vec<CodeRetrievalHit>,
+) {
+    let language_scopes = query_only_workflow_language_scopes(request);
+    if language_scopes.is_empty() {
+        return;
+    }
+
+    hits.retain(|hit| workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id));
+}
+
 fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {
     let excerpt = excerpt.to_ascii_lowercase();
     terms
@@ -515,13 +528,14 @@ fn search_chunks(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let strict_hits = if request.code_query_kind == CodeQueryKind::Hybrid {
         if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
-            let hits = search_chunks_with_fts_query(
+            let mut hits = search_chunks_with_fts_query(
                 connection,
                 status,
                 request,
                 &strict_fts_query,
                 strict_hybrid_chunk_candidate_limit(request),
             )?;
+            retain_query_only_workflow_language_hits(request, &mut hits);
             if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
                 return Ok(hits);
             }

@@ -65,6 +65,29 @@ fn hybrid_chunk_gate_rejects_query_language_scope_mismatches() {
 }
 
 #[test]
+fn hybrid_chunk_gate_retains_only_query_language_scoped_hits() {
+    let request = hybrid_gate_request(
+        "tsx provider panel effect run provider envelope payload",
+        12,
+    );
+    let mut hits = vec![
+        chunk_gate_hit_with_language(
+            "javascript",
+            "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
+        ),
+        chunk_gate_hit_with_language(
+            "typescript",
+            "function ProviderPanel() {\nReact.useEffect(() => runProvider(envelope.payload));\n}",
+        ),
+    ];
+
+    retain_query_only_workflow_language_hits(&request, &mut hits);
+
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].language_id, "typescript");
+}
+
+#[test]
 fn hybrid_chunk_gate_keeps_graph_expansion_for_sparse_or_fallback_hits() {
     let request = hybrid_gate_request("RK_PIPELINE_NOTE", 1);
     assert!(!hybrid_chunk_results_can_answer_without_graph_expansion(

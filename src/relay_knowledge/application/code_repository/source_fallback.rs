@@ -433,7 +433,7 @@ fn import_source_grep_score_adjustment(query: &str, specifier: &str, excerpt: &s
 
 fn query_prefers_dynamic_import_source(query: &str) -> bool {
     let query = query.trim();
-    if query.contains(" from ") || quoted_import_specifier(query).is_none() {
+    if quoted_import_specifier(query).is_none() {
         return false;
     }
 
