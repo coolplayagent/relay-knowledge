@@ -20,7 +20,8 @@ export type CodeQueryKind =
   | "references"
   | "callers"
   | "callees"
-  | "imports";
+  | "imports"
+  | "sbom";
 export type IndexKind = IndexStatus["kind"];
 export type WorkerKind = "embedding" | "ocr" | "vision" | "extractor";
 export type ProposalAction = "list" | "show" | "accept" | "reject" | "supersede";
@@ -234,7 +235,8 @@ export function codeQueryKindOptions(): Array<[CodeQueryKind, string]> {
     ["references", "references"],
     ["callers", "callers"],
     ["callees", "callees"],
-    ["imports", "imports"]
+    ["imports", "imports"],
+    ["sbom", "sbom"]
   ];
 }
 

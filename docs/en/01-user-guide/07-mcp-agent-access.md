@@ -71,8 +71,11 @@ Current MCP tool surface:
 - Service status.
 - Index status.
 - Authorized code graph query.
+- Authorized software global-model query.
 - Authorized repository-set code graph query.
 - Authorized code impact analysis.
+
+Agent kind selection uses existing product kinds rather than a separate MCP taxonomy. `relay_code_query` accepts `hybrid`, `symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and `sbom`. `relay_software_query` accepts `dependencies`, `sdks`, `files`, `topics`, `relationships`, `build`, `iac`, `design`, and `all`. Singular aliases are accepted for agent ergonomics, and `configuration` maps to software `relationships` while `model` or `models` maps to software `design`; configuration-driven feature flags stay on `relay_code_feature_flags`.
 
 Current MCP resource surface:
 
