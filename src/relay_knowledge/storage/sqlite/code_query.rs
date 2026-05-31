@@ -1,4 +1,3 @@
-#[cfg(test)]
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
@@ -80,7 +79,11 @@ use code_query_flow_scoring::{
     execution_flow_chunk_bonus, inline_construct_chunk_bonus, source_definition_body_chunk_bonus,
 };
 use code_query_hybrid_direct_gate::hybrid_direct_results_can_answer_without_graph_expansion;
-use code_query_hybrid_planning::{hybrid_query_prefers_chunk_first, hybrid_sequence_terms};
+use code_query_hybrid_planning::{
+    hybrid_query_prefers_chunk_first, hybrid_sequence_terms,
+    query_language_scoped_workflow_surface_scopes, workflow_language_scope_language_ids,
+    workflow_language_scope_matches,
+};
 #[cfg(test)]
 use code_query_import_scoring::{import_surface_bonus, import_target_symbol_bonus};
 #[cfg(test)]
@@ -147,8 +150,9 @@ fn search_code_with_status(
     let mut searched_chunks = false;
     if request.code_query_kind == CodeQueryKind::Hybrid && hybrid_query_prefers_chunk_first(request)
     {
-        if let Ok(chunk_hits) = search_chunks(connection, status, request) {
+        if let Ok(mut chunk_hits) = search_chunks(connection, status, request) {
             searched_chunks = true;
+            retain_query_language_scoped_workflow_hits(request, &mut chunk_hits);
             if hybrid_chunk_results_can_answer_without_graph_expansion(request, &chunk_hits) {
                 hits.extend(chunk_hits);
                 dedupe_sort_truncate(&mut hits, request.limit);
@@ -398,6 +402,7 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
     if terms.len() < 3 {
         return false;
     }
+    let language_scopes = query_language_scoped_workflow_surface_scopes(request);
     let required_matches = terms.len().clamp(3, 4);
     let required_hits = request.limit.clamp(1, 3);
     let dense_chunk_hits = hits
@@ -407,6 +412,7 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
                 && !hit
                     .retrieval_layers
                     .contains(&CodeRetrievalLayer::TextFallback)
+                && workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id)
                 && hybrid_sequence_match_count(&hit.excerpt, &terms) >= required_matches
         })
         .take(required_hits)
@@ -415,13 +421,19 @@ fn hybrid_chunk_results_can_answer_without_graph_expansion(
         return true;
     }
 
-    hybrid_chunk_results_have_collective_dense_coverage(&terms, hits, required_hits)
+    hybrid_chunk_results_have_collective_dense_coverage(
+        &terms,
+        hits,
+        required_hits,
+        &language_scopes,
+    )
 }
 
 fn hybrid_chunk_results_have_collective_dense_coverage(
     terms: &[String],
     hits: &[CodeRetrievalHit],
     required_hits: usize,
+    language_scopes: &[&str],
 ) -> bool {
     let required_coverage = terms.len().saturating_mul(2).div_ceil(3).max(4);
     let required_dense_matches = terms.len().clamp(3, 4);
@@ -433,6 +445,7 @@ fn hybrid_chunk_results_have_collective_dense_coverage(
             || hit
                 .retrieval_layers
                 .contains(&CodeRetrievalLayer::TextFallback)
+            || !workflow_language_scopes_allow_hit(language_scopes, &hit.language_id)
         {
             continue;
         }
@@ -453,6 +466,25 @@ fn hybrid_chunk_results_have_collective_dense_coverage(
     }
 
     supporting_hits >= required_hits && has_dense_hit && covered_terms.len() >= required_coverage
+}
+
+fn workflow_language_scopes_allow_hit(language_scopes: &[&str], language_id: &str) -> bool {
+    language_scopes.is_empty()
+        || language_scopes
+            .iter()
+            .any(|scope| workflow_language_scope_matches(language_id, scope))
+}
+
+fn retain_query_language_scoped_workflow_hits(
+    request: &CodeRetrievalRequest,
+    hits: &mut Vec<CodeRetrievalHit>,
+) {
+    let language_scopes = query_language_scoped_workflow_surface_scopes(request);
+    if language_scopes.is_empty() {
+        return;
+    }
+
+    hits.retain(|hit| workflow_language_scopes_allow_hit(&language_scopes, &hit.language_id));
 }
 
 fn hybrid_sequence_match_count(excerpt: &str, terms: &[String]) -> usize {
@@ -496,13 +528,14 @@ fn search_chunks(
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
     let strict_hits = if request.code_query_kind == CodeQueryKind::Hybrid {
         if let Some(strict_fts_query) = strict_hybrid_chunk_fts_match_query(&request.query) {
-            let hits = search_chunks_with_fts_query(
+            let mut hits = search_chunks_with_fts_query(
                 connection,
                 status,
                 request,
                 &strict_fts_query,
                 strict_hybrid_chunk_candidate_limit(request),
             )?;
+            retain_query_language_scoped_workflow_hits(request, &mut hits);
             if hybrid_chunk_results_can_answer_without_graph_expansion(request, &hits) {
                 return Ok(hits);
             }
@@ -553,7 +586,9 @@ fn search_chunks_with_fts_query(
     fts_query: &str,
     fts_limit: usize,
 ) -> Result<Vec<CodeRetrievalHit>, StorageError> {
-    let fts_filter = fts_path_and_language_filter_sql(status, request);
+    let query_language_filters = query_language_scoped_workflow_language_filters(request);
+    let fts_filter =
+        chunk_fts_path_and_language_filter_sql(status, request, &query_language_filters);
     let sql = format!(
         "
         SELECT c.file_id, c.path, c.language_id, c.content, c.byte_start, c.byte_end,
@@ -583,11 +618,12 @@ fn search_chunks_with_fts_query(
     );
     let mut statement = prepare_code_search_statement(connection, &sql)?;
     let rows = statement.query_map(
-        params_from_iter(fts_values_for_limited_with_language(
+        params_from_iter(chunk_fts_values_for_limited_with_language(
             required_scope(status)?,
             status,
             request,
             fts_query,
+            &query_language_filters,
             fts_limit,
             fts_limit,
         )),
@@ -707,6 +743,75 @@ fn search_chunks_with_fts_query(
     }
 
     Ok(hits)
+}
+
+fn query_language_scoped_workflow_language_filters(request: &CodeRetrievalRequest) -> Vec<String> {
+    let mut language_filters = Vec::new();
+    for scope in query_language_scoped_workflow_surface_scopes(request) {
+        for language_id in workflow_language_scope_language_ids(scope) {
+            if !language_filters.iter().any(|filter| filter == language_id) {
+                language_filters.push((*language_id).to_owned());
+            }
+        }
+    }
+
+    language_filters
+}
+
+fn chunk_fts_path_and_language_filter_sql(
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    query_language_filters: &[String],
+) -> String {
+    let mut filter = fts_path_and_language_filter_sql(status, request);
+    let extra_filter = exact_language_filter_sql("language_id", query_language_filters.len());
+    if extra_filter.is_empty() {
+        return filter;
+    }
+
+    if filter.is_empty() {
+        format!("AND {extra_filter}")
+    } else {
+        filter.push_str(" AND ");
+        filter.push_str(&extra_filter);
+        filter
+    }
+}
+
+fn exact_language_filter_sql(column: &str, filter_count: usize) -> String {
+    if filter_count == 0 {
+        return String::new();
+    }
+
+    let clauses = std::iter::repeat_with(|| format!("{column} = ?"))
+        .take(filter_count)
+        .collect::<Vec<_>>();
+    format!("({})", clauses.join(" OR "))
+}
+
+fn chunk_fts_values_for_limited_with_language(
+    source_scope: &str,
+    status: &CodeRepositoryStatus,
+    request: &CodeRetrievalRequest,
+    fts_query: &str,
+    query_language_filters: &[String],
+    fts_limit: usize,
+    limit: usize,
+) -> Vec<Value> {
+    let mut values = vec![
+        Value::Text(source_scope.to_owned()),
+        Value::Text(fts_query.to_owned()),
+        Value::Text(source_scope.to_owned()),
+    ];
+    push_path_filter_values(&mut values, &status.path_filters);
+    push_path_filter_values(&mut values, &request.repository.path_filters);
+    push_language_filter_values(&mut values, &status.language_filters);
+    push_language_filter_values(&mut values, &request.repository.language_filters);
+    push_language_filter_values(&mut values, query_language_filters);
+    values.push(Value::Integer(fts_limit as i64));
+    values.push(Value::Integer(limit as i64));
+
+    values
 }
 
 fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {

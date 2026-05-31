@@ -1,6 +1,14 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780217458-import-fallback-intent-aware-dynamic-boost
+- 算法/架构：Imports source `text_fallback` 的 dynamic `import()` 加分改为 query-intent aware：只有用户查询本身是 `import "./module"` 这类无 `from`/binding 的 bare import 表达式时，relative specifier 的 dynamic import source line 才获得优先级；普通 `./module`、`pkg/name` 或 path-like import specifier 查询保留已索引 ImportGraph 行在 source-text fallback 之前。实现仍在 `application::code_repository::source_fallback` 的有界 grep 结果合并层，graph import row、resolved/unresolved edge metadata 和 storage ranking 不变。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、source fallback candidate path/window、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、task lease/checkpoint 或安装发布；不枚举仓库、路径、case id、fixture query 或符号。预期修复 TypeScript/ES module path import 查询中 dynamic `import()` 文本行压过静态 type/runtime import graph evidence 的排序噪声，同时保留显式 dynamic import 查询优先返回执行时 import source line；风险是少量只输入普通 specifier 但想看 dynamic import 的用户会先看到 graph import declaration，受 dynamic-intent 正/负单测、resolved graph hit 保留和 bounded source fallback 语义控制。
+- 策略关联：建立在已采纳的 bounded source fallback evidence、external import diagnostic 和 Hybrid/workflow graph-first 规划策略之上；避免扩大 source fallback、增加无界候选、枚举 fixture 字符串或削弱 semantic/vector 与稳定性保护层。
+## 候选优化说明：run-1780216181-language-scoped-workflow-chunk-first
+- 算法/架构：Hybrid chunk-first planner 在既有 API-dense、structured-sequence 与 C/C++ procedural gates 之外，增加语言作用域明确的 workflow/dataflow 查询 gate：当请求带 Go/JavaScript/TypeScript/TSX/Python/JVM/.NET/Ruby/PHP/Swift/Scala 等语言过滤，或 query 本身包含 `tsx`/`jsx`/`go`/`python` 等语言标记，并且 query 同时具备足够 high-signal terms 与 async/callback/channel/effect/pipeline/handler 等 workflow signal，或一个 workflow signal 加 provider/payload/envelope/registry/normalize 等 dataflow surface 时，先执行有界 chunk FTS。是否提前返回仍交给既有 dense chunk coverage gate；覆盖不足时继续执行 Symbol、Reference、Call、Import 与 source fallback 的完整 Hybrid stack。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate 上限、chunk scorer、repo-set overlay、semantic/vector read model、source `text_fallback` 语义、env/paths/net、CLI/API、task lease/checkpoint、安装发布或 harness；不枚举仓库、路径、case id、fixture query 或符号，只使用通用语言标记和 workflow/dataflow 词类。预期改善 TSX/JS/Go/Python 等多语言 workflow 查询的首批 chunk evidence rank，并在 dense chunk 已足够回答时减少 symbol/call/import graph fanout，降低 fast competitive/performance workload 的 p50/p95 风险；风险是带语言过滤的探索式 Hybrid 查询可能先多跑一次 chunk FTS，受 high-signal/dataflow gate、既有 dense coverage gate、full-stack fallback、typed-arrow negative planner test 和 workflow chunk early-answer 单测控制。
+- 策略关联：在本 profile/category 没有已采纳历史的情况下选择通用 query-planning 算法改进；建立在已记录的 strict/broad Hybrid chunk union、API member strict chunk recall 与 Hybrid direct evidence gate 的结构化证据优先策略之上，避免 source-fallback 扩张、fixture 字符串枚举、candidate window 无界扩大或局部 scorer 调权的 rejected pattern。
 ## 候选优化说明：run-1780212377-bounded-overlay-evidence-index
 - 算法/架构：repository-set overlay evidence index 对同一目标 file/symbol record 只保留响应最多可能返回的前 5 条 edge，对 import-origin line 同样按响应上限保留前 5 条；非 import hit 的 file-origin evidence 在构建索引时流式保留 confidence 最高的 2 条，而不是先保存同文件所有 edge 再排序截断。返回 evidence 仍经同一个有序 `BTreeSet` 合并、bridge support、member priority、dedupe/diversity/top-k 和 returned-evidence pruning。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、overlay refresh、cross-edge resolution、单仓 FTS/candidate limit、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API、任务 lease/checkpoint 或安装发布；只把原本永远不会越过响应 evidence 上限的 hot-key edge 留在索引外。预期降低 Temporal/OpenTelemetry 这类多仓 workspace 中大量 import edge 指向同一 package/file/symbol 时的 repository-set query 内存和 per-hit evidence merge 成本；风险是未来若响应 evidence 上限提高，需要同步调大索引上限，受 shared constants 和 focused overlay evidence tests 控制。
@@ -915,66 +923,8 @@
 - score: 0.964715; cases: 36/36 passed; summary: prompt gate filtering stopped superseded quality failures from dominating follow-up candidates; current latency degradations remain protected memory context.
 ## 20260517T210331Z
 - score: 0.971793; cases: 36/36 passed; summary: identifier token cache improvements lifted performance and research judge while preserving repository and semantic/vector floors.
-## 20260517T212719Z-to-20260517T234741Z compacted
-- summary: accepted early retrieval/ranking, QoS test, scoped caller, TypeScript finalize, and parser manual extraction records were compacted to keep this primary benchmark log under the 1000-line hard cap. Scores ranged from 0.925314 to 0.964671 with 36/36 cases passed; raw patches and metrics remain in `.git/relay-knowledge-self-iteration/patches/` and historical reports.
-## 20260518T014540Z-to-20260518T041031Z compacted
-- summary: accepted retrieval token-signature simplification, code-query path/call ranking, and code-batch indexing records from this range were compacted to keep this primary benchmark log under the 1000-line hard cap. Full patch, score, metric, and raw adopted-note details remain in `.git/relay-knowledge-self-iteration/patches/20260518T014540Z.patch`, `20260518T035623Z.patch`, `20260518T041031Z.patch`, and historical reports.
-## 20260518T051523Z-to-20260518T071744Z compacted
-- summary: accepted code-query ranking, call-direction, code-batch search/indexing, and caller ranking records from this range were compacted to keep this primary benchmark log under the 1000-line hard cap. Full score, metric, patch, and raw adopted-note details remain in `.git/relay-knowledge-self-iteration/patches/20260518T051523Z.patch`, `20260518T052713Z.patch`, `20260518T062727Z.patch`, `20260518T071744Z.patch`, and historical reports.
-## 20260518T093310Z-to-20260518T094852Z compacted
-- summary: accepted code scope/indexing and path-index cleanup records were compacted to keep this primary log under the 1000-line hard cap; full metrics and raw patches remain in `.git/relay-knowledge-self-iteration/patches/20260518T093310Z.patch`, `.git/relay-knowledge-self-iteration/patches/20260518T094852Z.patch`, and historical reports.
-## 20260518T114107Z compacted
-- summary: accepted finalize reference-resolution SQL compaction with score 0.94048 and 45/45 cases passed; raw patch, metrics, and notes remain in `.git/relay-knowledge-self-iteration/patches/20260518T114107Z.patch` and historical reports.
-## 20260518T114915Z compacted
-- summary: accepted compound symbol FTS/query-token expansion with score 0.94613, 45/45 cases passed, and semantic_vector/stability floors at 1.0. Full patch/report details remain in `.git/relay-knowledge-self-iteration/patches/20260518T114915Z.patch` and historical reports.
-## 20260518T164005Z-20260518T184904Z archived
-- summary: older accepted parser, import ranking, path ranking, benchmark latency, and research-judge entries were compacted on 2026-05-20 to keep this primary log under the tracked-file line cap; full patch/report details remain in `.git/relay-knowledge-self-iteration/patches/`, reports, and progressive memory.
-## 20260518T195201Z-to-20260518T202013Z compacted
-- summary: accepted hybrid chunk ranking and import target-symbol ranking records were compacted to keep this primary log under the tracked-file line cap; full patch, score, metric, and raw excerpt details remain in `.git/relay-knowledge-self-iteration/patches/` and historical reports.
-## 20260518T213007Z compacted
-- summary: accepted C parser optimization with score 0.916663 and 87/87 cases passed; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches/20260518T213007Z.patch` and historical reports.
-## 20260518T214222Z
-- summary: search-document content optimization accepted with score 0.923286; raw metrics and patch excerpt were compacted to keep this primary log under the 1000-line hard cap. Full details remain in the patch/report artifacts.
-## 20260518T220331Z-20260519T-import-usage archived
-- summary: older accepted finalize, call-site, type-relationship, function-flow, header-declaration, and import-usage ranking notes were compacted to keep this primary log under the 1000-line hard cap; raw details remain in their patch/report artifacts and the archive document.
-## 20260519T050321Z compacted
-- summary: parser manual extraction candidate scored 0.885665 with 98/104 cases passed; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches/20260519T050321Z.patch` and historical reports.
-## 20260519T-run-1779223761-to-run-1779240531 compacted
-- summary: Rust v2 harness migration, bounded SQLite schema maintenance, compact high-coverage hybrid chunks, history synthesis, and assigned-result caller ranking were compacted on 20260520 to keep this primary benchmark log under the repository line cap. Raw patch/report details remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
-## run-1779242800-to-run-1779266107 compacted
-- summary: accepted overlay evidence, repository-set bridge support, caller ranking, streamed call-search finalize, hybrid chunk anchor FTS, symbol identity fast path, edge language marker, repository-set fanout retry, export-key index, caller/callee identity fast path, and dynamic category guardrails are compacted to keep this primary log under the line cap; full raw metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory.
-## run-1779279305-to-run-1779289571171823700 compacted
-- summary: returned overlay pruning, vector lexical coverage tie-break, derived cursor streaming, and exact-path symbol/chunk ranking accepted records were compacted on 2026-05-20 to keep this primary benchmark log under the repository line cap; strategy details remain in the candidate sections above and raw metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory summaries.
-## run-1779290426265110061-to-run-1779291615794938640 compacted
-- summary: derived token signature filter and derived scope/version pushdown validate records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; full details moved to the archive document and raw patch/report artifacts remain under `.git/relay-knowledge-self-iteration/`.
-## run-1779317832-to-run-1779323184 compacted
-- summary: reference identity fast path, reference/call source excerpts, and C-family usage reference facts accepted records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; detailed metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory, with strategy details preserved in the candidate sections above.
-## run-1779324524 compacted
-- summary: accepted callee sequence, source excerpt, and graph BM25 stability records were compacted on 2026-05-21 to keep this primary benchmark log under the repository line cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779324524.patch`, reports, and progressive memory, with strategy details preserved above.
-## run-1779331577-to-run-1779363937 compacted
-- summary: bidirectional call identity lookup, compact API-sequence hybrid ranking, and indirect function-pointer caller recovery are compacted here to keep this primary log under the file-length cap; full algorithms, metrics, and risks remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
-## run-1779365756-to-run-1779366747 compacted
-- summary: accepted repository-set member diversification plus hybrid chunk anchor/designated-initializer scoring records were compacted on 2026-05-21 to keep this primary benchmark log under the 1000-line hard cap; full metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779365756.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779366747.patch`, reports, and progressive memory, with strategy details preserved above.
-## run-1779368858-to-run-1779395376 compacted
-- summary: accepted source fallback, hybrid body/API/proximity ranking, reference usage context, declaration/call/excerpt ranking, compact API-sequence ranking, operation-surface ranking, and pure Hybrid symbol-identity planning records were compacted on 2026-05-22 to keep this primary benchmark log under the 1000-line hard cap; detailed algorithms, metrics, risks, raw patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries, with strategy details preserved in the candidate sections above.
-## run-1779399365 compacted
-- summary: accepted repository-set dependency symbol plan scored 0.968533 with foundational, competitive, semantic_vector, and stability floors at 1.0; full patch, metrics, and raw report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779399365.patch`, reports, and progressive memory.
-## run-1779433139-to-run-1779434421 compacted
-- summary: accepted reusable search-document buffers and lazy borrowed score fields are compacted here to keep this primary benchmark log under the 1000-line hard cap; latest accepted score was 0.963817 with foundational, competitive, semantic_vector, and stability floors at 1.0, performance 0.798985, 52/52 cases passed, and full metrics preserved in `.git/relay-knowledge-self-iteration/patches-v2/run-1779433139.patch`, `.git/relay-knowledge-self-iteration/patches-v2/run-1779434421.patch`, reports, and progressive memory.
-## run-1779435315 compacted
-- summary: latest accepted checkpoint batch delete-elision scored 0.964516 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; performance was 0.802867 and 52/52 cases passed. Full metrics, patch, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779435315.patch`, reports, and progressive memory; strategy details remain in the candidate section above.
-## run-1779439043-to-run-1779463498 compacted
-- summary: accepted code-search backfill marker, repository-set dependency API symbol query/direct plan, line-aware reference evidence, repository-set API identity coverage/declaration demotion, and bounded external import fallback records are compacted to keep this primary benchmark log under the 1000-line hard cap. Latest accepted in this range was `run-1779463498` with score 0.969160 and foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full raw metrics, changed paths, adopted notes, patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries, with strategy details preserved in candidate sections above.
-## run-1779465105 compacted
-- summary: accepted hybrid symbol elision with BM25 query retry scored 0.976355 with foundational, competitive, accuracy, semantic_vector, and stability floors at 1.0; full metrics, patch, changed paths, and adopted notes remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779465105.patch`, reports, and progressive memory, with strategy details preserved in the candidate section above.
-## run-1779596127-to-run-1779596855 compacted
-- summary: accepted internal source grep fallback and repository-set symbol fallback merge records are compacted here to keep this primary benchmark log under the 1000-line hard cap. Latest accepted `run-1779596855` scored 0.954442 with foundational=1.0, competitive=0.909091, semantic_vector=1.0, stability=1.0, and performance=0.858012; full raw metrics, changed paths, patches, reports, and progressive memory remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and memory summaries.
-## run-1779602603 compacted
-- summary: accepted TypeScript import-edge/source fallback recovery scored 0.970528 with foundational=1.0, competitive=0.988636, semantic_vector=1.0, stability=1.0, and performance=0.850156; full patch, changed paths, metrics, and report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779602603.patch`, reports, and progressive memory.
-## run-1779602969 compacted
-- summary: accepted batched Git blob size/read source-grep optimization scored 0.971214 with foundational=1.0, competitive=0.988636, semantic_vector=1.0, stability=1.0, and performance=0.853969; full metrics, degradations, patch, and report remain in `.git/relay-knowledge-self-iteration/patches-v2/run-1779602969.patch`, reports, and progressive memory.
-## run-1779604104-to-run-1779619958 compacted
-- summary: accepted repository-set Hybrid gating, adaptive parser fanout, API-dense Hybrid chunk recall, and collective chunk gate records are compacted here to keep this primary benchmark log under the 1000-line hard cap. Scores ranged from 0.974107 to 0.977769 with foundational=1.0, semantic_vector=1.0, and stability=1.0; full patches, metrics, changed paths, and reports remain under `.git/relay-knowledge-self-iteration/patches-v2/`, `reports-v2/`, and progressive memory.
+## 20260517T212719Z-to-run-1779619958 archived
+- archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves compacted summaries for accepted retrieval/ranking, parser, indexing, repository-set, source fallback, semantic/vector, and Hybrid chunk-gate records from `20260517T212719Z` through `run-1779619958`.
 
 ## 20260524-20260526 late detailed entries
 - archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line hard cap. The archive preserves run details for `run-1779620755` through `run-1779722194`, including SBOM dependency inventory, internal source fallback, query-aware candidate recovery, release glibc policy, and code-index lease recovery records.
@@ -997,3 +947,31 @@
 - summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line cap.
 ## run-1780212377-to-run-1780213983 compacted
 - summary: accepted bounded overlay evidence index (`run-1780212377`) and streaming chunk row scoring (`run-1780213983`) records were compacted to keep this primary benchmark log below the 1000-line hard cap. Full algorithms, invariants, scores, metrics, changed paths, and adopted notes remain in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md`, `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
+
+## run-1780216181
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1780216181.patch`
+- score: 0.969180 (foundational=1.000000, competitive=0.994118, accuracy=0.997059, semantic_vector=1.000000, research_judge=n/a, performance=0.835965, stability=1.000000)
+- cases: 114/114 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md`, `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_planning.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`
+- key improvements: none recorded
+- known degradations: none recorded
+- latency metrics: cargo_fmt_check_ms=3730ms; self_iteration_cargo_fmt_check_ms=466ms; linux_glibc_compatibility_policy_ms=162ms; skill_metadata_policy_cases_ms=343ms; cargo_build_debug_ms=1047ms; self_iteration_cargo_check_ms=3710ms; code_index_recovery_cases_ms=1409ms; code_index_sqlite_lock_cases_ms=1886ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1780217458
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1780217458.patch`
+- score: 0.987165 (foundational=1.000000, competitive=0.997059, accuracy=0.998529, semantic_vector=1.000000, research_judge=n/a, performance=0.932289, stability=1.000000)
+- cases: 114/114 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/source_fallback.rs`, `src/relay_knowledge/application/code_repository/source_fallback_tests.rs`
+- key improvements: score_component:score 0.96918->0.9871650455215046; score_component:performance 0.835965->0.9322894685835221; case_score:typescript_syntax_imports_type_and_runtime_protocol 0.75->1.0; case_rank:typescript_syntax_imports_type_and_runtime_protocol 2->1; metric:cargo_fmt_check_ms 3730.0->3137.0; metric:self_iteration_cargo_fmt_check_ms 466.0->342.0; metric:skill_metadata_policy_cases_ms 343.0->242.0; metric:cargo_build_debug_ms 1047.0->424.0
+- known degradations: metric:code_index_recovery_cases_ms 1409.0->4061.0; metric:code_index_sqlite_lock_cases_ms 1886.0->4245.0; metric:code_index_health_isolation_cases_ms 3920.0->6611.0; metric:leveldb_cpp_query_p95_ms 470.0->4517.0; metric:typescript_syntax_fixture_query_p95_ms 543.0->846.0; metric:temporal_go_workspace_repo_set_query_p50_ms 404.0->444.0; metric:temporal_go_workspace_repo_set_query_p95_ms 404.0->444.0; metric:local_noise_file_index_ms 1008.0->1167.0
+- latency metrics: cargo_fmt_check_ms=3137ms; self_iteration_cargo_fmt_check_ms=342ms; linux_glibc_compatibility_policy_ms=161ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=424ms; self_iteration_cargo_check_ms=584ms; code_index_recovery_cases_ms=4061ms; code_index_sqlite_lock_cases_ms=4245ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.

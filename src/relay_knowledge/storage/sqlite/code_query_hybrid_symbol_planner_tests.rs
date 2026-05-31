@@ -215,6 +215,53 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         12,
     )));
+    assert!(hybrid_query_prefers_chunk_first(&request(
+        "tsx provider panel effect run provider envelope payload",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert_eq!(
+        query_language_scoped_workflow_surface_scopes(&request(
+            "tsx provider panel effect run provider envelope payload",
+            CodeQueryKind::Hybrid,
+            12,
+        )),
+        vec!["typescript"]
+    );
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "where does payload go after handler response filter",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "ts provider effect response filter payload",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "goroutine defer close channel processor interface event payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["go".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "where does payload go after handler response filter",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["go".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "ES module registry async dispatch callback normalize payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["javascript".to_owned()],
+        )
+    ));
     assert!(hybrid_query_prefers_chunk_first(
         &request_with_language_filters(
             "operation table read callback dispatch designated initializer",
@@ -231,6 +278,31 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
             vec!["cpp".to_owned()],
         )
     ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "java provider effect response filter payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["cpp".to_owned()],
+        )
+    ));
+    assert!(
+        query_language_scoped_workflow_surface_scopes(&request_with_language_filters(
+            "java provider effect response filter payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["cpp".to_owned()],
+        ))
+        .is_empty()
+    );
+    assert!(
+        query_language_scoped_workflow_surface_scopes(&request(
+            "python Parser::parse_node visit_expr ASTNode",
+            CodeQueryKind::Hybrid,
+            10,
+        ))
+        .is_empty()
+    );
     assert!(!hybrid_query_prefers_chunk_first(&request(
         "operation table read callback dispatch designated initializer",
         CodeQueryKind::Hybrid,
@@ -241,6 +313,152 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         10,
     )));
+}
+
+#[tokio::test]
+async fn language_scoped_workflow_chunk_plan_answers_before_symbol_noise() {
+    let path = "src/component.tsx";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("component-file", path)],
+        symbols: vec![
+            symbol(
+                "provider-panel-symbol",
+                "component-file",
+                path,
+                "ProviderPanel",
+            ),
+            symbol(
+                "provider-effect-symbol",
+                "component-file",
+                path,
+                "ProviderEffect",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "provider-flow-start",
+                "component-file",
+                path,
+                "function ProviderPanel() starts the provider effect for an envelope payload",
+            ),
+            chunk(
+                "provider-flow-middle",
+                "component-file",
+                path,
+                "React.useEffect runs provider normalization before sending the payload envelope",
+            ),
+            chunk(
+                "provider-flow-end",
+                "component-file",
+                path,
+                "provider panel renders the envelope payload after effect completion",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "tsx provider panel effect run provider envelope payload",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("language-scoped workflow query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter().all(
+            |hit| hit.path == path && hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]
+        ),
+        "dense workflow chunks should avoid symbol-layer fanout: {hits:?}",
+    );
+}
+
+#[tokio::test]
+async fn query_language_scope_filters_chunk_candidates_before_fts_limit() {
+    let target_path = "src/component.tsx";
+    let mut files = Vec::new();
+    let mut chunks = Vec::new();
+    for index in 0..320 {
+        let file_id = format!("noise-file-{index:03}");
+        let path = format!("src/noise_{index:03}.js");
+        files.push(file_with_language(&file_id, &path, "javascript"));
+        chunks.push(chunk_with_language(
+            &format!("aaa-noise-chunk-{index:03}"),
+            &file_id,
+            &path,
+            "javascript",
+            "provider provider panel panel effect effect run run envelope envelope payload payload",
+        ));
+    }
+    files.push(file_with_language("target-file", target_path, "typescript"));
+    chunks.push(chunk_with_language(
+        "zzz-target-chunk",
+        "target-file",
+        target_path,
+        "typescript",
+        "ProviderPanel useEffect runs provider envelope payload flow",
+    ));
+    let changed_path_count = files.len();
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files,
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks,
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "tsx provider panel effect run provider envelope payload",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("query-scoped workflow chunk search should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter()
+            .all(|hit| hit.path == target_path && hit.language_id == "typescript"),
+        "query-derived language scope should be applied before the FTS candidate limit: {hits:?}",
+    );
 }
 
 #[tokio::test]
@@ -535,12 +753,16 @@ fn symbol_hit(id: &str, canonical_symbol_id: &str, excerpt: &str) -> CodeRetriev
 }
 
 fn file(file_id: &str, path: &str) -> RepositoryCodeFileRecord {
+    file_with_language(file_id, path, "typescript")
+}
+
+fn file_with_language(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
     RepositoryCodeFileRecord {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
-        language_id: "typescript".to_owned(),
+        language_id: language_id.to_owned(),
         blob_hash: format!("hash-{file_id}"),
         byte_len: 0,
         line_count: 8,
@@ -584,13 +806,23 @@ fn qualified_symbol(
 }
 
 fn chunk(chunk_id: &str, file_id: &str, path: &str, content: &str) -> RepositoryCodeChunkRecord {
+    chunk_with_language(chunk_id, file_id, path, "typescript", content)
+}
+
+fn chunk_with_language(
+    chunk_id: &str,
+    file_id: &str,
+    path: &str,
+    language_id: &str,
+    content: &str,
+) -> RepositoryCodeChunkRecord {
     RepositoryCodeChunkRecord {
         repository_id: "repo".to_owned(),
         source_scope: TEST_SOURCE_SCOPE.to_owned(),
         chunk_id: chunk_id.to_owned(),
         file_id: file_id.to_owned(),
         path: path.to_owned(),
-        language_id: "typescript".to_owned(),
+        language_id: language_id.to_owned(),
         content: content.to_owned(),
         byte_range: range(2, 4),
         line_range: range(2, 4),
