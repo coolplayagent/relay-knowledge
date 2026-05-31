@@ -101,7 +101,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             target_symbol_snapshot_id TEXT,
             target_hint TEXT,
             resolution_state TEXT NOT NULL DEFAULT 'unresolved',
-            confidence_basis_points INTEGER NOT NULL DEFAULT 5000,
+            confidence_basis_points INTEGER NOT NULL DEFAULT 2500,
             confidence_tier TEXT NOT NULL DEFAULT 'ambiguous',
             byte_start INTEGER NOT NULL,
             byte_end INTEGER NOT NULL,

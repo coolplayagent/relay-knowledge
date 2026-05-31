@@ -124,6 +124,23 @@ fn duplicate_reference_identity_keeps_single_reference_record() {
 }
 
 #[test]
+fn extracted_unresolved_references_start_with_low_confidence() {
+    let mut build = snapshot_build();
+
+    parse_indexed_file(&mut build, "src/app.rs", b"fn run() { missing(); }\n")
+        .expect("file should parse");
+    let reference = build
+        .references
+        .iter()
+        .find(|reference| reference.name == "missing")
+        .expect("call reference should be extracted before finalization");
+
+    assert_eq!(reference.resolution_state, "unresolved");
+    assert_eq!(reference.confidence_basis_points, 2_500);
+    assert_eq!(reference.confidence_tier, "ambiguous");
+}
+
+#[test]
 fn typescript_function_factory_members_are_call_containers() {
     let snapshot = parse_snapshot(
         "src/agent.ts",
