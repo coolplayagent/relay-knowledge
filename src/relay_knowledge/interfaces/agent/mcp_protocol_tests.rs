@@ -45,6 +45,7 @@ async fn initialize_and_tools_list_use_snake_case_names_without_refresh() {
     let names = tool_names(&tools);
     assert!(names.contains(&"relay_retrieve_context".to_owned()));
     assert!(names.contains(&"relay_code_query".to_owned()));
+    assert!(names.contains(&"relay_software_query".to_owned()));
     assert!(names.contains(&"relay_code_impact".to_owned()));
     assert!(!names.contains(&"relay_refresh_indexes".to_owned()));
     assert!(

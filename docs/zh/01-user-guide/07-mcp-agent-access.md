@@ -71,8 +71,11 @@ MCP tool surface 当前包括:
 - 服务状态。
 - 索引状态。
 - 已授权代码图谱查询。
+- 已授权软件全域模型查询。
 - 已授权 repository-set 代码图谱查询。
 - 已授权代码影响分析。
+
+Agent kind 选择复用现有产品 kind，而不是新增一套 MCP taxonomy。`relay_code_query` 接受 `hybrid`、`symbol`、`definition`、`references`、`callers`、`callees`、`imports` 和 `sbom`。`relay_software_query` 接受 `dependencies`、`sdks`、`files`、`topics`、`relationships`、`build`、`iac`、`design` 和 `all`。为方便 agent 调用，singular alias 会被接受；`configuration` 映射到软件 `relationships`，`model` 或 `models` 映射到软件 `design`；配置驱动 feature flag 仍通过 `relay_code_feature_flags` 查询。
 
 MCP resource surface 当前包括:
 

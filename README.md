@@ -346,8 +346,15 @@ requests and `notifications/cancelled` stay bound to the issued session.
 Missing session headers are rejected with HTTP 400; unknown or evicted session
 IDs are rejected with HTTP 404.
 The MCP tool surface includes graph retrieval, graph inspection, health,
-service status, index status, authorized code graph queries, and authorized
-code impact analysis. MCP does not expose index refresh or repository indexing;
+service status, index status, authorized code graph queries, authorized
+software global-model queries, repository-set code graph queries, and
+authorized code impact analysis. Agent-facing kind selection reuses existing
+product kinds: `relay_code_query` handles code graph kinds,
+`relay_software_query` handles software global-model kinds, and
+`relay_code_feature_flags` handles configuration-driven feature flags. Common
+agent aliases such as `dependency`, `configuration`, and `models` normalize to
+the existing `dependencies`, `relationships`, and `design` kinds instead of
+creating duplicate kinds. MCP does not expose index refresh or repository indexing;
 run `relay-knowledge repo index`, `relay-knowledge repo update`, or
 `relay-knowledge index refresh` from an explicit CLI/Web workflow before MCP
 queries depend on fresh indexes.

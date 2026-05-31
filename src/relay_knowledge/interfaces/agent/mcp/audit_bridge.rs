@@ -66,10 +66,8 @@ pub(super) async fn record_mcp_tool_audit(
         qos_decision: AgentAuditQosDecision::Admitted,
         status,
         source_scope: audit_source_scope(structured),
-        freshness: structured["freshness"].as_str().map(str::to_owned),
-        limit: structured["budget_used"]["limit"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok()),
+        freshness: audit_freshness(structured),
+        limit: audit_limit(structured),
         result_count: audit_result_count(structured),
         truncated: structured["truncated"].as_bool().unwrap_or(false),
         elapsed_ms,
@@ -176,9 +174,34 @@ pub(super) async fn record_mcp_method_audit(server: &McpServer, input: McpMethod
 fn audit_source_scope(structured: &Value) -> Option<String> {
     structured["source_scope"]
         .as_str()
+        .or_else(|| structured["scope"]["alias"].as_str())
         .or_else(|| structured["request"]["repository"]["repository"].as_str())
         .or_else(|| structured["request"]["set_alias"].as_str())
         .map(str::to_owned)
+}
+
+fn audit_freshness(structured: &Value) -> Option<String> {
+    structured["freshness"]
+        .as_str()
+        .or_else(|| structured["request"]["freshness_policy"].as_str())
+        .map(normalize_freshness_label)
+}
+
+fn normalize_freshness_label(value: &str) -> String {
+    match value {
+        "allow_stale" => "allow-stale",
+        "wait_until_fresh" => "wait-until-fresh",
+        "graph_only" => "graph-only",
+        other => other,
+    }
+    .to_owned()
+}
+
+fn audit_limit(structured: &Value) -> Option<usize> {
+    structured["budget_used"]["limit"]
+        .as_u64()
+        .or_else(|| structured["request"]["limit"].as_u64())
+        .and_then(|value| usize::try_from(value).ok())
 }
 
 fn audit_result_count(structured: &Value) -> Option<usize> {
@@ -190,13 +213,40 @@ fn audit_result_count(structured: &Value) -> Option<usize> {
         .as_array()
         .map(Vec::len)
         .or_else(|| structured["flags"].as_array().map(Vec::len))
+        .or_else(|| software_projection_result_count(structured))
+}
+
+fn software_projection_result_count(structured: &Value) -> Option<usize> {
+    let fields = [
+        "components",
+        "dependency_usages",
+        "sdk_usages",
+        "files",
+        "topics",
+        "relationships",
+        "build_targets",
+        "iac_resources",
+        "design_elements",
+    ];
+    let mut count = 0;
+    let mut found = false;
+    for field in fields {
+        if let Some(values) = structured[field].as_array() {
+            count += values.len();
+            found = true;
+        }
+    }
+
+    found.then_some(count)
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{audit_graph_version, audit_source_scope};
+    use super::{
+        audit_freshness, audit_graph_version, audit_limit, audit_result_count, audit_source_scope,
+    };
 
     #[test]
     fn audit_graph_version_reads_common_response_shapes() {
@@ -218,5 +268,32 @@ mod tests {
             audit_source_scope(&json!({"request": {"set_alias": "workspace"}})).as_deref(),
             Some("workspace")
         );
+    }
+
+    #[test]
+    fn audit_result_count_reads_software_projection_response() {
+        assert_eq!(
+            audit_result_count(&json!({
+                "components": [{"name": "serde"}],
+                "relationships": [{"relationship_kind": "configures"}]
+            })),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn audit_budget_reads_software_projection_request_shape() {
+        let structured = json!({
+            "request": {
+                "freshness_policy": "wait_until_fresh",
+                "limit": 13
+            }
+        });
+
+        assert_eq!(
+            audit_freshness(&structured).as_deref(),
+            Some("wait-until-fresh")
+        );
+        assert_eq!(audit_limit(&structured), Some(13));
     }
 }

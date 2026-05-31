@@ -93,7 +93,7 @@ relay-knowledge repo register <path> [--alias <name>] [--path <filter>]
 relay-knowledge repo index <alias> [--ref <ref>] [--dry-run]
 relay-knowledge repo scope preview <alias> [--ref <ref>]
 relay-knowledge repo update <alias> --base <ref> --head <ref>
-relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports]
+relay-knowledge repo query <alias> --query <text> [--kind hybrid|symbol|definition|references|callers|callees|imports|sbom]
 relay-knowledge repo feature-flags <alias> [--query <text>] [--ref <ref>] [--path <filter>] [--language <id>] [--limit <n>]
 relay-knowledge repo impact <alias> --base <ref> --head <ref>
 relay-knowledge repo report <alias> [--format markdown|json]
@@ -127,6 +127,8 @@ relay-knowledge version check
 `repo feature-flags` 读取索引阶段写入的配置驱动特性开关图事实，默认列出所选 repository scope 内的开关、配置来源和代码使用关系；`--query` 只做名称、配置 key、路径或 excerpt 过滤。抽取器识别环境变量、config/settings key、布尔配置声明，以及 OpenFeature、LaunchDarkly、Unleash 等常见 SDK evaluation 调用。它不会同步 provider 控制面的状态、策略、segment 或 rollout variant。该命令不会在查询时扫描全仓库源码；新增或修正开关抽取逻辑后，需要重新 `repo index` 或 `repo update` 才能看到新事实。
 
 `repo software` 读取所选 repository scope 的软件全域模型投影。`--kind dependencies` 返回由 manifest 和 lockfile 生成的包组件，以及把 declared package 与代码/配置 import 证据关联的 `dependency_usages`；`--kind sdks` 返回 unresolved external import/include 目标，作为 SDK 或 API surface 使用候选；`--kind files` 返回代码、配置、文档、构建、部署、测试和模板文件整体节点；`--kind topics` 返回从 Markdown/spec heading 和 `.knowledge/knowledge-map.yaml` 抽取的主题；`--kind relationships` 返回 `documents`、`depends_on`、`uses_sdk` 和 `configures` 等跨域关系。`--kind build` 返回从 Cargo、npm、Python、Go、Maven effective `pom.xml`、Gradle、CMake、Makefile 和 CI workflow 证据中提取的 package、script、target、feature、module、profile、plugin、goal、job 等构建入口。`--kind iac` 返回 Dockerfile、Compose、Kubernetes YAML、Helm chart、Terraform、systemd、launchd 和 CI workflow 中提取的部署/基础设施资源。`--kind design` 返回 README、架构/设计 Markdown 和 package/module manifest 中有证据支撑的软件系统、模块、组件、接口和能力元素。该命令不会执行构建工具、扫描包缓存、SDK 目录、云 API、未索引外部源码或查询时全仓文档；source scope 变化后需要重新 `repo index` 或 `repo update` 刷新投影。
+
+面向 Agent 的 MCP kind 查询复用同一组 kind family，不引入并行名称。`relay_code_query` 覆盖代码图谱 kind，`relay_software_query` 覆盖软件全域模型 kind，`relay_code_feature_flags` 覆盖配置驱动 feature flag。常见 agent 别名会归一到现有 kind：`dependency` 归一为 `dependencies`，`configuration` 归一为 `relationships`，`model` 或 `models` 归一为 `design`。
 
 `map` 命令维护仓库内 `.knowledge/knowledge-map.yaml` 知识导航契约。该 YAML 文件只保存 topic、source、route 和 history 元数据，不复制真实知识内容；真实知识仍以文档、代码、配置、CI、运行态系统或外部知识源为准。一个 topic 可以包含多个 source，`map source add` 会把不同 source id 追加到该 topic 的 route 顺序中。LLM agent 应通过 `map show` 和 `map route` 定位知识源，通过 `map source add/update/remove` 维护契约，并在变更后运行 `map validate --format json`。AGENTS.md 只应保留 `Knowledge map: .knowledge/knowledge-map.yaml` 这样的稳定引用。
 
