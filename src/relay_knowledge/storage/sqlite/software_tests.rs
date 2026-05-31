@@ -290,6 +290,9 @@ fn projection_orders_lifecycle_deployable_surfaces_first() {
     assert_eq!(iac_projection.iac_resources[0].provider, "kubernetes");
     assert_eq!(iac_projection.iac_resources[0].resource_kind, "Deployment");
     assert_eq!(iac_projection.iac_resources[0].name, "relay-api");
+    assert_eq!(iac_projection.iac_resources[1].provider, "kubernetes");
+    assert_eq!(iac_projection.iac_resources[1].resource_kind, "Service");
+    assert_eq!(iac_projection.iac_resources[1].name, "relay-service");
 }
 
 #[test]
@@ -794,10 +797,16 @@ fn seed_lifecycle_projection_rows(connection: &Connection) {
                 ('iac-compose-web', 'repo', 'scope-1', 'yaml', 'compose',
                  'service', 'web', NULL, NULL, 'extracted',
                  'compose', 'docker-compose.yml', 3, 3, 9000, 1),
-                ('iac-kubernetes-api', 'repo', 'scope-1', 'yaml', 'kubernetes',
-                 'Deployment', 'relay-api', 'Deployment', NULL, 'extracted',
-                 'kubernetes-yaml', 'deploy/app.yaml', 4, 4, 9000, 1);
-            ",
+	                ('iac-kubernetes-api', 'repo', 'scope-1', 'yaml', 'kubernetes',
+	                 'Deployment', 'relay-api', 'Deployment', NULL, 'extracted',
+	                 'kubernetes-yaml', 'deploy/app.yaml', 4, 4, 9000, 1),
+	                ('iac-kubernetes-service', 'repo', 'scope-1', 'yaml', 'kubernetes',
+	                 'Service', 'relay-service', 'Service', NULL, 'extracted',
+	                 'kubernetes-yaml', 'deploy/service.yaml', 4, 4, 9000, 1),
+	                ('iac-kubernetes-resource', 'repo', 'scope-1', 'yaml', 'kubernetes',
+	                 'resource', 'relay-custom', 'CustomResourceDefinition', NULL, 'extracted',
+	                 'kubernetes-yaml', 'deploy/custom.yaml', 4, 4, 9000, 1);
+	            ",
         )
         .expect("lifecycle projection rows should insert");
 }

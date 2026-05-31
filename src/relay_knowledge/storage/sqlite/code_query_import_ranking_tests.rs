@@ -277,6 +277,14 @@ async fn path_import_queries_use_structured_rows_when_fts_is_unavailable() {
     );
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("unresolved"));
     assert_eq!(hits[0].edge_target_hint.as_deref(), Some("openssl/ssl.h"));
+
+    let quoted_hits = store
+        .search_code(request("\"openssl/ssl.h\"", CodeQueryKind::Imports))
+        .await
+        .expect("delimited import path query should score structured rows without FTS");
+
+    assert_eq!(quoted_hits.len(), 1);
+    assert_eq!(quoted_hits[0].path, importer_path);
 }
 
 #[tokio::test]

@@ -112,6 +112,15 @@ fn search_import_path_rows(
 }
 
 fn import_path_lookup_pattern(request: &CodeRetrievalRequest) -> Option<String> {
+    let path_token = import_path_lookup_token(request)?;
+
+    Some(format!(
+        "%{}%",
+        escape_sql_like(&path_token.to_ascii_lowercase())
+    ))
+}
+
+fn import_path_lookup_token(request: &CodeRetrievalRequest) -> Option<&str> {
     if request.code_query_kind != CodeQueryKind::Imports
         || !query_looks_like_import_path(&request.query)
     {
@@ -126,10 +135,7 @@ fn import_path_lookup_pattern(request: &CodeRetrievalRequest) -> Option<String> 
         return None;
     }
 
-    Some(format!(
-        "%{}%",
-        escape_sql_like(&path_token.to_ascii_lowercase())
-    ))
+    Some(path_token)
 }
 
 fn import_path_token(token: &str) -> &str {
@@ -234,8 +240,9 @@ fn import_rows_to_hits(
         attach_import_target_symbols(connection, status, &mut rows)?;
     }
 
-    let query = request.query.to_lowercase();
-    let score_query = ScoreQuery::new(&request.query);
+    let scoring_query = import_scoring_query(request);
+    let query = scoring_query.to_lowercase();
+    let score_query = ScoreQuery::new(scoring_query);
     let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
 
     Ok(rows
@@ -248,16 +255,13 @@ fn import_rows_to_hits(
                 row.matched_symbol_name.as_deref().unwrap_or_default(),
             ]) + score_exact_path(&query, &row.path)
                 + scoped_identity_query_bonus(
-                    &request.query,
+                    scoring_query,
                     [
                         row.target_hint.as_deref().unwrap_or_default(),
                         row.matched_symbol_name.as_deref().unwrap_or_default(),
                     ],
                 )
-                + import_target_symbol_bonus(
-                    request.query.as_str(),
-                    row.matched_symbol_name.as_deref(),
-                );
+                + import_target_symbol_bonus(scoring_query, row.matched_symbol_name.as_deref());
             let score = base_score
                 + import_same_file_usage_bonus(
                     base_score,
@@ -266,27 +270,27 @@ fn import_rows_to_hits(
                 )
                 + import_target_directory_bonus(
                     base_score,
-                    &request.query,
+                    scoring_query,
                     &row.path,
                     row.target_hint.as_deref(),
                     request.code_query_kind,
                 )
                 + import_binding_context_bonus(
                     base_score,
-                    &request.query,
+                    scoring_query,
                     &row.module,
                     request.code_query_kind,
                 )
                 + import_statement_shape_bonus(
                     base_score,
-                    &request.query,
+                    scoring_query,
                     &row.module,
                     request.code_query_kind,
                 )
-                + import_line_priority(base_score, row.line_range.start, &request.query)
+                + import_line_priority(base_score, row.line_range.start, scoring_query)
                 + hybrid_import_sparse_query_penalty(
                     base_score,
-                    &request.query,
+                    scoring_query,
                     &row.path,
                     &row.module,
                     row.target_hint.as_deref(),
@@ -295,7 +299,7 @@ fn import_rows_to_hits(
                 )
                 + import_public_dependency_surface_bonus(
                     base_score,
-                    &request.query,
+                    scoring_query,
                     &row.path,
                     row.target_hint.as_deref(),
                     request.code_query_kind,
@@ -327,6 +331,10 @@ fn import_rows_to_hits(
             })
         })
         .collect())
+}
+
+fn import_scoring_query(request: &CodeRetrievalRequest) -> &str {
+    import_path_lookup_token(request).unwrap_or(&request.query)
 }
 
 fn import_excerpt(module: &str, target_symbol_names: Option<&str>) -> String {

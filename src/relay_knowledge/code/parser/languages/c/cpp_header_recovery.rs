@@ -6,9 +6,30 @@ pub(in crate::code::parser) fn manual_file_definitions(
     let lines = source_lines(content);
     let mut definitions = Vec::new();
     let mut index = 0usize;
+    let mut pending_header = None::<String>;
     while index < lines.len() {
-        if cpp_class_header_opens_body(lines[index].text) {
+        let code = line_code_without_comment(&lines[index].code)
+            .trim()
+            .to_owned();
+        if let Some(header) = pending_header.as_mut() {
+            if !code.is_empty() {
+                header.push(' ');
+                header.push_str(&code);
+            }
+            if cpp_class_header_opens_body(header) {
+                pending_header = None;
+                index = collect_class_member_declarations(&lines, index + 1, &mut definitions);
+            } else {
+                if code.ends_with(';') {
+                    pending_header = None;
+                }
+                index += 1;
+            }
+        } else if cpp_class_header_opens_body(&code) {
             index = collect_class_member_declarations(&lines, index + 1, &mut definitions);
+        } else if cpp_class_header_starts(&code) && !code.ends_with(';') {
+            pending_header = Some(code);
+            index += 1;
         } else {
             index += 1;
         }
@@ -17,12 +38,12 @@ pub(in crate::code::parser) fn manual_file_definitions(
     definitions
 }
 
-#[derive(Clone, Copy)]
-struct SourceLine<'a> {
+#[derive(Clone)]
+struct SourceLine {
     number: usize,
     byte_start: usize,
     byte_end: usize,
-    text: &'a str,
+    code: String,
 }
 
 struct PendingDeclaration {
@@ -33,16 +54,18 @@ struct PendingDeclaration {
     text: String,
 }
 
-fn source_lines(content: &str) -> Vec<SourceLine<'_>> {
+fn source_lines(content: &str) -> Vec<SourceLine> {
     let mut byte_start = 0usize;
+    let mut in_block_comment = false;
     let mut lines = Vec::new();
     for (index, raw_line) in content.split_inclusive('\n').enumerate() {
         let text = raw_line.strip_suffix('\n').unwrap_or(raw_line);
+        let code = line_without_block_comments(text, &mut in_block_comment);
         lines.push(SourceLine {
             number: index + 1,
             byte_start,
             byte_end: byte_start + text.len(),
-            text,
+            code,
         });
         byte_start += raw_line.len();
     }
@@ -53,12 +76,16 @@ fn source_lines(content: &str) -> Vec<SourceLine<'_>> {
 }
 
 fn cpp_class_header_opens_body(line: &str) -> bool {
-    let code = line_code_without_comment(line).trim_start();
-    code.contains('{')
-        && (code.starts_with("class ")
-            || code
-                .strip_prefix("struct ")
-                .is_some_and(cpp_struct_header_has_inheritance))
+    let code = line.trim_start();
+    code.contains('{') && cpp_class_header_starts(code)
+}
+
+fn cpp_class_header_starts(code: &str) -> bool {
+    let code = code.trim_start();
+    code.starts_with("class ")
+        || code
+            .strip_prefix("struct ")
+            .is_some_and(cpp_struct_header_has_inheritance)
 }
 
 fn cpp_struct_header_has_inheritance(header: &str) -> bool {
@@ -69,7 +96,7 @@ fn cpp_struct_header_has_inheritance(header: &str) -> bool {
 }
 
 fn collect_class_member_declarations(
-    lines: &[SourceLine<'_>],
+    lines: &[SourceLine],
     mut index: usize,
     definitions: &mut Vec<(String, &'static str, SyntaxRange)>,
 ) -> usize {
@@ -78,8 +105,8 @@ fn collect_class_member_declarations(
     let mut doc_start = None;
 
     while index < lines.len() && depth > 0 {
-        let line = lines[index];
-        let code = line_code_without_comment(line.text);
+        let line = &lines[index];
+        let code = line_code_without_comment(&line.code);
         let trimmed_code = code.trim();
         if depth == 1 {
             if trimmed_code.starts_with("};") {
@@ -100,12 +127,12 @@ fn collect_class_member_declarations(
 }
 
 fn collect_top_level_member_line(
-    line: SourceLine<'_>,
+    line: &SourceLine,
     pending: &mut Option<PendingDeclaration>,
     doc_start: &mut Option<(usize, usize)>,
     definitions: &mut Vec<(String, &'static str, SyntaxRange)>,
 ) {
-    let trimmed = line.text.trim();
+    let trimmed = line.code.trim();
     let is_preprocessor_directive = cpp_preprocessor_directive(trimmed);
     if trimmed.is_empty() || cpp_access_label(trimmed) || is_preprocessor_directive {
         if pending.is_none() && !is_preprocessor_directive {
@@ -131,14 +158,14 @@ fn collect_top_level_member_line(
     if !declaration.text.is_empty() {
         declaration.text.push('\n');
     }
-    declaration.text.push_str(line.text);
+    declaration.text.push_str(&line.code);
 
-    let code = line_code_without_comment(line.text);
+    let code = line_code_without_comment(&line.code);
     if !trailing_annotation_line(code.trim()) {
         declaration.byte_end = line.byte_end;
         declaration.line_end = line.number;
     }
-    if !line_code_without_comment(line.text)
+    if !line_code_without_comment(&line.code)
         .trim_end()
         .ends_with(';')
     {
@@ -161,6 +188,36 @@ fn collect_top_level_member_line(
 
 fn line_code_without_comment(line: &str) -> &str {
     line.split_once("//").map_or(line, |(code, _)| code)
+}
+
+fn line_without_block_comments(line: &str, in_block_comment: &mut bool) -> String {
+    let mut code = String::new();
+    let mut index = 0usize;
+    while index < line.len() {
+        let rest = &line[index..];
+        if *in_block_comment {
+            let Some(comment_end) = rest.find("*/") else {
+                break;
+            };
+            index += comment_end + "*/".len();
+            *in_block_comment = false;
+        } else if rest.starts_with("//") {
+            code.push_str(rest);
+            break;
+        } else if rest.starts_with("/*") {
+            index += "/*".len();
+            *in_block_comment = true;
+        } else {
+            let character = rest
+                .chars()
+                .next()
+                .expect("non-empty rest should yield a character");
+            code.push(character);
+            index += character.len_utf8();
+        }
+    }
+
+    code
 }
 
 fn class_member_line_opens_nested_body(trimmed_code: &str) -> bool {

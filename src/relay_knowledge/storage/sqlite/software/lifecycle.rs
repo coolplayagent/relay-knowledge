@@ -326,10 +326,10 @@ pub(super) fn iac_resources_for_scope(
                 WHEN 'container' THEN 8
                 ELSE 9
             END ASC,
-            CASE resource_kind
-                WHEN 'Deployment' THEN 0
-                WHEN 'StatefulSet' THEN 1
-                WHEN 'DaemonSet' THEN 2
+            CASE lower(resource_kind)
+                WHEN 'deployment' THEN 0
+                WHEN 'statefulset' THEN 1
+                WHEN 'daemonset' THEN 2
                 WHEN 'service' THEN 3
                 WHEN 'resource' THEN 4
                 WHEN 'module' THEN 5

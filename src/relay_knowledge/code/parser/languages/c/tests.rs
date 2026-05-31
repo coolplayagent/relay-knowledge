@@ -367,7 +367,14 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
     let snapshot = parse_source_snapshot(
         "db/db_impl.h",
         br#"
-class DBImpl : public DB {
+	/*
+	class CommentedExample {
+	 public:
+	  void CommentedApi();
+	};
+	*/
+	class DBImpl
+	    : public DB {
  public:
   struct CompactionStats {
     int64_t bytes_read;
@@ -416,6 +423,7 @@ class DBImpl : public DB {
         !snapshot.symbols.iter().any(|symbol| {
             (symbol.name == "DBImpl" && symbol.kind == "function_declaration")
                 || symbol.name == "defined"
+                || symbol.name == "CommentedApi"
         }),
         "preprocessor guards and destructors should not become declaration symbols: {:?}",
         snapshot.symbols
