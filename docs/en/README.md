@@ -91,6 +91,7 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Chapter 8: Competitive, High-Performance, and Local File Retrieval Research 2026](04-research/08-competitive-performance-research-2026.md)
 - [Chapter 9: GitNexus Feature and UI Implementation Research 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 - [Chapter 10: Software Global Domain Modeling Research 2026](04-research/10-software-global-domain-modeling-research-2026.md)
+- [Chapter 11: Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](04-research/11-software-global-codegraph-search-everything-comparison-2026.md)
 
 ## Appendix A: Benchmarks
 
@@ -108,3 +109,4 @@ volume covers and count as chapter 0 when they appear in a reading path.
 - [Appendix B.4: relay-teams E2E Verification 2026-05-14](06-verification/04-relay-teams-e2e-2026-05-14.md)
 - [Appendix B.7: Grep Fallback Documentation Refresh Audit 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md): chapter sync record for code retrieval exact-text fallback.
 - [Appendix B.8: Software Global Modeling Documentation Refresh Audit 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md): verification record for the software global modeling research and architecture archive.
+- [Appendix B.9: Software Global, CodeGraph, and Search Everything Research Documentation Refresh Audit 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md): chapter 11 research and bookshelf index sync record.

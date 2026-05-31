@@ -94,4 +94,4 @@ Generators should choose a direction only inside those constraints. Missing depe
 
 ---
 
-Navigation: Previous: [9. GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md)
+Navigation: Previous: [9. GitNexus Feature and UI Implementation Research 2026](09-gitnexus-reference-analysis-2026.md) | Next: [11. Software Global Modeling, CodeGraph, and Search Everything Comparison 2026](11-software-global-codegraph-search-everything-comparison-2026.md)
