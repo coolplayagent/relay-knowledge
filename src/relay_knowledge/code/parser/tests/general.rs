@@ -675,6 +675,55 @@ class ConnectorService:
 }
 
 #[test]
+fn python_type_annotations_emit_type_references() {
+    let snapshot = parse_source_snapshot(
+        "src/relay_teams/connector/service.py",
+        br#"
+class W3ConnectorSaveRequest:
+    pass
+
+class ConnectorService:
+    async def save_w3_connector(
+        self,
+        request: W3ConnectorSaveRequest,
+    ) -> None:
+        pass
+"#,
+    );
+
+    assert!(snapshot.references.iter().any(|reference| {
+        reference.name == "W3ConnectorSaveRequest"
+            && reference.kind == "type"
+            && reference.line_range.start == 8
+    }));
+}
+
+#[test]
+fn go_type_signatures_keep_declaration_keyword() {
+    let snapshot = parse_source_snapshot(
+        "processor/worker.go",
+        br#"
+package processor
+
+type EventProcessor interface {
+    Process(event string) error
+}
+"#,
+    );
+    let symbol = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "EventProcessor")
+        .expect("Go interface symbol should be extracted");
+
+    assert!(
+        symbol
+            .signature
+            .starts_with("type EventProcessor interface")
+    );
+}
+
+#[test]
 fn typescript_imports_have_site_stable_ids_and_skip_import_expression_tokens() {
     let snapshot = parse_source_snapshot(
         "src/runtime.ts",

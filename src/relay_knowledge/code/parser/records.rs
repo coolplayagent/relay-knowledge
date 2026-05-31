@@ -286,7 +286,7 @@ pub(super) fn symbol_record_with_qualified_suffix(
     range: &SyntaxRange,
     qualified_suffix: &str,
 ) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
-    let signature = symbol_signature(context.content, range, name);
+    let signature = normalized_symbol_signature(context, name, kind, range);
     let qualified_name = format!("{}::{qualified_suffix}", module_path(context.path));
     let symbol_snapshot_id = stable_id(
         "symbol",
@@ -318,6 +318,27 @@ pub(super) fn symbol_record_with_qualified_suffix(
         line_range: RepositoryCodeRange::new("line_range", range.line_start, range.line_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,
     })
+}
+
+fn normalized_symbol_signature(
+    context: &FileParseContext<'_>,
+    name: &str,
+    kind: &str,
+    range: &SyntaxRange,
+) -> String {
+    let signature = symbol_signature(context.content, range, name);
+    if context.language_id == "go"
+        && kind == "type"
+        && !signature.starts_with("type ")
+        && signature
+            .split_whitespace()
+            .next()
+            .is_some_and(|first| first == name)
+    {
+        format!("type {signature}")
+    } else {
+        signature
+    }
 }
 
 fn symbol_signature(content: &str, range: &SyntaxRange, fallback: &str) -> String {

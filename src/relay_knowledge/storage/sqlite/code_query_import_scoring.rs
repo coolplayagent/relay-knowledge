@@ -1,6 +1,9 @@
 use crate::domain::CodeQueryKind;
 
-use super::code_query_identifiers::identifier_terms_equivalent;
+use super::{
+    code_query_identifiers::identifier_terms_equivalent,
+    code_query_path_ranking::path_looks_like_test_or_benchmark,
+};
 
 pub(super) fn import_line_priority(base_score: f64, line_start: u32, query: &str) -> f64 {
     if base_score <= 0.0 || !query_looks_like_import_path(query) {
@@ -10,8 +13,8 @@ pub(super) fn import_line_priority(base_score: f64, line_start: u32, query: &str
     1.0 / f64::from(line_start.clamp(1, 1_000))
 }
 
-pub(super) fn import_surface_bonus(base_score: f64, path: &str) -> f64 {
-    if base_score <= 0.0 {
+pub(super) fn import_surface_bonus(base_score: f64, path: &str, kind: CodeQueryKind) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Hybrid {
         return 0.0;
     }
     if path
@@ -54,7 +57,10 @@ pub(super) fn import_public_dependency_surface_bonus(
     target_hint: Option<&str>,
     kind: CodeQueryKind,
 ) -> f64 {
-    if base_score <= 0.0 || kind != CodeQueryKind::Imports || !query_looks_like_import_path(query) {
+    if base_score <= 0.0
+        || !matches!(kind, CodeQueryKind::Hybrid | CodeQueryKind::Imports)
+        || !query_looks_like_import_path(query)
+    {
         return 0.0;
     }
     let target_is_header =
@@ -66,7 +72,108 @@ pub(super) fn import_public_dependency_surface_bonus(
         return 0.0;
     }
 
-    0.85
+    let same_public_directory_bonus = target_hint
+        .and_then(parent_dir)
+        .filter(|target_parent| parent_dir(path) == Some(*target_parent))
+        .map_or(0.0, |_| 0.75);
+    0.85 + same_public_directory_bonus
+}
+
+pub(super) fn import_source_path_query_overlap_bonus(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0
+        || kind != CodeQueryKind::Imports
+        || !query_looks_like_import_path(query)
+        || path_looks_like_test_or_benchmark(path)
+    {
+        return 0.0;
+    }
+    let target_terms = target_stem_terms(query, target_hint);
+    if target_terms.is_empty() {
+        return 0.0;
+    }
+    let source_terms = stem_terms(file_stem(path.rsplit('/').next().unwrap_or(path)));
+    let overlap = target_terms
+        .iter()
+        .filter(|target| source_terms.iter().any(|source| source == *target))
+        .count();
+
+    (overlap as f64 * 1.0).clamp(0.0, 1.2)
+}
+
+pub(super) fn import_self_implementation_penalty(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || !query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let target_stem = target_stem(query, target_hint);
+    let Some(target_stem) = target_stem.as_deref() else {
+        return 0.0;
+    };
+    let source_name = path.rsplit('/').next().unwrap_or(path);
+    if file_stem(source_name).eq_ignore_ascii_case(target_stem)
+        && source_file_can_implement_header(source_name)
+    {
+        -0.8
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn import_single_module_path_tiebreaker_bonus(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    module: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0
+        || kind != CodeQueryKind::Imports
+        || query_looks_like_import_path(query)
+        || query_terms(query).len() != 1
+        || path_looks_like_test_or_benchmark(path)
+        || !import_target_mentions_query(module, target_hint, query)
+    {
+        return 0.0;
+    }
+
+    1.0 / path.len().max(1) as f64
+}
+
+pub(super) fn import_reexport_surface_penalty(
+    base_score: f64,
+    query: &str,
+    path: &str,
+    module: &str,
+    target_hint: Option<&str>,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0 || kind != CodeQueryKind::Imports || query_looks_like_import_path(query) {
+        return 0.0;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    if !matches!(
+        file_name,
+        "__init__.py" | "mod.rs" | "index.js" | "index.ts"
+    ) {
+        return 0.0;
+    }
+    if import_target_mentions_query(module, target_hint, query) {
+        -0.2
+    } else {
+        0.0
+    }
 }
 
 pub(super) fn import_target_symbol_bonus(query: &str, matched_symbol_name: Option<&str>) -> f64 {
@@ -326,19 +433,6 @@ fn path_has_header_extension(path: &str) -> bool {
         })
 }
 
-fn path_looks_like_test_or_benchmark(path: &str) -> bool {
-    path.to_ascii_lowercase().split('/').any(|segment| {
-        matches!(
-            segment,
-            "test" | "tests" | "__tests__" | "testing" | "bench" | "benchmark" | "benchmarks"
-        ) || segment.ends_with("_test")
-            || segment.ends_with(".test.ts")
-            || segment.ends_with(".test.tsx")
-            || segment.ends_with(".spec.ts")
-            || segment.ends_with(".spec.tsx")
-    })
-}
-
 fn named_import_binding_count_for_query(module: &str, query: &str) -> Option<usize> {
     let (start, end) = named_import_bounds(module)?;
     let query_terms = query_terms(query);
@@ -381,6 +475,69 @@ fn query_terms(query: &str) -> Vec<String> {
         .filter(|term| !term.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn target_stem_terms(query: &str, target_hint: Option<&str>) -> Vec<String> {
+    target_stem(query, target_hint)
+        .map(|stem| stem_terms(&stem))
+        .unwrap_or_default()
+}
+
+fn target_stem(query: &str, target_hint: Option<&str>) -> Option<String> {
+    let target = target_hint
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .unwrap_or(query);
+    let file_name = target
+        .trim_matches(|character: char| {
+            !(character.is_ascii_alphanumeric()
+                || matches!(character, '_' | '-' | '.' | '/' | '\\'))
+        })
+        .rsplit(['/', '\\'])
+        .next()?;
+    let stem = file_stem(file_name);
+    (!stem.is_empty()).then(|| stem.to_ascii_lowercase())
+}
+
+fn file_stem(file_name: &str) -> &str {
+    file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem)
+}
+
+fn stem_terms(stem: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for token in stem
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+    {
+        for term in camel_case_terms(token) {
+            if term.len() >= MIN_IMPORT_COVERAGE_TERM_LEN {
+                terms.push(term);
+            }
+        }
+    }
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn source_file_can_implement_header(file_name: &str) -> bool {
+    file_name
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| matches!(extension, "c" | "cc" | "cpp" | "cxx" | "m" | "mm"))
+}
+
+fn import_target_mentions_query(module: &str, target_hint: Option<&str>, query: &str) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return false;
+    }
+    let query = query.to_ascii_lowercase();
+    [module, target_hint.unwrap_or_default()]
+        .into_iter()
+        .map(str::to_ascii_lowercase)
+        .any(|field| field.trim() == query || field.contains(&query))
 }
 
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
@@ -473,6 +630,29 @@ mod tests {
                 CodeQueryKind::Imports,
             ),
             0.65
+        );
+    }
+
+    #[test]
+    fn import_source_path_overlap_bonus_uses_robust_test_path_detection() {
+        assert_eq!(
+            import_source_path_query_overlap_bonus(
+                3.0,
+                "foo.h",
+                "src/foo_test.cc",
+                Some("include/foo.h"),
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+        assert!(
+            import_source_path_query_overlap_bonus(
+                3.0,
+                "foo.h",
+                "src/foo.cc",
+                Some("include/foo.h"),
+                CodeQueryKind::Imports,
+            ) > 0.0
         );
     }
 

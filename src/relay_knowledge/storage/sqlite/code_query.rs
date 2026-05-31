@@ -85,7 +85,11 @@ use code_query_hybrid_planning::{
     workflow_language_scope_matches,
 };
 #[cfg(test)]
-use code_query_import_scoring::{import_surface_bonus, import_target_symbol_bonus};
+use code_query_import_scoring::{
+    import_public_dependency_surface_bonus, import_reexport_surface_penalty,
+    import_self_implementation_penalty, import_source_path_query_overlap_bonus,
+    import_surface_bonus, import_target_symbol_bonus,
+};
 #[cfg(test)]
 use code_query_import_targets::target_symbol_import_query;
 use code_query_imports::search_imports;
