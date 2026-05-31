@@ -77,9 +77,10 @@ configure a proxy when their network requires one. Prefer standard
 `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` environment variables, and preserve
 those settings for checksum verification and follow-up diagnostics.
 
-Do not start or configure MCP from this skill. If a task asks for MCP,
-Streamable HTTP, resources, prompts, sessions, or protocol tools, use the
-project MCP documentation or a separate MCP skill instead.
+Do not use this skill for MCP setup, and do not start or configure MCP from this
+skill. If a task asks for MCP, Streamable HTTP, resources, prompts, sessions, or
+protocol tools, use the project MCP documentation or a separate MCP skill
+instead.
 
 For repository knowledge navigation contracts, use
 `references/knowledge-map-workflows.md`. Prefer `relay-knowledge map` commands

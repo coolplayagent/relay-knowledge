@@ -39,7 +39,7 @@ HTTP 必须建立在非阻塞 OS event mechanism 之上，例如 epoll、kqueue 
 
 ## 5. 代码质量硬约束
 
-- tracked 文件不得超过 1000 行。
+- tracked source、test、documentation、script 或 workflow 文件不得超过 1000 行。locked build 必需的生成式 release lockfile 例外，当前为 `Cargo.lock`，且必须保持机器生成。
 - 不添加 shallow function；函数必须负责校验、转换、外部边界、资源生命周期、错误映射、观测或真实编排。
 - 不保留 dead code、TODO stub、无调用公共 API、无测试 speculative extension point 或注释掉的实现。
 - 项目身份常量集中在 `project` 模块；模块局部运行默认值留在所属模块。
