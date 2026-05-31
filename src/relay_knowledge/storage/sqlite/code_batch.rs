@@ -127,7 +127,12 @@ fn finalize_session_once(
     session: &CodeIndexSession,
 ) -> Result<crate::domain::CodeIndexSummary, StorageError> {
     let transaction = connection.transaction()?;
-    finalize::resolve_scope(&transaction, &session.source_scope, &session.repository_id)?;
+    finalize::resolve_scope(
+        &transaction,
+        &session.source_scope,
+        &session.repository_id,
+        &session.language_filters,
+    )?;
     update_repository_after_session(&transaction, session)?;
     mark_checkpoint_completed(&transaction, &session.source_scope)?;
     transaction.commit()?;

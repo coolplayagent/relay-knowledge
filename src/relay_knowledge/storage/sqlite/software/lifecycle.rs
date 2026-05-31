@@ -8,7 +8,7 @@ use crate::{
         SoftwareDesignElement, SoftwareDesignElementInput, SoftwareGlobalRequest,
         SoftwareIacResource, SoftwareIacResourceInput,
     },
-    storage::StorageError,
+    storage::{StorageError, sqlite::maven},
 };
 
 const HIGH_CONFIDENCE: u16 = 9_000;
@@ -115,10 +115,17 @@ pub(super) fn delete_scope(
     connection: &Connection,
     source_scope: &str,
 ) -> Result<(), StorageError> {
-    connection.execute(
-        "DELETE FROM software_build_targets WHERE source_scope = ?1",
-        params![source_scope],
-    )?;
+    if maven::preserves_existing_facts(connection, source_scope)? {
+        connection.execute(
+            "DELETE FROM software_build_targets WHERE source_scope = ?1 AND ecosystem != 'maven'",
+            params![source_scope],
+        )?;
+    } else {
+        connection.execute(
+            "DELETE FROM software_build_targets WHERE source_scope = ?1",
+            params![source_scope],
+        )?;
+    }
     connection.execute(
         "DELETE FROM software_iac_resources WHERE source_scope = ?1",
         params![source_scope],
@@ -137,13 +144,16 @@ pub(super) fn refresh_projection(
     graph_version: GraphVersion,
 ) -> Result<LifecycleProjection, StorageError> {
     let documents = indexed_documents(connection, source_scope)?;
-    let mut build_targets = Vec::new();
+    let mut build_targets = existing_maven_build_targets(connection, source_scope)?;
     let mut iac_resources = Vec::new();
     let mut design_elements = Vec::new();
     for document in &documents {
         build::collect(document, graph_version, &mut build_targets)?;
         iac::collect(document, graph_version, &mut iac_resources)?;
         design::collect(document, graph_version, &mut design_elements)?;
+    }
+    for input in maven::build_target_inputs(connection, source_scope, graph_version)? {
+        push_build_target(&mut build_targets, input)?;
     }
     for target in &build_targets {
         insert_build_target(connection, target)?;
@@ -205,6 +215,27 @@ fn indexed_documents(
     }
 
     Ok(documents.into_values().collect())
+}
+
+fn existing_maven_build_targets(
+    connection: &Connection,
+    source_scope: &str,
+) -> Result<Vec<SoftwareBuildTarget>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT target_id, repository_id, source_scope, ecosystem, language_id, name,
+               kind, command, output_hint, source_kind, evidence_path, evidence_line_start,
+               evidence_line_end, confidence_basis_points, created_graph_version
+        FROM software_build_targets
+        WHERE source_scope = ?1
+          AND ecosystem = 'maven'
+        ORDER BY kind ASC, name ASC, evidence_path ASC
+        ",
+    )?;
+    let rows = statement.query_map(params![source_scope], build_target_from_row)?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
 }
 
 pub(super) fn build_targets_for_scope(

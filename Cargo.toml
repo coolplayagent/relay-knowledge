@@ -70,6 +70,7 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 unicode-ident = "1.0"
+quick-xml = "0.40.1"
 
 [lints.rust]
 unsafe_code = "forbid"

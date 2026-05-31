@@ -2,8 +2,8 @@ use crate::{
     domain::{
         CodeImportRecord, CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession,
         CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+        CodeRetrievalRequest, FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord,
+        RepositoryCodeRange, RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::{CodeRepositoryStore, SqliteGraphStore},
 };
@@ -348,6 +348,83 @@ async fn checkpointed_batches_finalize_relative_python_import_edges() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].path, "src/relay_teams/connector/service.py");
     assert_eq!(hits[0].edge_resolution_state.as_deref(), Some("resolved"));
+}
+
+#[tokio::test]
+async fn checkpointed_finalize_materializes_effective_maven_dependencies() {
+    let store = registered_store().await;
+    let source_scope = "git_snapshot:maven-effective-dependencies";
+    let session = session_for_scope(source_scope, 1);
+    let content = r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.acme</groupId>
+  <artifactId>service</artifactId>
+  <version>1.0.0</version>
+  <properties><slf4j.version>2.0.9</slf4j.version></properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>5.10.1</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>"#;
+
+    store
+        .begin_code_index_session(session.clone())
+        .await
+        .expect("session should begin");
+    store
+        .apply_code_index_batch(CodeIndexBatch {
+            files: vec![file(
+                source_scope,
+                "pom-file",
+                "pom.xml",
+                "xml",
+                CodeParseStatus::Parsed,
+            )],
+            chunks: vec![chunk(
+                source_scope,
+                "pom-chunk",
+                "pom-file",
+                "pom.xml",
+                content,
+            )],
+            ..batch(source_scope, 1)
+        })
+        .await
+        .expect("batch should persist");
+    store
+        .finalize_code_index_session(session)
+        .await
+        .expect("session should finalize");
+
+    let slf4j_hits = search(&store, "org.slf4j:slf4j-api", CodeQueryKind::Sbom).await;
+    assert_eq!(slf4j_hits.len(), 1);
+    assert!(slf4j_hits[0].excerpt.contains("2.0.9"));
+    assert_eq!(
+        slf4j_hits[0].edge_resolution_state.as_deref(),
+        Some("declared")
+    );
+
+    let bom_hits = search(&store, "org.junit:junit-bom", CodeQueryKind::Sbom).await;
+    assert_eq!(bom_hits.len(), 1);
+    assert!(bom_hits[0].excerpt.contains("group=bom"));
 }
 
 #[tokio::test]
@@ -752,6 +829,33 @@ fn file(
         line_count: 1,
         parse_status,
         degraded_reason: None,
+    }
+}
+
+fn chunk(
+    source_scope: &str,
+    chunk_id: &str,
+    file_id: &str,
+    path: &str,
+    content: &str,
+) -> RepositoryCodeChunkRecord {
+    RepositoryCodeChunkRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        chunk_id: chunk_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "xml".to_owned(),
+        content: content.to_owned(),
+        byte_range: RepositoryCodeRange {
+            start: 0,
+            end: content.len() as u32,
+        },
+        line_range: RepositoryCodeRange {
+            start: 1,
+            end: content.lines().count() as u32,
+        },
+        symbol_snapshot_id: None,
     }
 }
 

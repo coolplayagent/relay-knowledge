@@ -8,7 +8,7 @@ use crate::{
         source_relative_path,
     },
     domain::RepositoryCodeRange,
-    storage::StorageError,
+    storage::{StorageError, sqlite::maven},
 };
 
 #[path = "finalize_call_targets.rs"]
@@ -31,6 +31,7 @@ pub(super) fn resolve_scope(
     transaction: &Transaction<'_>,
     source_scope: &str,
     repository_id: &str,
+    language_filters: &[String],
 ) -> Result<(), StorageError> {
     let mut symbol_cache = None;
     let file_languages = files::load_file_languages(transaction, source_scope)?;
@@ -43,6 +44,11 @@ pub(super) fn resolve_scope(
     )?;
     imported_references::resolve_references(transaction, source_scope, &mut symbol_cache)?;
     call_targets::resolve_references(transaction, source_scope)?;
+    maven::refresh_effective_dependencies_with_language_filters(
+        transaction,
+        source_scope,
+        language_filters,
+    )?;
     search_documents::rebuild_reference_search_documents(transaction, source_scope)?;
     rebuild_calls(transaction, source_scope, repository_id, &mut symbol_cache)
 }
