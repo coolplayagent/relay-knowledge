@@ -10,6 +10,9 @@ const STRUCTURED_SEQUENCE_MIN_TERMS: usize = 4;
 const STRUCTURED_SEQUENCE_MIN_STRUCTURED_TERMS: usize = 3;
 const PROCEDURAL_LANGUAGE_MIN_TERMS: usize = 6;
 const PROCEDURAL_LANGUAGE_MIN_HIGH_SIGNAL_TERMS: usize = 5;
+const WORKFLOW_SURFACE_MIN_TERMS: usize = 5;
+const WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS: usize = 4;
+const WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS: usize = 2;
 const HIGH_SIGNAL_TERM_LEN: usize = 5;
 
 pub(super) fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -> bool {
@@ -31,6 +34,7 @@ pub(super) fn hybrid_query_prefers_chunk_first(request: &CodeRetrievalRequest) -
 
     hybrid_query_has_structured_sequence(&raw_terms, &terms)
         || hybrid_query_has_filtered_procedural_surface(request, &terms)
+        || hybrid_query_has_language_scoped_workflow_surface(request, &raw_terms, &terms)
 }
 
 pub(super) fn hybrid_sequence_terms(query: &str) -> Vec<String> {
@@ -80,6 +84,38 @@ fn hybrid_query_has_filtered_procedural_surface(
             >= PROCEDURAL_LANGUAGE_MIN_HIGH_SIGNAL_TERMS
 }
 
+fn hybrid_query_has_language_scoped_workflow_surface(
+    request: &CodeRetrievalRequest,
+    raw_terms: &[String],
+    terms: &[String],
+) -> bool {
+    if terms.len() < WORKFLOW_SURFACE_MIN_TERMS
+        || terms
+            .iter()
+            .filter(|term| hybrid_sequence_term_has_high_signal(term))
+            .count()
+            < WORKFLOW_SURFACE_MIN_HIGH_SIGNAL_TERMS
+        || !query_has_workflow_language_scope(request, raw_terms)
+    {
+        return false;
+    }
+
+    let workflow_terms = raw_terms
+        .iter()
+        .filter(|term| workflow_surface_term(term))
+        .count();
+    if workflow_terms >= 2 {
+        return true;
+    }
+
+    workflow_terms == 1
+        && raw_terms
+            .iter()
+            .filter(|term| dataflow_surface_term(term))
+            .count()
+            >= WORKFLOW_SURFACE_MIN_DATAFLOW_TERMS
+}
+
 fn hybrid_sequence_term_has_high_signal(term: &str) -> bool {
     term.chars().count() >= HIGH_SIGNAL_TERM_LEN
         || term.contains('_')
@@ -94,6 +130,84 @@ fn procedural_chunk_first_language(language: &str) -> bool {
     matches!(
         language.to_ascii_lowercase().as_str(),
         "c" | "cc" | "cpp" | "c++" | "cxx" | "h" | "hh" | "hpp" | "hxx"
+    )
+}
+
+fn query_has_workflow_language_scope(request: &CodeRetrievalRequest, raw_terms: &[String]) -> bool {
+    request
+        .repository
+        .language_filters
+        .iter()
+        .any(|language| workflow_chunk_first_language(language))
+        || raw_terms
+            .iter()
+            .any(|term| workflow_chunk_first_language(term))
+}
+
+fn workflow_chunk_first_language(language: &str) -> bool {
+    matches!(
+        language.to_ascii_lowercase().as_str(),
+        "cs" | "csharp"
+            | "go"
+            | "java"
+            | "javascript"
+            | "js"
+            | "jsx"
+            | "kotlin"
+            | "kt"
+            | "php"
+            | "py"
+            | "python"
+            | "rb"
+            | "ruby"
+            | "scala"
+            | "swift"
+            | "ts"
+            | "tsx"
+            | "typescript"
+    )
+}
+
+fn workflow_surface_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "async"
+            | "await"
+            | "callback"
+            | "channel"
+            | "closure"
+            | "defer"
+            | "dispatch"
+            | "effect"
+            | "event"
+            | "goroutine"
+            | "handler"
+            | "lambda"
+            | "listener"
+            | "pipeline"
+            | "promise"
+            | "queue"
+            | "stream"
+            | "task"
+            | "worker"
+            | "workflow"
+    )
+}
+
+fn dataflow_surface_term(term: &str) -> bool {
+    matches!(
+        term.to_ascii_lowercase().as_str(),
+        "envelope"
+            | "filter"
+            | "message"
+            | "normalize"
+            | "payload"
+            | "projector"
+            | "provider"
+            | "registry"
+            | "request"
+            | "response"
+            | "transport"
     )
 }
 

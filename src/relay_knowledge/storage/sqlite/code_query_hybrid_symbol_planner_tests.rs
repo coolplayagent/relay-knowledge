@@ -215,6 +215,27 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         12,
     )));
+    assert!(hybrid_query_prefers_chunk_first(&request(
+        "tsx provider panel effect run provider envelope payload",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "goroutine defer close channel processor interface event payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["go".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "ES module registry async dispatch callback normalize payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["javascript".to_owned()],
+        )
+    ));
     assert!(hybrid_query_prefers_chunk_first(
         &request_with_language_filters(
             "operation table read callback dispatch designated initializer",
@@ -241,6 +262,84 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         10,
     )));
+}
+
+#[tokio::test]
+async fn language_scoped_workflow_chunk_plan_answers_before_symbol_noise() {
+    let path = "src/component.tsx";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("component-file", path)],
+        symbols: vec![
+            symbol(
+                "provider-panel-symbol",
+                "component-file",
+                path,
+                "ProviderPanel",
+            ),
+            symbol(
+                "provider-effect-symbol",
+                "component-file",
+                path,
+                "ProviderEffect",
+            ),
+        ],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "provider-flow-start",
+                "component-file",
+                path,
+                "function ProviderPanel() starts the provider effect for an envelope payload",
+            ),
+            chunk(
+                "provider-flow-middle",
+                "component-file",
+                path,
+                "React.useEffect runs provider normalization before sending the payload envelope",
+            ),
+            chunk(
+                "provider-flow-end",
+                "component-file",
+                path,
+                "provider panel renders the envelope payload after effect completion",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request(
+            "tsx provider panel effect run provider envelope payload",
+            CodeQueryKind::Hybrid,
+            3,
+        ))
+        .await
+        .expect("language-scoped workflow query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter().all(
+            |hit| hit.path == path && hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]
+        ),
+        "dense workflow chunks should avoid symbol-layer fanout: {hits:?}",
+    );
 }
 
 #[tokio::test]
