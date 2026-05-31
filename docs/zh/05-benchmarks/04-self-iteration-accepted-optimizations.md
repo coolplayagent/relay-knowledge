@@ -995,17 +995,5 @@
 - summary: Hybrid direct-evidence graph-fanout gate was proposed and accepted in `run-1780153116`, scoring 0.960929 with 105/105 cases passed; it gates only direct non-edge evidence and preserves graph expansion for sparse, fallback-only, call/import, and broad single-token queries.
 - summary: accepted software-global evidence priority (`run-1780155576`) scored 0.971906 with foundational=1.0, semantic_vector=1.0, stability=1.0, and 105/105 cases passed; changed software lifecycle/projection/tests and preserved full metrics in the self-iteration patch/report memory.
 - summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line cap.
-
-## run-1780212377
-
-- patch: `/opt/workspace/relay-knowledge-spec/.git/relay-knowledge-self-iteration/patches-v2/run-1780212377.patch`
-- score: 0.911695 (foundational=0.930723, competitive=0.786899, accuracy=0.858811, semantic_vector=1.000000, research_judge=n/a, performance=0.854546, stability=1.000000)
-- cases: 268/308 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/repository_set/query.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=3165ms; self_iteration_cargo_fmt_check_ms=344ms; linux_glibc_compatibility_policy_ms=122ms; cargo_build_release_ms=179351ms; self_iteration_cargo_build_release_ms=29858ms; cargo_clippy_ms=705ms; cargo_test_ms=29117ms; self_iteration_cargo_clippy_ms=10793ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+## run-1780212377-to-run-1780213983 compacted
+- summary: accepted bounded overlay evidence index (`run-1780212377`) and streaming chunk row scoring (`run-1780213983`) records were compacted to keep this primary benchmark log below the 1000-line hard cap. Full algorithms, invariants, scores, metrics, changed paths, and adopted notes remain in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md`, `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.

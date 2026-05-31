@@ -617,114 +617,96 @@ fn search_chunks_with_fts_query(
     let query = request.query.to_lowercase();
     let score_query = ScoreQuery::new(&request.query);
     let declaration_terms = query_terms(&query);
-    let rows = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(StorageError::from)?;
+    let mut hits = Vec::new();
+    for row in rows {
+        let row = row.map_err(StorageError::from)?;
+        if !selected_row(&row.path, &row.language_id, status, request) {
+            continue;
+        }
+        let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
+        let symbol_bonus = row.symbol_name.as_deref().map_or(0.0, |name| {
+            symbol_query_bonus(
+                &request.query,
+                name,
+                row.symbol_qualified_name.as_deref().unwrap_or_default(),
+                "",
+                row.canonical_symbol_id.as_deref().unwrap_or_default(),
+                request,
+            )
+        });
+        let score = score_query.score([row.content.as_str(), row.path.as_str()])
+            + score_exact_path(&query, &row.path)
+            + declaration_bonus
+            + exact_definition_chunk_bonus(request, &row.content)
+            + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
+            + symbol_bonus;
+        let score = score
+            + exact_reference_chunk_bonus(request, score, &row.content)
+            + compact_high_coverage_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                request,
+            )
+            + compact_api_sequence_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                request,
+            )
+            + compact_unique_api_sequence_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                request,
+            )
+            + query_proximity_chunk_bonus(score, &request.query, &row.content, &row.path, request)
+            + execution_flow_chunk_bonus(score, &request.query, &row.content, &row.path, request)
+            + designated_initializer_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                request,
+            )
+            + inline_construct_chunk_bonus(score, &request.query, &row.content, &row.path, request)
+            + source_definition_body_chunk_bonus(
+                score,
+                &request.query,
+                &row.content,
+                &row.path,
+                request,
+            );
+        if score <= 0.0 {
+            continue;
+        }
+        hits.push(hit_from_parts(
+            status,
+            HitParts {
+                path: row.path,
+                language_id: row.language_id,
+                byte_range: row.byte_range,
+                line_range: row.line_range,
+                symbol_snapshot_id: row.symbol_snapshot_id,
+                canonical_symbol_id: row.canonical_symbol_id,
+                file_id: Some(row.file_id),
+                retrieval_layers: chunk_layers_for_request(request, &row.parse_status),
+                score,
+                excerpt: row.content,
+                degraded_reason: row.degraded_reason,
+                edge_kind: None,
+                edge_resolution_state: None,
+                edge_target_hint: None,
+                edge_confidence_basis_points: None,
+                edge_confidence_tier: None,
+            },
+        ));
+    }
 
-    Ok(rows
-        .into_iter()
-        .filter(|row| selected_row(&row.path, &row.language_id, status, request))
-        .filter_map(|row| {
-            let declaration_bonus = declaration_chunk_bonus(&declaration_terms, &row.content);
-            let symbol_bonus = row.symbol_name.as_deref().map_or(0.0, |name| {
-                symbol_query_bonus(
-                    &request.query,
-                    name,
-                    row.symbol_qualified_name.as_deref().unwrap_or_default(),
-                    "",
-                    row.canonical_symbol_id.as_deref().unwrap_or_default(),
-                    request,
-                )
-            });
-            let score = score_query.score([row.content.as_str(), row.path.as_str()])
-                + score_exact_path(&query, &row.path)
-                + declaration_bonus
-                + exact_definition_chunk_bonus(request, &row.content)
-                + declaration_surface_path_bonus(declaration_bonus, &row.path, request)
-                + symbol_bonus;
-            let score = score
-                + exact_reference_chunk_bonus(request, score, &row.content)
-                + compact_high_coverage_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + compact_api_sequence_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + compact_unique_api_sequence_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + query_proximity_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + execution_flow_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + designated_initializer_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + inline_construct_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                )
-                + source_definition_body_chunk_bonus(
-                    score,
-                    &request.query,
-                    &row.content,
-                    &row.path,
-                    request,
-                );
-            (score > 0.0).then(|| {
-                hit_from_parts(
-                    status,
-                    HitParts {
-                        path: row.path,
-                        language_id: row.language_id,
-                        byte_range: row.byte_range,
-                        line_range: row.line_range,
-                        symbol_snapshot_id: row.symbol_snapshot_id,
-                        canonical_symbol_id: row.canonical_symbol_id,
-                        file_id: Some(row.file_id),
-                        retrieval_layers: chunk_layers_for_request(request, &row.parse_status),
-                        score,
-                        excerpt: row.content,
-                        degraded_reason: row.degraded_reason,
-                        edge_kind: None,
-                        edge_resolution_state: None,
-                        edge_target_hint: None,
-                        edge_confidence_basis_points: None,
-                        edge_confidence_tier: None,
-                    },
-                )
-            })
-        })
-        .collect())
+    Ok(hits)
 }
 
 fn strict_hybrid_chunk_candidate_limit(request: &CodeRetrievalRequest) -> usize {
