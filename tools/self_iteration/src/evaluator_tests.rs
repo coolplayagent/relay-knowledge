@@ -319,8 +319,34 @@ mod tests {
         assert!(names
             .iter()
             .any(|name| name == "index_performance_many_files"));
+        assert!(!names
+            .iter()
+            .any(|name| name == "index_performance_wide_mixed_files"));
         assert!(names.iter().any(|name| name == "nonstandard_layout_fixture"));
         assert!(names.iter().any(|name| name == "project_alias_fixture"));
+    }
+
+    #[test]
+    fn wide_index_performance_fixture_is_full_only() {
+        let repo_config = serde_json::json!({
+            "generated_fixture": "index_performance_wide_mixed_files_v1"
+        });
+
+        assert!(!repository_in_profile(
+            "fast",
+            "index_performance_wide_mixed_files",
+            &repo_config
+        ));
+        assert!(repository_in_profile(
+            "full",
+            "index_performance_wide_mixed_files",
+            &repo_config
+        ));
+        assert!(repository_in_profile(
+            "exhaustive",
+            "index_performance_wide_mixed_files",
+            &repo_config
+        ));
     }
 
     #[test]
@@ -559,6 +585,11 @@ mod tests {
             "index_performance_many_files_v1",
         )
         .expect("index performance fixture should write");
+        create_generated_repository_files(
+            &root.join("wide_index_performance"),
+            "index_performance_wide_mixed_files_v1",
+        )
+        .expect("wide index performance fixture should write");
 
         assert!(!root.join("c/.relay-knowledge-fixture-version").exists());
         assert!(!root.join("typescript/.relay-knowledge-fixture-version").exists());
@@ -603,6 +634,14 @@ mod tests {
             root.join("index_performance/src/shard_015/file_1023.rs"),
         )
         .expect("index performance tail source");
+        let wide_performance_tail = std::fs::read_to_string(
+            root.join("wide_index_performance/crates/perf_core/src/shard_031/file_2047.rs"),
+        )
+        .expect("wide index performance tail source");
+        let wide_performance_bridge = std::fs::read_to_string(
+            root.join("wide_index_performance/crates/perf_core/src/bridge.rs"),
+        )
+        .expect("wide index performance bridge source");
         assert!(c_source.contains(".read = rk_driver_read"));
         assert!(c_source.contains("const struct rk_driver_ops rk_default_ops"));
         assert!(c_macro_source.contains("RK_HTTP_HANDLER(rk_http_access_handler)"));
@@ -627,6 +666,8 @@ mod tests {
         assert!(nonstandard_ts.contains("ExternalTypeScriptSessionClient"));
         assert!(nonstandard_cpp.contains("#include <external_session_client.hpp>"));
         assert!(performance_tail.contains("rk_perf_target_1023"));
+        assert!(wide_performance_tail.contains("rk_wide_target_2047"));
+        assert!(wide_performance_bridge.contains("rk_wide_bridge_dispatch"));
 
         std::fs::remove_dir_all(&root).expect("cleanup fixture");
     }
@@ -897,5 +938,25 @@ mod tests {
     fn percentile_selects_expected_rank() {
         assert_eq!(percentile(&[10, 20, 30, 40], 50), 20);
         assert_eq!(percentile(&[10, 20, 30, 40], 95), 30);
+    }
+
+    #[test]
+    fn query_max_budget_records_tail_latency_metric() {
+        let mut metrics = Vec::new();
+        let config = serde_json::json!({
+            "query_p50_budget_ms": 100,
+            "query_p95_budget_ms": 200,
+            "query_max_budget_ms": 1000
+        });
+
+        push_latency_metrics(&mut metrics, &config, "wide_repo_query", &[40, 81, 926]);
+
+        let max_metric = metrics
+            .iter()
+            .find(|metric| metric.name == "wide_repo_query_max_ms")
+            .expect("max latency metric should be recorded");
+        assert_eq!(max_metric.value, 926.0);
+        assert_eq!(max_metric.budget, Some(1000.0));
+        assert!(max_metric.key);
     }
 }

@@ -1,6 +1,9 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：manual-full-performance-standard-wide-fixture
+- 算法/架构：self-iteration 的 `full`/`exhaustive` performance workload 新增 `index_performance_wide_mixed_files` 生成式 Rust workspace，创建 2048 个目标文件、workspace/module surface 和跨 shard bridge 查询，并继续通过真实 `repo register`、`repo index`、`repo query` 记录 `*_index_ms`、`*_register_index_ms`、query p50/p95/max；默认 fast workload 不变。
+- 不变量/预期影响/风险：只扩展独立 harness、case 和文档，不改变产品 CLI/API、SQLite schema、parser facts、FTS 写入、任务 lease/checkpoint、source fallback、env/paths/net 或安装发布。预期让 full/performance 聚焦运行能捕获更宽 cold indexing、查询 percentile 和 tail symbol 召回回归；风险是 full profile 增加少量生成式索引时间，受 profile 隔离和显式预算控制。
 ## 候选优化说明：manual-otel-contrib-row-batch-throughput
 - 算法/架构：checkpointed full-index 的默认 row batch 上限从 50k 提升到仍有界的 150k；新解析 reference 直接写入最终 unresolved 基线 `2500/ambiguous`，finalize 只规范化违反该基线的 reference 行；generic reference resolution 只处理非 `call` reference，并先从待解析 reference 中取 distinct 名称/路径再用索引化 `IN` candidate set 和 `UPDATE ... FROM` 关联符号分组，避免对无关配置符号做全 scope GROUP BY 或逐行扫描 materialized CTE。调用引用继续由后续 `finalize_call_targets` 的 callable 规则解析，但 call-target index 只加载 callable symbol kinds，且 already-unresolved/ambiguous baseline rows 不再重写。
 - 不变量/预期影响/风险：不跳过任何源码、配置文档、symbol/reference/import/call/chunk/dependency/feature-flag fact，不改变 reference/call resolution 最终规则、SQLite schema 形状、FTS materialization、task lease、checkpoint replay、repo-set freshness、degraded/stale 状态或命令 timeout。预期减少 OpenTelemetry collector-contrib 这类 YAML/JSON/Go fact 密集仓库的 checkpoint batch 事务数和 finalize 对百万级 reference 的无效写放大，降低 `otel_collector_contrib_index` 超时及后续 repo-set add 因缺少 fresh scope 失败的风险；风险是单批 Rust/SQLite 工作集增大，仍受 byte、file、row 三重预算和现有 checkpoint replay/path-collision/self-iteration performance gate 约束。
