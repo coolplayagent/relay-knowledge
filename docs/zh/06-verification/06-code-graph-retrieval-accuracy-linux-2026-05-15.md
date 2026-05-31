@@ -235,7 +235,8 @@ RELAY_KNOWLEDGE_HOME=/tmp/relay-knowledge-linux-checkpoint-smoke \
 - progress：`batch_count = 1`、`checkpoint_file_count = 2`、
   `resource_budget = {max_files_per_batch:128, max_bytes_per_batch:16777216,
   max_rows_per_batch:50000}`。该记录是 2026-05-15 当时的输出；当前默认
-  full-index 文件批次上限为 256，字节与行预算保持不变。
+  full-index 预算为 `max_files_per_batch = 512`、`max_bytes_per_batch = 16777216`
+  和 `max_rows_per_batch = 150000`。
 - `definition module_init` rank 1/2 命中 `include/linux/module.h:89-90` 和
   `include/linux/module.h:131-137`。
 

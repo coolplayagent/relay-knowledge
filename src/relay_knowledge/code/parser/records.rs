@@ -413,7 +413,7 @@ pub(super) fn reference_record(
         target_symbol_snapshot_id: None,
         target_hint: Some(name.to_owned()),
         resolution_state: "unresolved".to_owned(),
-        confidence_basis_points: 5_000,
+        confidence_basis_points: 2_500,
         confidence_tier: "ambiguous".to_owned(),
         byte_range: RepositoryCodeRange::new("byte_range", range.byte_start, range.byte_end)
             .map_err(|error| CodeIndexError::InvalidInput(error.to_string()))?,

@@ -46,7 +46,9 @@ pub(super) fn resolve_references(
                 ])?;
             }
             TargetResolution::Ambiguous(target_hint) => {
-                if index.should_keep_existing_resolution(&reference) {
+                if index.should_keep_existing_resolution(&reference)
+                    || reference.is_ambiguous_baseline(&target_hint)
+                {
                     continue;
                 }
                 update.execute(params![
@@ -60,7 +62,9 @@ pub(super) fn resolve_references(
                 ])?;
             }
             TargetResolution::Unresolved => {
-                if index.should_keep_existing_resolution(&reference) {
+                if index.should_keep_existing_resolution(&reference)
+                    || reference.is_unresolved_baseline()
+                {
                     continue;
                 }
                 update.execute(params![
@@ -97,8 +101,10 @@ struct CallReference {
     path: String,
     name: String,
     target_symbol_snapshot_id: Option<String>,
+    target_hint: Option<String>,
     resolution_state: String,
     confidence_basis_points: u16,
+    confidence_tier: String,
 }
 
 enum TargetResolution {
@@ -114,6 +120,14 @@ impl CallTargetIndex {
             SELECT symbol_snapshot_id, path, name, kind, signature
             FROM code_repository_symbols
             WHERE source_scope = ?1
+              AND kind IN (
+                  'class',
+                  'constructor',
+                  'function',
+                  'function_declaration',
+                  'macro',
+                  'method'
+              )
             ",
         )?;
         let rows = statement.query_map(params![source_scope], |row| {
@@ -259,8 +273,8 @@ fn load_call_references(
 ) -> Result<Vec<CallReference>, StorageError> {
     let mut statement = transaction.prepare(
         "
-        SELECT reference_id, path, name, target_symbol_snapshot_id, resolution_state,
-               confidence_basis_points
+        SELECT reference_id, path, name, target_symbol_snapshot_id, target_hint,
+               resolution_state, confidence_basis_points, confidence_tier
         FROM code_repository_references
         WHERE source_scope = ?1
           AND kind = 'call'
@@ -272,11 +286,31 @@ fn load_call_references(
             path: row.get(1)?,
             name: row.get(2)?,
             target_symbol_snapshot_id: row.get(3)?,
-            resolution_state: row.get(4)?,
-            confidence_basis_points: row.get(5)?,
+            target_hint: row.get(4)?,
+            resolution_state: row.get(5)?,
+            confidence_basis_points: row.get(6)?,
+            confidence_tier: row.get(7)?,
         })
     })?;
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(StorageError::from)
+}
+
+impl CallReference {
+    fn is_unresolved_baseline(&self) -> bool {
+        self.target_symbol_snapshot_id.is_none()
+            && self.target_hint.as_deref() == Some(self.name.as_str())
+            && self.resolution_state == "unresolved"
+            && self.confidence_basis_points == 2_500
+            && self.confidence_tier == "ambiguous"
+    }
+
+    fn is_ambiguous_baseline(&self, target_hint: &str) -> bool {
+        self.target_symbol_snapshot_id.is_none()
+            && self.target_hint.as_deref() == Some(target_hint)
+            && self.resolution_state == "ambiguous"
+            && self.confidence_basis_points == 5_000
+            && self.confidence_tier == "ambiguous"
+    }
 }
