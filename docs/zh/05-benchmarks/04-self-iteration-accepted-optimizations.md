@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780217458-import-fallback-intent-aware-dynamic-boost
+- 算法/架构：Imports source `text_fallback` 的 dynamic `import()` 加分改为 query-intent aware：只有用户查询本身是 `import "./module"` 这类无 `from`/binding 的 bare import 表达式时，relative specifier 的 dynamic import source line 才获得优先级；普通 `./module`、`pkg/name` 或 path-like import specifier 查询保留已索引 ImportGraph 行在 source-text fallback 之前。实现仍在 `application::code_repository::source_fallback` 的有界 grep 结果合并层，graph import row、resolved/unresolved edge metadata 和 storage ranking 不变。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、source fallback candidate path/window、repo-set overlay、semantic/vector read model、env/paths/net、CLI/API、task lease/checkpoint 或安装发布；不枚举仓库、路径、case id、fixture query 或符号。预期修复 TypeScript/ES module path import 查询中 dynamic `import()` 文本行压过静态 type/runtime import graph evidence 的排序噪声，同时保留显式 dynamic import 查询优先返回执行时 import source line；风险是少量只输入普通 specifier 但想看 dynamic import 的用户会先看到 graph import declaration，受 dynamic-intent 正/负单测、resolved graph hit 保留和 bounded source fallback 语义控制。
+- 策略关联：建立在已采纳的 bounded source fallback evidence、external import diagnostic 和 Hybrid/workflow graph-first 规划策略之上；避免扩大 source fallback、增加无界候选、枚举 fixture 字符串或削弱 semantic/vector 与稳定性保护层。
 ## 候选优化说明：run-1780216181-language-scoped-workflow-chunk-first
 - 算法/架构：Hybrid chunk-first planner 在既有 API-dense、structured-sequence 与 C/C++ procedural gates 之外，增加语言作用域明确的 workflow/dataflow 查询 gate：当请求带 Go/JavaScript/TypeScript/TSX/Python/JVM/.NET/Ruby/PHP/Swift/Scala 等语言过滤，或 query 本身包含 `tsx`/`jsx`/`go`/`python` 等语言标记，并且 query 同时具备足够 high-signal terms 与 async/callback/channel/effect/pipeline/handler 等 workflow signal，或一个 workflow signal 加 provider/payload/envelope/registry/normalize 等 dataflow surface 时，先执行有界 chunk FTS。是否提前返回仍交给既有 dense chunk coverage gate；覆盖不足时继续执行 Symbol、Reference、Call、Import 与 source fallback 的完整 Hybrid stack。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate 上限、chunk scorer、repo-set overlay、semantic/vector read model、source `text_fallback` 语义、env/paths/net、CLI/API、task lease/checkpoint、安装发布或 harness；不枚举仓库、路径、case id、fixture query 或符号，只使用通用语言标记和 workflow/dataflow 词类。预期改善 TSX/JS/Go/Python 等多语言 workflow 查询的首批 chunk evidence rank，并在 dense chunk 已足够回答时减少 symbol/call/import graph fanout，降低 fast competitive/performance workload 的 p50/p95 风险；风险是带语言过滤的探索式 Hybrid 查询可能先多跑一次 chunk FTS，受 high-signal/dataflow gate、既有 dense coverage gate、full-stack fallback、typed-arrow negative planner test 和 workflow chunk early-answer 单测控制。
@@ -953,6 +957,20 @@
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=3730ms; self_iteration_cargo_fmt_check_ms=466ms; linux_glibc_compatibility_policy_ms=162ms; skill_metadata_policy_cases_ms=343ms; cargo_build_debug_ms=1047ms; self_iteration_cargo_check_ms=3710ms; code_index_recovery_cases_ms=1409ms; code_index_sqlite_lock_cases_ms=1886ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1780217458
+
+- patch: `/opt/workspace/relay-knowledge-refactor/.git/relay-knowledge-self-iteration/patches-v2/run-1780217458.patch`
+- score: 0.987165 (foundational=1.000000, competitive=0.997059, accuracy=0.998529, semantic_vector=1.000000, research_judge=n/a, performance=0.932289, stability=1.000000)
+- cases: 114/114 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/application/code_repository/source_fallback.rs`, `src/relay_knowledge/application/code_repository/source_fallback_tests.rs`
+- key improvements: score_component:score 0.96918->0.9871650455215046; score_component:performance 0.835965->0.9322894685835221; case_score:typescript_syntax_imports_type_and_runtime_protocol 0.75->1.0; case_rank:typescript_syntax_imports_type_and_runtime_protocol 2->1; metric:cargo_fmt_check_ms 3730.0->3137.0; metric:self_iteration_cargo_fmt_check_ms 466.0->342.0; metric:skill_metadata_policy_cases_ms 343.0->242.0; metric:cargo_build_debug_ms 1047.0->424.0
+- known degradations: metric:code_index_recovery_cases_ms 1409.0->4061.0; metric:code_index_sqlite_lock_cases_ms 1886.0->4245.0; metric:code_index_health_isolation_cases_ms 3920.0->6611.0; metric:leveldb_cpp_query_p95_ms 470.0->4517.0; metric:typescript_syntax_fixture_query_p95_ms 543.0->846.0; metric:temporal_go_workspace_repo_set_query_p50_ms 404.0->444.0; metric:temporal_go_workspace_repo_set_query_p95_ms 404.0->444.0; metric:local_noise_file_index_ms 1008.0->1167.0
+- latency metrics: cargo_fmt_check_ms=3137ms; self_iteration_cargo_fmt_check_ms=342ms; linux_glibc_compatibility_policy_ms=161ms; skill_metadata_policy_cases_ms=242ms; cargo_build_debug_ms=424ms; self_iteration_cargo_check_ms=584ms; code_index_recovery_cases_ms=4061ms; code_index_sqlite_lock_cases_ms=4245ms
 
 Adopted optimization notes:
 

@@ -182,7 +182,7 @@ pub(super) fn append_code_grep_fallback(
     let base_fallback_score = grep_score(plan.kind, score_bounds);
     let metadata = path_metadata(results);
     for matched in outcome.matches {
-        let fallback_score = source_grep_match_score(plan, &matched, base_fallback_score);
+        let fallback_score = source_grep_match_score(request, plan, &matched, base_fallback_score);
         if let Some(existing) = results.iter_mut().find(|hit| {
             hit.path == matched.path
                 && hit.line_range.start == matched.line_range.start
@@ -399,6 +399,7 @@ fn fallback_diagnostic(
 }
 
 fn source_grep_match_score(
+    request: &CodeRetrievalRequest,
     plan: &CodeGrepFallbackPlan,
     matched: &SourceGrepMatch,
     base_score: f64,
@@ -408,7 +409,7 @@ fn source_grep_match_score(
             reference_source_grep_score_adjustment(&plan.query, &matched.excerpt)
         }
         SourceGrepKind::Imports => {
-            import_source_grep_score_adjustment(&plan.query, &matched.excerpt)
+            import_source_grep_score_adjustment(&request.query, &plan.query, &matched.excerpt)
         }
         SourceGrepKind::Definition | SourceGrepKind::Hybrid => 0.0,
     };
@@ -416,9 +417,10 @@ fn source_grep_match_score(
     (base_score + adjustment).max(0.0)
 }
 
-fn import_source_grep_score_adjustment(specifier: &str, excerpt: &str) -> f64 {
+fn import_source_grep_score_adjustment(query: &str, specifier: &str, excerpt: &str) -> f64 {
     let line = excerpt.trim();
-    if relative_path_import_specifier(specifier)
+    if query_prefers_dynamic_import_source(query)
+        && relative_path_import_specifier(specifier)
         && !source_line_starts_with_comment(line)
         && line.contains(specifier)
         && (line.contains("import(") || line.contains("import ("))
@@ -427,6 +429,14 @@ fn import_source_grep_score_adjustment(specifier: &str, excerpt: &str) -> f64 {
     } else {
         0.0
     }
+}
+
+fn query_prefers_dynamic_import_source(query: &str) -> bool {
+    let query = query.trim();
+    query.starts_with("import ")
+        && !query.contains(" from ")
+        && !query.contains('{')
+        && quoted_import_specifier(query).is_some()
 }
 
 fn source_line_starts_with_comment(line: &str) -> bool {

@@ -416,6 +416,63 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
 }
 
 #[test]
+fn import_fallback_keeps_graph_imports_before_dynamic_text_for_plain_specifier_queries() {
+    let request = request("./protocol", CodeQueryKind::Imports, Vec::new());
+    let mut graph_hit = hit(
+        "src/provider.ts",
+        "import type { StreamEnvelope } from \"./protocol\";",
+    );
+    graph_hit.score = 2.25;
+    graph_hit.edge_kind = Some("import".to_owned());
+    graph_hit.edge_resolution_state = Some("resolved".to_owned());
+    graph_hit.retrieval_layers = vec![CodeRetrievalLayer::ImportGraph];
+    let mut results = vec![graph_hit];
+    let plan = CodeGrepFallbackPlan {
+        commit: "commit".to_owned(),
+        query: "./protocol".to_owned(),
+        paths: Vec::new(),
+        path_filters: Vec::new(),
+        language_filters: vec!["typescript".to_owned()],
+        limit: 10,
+        kind: SourceGrepKind::Imports,
+        identity: None,
+        needs_scope_paths: false,
+    };
+
+    append_code_grep_fallback(
+        &status(),
+        &request,
+        &mut results,
+        &plan,
+        SourceGrepOutcome {
+            matches: vec![SourceGrepMatch {
+                path: "src/provider.ts".to_owned(),
+                language_id: "typescript".to_owned(),
+                excerpt: "await import(\"./protocol\");".to_owned(),
+                byte_range: RepositoryCodeRange {
+                    start: 100,
+                    end: 127,
+                },
+                line_range: RepositoryCodeRange { start: 8, end: 8 },
+            }],
+            degraded_reason: None,
+        },
+    );
+
+    assert!(
+        results[0]
+            .retrieval_layers
+            .contains(&CodeRetrievalLayer::ImportGraph),
+        "plain specifier queries should keep graph import evidence first: {results:?}",
+    );
+    let dynamic = results
+        .iter()
+        .find(|hit| hit.excerpt.contains("await import"))
+        .expect("dynamic source fallback should still be retained");
+    assert!(dynamic.score < results[0].score);
+}
+
+#[test]
 fn import_fallback_keeps_graph_evidence_ahead_of_text_fallback() {
     let mut request = request("ProviderShared", CodeQueryKind::Imports, Vec::new());
     request.limit = 1;
