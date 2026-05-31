@@ -19,6 +19,7 @@ pub(in crate::code) fn enrich_symbol_identities(
             byte_start: symbol.byte_range.start,
             byte_end: symbol.byte_range.end,
             prefix: path_prefix(&symbol.qualified_name).to_owned(),
+            explicit_segments: explicit_qualified_segments(&symbol.qualified_name, &symbol.name),
         })
         .collect::<Vec<_>>();
     let mut by_path = BTreeMap::<&str, Vec<usize>>::new();
@@ -54,6 +55,9 @@ pub(in crate::code) fn enrich_symbol_identities(
                 .map(|ancestor| symbol_metadata[*ancestor].name.clone())
                 .collect::<Vec<_>>();
             segments.push(metadata.name.clone());
+            if metadata.explicit_segments.len() > segments.len() {
+                segments = metadata.explicit_segments.clone();
+            }
             symbols[metadata.index].qualified_name =
                 format!("{}::{}", metadata.prefix, segments.join("."));
             symbols[metadata.index].canonical_symbol_id = format!(
@@ -77,12 +81,29 @@ struct SymbolIdentityMetadata {
     byte_start: u32,
     byte_end: u32,
     prefix: String,
+    explicit_segments: Vec<String>,
 }
 
 fn path_prefix(qualified_name: &str) -> &str {
     qualified_name
         .rsplit_once("::")
         .map_or(qualified_name, |(prefix, _)| prefix)
+}
+
+fn explicit_qualified_segments(qualified_name: &str, name: &str) -> Vec<String> {
+    let suffix = qualified_name
+        .rsplit_once("::")
+        .map_or(qualified_name, |(_, suffix)| suffix);
+    let segments = suffix
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if segments.last().is_some_and(|segment| segment == name) {
+        segments
+    } else {
+        vec![name.to_owned()]
+    }
 }
 
 fn container_kind(kind: &str) -> bool {

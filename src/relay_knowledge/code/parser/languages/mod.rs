@@ -142,6 +142,16 @@ pub(super) fn language_manual_definitions(
     }
 }
 
+pub(super) fn language_manual_file_definitions(
+    content: &str,
+    language_id: &str,
+) -> Vec<(String, Option<String>, &'static str, SyntaxRange)> {
+    match language_id {
+        "c" => c::manual_file_definitions(content),
+        _ => Vec::new(),
+    }
+}
+
 pub(super) fn language_manual_call(
     content: &str,
     language_id: &str,

@@ -363,6 +363,224 @@ int declared(void);
 }
 
 #[test]
+fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
+    let snapshot = parse_source_snapshot(
+        "db/db_impl.h",
+        br#"
+	/*
+	class CommentedExample {
+	 public:
+	  void CommentedApi();
+	};
+	*/
+	class DBImpl
+	    : public DB {
+ public:
+  struct CompactionStats {
+    int64_t bytes_read;
+  };
+
+  // Recover the descriptor from persistent storage.  May do a significant
+  // amount of work to recover recently logged updates.  Any changes to
+  // be made to the descriptor are added to *edit.
+  Status Recover(VersionEdit* edit, bool* save_manifest)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  Status RecoverLogFile(uint64_t log_number, bool last_log, bool* save_manifest,
+                        VersionEdit* edit, SequenceNumber* max_sequence)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  ~DBImpl();
+
+	#if defined(ENABLE_RECOVERY)
+	  Status GuardedRecover(VersionEdit* edit);
+	#endif
+
+	  int (*log_filter)(void*);
+	  VersionEdit edit_;
+	};
+
+			struct Options {
+			 public:
+			  Status Validate() const;
+			  void SetUrl(const char* url = "http://localhost");
+			  void SetJson(const char* json = "{}");
+			  Status OpenDefault(const Options& opts = default_options());
+			  Status ModeDefault(int mode = default_mode);
+			  operator bool() const;
+			};
+
+			class Compact { public: void Bar(); void Baz(); };
+			class CommentedCompact { public: /* doc */ void AfterComment(); };
+			class NestedDB { public: struct Iterator { Status Seek(); }; };
+			class Q_CORE_EXPORT DB { public: Status Save(); };
+			class __attribute__((visibility("default"))) AttributeDB {
+			 public:
+			  Status Connect();
+			};
+
+			LEVELDB_EXPORT class ExportedDB {
+			 public:
+			  __attribute__((warn_unused_result)) Status Open();
+			  __declspec(dllexport) Status Close();
+		};
+
+		RK_API struct ExportedOptions { public: Status Load(); };
+		"#,
+    );
+
+    let recover = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "Recover")
+        .expect("C++ class member declaration should be recovered from C header parse");
+    assert_eq!(recover.kind, "function_declaration");
+    assert!(recover.signature.contains("Status Recover"));
+    assert!(
+        recover.qualified_name.contains("DBImpl.Recover")
+            && recover.canonical_symbol_id.contains("DBImpl.Recover"),
+        "recovered class members should preserve owner identity: {recover:?}"
+    );
+    assert!(
+        !recover.signature.contains("EXCLUSIVE_LOCKS_REQUIRED"),
+        "trailing annotation macros should not become part of recovered declaration ranges"
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "RecoverLogFile" && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "GuardedRecover" && symbol.kind == "function_declaration"
+    }));
+    let validate = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "Validate")
+        .expect("plain C++ struct methods should be recovered from C header parse");
+    assert!(
+        validate.qualified_name.contains("Options.Validate"),
+        "plain struct member should preserve owner identity: {validate:?}"
+    );
+    let set_url = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "SetUrl")
+        .expect("URL default argument should not be truncated as a line comment");
+    assert!(
+        set_url.signature.contains("\"http://localhost\""),
+        "string literals containing // should remain in recovered declarations: {set_url:?}"
+    );
+    let set_json = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "SetJson")
+        .expect("braced JSON defaults should not look like nested class bodies");
+    assert!(
+        set_json.signature.contains("\"{}\""),
+        "string literals containing braces should remain in recovered declarations: {set_json:?}"
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "OpenDefault"
+            && symbol.qualified_name.contains("Options.OpenDefault")
+            && symbol.signature.contains("default_options()")
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "ModeDefault"
+            && symbol.qualified_name.contains("Options.ModeDefault")
+            && symbol.signature.contains("default_mode")
+    }));
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.name == "Bar"
+                && symbol.qualified_name.contains("Compact.Bar")
+                && symbol.kind == "function_declaration"
+        }),
+        "same-line recovered members should preserve owner identity: {:?}",
+        snapshot.symbols
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Baz"
+            && symbol.qualified_name.contains("Compact.Baz")
+            && symbol.kind == "function_declaration"
+    }));
+    let after_comment = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "AfterComment")
+        .expect("block comments before compact members should preserve declaration offsets");
+    assert!(
+        after_comment
+            .qualified_name
+            .contains("CommentedCompact.AfterComment")
+            && after_comment.signature.contains("void AfterComment")
+            && !after_comment.signature.contains("doc"),
+        "comment-stripped member ranges should point at the declaration: {after_comment:?}"
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Seek"
+            && symbol.qualified_name.contains("NestedDB.Iterator.Seek")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Save"
+            && symbol.qualified_name.contains("DB.Save")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Connect"
+            && symbol.qualified_name.contains("AttributeDB.Connect")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.name == "Open"
+                && symbol.qualified_name.contains("ExportedDB.Open")
+                && symbol.kind == "function_declaration"
+        }),
+        "exported class members should preserve owner identity: {:?}",
+        snapshot.symbols
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Close"
+            && symbol.qualified_name.contains("ExportedDB.Close")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Load"
+            && symbol.qualified_name.contains("ExportedOptions.Load")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| {
+            (symbol.name == "DBImpl" && symbol.kind == "function_declaration")
+                || symbol.name == "defined"
+                || symbol.name == "CommentedApi"
+                || symbol.name == "bool"
+                || symbol.name == "__attribute__"
+                || symbol.name == "__declspec"
+        }),
+        "preprocessor guards, destructors, comments, decorators, and operators should not become declaration symbols: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        !snapshot.symbols.iter().any(|symbol| symbol.name == "edit_"),
+        "data members should not become function declaration symbols"
+    );
+    assert!(
+        !snapshot
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "int" || symbol.name == "log_filter"),
+        "function pointer members should not become function declaration symbols"
+    );
+    assert!(snapshot.chunks.iter().any(|chunk| {
+        chunk.path == "db/db_impl.h"
+            && chunk.content.contains("Recover the descriptor")
+            && chunk.content.contains("VersionEdit* edit")
+            && chunk.content.contains("save_manifest")
+    }));
+}
+
+#[test]
 fn c_function_pointer_parameters_are_not_global_function_symbols() {
     let snapshot = parse_source_snapshot(
         "include/linux/callbacks.h",

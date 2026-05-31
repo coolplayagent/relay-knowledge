@@ -161,6 +161,7 @@ pub(super) fn upsert_symbol(output: &mut FileParseOutput, symbol: RepositoryCode
                 && existing.path == symbol.path
                 && existing.line_range.start == symbol.line_range.start
                 && symbol_kinds_overlap(&existing.kind, &symbol.kind)
+                && !symbols_have_distinct_scoped_identities(existing, &symbol)
                 && ranges_overlap(
                     existing.byte_range.start,
                     existing.byte_range.end,
@@ -223,11 +224,26 @@ fn symbol_preferred_over_existing(
     symbol: &RepositoryCodeSymbolRecord,
     existing: &RepositoryCodeSymbolRecord,
 ) -> bool {
-    matches!(symbol.kind.as_str(), "function" | "macro")
+    (matches!(symbol.kind.as_str(), "function" | "macro")
         && !matches!(
             existing.kind.as_str(),
             "constructor" | "function" | "macro" | "method"
-        )
+        ))
+}
+
+fn symbols_have_distinct_scoped_identities(
+    left: &RepositoryCodeSymbolRecord,
+    right: &RepositoryCodeSymbolRecord,
+) -> bool {
+    left.name == right.name
+        && left.kind == right.kind
+        && scoped_qualified_suffix(left) != scoped_qualified_suffix(right)
+}
+
+fn scoped_qualified_suffix(symbol: &RepositoryCodeSymbolRecord) -> bool {
+    symbol
+        .qualified_name
+        .ends_with(&format!(".{}", symbol.name))
 }
 
 pub(super) fn upsert_reference(
@@ -260,8 +276,18 @@ pub(super) fn symbol_record(
     kind: &str,
     range: &SyntaxRange,
 ) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
+    symbol_record_with_qualified_suffix(context, name, kind, range, name)
+}
+
+pub(super) fn symbol_record_with_qualified_suffix(
+    context: &FileParseContext<'_>,
+    name: &str,
+    kind: &str,
+    range: &SyntaxRange,
+    qualified_suffix: &str,
+) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
     let signature = symbol_signature(context.content, range, name);
-    let qualified_name = format!("{}::{name}", module_path(context.path));
+    let qualified_name = format!("{}::{qualified_suffix}", module_path(context.path));
     let symbol_snapshot_id = stable_id(
         "symbol",
         [

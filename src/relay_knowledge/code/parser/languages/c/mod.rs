@@ -9,10 +9,12 @@ use super::super::recovery::{
 };
 use preprocessor::{LocalFunctionMacroDefinition, local_function_macro_definition};
 
+mod cpp_header_recovery;
 mod gcc_recovery;
 mod node_kinds;
 mod preprocessor;
 
+pub(in crate::code::parser) use cpp_header_recovery::manual_file_definitions;
 use gcc_recovery::gcc_decorated_function_symbol;
 pub(in crate::code::parser) use node_kinds::{definition_kind, is_call_node};
 
