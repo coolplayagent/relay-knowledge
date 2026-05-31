@@ -7,6 +7,9 @@ use crate::{
     storage::StorageError,
 };
 
+use super::code_query_import_scoring::{
+    import_usage_identifier_terms, named_import_binding_terms, named_import_binding_terms_for_query,
+};
 use super::code_query_rows::ImportRow;
 use super::code_query_support::{
     CandidateLayer, candidate_limit, language_filter_sql_for_column, path_filter_sql_for_column,
@@ -65,15 +68,16 @@ pub(super) fn attach_import_query_usage_context(
     rows: &mut [ImportRow],
 ) -> Result<(), StorageError> {
     if request.code_query_kind != CodeQueryKind::Imports
-        || !target_symbol_import_query(&request.query)
+        || (!target_symbol_import_query(&request.query)
+            && !rows.iter().any(|row| {
+                row.target_symbol_names
+                    .as_deref()
+                    .is_some_and(|names| !names.is_empty())
+            }))
     {
         return Ok(());
     }
-    let query_terms = query_identifier_terms(&request.query)
-        .into_iter()
-        .filter(|term| term.len() >= 3)
-        .collect::<Vec<_>>();
-    if query_terms.is_empty() || rows.is_empty() {
+    if rows.is_empty() {
         return Ok(());
     }
 
@@ -83,21 +87,62 @@ pub(super) fn attach_import_query_usage_context(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let mut usage_by_path = BTreeMap::<String, usize>::new();
+    let mut content_by_path = BTreeMap::<String, String>::new();
     for path_chunk in paths.chunks(SQLITE_BIND_BATCH_SIZE - 1) {
         for (path, content) in import_context_chunks(connection, status, path_chunk)? {
-            let usage = usage_by_path.entry(path).or_default();
-            *usage = usage.saturating_add(identifier_occurrences(&content, &query_terms));
+            let entry = content_by_path.entry(path).or_default();
+            if !entry.is_empty() {
+                entry.push('\n');
+            }
+            entry.push_str(&content);
         }
     }
 
     for row in rows {
-        let usage = usage_by_path.get(&row.path).copied().unwrap_or_default();
-        let import_line_usage = identifier_occurrences(&row.module, &query_terms);
+        let usage_terms = import_usage_terms_for_row(&request.query, row);
+        if usage_terms.is_empty() {
+            continue;
+        }
+        let usage = content_by_path
+            .get(&row.path)
+            .map(|content| identifier_occurrences(content, &usage_terms))
+            .unwrap_or_default();
+        let import_line_usage = identifier_occurrences(&row.module, &usage_terms);
         row.same_file_query_usage_count = usage.saturating_sub(import_line_usage);
     }
 
     Ok(())
+}
+
+fn import_usage_terms_for_row(query: &str, row: &ImportRow) -> Vec<String> {
+    let symbol_import_query = target_symbol_import_query(query);
+    let mut terms = if symbol_import_query {
+        query_identifier_terms(query)
+            .into_iter()
+            .filter(|term| term.len() >= 3)
+            .map(|term| term.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if symbol_import_query {
+        terms.extend(named_import_binding_terms_for_query(
+            &row.module,
+            query,
+            row.matched_symbol_name.as_deref(),
+        ));
+    } else {
+        terms.extend(named_import_binding_terms(&row.module));
+    }
+    if !symbol_import_query {
+        if let Some(target_symbol_names) = row.target_symbol_names.as_deref() {
+            terms.extend(import_usage_identifier_terms(target_symbol_names));
+        }
+    }
+    terms.sort();
+    terms.dedup();
+
+    terms
 }
 
 fn import_context_chunks(

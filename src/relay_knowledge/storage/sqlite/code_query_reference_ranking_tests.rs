@@ -1,9 +1,9 @@
 use crate::{
     domain::{
         CodeIndexSnapshot, CodeParseStatus, CodeQueryKind, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRetrievalLayer, FreshnessPolicy, RepositoryCodeChunkRecord,
-        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
-        RepositoryCodeSymbolRecord,
+        CodeRepositorySelector, CodeRetrievalHit, CodeRetrievalLayer, FreshnessPolicy,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
     storage::code::CodeRepositoryStore,
@@ -405,11 +405,402 @@ async fn exact_reference_queries_rank_indirect_array_calls_before_array_declarat
     assert!(hits[0].score > hits[1].score);
 }
 
+#[tokio::test]
+async fn exact_reference_queries_rank_return_calls_before_assignment_calls() {
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file("state-file", "src/state.js", "javascript")],
+        symbols: Vec::new(),
+        references: vec![
+            reference_on_line(
+                "assignment-normalize-role",
+                "state-file",
+                "src/state.js",
+                "normalizeRoleId",
+                None,
+                12,
+            ),
+            reference_on_line(
+                "return-normalize-role",
+                "state-file",
+                "src/state.js",
+                "normalizeRoleId",
+                None,
+                18,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "assignment-chunk",
+                "state-file",
+                "src/state.js",
+                "function update(roleId) {\n  const safeRoleId = normalizeRoleId(roleId);\n  return safeRoleId;\n}",
+                range(11, 14),
+            ),
+            chunk(
+                "return-chunk",
+                "state-file",
+                "src/state.js",
+                "function current(state) {\n  return normalizeRoleId(state.coordinatorRoleId);\n}",
+                range(17, 19),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("normalizeRoleId", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert!(hits[0].excerpt.contains("return normalizeRoleId"));
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
+async fn exact_reference_queries_rank_type_annotations_before_test_constructors() {
+    let service_path = "src/connector/service.py";
+    let test_path = "tests/connector/test_service.py";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("service-file", service_path, "python"),
+            file("test-file", test_path, "python"),
+        ],
+        symbols: Vec::new(),
+        references: vec![
+            typed_reference_on_line(
+                "service-request-type",
+                "service-file",
+                service_path,
+                "W3ConnectorSaveRequest",
+                12,
+            ),
+            reference_on_line(
+                "test-constructor-call",
+                "test-file",
+                test_path,
+                "W3ConnectorSaveRequest",
+                None,
+                32,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "service-chunk",
+                "service-file",
+                service_path,
+                "async def save_w3_connector(\n    request: W3ConnectorSaveRequest,\n) -> W3ConnectorSaveResponse:\n    pass",
+                range(11, 14),
+            ),
+            chunk(
+                "test-chunk",
+                "test-file",
+                test_path,
+                "request = W3ConnectorSaveRequest(username=\"user\", password=\"secret\")",
+                range(32, 32),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("W3ConnectorSaveRequest", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, service_path);
+    assert!(hits[0].excerpt.contains("request: W3ConnectorSaveRequest"));
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[tokio::test]
+async fn exact_reference_queries_do_not_treat_object_literal_values_as_type_annotations() {
+    let registry_path = "src/connector/registry.ts";
+    let runtime_path = "src/connector/runtime.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("registry-file", registry_path, "typescript"),
+            file("runtime-file", runtime_path, "typescript"),
+        ],
+        symbols: Vec::new(),
+        references: vec![
+            reference_on_line(
+                "registry-value-reference",
+                "registry-file",
+                registry_path,
+                "SaveRequest",
+                None,
+                8,
+            ),
+            reference_on_line(
+                "runtime-call-reference",
+                "runtime-file",
+                runtime_path,
+                "SaveRequest",
+                None,
+                20,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "registry-chunk",
+                "registry-file",
+                registry_path,
+                "export const handlers = {\n  save: SaveRequest,\n};",
+                range(7, 9),
+            ),
+            chunk(
+                "runtime-chunk",
+                "runtime-file",
+                runtime_path,
+                "export function run(input: unknown) {\n  return SaveRequest(input);\n}",
+                range(19, 21),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("SaveRequest", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, runtime_path);
+    assert!(hits[0].excerpt.contains("return SaveRequest"));
+    assert!(score_for_path(&hits, runtime_path) > score_for_path(&hits, registry_path));
+}
+
+#[tokio::test]
+async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fields() {
+    let session_path = "packages/opencode/src/session/session.ts";
+    let sync_path = "packages/opencode/src/sync/index.ts";
+    let test_path = "packages/opencode/test/config/config.test.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("session-file", session_path, "typescript"),
+            file("sync-file", sync_path, "typescript"),
+            file("test-file", test_path, "typescript"),
+        ],
+        symbols: vec![symbol(
+            "instance-context-symbol",
+            "session-file",
+            "packages/opencode/src/project/instance-context.ts",
+            "InstanceContext",
+            "Project.InstanceContext",
+        )],
+        references: vec![
+            typed_reference_on_line(
+                "session-plan-instance",
+                "session-file",
+                session_path,
+                "InstanceContext",
+                372,
+            ),
+            typed_reference_on_line(
+                "sync-publish-instance",
+                "sync-file",
+                sync_path,
+                "InstanceContext",
+                55,
+            ),
+            typed_reference_on_line(
+                "test-helper-instance",
+                "test-file",
+                test_path,
+                "InstanceContext",
+                64,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "session-chunk",
+                "session-file",
+                session_path,
+                "export function plan(\n  input: PlanInput,\n  instance: InstanceContext,\n) {\n  return instance.directory\n}",
+                range(370, 374),
+            ),
+            chunk(
+                "sync-chunk",
+                "sync-file",
+                sync_path,
+                "type PublishContext = {\n  instance?: InstanceContext\n  workspace?: WorkspaceID\n}",
+                range(54, 57),
+            ),
+            chunk(
+                "test-chunk",
+                "test-file",
+                test_path,
+                "async function load(ctx: InstanceContext) {\n  return ctx.directory\n}",
+                range(64, 66),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("InstanceContext", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, session_path);
+    assert!(hits[0].excerpt.contains("instance: InstanceContext"));
+    assert!(score_for_path(&hits, session_path) > score_for_path(&hits, sync_path));
+    assert!(score_for_path(&hits, session_path) > score_for_path(&hits, test_path));
+}
+
+#[tokio::test]
+async fn exact_reference_queries_rank_constructor_calls_before_passive_values() {
+    let registry_path = "src/connector/registry.ts";
+    let runtime_path = "src/connector/runtime.ts";
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 2,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("registry-file", registry_path, "typescript"),
+            file("runtime-file", runtime_path, "typescript"),
+        ],
+        symbols: Vec::new(),
+        references: vec![
+            reference_on_line(
+                "registry-value-reference",
+                "registry-file",
+                registry_path,
+                "SaveRequest",
+                None,
+                8,
+            ),
+            reference_on_line(
+                "runtime-constructor-reference",
+                "runtime-file",
+                runtime_path,
+                "SaveRequest",
+                None,
+                20,
+            ),
+        ],
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "registry-chunk",
+                "registry-file",
+                registry_path,
+                "export const handlers = {\n  save: SaveRequest,\n};",
+                range(7, 9),
+            ),
+            chunk(
+                "runtime-chunk",
+                "runtime-file",
+                runtime_path,
+                "export function run(input: unknown) {\n  return new SaveRequest(input);\n}",
+                range(19, 21),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("SaveRequest", CodeQueryKind::References))
+        .await
+        .expect("reference query should succeed");
+
+    assert_eq!(hits[0].path, runtime_path);
+    assert!(hits[0].excerpt.contains("new SaveRequest"));
+    assert!(score_for_path(&hits, runtime_path) > score_for_path(&hits, registry_path));
+}
+
 fn request(query: &str, kind: CodeQueryKind) -> crate::domain::CodeRetrievalRequest {
     let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
         .expect("selector should validate");
     crate::domain::CodeRetrievalRequest::new(query, selector, kind, 10, FreshnessPolicy::AllowStale)
         .expect("request should validate")
+}
+
+fn score_for_path(hits: &[CodeRetrievalHit], path: &str) -> f64 {
+    hits.iter()
+        .find(|hit| hit.path == path)
+        .map(|hit| hit.score)
+        .expect("path should be returned")
 }
 
 fn file(file_id: &str, path: &str, language_id: &str) -> RepositoryCodeFileRecord {
@@ -450,6 +841,18 @@ fn symbol(
         byte_range: range(10, 20),
         line_range: range(10, 20),
     }
+}
+
+fn typed_reference_on_line(
+    reference_id: &str,
+    file_id: &str,
+    path: &str,
+    name: &str,
+    line: u32,
+) -> RepositoryCodeReferenceRecord {
+    let mut reference = reference_on_line(reference_id, file_id, path, name, None, line);
+    reference.kind = "type".to_owned();
+    reference
 }
 
 fn reference(

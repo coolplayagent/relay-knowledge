@@ -12,7 +12,7 @@ use super::{
     HitParts,
     code_query_excerpts::reference_excerpt,
     code_query_path_ranking::{
-        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+        query_mentions_test_or_benchmark, reference_source_path_bonus, reference_test_path_penalty,
     },
     code_query_rows::ReferenceRow,
     code_query_support::*,
@@ -24,11 +24,12 @@ const REFERENCE_ASSIGNMENT_USAGE_BONUS: f64 = 1.4;
 const REFERENCE_INDIRECT_CALL_USAGE_BONUS: f64 = 1.8;
 const REFERENCE_MEMBER_CALL_USAGE_BONUS: f64 = 1.2;
 const REFERENCE_RETURN_USAGE_BONUS: f64 = 1.45;
-const REFERENCE_EXPORTED_FUNCTION_TYPE_BONUS: f64 = 0.85;
-const REFERENCE_FUNCTION_TYPE_BONUS: f64 = 0.65;
-const REFERENCE_ARROW_FUNCTION_TYPE_BONUS: f64 = 0.35;
-const REFERENCE_PRODUCTION_PATH_BONUS: f64 = 0.25;
-const REFERENCE_TEST_PATH_PENALTY: f64 = -0.85;
+const REFERENCE_PLAIN_CALL_USAGE_BONUS: f64 = 1.05;
+const REFERENCE_RETURN_CALL_USAGE_BONUS: f64 = 1.55;
+const REFERENCE_PARAMETER_TYPE_USAGE_BONUS: f64 = 0.45;
+const REFERENCE_EXPORTED_PARAMETER_TYPE_USAGE_BONUS: f64 = 0.75;
+const REFERENCE_TYPE_USAGE_BONUS: f64 = 1.65;
+const MAX_GENERIC_CALL_LOOKAHEAD_BYTES: usize = 256;
 
 struct ReferenceIdentityRows {
     rows: Vec<ReferenceRow>,
@@ -267,14 +268,21 @@ fn reference_rows_to_hits(
                 ],
             );
             let focused_source_excerpt = focused_reference_source_excerpt(&row);
+            let usage_context_bonus = reference_row_usage_context_bonus(
+                base_score,
+                &row,
+                focused_source_excerpt.as_deref(),
+                request,
+            );
             let score = base_score
-                + reference_usage_context_bonus(
-                    base_score,
-                    &row.name,
-                    focused_source_excerpt.as_deref(),
-                    request,
-                )
+                + usage_context_bonus
                 + reference_source_path_bonus(
+                    base_score,
+                    &row.path,
+                    request,
+                    query_has_test_intent,
+                )
+                + reference_test_path_penalty(
                     base_score,
                     &row.path,
                     request,
@@ -329,8 +337,60 @@ fn focused_reference_source_excerpt(row: &ReferenceRow) -> Option<String> {
     }
 }
 
+fn reference_row_usage_context_bonus(
+    base_score: f64,
+    row: &ReferenceRow,
+    focused_source_excerpt: Option<&str>,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if row.kind == "type" {
+        if let Some(bonus) = type_reference_row_usage_context_bonus(base_score, row, request) {
+            return bonus;
+        }
+    }
+    reference_usage_context_bonus(
+        base_score,
+        &row.kind,
+        &row.name,
+        focused_source_excerpt,
+        request,
+    )
+}
+
+fn type_reference_row_usage_context_bonus(
+    base_score: f64,
+    row: &ReferenceRow,
+    request: &CodeRetrievalRequest,
+) -> Option<f64> {
+    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::References {
+        return Some(0.0);
+    }
+
+    let source_excerpt = row.source_excerpt.as_deref()?;
+    let line_start = row.source_excerpt_line_start?;
+    let offset = usize::try_from(row.line_range.start.checked_sub(line_start)?).ok()?;
+    let raw_lines = source_excerpt.lines().collect::<Vec<_>>();
+    let target_line = source_usage_line(raw_lines.get(offset)?)?;
+    identifier_ranges(target_line, &row.name).next()?;
+    let previous_lines = raw_lines[..offset]
+        .iter()
+        .filter_map(|line| source_usage_line(line))
+        .collect::<Vec<_>>();
+
+    Some(
+        reference_line_usage_bonus(
+            target_line,
+            &row.kind,
+            &row.name,
+            parameter_type_context(&previous_lines),
+        )
+        .unwrap_or(0.0),
+    )
+}
+
 pub(super) fn reference_usage_context_bonus(
     base_score: f64,
+    reference_kind: &str,
     name: &str,
     source_excerpt: Option<&str>,
     request: &CodeRetrievalRequest,
@@ -342,32 +402,23 @@ pub(super) fn reference_usage_context_bonus(
         return 0.0;
     };
 
-    source_excerpt
+    let lines = source_excerpt
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.starts_with("//") && !line.starts_with('*'))
-        .filter_map(|line| reference_line_usage_bonus(line, name))
-        .fold(0.0, f64::max)
-}
+        .filter_map(source_usage_line)
+        .collect::<Vec<_>>();
 
-fn reference_source_path_bonus(
-    base_score: f64,
-    path: &str,
-    request: &CodeRetrievalRequest,
-    query_has_test_intent: bool,
-) -> f64 {
-    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::References {
-        return 0.0;
-    }
-    if path_looks_like_test_or_benchmark(path) {
-        if query_has_test_intent {
-            0.0
-        } else {
-            REFERENCE_TEST_PATH_PENALTY
-        }
-    } else {
-        REFERENCE_PRODUCTION_PATH_BONUS
-    }
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            reference_line_usage_bonus(
+                line,
+                reference_kind,
+                name,
+                parameter_type_context(&lines[..index]),
+            )
+        })
+        .fold(0.0, f64::max)
 }
 
 fn reference_same_name_file_penalty(
@@ -397,22 +448,57 @@ fn normalized_identifier(value: &str) -> String {
         .collect()
 }
 
-fn reference_line_usage_bonus(line: &str, name: &str) -> Option<f64> {
+fn source_usage_line(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.starts_with("//") || line.starts_with('*') {
+        None
+    } else {
+        Some(line)
+    }
+}
+
+fn reference_line_usage_bonus(
+    line: &str,
+    reference_kind: &str,
+    name: &str,
+    parameter_context: Option<ParameterTypeContext>,
+) -> Option<f64> {
     identifier_ranges(line, name)
         .filter(|(start, end)| !line_declares_reference_name(line, name, *start, *end))
-        .map(|(start, end)| reference_identifier_usage_bonus(line, start, end))
+        .map(|(start, end)| {
+            reference_identifier_usage_bonus(line, reference_kind, start, end, parameter_context)
+        })
         .max_by(f64::total_cmp)
         .filter(|bonus| *bonus > 0.0)
 }
 
-fn reference_identifier_usage_bonus(line: &str, start: usize, end: usize) -> f64 {
+fn reference_identifier_usage_bonus(
+    line: &str,
+    reference_kind: &str,
+    start: usize,
+    end: usize,
+    parameter_context: Option<ParameterTypeContext>,
+) -> f64 {
     let before = line.get(..start).unwrap_or_default();
     let after = line.get(end..).unwrap_or_default().trim_start();
+    if reference_kind == "type" {
+        if let Some(annotation_prefix) = type_annotation_context_prefix(before) {
+            return REFERENCE_TYPE_USAGE_BONUS
+                + parameter_type_reference_bonus(line, annotation_prefix, parameter_context);
+        }
+    }
     if identifier_is_indirect_call(after) {
         return REFERENCE_INDIRECT_CALL_USAGE_BONUS;
     }
     if identifier_is_member_call(before, after) {
         return REFERENCE_MEMBER_CALL_USAGE_BONUS;
+    }
+    if identifier_is_plain_call(after) {
+        return if identifier_is_return_value(before) {
+            REFERENCE_RETURN_CALL_USAGE_BONUS
+        } else {
+            REFERENCE_PLAIN_CALL_USAGE_BONUS
+        };
     }
     if identifier_is_assignment_value(before) {
         return REFERENCE_ASSIGNMENT_USAGE_BONUS;
@@ -420,17 +506,105 @@ fn reference_identifier_usage_bonus(line: &str, start: usize, end: usize) -> f64
     if identifier_is_return_value(before) {
         return REFERENCE_RETURN_USAGE_BONUS;
     }
-    if let Some(bonus) = type_signature_context_bonus(line, before, after) {
-        return bonus;
-    }
 
     0.0
+}
+
+#[derive(Clone, Copy)]
+struct ParameterTypeContext {
+    exported_callable: bool,
+}
+
+fn parameter_type_context(previous_lines: &[&str]) -> Option<ParameterTypeContext> {
+    let context = previous_lines.join("\n");
+    let open_paren = context.rfind('(')?;
+    if context[open_paren + 1..].contains(')') {
+        return None;
+    }
+    let head_line = context[..open_paren]
+        .lines()
+        .next_back()
+        .unwrap_or_default();
+
+    Some(ParameterTypeContext {
+        exported_callable: line_starts_exported_callable(head_line),
+    })
+}
+
+fn parameter_type_reference_bonus(
+    line: &str,
+    before: &str,
+    parameter_context: Option<ParameterTypeContext>,
+) -> f64 {
+    let same_line_parameter = type_annotation_is_callable_parameter(before);
+    let multiline_parameter = !same_line_parameter
+        && parameter_context.is_some()
+        && type_annotation_has_parameter_name(before);
+    if !same_line_parameter && !multiline_parameter {
+        return 0.0;
+    }
+    if line_starts_exported_callable(line)
+        || parameter_context.is_some_and(|context| context.exported_callable)
+    {
+        REFERENCE_EXPORTED_PARAMETER_TYPE_USAGE_BONUS
+    } else {
+        REFERENCE_PARAMETER_TYPE_USAGE_BONUS
+    }
+}
+
+fn type_annotation_is_callable_parameter(before: &str) -> bool {
+    let before = before.trim_end();
+    let Some(prefix) = before.strip_suffix(':') else {
+        return false;
+    };
+    let Some(open_paren) = prefix.rfind('(') else {
+        return false;
+    };
+    if prefix[open_paren + 1..].contains(')') {
+        return false;
+    }
+
+    prefix[open_paren + 1..]
+        .split(',')
+        .next_back()
+        .is_some_and(parameter_segment_has_name)
+}
+
+fn type_annotation_has_parameter_name(before: &str) -> bool {
+    let before = before.trim_end();
+    before
+        .strip_suffix(':')
+        .is_some_and(parameter_segment_has_name)
+}
+
+fn parameter_segment_has_name(segment: &str) -> bool {
+    segment
+        .trim()
+        .trim_start_matches("readonly ")
+        .trim_start_matches("public ")
+        .trim_start_matches("private ")
+        .trim_start_matches("protected ")
+        .chars()
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+}
+
+fn line_starts_exported_callable(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with("export function ")
+        || line.starts_with("export async function ")
+        || (line.starts_with("export const ") && (line.contains("=>") || line.contains("function")))
 }
 
 fn line_declares_reference_name(line: &str, name: &str, start: usize, end: usize) -> bool {
     let before = line.get(..start).unwrap_or_default().trim_end();
     let after = line.get(end..).unwrap_or_default().trim_start();
-    if before.ends_with('.') || before.ends_with("->") || identifier_is_assignment_value(before) {
+    if before.ends_with('.')
+        || before.ends_with("->")
+        || identifier_is_assignment_value(before)
+        || identifier_is_type_annotation(before)
+        || type_annotation_context_prefix(before).is_some()
+    {
         return false;
     }
     if identifier_is_return_value(before) {
@@ -450,11 +624,21 @@ fn line_declares_reference_name(line: &str, name: &str, start: usize, end: usize
 }
 
 fn declaration_prefix_before_name(before: &str) -> bool {
+    if prefix_ends_with_value_flow_keyword(before) {
+        return false;
+    }
     let token_count = before.split_whitespace().count();
     token_count >= 1
         && before
             .chars()
             .all(|character| !matches!(character, '=' | '+' | '-' | '*' | '/' | '%' | '?'))
+}
+
+fn prefix_ends_with_value_flow_keyword(before: &str) -> bool {
+    before
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .rfind(|token| !token.is_empty())
+        .is_some_and(|token| matches!(token, "return" | "yield" | "await" | "new"))
 }
 
 fn array_declarator_has_initializer(after: &str) -> bool {
@@ -477,28 +661,39 @@ fn identifier_is_assignment_value(before: &str) -> bool {
 fn identifier_is_return_value(before: &str) -> bool {
     before
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .rev()
-        .find(|term| !term.is_empty())
-        .is_some_and(|term| term == "return")
+        .rfind(|token| !token.is_empty())
+        .is_some_and(|token| matches!(token, "return" | "yield" | "await"))
 }
 
-fn type_signature_context_bonus(line: &str, before: &str, after: &str) -> Option<f64> {
-    if !before.trim_end().ends_with(':') {
-        return None;
-    }
-    let lower_before = before.to_ascii_lowercase();
-    if lower_before.contains("export function ") || lower_before.contains("export async function ")
-    {
-        return Some(REFERENCE_EXPORTED_FUNCTION_TYPE_BONUS);
-    }
-    if lower_before.contains("function ") || lower_before.contains("def ") {
-        return Some(REFERENCE_FUNCTION_TYPE_BONUS);
-    }
-    if line.contains("=>") || after.contains("=>") {
-        return Some(REFERENCE_ARROW_FUNCTION_TYPE_BONUS);
-    }
+fn identifier_is_type_annotation(before: &str) -> bool {
+    let before = before.trim_end();
+    before.ends_with(':') || before.ends_with(" as")
+}
 
-    None
+fn type_annotation_context_prefix(before: &str) -> Option<&str> {
+    let before = before.trim_end();
+    if identifier_is_type_annotation(before) {
+        return Some(before);
+    }
+    if let Some(prefix) = nested_type_assertion_prefix(before) {
+        return Some(prefix);
+    }
+    let colon_index = before.rfind(':')?;
+    let suffix = before[colon_index + 1..].trim();
+    nested_type_context_suffix(suffix).then_some(&before[..=colon_index])
+}
+
+fn nested_type_assertion_prefix(before: &str) -> Option<&str> {
+    let assertion_index = before.rfind(" as ")?;
+    let suffix = before[assertion_index + " as ".len()..].trim();
+    nested_type_context_suffix(suffix).then_some(&before[..assertion_index + " as".len()])
+}
+
+fn nested_type_context_suffix(suffix: &str) -> bool {
+    !suffix.is_empty()
+        && suffix
+            .chars()
+            .any(|character| matches!(character, '[' | '<' | '|' | ','))
 }
 
 fn identifier_is_indirect_call(after: &str) -> bool {
@@ -509,6 +704,39 @@ fn identifier_is_indirect_call(after: &str) -> bool {
         return false;
     };
     tail.trim_start().starts_with('(')
+}
+
+fn identifier_is_plain_call(after: &str) -> bool {
+    after.starts_with('(') || identifier_is_generic_call(after)
+}
+
+fn identifier_is_generic_call(after: &str) -> bool {
+    let Some(rest) = after.strip_prefix('<') else {
+        return false;
+    };
+    let mut depth = 1usize;
+    for (index, character) in rest.char_indices() {
+        if index > MAX_GENERIC_CALL_LOOKAHEAD_BYTES {
+            return false;
+        }
+        match character {
+            '<' => depth = depth.saturating_add(1),
+            '>' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let tail_start = index + character.len_utf8();
+                    return rest
+                        .get(tail_start..)
+                        .unwrap_or_default()
+                        .trim_start()
+                        .starts_with('(');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    false
 }
 
 fn identifier_is_member_call(before: &str, after: &str) -> bool {
@@ -629,25 +857,36 @@ mod tests {
 
         let assignment = reference_usage_context_bonus(
             5.0,
+            "value",
             "normalizeRoleId",
             Some("state.coordinatorRoleId = normalizeRoleId(roleId) || null;"),
             &request,
         );
         let returned = reference_usage_context_bonus(
             5.0,
+            "value",
             "normalizeRoleId",
             Some("return normalizeRoleId(state.coordinatorRoleId);"),
             &request,
         );
         let type_signature = reference_usage_context_bonus(
             5.0,
+            "type",
             "InstanceContext",
             Some("export function plan(input: Input, instance: InstanceContext) {"),
+            &request,
+        );
+        let nested_type_signature = reference_usage_context_bonus(
+            5.0,
+            "type",
+            "InstanceContext",
+            Some("export function plan(input: Record<string, InstanceContext>) {"),
             &request,
         );
 
         assert!(returned > assignment);
         assert!(type_signature > 0.0);
+        assert!(nested_type_signature >= type_signature);
         assert!(
             reference_same_name_file_penalty(
                 5.0,
@@ -655,5 +894,15 @@ mod tests {
                 &request,
             ) < 0.0
         );
+    }
+
+    #[test]
+    fn plain_call_detection_requires_real_generic_call_shape() {
+        assert!(identifier_is_plain_call("(value)"));
+        assert!(identifier_is_plain_call("<Payload>(value)"));
+        assert!(identifier_is_plain_call("<Map<Key, Value>>(value)"));
+        assert!(!identifier_is_plain_call("< computeThreshold())"));
+        assert!(!identifier_is_plain_call("< bar(baz)"));
+        assert!(!identifier_is_plain_call("<Payload> + value"));
     }
 }

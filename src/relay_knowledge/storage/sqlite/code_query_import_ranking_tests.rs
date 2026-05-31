@@ -161,6 +161,77 @@ async fn symbol_import_queries_rank_dense_same_file_alias_usage() {
 }
 
 #[tokio::test]
+async fn symbol_import_usage_counts_only_the_queried_named_binding() {
+    let target_path = "packages/llm/src/protocols/module.ts";
+    let active_path = "packages/llm/src/protocols/target-usage.ts";
+    let noisy_path = "packages/llm/src/protocols/common-usage.ts";
+    let mut target_symbol = symbol("target-symbol", "target-file", target_path, "Target");
+    target_symbol.language_id = "typescript".to_owned();
+    let mut active_import = import(
+        "active-import",
+        "active-file",
+        active_path,
+        "import { Target, VeryCommon } from \"./module\"",
+    );
+    active_import.target_hint = Some(target_path.to_owned());
+    let mut noisy_import = import(
+        "noisy-import",
+        "noisy-file",
+        noisy_path,
+        "import { Target, VeryCommon } from \"./module\"",
+    );
+    noisy_import.target_hint = Some(target_path.to_owned());
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("target-file", target_path, "typescript"),
+            file("active-file", active_path, "typescript"),
+            file("noisy-file", noisy_path, "typescript"),
+        ],
+        symbols: vec![target_symbol],
+        references: Vec::new(),
+        imports: vec![active_import, noisy_import],
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "active-chunk",
+                "active-file",
+                active_path,
+                &repeated_target_usage(4),
+            ),
+            chunk(
+                "noisy-chunk",
+                "noisy-file",
+                noisy_path,
+                &repeated_very_common_usage(30),
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("Target", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, active_path);
+}
+
+#[tokio::test]
 async fn path_import_queries_include_resolved_target_symbols_in_excerpt() {
     let importer_path = "table/filter_block.cc";
     let target_path = "include/leveldb/filter_policy.h";
@@ -433,6 +504,89 @@ async fn path_import_queries_rank_public_header_importers_before_implementation_
 }
 
 #[tokio::test]
+async fn path_import_queries_rank_importer_path_and_target_symbol_usage() {
+    let active_path = "src/cache/cache_consumer.cc";
+    let bootstrap_path = "src/bootstrap/consumer.cc";
+    let target_path = "include/store/cache.hpp";
+    let mut active_import = import(
+        "active-cache-import",
+        "active-file",
+        active_path,
+        "#include \"store/cache.hpp\"",
+    );
+    active_import.target_hint = Some(target_path.to_owned());
+    active_import.resolution_state = "resolved".to_owned();
+    active_import.line_range = range(3, 3);
+    let mut bootstrap_import = import(
+        "bootstrap-cache-import",
+        "bootstrap-file",
+        bootstrap_path,
+        "#include \"store/cache.hpp\"",
+    );
+    bootstrap_import.target_hint = Some(target_path.to_owned());
+    bootstrap_import.resolution_state = "resolved".to_owned();
+    bootstrap_import.line_range = range(1, 1);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("active-file", active_path, "cpp"),
+            file("bootstrap-file", bootstrap_path, "cpp"),
+            file("target-file", target_path, "cpp"),
+        ],
+        symbols: vec![
+            symbol("cache-symbol", "target-file", target_path, "Cache"),
+            symbol("insert-symbol", "target-file", target_path, "Insert"),
+        ],
+        references: Vec::new(),
+        imports: vec![bootstrap_import, active_import],
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "active-chunk",
+                "active-file",
+                active_path,
+                "void run() {\n  Cache cache;\n  cache.Insert(\"key\");\n}",
+            ),
+            chunk(
+                "bootstrap-chunk",
+                "bootstrap-file",
+                bootstrap_path,
+                "void bootstrap() {\n  start_runtime();\n}",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("store/cache.hpp", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, active_path);
+    let active_score = score_for_path(&hits, active_path).expect("active import should match");
+    let bootstrap_score =
+        score_for_path(&hits, bootstrap_path).expect("bootstrap import should match");
+    assert!(
+        active_score > bootstrap_score,
+        "importer source context should outrank earlier but unused import: {active_score} <= {bootstrap_score}",
+    );
+}
+
+#[tokio::test]
 async fn path_import_queries_demote_test_importers_without_test_intent() {
     let production_path = "table/filter_block.cc";
     let test_path = "table/filter_block_test.cc";
@@ -629,6 +783,18 @@ fn chunk(chunk_id: &str, file_id: &str, path: &str, content: &str) -> Repository
 fn repeated_provider_shared_usage(count: usize) -> String {
     (0..count)
         .map(|index| format!("const value{index} = ProviderShared.encodeJson(input{index});\n"))
+        .collect()
+}
+
+fn repeated_very_common_usage(count: usize) -> String {
+    (0..count)
+        .map(|index| format!("const value{index} = VeryCommon.encode(input{index});\n"))
+        .collect()
+}
+
+fn repeated_target_usage(count: usize) -> String {
+    (0..count)
+        .map(|index| format!("const value{index} = Target.from(input{index});\n"))
         .collect()
 }
 

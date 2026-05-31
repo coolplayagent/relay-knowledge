@@ -757,6 +757,10 @@ mod exported_value_tests;
 mod identity_tests;
 
 #[cfg(test)]
+#[path = "tests/go.rs"]
+mod go_tests;
+
+#[cfg(test)]
 #[path = "languages/c/tests.rs"]
 mod c_tests;
 
@@ -791,3 +795,7 @@ mod knowledge_map_tests;
 #[cfg(test)]
 #[path = "tests/text_only_topics.rs"]
 mod text_only_topic_tests;
+
+#[cfg(test)]
+#[path = "tests/type_references.rs"]
+mod type_reference_tests;

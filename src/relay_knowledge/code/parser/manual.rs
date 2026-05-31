@@ -37,7 +37,7 @@ pub(super) fn collect_manual_nodes(
         if let Some((name, range)) = manual_call(context, node) {
             upsert_reference(output, reference_record(context, &name, "call", &range)?);
         }
-        if let Some((name, kind, range)) = manual_reference(context, node) {
+        for (name, kind, range) in manual_references(context, node) {
             upsert_reference(output, reference_record(context, &name, kind, &range)?);
         }
         push_children_reverse(node, &mut stack);
@@ -180,11 +180,11 @@ fn callable_expression_name(content: &str, function: Node<'_>) -> Option<(String
     last_identifier_text(content, function).map(|name| (name, syntax_range(function)))
 }
 
-fn manual_reference(
+fn manual_references(
     context: &FileParseContext<'_>,
     node: Node<'_>,
-) -> Option<(String, &'static str, SyntaxRange)> {
-    languages::language_manual_reference(context.content, context.language_id, node)
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    languages::language_manual_references(context.content, context.language_id, node)
 }
 
 fn node_contains(parent: Node<'_>, child: Node<'_>) -> bool {

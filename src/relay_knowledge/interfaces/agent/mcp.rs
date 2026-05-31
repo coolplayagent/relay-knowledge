@@ -597,10 +597,7 @@ fn handle_notification(server: &McpServer, method: &str, params: Value, namespac
 
 fn admit_mcp_request(server: &McpServer) -> Result<QosPermit, RejectReason> {
     let policy = server.network.current().qos;
-    let queued = server.qos.reserve_queue(&policy)?;
-    let permit = server.qos.admit_request(&policy);
-    drop(queued);
-    permit
+    server.qos.admit_queued_request(&policy)
 }
 
 async fn run_cancellable_tool_call(

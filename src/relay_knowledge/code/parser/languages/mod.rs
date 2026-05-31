@@ -115,6 +115,10 @@ pub(super) fn manual_definition_candidate(language_id: &str, node_kind: &str) ->
             javascript::manual_definition_candidate(node_kind)
                 || definition_kind(language_id, node_kind).is_some()
         }
+        "go" => {
+            go::manual_definition_candidate(node_kind)
+                || definition_kind(language_id, node_kind).is_some()
+        }
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definition_candidate(language_id, node_kind)
         }
@@ -131,6 +135,7 @@ pub(super) fn language_manual_definitions(
     match language_id {
         "c" => c::manual_definitions(content, node),
         "cpp" => cpp::manual_definitions(content, node),
+        "go" => go::manual_definitions(content, node),
         "ini" | "json" | "markdown" | "properties" | "toml" | "yaml" => {
             config::manual_definitions(content, language_id, node)
         }
@@ -183,15 +188,23 @@ pub(super) fn language_exported_declaration_range(
     }
 }
 
-pub(super) fn language_manual_reference(
+pub(super) fn language_manual_references(
     content: &str,
     language_id: &str,
     node: Node<'_>,
-) -> Option<(String, &'static str, SyntaxRange)> {
+) -> Vec<(String, &'static str, SyntaxRange)> {
     match language_id {
-        "c" | "cpp" => c_family_references::manual_reference(content, node),
-        "sql" => sql::manual_reference(content, node),
-        _ => None,
+        "c" | "cpp" => c_family_references::manual_reference(content, node)
+            .into_iter()
+            .collect(),
+        "python" => python::manual_reference(content, node),
+        "sql" => sql::manual_reference(content, node).into_iter().collect(),
+        "javascript" | "jsx" | "typescript" | "tsx" => {
+            javascript::manual_reference(content, language_id, node)
+                .into_iter()
+                .collect()
+        }
+        _ => Vec::new(),
     }
 }
 

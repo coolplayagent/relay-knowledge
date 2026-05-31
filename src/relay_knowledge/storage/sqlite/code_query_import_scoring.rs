@@ -207,6 +207,42 @@ pub(super) fn import_same_file_usage_bonus(
     ((usage_count - 1) as f64 * IMPORT_USAGE_BONUS_PER_REFERENCE).min(MAX_IMPORT_USAGE_BONUS)
 }
 
+pub(super) fn import_importer_path_context_bonus(
+    base_score: f64,
+    usage_count: usize,
+    query: &str,
+    path: &str,
+    kind: CodeQueryKind,
+) -> f64 {
+    if base_score <= 0.0
+        || usage_count == 0
+        || kind != CodeQueryKind::Imports
+        || !query_looks_like_import_path(query)
+    {
+        return 0.0;
+    }
+    let last_segment = query.rsplit(['/', '\\']).next().unwrap_or(query);
+    let target_stem = last_segment
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(last_segment);
+    let target_terms = import_usage_identifier_terms(target_stem);
+    if target_terms.is_empty() {
+        return 0.0;
+    }
+    let path_terms = import_usage_identifier_terms(path);
+    let matched_terms = target_terms
+        .iter()
+        .filter(|term| {
+            path_terms
+                .iter()
+                .any(|path_term| identifier_terms_equivalent(path_term, term))
+        })
+        .count();
+
+    (matched_terms as f64 * IMPORT_PATH_CONTEXT_BONUS_PER_TERM).min(MAX_IMPORT_PATH_CONTEXT_BONUS)
+}
+
 pub(super) fn import_target_directory_bonus(
     base_score: f64,
     query: &str,
@@ -292,8 +328,10 @@ const HYBRID_SPARSE_IMPORT_PENALTY_PER_TERM: f64 = 4.0;
 const MAX_HYBRID_SPARSE_IMPORT_PENALTY: f64 = 16.0;
 const MIN_SPARSE_IMPORT_BASE_SCORE: f64 = 0.5;
 const MIN_IMPORT_COVERAGE_TERM_LEN: usize = 3;
-const IMPORT_USAGE_BONUS_PER_REFERENCE: f64 = 0.05;
-const MAX_IMPORT_USAGE_BONUS: f64 = 0.4;
+const IMPORT_USAGE_BONUS_PER_REFERENCE: f64 = 0.08;
+const MAX_IMPORT_USAGE_BONUS: f64 = 0.8;
+const IMPORT_PATH_CONTEXT_BONUS_PER_TERM: f64 = 0.65;
+const MAX_IMPORT_PATH_CONTEXT_BONUS: f64 = 1.3;
 const IMPORT_BINDING_CONTEXT_BONUS_PER_BINDING: f64 = 0.25;
 const MAX_IMPORT_BINDING_CONTEXT_BONUS: f64 = 1.0;
 
@@ -444,12 +482,63 @@ fn named_import_binding_count_for_query(module: &str, query: &str) -> Option<usi
             continue;
         }
         binding_count += 1;
-        if import_binding_matches_query(binding, &query_terms) {
+        if import_binding_name(binding)
+            .is_some_and(|binding_name| import_binding_matches_query(binding_name, &query_terms))
+        {
             query_is_bound = true;
         }
     }
 
     query_is_bound.then_some(binding_count)
+}
+
+pub(super) fn named_import_binding_terms(module: &str) -> Vec<String> {
+    let Some((start, end)) = named_import_bounds(module) else {
+        return Vec::new();
+    };
+    let mut terms = Vec::new();
+    for binding in module[start + 1..end].split(',') {
+        let Some(binding_names) = import_binding_names(binding) else {
+            continue;
+        };
+        for term in import_usage_identifier_terms(binding_names.local) {
+            if !terms.contains(&term) {
+                terms.push(term);
+            }
+        }
+    }
+
+    terms
+}
+
+pub(super) fn named_import_binding_terms_for_query(
+    module: &str,
+    query: &str,
+    matched_symbol_names: Option<&str>,
+) -> Vec<String> {
+    let Some((start, end)) = named_import_bounds(module) else {
+        return Vec::new();
+    };
+    let requested_terms = query_terms(query);
+    let matched_terms = matched_symbol_names.map(query_terms).unwrap_or_default();
+    let mut terms = Vec::new();
+    for binding in module[start + 1..end].split(',') {
+        let Some(binding_names) = import_binding_names(binding) else {
+            continue;
+        };
+        if !import_binding_matches_terms(binding_names, &requested_terms)
+            && !import_binding_matches_terms(binding_names, &matched_terms)
+        {
+            continue;
+        }
+        for term in import_usage_identifier_terms(binding_names.local) {
+            if !terms.contains(&term) {
+                terms.push(term);
+            }
+        }
+    }
+
+    terms
 }
 
 fn named_import_bounds(module: &str) -> Option<(usize, usize)> {
@@ -458,15 +547,41 @@ fn named_import_bounds(module: &str) -> Option<(usize, usize)> {
     (end > start).then_some((start, end))
 }
 
-fn import_binding_matches_query(binding: &str, query_terms: &[String]) -> bool {
+#[derive(Clone, Copy)]
+struct ImportBindingNames<'a> {
+    imported: &'a str,
+    local: &'a str,
+}
+
+fn import_binding_name(binding: &str) -> Option<&str> {
+    import_binding_names(binding).map(|names| names.local)
+}
+
+fn import_binding_names(binding: &str) -> Option<ImportBindingNames<'_>> {
+    let binding = binding.trim().trim_start_matches("type ").trim();
+    let imported = binding
+        .split_whitespace()
+        .next()?
+        .trim_matches(|character: char| !(character.is_ascii_alphanumeric() || character == '_'));
     let binding_name = binding
         .split_whitespace()
-        .last()
-        .unwrap_or(binding)
+        .last()?
         .trim_matches(|character: char| !(character.is_ascii_alphanumeric() || character == '_'));
+    (!imported.is_empty() && !binding_name.is_empty()).then_some(ImportBindingNames {
+        imported,
+        local: binding_name,
+    })
+}
+
+fn import_binding_matches_query(binding_name: &str, query_terms: &[String]) -> bool {
     query_terms
         .iter()
         .any(|term| identifier_terms_equivalent(binding_name, term))
+}
+
+fn import_binding_matches_terms(binding_names: ImportBindingNames<'_>, terms: &[String]) -> bool {
+    import_binding_matches_query(binding_names.imported, terms)
+        || import_binding_matches_query(binding_names.local, terms)
 }
 
 fn query_terms(query: &str) -> Vec<String> {
@@ -540,6 +655,52 @@ fn import_target_mentions_query(module: &str, target_hint: Option<&str>, query: 
         .any(|field| field.trim() == query || field.contains(&query))
 }
 
+pub(super) fn import_usage_identifier_terms(value: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for token in identifier_tokens(value) {
+        if import_usage_term_is_specific(token) {
+            push_import_usage_term(&mut terms, token);
+        }
+        for part in token.split('_').filter(|part| !part.is_empty()) {
+            if import_usage_term_is_specific(part) {
+                push_import_usage_term(&mut terms, part);
+            }
+        }
+        for term in camel_case_terms(token) {
+            if import_usage_term_is_specific(&term) {
+                push_import_usage_term(&mut terms, &term);
+            }
+        }
+    }
+
+    terms
+}
+
+fn push_import_usage_term(terms: &mut Vec<String>, term: &str) {
+    let term = term.to_ascii_lowercase();
+    if !terms.contains(&term) {
+        terms.push(term);
+    }
+}
+
+fn import_usage_term_is_specific(term: &str) -> bool {
+    term.len() >= 5 || term.contains('_') || term_has_case_boundary(term)
+}
+
+fn term_has_case_boundary(value: &str) -> bool {
+    let mut previous: Option<char> = None;
+    for character in value.chars() {
+        if character.is_ascii_uppercase()
+            && previous.is_some_and(|previous| previous.is_ascii_lowercase())
+        {
+            return true;
+        }
+        previous = Some(character);
+    }
+
+    false
+}
+
 fn identifier_tokens(value: &str) -> impl Iterator<Item = &str> {
     value
         .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
@@ -575,6 +736,27 @@ fn camel_case_terms(token: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extensionless_path_import_context_bonus_uses_only_target_basename() {
+        let services_only_bonus = import_importer_path_context_bonus(
+            1.0,
+            1,
+            "services/cache",
+            "src/services/bootstrap.ts",
+            CodeQueryKind::Imports,
+        );
+        let basename_bonus = import_importer_path_context_bonus(
+            1.0,
+            1,
+            "services/cache",
+            "src/cache/cache_consumer.ts",
+            CodeQueryKind::Imports,
+        );
+
+        assert_eq!(services_only_bonus, 0.0);
+        assert!(basename_bonus > services_only_bonus);
+    }
 
     #[test]
     fn import_line_priority_only_applies_to_path_like_queries() {
@@ -653,6 +835,83 @@ mod tests {
                 Some("include/foo.h"),
                 CodeQueryKind::Imports,
             ) > 0.0
+        );
+    }
+
+    #[test]
+    fn path_import_context_bonus_matches_target_stem_terms_to_importer_path() {
+        assert_eq!(
+            import_importer_path_context_bonus(
+                3.0,
+                2,
+                "store/cache.hpp",
+                "src/storage/cache_consumer.cc",
+                CodeQueryKind::Imports,
+            ),
+            0.65
+        );
+        assert_eq!(
+            import_importer_path_context_bonus(
+                3.0,
+                2,
+                "store/cache.hpp",
+                "src/storage/consumer.cc",
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+        assert_eq!(
+            import_importer_path_context_bonus(
+                0.0,
+                2,
+                "store/cache.hpp",
+                "src/storage/cache_consumer.cc",
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+        assert_eq!(
+            import_importer_path_context_bonus(
+                3.0,
+                0,
+                "store/cache.hpp",
+                "src/storage/cache_consumer.cc",
+                CodeQueryKind::Imports,
+            ),
+            0.0
+        );
+    }
+
+    #[test]
+    fn import_binding_terms_keep_specific_local_names() {
+        assert_eq!(
+            named_import_binding_terms(
+                "import { JsonObject, optionalArray, type ProviderShared as Shared } from './shared'",
+            ),
+            vec![
+                "jsonobject".to_owned(),
+                "object".to_owned(),
+                "optionalarray".to_owned(),
+                "optional".to_owned(),
+                "array".to_owned(),
+                "shared".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn import_binding_terms_for_query_keep_only_matching_binding() {
+        assert_eq!(
+            named_import_binding_terms_for_query(
+                "import { Target as LocalTarget, VeryCommon } from './module'",
+                "Target",
+                Some("Target"),
+            ),
+            vec![
+                "localtarget".to_owned(),
+                "local".to_owned(),
+                "target".to_owned()
+            ]
         );
     }
 
