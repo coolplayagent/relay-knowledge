@@ -400,20 +400,29 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
 	  VersionEdit edit_;
 	};
 
-		struct Options {
-		 public:
-		  Status Validate() const;
-		  void SetUrl(const char* url = "http://localhost");
-		  void SetJson(const char* json = "{}");
-		  operator bool() const;
-		};
+			struct Options {
+			 public:
+			  Status Validate() const;
+			  void SetUrl(const char* url = "http://localhost");
+			  void SetJson(const char* json = "{}");
+			  Status OpenDefault(const Options& opts = default_options());
+			  Status ModeDefault(int mode = default_mode);
+			  operator bool() const;
+			};
 
-		class Compact { public: void Bar(); };
+			class Compact { public: void Bar(); void Baz(); };
+			class CommentedCompact { public: /* doc */ void AfterComment(); };
+			class NestedDB { public: struct Iterator { Status Seek(); }; };
+			class Q_CORE_EXPORT DB { public: Status Save(); };
+			class __attribute__((visibility("default"))) AttributeDB {
+			 public:
+			  Status Connect();
+			};
 
-		LEVELDB_EXPORT class ExportedDB {
-		 public:
-		  __attribute__((warn_unused_result)) Status Open();
-		  __declspec(dllexport) Status Close();
+			LEVELDB_EXPORT class ExportedDB {
+			 public:
+			  __attribute__((warn_unused_result)) Status Open();
+			  __declspec(dllexport) Status Close();
 		};
 
 		RK_API struct ExportedOptions { public: Status Load(); };
@@ -469,6 +478,16 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
         set_json.signature.contains("\"{}\""),
         "string literals containing braces should remain in recovered declarations: {set_json:?}"
     );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "OpenDefault"
+            && symbol.qualified_name.contains("Options.OpenDefault")
+            && symbol.signature.contains("default_options()")
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "ModeDefault"
+            && symbol.qualified_name.contains("Options.ModeDefault")
+            && symbol.signature.contains("default_mode")
+    }));
     assert!(
         snapshot.symbols.iter().any(|symbol| {
             symbol.name == "Bar"
@@ -478,6 +497,39 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
         "same-line recovered members should preserve owner identity: {:?}",
         snapshot.symbols
     );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Baz"
+            && symbol.qualified_name.contains("Compact.Baz")
+            && symbol.kind == "function_declaration"
+    }));
+    let after_comment = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "AfterComment")
+        .expect("block comments before compact members should preserve declaration offsets");
+    assert!(
+        after_comment
+            .qualified_name
+            .contains("CommentedCompact.AfterComment")
+            && after_comment.signature.contains("void AfterComment")
+            && !after_comment.signature.contains("doc"),
+        "comment-stripped member ranges should point at the declaration: {after_comment:?}"
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Seek"
+            && symbol.qualified_name.contains("NestedDB.Iterator.Seek")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Save"
+            && symbol.qualified_name.contains("DB.Save")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Connect"
+            && symbol.qualified_name.contains("AttributeDB.Connect")
+            && symbol.kind == "function_declaration"
+    }));
     assert!(
         snapshot.symbols.iter().any(|symbol| {
             symbol.name == "Open"

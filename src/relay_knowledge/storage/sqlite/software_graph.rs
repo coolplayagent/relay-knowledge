@@ -482,13 +482,13 @@ pub(super) fn files_for_scope(
         ORDER BY
             CASE file_role
                 WHEN 'dependency_manifest' THEN 0
-                WHEN 'source' THEN 1
-                WHEN 'documentation' THEN 2
-                WHEN 'configuration' THEN 3
-                WHEN 'deployment' THEN 4
-                WHEN 'test' THEN 5
-                WHEN 'template' THEN 6
-                WHEN 'build_manifest' THEN 7
+                WHEN 'build_manifest' THEN 1
+                WHEN 'source' THEN 2
+                WHEN 'documentation' THEN 3
+                WHEN 'configuration' THEN 4
+                WHEN 'deployment' THEN 5
+                WHEN 'test' THEN 6
+                WHEN 'template' THEN 7
                 WHEN 'knowledge_map' THEN 8
                 ELSE 9
             END ASC,

@@ -258,6 +258,42 @@ fn projection_orders_operational_files_and_relationships_first() {
 }
 
 #[test]
+fn projection_orders_build_manifests_before_source_files() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES
+                ('repo', 'scope-1', 'build-make', 'Makefile', 'make', 'parsed'),
+                ('repo', 'scope-1', 'source-lib', 'src/lib.rs', 'rust', 'parsed')",
+            [],
+        )
+        .expect("build manifest and source files should insert");
+    refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    let files = SoftwareGlobalRequest::new(
+        crate::domain::CodeRepositorySelector::new("repo", "commit-1", Vec::new(), Vec::new())
+            .expect("selector"),
+        SoftwareGlobalKind::Files,
+        crate::domain::FreshnessPolicy::AllowStale,
+        3,
+    )
+    .expect("request should validate");
+    let file_projection = projection(&mut connection, files).expect("projection should load");
+    let paths = file_projection
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, ["Cargo.toml", "Makefile", "src/lib.rs"]);
+}
+
+#[test]
 fn projection_orders_lifecycle_deployable_surfaces_first() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);
