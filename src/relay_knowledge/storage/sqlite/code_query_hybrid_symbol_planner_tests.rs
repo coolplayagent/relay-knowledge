@@ -220,9 +220,22 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         12,
     )));
+    assert!(!hybrid_query_prefers_chunk_first(&request(
+        "where does payload go after handler response filter",
+        CodeQueryKind::Hybrid,
+        12,
+    )));
     assert!(hybrid_query_prefers_chunk_first(
         &request_with_language_filters(
             "goroutine defer close channel processor interface event payload",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["go".to_owned()],
+        )
+    ));
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
+            "where does payload go after handler response filter",
             CodeQueryKind::Hybrid,
             12,
             vec!["go".to_owned()],

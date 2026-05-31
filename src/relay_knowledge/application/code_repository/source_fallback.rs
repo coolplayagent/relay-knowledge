@@ -433,10 +433,15 @@ fn import_source_grep_score_adjustment(query: &str, specifier: &str, excerpt: &s
 
 fn query_prefers_dynamic_import_source(query: &str) -> bool {
     let query = query.trim();
+    if query.contains(" from ") || query.contains('{') || quoted_import_specifier(query).is_none() {
+        return false;
+    }
+
     query.starts_with("import ")
-        && !query.contains(" from ")
-        && !query.contains('{')
-        && quoted_import_specifier(query).is_some()
+        || query.starts_with("import(")
+        || query.starts_with("import (")
+        || query.starts_with("await import(")
+        || query.starts_with("await import (")
 }
 
 fn source_line_starts_with_comment(line: &str) -> bool {

@@ -141,7 +141,16 @@ fn query_has_workflow_language_scope(request: &CodeRetrievalRequest, raw_terms: 
         .any(|language| workflow_chunk_first_language(language))
         || raw_terms
             .iter()
-            .any(|term| workflow_chunk_first_language(term))
+            .any(|term| workflow_chunk_first_query_term(term))
+}
+
+fn workflow_chunk_first_query_term(term: &str) -> bool {
+    let term = term.to_ascii_lowercase();
+    if term == "go" {
+        return false;
+    }
+
+    workflow_chunk_first_language(&term)
 }
 
 fn workflow_chunk_first_language(language: &str) -> bool {
