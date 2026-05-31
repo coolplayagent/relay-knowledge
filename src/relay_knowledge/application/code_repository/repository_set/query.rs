@@ -24,6 +24,9 @@ struct ImportOriginIndexes {
     files: ImportOriginFileIndex,
 }
 
+const MAX_RETURNED_OVERLAY_EVIDENCE: usize = 5;
+const MAX_TARGET_EVIDENCE_PER_RECORD: usize = MAX_RETURNED_OVERLAY_EVIDENCE;
+const MAX_LINE_ORIGIN_EVIDENCE: usize = MAX_RETURNED_OVERLAY_EVIDENCE;
 const MAX_FILE_ORIGIN_EVIDENCE: usize = 2;
 const EVIDENCE_BACKED_PRIORITY_SCORE_STEP: f64 = 0.12;
 const MAX_ABSOLUTE_MEMBER_PRIORITY_SCORE: i32 = 10;
@@ -46,16 +49,22 @@ impl<'a> OverlayEvidenceIndex<'a> {
                 continue;
             };
             match edge.to_record_kind.as_str() {
-                "code_file" => index
-                    .target_files
-                    .entry((target_scope, target_record_id))
-                    .or_default()
-                    .push(position),
-                "code_symbol_snapshot" => index
-                    .target_symbols
-                    .entry((target_scope, target_record_id))
-                    .or_default()
-                    .push(position),
+                "code_file" => push_ordered_position(
+                    index
+                        .target_files
+                        .entry((target_scope, target_record_id))
+                        .or_default(),
+                    position,
+                    MAX_TARGET_EVIDENCE_PER_RECORD,
+                ),
+                "code_symbol_snapshot" => push_ordered_position(
+                    index
+                        .target_symbols
+                        .entry((target_scope, target_record_id))
+                        .or_default(),
+                    position,
+                    MAX_TARGET_EVIDENCE_PER_RECORD,
+                ),
                 _ => {}
             }
         }
@@ -64,7 +73,7 @@ impl<'a> OverlayEvidenceIndex<'a> {
     }
 
     pub(super) fn evidence_for_hit(&self, hit: &CodeRetrievalHit) -> Vec<CodeRepositoryCrossEdge> {
-        let mut matches = BTreeMap::<usize, ()>::new();
+        let mut matches = BTreeSet::new();
         if hit.edge_kind.as_deref() == Some("import") {
             let import_origins = self
                 .import_origins
@@ -105,8 +114,8 @@ impl<'a> OverlayEvidenceIndex<'a> {
         }
 
         matches
-            .into_keys()
-            .take(5)
+            .into_iter()
+            .take(MAX_RETURNED_OVERLAY_EVIDENCE)
             .map(|position| self.edges[position].clone())
             .collect()
     }
@@ -119,43 +128,63 @@ impl<'a> OverlayEvidenceIndex<'a> {
                 continue;
             }
             if let Some((path, line_start, line_end)) = evidence_origin(&edge.evidence_json) {
-                lines
-                    .entry((
-                        edge.from_source_scope.clone(),
-                        path.clone(),
-                        line_start,
-                        line_end,
-                    ))
-                    .or_insert_with(Vec::new)
-                    .push(position);
-                files
-                    .entry((edge.from_source_scope.clone(), path))
-                    .or_insert_with(Vec::new)
-                    .push(position);
+                push_ordered_position(
+                    lines
+                        .entry((
+                            edge.from_source_scope.clone(),
+                            path.clone(),
+                            line_start,
+                            line_end,
+                        ))
+                        .or_insert_with(Vec::new),
+                    position,
+                    MAX_LINE_ORIGIN_EVIDENCE,
+                );
+                push_file_origin_position(
+                    self.edges,
+                    files
+                        .entry((edge.from_source_scope.clone(), path))
+                        .or_insert_with(Vec::new),
+                    position,
+                );
             }
         }
         for positions in files.values_mut() {
-            positions.sort_by(|left, right| {
-                self.edges[*right]
-                    .confidence_basis_points
-                    .cmp(&self.edges[*left].confidence_basis_points)
-                    .then_with(|| left.cmp(right))
-            });
-            positions.truncate(MAX_FILE_ORIGIN_EVIDENCE);
             positions.sort_unstable();
         }
 
         ImportOriginIndexes { lines, files }
     }
 
-    fn collect(&self, edges: Option<&Vec<usize>>, matches: &mut BTreeMap<usize, ()>) {
+    fn collect(&self, edges: Option<&Vec<usize>>, matches: &mut BTreeSet<usize>) {
         let Some(edges) = edges else {
             return;
         };
         for position in edges {
-            matches.insert(*position, ());
+            matches.insert(*position);
         }
     }
+}
+
+fn push_ordered_position(positions: &mut Vec<usize>, position: usize, cap: usize) {
+    if positions.len() < cap {
+        positions.push(position);
+    }
+}
+
+fn push_file_origin_position(
+    edges: &[CodeRepositoryCrossEdge],
+    positions: &mut Vec<usize>,
+    position: usize,
+) {
+    positions.push(position);
+    positions.sort_by(|left, right| {
+        edges[*right]
+            .confidence_basis_points
+            .cmp(&edges[*left].confidence_basis_points)
+            .then_with(|| left.cmp(right))
+    });
+    positions.truncate(MAX_FILE_ORIGIN_EVIDENCE);
 }
 
 const MAX_REPOSITORY_SET_CANDIDATES_PER_MEMBER: usize = 50;
@@ -646,6 +675,13 @@ mod tests {
         file_edge.to_record_id = Some("file-1".to_owned());
         edges.insert(2, file_edge.clone());
         let index = OverlayEvidenceIndex::new(&edges);
+        assert_eq!(
+            index
+                .target_symbols
+                .get(&("scope-app".to_owned(), "symbol-1".to_owned()))
+                .map(Vec::len),
+            Some(MAX_TARGET_EVIDENCE_PER_RECORD)
+        );
 
         let evidence =
             index.evidence_for_hit(&hit("repo-a", "scope-app", "src/client.rs", 1, 0.75, false));
