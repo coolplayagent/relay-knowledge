@@ -3,8 +3,8 @@
 This ClawHub-compatible skill teaches LLM agents to operate `relay-knowledge`
 through the local CLI. It is for local knowledge graph ingestion, hybrid
 GraphRAG queries, code repository indexing, code graph search, multi-repository
-queries, feature flag graph queries, impact analysis, setup diagnostics,
-installation checks, and upgrade checks.
+queries, software graph relationship queries, feature flag graph queries,
+impact analysis, setup diagnostics, installation checks, and upgrade checks.
 
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
@@ -14,9 +14,15 @@ cannot be indexed, or the user explicitly needs raw text or regular-expression
 matching.
 
 For `repo query --kind` prompts, the supported code query kinds are `hybrid`,
-`symbol`, `definition`, `references`, `callers`, `callees`, and `imports`.
-Agents should choose one of these kinds first and treat `grep`/`rg` as fallback
-tools, not the preferred path.
+`symbol`, `definition`, `references`, `callers`, `callees`, `imports`, and
+`sbom`. Agents should choose one of these kinds first and treat `grep`/`rg` as
+fallback tools, not the preferred path.
+
+For repository-wide software graph prompts, agents should use
+`repo software --kind` with `dependencies`, `sdks`, `files`, `topics`,
+`relationships`, `build`, `iac`, `design`, or `all`. Use
+`repo software --kind relationships` when the user asks for graph
+relationships, dependency paths, architecture maps, or `代码图关系`.
 
 For feature flag, config gate, environment-variable gate, settings gate, or
 guarded-code questions, agents should use `repo feature-flags`. Feature flags

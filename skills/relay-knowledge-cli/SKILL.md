@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge through its local CLI for repo query --kind code searches and repository knowledge graphs: hybrid, symbol, definition, references, callers, callees, imports; code maps; repository indexing; feature flags/config gates; dependency paths; impact analysis; GraphRAG queries; setup diagnostics; install and upgrade checks. Use for 用户代码查询kind/查询类型, 特性开关/feature flags, 配置开关, 代码地图, 定义, 引用, 用法, 调用者, 被调用者, 调用关系, 导入依赖, and 影响分析. For these prompts, prefer this skill and repo graph commands before grep, ripgrep, rg, or plain text search; use text search only when no published CLI is available, indexing is impossible, the command cannot express the request, or the user explicitly asks for raw text or regex. Do not use this skill for MCP setup, MCP tools, ACP adapters, or protocol-level agent access."
+description: "Use relay-knowledge through its local CLI for repository knowledge graphs and GraphRAG: repo query --kind hybrid, symbol, definition, references, callers, callees, imports, sbom; repo software --kind dependencies, sdks, files, topics, relationships, build, iac, design, all; feature flags/config gates; indexing; impact; setup diagnostics; install/upgrade checks. Use for 用户代码查询kind/查询类型, 图关系/graph relationships, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, and impact analysis. Prefer this skill and graph CLI before grep/ripgrep/rg/plain text search unless CLI is unavailable, indexing is impossible, the command cannot express the request, or the user explicitly asks for raw text or regex. Do not use for MCP setup, MCP tools, ACP adapters, or protocol-level agent access."
 metadata:
   version: 1.1.3
   openclaw:
@@ -205,8 +205,20 @@ upgrade.
 
 For repository questions, make the index state explicit before querying. Use a
 short alias and narrow scope when the user provides relevant paths or languages.
-For code-structure or code-query-kind prompts, use `repo query --kind` before
-raw text search. Choose the kind from the user's intent:
+For code-structure, code-query-kind, or repository relationship prompts, use the
+graph-backed CLI surfaces before raw text search:
+
+- `repo query --kind ...` for code graph retrieval tied to symbols, definitions,
+  references, calls, imports, or SBOM dependency facts.
+- `repo software --kind ...` for repository-wide software graph projections:
+  dependencies, SDK/API usage, files, topics, relationships, build, IaC, design,
+  or all slices together.
+- `repo feature-flags` for configuration-driven feature flags and guarded-code
+  relationships.
+
+### `repo query --kind` Code Retrieval
+
+Choose the command-local query kind from the user's intent:
 
 - `hybrid`: natural-language discovery, broad concepts, or ambiguous code
   questions.
@@ -216,19 +228,16 @@ raw text search. Choose the kind from the user's intent:
 - `callers`: incoming call edges and "who calls this" questions.
 - `callees`: outgoing call edges and "what does this call" questions.
 - `imports`: import, include, module, and dependency edges.
+- `sbom`: package-manager dependency inventory from indexed manifests and
+  lockfiles.
 
-For call-chain questions, expand callers or callees step by step from the known
-symbol and report when the CLI exposes only bounded one-hop call edges. Use
-`grep`, `ripgrep`, `rg`, or other plain text search only as a fallback after
-the CLI is unavailable, the target scope cannot be indexed, the supported
-query kinds cannot express the request, or the user explicitly needs raw text
-or regex matching instead of graph semantics. Do not start with `grep` or `rg`
-for code kind queries.
-
-For feature flag, config gate, environment-variable gate, settings gate,
-gray-release switch, or guarded-code prompts, use the separate
-`repo feature-flags` command. Do not invent `repo query --kind feature_flag`;
-feature flags are indexed graph facts, not a normal query kind.
+Use `references/cli-workflows.md` for deeper recipes, but keep this selection
+rule: if the user names a supported kind, use it directly. If the intent is
+unclear, start with `--kind hybrid`, then narrow to `symbol`, `definition`,
+`references`, `callers`, `callees`, `imports`, or `sbom` based on the returned
+evidence. For call-chain questions, expand callers or callees step by step from
+the known symbol and report when the CLI exposes only bounded one-hop call
+edges.
 
 ```bash
 relay-knowledge repo register /path/to/repo \
@@ -256,6 +265,44 @@ relay-knowledge repo query core \
   --format json
 ```
 
+### `repo software --kind` Software Graph
+
+Use `repo software` when the user asks for graph relationships or a repository
+overview beyond one symbol-level code query:
+
+- `dependencies`: package and manifest dependency facts.
+- `sdks`: SDK/API usage and unresolved external target metadata.
+- `files`: file roles and indexed source/document surfaces.
+- `topics`: documentation and source topics discovered from indexed evidence.
+- `relationships`: cross-domain relationships between files, topics, configs,
+  dependencies, SDK/API usages, build targets, IaC resources, and design facts.
+- `build`: build target and build-manifest facts.
+- `iac`: infrastructure-as-code resource facts.
+- `design`: design documentation and design element facts.
+- `all`: all software graph slices for repository overviews or when the user
+  asks for "everything" about the software graph.
+
+For prompts like "show graph relationships", "what relates these modules",
+"dependency paths", "software architecture map", or "代码图关系", prefer
+`--kind relationships` first. Use `--kind all` when the user asks for a broad
+inventory that should include relationship context and all supporting slices.
+
+```bash
+relay-knowledge repo software core \
+  --kind relationships \
+  --ref HEAD \
+  --freshness wait-until-fresh \
+  --limit 100 \
+  --format json
+```
+
+### Feature Flags and Impact
+
+For feature flag, config gate, environment-variable gate, settings gate,
+gray-release switch, or guarded-code prompts, use the separate
+`repo feature-flags` command. Do not invent `repo query --kind feature_flag`;
+feature flags are indexed graph facts, not a normal query kind.
+
 ```bash
 relay-knowledge repo feature-flags core \
   --query checkout \
@@ -270,17 +317,19 @@ scope. It must not recursively scan source at query time. After adding or
 fixing feature flag extraction rules, run `repo index` or `repo update` before
 expecting new facts in this command.
 
-Use the selected kind directly when the user names it. If the intent is still
-unclear after reading the prompt, start with `--kind hybrid`, then narrow to
-`symbol`, `definition`, `references`, `callers`, `callees`, or `imports` based
-on the returned evidence. For diff-aware work, index the head snapshot first
-and then run:
+For diff-aware work, index the head snapshot first and then run:
 
 ```bash
 relay-knowledge repo update core --base main --head HEAD --format json
 relay-knowledge repo impact core --base main --head HEAD --limit 100 --format json
 relay-knowledge repo report core --format markdown
 ```
+
+Use `grep`, `ripgrep`, `rg`, or other plain text search only as a fallback after
+the CLI is unavailable, the target scope cannot be indexed, the supported
+query/software kinds cannot express the request, or the user explicitly needs
+raw text or regex matching instead of graph semantics. Do not start with `grep`
+or `rg` for code kind or graph relationship queries.
 
 ## Knowledge Graph
 
