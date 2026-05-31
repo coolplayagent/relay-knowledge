@@ -437,15 +437,10 @@ fn query_prefers_dynamic_import_source(query: &str) -> bool {
         return false;
     }
 
-    if query.starts_with("import(")
+    query.starts_with("import(")
         || query.starts_with("import (")
         || query.starts_with("await import(")
         || query.starts_with("await import (")
-    {
-        return true;
-    }
-
-    query.starts_with("import ") && !query.contains('{')
 }
 
 fn source_line_starts_with_comment(line: &str) -> bool {
