@@ -78,6 +78,7 @@
 - [第 8 章 竞争力、高性能与本机文件检索研究 2026](04-research/08-competitive-performance-research-2026.md)
 - [第 9 章 GitNexus 功能与界面实现研究 2026](04-research/09-gitnexus-reference-analysis-2026.md)
 - [第 10 章 软件全域建模研究 2026](04-research/10-software-global-domain-modeling-research-2026.md)
+- [第 11 章 软件全域建模、CodeGraph 与 Search Everything 对比研究 2026](04-research/11-software-global-codegraph-search-everything-comparison-2026.md)
 
 ## 附录 A：基准记录
 
@@ -97,3 +98,4 @@
 - [附录 B.6 Linux 代码图检索准确性测试 2026-05-15](06-verification/06-code-graph-retrieval-accuracy-linux-2026-05-15.md)
 - [附录 B.7 Grep 兜底文档刷新审计 2026-05-22](06-verification/07-grep-fallback-documentation-refresh-2026-05-22.md)：代码检索 exact-text fallback 的章节同步记录。
 - [附录 B.8 软件全域建模文档刷新审计 2026-05-28](06-verification/08-software-global-modeling-documentation-refresh-2026-05-28.md)：软件全域建模研究与架构归档验证记录。
+- [附录 B.9 软件全域、CodeGraph 与 Search Everything 研究文档刷新审计 2026-05-31](06-verification/09-software-global-codegraph-search-everything-research-2026-05-31.md)：第 11 章研究与书籍目录同步记录。
