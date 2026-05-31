@@ -417,7 +417,11 @@ fn import_fallback_ranks_dynamic_import_source_lines_before_static_text_echoes()
 
 #[test]
 fn import_fallback_treats_import_call_queries_as_dynamic_import_intent() {
-    for query in ["import(\"./protocol\")", "await import(\"./protocol\")"] {
+    for query in [
+        "import(\"./protocol\")",
+        "await import(\"./protocol\")",
+        "await import(\"./protocol\", { with: { type: \"json\" } })",
+    ] {
         let request = request(query, CodeQueryKind::Imports, Vec::new());
         let mut graph_hit = hit("src/provider.ts", "import \"./protocol\" target symbols");
         graph_hit.score = 3.75;
