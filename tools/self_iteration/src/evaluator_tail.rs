@@ -1065,6 +1065,9 @@ fn create_generated_repository_files(root: &Path, fixture: &str) -> Result<(), S
     if fixture == "index_performance_many_files_v1" {
         return write_index_performance_many_files_fixture(root);
     }
+    if fixture == "index_performance_wide_mixed_files_v1" {
+        return write_index_performance_wide_mixed_files_fixture(root);
+    }
     for (path, content) in generated_repository_files(fixture)? {
         write_fixture_file(&root.join(path), content)?;
     }
@@ -1290,6 +1293,81 @@ fn write_index_performance_many_files_fixture(root: &Path) -> Result<(), String>
             ),
         )?;
     }
+
+    Ok(())
+}
+
+fn write_index_performance_wide_mixed_files_fixture(root: &Path) -> Result<(), String> {
+    write_fixture_file(
+        &root.join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/perf_core"]
+resolver = "2"
+"#,
+    )?;
+    write_fixture_file(
+        &root.join("crates/perf_core/Cargo.toml"),
+        r#"[package]
+name = "rk-perf-core"
+version = "0.1.0"
+edition = "2021"
+"#,
+    )?;
+
+    let mut lib_rs = String::from("pub mod bridge;\n");
+    for shard in 0..32 {
+        lib_rs.push_str(&format!("pub mod shard_{shard:03};\n"));
+        let mut mod_rs = String::new();
+        for offset in 0..64 {
+            let index = shard * 64 + offset;
+            mod_rs.push_str(&format!("pub mod file_{index:04};\n"));
+            write_fixture_file(
+                &root
+                    .join("crates/perf_core/src")
+                    .join(format!("shard_{shard:03}"))
+                    .join(format!("file_{index:04}.rs")),
+                &format!(
+                    "pub struct RkWideRecord{index:04} {{ pub value: u64 }}\n\
+                     pub fn rk_wide_target_{index:04}(input: u64) -> u64 {{\n\
+                         input.wrapping_add({index}).rotate_left({rotate})\n\
+                     }}\n\
+                     pub fn rk_wide_map_{index:04}(items: &[u64]) -> u64 {{\n\
+                         items.iter().copied().map(rk_wide_target_{index:04}).sum()\n\
+                     }}\n",
+                    rotate = index % 32
+                ),
+            )?;
+        }
+        write_fixture_file(
+            &root
+                .join("crates/perf_core/src")
+                .join(format!("shard_{shard:03}"))
+                .join("mod.rs"),
+            &mod_rs,
+        )?;
+    }
+    write_fixture_file(&root.join("crates/perf_core/src/lib.rs"), &lib_rs)?;
+    write_fixture_file(
+        &root.join("crates/perf_core/src/bridge.rs"),
+        r#"use crate::shard_000::file_0000::rk_wide_target_0000;
+use crate::shard_015::file_1023::rk_wide_target_1023;
+use crate::shard_031::file_2047::rk_wide_target_2047;
+
+pub fn rk_wide_bridge_dispatch(input: u64) -> u64 {
+    let early = rk_wide_target_0000(input);
+    let middle = rk_wide_target_1023(early);
+    rk_wide_target_2047(middle)
+}
+
+pub fn rk_wide_cross_shard_pipeline(values: &[u64]) -> u64 {
+    values
+        .iter()
+        .copied()
+        .map(rk_wide_bridge_dispatch)
+        .sum()
+}
+"#,
+    )?;
 
     Ok(())
 }
@@ -3641,6 +3719,15 @@ fn push_latency_metrics(
         lower_is_better: true,
         key: true,
     });
+    if let Some(max_budget) = budget(config, "query_max_budget_ms") {
+        metrics.push(MetricObservation {
+            name: format!("{prefix}_max_ms"),
+            value: durations.iter().copied().max().unwrap_or(0) as f64,
+            budget: Some(max_budget),
+            lower_is_better: true,
+            key: true,
+        });
+    }
 }
 
 fn percentile(values: &[u64], percentile_value: u64) -> u64 {

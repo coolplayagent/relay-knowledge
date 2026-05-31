@@ -166,6 +166,14 @@ Override the subset with
 `--profile full` for the previous full gates and workload; long-running
 large-repository checks still use `--profile exhaustive`.
 
+The `full` and `exhaustive` profiles add the generated
+`index_performance_wide_mixed_files` repository to the performance workload.
+It creates a wider Rust workspace with 2048 indexed target files and cross-shard
+bridge queries, then records the same cold `*_index_ms`,
+`*_register_index_ms`, query percentile, and query max metrics under stricter
+budgets. This raises the performance bar for deeper validation without adding
+cost to the default `fast` profile.
+
 Use `--categories` to focus an iteration on a specific score family without
 dropping bottom-line protection. Supported categories are `foundational`,
 `competitive`, `semantic_vector`, `file_fixtures`, `repository_sets`,
@@ -457,10 +465,12 @@ enumerating cases.
   and add combined `register_index_budget_ms` budgets. The default fast profile
   includes the generated `index_performance_many_files` repository so cold
   throughput regressions are visible even when external large repositories are
-  absent. The evaluator records both `*_index_ms` and `*_register_index_ms` so
-  self-iteration prioritizes cold indexing wall time after `repo register`,
-  including batching, parser throughput, SQLite writes, finalize work, and
-  incremental reuse.
+  absent. Full and exhaustive profiles also include
+  `index_performance_wide_mixed_files`, a 2048-file Rust workspace with
+  cross-shard bridge queries. The evaluator records both `*_index_ms` and
+  `*_register_index_ms` so self-iteration prioritizes cold indexing wall time
+  after `repo register`, including batching, parser throughput, SQLite writes,
+  finalize work, query p50/p95/max, and incremental reuse.
 - Software global projection targets in
   `cases/repository_software_global_targets.json` run `repo software` against a
   generated full-scope repository after normal registration and indexing. They

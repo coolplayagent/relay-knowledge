@@ -8,6 +8,7 @@ This page is the compact English companion for the self-iteration optimization l
 
 - Algorithm and architecture: the default full-code-index batch now covers 512 files while retaining the 16 MiB blob cap and raising the bounded row cap to 150k. Checkpointed SQLite batch apply skips the empty-scope path-index existence probe for the first new batch, while later batches still keep collision cleanup and replay idempotency.
 - Guardrails: the default fast self-iteration profile includes the generated `index_performance_many_files` repository with 1024 small Rust files, recording both `*_index_ms` and `*_register_index_ms` through the real `repo register` plus `repo index` path.
+- Higher full-profile standard: full and exhaustive self-iteration now add `index_performance_wide_mixed_files`, a generated 2048-file Rust workspace with cross-shard bridge queries and separate cold index, register-plus-index, query p50, query p95, and query max budgets. The default fast profile is unchanged.
 - Limits: no CLI/API shape, SQLite schema, parser fact, FTS document semantics, edge finalization, freshness/status, task lease, checkpoint, or source-fallback budget changed. Performance fixes must not skip indexing work, hide degraded states, use unbounded timeouts, or special-case repositories, paths, queries, symbols, or case ids.
 
 ## Issue #147: Cross-Language Call Graph
