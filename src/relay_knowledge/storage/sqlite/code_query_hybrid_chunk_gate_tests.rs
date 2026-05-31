@@ -114,6 +114,18 @@ fn hybrid_direct_gate_accepts_dense_non_fallback_symbol_evidence() {
 }
 
 #[test]
+fn hybrid_direct_gate_keeps_graph_expansion_for_graph_intent_terms() {
+    let request = hybrid_gate_request("Recover descriptor save_manifest VersionEdit callers", 10);
+
+    assert!(!hybrid_direct_results_can_answer_without_graph_expansion(
+        &request,
+        &[symbol_gate_hit(
+            "// Recover the descriptor from persistent storage.\nStatus Recover(VersionEdit* edit, bool* save_manifest);"
+        )]
+    ));
+}
+
+#[test]
 fn strict_hybrid_chunk_fts_uses_multiple_structured_api_anchors() {
     let strict = strict_hybrid_chunk_fts_match_query(
         "worker.New RegisterWorkflow RegisterActivity InterruptCh task queue",

@@ -8,34 +8,41 @@ pub(in crate::code::parser) fn manual_file_definitions(
     let mut index = 0usize;
     let mut pending_header = None::<String>;
     while index < lines.len() {
-        let code = line_code_without_comment(&lines[index].code)
-            .trim()
-            .to_owned();
+        let line_code = line_code_without_comment(&lines[index].code);
+        let code = line_code.trim();
         if let Some(header) = pending_header.as_mut() {
             if !code.is_empty() {
                 header.push(' ');
-                header.push_str(&code);
+                header.push_str(code);
             }
             if cpp_class_header_opens_body(header) {
                 let owner = cpp_class_header_name(header);
                 pending_header = None;
-                index =
-                    collect_class_member_declarations(&lines, index + 1, owner, &mut definitions);
+                let body_start = top_level_body_open_start(line_code).unwrap_or(line_code.len());
+                index = collect_class_member_declarations(
+                    &lines,
+                    index,
+                    body_start + "{".len(),
+                    owner,
+                    &mut definitions,
+                );
             } else {
                 if code.ends_with(';') {
                     pending_header = None;
                 }
                 index += 1;
             }
-        } else if cpp_class_header_opens_body(&code) {
+        } else if cpp_class_header_opens_body(line_code) {
+            let body_start = top_level_body_open_start(line_code).unwrap_or(line_code.len());
             index = collect_class_member_declarations(
                 &lines,
-                index + 1,
-                cpp_class_header_name(&code),
+                index,
+                body_start + "{".len(),
+                cpp_class_header_name(line_code),
                 &mut definitions,
             );
-        } else if cpp_class_header_starts(&code) && !code.ends_with(';') {
-            pending_header = Some(code);
+        } else if cpp_class_header_starts(code) && !code.ends_with(';') {
+            pending_header = Some(code.to_owned());
             index += 1;
         } else {
             index += 1;
@@ -83,30 +90,47 @@ fn source_lines(content: &str) -> Vec<SourceLine> {
 }
 
 fn cpp_class_header_opens_body(line: &str) -> bool {
-    let code = line.trim_start();
-    code.contains('{') && cpp_class_header_starts(code)
+    top_level_body_open_start(line).is_some_and(|body_start| {
+        let header = &line[..body_start];
+        cpp_class_header_starts(header)
+    })
 }
 
 fn cpp_class_header_starts(code: &str) -> bool {
-    let code = code.trim_start();
-    code.starts_with("class ") || code.starts_with("struct ")
+    cpp_class_header_name(code).is_some()
 }
 
 fn cpp_class_header_name(header: &str) -> Option<String> {
-    let header = header.trim_start();
-    let rest = header
-        .strip_prefix("class ")
-        .or_else(|| header.strip_prefix("struct "))?
-        .trim_start();
-    let name = rest
-        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
-        .next()?;
-    function_name_candidate(name).then(|| name.to_owned())
+    let search_end = top_level_body_open_start(header).unwrap_or(header.len());
+    let header = &header[..search_end];
+    let identifiers = identifier_spans(header);
+    let mut name = None;
+    for (position, (start, end)) in identifiers.iter().copied().enumerate() {
+        let token = &header[start..end];
+        if !matches!(token, "class" | "struct") {
+            continue;
+        }
+        if position > 0 {
+            let (previous_start, previous_end) = identifiers[position - 1];
+            if &header[previous_start..previous_end] == "enum" {
+                continue;
+            }
+        }
+        let Some((name_start, name_end)) = identifiers.get(position + 1).copied() else {
+            continue;
+        };
+        let candidate = &header[name_start..name_end];
+        if function_name_candidate(candidate) {
+            name = Some(candidate.to_owned());
+        }
+    }
+    name
 }
 
 fn collect_class_member_declarations(
     lines: &[SourceLine],
     mut index: usize,
+    mut line_code_start: usize,
     owner: Option<String>,
     definitions: &mut Vec<(String, Option<String>, &'static str, SyntaxRange)>,
 ) -> usize {
@@ -117,6 +141,16 @@ fn collect_class_member_declarations(
     while index < lines.len() && depth > 0 {
         let line = &lines[index];
         let code = line_code_without_comment(&line.code);
+        let code_start = line_code_start.min(code.len());
+        line_code_start = 0;
+        let code = &code[code_start..];
+        let member_line = source_line_fragment(
+            line,
+            code_start,
+            top_level_body_close_start(code).map_or(line.code.len(), |close_start| {
+                code_start.saturating_add(close_start)
+            }),
+        );
         let trimmed_code = code.trim();
         if depth == 1 {
             if trimmed_code.starts_with("};") {
@@ -127,7 +161,7 @@ fn collect_class_member_declarations(
                 doc_start = None;
             } else {
                 collect_top_level_member_line(
-                    line,
+                    &member_line,
                     owner.as_deref(),
                     &mut pending,
                     &mut doc_start,
@@ -140,6 +174,20 @@ fn collect_class_member_declarations(
     }
 
     index
+}
+
+fn source_line_fragment(line: &SourceLine, code_start: usize, code_end: usize) -> SourceLine {
+    if code_start == 0 && code_end >= line.code.len() {
+        return line.clone();
+    }
+    let code_start = code_start.min(line.code.len());
+    let code_end = code_end.clamp(code_start, line.code.len());
+    SourceLine {
+        number: line.number,
+        byte_start: line.byte_start + code_start,
+        byte_end: line.byte_start + code_end,
+        code: line.code[code_start..code_end].to_owned(),
+    }
 }
 
 fn collect_top_level_member_line(
@@ -290,7 +338,7 @@ fn next_character(value: &str) -> char {
 }
 
 fn class_member_line_opens_nested_body(trimmed_code: &str) -> bool {
-    !trimmed_code.starts_with("//") && trimmed_code.contains('{')
+    !trimmed_code.starts_with("//") && top_level_body_open_start(trimmed_code).is_some()
 }
 
 fn trailing_annotation_line(code: &str) -> bool {
@@ -315,14 +363,107 @@ fn cpp_preprocessor_directive(trimmed: &str) -> bool {
 
 fn brace_delta(code: &str) -> isize {
     let mut delta = 0isize;
-    for character in code.chars() {
+    let mut index = 0usize;
+    let mut string_delimiter = None;
+    let mut escaped = false;
+    let mut parameter_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    while index < code.len() {
+        let rest = &code[index..];
+        let character = next_character(rest);
+        index += character.len_utf8();
+        if let Some(delimiter) = string_delimiter {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                string_delimiter = None;
+            }
+            continue;
+        }
         match character {
-            '{' => delta += 1,
-            '}' => delta -= 1,
+            '"' | '\'' => string_delimiter = Some(character),
+            '(' => parameter_depth += 1,
+            ')' => parameter_depth = parameter_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' if parameter_depth == 0 && bracket_depth == 0 => delta += 1,
+            '}' if parameter_depth == 0 && bracket_depth == 0 => delta -= 1,
             _ => {}
         }
     }
     delta
+}
+
+fn top_level_body_open_start(code: &str) -> Option<usize> {
+    top_level_body_delimiter_start(code, '{')
+}
+
+fn top_level_body_close_start(code: &str) -> Option<usize> {
+    top_level_body_delimiter_start(code, '}')
+}
+
+fn top_level_body_delimiter_start(code: &str, delimiter: char) -> Option<usize> {
+    let mut index = 0usize;
+    let mut string_delimiter = None;
+    let mut escaped = false;
+    let mut parameter_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    while index < code.len() {
+        let rest = &code[index..];
+        let character = next_character(rest);
+        if let Some(delimiter) = string_delimiter {
+            index += character.len_utf8();
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                string_delimiter = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => string_delimiter = Some(character),
+            '(' => parameter_depth += 1,
+            ')' => parameter_depth = parameter_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            character if character == delimiter && parameter_depth == 0 && bracket_depth == 0 => {
+                return Some(index);
+            }
+            _ => {}
+        }
+        index += character.len_utf8();
+    }
+
+    None
+}
+
+fn identifier_spans(code: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut index = 0usize;
+    while index < code.len() {
+        let rest = &code[index..];
+        let character = next_character(rest);
+        if !identifier_start(character) {
+            index += character.len_utf8();
+            continue;
+        }
+        let start = index;
+        index += character.len_utf8();
+        while index < code.len() {
+            let rest = &code[index..];
+            let character = next_character(rest);
+            if !identifier_continue(character) {
+                break;
+            }
+            index += character.len_utf8();
+        }
+        spans.push((start, index));
+    }
+    spans
 }
 
 fn member_function_declaration_name(statement: &str) -> Option<String> {
@@ -355,15 +496,90 @@ fn contains_operator_keyword(prefix: &str) -> bool {
 
 fn top_level_parameter_start(code: &str) -> Option<usize> {
     let mut depth = 0usize;
-    for (index, character) in code.char_indices() {
+    let mut index = 0usize;
+    while index < code.len() {
+        let rest = &code[index..];
+        let character = next_character(rest);
         match character {
             '(' if depth == 0 && parameter_open_looks_like_function(code, index) => {
+                if let Some(after_decorator) = parameter_decorator_end(code, index) {
+                    index = after_decorator;
+                    continue;
+                }
                 return Some(index);
             }
             '(' => depth += 1,
             ')' => depth = depth.saturating_sub(1),
             _ => {}
         }
+        index += character.len_utf8();
+    }
+
+    None
+}
+
+fn parameter_decorator_end(code: &str, parameter_start: usize) -> Option<usize> {
+    let (name_start, name_end) = name_bounds_before_open(code, parameter_start)?;
+    let name = &code[name_start..name_end];
+    if !member_decorator_name(name) {
+        return None;
+    }
+    let group_end = matching_parameter_end(code, parameter_start)?;
+    let rest = code[group_end + ")".len()..].trim_start();
+    (rest.contains('(') && rest.trim_end_matches(';').chars().any(identifier_start))
+        .then_some(group_end + ")".len())
+}
+
+fn member_decorator_name(name: &str) -> bool {
+    matches!(
+        name,
+        "__attribute__"
+            | "attribute"
+            | "__declspec"
+            | "__declspec__"
+            | "__always_inline"
+            | "always_inline"
+    ) || uppercase_decorator_name(name)
+}
+
+fn uppercase_decorator_name(name: &str) -> bool {
+    name.chars().any(|character| character.is_ascii_uppercase())
+        && name.chars().all(|character| {
+            character == '_' || character.is_ascii_uppercase() || character.is_ascii_digit()
+        })
+}
+
+fn matching_parameter_end(code: &str, parameter_start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = parameter_start;
+    let mut string_delimiter = None;
+    let mut escaped = false;
+    while index < code.len() {
+        let rest = &code[index..];
+        let character = next_character(rest);
+        if let Some(delimiter) = string_delimiter {
+            index += character.len_utf8();
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                string_delimiter = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => string_delimiter = Some(character),
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+        index += character.len_utf8();
     }
 
     None
@@ -402,8 +618,42 @@ fn function_name_candidate(name: &str) -> bool {
         return false;
     }
     let mut characters = name.chars();
-    characters
-        .next()
-        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+    characters.next().is_some_and(identifier_start) && characters.all(identifier_continue)
+}
+
+fn identifier_start(character: char) -> bool {
+    character == '_' || character.is_ascii_alphabetic()
+}
+
+fn identifier_continue(character: char) -> bool {
+    character == '_' || character.is_ascii_alphanumeric()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manual_file_definitions;
+
+    #[test]
+    fn manual_file_definitions_recover_same_line_and_exported_class_members() {
+        let definitions = manual_file_definitions(
+            r#"
+class Compact { public: void Bar(); };
+LEVELDB_EXPORT class ExportedDB {
+ public:
+  __attribute__((warn_unused_result)) Status Open();
+};
+"#,
+        );
+
+        assert!(definitions.iter().any(|(name, qualified, kind, _)| {
+            name == "Bar"
+                && qualified.as_deref() == Some("Compact.Bar")
+                && *kind == "function_declaration"
+        }));
+        assert!(definitions.iter().any(|(name, qualified, kind, _)| {
+            name == "Open"
+                && qualified.as_deref() == Some("ExportedDB.Open")
+                && *kind == "function_declaration"
+        }));
+    }
 }

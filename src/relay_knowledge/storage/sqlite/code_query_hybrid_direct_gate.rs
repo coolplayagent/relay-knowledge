@@ -13,6 +13,9 @@ pub(super) fn hybrid_direct_results_can_answer_without_graph_expansion(
     if terms.len() < 3 {
         return false;
     }
+    if hybrid_query_has_graph_expansion_intent(&terms) {
+        return false;
+    }
 
     hits.iter()
         .take(request.limit.max(1))
@@ -31,6 +34,25 @@ fn hybrid_direct_required_match_count(term_count: usize) -> usize {
         .div_ceil(5)
         .clamp(4, 6)
         .min(term_count)
+}
+
+fn hybrid_query_has_graph_expansion_intent(terms: &[String]) -> bool {
+    terms.iter().any(|term| {
+        matches!(
+            term.as_str(),
+            "caller"
+                | "callers"
+                | "callee"
+                | "callees"
+                | "reference"
+                | "references"
+                | "referenced"
+                | "import"
+                | "imports"
+                | "importer"
+                | "importers"
+        )
+    })
 }
 
 fn hybrid_direct_hit_can_answer(hit: &CodeRetrievalHit) -> bool {

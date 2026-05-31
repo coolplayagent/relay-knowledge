@@ -400,13 +400,24 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
 	  VersionEdit edit_;
 	};
 
-	struct Options {
-	 public:
-	  Status Validate() const;
-	  void SetUrl(const char* url = "http://localhost");
-	  operator bool() const;
-	};
-	"#,
+		struct Options {
+		 public:
+		  Status Validate() const;
+		  void SetUrl(const char* url = "http://localhost");
+		  void SetJson(const char* json = "{}");
+		  operator bool() const;
+		};
+
+		class Compact { public: void Bar(); };
+
+		LEVELDB_EXPORT class ExportedDB {
+		 public:
+		  __attribute__((warn_unused_result)) Status Open();
+		  __declspec(dllexport) Status Close();
+		};
+
+		RK_API struct ExportedOptions { public: Status Load(); };
+		"#,
     );
 
     let recover = snapshot
@@ -449,14 +460,53 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
         set_url.signature.contains("\"http://localhost\""),
         "string literals containing // should remain in recovered declarations: {set_url:?}"
     );
+    let set_json = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "SetJson")
+        .expect("braced JSON defaults should not look like nested class bodies");
+    assert!(
+        set_json.signature.contains("\"{}\""),
+        "string literals containing braces should remain in recovered declarations: {set_json:?}"
+    );
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.name == "Bar"
+                && symbol.qualified_name.contains("Compact.Bar")
+                && symbol.kind == "function_declaration"
+        }),
+        "same-line recovered members should preserve owner identity: {:?}",
+        snapshot.symbols
+    );
+    assert!(
+        snapshot.symbols.iter().any(|symbol| {
+            symbol.name == "Open"
+                && symbol.qualified_name.contains("ExportedDB.Open")
+                && symbol.kind == "function_declaration"
+        }),
+        "exported class members should preserve owner identity: {:?}",
+        snapshot.symbols
+    );
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Close"
+            && symbol.qualified_name.contains("ExportedDB.Close")
+            && symbol.kind == "function_declaration"
+    }));
+    assert!(snapshot.symbols.iter().any(|symbol| {
+        symbol.name == "Load"
+            && symbol.qualified_name.contains("ExportedOptions.Load")
+            && symbol.kind == "function_declaration"
+    }));
     assert!(
         !snapshot.symbols.iter().any(|symbol| {
             (symbol.name == "DBImpl" && symbol.kind == "function_declaration")
                 || symbol.name == "defined"
                 || symbol.name == "CommentedApi"
                 || symbol.name == "bool"
+                || symbol.name == "__attribute__"
+                || symbol.name == "__declspec"
         }),
-        "preprocessor guards, destructors, comments, and operators should not become declaration symbols: {:?}",
+        "preprocessor guards, destructors, comments, decorators, and operators should not become declaration symbols: {:?}",
         snapshot.symbols
     );
     assert!(
