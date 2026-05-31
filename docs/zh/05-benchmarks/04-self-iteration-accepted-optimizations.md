@@ -975,3 +975,10 @@ Rust self-iteration v2 accepted this candidate through the independent tools/sel
 Adopted optimization notes:
 
 Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## 2026-05-31 foundational full/all ranking repair
+
+- focused verification: `manual-evaluate-1780237301093634092` scored 0.992795 with foundational=1.000000, semantic_vector=1.000000, stability=1.000000, and 132/132 cases passing under `--profile full --categories foundational`.
+- all-category verification: `manual-evaluate-1780233300285732965` scored 0.923083 with foundational=1.000000, semantic_vector=1.000000, stability=1.000000, and 279/311 all-category cases passing under `--profile full --categories all --exclude-categories research_judge`.
+- summary: Python function type annotations now emit structured reference facts while preserving nested generic/default-expression/comment boundaries, Go type signatures keep the declaration keyword in symbol excerpts, import ranking separates package re-export surfaces from consuming source files and reuses robust test-path detection for path overlap bonuses, and reference ranking prefers return/type-use and external consumer contexts over same-name definition files.
+- invariants: changes are query/parser scoring only; no durable task lease, queue bound, SQLite checkpoint, graph schema, service manager, env, paths, net, QoS, release, or installation behavior changed.

@@ -12,7 +12,9 @@ use super::{
     HitParts,
     code_query_import_scoring::{
         hybrid_import_sparse_query_penalty, import_binding_context_bonus, import_line_priority,
-        import_public_dependency_surface_bonus, import_same_file_usage_bonus,
+        import_public_dependency_surface_bonus, import_reexport_surface_penalty,
+        import_same_file_usage_bonus, import_self_implementation_penalty,
+        import_single_module_path_tiebreaker_bonus, import_source_path_query_overlap_bonus,
         import_statement_shape_bonus, import_surface_bonus, import_target_directory_bonus,
         import_target_symbol_bonus, query_looks_like_import_path,
     },
@@ -304,8 +306,38 @@ fn import_rows_to_hits(
                     row.target_hint.as_deref(),
                     request.code_query_kind,
                 )
+                + import_source_path_query_overlap_bonus(
+                    base_score,
+                    scoring_query,
+                    &row.path,
+                    row.target_hint.as_deref(),
+                    request.code_query_kind,
+                )
+                + import_self_implementation_penalty(
+                    base_score,
+                    scoring_query,
+                    &row.path,
+                    row.target_hint.as_deref(),
+                    request.code_query_kind,
+                )
+                + import_single_module_path_tiebreaker_bonus(
+                    base_score,
+                    scoring_query,
+                    &row.path,
+                    &row.module,
+                    row.target_hint.as_deref(),
+                    request.code_query_kind,
+                )
+                + import_reexport_surface_penalty(
+                    base_score,
+                    scoring_query,
+                    &row.path,
+                    &row.module,
+                    row.target_hint.as_deref(),
+                    request.code_query_kind,
+                )
                 + import_test_path_penalty(base_score, &row.path, request, query_has_test_intent)
-                + import_surface_bonus(base_score, &row.path);
+                + import_surface_bonus(base_score, &row.path, request.code_query_kind);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,

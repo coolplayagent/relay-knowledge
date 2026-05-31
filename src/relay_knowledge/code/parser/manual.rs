@@ -56,6 +56,11 @@ pub(super) fn collect_manual_nodes(
             )?,
         );
     }
+    for (name, kind, range) in
+        languages::language_manual_file_references(context.content, context.language_id)
+    {
+        upsert_reference(output, reference_record(context, &name, kind, &range)?);
+    }
     for definition in config_definitions {
         upsert_symbol(
             output,

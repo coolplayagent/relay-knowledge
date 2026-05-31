@@ -9,15 +9,26 @@ use crate::{
 };
 
 use super::{
-    HitParts, code_query_excerpts::reference_excerpt, code_query_rows::ReferenceRow,
-    code_query_support::*, code_search_plannable_outage_reason, dedupe_sort_truncate,
-    hit_from_parts, mark_hits_degraded, prepare_code_search_statement, required_scope,
-    selected_row,
+    HitParts,
+    code_query_excerpts::reference_excerpt,
+    code_query_path_ranking::{
+        path_looks_like_test_or_benchmark, query_mentions_test_or_benchmark,
+    },
+    code_query_rows::ReferenceRow,
+    code_query_support::*,
+    code_search_plannable_outage_reason, dedupe_sort_truncate, hit_from_parts, mark_hits_degraded,
+    prepare_code_search_statement, required_scope, selected_row,
 };
 
 const REFERENCE_ASSIGNMENT_USAGE_BONUS: f64 = 1.4;
 const REFERENCE_INDIRECT_CALL_USAGE_BONUS: f64 = 1.8;
 const REFERENCE_MEMBER_CALL_USAGE_BONUS: f64 = 1.2;
+const REFERENCE_RETURN_USAGE_BONUS: f64 = 1.45;
+const REFERENCE_EXPORTED_FUNCTION_TYPE_BONUS: f64 = 0.85;
+const REFERENCE_FUNCTION_TYPE_BONUS: f64 = 0.65;
+const REFERENCE_ARROW_FUNCTION_TYPE_BONUS: f64 = 0.35;
+const REFERENCE_PRODUCTION_PATH_BONUS: f64 = 0.25;
+const REFERENCE_TEST_PATH_PENALTY: f64 = -0.85;
 
 struct ReferenceIdentityRows {
     rows: Vec<ReferenceRow>,
@@ -234,6 +245,7 @@ fn reference_rows_to_hits(
     rows: Vec<ReferenceRow>,
 ) -> Vec<CodeRetrievalHit> {
     let score_query = ScoreQuery::new(&request.query);
+    let query_has_test_intent = query_mentions_test_or_benchmark(&request.query);
 
     rows.into_iter()
         .filter(|row| selected_row(&row.path, &row.language_id, status, request))
@@ -261,7 +273,14 @@ fn reference_rows_to_hits(
                     &row.name,
                     focused_source_excerpt.as_deref(),
                     request,
-                );
+                )
+                + reference_source_path_bonus(
+                    base_score,
+                    &row.path,
+                    request,
+                    query_has_test_intent,
+                )
+                + reference_same_name_file_penalty(base_score, &row.path, request);
             (score > 0.0).then(|| {
                 hit_from_parts(
                     status,
@@ -331,6 +350,53 @@ pub(super) fn reference_usage_context_bonus(
         .fold(0.0, f64::max)
 }
 
+fn reference_source_path_bonus(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+    query_has_test_intent: bool,
+) -> f64 {
+    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::References {
+        return 0.0;
+    }
+    if path_looks_like_test_or_benchmark(path) {
+        if query_has_test_intent {
+            0.0
+        } else {
+            REFERENCE_TEST_PATH_PENALTY
+        }
+    } else {
+        REFERENCE_PRODUCTION_PATH_BONUS
+    }
+}
+
+fn reference_same_name_file_penalty(
+    base_score: f64,
+    path: &str,
+    request: &CodeRetrievalRequest,
+) -> f64 {
+    if base_score <= 0.0 || request.code_query_kind != CodeQueryKind::References {
+        return 0.0;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let file_stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    if normalized_identifier(file_stem) == normalized_identifier(&request.query) {
+        -0.45
+    } else {
+        0.0
+    }
+}
+
+fn normalized_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 fn reference_line_usage_bonus(line: &str, name: &str) -> Option<f64> {
     identifier_ranges(line, name)
         .filter(|(start, end)| !line_declares_reference_name(line, name, *start, *end))
@@ -351,6 +417,12 @@ fn reference_identifier_usage_bonus(line: &str, start: usize, end: usize) -> f64
     if identifier_is_assignment_value(before) {
         return REFERENCE_ASSIGNMENT_USAGE_BONUS;
     }
+    if identifier_is_return_value(before) {
+        return REFERENCE_RETURN_USAGE_BONUS;
+    }
+    if let Some(bonus) = type_signature_context_bonus(line, before, after) {
+        return bonus;
+    }
 
     0.0
 }
@@ -359,6 +431,12 @@ fn line_declares_reference_name(line: &str, name: &str, start: usize, end: usize
     let before = line.get(..start).unwrap_or_default().trim_end();
     let after = line.get(end..).unwrap_or_default().trim_start();
     if before.ends_with('.') || before.ends_with("->") || identifier_is_assignment_value(before) {
+        return false;
+    }
+    if identifier_is_return_value(before) {
+        return false;
+    }
+    if before.ends_with(':') {
         return false;
     }
     if after.starts_with('(') && declaration_prefix_before_name(before) {
@@ -394,6 +472,33 @@ fn identifier_is_assignment_value(before: &str) -> bool {
         .rev()
         .find(|character| !character.is_whitespace())
         .is_some_and(|character| character == '=')
+}
+
+fn identifier_is_return_value(before: &str) -> bool {
+    before
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .rev()
+        .find(|term| !term.is_empty())
+        .is_some_and(|term| term == "return")
+}
+
+fn type_signature_context_bonus(line: &str, before: &str, after: &str) -> Option<f64> {
+    if !before.trim_end().ends_with(':') {
+        return None;
+    }
+    let lower_before = before.to_ascii_lowercase();
+    if lower_before.contains("export function ") || lower_before.contains("export async function ")
+    {
+        return Some(REFERENCE_EXPORTED_FUNCTION_TYPE_BONUS);
+    }
+    if lower_before.contains("function ") || lower_before.contains("def ") {
+        return Some(REFERENCE_FUNCTION_TYPE_BONUS);
+    }
+    if line.contains("=>") || after.contains("=>") {
+        return Some(REFERENCE_ARROW_FUNCTION_TYPE_BONUS);
+    }
+
+    None
 }
 
 fn identifier_is_indirect_call(after: &str) -> bool {
@@ -507,5 +612,48 @@ mod tests {
             1,
             false
         ));
+    }
+
+    #[test]
+    fn reference_usage_context_prioritizes_returns_and_function_type_annotations() {
+        let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate");
+        let request = CodeRetrievalRequest::new(
+            "InstanceContext",
+            selector,
+            CodeQueryKind::References,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+
+        let assignment = reference_usage_context_bonus(
+            5.0,
+            "normalizeRoleId",
+            Some("state.coordinatorRoleId = normalizeRoleId(roleId) || null;"),
+            &request,
+        );
+        let returned = reference_usage_context_bonus(
+            5.0,
+            "normalizeRoleId",
+            Some("return normalizeRoleId(state.coordinatorRoleId);"),
+            &request,
+        );
+        let type_signature = reference_usage_context_bonus(
+            5.0,
+            "InstanceContext",
+            Some("export function plan(input: Input, instance: InstanceContext) {"),
+            &request,
+        );
+
+        assert!(returned > assignment);
+        assert!(type_signature > 0.0);
+        assert!(
+            reference_same_name_file_penalty(
+                5.0,
+                "packages/opencode/src/project/instance-context.ts",
+                &request,
+            ) < 0.0
+        );
     }
 }

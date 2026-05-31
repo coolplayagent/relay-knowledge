@@ -152,6 +152,16 @@ pub(super) fn language_manual_file_definitions(
     }
 }
 
+pub(super) fn language_manual_file_references(
+    content: &str,
+    language_id: &str,
+) -> Vec<(String, &'static str, SyntaxRange)> {
+    match language_id {
+        "python" => python::manual_type_references(content),
+        _ => Vec::new(),
+    }
+}
+
 pub(super) fn language_manual_call(
     content: &str,
     language_id: &str,

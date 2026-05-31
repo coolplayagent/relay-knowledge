@@ -1,9 +1,10 @@
 use super::*;
 use crate::{
     domain::{
-        CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration,
-        CodeRepositorySelector, FreshnessPolicy, RepositoryCodeFileRecord, RepositoryCodeRange,
-        RepositoryCodeReferenceRecord, RepositoryCodeSymbolRecord,
+        CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+        CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
+        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeReferenceRecord,
+        RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
     storage::code::CodeRepositoryStore,
@@ -270,12 +271,81 @@ fn declaration_chunk_bonus_preserves_interface_boost() {
 
 #[test]
 fn import_surface_bonus_prefers_public_reexport_files() {
-    assert_eq!(import_surface_bonus(0.0, "src/pkg/__init__.py"), 0.0);
-    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py") > 0.0);
-    assert!(import_surface_bonus(3.0, "src/lib.rs") > 0.0);
-    assert!(import_surface_bonus(3.0, "src/index.ts") > 0.0);
-    assert_eq!(import_surface_bonus(3.0, "tests/pkg/__init__.py"), 0.0);
-    assert_eq!(import_surface_bonus(3.0, "tests/pkg/test_imports.py"), 0.0);
+    assert_eq!(
+        import_surface_bonus(0.0, "src/pkg/__init__.py", CodeQueryKind::Hybrid),
+        0.0
+    );
+    assert!(import_surface_bonus(3.0, "src/pkg/__init__.py", CodeQueryKind::Hybrid) > 0.0);
+    assert!(import_surface_bonus(3.0, "src/lib.rs", CodeQueryKind::Hybrid) > 0.0);
+    assert!(import_surface_bonus(3.0, "src/index.ts", CodeQueryKind::Hybrid) > 0.0);
+    assert_eq!(
+        import_surface_bonus(3.0, "src/pkg/__init__.py", CodeQueryKind::Imports),
+        0.0
+    );
+    assert_eq!(
+        import_surface_bonus(3.0, "tests/pkg/__init__.py", CodeQueryKind::Hybrid),
+        0.0
+    );
+    assert_eq!(
+        import_surface_bonus(3.0, "tests/pkg/test_imports.py", CodeQueryKind::Hybrid),
+        0.0
+    );
+}
+
+#[test]
+fn import_path_queries_prefer_consuming_source_paths_over_header_forwarders() {
+    assert!(
+        import_public_dependency_surface_bonus(
+            3.0,
+            "leveldb/filter_policy.h",
+            "db/dbformat.h",
+            Some("include/leveldb/filter_policy.h"),
+            CodeQueryKind::Imports,
+        ) > 0.0
+    );
+    assert!(
+        import_source_path_query_overlap_bonus(
+            3.0,
+            "leveldb/filter_policy.h",
+            "table/filter_block.cc",
+            Some("include/leveldb/filter_policy.h"),
+            CodeQueryKind::Imports,
+        ) > 0.0
+    );
+    assert!(
+        import_self_implementation_penalty(
+            3.0,
+            "leveldb/filter_policy.h",
+            "util/filter_policy.cc",
+            Some("include/leveldb/filter_policy.h"),
+            CodeQueryKind::Imports,
+        ) < 0.0
+    );
+}
+
+#[test]
+fn import_queries_demote_package_reexport_surfaces() {
+    assert!(
+        import_reexport_surface_penalty(
+            3.0,
+            "relay_teams.connector.models",
+            "src/relay_teams/connector/__init__.py",
+            "from relay_teams.connector.models import Connector",
+            Some("src/relay_teams/connector/models.py"),
+            CodeQueryKind::Imports,
+        ) < 0.0
+    );
+    assert_eq!(
+        import_reexport_surface_penalty(
+            3.0,
+            "relay_teams.connector.models",
+            "src/relay_teams/connector/service.py",
+            "from relay_teams.connector.models import Connector",
+            Some("src/relay_teams/connector/models.py"),
+            CodeQueryKind::Imports,
+        ),
+        0.0
+    );
 }
 
 #[test]
