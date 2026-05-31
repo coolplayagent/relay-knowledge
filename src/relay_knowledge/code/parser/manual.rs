@@ -6,7 +6,10 @@ use super::{
     super::CodeIndexError,
     FileParseContext, FileParseOutput, languages,
     nodes::{SyntaxRange, last_identifier_text, node_text, push_children_reverse, syntax_range},
-    records::{reference_record, symbol_record, upsert_reference, upsert_symbol},
+    records::{
+        reference_record, symbol_record, symbol_record_with_qualified_suffix, upsert_reference,
+        upsert_symbol,
+    },
 };
 
 pub(super) fn collect_manual_nodes(
@@ -39,10 +42,19 @@ pub(super) fn collect_manual_nodes(
         }
         push_children_reverse(node, &mut stack);
     }
-    for (name, kind, range) in
+    for (name, qualified_suffix, kind, range) in
         languages::language_manual_file_definitions(context.content, context.language_id)
     {
-        upsert_symbol(output, symbol_record(context, &name, kind, &range)?);
+        upsert_symbol(
+            output,
+            symbol_record_with_qualified_suffix(
+                context,
+                &name,
+                kind,
+                &range,
+                qualified_suffix.as_deref().unwrap_or(&name),
+            )?,
+        );
     }
     for definition in config_definitions {
         upsert_symbol(

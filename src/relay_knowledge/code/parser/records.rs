@@ -260,8 +260,18 @@ pub(super) fn symbol_record(
     kind: &str,
     range: &SyntaxRange,
 ) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
+    symbol_record_with_qualified_suffix(context, name, kind, range, name)
+}
+
+pub(super) fn symbol_record_with_qualified_suffix(
+    context: &FileParseContext<'_>,
+    name: &str,
+    kind: &str,
+    range: &SyntaxRange,
+    qualified_suffix: &str,
+) -> Result<RepositoryCodeSymbolRecord, CodeIndexError> {
     let signature = symbol_signature(context.content, range, name);
-    let qualified_name = format!("{}::{name}", module_path(context.path));
+    let qualified_name = format!("{}::{qualified_suffix}", module_path(context.path));
     let symbol_snapshot_id = stable_id(
         "symbol",
         [

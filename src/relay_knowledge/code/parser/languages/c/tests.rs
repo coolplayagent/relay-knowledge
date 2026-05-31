@@ -392,14 +392,21 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
 
   ~DBImpl();
 
-#if defined(ENABLE_RECOVERY)
-  Status GuardedRecover(VersionEdit* edit);
-#endif
+	#if defined(ENABLE_RECOVERY)
+	  Status GuardedRecover(VersionEdit* edit);
+	#endif
 
-  int (*log_filter)(void*);
-  VersionEdit edit_;
-};
-"#,
+	  int (*log_filter)(void*);
+	  VersionEdit edit_;
+	};
+
+	struct Options {
+	 public:
+	  Status Validate() const;
+	  void SetUrl(const char* url = "http://localhost");
+	  operator bool() const;
+	};
+	"#,
     );
 
     let recover = snapshot
@@ -410,6 +417,11 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
     assert_eq!(recover.kind, "function_declaration");
     assert!(recover.signature.contains("Status Recover"));
     assert!(
+        recover.qualified_name.contains("DBImpl.Recover")
+            && recover.canonical_symbol_id.contains("DBImpl.Recover"),
+        "recovered class members should preserve owner identity: {recover:?}"
+    );
+    assert!(
         !recover.signature.contains("EXCLUSIVE_LOCKS_REQUIRED"),
         "trailing annotation macros should not become part of recovered declaration ranges"
     );
@@ -419,13 +431,32 @@ fn c_headers_recover_cpp_class_member_declarations_after_nested_types() {
     assert!(snapshot.symbols.iter().any(|symbol| {
         symbol.name == "GuardedRecover" && symbol.kind == "function_declaration"
     }));
+    let validate = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "Validate")
+        .expect("plain C++ struct methods should be recovered from C header parse");
+    assert!(
+        validate.qualified_name.contains("Options.Validate"),
+        "plain struct member should preserve owner identity: {validate:?}"
+    );
+    let set_url = snapshot
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "SetUrl")
+        .expect("URL default argument should not be truncated as a line comment");
+    assert!(
+        set_url.signature.contains("\"http://localhost\""),
+        "string literals containing // should remain in recovered declarations: {set_url:?}"
+    );
     assert!(
         !snapshot.symbols.iter().any(|symbol| {
             (symbol.name == "DBImpl" && symbol.kind == "function_declaration")
                 || symbol.name == "defined"
                 || symbol.name == "CommentedApi"
+                || symbol.name == "bool"
         }),
-        "preprocessor guards and destructors should not become declaration symbols: {:?}",
+        "preprocessor guards, destructors, comments, and operators should not become declaration symbols: {:?}",
         snapshot.symbols
     );
     assert!(

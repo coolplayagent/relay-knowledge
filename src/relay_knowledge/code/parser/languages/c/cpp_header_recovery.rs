@@ -2,7 +2,7 @@ use super::super::super::nodes::SyntaxRange;
 
 pub(in crate::code::parser) fn manual_file_definitions(
     content: &str,
-) -> Vec<(String, &'static str, SyntaxRange)> {
+) -> Vec<(String, Option<String>, &'static str, SyntaxRange)> {
     let lines = source_lines(content);
     let mut definitions = Vec::new();
     let mut index = 0usize;
@@ -17,8 +17,10 @@ pub(in crate::code::parser) fn manual_file_definitions(
                 header.push_str(&code);
             }
             if cpp_class_header_opens_body(header) {
+                let owner = cpp_class_header_name(header);
                 pending_header = None;
-                index = collect_class_member_declarations(&lines, index + 1, &mut definitions);
+                index =
+                    collect_class_member_declarations(&lines, index + 1, owner, &mut definitions);
             } else {
                 if code.ends_with(';') {
                     pending_header = None;
@@ -26,7 +28,12 @@ pub(in crate::code::parser) fn manual_file_definitions(
                 index += 1;
             }
         } else if cpp_class_header_opens_body(&code) {
-            index = collect_class_member_declarations(&lines, index + 1, &mut definitions);
+            index = collect_class_member_declarations(
+                &lines,
+                index + 1,
+                cpp_class_header_name(&code),
+                &mut definitions,
+            );
         } else if cpp_class_header_starts(&code) && !code.ends_with(';') {
             pending_header = Some(code);
             index += 1;
@@ -82,23 +89,26 @@ fn cpp_class_header_opens_body(line: &str) -> bool {
 
 fn cpp_class_header_starts(code: &str) -> bool {
     let code = code.trim_start();
-    code.starts_with("class ")
-        || code
-            .strip_prefix("struct ")
-            .is_some_and(cpp_struct_header_has_inheritance)
+    code.starts_with("class ") || code.starts_with("struct ")
 }
 
-fn cpp_struct_header_has_inheritance(header: &str) -> bool {
-    header.contains(": public")
-        || header.contains(": protected")
-        || header.contains(": private")
-        || header.contains(": virtual")
+fn cpp_class_header_name(header: &str) -> Option<String> {
+    let header = header.trim_start();
+    let rest = header
+        .strip_prefix("class ")
+        .or_else(|| header.strip_prefix("struct "))?
+        .trim_start();
+    let name = rest
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .next()?;
+    function_name_candidate(name).then(|| name.to_owned())
 }
 
 fn collect_class_member_declarations(
     lines: &[SourceLine],
     mut index: usize,
-    definitions: &mut Vec<(String, &'static str, SyntaxRange)>,
+    owner: Option<String>,
+    definitions: &mut Vec<(String, Option<String>, &'static str, SyntaxRange)>,
 ) -> usize {
     let mut depth = 1isize;
     let mut pending = None;
@@ -116,7 +126,13 @@ fn collect_class_member_declarations(
                 pending = None;
                 doc_start = None;
             } else {
-                collect_top_level_member_line(line, &mut pending, &mut doc_start, definitions);
+                collect_top_level_member_line(
+                    line,
+                    owner.as_deref(),
+                    &mut pending,
+                    &mut doc_start,
+                    definitions,
+                );
             }
         }
         depth += brace_delta(code);
@@ -128,9 +144,10 @@ fn collect_class_member_declarations(
 
 fn collect_top_level_member_line(
     line: &SourceLine,
+    owner: Option<&str>,
     pending: &mut Option<PendingDeclaration>,
     doc_start: &mut Option<(usize, usize)>,
-    definitions: &mut Vec<(String, &'static str, SyntaxRange)>,
+    definitions: &mut Vec<(String, Option<String>, &'static str, SyntaxRange)>,
 ) {
     let trimmed = line.code.trim();
     let is_preprocessor_directive = cpp_preprocessor_directive(trimmed);
@@ -173,8 +190,10 @@ fn collect_top_level_member_line(
     }
     let declaration = pending.take().expect("pending declaration should exist");
     if let Some(name) = member_function_declaration_name(&declaration.text) {
+        let qualified_name = owner.map(|owner| format!("{owner}.{name}"));
         definitions.push((
             name,
+            qualified_name,
             "function_declaration",
             SyntaxRange {
                 byte_start: declaration.byte_start,
@@ -187,12 +206,14 @@ fn collect_top_level_member_line(
 }
 
 fn line_code_without_comment(line: &str) -> &str {
-    line.split_once("//").map_or(line, |(code, _)| code)
+    line_comment_start(line).map_or(line, |start| &line[..start])
 }
 
 fn line_without_block_comments(line: &str, in_block_comment: &mut bool) -> String {
     let mut code = String::new();
     let mut index = 0usize;
+    let mut string_delimiter = None;
+    let mut escaped = false;
     while index < line.len() {
         let rest = &line[index..];
         if *in_block_comment {
@@ -201,6 +222,17 @@ fn line_without_block_comments(line: &str, in_block_comment: &mut bool) -> Strin
             };
             index += comment_end + "*/".len();
             *in_block_comment = false;
+        } else if let Some(delimiter) = string_delimiter {
+            let character = next_character(rest);
+            code.push(character);
+            index += character.len_utf8();
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                string_delimiter = None;
+            }
         } else if rest.starts_with("//") {
             code.push_str(rest);
             break;
@@ -208,16 +240,53 @@ fn line_without_block_comments(line: &str, in_block_comment: &mut bool) -> Strin
             index += "/*".len();
             *in_block_comment = true;
         } else {
-            let character = rest
-                .chars()
-                .next()
-                .expect("non-empty rest should yield a character");
+            let character = next_character(rest);
             code.push(character);
             index += character.len_utf8();
+            if matches!(character, '"' | '\'') {
+                string_delimiter = Some(character);
+            }
         }
     }
 
     code
+}
+
+fn line_comment_start(line: &str) -> Option<usize> {
+    let mut index = 0usize;
+    let mut string_delimiter = None;
+    let mut escaped = false;
+    while index < line.len() {
+        let rest = &line[index..];
+        if let Some(delimiter) = string_delimiter {
+            let character = next_character(rest);
+            index += character.len_utf8();
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                string_delimiter = None;
+            }
+        } else if rest.starts_with("//") {
+            return Some(index);
+        } else {
+            let character = next_character(rest);
+            index += character.len_utf8();
+            if matches!(character, '"' | '\'') {
+                string_delimiter = Some(character);
+            }
+        }
+    }
+
+    None
+}
+
+fn next_character(value: &str) -> char {
+    value
+        .chars()
+        .next()
+        .expect("non-empty value should yield a character")
 }
 
 fn class_member_line_opens_nested_body(trimmed_code: &str) -> bool {
@@ -269,11 +338,19 @@ fn member_function_declaration_name(statement: &str) -> Option<String> {
     }
     let parameter_start = top_level_parameter_start(&code)?;
     let (name_start, name_end) = name_bounds_before_open(&code, parameter_start)?;
-    if code[..name_start].trim_end().ends_with('~') {
+    if code[..name_start].trim_end().ends_with('~')
+        || contains_operator_keyword(&code[..parameter_start])
+    {
         return None;
     }
     let name = &code[name_start..name_end];
     function_name_candidate(name).then(|| name.to_owned())
+}
+
+fn contains_operator_keyword(prefix: &str) -> bool {
+    prefix
+        .split(|character: char| !(character == '_' || character.is_ascii_alphanumeric()))
+        .any(|token| token == "operator")
 }
 
 fn top_level_parameter_start(code: &str) -> Option<usize> {
