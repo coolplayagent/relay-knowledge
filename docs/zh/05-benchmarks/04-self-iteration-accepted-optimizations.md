@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780212377-bounded-overlay-evidence-index
+- 算法/架构：repository-set overlay evidence index 对同一目标 file/symbol record 只保留响应最多可能返回的前 5 条 edge，对 import-origin line 同样按响应上限保留前 5 条；非 import hit 的 file-origin evidence 在构建索引时流式保留 confidence 最高的 2 条，而不是先保存同文件所有 edge 再排序截断。返回 evidence 仍经同一个有序 `BTreeSet` 合并、bridge support、member priority、dedupe/diversity/top-k 和 returned-evidence pruning。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、overlay refresh、cross-edge resolution、单仓 FTS/candidate limit、source `text_fallback`、semantic/vector read model、env/paths/net、CLI/API、任务 lease/checkpoint 或安装发布；只把原本永远不会越过响应 evidence 上限的 hot-key edge 留在索引外。预期降低 Temporal/OpenTelemetry 这类多仓 workspace 中大量 import edge 指向同一 package/file/symbol 时的 repository-set query 内存和 per-hit evidence merge 成本；风险是未来若响应 evidence 上限提高，需要同步调大索引上限，受 shared constants 和 focused overlay evidence tests 控制。
+- 策略关联：建立在已采纳的 repository-set overlay priority、bridge support、bounded candidate window 和结构化证据优先策略之上；避免最近 rejected cluster 的 no-candidate-diff 模式，也避免通过扩大 source fallback、枚举仓库/路径/query/case 或弱化 semantic/vector/stability 保护层换取性能。
 ## 候选优化说明：manual-full-performance-standard-wide-fixture
 - 算法/架构：self-iteration 的 `full`/`exhaustive` performance workload 新增 `index_performance_wide_mixed_files` 生成式 Rust workspace，创建 2048 个目标文件、workspace/module surface 和跨 shard bridge 查询，并继续通过真实 `repo register`、`repo index`、`repo query` 记录 `*_index_ms`、`*_register_index_ms`、query p50/p95/max；默认 fast workload 不变。
 - 不变量/预期影响/风险：只扩展独立 harness、case 和文档，不改变产品 CLI/API、SQLite schema、parser facts、FTS 写入、任务 lease/checkpoint、source fallback、env/paths/net 或安装发布。预期让 full/performance 聚焦运行能捕获更宽 cold indexing、查询 percentile 和 tail symbol 召回回归；风险是 full profile 增加少量生成式索引时间，受 profile 隔离和显式预算控制。
@@ -991,3 +995,5 @@
 - summary: Hybrid direct-evidence graph-fanout gate was proposed and accepted in `run-1780153116`, scoring 0.960929 with 105/105 cases passed; it gates only direct non-edge evidence and preserves graph expansion for sparse, fallback-only, call/import, and broad single-token queries.
 - summary: accepted software-global evidence priority (`run-1780155576`) scored 0.971906 with foundational=1.0, semantic_vector=1.0, stability=1.0, and 105/105 cases passed; changed software lifecycle/projection/tests and preserved full metrics in the self-iteration patch/report memory.
 - summary: accepted import query extraction (`run-1780159030`) scored 0.978136 with 105/105 cases passed; detailed metrics were archived in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260524.md` to keep this primary benchmark log below the 1000-line cap.
+## run-1780212377-to-run-1780213983 compacted
+- summary: accepted bounded overlay evidence index (`run-1780212377`) and streaming chunk row scoring (`run-1780213983`) records were compacted to keep this primary benchmark log below the 1000-line hard cap. Full algorithms, invariants, scores, metrics, changed paths, and adopted notes remain in `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations-archive-20260531.md`, `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
