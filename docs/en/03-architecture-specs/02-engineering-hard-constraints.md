@@ -39,7 +39,7 @@ Network entry points support connection budgets, request budgets, body limits, t
 
 ## 5. Code Quality Constraints
 
-- No tracked file may exceed 1000 lines.
+- No tracked source, test, documentation, script, or workflow file may exceed 1000 lines. Generated release lockfiles required by locked builds, currently `Cargo.lock`, are exempt and must stay machine-generated.
 - Do not add shallow functions; functions must validate, transform, isolate boundaries, manage resources, map errors, add observability, or coordinate real workflows.
 - Do not keep dead code, TODO stubs, unused public APIs, untested speculative extension points, or commented-out implementations.
 - Project identity constants live in the `project` module; module-local operational defaults stay with the owning module.

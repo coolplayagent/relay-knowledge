@@ -10,8 +10,8 @@ Use the existing Rust layout:
 - `src/relay_knowledge/lib.rs`: reusable knowledge graph primitives and the Cargo library entry point.
 - `src/relay_knowledge/main.rs`: default CLI entry point.
 - `tests/`: integration and smoke tests.
-- `docs/zh/03-architecture-specs/engineering-hard-constraints.md`: hard constraints for shallow functions, dead code, documentation completeness, foundational modules, acyclic dependencies, max file length, unit-test coverage, event-driven HTTP, QoS, and Playwright Chromium browser integration-test readiness.
-- `docs/zh/03-architecture-specs/installation-and-release.md`: installation, packaging, publishing, service deployment, upgrade, and uninstall requirements.
+- `docs/zh/03-architecture-specs/02-engineering-hard-constraints.md`: hard constraints for shallow functions, dead code, documentation completeness, foundational modules, acyclic dependencies, max file length, unit-test coverage, event-driven HTTP, QoS, and Playwright Chromium browser integration-test readiness.
+- `docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md`: installation, packaging, publishing, service deployment, upgrade, and uninstall requirements.
 - `.github/workflows/pr-checks.yml`: CI quality gates.
 
 Keep generated output, build products, and large temporary data out of version control.
@@ -53,7 +53,7 @@ Document required services, such as graph databases or local containers, in `REA
 - Do not fix large-repository indexing performance by moving Git blob reads, parser work, SQLite writes, FTS rebuilds, or edge finalization onto async executor hot paths.
 - Do not accept code-index performance changes unless they preserve durable task leases, checkpoint replay/idempotency, at most one active writer task per repository, bounded retry/backoff, and observable progress/status.
 - Do not accept code-index performance changes unless `tools/self_iteration` fast or `--categories performance` contains a case or metric that would fail if the same regression returns.
-- Follow `docs/zh/03-architecture-specs/engineering-hard-constraints.md` as a hard architecture contract, not optional guidance.
+- Follow `docs/zh/03-architecture-specs/02-engineering-hard-constraints.md` as a hard architecture contract, not optional guidance.
 - Do not introduce circular dependencies between crates, modules, traits, services, adapters, or configuration objects. Keep the dependency graph acyclic; when two modules need shared types or behavior, extract the contract into the lower layer or a narrowly scoped contract module.
 - Provide foundational modules with strict ownership boundaries: `env` owns environment variable loading/parsing/validation, `paths` owns platform paths and runtime directories, and `net` owns all network capabilities including HTTP.
 - Do not read environment variables outside `env`, do not construct runtime/config/data/log/cache paths outside `paths`, and do not create sockets, HTTP clients, HTTP servers, listeners, or network loops outside `net`, except for tightly scoped tests or bootstrap code with documented reasons.
@@ -74,7 +74,7 @@ Document required services, such as graph databases or local containers, in `REA
 - Keep binary installation separate from runtime state. Configuration, graph databases, indexes, logs, caches, temporary files, and dead-letter data must use documented platform directories, not the repository, current working directory, or release extraction directory unless the user explicitly configures that.
 - Service installation must use the platform service manager: systemd on Linux, Windows Service on Windows, and launchd on macOS. Do not implement long-running background operation as an unmanaged CLI loop.
 - Package manager manifests such as Homebrew, Scoop, winget, or distro packages should reference artifacts produced from the same release tag rather than rebuilding divergent snapshots.
-- Any change that affects packaging, release artifacts, service templates, data directories, configuration, migration, upgrade, or uninstall behavior must update `docs/zh/03-architecture-specs/installation-and-release.md` and any affected README or release-note guidance.
+- Any change that affects packaging, release artifacts, service templates, data directories, configuration, migration, upgrade, or uninstall behavior must update `docs/zh/03-architecture-specs/19-installation-release-and-upgrade.md` and any affected README or release-note guidance.
 
 ## Coding Style & Naming Conventions
 
@@ -88,7 +88,7 @@ Keep project identity constants centralized in `src/relay_knowledge/project/mod.
 
 Agent-facing skill and documentation command examples must be shell-specific. Do not place Windows `.exe`, drive-letter, or `assets/windows-*` commands in bash, sh, POSIX, or unlabeled code blocks. Put Windows examples only in PowerShell or cmd.exe blocks, and keep POSIX examples on POSIX binaries such as `assets/linux-x86_64/relay-knowledge` or a POSIX `PATH` install.
 
-No tracked file may exceed 1000 lines. Split Rust modules, tests, docs, scripts, and workflow files by responsibility before they cross that limit; do not use dense formatting or unrelated aggregation to bypass the cap. The self-iteration tool under `tools/self_iteration/` is exempt from this file-length limit so local iteration speed and operational simplicity can take priority there.
+No tracked source, test, documentation, script, or workflow file may exceed 1000 lines. Split Rust modules, tests, docs, scripts, and workflow files by responsibility before they cross that limit; do not use dense formatting or unrelated aggregation to bypass the cap. Generated release lockfiles required by locked builds, currently `Cargo.lock`, are exempt but must not be edited by hand. The self-iteration tool under `tools/self_iteration/` is exempt from this file-length limit so local iteration speed and operational simplicity can take priority there.
 
 Do not add shallow functions. A function must enforce an invariant, perform meaningful validation/transformation, isolate an external boundary, manage resource lifecycle, map errors, add observability, or coordinate a real workflow. Prefer constants, typed config, or direct calls over pass-through wrappers that only rename another call.
 
