@@ -2,11 +2,11 @@
 
 [中文](../../zh/01-user-guide/05-code-repository-graph-workflow.md) | [English](../../en/01-user-guide/05-code-repository-graph-workflow.md)
 
-代码仓库图谱把 Git tree、文件、符号、引用、调用、import 关系和依赖清单纳入同一检索面。它不是简单的文件搜索；查询和影响分析都依赖已索引的代码图谱快照。精确文本 `grep` 只作为已索引快照上的有界兜底层，用来补齐 AST/FTS 明确漏召的源码行。
+代码仓库图谱把 Git tree 或 filesystem synthetic snapshot、文件、符号、引用、调用、import 关系和依赖清单纳入同一检索面。它不是简单的文件搜索；查询和影响分析都依赖已索引的代码图谱快照。精确文本 `grep` 只作为已索引快照上的有界兜底层，用来补齐 AST/FTS 明确漏召的源码行。
 
 ## 5.1 注册仓库
 
-把 Git 仓库注册为代码检索源:
+把 Git 仓库或非 Git source directory 注册为代码检索源:
 
 ```bash
 relay-knowledge repo register /path/to/repo \
@@ -14,9 +14,9 @@ relay-knowledge repo register /path/to/repo \
   --format json
 ```
 
-省略 `--alias` 时，后续命令使用的短名默认是解析后的 Git root 目录名。对于 `/path/to/repo`，后续命令默认使用 `repo`，除非注册时显式传入 `--alias` 覆盖。`--path` 可以重复；注册会拒绝 `--language`，确保混合语言仓库保留完整语言面；后续 `repo query --language` 可以收窄结果，但不会缩小已索引快照。
+省略 `--alias` 时，后续命令使用的短名默认是解析后的 Git root 或 filesystem root 目录名。对于 `/path/to/repo`，后续命令默认使用 `repo`，除非注册时显式传入 `--alias` 覆盖。`--path` 可以重复；注册会拒绝 `--language`，确保混合语言仓库保留完整语言面；后续 `repo query --language` 可以收窄结果，但不会缩小已索引快照。
 
-注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径必须指向本机可读 Git worktree；索引时再解析目标 ref 或 worktree overlay。再次注册同一个 Git root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
+注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径可以指向本机可读 Git worktree 或普通 source directory；索引时再解析目标 ref、worktree overlay 或 filesystem synthetic snapshot。再次注册同一个 root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
 
 ## 5.2 Scope 预览
 
@@ -32,7 +32,7 @@ relay-knowledge repo scope preview repo --ref HEAD --format json
 relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
-preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。clean index 以 Git tree 为权威：只要目录在注册和请求的 path scope 内，Git 跟踪的 `.cloudbuild/`、`.cid/`、`.build_config/`、`build/`、`dist/`、`vendor/` 和 `third_party/` 都可以进入索引。默认 `--path src` 注册仍只会扩展到已发现 source root，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root；精确请求 path filter 仍只收窄查询。保留的默认 preset 是文件级保护，用于二进制/媒体资产和 `*.jsonl` 数据集转储。`uv.lock` 这类锁文件快照可以贡献 SBOM 依赖事实，但不会展开成源码 chunk 或配置符号。worktree overlay 使用 Git status，因此被 `.gitignore` 忽略的 untracked 文件不会进入索引，除非 Git 自身报告它们；未跟踪的宽泛依赖、缓存或构建目录不会递归展开，除非显式 path filter opt in。
+preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。clean Git index 以 tracked tree 为权威：只要目录在注册和请求的 path scope 内，Git 跟踪的 `.cloudbuild/`、`.cid/`、`.build_config/`、`build/`、`dist/`、`vendor/` 和 `third_party/` 都可以进入索引。非 Git source directory 默认按白名单扫描根层支持文件和 `src/`、`include/`、`lib/`、`Sources/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`docs/`、`config/` 等 source-like roots；`build/`、`dist/`、`target/`、`node_modules/`、`vendor/`、`third_party/`、cache、virtualenv 和 coverage 目录只有显式 `--path` opt in 才会进入。这个 opt in 是路径特异的：`--path src` 不会扫描兄弟级 `node_modules/` 或 `target/`，只有 `--path build` 或 `build/` 下的路径才允许该宽泛目录进入，`--path .` 则允许整个 root。默认非 Git scan 会跳过不会贡献白名单内容的目录；带过滤条件的非 Git scan 会在读取前跳过无关兄弟目录。若目录含 Git metadata 但 Git 因 unsafe ownership 或 metadata 损坏无法解析，注册会失败，而不是回退为非 Git 索引。默认 `--path src` 注册仍只会扩展到已发现 source root，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root；精确请求 path filter 仍只收窄查询。`filesystem:` snapshot id 绑定到 discovery 后实际进入索引的文件，因此未索引文件变化不会让 scoped ref 失效，后台 worker 重放排队 synthetic ref 前也会重新校验，full-index batch 和 incremental delta 接受 live bytes 前会校验计划文件 hash，moving-ref resolution 使用与 indexed scope 相同的 path 和 language filters。显式已存储 `filesystem:` ref 在本地编辑后仍可查询；只有 source fallback 读取要求 live tree 仍匹配。保留的默认 preset 是文件级保护，用于二进制/媒体资产和 `*.jsonl` 数据集转储。`uv.lock` 这类锁文件快照可以贡献 SBOM 依赖事实，但不会展开成源码 chunk 或配置符号。Git worktree overlay 使用 Git status，因此被 `.gitignore` 忽略的 untracked 文件不会进入索引，除非 Git 自身报告它们；未跟踪的宽泛依赖、缓存或构建目录不会递归展开，除非显式 path filter opt in。
 
 ## 5.3 建立代码图谱索引
 
@@ -48,7 +48,7 @@ relay-knowledge repo index repo --ref HEAD --format json
 relay-knowledge repo index repo --ref <commit-sha> --format json
 ```
 
-全量索引通过 Git 从 clean tree 读取普通 blob，先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash、SQL，以及常见项目配置、构建和模板文件。SQL 文件会贡献 table、view/materialized view、function/procedure、trigger、type 等 schema object 符号，以及 SQL 对象引用和函数/过程调用边。配置面覆盖 Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template；层级配置会写入 `server.port`、`containers[].name`、`bin[].name` 这类稳定路径。同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的引用保留为 unresolved metadata。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
+全量索引通过 Git 从 clean tree 读取普通 blob，或从非 Git source directory 读取 filesystem synthetic snapshot；随后先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash、SQL，以及常见项目配置、构建和模板文件。SQL 文件会贡献 table、view/materialized view、function/procedure、trigger、type 等 schema object 符号，以及 SQL 对象引用和函数/过程调用边。配置面覆盖 Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template；层级配置会写入 `server.port`、`containers[].name`、`bin[].name` 这类稳定路径。同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的引用保留为 unresolved metadata。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
 当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。
 
@@ -88,7 +88,7 @@ branch、tag 和 `HEAD` 会先解析到 commit/tree；同一 tree hash 的多个
 
 符号命中同时返回 `canonical_symbol_id`，用于跨快照表达逻辑符号身份。引用、调用、import 和 SBOM 命中会返回 `edge_kind`、`edge_resolution_state`、`edge_target_hint`、`edge_confidence_basis_points` 和 `edge_confidence_tier`。当目标无法唯一解析时，结果会标记为 `unresolved` 或 `ambiguous`，不会把猜测写成确定调用。`repo query --kind sbom` 返回索引期从 `Cargo.toml`、`Cargo.lock`、`package.json`、`package-lock.json`、`go.mod`、`go.sum`、`pyproject.toml`、`uv.lock`、`requirements*.txt`、`requirements/` 目录下的依赖文本、`constraints.txt`、Maven effective `pom.xml` dependency 和 BOM import、Gradle dependency block、CMake `CMakeLists.txt`、Conan `conanfile.txt` 或常见 `conanfile.py` 声明，以及 GitHub Actions workflow、GitLab CI、Docker Compose、Helm `Chart.yaml`、Ansible `requirements.yml` 等 allowlist IaC YAML 中提取的依赖清单；YAML、JSON、TOML、INI 和 Java properties 文件也会作为 code language 建索引，用于通过 `--language yaml|json|toml|ini|properties` 检索嵌套配置 key、section 和证据行，但 `package-lock.json` 和 `uv.lock` 这类仅用于依赖建模的锁文件只贡献 SBOM 事实，不会把每个锁定 key 展开成配置符号或源码 chunk；共享的 npm、JVM、CMake、Conan 和 IaC manifest 会保留 TypeScript/JSX、Kotlin/Scala、C/C++、YAML 查询可用的兼容语言 scope；它会处理常见 Python PEP 508 marker、editable Python direct reference、uv dependency groups、Cargo rename 语法、CMake package 声明、Gradle map-style 写法，以及 Maven 仓库内 parent POM/property/dependencyManagement 解析，会去重 `go.sum` 中同一模块版本的普通行与 `/go.mod` 行，跳过本地 Cargo path/workspace 包、本地 npm `file:`/`link:`/`workspace:` spec、本地 npm package-lock v1/v2 workspace 行、本地 Python/Poetry/uv path 依赖、本地 CMake subdirectory 和本地 workflow action，并且把 Maven imported BOM 当作 SBOM 记录；它不会执行包管理器、CI workflow、Maven、CMake、Helm、Docker 或 Kubernetes 工具，不解析传递依赖、访问 registry，也不提供漏洞或许可证分析。如果 import 指向没有作为代码图谱 target 建索引的 unresolved 外部依赖，`repo query --kind imports` 和 repository-set import 查询可以用受限的内部 source fallback 在当前已索引仓库源码中搜索。fallback 搜索词来自 unresolved target hint，并排在结构化 import-graph 证据之后，因此小 `limit` 下 agent 仍能看到 `edge_resolution_state` 和 `edge_target_hint`。此类 fallback 命中会携带 `text_fallback`，因此 agent 应把结果当成本仓源码文本证据，而不是依赖库图谱证据。外部依赖源码缺失保持 unresolved edge coverage metadata，除非兜底自身失败，否则不设置 `degraded_reason`。
 
-`definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、内部 exact-text source fallback 兜底的顺序。兜底只在当前结构化结果没有覆盖具体身份、引用或 hybrid 结果窗口仍有空位时触发；它搜索已索引 commit 中经过 path/language/scope 过滤并物化的候选文件，而不是直接扫当前脏工作树。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
+`definition`、`references` 和 `hybrid` 查询采用 AST/FTS 优先、内部 exact-text source fallback 兜底的顺序。兜底只在当前结构化结果没有覆盖具体身份、引用或 hybrid 结果窗口仍有空位时触发；它搜索已索引 commit 中经过 path/language/scope 过滤并物化的候选文件，而不是直接扫当前脏工作树。对非 Git `filesystem:` commit，兜底会先确认当前 live tree 仍解析到同一个 synthetic snapshot；如果已经变化，则报告降级而不是读取另一个快照的 live 文件。兜底命中的 `retrieval_layers` 至少包含 `lexical` 和 `text_fallback`，definition 兜底还可以包含 `definition`；这些命中没有 resolved edge confidence，因为它们只是源码文本证据。
 
 如果候选路径查询不可用、候选文件数、物化字节或单行长度预算耗尽，查询仍返回已有代码图结果，并在 `degraded_reason` 中说明 source fallback 预算或候选路径原因。缩小 `--path`、`--language` 或先确认目标 ref 已 fresh，通常比扩大 `--limit` 更有效。
 
@@ -150,7 +150,7 @@ relay-knowledge repo-set query workspace \
 relay-knowledge repo update repo --base main --head HEAD --format json
 ```
 
-`repo update` 会把 `base` 到 `head` 的 diff 应用到已持久化的 `base` snapshot。`base` 不需要是当前 active snapshot；只要同一 repository id、path filter 和 language filter 下曾经索引过该 base commit，增量更新就会从对应 persisted scope 克隆并只解析变化文件。
+`repo update` 会把 `base` 到 `head` 的 diff 应用到已持久化的 `base` snapshot。`base` 不需要是当前 active snapshot；只要同一 repository id、path filter 和 language filter 下曾经索引过该 base commit，增量更新就会从对应 persisted scope 克隆并只解析变化文件。对于非 Git scope，delta 解析会拒绝不再匹配计划 filesystem content hash 的 live bytes。
 
 如果 CLI 报告找不到 matching indexed base scope，先索引目标 base:
 
@@ -184,7 +184,7 @@ relay-knowledge repo impact repo \
   --format json
 ```
 
-影响分析会验证 `head_ref` 对应已索引 snapshot，按注册 scope 过滤 changed paths，再用模块、符号、caller、import 和已删除符号名推导受影响位置。
+影响分析会验证 `head_ref` 对应已索引 snapshot，按注册 scope 过滤 changed paths，再用模块、符号、caller、import 和已删除符号名推导受影响位置。非 Git impact 请求使用同一个 indexed filesystem scope filters，因此显式索引的 `build/` 或 `vendor/` 路径不会被默认非 Git scan policy 丢掉。
 
 ## 5.8 报告与状态
 

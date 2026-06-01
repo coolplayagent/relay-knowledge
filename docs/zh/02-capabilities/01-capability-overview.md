@@ -16,7 +16,7 @@
 
 - 安装后可以用本地 SQLite 和确定性 semantic/vector read model 零配置运行。
 - 用户可以写入 evidence 和实体标签，查询 context pack，并用 JSON 输出集成脚本。
-- 用户可以注册 Git 仓库，索引 clean snapshot，查询 symbol/reference/chunk，并分析 changeset impact。
+- 用户可以注册 Git 仓库或非 Git source directory，索引 clean snapshot 或 filesystem synthetic snapshot，查询 symbol/reference/chunk，并分析 changeset impact。
 - 常驻服务可以同时提供 Web、HTTP API、MCP Streamable HTTP 和本地 ACP session adapter。
 - Health、service doctor、index status、repo status 和 Web readiness 共享同一诊断语义。
 

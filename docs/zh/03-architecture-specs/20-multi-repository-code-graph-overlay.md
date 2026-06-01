@@ -45,7 +45,7 @@
 
 ### 3.1 Repository
 
-`CodeRepository` 继续表示一个本地 Git worktree 的稳定身份和授权边界。
+`CodeRepository` 继续表示一个本地 Git worktree 或非 Git source directory 的稳定身份和授权边界。
 
 ```text
 CodeRepository {
@@ -57,7 +57,7 @@ CodeRepository {
 }
 ```
 
-同一 Git root 可以有多个 alias；同一 alias 不得指向不同 repository id。这个约束不因多仓库集合而改变。
+同一 Git root 或 filesystem root 可以有多个 alias；同一 alias 不得指向不同 repository id。这个约束不因多仓库集合而改变。
 
 ### 3.2 Repository Snapshot
 

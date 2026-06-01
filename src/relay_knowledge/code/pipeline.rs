@@ -1,4 +1,4 @@
-use std::{path::PathBuf, thread};
+use std::{collections::BTreeMap, path::PathBuf, thread};
 
 use crate::domain::{
     CodeIndexBatch, CodeIndexResourceBudget, CodeIndexSession, CodeRepositoryRegistration,
@@ -7,14 +7,15 @@ use crate::domain::{
 
 use super::{
     CodeIndexError,
-    changes::{GitTreeEntry, tracked_entries},
-    git::{git_batch_blobs, resolve_ref, resolve_tree},
+    changes::GitTreeEntry,
     identity, parse_indexed_file,
-    scope::{
-        discover_source_layout, effective_index_path_filters,
-        selection_exclusion_reason_with_layout,
-    },
+    scope::scoped_source_snapshot,
     snapshot::{SnapshotBuild, SnapshotScopeFilters},
+    source::{
+        RepositorySourceKind, ensure_filesystem_blobs_match_content_hashes,
+        ensure_filesystem_paths_match_content_hashes, filesystem_content_hashes_for_paths,
+        filesystem_tree_hash_from_path_hashes, source_snapshot_batch_bytes,
+    },
 };
 
 const GIT_BLOB_FETCH_GROUP: usize = CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH;
@@ -33,6 +34,8 @@ pub struct CodeIndexPlan {
     source_scope: String,
     path_filters: Vec<String>,
     language_filters: Vec<String>,
+    source_kind: RepositorySourceKind,
+    filesystem_path_hashes: BTreeMap<String, String>,
     paths: Vec<GitTreeEntry>,
     cursor: usize,
     next_batch_index: usize,
@@ -88,7 +91,24 @@ impl CodeIndexPlan {
                 .iter()
                 .map(|entry| entry.path.clone())
                 .collect::<Vec<_>>();
-            let blobs = git_batch_blobs(&self.root, &self.commit, &fetched_paths)?;
+            ensure_filesystem_paths_match_content_hashes(
+                &self.root,
+                &self.commit,
+                &fetched_paths,
+                &self.filesystem_path_hashes,
+            )?;
+            let blobs = source_snapshot_batch_bytes(
+                &self.root,
+                self.source_kind,
+                &self.commit,
+                &fetched_paths,
+            )?;
+            ensure_filesystem_blobs_match_content_hashes(
+                &self.commit,
+                &fetched_paths,
+                &blobs,
+                &self.filesystem_path_hashes,
+            )?;
             let parsed_files = parse_fetched_files(&self, &fetched_paths, &blobs)?;
             for (bytes, parsed_file) in blobs.iter().zip(parsed_files) {
                 parsed_bytes = parsed_bytes.saturating_add(bytes.len());
@@ -241,45 +261,53 @@ pub fn prepare_full_index_plan(
     resource_budget: CodeIndexResourceBudget,
 ) -> Result<CodeIndexPlan, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    let commit = resolve_ref(&root, &selector.ref_selector)?;
-    let tree_hash = resolve_tree(&root, &commit)?;
-    let entries = tracked_entries(&root, &commit)?;
-    let source_layout = discover_source_layout(&entries);
-    let paths = entries
-        .into_iter()
-        .filter(|entry| {
-            selection_exclusion_reason_with_layout(
-                &entry.path,
-                &registration,
-                &selector,
-                &source_layout,
-            )
-            .is_none()
-        })
-        .collect::<Vec<_>>();
-    let path_filters = effective_index_path_filters(&registration, &selector, &source_layout);
-    let language_filters =
-        merged_filters(&registration.language_filters, &selector.language_filters);
+    let snapshot = scoped_source_snapshot(&registration, &selector, &root, &selector.ref_selector)?;
+    let filesystem_path_hashes = filesystem_plan_path_hashes(&snapshot)?;
     let source_scope = code_snapshot_scope_id(
         &registration.repository_id,
-        &tree_hash,
-        &path_filters,
-        &language_filters,
+        &snapshot.tree_hash,
+        &snapshot.path_filters,
+        &snapshot.language_filters,
     );
 
     Ok(CodeIndexPlan {
         registration,
-        root,
-        commit,
-        tree_hash,
+        root: snapshot.root,
+        commit: snapshot.resolved_commit_sha,
+        tree_hash: snapshot.tree_hash,
         source_scope,
-        path_filters,
-        language_filters,
-        paths,
+        path_filters: snapshot.path_filters,
+        language_filters: snapshot.language_filters,
+        source_kind: snapshot.kind,
+        filesystem_path_hashes,
+        paths: snapshot.entries,
         cursor: 0,
         next_batch_index: 1,
         resource_budget,
     })
+}
+
+fn filesystem_plan_path_hashes(
+    snapshot: &super::scope::ScopedSourceSnapshot,
+) -> Result<BTreeMap<String, String>, CodeIndexError> {
+    if !snapshot.kind.is_filesystem() {
+        return Ok(BTreeMap::new());
+    }
+    let paths = snapshot
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    let path_hashes = filesystem_content_hashes_for_paths(&snapshot.root, &paths)?;
+    let tree_hash = filesystem_tree_hash_from_path_hashes(&path_hashes);
+    if tree_hash != snapshot.tree_hash {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "filesystem source snapshot {} no longer matches planned filesystem content {tree_hash}",
+            snapshot.tree_hash
+        )));
+    }
+
+    Ok(path_hashes)
 }
 
 fn next_fetch_end(plan: &CodeIndexPlan, batch_file_count: usize, parsed_bytes: usize) -> usize {
@@ -325,17 +353,6 @@ fn batch_row_count(build: &SnapshotBuild) -> usize {
         .saturating_add(build.feature_flags.len())
         .saturating_add(build.chunks.len())
         .saturating_add(build.diagnostics.len())
-}
-
-fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
-    let mut merged = Vec::new();
-    for value in left.iter().chain(right.iter()) {
-        if !merged.contains(value) {
-            merged.push(value.clone());
-        }
-    }
-
-    merged
 }
 
 #[cfg(test)]

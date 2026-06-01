@@ -120,3 +120,50 @@ impl Drop for TempGitRepo {
         let _ = fs::remove_dir_all(&self.path);
     }
 }
+
+pub(in crate::code) struct TempSourceDir {
+    pub(super) path: PathBuf,
+}
+
+impl TempSourceDir {
+    pub(in crate::code) fn create(name: &str) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
+        fs::create_dir_all(path.join("src")).expect("source directory should be created");
+
+        Self { path }
+    }
+
+    pub(in crate::code) fn registration(&self) -> CodeRepositoryRegistration {
+        CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            self.path.display().to_string(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("registration should validate")
+    }
+
+    pub(super) fn selector(&self) -> CodeRepositorySelector {
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+            .expect("selector should validate")
+    }
+
+    pub(in crate::code) fn write(&self, relative: &str, content: &str) {
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent directory should exist");
+        }
+        fs::write(path, content).expect("fixture file should be written");
+    }
+}
+
+impl Drop for TempSourceDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}

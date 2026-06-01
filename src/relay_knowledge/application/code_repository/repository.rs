@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
     api::{
@@ -9,10 +9,10 @@ use crate::{
         CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
-        REGISTRATION_LANGUAGE_FILTER_ERROR, build_index_snapshot, changed_paths_for_diff,
+        REGISTRATION_LANGUAGE_FILTER_ERROR, build_index_snapshot_with_base_commit,
+        changed_paths_for_diff_with_filters, changed_paths_for_filesystem_diff,
         deleted_symbol_names_for_diff, partition_changed_paths_for_selector,
         prepare_full_index_plan, preview_repository_scope, register_repository,
-        resolve_repository_snapshot,
     },
     domain::{
         CodeFeatureFlagRequest, CodeImpactRequest, CodeIndexMode, CodeIndexRequest,
@@ -28,10 +28,10 @@ use crate::application::service::RelayKnowledgeService;
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
-    apply_code_grep_fallback, feature_flag_request_at_indexed_ref, index_start_from_completed,
-    latest_compatible_code_scope_status, merged_filters, now_millis,
-    previous_fingerprints_for_index, recover_code_index_task_leases, refresh_code_index_task_lease,
-    registration_from_status, required_code_repository, resolve_code_ref,
+    apply_code_grep_fallback, feature_flag_request_at_indexed_ref, fresh_full_index_probe,
+    index_start_from_completed, latest_compatible_code_scope_status, now_millis,
+    previous_index_state_for_index, recover_code_index_task_leases, refresh_code_index_task_lease,
+    registration_from_status, required_code_repository, resolve_code_ref_for_selector,
     resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
     storage_api_error,
 };
@@ -110,10 +110,16 @@ impl RelayKnowledgeService {
             )
             .await?
         } else {
-            let previous = previous_fingerprints_for_index(&store, &status, &request).await?;
+            let previous = previous_index_state_for_index(&store, &status, &request).await?;
             let mode = request.mode;
             let snapshot = run_blocking_code(move || {
-                build_index_snapshot(&registration, &selector, mode, previous)
+                build_index_snapshot_with_base_commit(
+                    &registration,
+                    &selector,
+                    mode,
+                    previous.fingerprints,
+                    previous.base_resolved_commit_sha,
+                )
             })
             .await?;
             store
@@ -212,6 +218,22 @@ impl RelayKnowledgeService {
             return Ok(index_start_from_completed(response, None));
         }
         recover_code_index_task_leases(&store, now_millis()).await?;
+        let payload_json = serde_json::to_string(&request)
+            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
+        if let Some(active_task) = self
+            .active_full_index_task_for_request(&store, &status, &request, &payload_json)
+            .await?
+        {
+            return self
+                .index_start_response_from_task(
+                    &store,
+                    status,
+                    active_task,
+                    request.repository.ref_selector,
+                    &context,
+                )
+                .await;
+        }
 
         let registration = registration_from_status(&status);
         let selector = request.repository.clone();
@@ -221,8 +243,6 @@ impl RelayKnowledgeService {
         })
         .await?;
         let session = plan.session();
-        let payload_json = serde_json::to_string(&request)
-            .map_err(|error| ApiError::invalid_argument(error.to_string()))?;
         let input_fingerprint = format!(
             "full:{}:{}:{}",
             session.repository_id, session.tree_hash, session.source_scope
@@ -270,6 +290,39 @@ impl RelayKnowledgeService {
             &context,
         )
         .await
+    }
+
+    async fn active_full_index_task_for_request(
+        &self,
+        store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+        status: &CodeRepositoryStatus,
+        request: &CodeIndexRequest,
+        payload_json: &str,
+    ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, ApiError> {
+        let Some(active_task) = store
+            .active_code_index_task(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?
+        else {
+            return Ok(None);
+        };
+        if !active_task.state.is_unfinished()
+            || active_task.mode != CodeIndexMode::Full
+            || active_task.payload_json != payload_json
+        {
+            return Ok(None);
+        }
+        let resolved = resolve_code_ref_for_selector(
+            status,
+            &request.repository,
+            request.repository.ref_selector.clone(),
+        )
+        .await?;
+        if resolved == active_task.resolved_commit_sha {
+            Ok(Some(active_task))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn index_start_response_from_task(
@@ -406,23 +459,13 @@ impl RelayKnowledgeService {
         if request.mode != CodeIndexMode::Full {
             return Ok(None);
         }
-        let registration = registration_from_status(status);
-        let selector = request.repository.clone();
-        let (resolved_commit_sha, tree_hash) = run_blocking_code(move || {
-            resolve_repository_snapshot(&registration.root_path, &selector.ref_selector)
-        })
-        .await?;
-        let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
-        let language_filters = merged_filters(
-            &status.language_filters,
-            &request.repository.language_filters,
-        );
+        let probe = fresh_full_index_probe(status, &request.repository).await?;
         let scoped_status = store
             .code_repository_scope_status(
                 request.repository.repository.clone(),
-                resolved_commit_sha.clone(),
-                path_filters,
-                language_filters,
+                probe.resolved_commit_sha.clone(),
+                probe.path_filters.clone(),
+                probe.language_filters.clone(),
             )
             .await
             .map_err(storage_api_error)?;
@@ -431,12 +474,12 @@ impl RelayKnowledgeService {
         };
         let expected_source_scope = expected_scope_id(
             &status.repository_id,
-            &tree_hash,
+            &probe.tree_hash,
             &scoped_status.path_filters,
             &scoped_status.language_filters,
         );
         if scoped_status.stale
-            || scoped_status.tree_hash.as_deref() != Some(tree_hash.as_str())
+            || scoped_status.tree_hash.as_deref() != Some(probe.tree_hash.as_str())
             || expected_source_scope.as_deref().is_some_and(|expected| {
                 scoped_status.last_indexed_scope_id.as_deref() != Some(expected)
             })
@@ -462,8 +505,8 @@ impl RelayKnowledgeService {
         let summary = crate::domain::CodeIndexSummary {
             repository_id: scoped_status.repository_id.clone(),
             source_scope,
-            resolved_commit_sha,
-            tree_hash,
+            resolved_commit_sha: probe.resolved_commit_sha,
+            tree_hash: probe.tree_hash,
             indexed_file_count: scoped_status.indexed_file_count,
             changed_path_count: 0,
             skipped_unchanged_count: scoped_status.indexed_file_count,
@@ -760,15 +803,62 @@ impl RelayKnowledgeService {
     ) -> Result<CodeRepositoryImpactResponse, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
         let status = required_code_repository(&store, &request.repository.repository).await?;
-        let head_commit = resolve_code_ref(&status, request.head_ref.clone()).await?;
+        let head_commit =
+            resolve_code_ref_for_selector(&status, &request.repository, request.head_ref.clone())
+                .await?;
         request.repository.ref_selector = head_commit.clone();
         let scoped_status =
             resolved_code_scope_status(&store, &status, &request.repository).await?;
         let root = PathBuf::from(status.root_path.clone());
         let base_ref = request.base_ref.clone();
         let head_ref = head_commit.clone();
-        let changed_paths =
-            run_blocking_code(move || changed_paths_for_diff(root, &base_ref, &head_ref)).await?;
+        let path_filters = scoped_status.path_filters.clone();
+        let language_filters = scoped_status.language_filters.clone();
+        let base_fingerprints = if base_ref.starts_with("filesystem:") {
+            let mut base_selector = request.repository.clone();
+            base_selector.ref_selector = base_ref.clone();
+            match resolved_code_scope_status(&store, &status, &base_selector).await {
+                Ok(base_status) => match base_status.last_indexed_scope_id {
+                    Some(source_scope) => Some(
+                        store
+                            .code_file_fingerprints_for_scope(source_scope)
+                            .await
+                            .map_err(storage_api_error)?,
+                    ),
+                    None => None,
+                },
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+        let changed_paths = if let Some(base_fingerprints) = base_fingerprints {
+            run_blocking_code(move || {
+                let previous_hashes = base_fingerprints
+                    .into_iter()
+                    .map(|file| (file.path, file.blob_hash))
+                    .collect::<BTreeMap<_, _>>();
+                changed_paths_for_filesystem_diff(
+                    &root,
+                    &head_ref,
+                    &path_filters,
+                    &language_filters,
+                    &previous_hashes,
+                )
+            })
+            .await?
+        } else {
+            run_blocking_code(move || {
+                changed_paths_for_diff_with_filters(
+                    root,
+                    &base_ref,
+                    &head_ref,
+                    &path_filters,
+                    &language_filters,
+                )
+            })
+            .await?
+        };
         let registration = registration_from_status(&status);
         let path_groups = {
             let registration = registration.clone();

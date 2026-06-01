@@ -4,7 +4,6 @@ use crate::{
         CodeRepositorySetQueryResponse, CodeRepositorySetRefreshResponse,
         CodeRepositorySetStatusResponse, RequestContext,
     },
-    code::{CodeIndexError, resolve_repository_snapshot},
     domain::{
         CodeQueryKind, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
         CodeRepositorySetCreateRequest, CodeRepositorySetMemberStatus, CodeRepositorySetQueryHit,
@@ -18,11 +17,15 @@ use crate::{
     },
 };
 use futures_util::{StreamExt, stream};
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use crate::application::{
-    code_repository::support::apply_code_grep_fallback, service::RelayKnowledgeService,
+    code_repository::support::{apply_code_grep_fallback, resolve_code_ref_for_selector},
+    service::RelayKnowledgeService,
 };
+
+#[cfg(test)]
+use crate::code::CodeIndexError;
 
 use super::{
     plan::{
@@ -86,14 +89,18 @@ impl RelayKnowledgeService {
                     request.repository_alias
                 ))
             })?;
-        let root_path = repository.root_path.clone();
-        let ref_selector = request.ref_selector.clone();
-        let (resolved_commit_sha, _tree_hash) =
-            run_blocking_code(move || resolve_repository_snapshot(root_path, &ref_selector))
-                .await?;
         let path_filters = merged_filters(&repository.path_filters, &request.path_filters);
         let language_filters =
             merged_filters(&repository.language_filters, &request.language_filters);
+        let selector = CodeRepositorySelector {
+            repository: request.repository_alias.clone(),
+            ref_selector: request.ref_selector.clone(),
+            path_filters: request.path_filters.clone(),
+            language_filters: request.language_filters.clone(),
+        };
+        let resolved_commit_sha =
+            resolve_code_ref_for_selector(&repository, &selector, request.ref_selector.clone())
+                .await?;
         let scope = store
             .code_repository_scope_status(
                 request.repository_alias.clone(),
@@ -544,16 +551,18 @@ async fn moving_member_stale_reason(
                 member.repository_alias
             ))
         })?;
-    let root_path = PathBuf::from(repository.root_path);
     let ref_selector = member.ref_selector.clone();
-    let resolved =
-        tokio::task::spawn_blocking(move || resolve_repository_snapshot(root_path, &ref_selector))
-            .await
-            .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+    let selector = CodeRepositorySelector {
+        repository: member.repository_alias.clone(),
+        ref_selector: ref_selector.clone(),
+        path_filters: member.path_filters.clone(),
+        language_filters: member.language_filters.clone(),
+    };
+    let resolved = resolve_code_ref_for_selector(&repository, &selector, ref_selector).await;
 
     match resolved {
-        Ok((current_commit, _)) if current_commit == member.resolved_commit_sha => Ok(None),
-        Ok((current_commit, _)) => Ok(Some(format!(
+        Ok(current_commit) if current_commit == member.resolved_commit_sha => Ok(None),
+        Ok(current_commit) => Ok(Some(format!(
             "repository set member '{}' ref '{}' now resolves to {}, not stored snapshot {}",
             member.repository_alias,
             member.ref_selector,
@@ -562,7 +571,9 @@ async fn moving_member_stale_reason(
         ))),
         Err(error) => Ok(Some(format!(
             "repository set member '{}' ref '{}' could not be resolved: {error}",
-            member.repository_alias, member.ref_selector
+            member.repository_alias,
+            member.ref_selector,
+            error = error.message
         ))),
     }
 }
@@ -702,17 +713,7 @@ fn now_millis() -> u64 {
         })
 }
 
-async fn run_blocking_code<T, F>(operation: F) -> Result<T, ApiError>
-where
-    T: Send + 'static,
-    F: FnOnce() -> Result<T, CodeIndexError> + Send + 'static,
-{
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(|error| ApiError::storage_unavailable(error.to_string()))?
-        .map_err(code_api_error)
-}
-
+#[cfg(test)]
 fn code_api_error(error: CodeIndexError) -> ApiError {
     match error {
         CodeIndexError::InvalidInput(message) => ApiError::invalid_argument(message),

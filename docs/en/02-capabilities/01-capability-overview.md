@@ -16,7 +16,7 @@ The foundation is local graph storage, evidence writes, query, CLI, Web, and dia
 
 - The local SQLite profile and deterministic semantic/vector read models work without configuration.
 - Users can write evidence and entity labels, query context packs, and integrate scripts through JSON output.
-- Users can register Git repositories, index clean snapshots, query symbols/references/chunks, and analyze changeset impact.
+- Users can register Git repositories or non-Git source directories, index clean snapshots or filesystem synthetic snapshots, query symbols/references/chunks, and analyze changeset impact.
 - Resident service mode can expose Web, HTTP API, MCP Streamable HTTP, and local ACP session access.
 - Health, service doctor, index status, repo status, and Web readiness share the same diagnostic semantics.
 

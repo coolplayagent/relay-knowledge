@@ -45,7 +45,7 @@ This is the English documentation page for `04-research/07-relay-knowledge-imple
 - `application` 层通过 `RelayKnowledgeService` 收口业务入口，CLI 和未来 adapter 不需要直接访问 SQLite 或 tree-sitter。
 - `storage` 层通过 trait 隔离图事实、mutation log、index metadata 和 code graph 查询，SQLite 实现把阻塞数据库操作放到 `spawn_blocking` worker 中。
 - `domain` 层已有 `GraphVersion`、`SourceScope`、`FreshnessPolicy`、`IndexStatus`、`GraphMutationBatch`、`EvidenceRecord` 和代码图类型，适合继续扩展成更完整的事实模型。
-- `code` 和 `application::code_service` 已经实现 Git 仓库注册、clean snapshot 索引、增量 diff、worktree overlay、Tree-sitter 多语言解析、代码图检索、query-time 内部 exact-text source fallback 和 diff impact。
+- `code` 和 `application::code_service` 已经实现 Git 仓库与非 Git source directory 注册、clean snapshot 与 filesystem synthetic snapshot 索引、增量 diff、worktree overlay、Tree-sitter 多语言解析、代码图检索、query-time 内部 exact-text source fallback 和 diff impact。
 - `net::http` 和 `net::qos` 已经拥有配置校验、事件驱动 HTTP server、超时、请求体预算和 admission policy 基础；MCP Streamable HTTP 已经在这些边界内运行。
 - `interfaces::agent::mcp` 已经实现 MCP Streamable HTTP session、protocol header 校验、tool calls、resources、prompts、Prometheus metrics endpoint、access policy、QoS admission、cancellation registry、index refresh 权限控制、code graph query、code impact、bounded audit log 和可选 JSONL audit sink。
 - `interfaces::agent::acp` 已经实现本地 ACP session adapter，支持 initialize metadata、session/new、session/prompt progress、cancellation、context artifact、runtime identity、QoS admission、bounded audit log 和可选 JSONL audit sink。

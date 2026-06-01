@@ -45,7 +45,7 @@ The model has three layers.
 
 ### 3.1 Repository
 
-`CodeRepository` continues to represent one local Git worktree and its authorization boundary.
+`CodeRepository` continues to represent one local Git worktree or non-Git source directory and its authorization boundary.
 
 ```text
 CodeRepository {
@@ -57,7 +57,7 @@ CodeRepository {
 }
 ```
 
-One Git root can have multiple aliases. One alias cannot point to different repository ids. Repository sets do not change this rule.
+One Git or filesystem root can have multiple aliases. One alias cannot point to different repository ids. Repository sets do not change this rule.
 
 ### 3.2 Repository Snapshot
 

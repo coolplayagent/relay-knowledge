@@ -3,12 +3,15 @@ use std::path::PathBuf;
 use crate::{
     api::{ApiError, CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse},
     code::{
-        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, resolve_repository_ref,
-        source_declarations_for_identity, source_grep_matches,
+        CodeIndexError, SOURCE_GREP_CANDIDATE_FILE_LIMIT, prepare_full_index_plan,
+        repository_uses_filesystem_source, resolve_repository_ref_with_filters,
+        resolve_repository_snapshot_with_filters, source_declarations_for_identity,
+        source_grep_matches,
     },
     domain::{
-        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeRepositoryRegistration,
-        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest,
+        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
+        CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositorySelector,
+        CodeRepositoryStatus, CodeRetrievalRequest,
     },
     storage::{
         CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
@@ -24,6 +27,18 @@ pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
 pub(super) const CODE_INDEX_TASK_RETRY_BACKOFF_MS: u64 = 60_000;
 pub(super) const RETAIN_RECENT_CODE_SCOPES: usize = 2;
+
+pub(super) struct PreviousIndexState {
+    pub(super) fingerprints: Vec<crate::domain::CodeFileFingerprint>,
+    pub(super) base_resolved_commit_sha: Option<String>,
+}
+
+pub(super) struct FreshFullIndexProbe {
+    pub(super) resolved_commit_sha: String,
+    pub(super) tree_hash: String,
+    pub(super) path_filters: Vec<String>,
+    pub(super) language_filters: Vec<String>,
+}
 
 pub(super) async fn required_code_repository(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
@@ -105,6 +120,51 @@ pub(super) fn registration_from_status(
     }
 }
 
+pub(super) async fn fresh_full_index_probe(
+    status: &CodeRepositoryStatus,
+    selector: &CodeRepositorySelector,
+) -> Result<FreshFullIndexProbe, ApiError> {
+    let registration = registration_from_status(status);
+    let selector = selector.clone();
+    let root = PathBuf::from(status.root_path.clone());
+    run_blocking_code(move || {
+        if selector.ref_selector.starts_with("filesystem:")
+            || repository_uses_filesystem_source(&root)?
+        {
+            let plan = prepare_full_index_plan(
+                registration,
+                selector,
+                CodeIndexResourceBudget::default(),
+            )?;
+            let session = plan.session();
+            return Ok(FreshFullIndexProbe {
+                resolved_commit_sha: session.resolved_commit_sha,
+                tree_hash: session.tree_hash,
+                path_filters: session.path_filters,
+                language_filters: session.language_filters,
+            });
+        }
+
+        let path_filters = merged_filters(&registration.path_filters, &selector.path_filters);
+        let language_filters =
+            merged_filters(&registration.language_filters, &selector.language_filters);
+        let (resolved_commit_sha, tree_hash) = resolve_repository_snapshot_with_filters(
+            &root,
+            &selector.ref_selector,
+            &path_filters,
+            &language_filters,
+        )?;
+
+        Ok(FreshFullIndexProbe {
+            resolved_commit_sha,
+            tree_hash,
+            path_filters,
+            language_filters,
+        })
+    })
+    .await
+}
+
 pub(super) fn index_start_from_completed(
     response: CodeRepositoryIndexResponse,
     task: Option<crate::domain::CodeIndexTaskRecord>,
@@ -119,18 +179,23 @@ pub(super) fn index_start_from_completed(
     }
 }
 
-pub(super) async fn previous_fingerprints_for_index(
+pub(super) async fn previous_index_state_for_index(
     store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
     status: &CodeRepositoryStatus,
     request: &CodeIndexRequest,
-) -> Result<Vec<crate::domain::CodeFileFingerprint>, ApiError> {
+) -> Result<PreviousIndexState, ApiError> {
     let CodeIndexMode::Incremental { base_ref, .. } = &request.mode else {
-        return store
+        let fingerprints = store
             .code_file_fingerprints(status.repository_id.clone())
             .await
-            .map_err(storage_api_error);
+            .map_err(storage_api_error)?;
+        return Ok(PreviousIndexState {
+            fingerprints,
+            base_resolved_commit_sha: status.last_indexed_commit.clone(),
+        });
     };
-    let base_commit = resolve_code_ref(status, base_ref.clone()).await?;
+    let base_commit =
+        resolve_code_ref_for_selector(status, &request.repository, base_ref.clone()).await?;
     let path_filters = merged_filters(&status.path_filters, &request.repository.path_filters);
     let language_filters = merged_filters(
         &status.language_filters,
@@ -168,10 +233,14 @@ pub(super) async fn previous_fingerprints_for_index(
         ))
     })?;
 
-    store
+    let fingerprints = store
         .code_file_fingerprints_for_scope(source_scope)
         .await
-        .map_err(storage_api_error)
+        .map_err(storage_api_error)?;
+    Ok(PreviousIndexState {
+        fingerprints,
+        base_resolved_commit_sha: Some(base_commit),
+    })
 }
 
 pub(super) async fn apply_code_grep_fallback(
@@ -231,9 +300,18 @@ pub(super) async fn apply_code_grep_fallback(
         let registration = registration_from_status(base_status);
         let commit = plan.commit.clone();
         let paths = plan.paths.clone();
+        let path_filters = plan.path_filters.clone();
+        let language_filters = plan.language_filters.clone();
         let identity = identity.clone();
         let declarations = run_blocking_code(move || {
-            source_declarations_for_identity(&registration, &commit, paths, &identity)
+            source_declarations_for_identity(
+                &registration,
+                &commit,
+                paths,
+                &path_filters,
+                &language_filters,
+                &identity,
+            )
         })
         .await?;
         append_definition_source_fallback(scoped_status, request, results, declarations);
@@ -246,8 +324,12 @@ pub(super) async fn retrieval_request_at_indexed_ref(
     mut request: CodeRetrievalRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<CodeRetrievalRequest, ApiError> {
-    request.repository.ref_selector =
-        indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
+    request.repository.ref_selector = indexed_commit_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
 
     Ok(request)
 }
@@ -256,8 +338,12 @@ pub(super) async fn feature_flag_request_at_indexed_ref(
     mut request: CodeFeatureFlagRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<CodeFeatureFlagRequest, ApiError> {
-    request.repository.ref_selector =
-        indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
+    request.repository.ref_selector = indexed_commit_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
 
     Ok(request)
 }
@@ -378,17 +464,77 @@ pub(super) async fn active_index_matches_request(
         return Ok(false);
     };
 
-    Ok(task.resolved_commit_sha == selector.ref_selector
-        && active_languages_cover_requested_scope(
-            &status.language_filters,
-            &task.language_filters,
-            &selector.language_filters,
-        )
-        && active_paths_cover_requested_scope(
-            &status.path_filters,
-            &task.path_filters,
-            &selector.path_filters,
-        ))
+    if !active_task_filters_cover_requested_scope(status, &task, selector) {
+        return Ok(false);
+    }
+
+    if task.resolved_commit_sha == selector.ref_selector {
+        return Ok(true);
+    }
+
+    active_non_git_index_matches_selector(status, &task, selector).await
+}
+
+async fn active_non_git_index_matches_selector(
+    status: &CodeRepositoryStatus,
+    task: &CodeIndexTaskRecord,
+    selector: &CodeRepositorySelector,
+) -> Result<bool, ApiError> {
+    if !selector.ref_selector.starts_with("filesystem:") {
+        return Ok(false);
+    }
+
+    let root = PathBuf::from(status.root_path.clone());
+    let task_ref_selector = task.ref_selector.clone();
+    let task_resolved_commit = task.resolved_commit_sha.clone();
+    let task_path_filters = task.path_filters.clone();
+    let task_language_filters = task.language_filters.clone();
+    let selector_resolved_commit = selector.ref_selector.clone();
+    let selector_path_filters = merged_filters(&status.path_filters, &selector.path_filters);
+    let selector_language_filters =
+        merged_filters(&status.language_filters, &selector.language_filters);
+
+    run_blocking_code(move || {
+        if !repository_uses_filesystem_source(&root)? {
+            return Ok(false);
+        }
+
+        let live_task_commit = resolve_repository_ref_with_filters(
+            root.clone(),
+            &task_ref_selector,
+            &task_path_filters,
+            &task_language_filters,
+        )?;
+        if live_task_commit != task_resolved_commit {
+            return Ok(false);
+        }
+
+        let live_selector_commit = resolve_repository_ref_with_filters(
+            root,
+            &task_ref_selector,
+            &selector_path_filters,
+            &selector_language_filters,
+        )?;
+
+        Ok(live_selector_commit == selector_resolved_commit)
+    })
+    .await
+}
+
+fn active_task_filters_cover_requested_scope(
+    status: &CodeRepositoryStatus,
+    task: &CodeIndexTaskRecord,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    active_languages_cover_requested_scope(
+        &status.language_filters,
+        &task.language_filters,
+        &selector.language_filters,
+    ) && active_paths_cover_requested_scope(
+        &status.path_filters,
+        &task.path_filters,
+        &selector.path_filters,
+    )
 }
 
 fn active_paths_cover_requested_scope(
@@ -463,8 +609,9 @@ pub(super) fn now_millis() -> u64 {
         })
 }
 
-pub(super) async fn indexed_commit_for_ref(
+pub(super) async fn indexed_commit_for_selector(
     status: &CodeRepositoryStatus,
+    selector: &CodeRepositorySelector,
     ref_selector: String,
 ) -> Result<String, ApiError> {
     if ref_selector == "worktree" {
@@ -482,7 +629,7 @@ pub(super) async fn indexed_commit_for_ref(
         )));
     }
 
-    resolve_code_ref(status, ref_selector).await
+    resolve_code_ref_for_selector(status, selector, ref_selector).await
 }
 
 fn is_worktree_overlay(status: &CodeRepositoryStatus) -> bool {
@@ -496,13 +643,38 @@ fn is_worktree_overlay(status: &CodeRepositoryStatus) -> bool {
             .is_some_and(|value| value.starts_with("worktree:"))
 }
 
-pub(super) async fn resolve_code_ref(
+pub(super) async fn resolve_code_ref_for_selector(
     status: &CodeRepositoryStatus,
+    selector: &CodeRepositorySelector,
     ref_selector: String,
 ) -> Result<String, ApiError> {
     let root = PathBuf::from(status.root_path.clone());
+    let path_filters = merged_filters(&status.path_filters, &selector.path_filters);
+    let language_filters = merged_filters(&status.language_filters, &selector.language_filters);
+    let active_commit = status.last_indexed_commit.clone();
+    let active_path_filters = status.path_filters.clone();
+    let active_language_filters = status.language_filters.clone();
+    let selector_fits_active_scope = !ref_selector.starts_with("filesystem:")
+        && selector_filters_fit_indexed_scope(status, selector);
 
-    run_blocking_code(move || resolve_repository_ref(root, &ref_selector)).await
+    run_blocking_code(move || {
+        if selector_fits_active_scope
+            && let Some(active_commit) = active_commit
+            && repository_uses_filesystem_source(&root)?
+        {
+            let active_live_commit = resolve_repository_ref_with_filters(
+                root.clone(),
+                &ref_selector,
+                &active_path_filters,
+                &active_language_filters,
+            )?;
+            if active_live_commit == active_commit {
+                return Ok(active_commit);
+            }
+        }
+        resolve_repository_ref_with_filters(root, &ref_selector, &path_filters, &language_filters)
+    })
+    .await
 }
 
 pub(super) async fn run_blocking_code<T, F>(operation: F) -> Result<T, ApiError>
