@@ -1,14 +1,48 @@
 use std::path::Path;
 
+#[cfg(test)]
+use std::{path::PathBuf, sync::Mutex};
+
 use super::{
     CodeIndexError,
     git::{git_bytes, validate_git_ref_arg},
 };
 
+#[cfg(test)]
+static TRACKED_ENTRIES_OBSERVER: Mutex<Option<(PathBuf, usize)>> = Mutex::new(None);
+
+#[cfg(test)]
+pub(crate) fn reset_tracked_entries_call_count_for_root(root: PathBuf) {
+    *TRACKED_ENTRIES_OBSERVER
+        .lock()
+        .expect("tracked entries observer should lock") = Some((root, 0));
+}
+
+#[cfg(test)]
+pub(crate) fn tracked_entries_call_count_for_root(root: &Path) -> usize {
+    TRACKED_ENTRIES_OBSERVER
+        .lock()
+        .expect("tracked entries observer should lock")
+        .as_ref()
+        .filter(|(observed_root, _)| observed_root == root)
+        .map(|(_, count)| *count)
+        .unwrap_or(0)
+}
+
 pub(super) fn tracked_entries(
     root: &Path,
     commit: &str,
 ) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
+    #[cfg(test)]
+    if let Some((observed_root, count)) = TRACKED_ENTRIES_OBSERVER
+        .lock()
+        .expect("tracked entries observer should lock")
+        .as_mut()
+        && observed_root == root
+    {
+        *count += 1;
+    }
+
     let bytes = git_bytes(root, ["ls-tree", "-r", "-l", "-z", commit])?;
     let mut entries = Vec::new();
     for record in split_nul(&bytes) {

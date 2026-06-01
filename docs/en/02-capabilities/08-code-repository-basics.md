@@ -8,7 +8,7 @@
 
 ## Capability Positioning
 
-Code repository basics let users register Git repositories as first-class sources, index clean snapshots, and query code context through the same application service.
+Code repository basics let users register Git repositories or non-Git source directories as first-class sources, index clean snapshots or filesystem synthetic snapshots, and query code context through the same application service.
 
 ## User-visible Behavior
 
@@ -21,10 +21,10 @@ relay-knowledge repo update relay-knowledge --base main --head HEAD --format jso
 relay-knowledge repo status relay-knowledge --format json
 ```
 
-When `--alias` is omitted or blank, registration uses the resolved Git root
-directory name as the stable repository alias. Agents should prefer this default
-for first-time project registration so later sessions reuse the same index;
-`--alias` remains available as an explicit override.
+When `--alias` is omitted or blank, registration uses the resolved Git root or
+filesystem root directory name as the stable repository alias. Agents should
+prefer this default for first-time project registration so later sessions reuse
+the same index; `--alias` remains available as an explicit override.
 
 `repo query` supports `--limit`, `--ref`, repeatable `--path`, repeatable `--language`, and freshness policy. `repo register` rejects language filters so mixed-language repositories keep their full language surface; use query-time `--language` to narrow results.
 
@@ -49,6 +49,16 @@ dataset dumps unless an explicit path filter opts in. Dirty worktree overlays
 still use Git status for untracked files and do not recursively expand
 untracked broad dependency/cache/build directories unless an explicit path
 filter opts in.
+
+Non-Git source directories have no tracked tree authority, so their default scan
+is whitelist based: supported source/config/docs files at the root and
+source-like roots such as `src/`, `include/`, `lib/`, `Sources/`, `packages/`,
+`modules/`, `plugins/`, `extensions/`, `docs/`, and `config/` are eligible.
+`build/`, `dist/`, `target/`, `node_modules/`, `vendor/`, `third_party/`,
+cache, virtualenv, and coverage directories are skipped by default and scanned
+only when an explicit `--path` opts in. For non-Git sources, `HEAD` or any other
+ref selector resolves to the current filesystem synthetic snapshot, and full,
+incremental, and worktree-overlay modes share filesystem fingerprint semantics.
 
 For example, a mixed-layout repository can register
 `--path external_deps/python_sdk`,

@@ -11,26 +11,220 @@ use crate::domain::{
 
 use super::{
     CodeIndexError,
-    changes::{GitTreeEntry, tracked_entries},
+    changes::GitTreeEntry,
     languages::language_id,
     parser::dependency_manifest_language_ids,
     parser::dependency_manifest_overrides_default_exclusion,
-    resolve_ref, resolve_tree,
+    snapshot,
+    source::{
+        FileSystemScanPolicy, RepositorySourceKind, RepositorySourceSnapshot,
+        filesystem_source_snapshot, source_snapshot,
+    },
+    source::{
+        explicit_path_filter_opts_into_default_file_exclusion, filesystem_content_hashes_for_paths,
+        filesystem_default_source_allows, filesystem_registration_identity,
+        filesystem_tree_hash_from_path_hashes, source_commit_is_filesystem,
+        source_default_file_preset_excludes, source_kind, source_language_filter_allows,
+        source_path_has_indexable_content,
+    },
     source_roots::{NESTED_SOURCE_MARKERS, STRIPPABLE_SOURCE_ROOTS},
 };
 
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
 const PREVIEW_MAX_LARGEST_FILES: usize = 10;
 const DEFAULT_TEXT_FILE_BUDGET_BYTES: usize = 512 * 1024;
-const DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
-    "7z", "avif", "bmp", "bz2", "class", "eot", "gif", "gz", "ico", "jar", "jpeg", "jpg", "jsonl",
-    "lockb", "map", "mov", "mp4", "otf", "pdf", "png", "svg", "tar", "tgz", "ttf", "wasm", "webm",
-    "woff", "woff2", "zip", "zst",
-];
-const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &["uv.lock"];
 const SOURCE_LAYOUT_DISCOVERY_MAX_PATHS: usize = 200_000;
 const SOURCE_LAYOUT_DISCOVERY_MAX_ROOTS: usize = 512;
 const AUTO_SOURCE_SCOPE_FILTERS: &[&str] = &[".", "src", "include", "lib", "Sources"];
+
+#[derive(Debug, Clone)]
+pub(super) struct ScopedSourceSnapshot {
+    pub(super) kind: RepositorySourceKind,
+    pub(super) root: PathBuf,
+    pub(super) resolved_commit_sha: String,
+    pub(super) tree_hash: String,
+    pub(super) entries: Vec<GitTreeEntry>,
+    pub(super) content_hashes: BTreeMap<String, String>,
+    pub(super) path_filters: Vec<String>,
+    pub(super) language_filters: Vec<String>,
+}
+
+pub(super) fn scoped_source_snapshot(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    root: &std::path::Path,
+    ref_selector: &str,
+) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    let allow_filesystem_ref =
+        registration_allows_filesystem_ref(registration, root, ref_selector)?;
+    scoped_source_snapshot_inner(
+        registration,
+        selector,
+        root,
+        ref_selector,
+        allow_filesystem_ref,
+    )
+}
+
+pub(super) fn scoped_source_snapshot_for_filters(
+    root: &std::path::Path,
+    ref_selector: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    let registration = CodeRepositoryRegistration {
+        repository_id: "repo".to_owned(),
+        alias: "alias".to_owned(),
+        root_path: root.display().to_string(),
+        path_filters: path_filters.to_vec(),
+        language_filters: language_filters.to_vec(),
+    };
+    let selector = CodeRepositorySelector {
+        repository: "alias".to_owned(),
+        ref_selector: ref_selector.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+    };
+
+    scoped_source_snapshot_inner(&registration, &selector, root, ref_selector, true)
+}
+
+pub(super) fn scoped_source_snapshot_for_registration(
+    registration: &CodeRepositoryRegistration,
+    ref_selector: &str,
+) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    let root = PathBuf::from(&registration.root_path);
+    let selector = CodeRepositorySelector {
+        repository: registration.alias.clone(),
+        ref_selector: ref_selector.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+    };
+
+    scoped_source_snapshot(registration, &selector, &root, ref_selector)
+}
+
+pub(super) fn scoped_source_snapshot_for_registration_filters(
+    registration: &CodeRepositoryRegistration,
+    ref_selector: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    let root = PathBuf::from(&registration.root_path);
+    let selector = CodeRepositorySelector {
+        repository: registration.alias.clone(),
+        ref_selector: ref_selector.to_owned(),
+        path_filters: path_filters.to_vec(),
+        language_filters: language_filters.to_vec(),
+    };
+
+    scoped_source_snapshot(registration, &selector, &root, ref_selector)
+}
+
+fn scoped_source_snapshot_inner(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    root: &std::path::Path,
+    ref_selector: &str,
+    allow_filesystem_ref: bool,
+) -> Result<ScopedSourceSnapshot, CodeIndexError> {
+    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
+        registration
+            .path_filters
+            .iter()
+            .chain(selector.path_filters.iter()),
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    let snapshot =
+        source_snapshot_for_scope(root, ref_selector, filesystem_policy, allow_filesystem_ref)?;
+    let source_layout = discover_source_layout(&snapshot.entries);
+    let path_filters = effective_index_path_filters(registration, selector, &source_layout);
+    let language_filters =
+        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
+    let entries = snapshot
+        .entries
+        .into_iter()
+        .filter(|entry| {
+            selection_exclusion_reason_for_source(
+                &entry.path,
+                registration,
+                selector,
+                &source_layout,
+                snapshot.kind,
+            )
+            .is_none()
+        })
+        .collect::<Vec<_>>();
+    let (resolved_commit_sha, tree_hash, content_hashes) = if snapshot.kind.is_filesystem() {
+        scoped_filesystem_tree_hash(&snapshot.root, &entries, ref_selector)?
+    } else {
+        (
+            snapshot.resolved_commit_sha,
+            snapshot.tree_hash,
+            BTreeMap::new(),
+        )
+    };
+
+    Ok(ScopedSourceSnapshot {
+        kind: snapshot.kind,
+        root: snapshot.root,
+        resolved_commit_sha,
+        tree_hash,
+        entries,
+        content_hashes,
+        path_filters,
+        language_filters,
+    })
+}
+
+fn source_snapshot_for_scope(
+    root: &std::path::Path,
+    ref_selector: &str,
+    filesystem_policy: FileSystemScanPolicy,
+    allow_filesystem_ref: bool,
+) -> Result<RepositorySourceSnapshot, CodeIndexError> {
+    if source_commit_is_filesystem(ref_selector) && allow_filesystem_ref {
+        return filesystem_source_snapshot(root, filesystem_policy);
+    }
+
+    source_snapshot(root, ref_selector, filesystem_policy)
+}
+
+fn registration_allows_filesystem_ref(
+    registration: &CodeRepositoryRegistration,
+    root: &std::path::Path,
+    ref_selector: &str,
+) -> Result<bool, CodeIndexError> {
+    if !source_commit_is_filesystem(ref_selector) {
+        return Ok(false);
+    }
+    if registration.repository_id == filesystem_registration_identity(root)? {
+        return Ok(true);
+    }
+
+    Ok(source_kind(root)?.is_filesystem())
+}
+
+pub(super) fn scoped_filesystem_tree_hash(
+    root: &std::path::Path,
+    entries: &[GitTreeEntry],
+    ref_selector: &str,
+) -> Result<(String, String, BTreeMap<String, String>), CodeIndexError> {
+    let paths = entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    let content_hashes = filesystem_content_hashes_for_paths(root, &paths)?;
+    let tree_hash = filesystem_tree_hash_from_path_hashes(&content_hashes);
+    if source_commit_is_filesystem(ref_selector) && ref_selector != tree_hash {
+        return Err(CodeIndexError::InvalidInput(format!(
+            "filesystem source snapshot {ref_selector} no longer matches live indexed scope {tree_hash}"
+        )));
+    }
+
+    Ok((tree_hash.clone(), tree_hash, content_hashes))
+}
 
 /// Returns a non-mutating preview of the effective repository indexing scope.
 pub fn preview_repository_scope(
@@ -38,8 +232,22 @@ pub fn preview_repository_scope(
     selector: &CodeRepositorySelector,
 ) -> Result<CodeRepositoryScopePreview, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
-    let commit = resolve_ref(&root, &selector.ref_selector)?;
-    let tree_hash = resolve_tree(&root, &commit)?;
+    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
+        registration
+            .path_filters
+            .iter()
+            .chain(selector.path_filters.iter()),
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    let allow_filesystem_ref =
+        registration_allows_filesystem_ref(registration, &root, &selector.ref_selector)?;
+    let snapshot = source_snapshot_for_scope(
+        &root,
+        &selector.ref_selector,
+        filesystem_policy,
+        allow_filesystem_ref,
+    )?;
     let mut selected_byte_count = 0usize;
     let mut selected_file_count = 0usize;
     let mut unsupported_file_count = 0usize;
@@ -49,14 +257,16 @@ pub fn preview_repository_scope(
     let mut largest_files = Vec::<CodeRepositoryLargestFile>::new();
     let mut excluded_paths = Vec::<CodeRepositoryExcludedPath>::new();
 
-    let entries = tracked_entries(&root, &commit)?;
+    let entries = snapshot.entries;
     let source_layout = discover_source_layout(&entries);
+    let mut selected_entries = Vec::new();
     for entry in entries {
-        if let Some(reason) = selection_exclusion_reason_with_layout(
+        if let Some(reason) = selection_exclusion_reason_for_source(
             &entry.path,
             registration,
             selector,
             &source_layout,
+            snapshot.kind,
         ) {
             if excluded_paths.len() < PREVIEW_MAX_EXCLUDED_PATHS {
                 excluded_paths.push(CodeRepositoryExcludedPath {
@@ -86,10 +296,20 @@ pub fn preview_repository_scope(
             expected_degraded_file_count += 1;
         }
         largest_files.push(CodeRepositoryLargestFile {
-            path: entry.path,
+            path: entry.path.clone(),
             byte_count: entry.byte_count,
         });
+        selected_entries.push(entry);
     }
+    let (resolved_commit_sha, tree_hash, _) = if snapshot.kind.is_filesystem() {
+        scoped_filesystem_tree_hash(&snapshot.root, &selected_entries, &selector.ref_selector)?
+    } else {
+        (
+            snapshot.resolved_commit_sha,
+            snapshot.tree_hash,
+            BTreeMap::new(),
+        )
+    };
     largest_files.sort_by(|left, right| {
         right
             .byte_count
@@ -102,7 +322,7 @@ pub fn preview_repository_scope(
         repository_id: registration.repository_id.clone(),
         alias: registration.alias.clone(),
         requested_ref: selector.ref_selector.clone(),
-        resolved_commit_sha: commit,
+        resolved_commit_sha,
         tree_hash,
         selected_file_count,
         selected_byte_count,
@@ -130,15 +350,40 @@ pub fn partition_changed_paths_for_selector(
     selector: &CodeRepositorySelector,
     paths: Vec<String>,
 ) -> Result<CodeImpactPathGroups, CodeIndexError> {
+    if paths.is_empty() {
+        return Ok(CodeImpactPathGroups {
+            in_scope_changed_paths: Vec::new(),
+            out_of_scope_changed_paths: Vec::new(),
+        });
+    }
     let root = PathBuf::from(&registration.root_path);
-    let commit = resolve_ref(&root, &selector.ref_selector)?;
-    let entries = tracked_entries(&root, &commit)?;
-    let source_layout = discover_source_layout(&entries);
+    let filesystem_policy = FileSystemScanPolicy::from_path_and_language_filters(
+        registration
+            .path_filters
+            .iter()
+            .chain(selector.path_filters.iter()),
+        &registration.language_filters,
+        &selector.language_filters,
+    );
+    let (source_layout, source_kind) = if source_commit_is_filesystem(&selector.ref_selector) {
+        let snapshot =
+            scoped_source_snapshot(registration, selector, &root, &selector.ref_selector)?;
+        (discover_source_layout(&snapshot.entries), snapshot.kind)
+    } else {
+        let snapshot = source_snapshot(&root, &selector.ref_selector, filesystem_policy)?;
+        (discover_source_layout(&snapshot.entries), snapshot.kind)
+    };
     let mut in_scope_changed_paths = Vec::new();
     let mut out_of_scope_changed_paths = Vec::new();
     for path in paths {
-        if selection_exclusion_reason_with_layout(&path, registration, selector, &source_layout)
-            .is_none()
+        if selection_exclusion_reason_for_source(
+            &path,
+            registration,
+            selector,
+            &source_layout,
+            source_kind,
+        )
+        .is_none()
         {
             in_scope_changed_paths.push(path);
         } else {
@@ -192,20 +437,41 @@ pub(super) fn selection_exclusion_reason_with_layout(
     selector: &CodeRepositorySelector,
     source_layout: &SourceLayoutDiscovery,
 ) -> Option<String> {
+    selection_exclusion_reason_for_source(
+        path,
+        registration,
+        selector,
+        source_layout,
+        RepositorySourceKind::Git,
+    )
+}
+
+pub(super) fn selection_exclusion_reason_for_source(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    source_layout: &SourceLayoutDiscovery,
+    source_kind: RepositorySourceKind,
+) -> Option<String> {
     if !path_scope_allows(path, registration, selector)
         && !source_layout.extends_path_scope(path, registration, selector)
     {
         return Some("outside registered/requested path scope".to_owned());
     }
-    if !language_filter_allows(path, &registration.language_filters)
-        || !language_filter_allows(path, &selector.language_filters)
+    if source_kind.is_filesystem()
+        && filesystem_default_scope_excludes(path, registration, selector)
+    {
+        return Some("outside non-git default source whitelist".to_owned());
+    }
+    if !source_language_filter_allows(path, &registration.language_filters)
+        || !source_language_filter_allows(path, &selector.language_filters)
     {
         return Some("outside registered/requested language scope".to_owned());
     }
-    if default_source_preset_excludes(path)
+    if source_default_file_preset_excludes(path)
         && !dependency_manifest_overrides_default_exclusion(path)
         && !source_layout.keeps_default_excluded_source(path)
-        && !explicit_path_filter_opts_into_default_exclusion(
+        && !explicit_path_filter_opts_into_default_file_exclusion(
             path,
             registration
                 .path_filters
@@ -251,7 +517,7 @@ pub(super) fn discover_source_layout(entries: &[GitTreeEntry]) -> SourceLayoutDi
     for entry in entries.iter().take(SOURCE_LAYOUT_DISCOVERY_MAX_PATHS) {
         if !source_path_has_indexable_content(&entry.path)
             || path_contains_broad_dependency_segment(&entry.path)
-            || default_source_preset_excludes(&entry.path)
+            || source_default_file_preset_excludes(&entry.path)
         {
             continue;
         }
@@ -271,22 +537,40 @@ pub(super) fn effective_index_path_filters(
     selector: &CodeRepositorySelector,
     source_layout: &SourceLayoutDiscovery,
 ) -> Vec<String> {
+    effective_index_path_filters_for_layouts(registration, selector, &[source_layout])
+}
+
+pub(super) fn effective_index_path_filters_for_layouts(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    source_layouts: &[&SourceLayoutDiscovery],
+) -> Vec<String> {
     let mut filters = merged_path_filters(&registration.path_filters, &selector.path_filters);
     if !registration_scope_can_discover_source_roots(&registration.path_filters) {
         return filters;
     }
-    for root in &source_layout.source_roots {
-        if !selector_filter_allows_root(root, &selector.path_filters) {
-            continue;
+    for source_layout in source_layouts {
+        for root in &source_layout.source_roots {
+            if !selector_filter_allows_root(root, &selector.path_filters) {
+                continue;
+            }
+            push_filter_if_uncovered(&mut filters, root);
         }
-        push_filter_if_uncovered(&mut filters, root);
     }
 
     filters
 }
 
-fn source_path_has_indexable_content(path: &str) -> bool {
-    language_id(path).is_some() || dependency_manifest_language_ids(path).is_some()
+fn filesystem_default_scope_excludes(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    if !registration.path_filters.is_empty() || !selector.path_filters.is_empty() {
+        return false;
+    }
+
+    !filesystem_default_source_allows(path)
 }
 
 fn preview_language_id(path: &str) -> &'static str {
@@ -356,6 +640,9 @@ fn path_filter_covers(filter: &str, path: &str) -> bool {
 fn source_layout_roots_for_path(path: &str) -> Vec<String> {
     let path = normalize_path_filter(path);
     let mut roots = Vec::new();
+    if path_matches_filter(path, "include") {
+        push_source_root(&mut roots, "include".to_owned());
+    }
     for marker in NESTED_SOURCE_MARKERS {
         if let Some((prefix, _)) = path.split_once(marker) {
             push_source_root(&mut roots, format!("{prefix}{marker}"));
@@ -413,69 +700,6 @@ fn path_filter_overlaps(path: &str, filters: &[String]) -> bool {
             .any(|filter| path_overlaps_filter(path, filter))
 }
 
-fn language_filter_allows(path: &str, filters: &[String]) -> bool {
-    if filters.is_empty() {
-        return true;
-    }
-    if language_id(path).is_some_and(|language| filters.iter().any(|filter| filter == language)) {
-        return true;
-    }
-    dependency_manifest_language_ids(path).is_some_and(|languages| {
-        languages
-            .iter()
-            .any(|language| filters.iter().any(|filter| filter == language))
-    })
-}
-
-fn default_source_preset_excludes(path: &str) -> bool {
-    let normalized = normalize_path_filter(path);
-    if normalized
-        .rsplit('/')
-        .next()
-        .is_some_and(|file_name| DEFAULT_EXCLUDED_FILENAMES.contains(&file_name))
-    {
-        return true;
-    }
-    normalized
-        .rsplit_once('.')
-        .map(|(_, extension)| {
-            DEFAULT_EXCLUDED_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
-        })
-        .unwrap_or(false)
-}
-
-fn explicit_path_filter_opts_into_default_exclusion<'a>(
-    path: &str,
-    filters: impl IntoIterator<Item = &'a String>,
-) -> bool {
-    let path_extension = path
-        .rsplit_once('.')
-        .map(|(_, extension)| extension.to_ascii_lowercase());
-    filters.into_iter().any(|filter| {
-        let filter = normalize_path_filter(filter);
-        if filter.is_empty() || filter == "." {
-            return false;
-        }
-        let filter_segments = filter.split('/').collect::<Vec<_>>();
-        let targets_default_exclusion = filter_segments.iter().any(|segment| {
-            DEFAULT_EXCLUDED_FILENAMES.contains(segment)
-                || segment
-                    .rsplit_once('.')
-                    .map(|(_, ext)| ext.to_ascii_lowercase())
-                    .is_some_and(|extension| {
-                        DEFAULT_EXCLUDED_EXTENSIONS.contains(&extension.as_str())
-                    })
-        });
-        if !targets_default_exclusion {
-            return false;
-        }
-        path_matches_filter(path, filter)
-            || filter.strip_prefix("*.").is_some_and(|extension| {
-                path_extension.as_deref() == Some(&extension.to_ascii_lowercase())
-            })
-    })
-}
-
 fn path_matches_filter(path: &str, filter: &str) -> bool {
     let path = normalize_path_filter(path);
     let filter = normalize_path_filter(filter);
@@ -527,7 +751,7 @@ mod tests {
             "vendor/pkg/lib.rs",
             "third_party/pkg/lib.rs",
         ] {
-            assert!(!default_source_preset_excludes(path), "{path}");
+            assert!(!source_default_file_preset_excludes(path), "{path}");
         }
     }
 
@@ -569,7 +793,7 @@ mod tests {
             &registration,
             &selector
         ));
-        assert!(default_source_preset_excludes("uv.lock"));
+        assert!(source_default_file_preset_excludes("uv.lock"));
         assert!(path_is_selected("uv.lock", &registration, &selector));
     }
 

@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::support::{
-    active_index_matches_request, indexed_commit_for_ref, latest_compatible_code_scope_status,
+    active_index_matches_request, indexed_commit_for_selector, latest_compatible_code_scope_status,
     required_code_repository, resolved_code_scope_status, storage_api_error,
 };
 
@@ -159,8 +159,12 @@ async fn software_request_at_indexed_ref(
     mut request: SoftwareGlobalRequest,
     status: &CodeRepositoryStatus,
 ) -> Result<SoftwareGlobalRequest, ApiError> {
-    request.repository.ref_selector =
-        indexed_commit_for_ref(status, request.repository.ref_selector.clone()).await?;
+    request.repository.ref_selector = indexed_commit_for_selector(
+        status,
+        &request.repository,
+        request.repository.ref_selector.clone(),
+    )
+    .await?;
 
     Ok(request)
 }

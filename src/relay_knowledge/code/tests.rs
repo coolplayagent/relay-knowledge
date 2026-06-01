@@ -4,7 +4,7 @@ use std::fs;
 
 use super::changes::{GitChange, parse_name_status_z, tracked_entries};
 use super::git::git_batch_blobs;
-use super::test_fixtures::{TempGitRepo, reference, symbol};
+use super::test_fixtures::{TempGitRepo, TempSourceDir, reference, symbol};
 
 #[test]
 fn detects_supported_languages_and_filters_paths() {
@@ -467,6 +467,172 @@ fn register_repository_rejects_language_filters() {
             .to_string()
             .contains(REGISTRATION_LANGUAGE_FILTER_ERROR)
     );
+}
+
+#[test]
+fn register_repository_accepts_non_git_source_directory() {
+    let source = TempSourceDir::create("non-git-register");
+    source.write("src/lib.rs", "fn value() {}\n");
+    let expected_alias = source
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("fixture root should have a directory name")
+        .to_owned();
+
+    let registration =
+        register_repository(&source.path, "   ", Vec::new(), Vec::new()).expect("source dir");
+
+    assert_eq!(registration.alias, expected_alias);
+    assert_eq!(
+        registration.root_path,
+        source.path.canonicalize().unwrap().display().to_string()
+    );
+}
+
+#[test]
+fn non_git_full_index_uses_default_source_whitelist() {
+    let source = TempSourceDir::create("non-git-default-whitelist");
+    source.write("src/lib.rs", "pub fn indexed_src() {}\n");
+    source.write("include/public.h", "int indexed_header(void);\n");
+    source.write("README.md", "# indexed docs\n");
+    source.write("build/generated.rs", "pub fn build_output() {}\n");
+    source.write("dist/bundle.js", "export function bundled() {}\n");
+    source.write("target/generated.rs", "pub fn target_output() {}\n");
+    source.write(
+        "node_modules/pkg/index.js",
+        "export function dependency() {}\n",
+    );
+
+    let mut plan = prepare_full_index_plan(
+        source.registration(),
+        source.selector(),
+        CodeIndexResourceBudget::default(),
+    )
+    .expect("filesystem plan should prepare");
+    let mut paths = Vec::new();
+    let mut symbol_names = Vec::new();
+    loop {
+        let (next_plan, batch) = plan.parse_next_batch().expect("batch should parse");
+        plan = next_plan;
+        let Some(batch) = batch else {
+            break;
+        };
+        paths.extend(batch.files.into_iter().map(|file| file.path));
+        symbol_names.extend(batch.symbols.into_iter().map(|symbol| symbol.name));
+    }
+
+    assert!(paths.iter().any(|path| path == "src/lib.rs"));
+    assert!(paths.iter().any(|path| path == "include/public.h"));
+    assert!(paths.iter().any(|path| path == "README.md"));
+    for skipped in [
+        "build/generated.rs",
+        "dist/bundle.js",
+        "target/generated.rs",
+        "node_modules/pkg/index.js",
+    ] {
+        assert!(paths.iter().all(|path| path != skipped), "{skipped}");
+    }
+    assert!(symbol_names.iter().any(|name| name == "indexed_src"));
+}
+
+#[test]
+fn non_git_explicit_path_filter_opts_into_broad_directory() {
+    let source = TempSourceDir::create("non-git-build-opt-in");
+    source.write("src/lib.rs", "pub fn indexed_src() {}\n");
+    source.write("build/generated.rs", "pub fn build_output() {}\n");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        source.path.display().to_string(),
+        vec!["build".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let plan = prepare_full_index_plan(
+        registration,
+        source.selector(),
+        CodeIndexResourceBudget::default(),
+    )
+    .expect("filesystem plan should prepare");
+    let (_, batch) = plan.parse_next_batch().expect("batch should parse");
+    let paths = batch
+        .expect("batch should exist")
+        .files
+        .into_iter()
+        .map(|file| file.path)
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, ["build/generated.rs"]);
+}
+
+#[test]
+fn non_git_incremental_uses_synthetic_file_fingerprints() {
+    let source = TempSourceDir::create("non-git-incremental");
+    source.write("src/lib.rs", "pub fn value() -> u32 { 0 }\n");
+    source.write("include/old.h", "int old_value(void);\n");
+    let registration = source.registration();
+    let selector = source.selector();
+    let base_snapshot =
+        build_index_snapshot(&registration, &selector, CodeIndexMode::Full, Vec::new())
+            .expect("base filesystem index should build");
+    let previous_hashes = base_snapshot
+        .files
+        .iter()
+        .map(|file| CodeFileFingerprint {
+            path: file.path.clone(),
+            blob_hash: file.blob_hash.clone(),
+        })
+        .collect::<Vec<_>>();
+    source.write("src/lib.rs", "pub fn value() -> u32 { 1 }\n");
+    source.write("src/new.rs", "pub fn new_value() {}\n");
+    fs::remove_file(source.path.join("include/old.h")).expect("old header should delete");
+
+    let snapshot = build_index_snapshot_with_base_commit(
+        &registration,
+        &selector,
+        CodeIndexMode::incremental("previous", "HEAD").expect("incremental mode should validate"),
+        previous_hashes,
+        Some(base_snapshot.resolved_commit_sha.clone()),
+    )
+    .expect("incremental filesystem index should build");
+
+    assert!(snapshot.resolved_commit_sha.starts_with("filesystem:"));
+    assert_eq!(
+        snapshot.base_resolved_commit_sha.as_deref(),
+        Some(base_snapshot.resolved_commit_sha.as_str())
+    );
+    assert_eq!(snapshot.deleted_paths, ["include/old.h"]);
+    assert!(snapshot.files.iter().any(|file| file.path == "src/lib.rs"));
+    assert!(snapshot.files.iter().any(|file| file.path == "src/new.rs"));
+}
+
+#[test]
+fn non_git_source_fallback_reads_filesystem_snapshot_paths() {
+    let source = TempSourceDir::create("non-git-source-fallback");
+    source.write("src/lib.rs", "pub fn fallback_target() {}\n");
+    let registration = source.registration();
+    let commit =
+        resolve_repository_ref(&source.path, "HEAD").expect("filesystem ref should resolve");
+
+    let outcome = source_grep_matches(
+        &registration,
+        &commit,
+        SourceGrepRequest {
+            query: "fallback_target".to_owned(),
+            paths: vec!["src/lib.rs".to_owned()],
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            limit: 5,
+            kind: SourceGrepKind::Definition,
+        },
+    )
+    .expect("source fallback should read filesystem source");
+
+    assert_eq!(outcome.matches.len(), 1);
+    assert_eq!(outcome.matches[0].path, "src/lib.rs");
+    assert!(outcome.degraded_reason.is_none());
 }
 
 #[test]

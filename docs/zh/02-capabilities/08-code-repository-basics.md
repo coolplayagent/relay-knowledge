@@ -8,7 +8,7 @@
 
 ## 能力定位
 
-代码仓库基础能力让用户把 Git 仓库注册为一等 source，按 clean snapshot 索引，并通过同一 application service 查询代码上下文。
+代码仓库基础能力让用户把 Git 仓库或非 Git source directory 注册为一等 source，按 clean snapshot 或 filesystem synthetic snapshot 索引，并通过同一 application service 查询代码上下文。
 
 ## 用户可见行为
 
@@ -21,7 +21,7 @@ relay-knowledge repo update relay-knowledge --base main --head HEAD --format jso
 relay-knowledge repo status relay-knowledge --format json
 ```
 
-省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
+省略 `--alias` 或传入空 alias 时，注册会使用解析后的 Git root 或 filesystem root 目录名作为稳定仓库 alias。agent 首次注册项目时应优先使用这个默认值，让后续 session 复用同一索引；`--alias` 仍可作为显式覆盖。
 
 `repo query` 支持 `--limit`、`--ref`、可重复 `--path`、可重复 `--language` 和 freshness policy。`repo register` 会拒绝 language filter，确保混合语言仓库保留完整语言面；需要收窄结果时在查询期使用 `--language`。
 
@@ -43,6 +43,15 @@ Git tree 决定哪些目录是源码证据：被 Git 跟踪的 `.cloudbuild/`、
 `*.jsonl` 数据集转储，除非显式 path filter opt in。脏工作树 overlay 仍通过
 Git status 处理 untracked 文件，且不会递归展开未跟踪的宽泛依赖、缓存或构建目录，
 除非显式 path filter opt in。
+
+非 Git source directory 没有 tracked tree 作为目录权威，因此默认使用白名单扫描：
+根层支持的 source/config/docs 文件，以及 `src/`、`include/`、`lib/`、`Sources/`、
+`packages/`、`modules/`、`plugins/`、`extensions/`、`docs/`、`config/` 等
+source-like roots 会进入索引；`build/`、`dist/`、`target/`、`node_modules/`、
+`vendor/`、`third_party/`、cache、virtualenv 和 coverage 目录默认跳过，只有显式
+`--path` opt in 时才会扫描。非 Git 的 `HEAD` 或其他 ref selector 会解析到当前
+filesystem synthetic snapshot，full、incremental 和 worktree overlay 共享同一套
+filesystem fingerprint 语义。
 
 例如，混合布局仓库可以注册 `--path external_deps/python_sdk`、
 `--path plugins/example.com/nonstandard/session` 或

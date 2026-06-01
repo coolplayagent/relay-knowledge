@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -9,9 +9,16 @@ use crate::domain::{CodeRepositoryRegistration, RepositoryCodeRange};
 
 use super::{
     CodeIndexError,
-    git::{git_batch_blob_sizes, git_batch_blobs, git_bytes},
     languages::language_id,
-    safe_git_blob_path, source_line_defines_identity,
+    safe_git_blob_path,
+    scope::{
+        scoped_source_snapshot_for_registration, scoped_source_snapshot_for_registration_filters,
+    },
+    source::{
+        source_batch_bytes_after_content_verification, source_blob_sizes_after_policy_verification,
+        source_bytes_after_content_verification, source_commit_is_filesystem,
+    },
+    source_line_defines_identity,
 };
 
 pub(crate) const SOURCE_GREP_CANDIDATE_FILE_LIMIT: usize = 256;
@@ -57,7 +64,6 @@ pub(crate) fn source_grep_matches(
     commit: &str,
     request: SourceGrepRequest,
 ) -> Result<SourceGrepOutcome, CodeIndexError> {
-    super::git::validate_git_ref_arg("commit", commit)?;
     if request.limit == 0 || request.query.trim().is_empty() {
         return Ok(SourceGrepOutcome {
             matches: Vec::new(),
@@ -71,9 +77,17 @@ pub(crate) fn source_grep_matches(
             degraded_reason: candidates.degraded_reason,
         });
     }
-    let root = PathBuf::from(&registration.root_path);
     let mut tree = TempSourceTree::create()?;
-    let materialized = materialize_git_blobs(&root, commit, &candidates.paths, &mut tree)?;
+    let materialized = materialize_source_blobs(
+        registration,
+        commit,
+        &candidates.paths,
+        SourceMaterializationScope {
+            path_filters: &request.path_filters,
+            language_filters: &request.language_filters,
+        },
+        &mut tree,
+    )?;
     let degraded_reason = candidates
         .degraded_reason
         .or(materialized.degraded_reason.clone());
@@ -138,42 +152,142 @@ fn selected_candidate_paths(request: &SourceGrepRequest) -> CandidatePaths {
     }
 }
 
-fn materialize_git_blobs(
-    root: &Path,
-    commit: &str,
-    paths: &[String],
-    tree: &mut TempSourceTree,
-) -> Result<MaterializedFiles, CodeIndexError> {
-    materialize_git_blobs_with_budget(root, commit, paths, tree, MAX_GREP_BYTES)
+#[derive(Clone, Copy)]
+struct SourceMaterializationScope<'a> {
+    path_filters: &'a [String],
+    language_filters: &'a [String],
 }
 
-fn materialize_git_blobs_with_budget(
+fn materialize_source_blobs(
+    registration: &CodeRepositoryRegistration,
+    commit: &str,
+    paths: &[String],
+    scope: SourceMaterializationScope<'_>,
+    tree: &mut TempSourceTree,
+) -> Result<MaterializedFiles, CodeIndexError> {
+    let root = PathBuf::from(&registration.root_path);
+    materialize_source_blobs_with_budget(
+        registration,
+        &root,
+        commit,
+        paths,
+        scope,
+        tree,
+        MAX_GREP_BYTES,
+    )
+}
+
+fn materialize_source_blobs_with_budget(
+    registration: &CodeRepositoryRegistration,
     root: &Path,
     commit: &str,
     paths: &[String],
+    scope: SourceMaterializationScope<'_>,
     tree: &mut TempSourceTree,
     max_bytes: usize,
 ) -> Result<MaterializedFiles, CodeIndexError> {
-    if let Some(selection) = candidate_git_blob_selection(root, commit, paths, max_bytes) {
-        return materialize_selected_git_blobs(root, commit, selection, tree);
+    let verified_hashes = match ensure_source_grep_commit_current(
+        registration,
+        commit,
+        scope.path_filters,
+        scope.language_filters,
+    ) {
+        Ok(hashes) => hashes,
+        Err(error) if source_commit_is_filesystem(commit) => {
+            return Ok(MaterializedFiles {
+                file_count: 0,
+                degraded_reason: Some(error.to_string()),
+            });
+        }
+        Err(error) => return Err(error),
+    };
+    let materialized = if let Some(selection) =
+        candidate_source_blob_selection(root, commit, paths, max_bytes)
+    {
+        materialize_selected_source_blobs(root, commit, selection, tree, verified_hashes.as_ref())?
+    } else {
+        materialize_source_blobs_per_path(
+            root,
+            commit,
+            paths,
+            tree,
+            max_bytes,
+            verified_hashes.as_ref(),
+        )?
+    };
+    if let Err(error) = ensure_source_grep_commit_current(
+        registration,
+        commit,
+        scope.path_filters,
+        scope.language_filters,
+    ) {
+        if source_commit_is_filesystem(commit) {
+            return Ok(MaterializedFiles {
+                file_count: 0,
+                degraded_reason: Some(error.to_string()),
+            });
+        }
+        return Err(error);
     }
 
-    materialize_git_blobs_per_path(root, commit, paths, tree, max_bytes)
+    Ok(materialized)
 }
 
-fn materialize_selected_git_blobs(
+fn ensure_source_grep_commit_current(
+    registration: &CodeRepositoryRegistration,
+    commit: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<Option<BTreeMap<String, String>>, CodeIndexError> {
+    if source_commit_is_filesystem(commit) {
+        return filesystem_hashes_for_verified_scope(
+            registration,
+            commit,
+            path_filters,
+            language_filters,
+        )
+        .map(Some);
+    }
+
+    Ok(None)
+}
+
+fn filesystem_hashes_for_verified_scope(
+    registration: &CodeRepositoryRegistration,
+    commit: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<BTreeMap<String, String>, CodeIndexError> {
+    match scoped_source_snapshot_for_registration(registration, commit) {
+        Ok(snapshot) => Ok(snapshot.content_hashes),
+        Err(stored_scope_error) => {
+            match scoped_source_snapshot_for_registration_filters(
+                registration,
+                commit,
+                path_filters,
+                language_filters,
+            ) {
+                Ok(snapshot) => Ok(snapshot.content_hashes),
+                Err(_) => Err(stored_scope_error),
+            }
+        }
+    }
+}
+
+fn materialize_selected_source_blobs(
     root: &Path,
     commit: &str,
     selection: BlobCandidateSelection,
     tree: &mut TempSourceTree,
+    expected_hashes: Option<&BTreeMap<String, String>>,
 ) -> Result<MaterializedFiles, CodeIndexError> {
     let mut file_count = 0usize;
-    for (path, bytes) in
-        selection
-            .paths
-            .iter()
-            .zip(candidate_git_blobs(root, commit, &selection.paths))
-    {
+    for (path, bytes) in selection.paths.iter().zip(candidate_source_blobs(
+        root,
+        commit,
+        &selection.paths,
+        expected_hashes,
+    )) {
         let Some(bytes) = bytes else {
             continue;
         };
@@ -189,19 +303,21 @@ fn materialize_selected_git_blobs(
     })
 }
 
-fn materialize_git_blobs_per_path(
+fn materialize_source_blobs_per_path(
     root: &Path,
     commit: &str,
     paths: &[String],
     tree: &mut TempSourceTree,
     max_bytes: usize,
+    expected_hashes: Option<&BTreeMap<String, String>>,
 ) -> Result<MaterializedFiles, CodeIndexError> {
     let mut byte_count = 0usize;
     let mut file_count = 0usize;
     let mut exhausted = false;
     for path in paths {
-        let object = format!("{commit}:{path}");
-        let Ok(bytes) = git_bytes(root, ["show", &object]) else {
+        let Ok(bytes) =
+            source_bytes_after_content_verification(root, commit, path, expected_hashes)
+        else {
             continue;
         };
         if byte_count.saturating_add(bytes.len()) > max_bytes {
@@ -225,13 +341,13 @@ struct BlobCandidateSelection {
     exhausted: bool,
 }
 
-fn candidate_git_blob_selection(
+fn candidate_source_blob_selection(
     root: &Path,
     commit: &str,
     paths: &[String],
     max_bytes: usize,
 ) -> Option<BlobCandidateSelection> {
-    let sizes = git_batch_blob_sizes(root, commit, paths).ok()?;
+    let sizes = source_blob_sizes_after_policy_verification(root, commit, paths).ok()?;
     if sizes.len() != paths.len() {
         return None;
     }
@@ -257,14 +373,19 @@ fn candidate_git_blob_selection(
     })
 }
 
-fn candidate_git_blobs(root: &Path, commit: &str, paths: &[String]) -> Vec<Option<Vec<u8>>> {
-    match git_batch_blobs(root, commit, paths) {
+fn candidate_source_blobs(
+    root: &Path,
+    commit: &str,
+    paths: &[String],
+    expected_hashes: Option<&BTreeMap<String, String>>,
+) -> Vec<Option<Vec<u8>>> {
+    match source_batch_bytes_after_content_verification(root, commit, paths, expected_hashes) {
         Ok(blobs) if blobs.len() == paths.len() => blobs.into_iter().map(Some).collect(),
+        Err(_) if source_commit_is_filesystem(commit) => paths.iter().map(|_| None).collect(),
         _ => paths
             .iter()
             .map(|path| {
-                let object = format!("{commit}:{path}");
-                git_bytes(root, ["show", &object]).ok()
+                source_bytes_after_content_verification(root, commit, path, expected_hashes).ok()
             })
             .collect(),
     }
@@ -602,10 +723,28 @@ mod tests {
         repo.git(["commit", "-m", "budget fixture"]);
         let mut tree = TempSourceTree::create().expect("temp tree should be created");
         let paths = vec!["large.txt".to_owned(), "small.txt".to_owned()];
+        let registration = CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            repo.root.display().to_string(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("registration should validate");
 
-        let materialized =
-            materialize_git_blobs_with_budget(&repo.root, "HEAD", &paths, &mut tree, 5)
-                .expect("materialization should succeed");
+        let materialized = materialize_source_blobs_with_budget(
+            &registration,
+            &repo.root,
+            "HEAD",
+            &paths,
+            SourceMaterializationScope {
+                path_filters: &[],
+                language_filters: &[],
+            },
+            &mut tree,
+            5,
+        )
+        .expect("materialization should succeed");
 
         assert_eq!(materialized.file_count, 1);
         assert!(materialized.degraded_reason.is_some());

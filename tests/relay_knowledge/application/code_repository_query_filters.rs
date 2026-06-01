@@ -136,6 +136,224 @@ pub fn test_retry_policy() -> u32 {
 }
 
 #[tokio::test]
+async fn non_git_language_query_can_narrow_full_filesystem_index() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "relay-knowledge-non-git-language-narrowing-{nanos}"
+    ));
+    fs::create_dir_all(root.join("src")).expect("source directory should be created");
+    fs::write(
+        root.join("src/lib.rs"),
+        "pub fn retry_policy() -> u32 { 3 }\n",
+    )
+    .expect("rust source should be written");
+    fs::write(
+        root.join("src/index.ts"),
+        "export function retryPolicy(): number { return 3; }\n",
+    )
+    .expect("typescript source should be written");
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: root.display().to_string(),
+                alias: "fixture-fs".to_owned(),
+                path_filters: Vec::new(),
+                language_filters: Vec::new(),
+            },
+            context("register-non-git-language-narrowing"),
+        )
+        .await
+        .expect("filesystem repository should register");
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-non-git-language-narrowing"),
+        )
+        .await
+        .expect("filesystem repository should index");
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "retry_policy",
+                CodeRepositorySelector::new(
+                    "fixture-fs",
+                    "HEAD",
+                    Vec::new(),
+                    vec!["rust".to_owned()],
+                )
+                .expect("selector should validate"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-non-git-language-narrowing"),
+        )
+        .await
+        .expect("language-filtered query should use the full filesystem index");
+
+    assert!(response.results.iter().any(|hit| hit.path == "src/lib.rs"));
+}
+
+#[tokio::test]
+async fn non_git_active_broad_index_allows_narrow_stale_query() {
+    let root = create_non_git_source_dir("code-query-non-git-narrow-stale");
+    write_source_file(&root, "src/lib.rs", "pub fn stale_policy() -> u32 { 1 }\n");
+    write_source_file(
+        &root,
+        "src/index.ts",
+        "export function stalePolicy(): number { return 1; }\n",
+    );
+    let service = service_with_memory_store().await;
+
+    register_non_git_fixture(
+        &service,
+        &root,
+        "fixture-fs",
+        "register-non-git-narrow-stale",
+    )
+    .await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-non-git-narrow-stale"),
+        )
+        .await
+        .expect("initial filesystem index should complete");
+    write_source_file(
+        &root,
+        "src/lib.rs",
+        "pub fn pending_policy() -> u32 { 2 }\n",
+    );
+    write_source_file(
+        &root,
+        "src/index.ts",
+        "export function pendingPolicy(): number { return 2; }\n",
+    );
+    let started = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-non-git-narrow-stale"),
+        )
+        .await
+        .expect("moved filesystem HEAD should queue");
+    assert!(started.task.is_some());
+
+    let response = service
+        .query_code_repository(
+            CodeRetrievalRequest::new(
+                "stale_policy",
+                language_selector("fixture-fs", "HEAD", "rust"),
+                CodeQueryKind::Definition,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("query request should validate"),
+            context("query-non-git-narrow-stale"),
+        )
+        .await
+        .expect("narrow query should serve stale scope while broad index is active");
+
+    assert!(response.results.iter().any(|hit| hit.path == "src/lib.rs"));
+    assert!(
+        response
+            .degraded_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("served last completed code index"))
+    );
+}
+
+#[tokio::test]
+async fn non_git_incremental_uses_explicit_filesystem_base_scope() {
+    let root = create_non_git_source_dir("code-query-non-git-explicit-base");
+    write_source_file(&root, "src/base.rs", "pub fn base_policy() -> u32 { 1 }\n");
+    let service = service_with_memory_store().await;
+
+    register_non_git_fixture(
+        &service,
+        &root,
+        "fixture-fs",
+        "register-non-git-explicit-base",
+    )
+    .await;
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-non-git-explicit-base-v1"),
+        )
+        .await
+        .expect("initial filesystem index should complete");
+    let base_status = service
+        .code_repository_status(
+            selector("fixture-fs", "HEAD"),
+            context("status-non-git-explicit-base-v1"),
+        )
+        .await
+        .expect("base status should load");
+    let base_commit = base_status
+        .status
+        .last_indexed_commit
+        .clone()
+        .expect("base commit should exist");
+
+    write_source_file(
+        &root,
+        "src/new.rs",
+        "pub fn added_after_base() -> u32 { 2 }\n",
+    );
+    service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-non-git-explicit-base-v2"),
+        )
+        .await
+        .expect("active filesystem index should complete");
+
+    write_source_file(&root, "src/base.rs", "pub fn base_policy() -> u32 { 3 }\n");
+    let updated = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("fixture-fs", "HEAD"),
+                mode: CodeIndexMode::incremental(base_commit, "HEAD")
+                    .expect("incremental mode should validate"),
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("update-non-git-explicit-base"),
+        )
+        .await
+        .expect("incremental filesystem update should use requested base");
+
+    assert_eq!(updated.summary.skipped_unchanged_count, 0);
+    assert!(updated.summary.changed_path_count >= 2);
+}
+
+#[tokio::test]
 async fn query_language_filter_includes_dependency_manifests() {
     let repo = FixtureRepo::create("code-query-language-sbom");
     repo.write("src/lib.rs", "pub fn uses_serde() {}\n");
@@ -528,6 +746,49 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
     let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+async fn register_non_git_fixture(
+    service: &RelayKnowledgeService,
+    root: &Path,
+    alias: &str,
+    context_name: &str,
+) {
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: root.display().to_string(),
+                alias: alias.to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: Vec::new(),
+            },
+            context(context_name),
+        )
+        .await
+        .expect("filesystem repository should register");
+}
+
+fn create_non_git_source_dir(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
+    fs::create_dir_all(root.join("src")).expect("source directory should be created");
+    root
+}
+
+fn write_source_file(root: &Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("parent directory should exist");
+    }
+    fs::write(path, content).expect("source file should be written");
+}
+
+fn language_selector(alias: &str, ref_selector: &str, language: &str) -> CodeRepositorySelector {
+    CodeRepositorySelector::new(alias, ref_selector, Vec::new(), vec![language.to_owned()])
+        .expect("selector should validate")
 }
 
 struct FixtureRepo {

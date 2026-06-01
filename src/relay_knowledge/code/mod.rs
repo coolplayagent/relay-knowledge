@@ -13,6 +13,8 @@ use std::{
 mod changes;
 mod configuration;
 pub(crate) mod feature_flags;
+mod filesystem_delta;
+mod full_snapshot;
 mod git;
 mod grep;
 mod identity;
@@ -20,25 +22,26 @@ mod ids;
 mod languages;
 mod parser;
 mod pipeline;
+mod resolution;
 mod scope;
 mod snapshot;
+mod source;
 pub(crate) mod source_roots;
-
-#[cfg(test)]
-#[path = "tests/fixtures.rs"]
-mod test_fixtures;
-
-#[cfg(test)]
-mod tests;
 
 #[cfg(test)]
 #[path = "tests/source/declarations.rs"]
 mod source_declaration_tests;
-
+#[cfg(test)]
+#[path = "tests/source/filesystem.rs"]
+mod source_filesystem_tests;
 #[cfg(test)]
 #[path = "tests/source/layout.rs"]
 mod source_layout_tests;
-
+#[cfg(test)]
+#[path = "tests/fixtures.rs"]
+mod test_fixtures;
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 #[path = "tests/source/worktree_overlay.rs"]
 mod worktree_overlay_tests;
@@ -49,7 +52,16 @@ use crate::domain::{
 };
 
 use changes::{GitChange, diff_changes, tracked_entries, worktree_changed_paths};
-use git::{git_bytes, git_optional, resolve_git_root, resolve_ref, resolve_tree};
+#[cfg(test)]
+pub(crate) use changes::{
+    reset_tracked_entries_call_count_for_root, tracked_entries_call_count_for_root,
+};
+use filesystem_delta::build_filesystem_delta_snapshot;
+pub(crate) use filesystem_delta::changed_paths_for_filesystem_diff;
+use full_snapshot::build_full_snapshot;
+#[cfg(test)]
+pub(crate) use full_snapshot::mutate_next_filesystem_full_snapshot_read;
+use git::{git_bytes, resolve_ref, resolve_tree};
 pub(crate) use grep::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
     SourceGrepRequest, source_grep_matches,
@@ -57,21 +69,28 @@ pub(crate) use grep::{
 use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
 pub use pipeline::{CodeIndexPlan, prepare_full_index_plan};
+pub use resolution::{
+    resolve_repository_ref, resolve_repository_ref_with_filters,
+    resolve_repository_ref_with_path_filters, resolve_repository_snapshot,
+    resolve_repository_snapshot_with_filters, resolve_repository_snapshot_with_path_filters,
+};
 use scope::{
     discover_source_layout, effective_index_path_filters, path_is_selected_with_layout,
-    path_scope_overlaps, selection_exclusion_reason_with_layout,
+    path_scope_overlaps, scoped_source_snapshot_for_filters,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 use snapshot::{SnapshotBuild, SnapshotScopeFilters};
+use source::{
+    registration_source, source_bytes_after_content_verification, source_commit_is_filesystem,
+    source_kind,
+};
 
 #[cfg(test)]
-use identity::resolve_reference_targets;
-
-#[cfg(test)]
-use languages::language_id;
-
-#[cfg(test)]
-use scope::{path_is_selected, path_scope_allows};
+use {
+    identity::resolve_reference_targets,
+    languages::language_id,
+    scope::{path_is_selected, path_scope_allows},
+};
 
 pub(crate) const REGISTRATION_LANGUAGE_FILTER_ERROR: &str = concat!(
     "registration language filters are not supported; ",
@@ -108,7 +127,7 @@ impl From<std::io::Error> for CodeIndexError {
     }
 }
 
-/// Validates a Git worktree and creates a stable repository registration.
+/// Validates a code source root and creates a stable repository registration.
 pub fn register_repository(
     path: impl AsRef<Path>,
     alias: impl Into<String>,
@@ -120,12 +139,10 @@ pub fn register_repository(
             REGISTRATION_LANGUAGE_FILTER_ERROR.to_owned(),
         ));
     }
-    let root = resolve_git_root(path.as_ref())?;
-    let root_identity = root.display().to_string();
-    let origin = git_optional(&root, ["config", "--get", "remote.origin.url"])?
-        .unwrap_or_else(|| root_identity.clone());
-    let repository_id = stable_id("repo", [origin.as_str(), root_identity.as_str()]);
-    let alias = explicit_or_project_alias(alias, &root)?;
+    let source = registration_source(path.as_ref())?;
+    let root_identity = source.root.display().to_string();
+    let repository_id = source.identity;
+    let alias = explicit_or_project_alias(alias, &source.root)?;
 
     CodeRepositoryRegistration::new(
         repository_id,
@@ -165,6 +182,16 @@ pub fn build_index_snapshot(
     mode: CodeIndexMode,
     previous_hashes: Vec<CodeFileFingerprint>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    build_index_snapshot_with_base_commit(registration, selector, mode, previous_hashes, None)
+}
+
+pub(crate) fn build_index_snapshot_with_base_commit(
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+    mode: CodeIndexMode,
+    previous_hashes: Vec<CodeFileFingerprint>,
+    base_resolved_commit_sha: Option<String>,
+) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let previous_hashes = previous_hashes
         .into_iter()
@@ -180,19 +207,89 @@ pub fn build_index_snapshot(
             &base_ref,
             &head_ref,
             &previous_hashes,
+            base_resolved_commit_sha.as_deref(),
         ),
-        CodeIndexMode::WorktreeOverlay => {
-            build_worktree_overlay_snapshot(registration, selector, &root, &previous_hashes)
-        }
+        CodeIndexMode::WorktreeOverlay => build_worktree_overlay_snapshot(
+            registration,
+            selector,
+            &root,
+            &previous_hashes,
+            base_resolved_commit_sha.as_deref(),
+        ),
     }
 }
 
-/// Returns changed paths for impact analysis without mutating the code index.
 pub fn changed_paths_for_diff(
     root_path: impl AsRef<Path>,
     base_ref: &str,
     head_ref: &str,
 ) -> Result<Vec<String>, CodeIndexError> {
+    changed_paths_for_diff_with_filters(root_path, base_ref, head_ref, &[], &[])
+}
+
+pub fn changed_paths_for_diff_with_path_filters(
+    root_path: impl AsRef<Path>,
+    base_ref: &str,
+    head_ref: &str,
+    path_filters: &[String],
+) -> Result<Vec<String>, CodeIndexError> {
+    changed_paths_for_diff_with_filters(root_path, base_ref, head_ref, path_filters, &[])
+}
+
+pub fn changed_paths_for_diff_with_filters(
+    root_path: impl AsRef<Path>,
+    base_ref: &str,
+    head_ref: &str,
+    path_filters: &[String],
+    language_filters: &[String],
+) -> Result<Vec<String>, CodeIndexError> {
+    if source_commit_is_filesystem(base_ref) || source_commit_is_filesystem(head_ref) {
+        if base_ref == head_ref {
+            return Ok(Vec::new());
+        }
+        let base_commit = resolve_repository_ref_with_filters(
+            root_path.as_ref(),
+            base_ref,
+            path_filters,
+            language_filters,
+        )?;
+        let head_commit = resolve_repository_ref_with_filters(
+            root_path.as_ref(),
+            head_ref,
+            path_filters,
+            language_filters,
+        )?;
+        if base_commit == head_commit {
+            return Ok(Vec::new());
+        }
+        let snapshot = scoped_source_snapshot_for_filters(
+            root_path.as_ref(),
+            head_ref,
+            path_filters,
+            language_filters,
+        )?;
+        return Ok(snapshot
+            .entries
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect());
+    }
+    if source_kind(root_path.as_ref())?.is_filesystem() {
+        if base_ref == head_ref {
+            return Ok(Vec::new());
+        }
+        let snapshot = scoped_source_snapshot_for_filters(
+            root_path.as_ref(),
+            head_ref,
+            path_filters,
+            language_filters,
+        )?;
+        return Ok(snapshot
+            .entries
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect());
+    }
     let changes = diff_changes(root_path.as_ref(), base_ref, head_ref)?;
 
     Ok(impact_paths_from_changes(changes))
@@ -235,14 +332,30 @@ pub(crate) fn source_declarations_for_identity(
     registration: &CodeRepositoryRegistration,
     commit: &str,
     paths: Vec<String>,
+    path_filters: &[String],
+    language_filters: &[String],
     identity: &str,
 ) -> Result<Vec<SourceDeclarationMatch>, CodeIndexError> {
-    git::validate_git_ref_arg("commit", commit)?;
     if !simple_source_identifier(identity) {
         return Ok(Vec::new());
     }
 
     let root = PathBuf::from(&registration.root_path);
+    let filesystem_hashes = if source_commit_is_filesystem(commit) {
+        match scope::scoped_source_snapshot_for_registration(registration, commit).or_else(|_| {
+            scope::scoped_source_snapshot_for_registration_filters(
+                registration,
+                commit,
+                path_filters,
+                language_filters,
+            )
+        }) {
+            Ok(snapshot) => Some(snapshot.content_hashes),
+            Err(_) => return Ok(Vec::new()),
+        }
+    } else {
+        None
+    };
     let mut seen = BTreeSet::new();
     let mut files_considered = 0usize;
     let mut matches = Vec::new();
@@ -254,8 +367,12 @@ pub(crate) fn source_declarations_for_identity(
             continue;
         }
         files_considered += 1;
-        let object = format!("{commit}:{path}");
-        let Ok(bytes) = git::git_bytes(&root, ["show", &object]) else {
+        let Ok(bytes) = source_bytes_after_content_verification(
+            &root,
+            commit,
+            &path,
+            filesystem_hashes.as_ref(),
+        ) else {
             continue;
         };
         if bytes.len() > MAX_SOURCE_DECLARATION_BYTES {
@@ -421,6 +538,12 @@ pub fn deleted_symbol_names_for_diff(
     head_ref: &str,
 ) -> Result<Vec<String>, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
+    if source_commit_is_filesystem(base_ref) || source_commit_is_filesystem(head_ref) {
+        return Ok(Vec::new());
+    }
+    if source_kind(&root)?.is_filesystem() {
+        return Ok(Vec::new());
+    }
     let base_commit = resolve_ref(&root, base_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
     let base_entries = tracked_entries(&root, &base_commit)?;
@@ -456,67 +579,10 @@ pub fn deleted_symbol_names_for_diff(
     Ok(names)
 }
 
-/// Resolves a repository ref selector to the exact commit used by storage.
-pub fn resolve_repository_ref(
+pub(crate) fn repository_uses_filesystem_source(
     root_path: impl AsRef<Path>,
-    ref_selector: &str,
-) -> Result<String, CodeIndexError> {
-    let root = resolve_git_root(root_path.as_ref())?;
-
-    resolve_ref(&root, ref_selector)
-}
-
-/// Resolves a repository ref selector to the exact commit and tree hash.
-pub fn resolve_repository_snapshot(
-    root_path: impl AsRef<Path>,
-    ref_selector: &str,
-) -> Result<(String, String), CodeIndexError> {
-    let root = resolve_git_root(root_path.as_ref())?;
-    let commit = resolve_ref(&root, ref_selector)?;
-    let tree_hash = resolve_tree(&root, &commit)?;
-
-    Ok((commit, tree_hash))
-}
-
-fn build_full_snapshot(
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-    root: &Path,
-) -> Result<CodeIndexSnapshot, CodeIndexError> {
-    let commit = resolve_ref(root, &selector.ref_selector)?;
-    let tree_hash = resolve_tree(root, &commit)?;
-    let entries = tracked_entries(root, &commit)?;
-    let source_layout = discover_source_layout(&entries);
-    let path_filters = effective_index_path_filters(registration, selector, &source_layout);
-    let language_filters =
-        snapshot::merged_filters(&registration.language_filters, &selector.language_filters);
-    let paths = entries
-        .into_iter()
-        .map(|entry| entry.path)
-        .filter(|path| {
-            selection_exclusion_reason_with_layout(path, registration, selector, &source_layout)
-                .is_none()
-        })
-        .collect::<Vec<_>>();
-    let mut build = SnapshotBuild::new_with_scope_filters(
-        registration,
-        commit,
-        tree_hash,
-        SnapshotScopeFilters {
-            path_filters,
-            language_filters,
-        },
-        true,
-        paths.len(),
-        0,
-    );
-
-    for path in paths {
-        let bytes = git_bytes(root, ["show", &format!("{}:{path}", build.commit)])?;
-        parse_indexed_file(&mut build, &path, &bytes)?;
-    }
-
-    Ok(build.finish())
+) -> Result<bool, CodeIndexError> {
+    Ok(source_kind(root_path.as_ref())?.is_filesystem())
 }
 
 fn build_incremental_snapshot(
@@ -526,7 +592,22 @@ fn build_incremental_snapshot(
     base_ref: &str,
     head_ref: &str,
     previous_hashes: &BTreeMap<String, String>,
+    base_resolved_commit_sha: Option<&str>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    if source_commit_is_filesystem(base_ref)
+        || source_commit_is_filesystem(head_ref)
+        || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
+        || source_kind(root)?.is_filesystem()
+    {
+        return build_filesystem_delta_snapshot(
+            registration,
+            selector,
+            root,
+            head_ref,
+            previous_hashes,
+            base_resolved_commit_sha,
+        );
+    }
     let base_commit = resolve_ref(root, base_ref)?;
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
@@ -613,7 +694,21 @@ fn build_worktree_overlay_snapshot(
     selector: &CodeRepositorySelector,
     root: &Path,
     previous_hashes: &BTreeMap<String, String>,
+    base_resolved_commit_sha: Option<&str>,
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
+    if source_commit_is_filesystem(&selector.ref_selector)
+        || base_resolved_commit_sha.is_some_and(source_commit_is_filesystem)
+        || source_kind(root)?.is_filesystem()
+    {
+        return build_filesystem_delta_snapshot(
+            registration,
+            selector,
+            root,
+            &selector.ref_selector,
+            previous_hashes,
+            base_resolved_commit_sha,
+        );
+    }
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let head_commit = resolve_ref(root, "HEAD")?;
     if commit != head_commit {

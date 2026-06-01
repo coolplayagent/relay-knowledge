@@ -56,7 +56,7 @@ relay-knowledge query "topic" --freshness graph-only --format json
 
 `source_scope is required by the MCP access policy`: MCP graph tool 请求缺少 scope，或者未配置允许 unspecified scope。
 
-`source_scope '<scope>' is not authorized for this MCP policy`: 请求 scope 不在 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 中，也不是当前运行时已注册的 code repository alias。运行中可先执行 `relay-knowledge repo register <path>`，让 Git root 目录名成为默认 alias，或在确实需要自定义 scope 时传入 `--alias <scope>`，然后完成索引；否则按错误提示追加 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` 后重启服务。
+`source_scope '<scope>' is not authorized for this MCP policy`: 请求 scope 不在 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES` 中，也不是当前运行时已注册的 code repository alias。运行中可先执行 `relay-knowledge repo register <path>`，让 Git root 或 filesystem root 目录名成为默认 alias，或在确实需要自定义 scope 时传入 `--alias <scope>`，然后完成索引；否则按错误提示追加 `RELAY_KNOWLEDGE_MCP_ALLOWED_SCOPES=<scope>` 后重启服务。
 
 路径配置错误: 高级目录覆盖和 `RELAY_KNOWLEDGE_HOME` 必须是绝对路径，且不能包含 `..`。完整变量清单见 [第 12 章](12-advanced-configuration.md)。
 

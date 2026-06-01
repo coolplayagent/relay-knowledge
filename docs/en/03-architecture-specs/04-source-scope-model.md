@@ -53,6 +53,72 @@ file-level protection for binary/media files and dataset dumps such as
 not recursively expand untracked high-volume dependency/cache/build directories
 unless an explicit path filter opts in.
 
+Non-Git source directories use a filesystem synthetic snapshot instead of Git
+history. Because there is no tracked tree authority, the default scan is
+whitelist based: root-level supported files and source-like roots such as
+`src/`, `include/`, `lib/`, `Sources/`, `packages/`, `modules/`, `plugins/`,
+`extensions/`, `docs/`, and `config/` are eligible, while broad build,
+dependency, cache, virtualenv, and coverage directories require explicit path
+opt-in. The opt-in is path-specific: a narrow filter such as `--path src` does
+not permit scanning sibling `node_modules/`, `target/`, or `vendor/`
+directories, while `--path build` or a path beneath `build/` permits that broad
+directory, and `--path .` explicitly opts into the whole non-Git root including
+broad directories. Default scans without a path filter descend only into
+directories that can contribute root-level whitelisted files or whitelisted
+source/config/documentation roots. Filtered scans descend only into requested
+paths and bounded discoverable source roots, so unrelated sibling directories
+are skipped before `read_dir` can fail or spend time outside the requested scope.
+If Git probing
+finds Git metadata but cannot resolve the repository because of unsafe ownership,
+missing Git support, or corrupt metadata, registration and ref resolution fail
+instead of silently treating the directory as a non-Git filesystem source.
+
+The `filesystem:` synthetic commit is bound to the effective indexed scope after
+source-layout discovery, not to every scanned file. Unindexed files outside the
+registered/requested path, language, and non-Git default whitelist do not move
+that scoped commit. The pre-scope filesystem hash pass must also apply the file
+preset before reading contents: media, binary, `*.jsonl`, and other default
+excluded files are not read or hashed unless an explicit path filter opts into
+that file. Non-Git moving-ref resolution for query, status, repository sets, and
+impact must use the same effective path and language filters that identify the
+indexed scope. Repository-set members with narrower filters must resolve through
+the active compatible broader non-Git commit before requiring a narrower
+synthetic commit to exist in storage, and repository-set freshness checks must
+reuse the same compatible commit before marking a moving member stale. Full-index tasks that replay a queued `filesystem:` ref must
+recompute the same scoped hash and fail or retry when the live indexed scope has
+changed; they must not silently index a different live tree under the queued
+commit. After a full-index plan or synchronous full-snapshot build has accepted
+a non-Git synthetic scope, every later read must verify the planned per-path
+content hashes before parsing live bytes, and incremental/worktree-overlay
+filesystem deltas must reject bytes that no longer match the planned content
+hashes before parsing. Non-Git file byte,
+hash, and metadata materialization must recheck every selected path component
+with `symlink_metadata` and reject final-path or ancestor-directory symlink
+replacements before reading or sizing the file. Explicit stored `filesystem:`
+refs resolve by identity before dynamic source-kind or Git probing, so old
+indexed scopes remain queryable after local edits or after Git metadata is later
+added to a source directory. Source byte materialization verifies the live tree
+before reading, and a `filesystem:` ref must run that verification through the
+filesystem snapshot path before any Git reprobe, using the same effective path
+and language filters as the indexed scope.
+Incremental non-Git updates must honor an explicit `base_ref` by resolving and
+loading fingerprints for that stored scope instead of silently using the
+currently active scope. They use both current and previous source-layout
+discovery so deleting the last file in a discovered root still removes the old
+indexed path. While a broader non-Git index task is active, narrower stale-read
+requests may be served only after comparing both the task scope and the
+requested selector scope with the task's effective path and language filters.
+Impact path collection for non-Git sources must check explicit `filesystem:`
+base/head refs before source-kind probing, resolve and compare scoped base/head
+refs first with those path and language filters, return an empty changeset when
+they match, and otherwise use the indexed effective filesystem filters,
+including explicit broad-directory opt-ins. Impact path partitioning and
+deleted-symbol extraction must also handle explicit `filesystem:` refs before
+Git probing; empty filesystem changesets must not force a snapshot reprobe.
+Query/status ref normalization and fresh full-index reuse checks for Git must
+keep the cheap `rev-parse`/tree-id path and must not perform an index-scale tree
+walk just to resolve a ref or prove the existing scope is fresh.
+
 ## 4. Git Snapshot Rules
 
 - `repository_id` is the stable local identity and is not an alias.

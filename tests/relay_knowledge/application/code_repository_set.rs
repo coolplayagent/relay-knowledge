@@ -319,6 +319,93 @@ pub fn shared_target() -> u32 {
 }
 
 #[tokio::test]
+async fn repository_set_member_reuses_broad_non_git_scope_for_narrow_filters() {
+    let source = PlainSourceDir::create("repo-set-non-git-broad-member");
+    source.write(
+        "src/api/public.rs",
+        r#"
+pub fn shared_target() -> u32 {
+    1
+}
+"#,
+    );
+    source.write(
+        "src/internal/hidden.rs",
+        r#"
+pub fn hidden_target() -> u32 {
+    2
+}
+"#,
+    );
+    let service = service_with_memory_store().await;
+
+    service
+        .register_code_repository(
+            CodeRepositoryRegisterRequest {
+                root_path: source.path.display().to_string(),
+                alias: "plain".to_owned(),
+                path_filters: vec!["src".to_owned()],
+                language_filters: Vec::new(),
+            },
+            context("register-non-git-broad-member"),
+        )
+        .await
+        .expect("non-git repository should register");
+    let indexed = service
+        .index_code_repository(
+            CodeIndexRequest {
+                repository: selector("plain"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::WaitUntilFresh,
+            },
+            context("index-non-git-broad-member"),
+        )
+        .await
+        .expect("broad non-git repository should index");
+    service
+        .create_code_repository_set(
+            CodeRepositorySetCreateRequest::new("workspace", None, None)
+                .expect("set request should validate"),
+            context("create-non-git-broad-member-set"),
+        )
+        .await
+        .expect("set should create");
+
+    let added = service
+        .add_code_repository_set_member(
+            CodeRepositorySetAddMemberRequest::new(
+                "workspace",
+                "plain",
+                "HEAD",
+                vec!["src/api".to_owned()],
+                Vec::new(),
+                0,
+            )
+            .expect("member request should validate"),
+            context("add-non-git-broad-member"),
+        )
+        .await
+        .expect("narrow member should reuse broad non-git scope");
+
+    assert_eq!(
+        added.member.resolved_commit_sha,
+        indexed.summary.resolved_commit_sha
+    );
+    assert_eq!(added.member.source_scope, indexed.summary.source_scope);
+
+    let status = service
+        .code_repository_set_status(
+            "workspace".to_owned(),
+            context("status-non-git-broad-member"),
+        )
+        .await
+        .expect("set status should keep compatible broad member fresh");
+
+    assert_eq!(status.status.members[0].freshness_state, "fresh");
+    assert!(!status.status.members[0].stale);
+}
+
+#[tokio::test]
 async fn repository_set_status_marks_moving_member_stale_when_ref_advances() {
     let repo = FixtureRepo::create("repo-set-moving-ref");
     repo.write(
@@ -543,6 +630,31 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
 
 struct FixtureRepo {
     path: PathBuf,
+}
+
+struct PlainSourceDir {
+    path: PathBuf,
+}
+
+impl PlainSourceDir {
+    fn create(name: &str) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("relay-knowledge-{name}-{nanos}"));
+        fs::create_dir_all(path.join("src")).expect("source directory should be created");
+
+        Self { path }
+    }
+
+    fn write(&self, relative: &str, content: &str) {
+        let path = self.path.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent directory should exist");
+        }
+        fs::write(path, content).expect("fixture file should be written");
+    }
 }
 
 impl FixtureRepo {

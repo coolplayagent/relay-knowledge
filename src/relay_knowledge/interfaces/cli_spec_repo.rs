@@ -14,7 +14,7 @@ pub(super) fn repo_register() -> CliCommandSpec {
                 Some("name"),
                 false,
                 false,
-                "Stable repository alias used by later repo commands; defaults to the Git root directory name.",
+                "Stable repository alias used by later repo commands; defaults to the Git or filesystem root directory name.",
                 None,
                 &[],
             ),
@@ -33,7 +33,7 @@ pub(super) fn repo_register() -> CliCommandSpec {
             "relay-knowledge repo register /path/to/repo --alias core --path src --format json",
         ],
         &[
-            "Stores repository registration metadata; indexing is a separate command. When `--alias` is omitted or blank, the resolved Git root directory name is used so later agent sessions can reuse the same repository. Registration rejects language filters so mixed-language repositories keep their full language surface; use repo query --language to narrow results. Registering the same repository root with another alias preserves existing aliases for that repository id."
+            "Stores repository registration metadata; indexing is a separate command. When `--alias` is omitted or blank, the resolved Git root or filesystem root directory name is used so later agent sessions can reuse the same repository. Registration rejects language filters so mixed-language repositories keep their full language surface; use repo query --language to narrow results. Registering the same repository root with another alias preserves existing aliases for that repository id."
         ],
     )
 }
