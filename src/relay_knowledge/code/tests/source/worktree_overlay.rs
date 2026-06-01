@@ -141,6 +141,118 @@ fn worktree_overlay_indexes_untracked_files_under_new_directories() {
     );
 }
 
+#[test]
+fn worktree_overlay_respects_gitignore_for_untracked_directories() {
+    let repo = TempGitRepo::create("overlay-gitignore");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.write(".gitignore", "build/\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write("src/local.rs", "fn local_value() -> u32 { 1 }\n");
+    repo.write("build/generated.rs", "fn ignored_generated() {}\n");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should use git status ignore rules");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/local.rs")
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| file.path != "build/generated.rs")
+    );
+}
+
+#[test]
+fn worktree_overlay_skips_untracked_broad_directories_without_path_opt_in() {
+    let repo = TempGitRepo::create("overlay-untracked-broad");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write("src/local.rs", "fn local_value() -> u32 { 1 }\n");
+    repo.write("vendor/pkg/lib.rs", "pub fn vendored() {}\n");
+    repo.write(
+        "node_modules/pkg/index.js",
+        "export function dependency() {}\n",
+    );
+    repo.write("target/generated.rs", "fn generated() {}\n");
+
+    let snapshot = build_index_snapshot(
+        &repo.registration(),
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should avoid broad untracked trees");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "src/local.rs")
+    );
+    for path in [
+        "vendor/pkg/lib.rs",
+        "node_modules/pkg/index.js",
+        "target/generated.rs",
+    ] {
+        assert!(
+            snapshot.files.iter().all(|file| file.path != path),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn worktree_overlay_allows_explicit_untracked_broad_path_opt_in() {
+    let repo = TempGitRepo::create("overlay-untracked-broad-opt-in");
+    repo.write("src/lib.rs", "fn value() -> u32 { 0 }\n");
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    repo.write("vendor/pkg/lib.rs", "pub fn vendored() {}\n");
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        repo.path.display().to_string(),
+        vec!["vendor/pkg".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+
+    let snapshot = build_index_snapshot(
+        &registration,
+        &repo.selector(),
+        CodeIndexMode::WorktreeOverlay,
+        Vec::new(),
+    )
+    .expect("overlay should honor explicit broad path opt-in");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "vendor/pkg/lib.rs")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn worktree_overlay_skips_symlinked_directories() {

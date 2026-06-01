@@ -40,17 +40,23 @@ Code source layout detection is not limited to a top-level `src/` directory.
 The indexer and import resolver also recognize real source under roots such as
 `external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`,
 `Sources/`, and `lib/`, including nested JVM roots like
-`modules/<name>/src/main/java`. Heavy dependency dumps such as plain `vendor/`
-and `third_party/` remain excluded by the source preset unless the user
-explicitly opts in with a path filter.
+`modules/<name>/src/main/java`. When the registered scope covers the whole
+repository, the Git tree decides which directories are source evidence:
+tracked `.cloudbuild/`, `.cid/`, `.build_config/`, `build/`, `dist/`,
+`vendor/`, and `third_party/` paths are eligible instead of being rejected by
+name. File-level safeguards still skip binary/media assets and `*.jsonl`
+dataset dumps unless an explicit path filter opts in. Dirty worktree overlays
+still use Git status for untracked files and do not recursively expand
+untracked broad dependency/cache/build directories unless an explicit path
+filter opts in.
 
 For example, a mixed-layout repository can register
 `--path external_deps/python_sdk`,
 `--path plugins/example.com/nonstandard/session`, or
 `--path modules/payment/src/main/java` to index those authorized source trees.
-If source under `vendor/pkg` or `third_party/pkg` is intentionally needed, that
-path must be passed explicitly so high-volume dependency dumps do not enter the
-default scope by accident.
+If a registration is intentionally narrowed to `--path src`, paths under
+`vendor/pkg`, `third_party/pkg`, or `build/` remain outside that registered
+scope until the user widens the path filters.
 
 ## Command/API Entry Points
 

@@ -61,8 +61,8 @@
 
 ## RK-PERF-007：默认 scope 包含大型数据和 lock 文件
 
-- 根因：默认 source preset 未排除大型 JSONL 数据集 dump，并曾把 `uv.lock` 当 unknown source file 展开。
-- 修复：默认排除常见生成物、cache、dataset dump 和 vendored asset；`uv.lock` 只作为 SBOM metadata 参与依赖建模，不产生 source chunk；显式 path filter 仍可 opt in。
+- 根因：默认 file preset 未排除大型 JSONL 数据集 dump，并曾把 `uv.lock` 当 unknown source file 展开。
+- 修复：默认排除常见二进制/媒体 asset 与 dataset dump；`uv.lock` 只作为 SBOM metadata 参与依赖建模，不产生 source chunk；显式 path filter 仍可 opt in。
 - 验收：relay-teams 默认 source retrieval bytes 从 32,888,900 降到 22,063,153。
 - 状态：已实现。
 

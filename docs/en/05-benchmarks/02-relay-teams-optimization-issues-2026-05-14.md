@@ -101,11 +101,11 @@ Source benchmark: [relay-teams baseline](01-relay-teams-baseline-2026-05-14.md)
 ## RK-PERF-007: Default scope includes large unknown files
 
 - Baseline: scope selected large JSONL fixtures and `uv.lock` as unknown files.
-- Root cause: source preset includes some large non-code text-like assets.
-- Fix: exclude `*.jsonl` dataset dumps from the default source preset and keep
+- Root cause: file preset includes some large non-code text-like assets.
+- Fix: exclude `*.jsonl` dataset dumps from the default file preset and keep
   `uv.lock` as SBOM-only metadata so it does not produce unknown source chunks.
 - Acceptance: scope preview reports dataset dumps under `excluded_paths` with
-  reason `excluded by source preset`; `uv.lock` may be selected for SBOM facts
+  reason `excluded by file preset`; `uv.lock` may be selected for SBOM facts
   but does not contribute source chunks, unsupported, large/heavy, or degraded
   retrieval counts.
 - Tests: scope selection and preview tests cover `.jsonl`, `uv.lock`, and

@@ -26,7 +26,7 @@ This page is the compact English companion for the self-iteration optimization l
 ## Issue #146: Nonstandard Source Layouts
 
 - Algorithm and architecture: repository source normalization treats source roots as a layout set rather than a single top-level `src/` convention. The indexer and import/module resolver recognize `external_deps/`, `packages/`, `modules/`, `plugins/`, `extensions/`, `Sources/`, `lib/`, nested JVM roots, and C/C++ `include/` segments.
-- Invariants and limits: plain `vendor/` and `third_party/` remain excluded by the source preset and require explicit path-filter opt-in. TypeScript bare specifiers resolve only when a local indexed module candidate exists, and ambiguous local matches stay protected.
+- Invariants and limits: source-root discovery still avoids widening a deliberately narrow `--path src` registration into broad dependency trees, while whole-repository Git scopes let tracked `vendor/` and `third_party/` paths participate like other tracked directories. TypeScript bare specifiers resolve only when a local indexed module candidate exists, and ambiguous local matches stay protected.
 - Guardrails: `nonstandard_layout_fixture` is included in the default fast profile and covers Python, TypeScript, Go, Java, C++, and Swift source outside a top-level `src/` directory without repository, path, query, symbol, or case-id special casing.
 
 ## Issue #166: Registration Language Filters

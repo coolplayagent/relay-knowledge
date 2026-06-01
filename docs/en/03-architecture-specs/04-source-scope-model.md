@@ -43,9 +43,15 @@ Repository source normalization must treat source roots as a layout set rather
 than a single `src/` convention. Supported source-root candidates include
 `src/`, `lib/`, `Sources/`, `external_deps/`, `packages/`, `modules/`,
 `plugins/`, `extensions/`, and nested JVM roots beneath those directories.
-Default exclusion presets still protect high-volume dependency dumps such as
-plain `vendor/` and `third_party/`; those paths require explicit path-filter
-opt-in before they can enter a repository scope.
+For clean Git snapshots, the tracked tree is the directory authority inside the
+registered and requested path scope: tracked `.cloudbuild/`, `.cid/`,
+`.build_config/`, `build/`, `dist/`, `vendor/`, and `third_party/` paths are
+eligible instead of being rejected by name. The remaining default preset is
+file-level protection for binary/media files and dataset dumps such as
+`*.jsonl`. Source-root discovery still avoids widening a deliberately narrow
+`--path src` registration into broad dependency trees, and worktree overlays do
+not recursively expand untracked high-volume dependency/cache/build directories
+unless an explicit path filter opts in.
 
 ## 4. Git Snapshot Rules
 
