@@ -178,16 +178,6 @@ pub(super) fn git_batch_blob_sizes(
     parse_cat_file_batch_sizes(paths, &output.stdout)
 }
 
-pub(super) fn git_object_exists(root: &Path, object: &str) -> Result<bool, CodeIndexError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["cat-file", "-e", object])
-        .output()?;
-
-    Ok(output.status.success())
-}
-
 fn parse_cat_file_batch(paths: &[String], bytes: &[u8]) -> Result<Vec<Vec<u8>>, CodeIndexError> {
     let mut offset = 0usize;
     let mut blobs = Vec::with_capacity(paths.len());

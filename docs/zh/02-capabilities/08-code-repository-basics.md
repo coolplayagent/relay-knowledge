@@ -36,15 +36,19 @@ relay-knowledge repo status relay-knowledge --format json
 代码源码布局识别不再局限于顶层 `src/` 目录。索引器和 import 解析会识别
 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、
 `Sources/`、`lib/` 等目录下的真实源码，也支持
-`modules/<name>/src/main/java` 这类嵌套 JVM source root。普通 `vendor/`
-和 `third_party/` 这类重型依赖转储仍由 source preset 默认排除，除非用户通过
-path filter 显式 opt in。
+`modules/<name>/src/main/java` 这类嵌套 JVM source root。当注册 scope 覆盖整个仓库时，
+Git tree 决定哪些目录是源码证据：被 Git 跟踪的 `.cloudbuild/`、`.cid/`、
+`.build_config/`、`build/`、`dist/`、`vendor/` 和 `third_party/` 路径都会按
+普通索引候选处理，而不会只因目录名被拒绝。文件级保护仍会跳过二进制/媒体资产和
+`*.jsonl` 数据集转储，除非显式 path filter opt in。脏工作树 overlay 仍通过
+Git status 处理 untracked 文件，且不会递归展开未跟踪的宽泛依赖、缓存或构建目录，
+除非显式 path filter opt in。
 
 例如，混合布局仓库可以注册 `--path external_deps/python_sdk`、
 `--path plugins/example.com/nonstandard/session` 或
-`--path modules/payment/src/main/java` 来索引这些授权源码；如果确实需要
-`vendor/pkg` 或 `third_party/pkg` 中的源码，必须显式传入对应 `--path`，避免把大
-容量依赖转储误纳入默认 scope。
+`--path modules/payment/src/main/java` 来索引这些授权源码；如果注册时刻意收窄为
+`--path src`，那么 `vendor/pkg`、`third_party/pkg` 或 `build/` 会继续处于注册
+scope 之外，直到用户显式放宽 path filter。
 
 ## 命令/API 入口
 

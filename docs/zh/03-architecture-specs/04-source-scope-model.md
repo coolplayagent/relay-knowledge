@@ -41,8 +41,13 @@ Scope 构造遵循固定流程：
 仓库源码规范化必须把 source root 视为一组布局，而不是单一 `src/` 约定。支持的
 source-root candidate 包括 `src/`、`lib/`、`Sources/`、`external_deps/`、
 `packages/`、`modules/`、`plugins/`、`extensions/`，以及这些目录下的嵌套
-JVM source root。默认排除 preset 仍保护普通 `vendor/`、`third_party/` 这类
-高容量依赖转储；这些路径必须通过显式 path filter opt in 后才能进入仓库 scope。
+JVM source root。对于 clean Git snapshot，注册和请求 path scope 内的 tracked tree
+是目录权威：Git 跟踪的 `.cloudbuild/`、`.cid/`、`.build_config/`、`build/`、
+`dist/`、`vendor/` 和 `third_party/` 路径都会作为候选，而不会只因目录名被拒绝。
+保留的默认 preset 是文件级保护，用于二进制/媒体文件和 `*.jsonl` 这类数据集转储。
+source-root discovery 仍不会把刻意收窄的 `--path src` 注册自动扩大到宽泛依赖树；
+worktree overlay 也不会递归展开未跟踪的高容量依赖、缓存或构建目录，除非显式
+path filter opt in。
 
 ## 4. Git 快照规则
 

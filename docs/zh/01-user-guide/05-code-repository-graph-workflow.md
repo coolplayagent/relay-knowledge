@@ -32,7 +32,7 @@ relay-knowledge repo scope preview repo --ref HEAD --format json
 relay-knowledge repo index repo --ref HEAD --dry-run --format json
 ```
 
-preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。默认 source preset 会先检查 Git tracked path 的目录结构，识别 `src/` 之外的真实源码目录，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root。默认 `--path src` 注册会在索引期扩展到这些已发现源码根，精确请求 path filter 仍只收窄查询。它仍会排除 dependency/cache/vendor/build/out/target 目录、二进制/媒体资产和 `*.jsonl` 数据集转储；`uv.lock` 这类锁文件快照可以贡献 SBOM 依赖事实，但不会展开成源码 chunk 或配置符号。`dist` 下被 Git 跟踪的源码语言 runtime 子树（例如 `dist/js/core` 或 `dist/js/app`）会进入索引，minified 文件、CSS/assets 和其他 distribution 子树仍默认排除。确实需要检索其他默认排除文件时，用精确 `--path` 注册或请求对应文件即可显式纳入。
+preview 适合在收窄注册期 `--path` 后确认不会把无关目录写入代码图谱。clean index 以 Git tree 为权威：只要目录在注册和请求的 path scope 内，Git 跟踪的 `.cloudbuild/`、`.cid/`、`.build_config/`、`build/`、`dist/`、`vendor/` 和 `third_party/` 都可以进入索引。默认 `--path src` 注册仍只会扩展到已发现 source root，例如 `external_deps/`、`packages/`、`modules/`、`plugins/`、`extensions/`、`Sources/`、`lib/` 和嵌套 JVM source root；精确请求 path filter 仍只收窄查询。保留的默认 preset 是文件级保护，用于二进制/媒体资产和 `*.jsonl` 数据集转储。`uv.lock` 这类锁文件快照可以贡献 SBOM 依赖事实，但不会展开成源码 chunk 或配置符号。worktree overlay 使用 Git status，因此被 `.gitignore` 忽略的 untracked 文件不会进入索引，除非 Git 自身报告它们；未跟踪的宽泛依赖、缓存或构建目录不会递归展开，除非显式 path filter opt in。
 
 ## 5.3 建立代码图谱索引
 

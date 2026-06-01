@@ -11,7 +11,7 @@ use super::{
     git::{git_batch_blobs, resolve_ref, resolve_tree},
     identity, parse_indexed_file,
     scope::{
-        discover_source_layout, effective_index_path_filters, load_ignore_rules_from_commit,
+        discover_source_layout, effective_index_path_filters,
         selection_exclusion_reason_with_layout,
     },
     snapshot::{SnapshotBuild, SnapshotScopeFilters},
@@ -243,7 +243,6 @@ pub fn prepare_full_index_plan(
     let root = PathBuf::from(&registration.root_path);
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(&root, &commit)?;
-    let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
     let entries = tracked_entries(&root, &commit)?;
     let source_layout = discover_source_layout(&entries);
     let paths = entries
@@ -253,7 +252,6 @@ pub fn prepare_full_index_plan(
                 &entry.path,
                 &registration,
                 &selector,
-                &ignore_rules,
                 &source_layout,
             )
             .is_none()

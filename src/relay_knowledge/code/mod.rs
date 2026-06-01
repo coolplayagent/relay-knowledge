@@ -49,9 +49,7 @@ use crate::domain::{
 };
 
 use changes::{GitChange, diff_changes, tracked_entries, worktree_changed_paths};
-use git::{
-    git_bytes, git_object_exists, git_optional, resolve_git_root, resolve_ref, resolve_tree,
-};
+use git::{git_bytes, git_optional, resolve_git_root, resolve_ref, resolve_tree};
 pub(crate) use grep::{
     SOURCE_GREP_CANDIDATE_FILE_LIMIT, SourceGrepKind, SourceGrepMatch, SourceGrepOutcome,
     SourceGrepRequest, source_grep_matches,
@@ -60,8 +58,7 @@ use ids::{stable_content_hash, stable_hash64, stable_id};
 use parser::parse_indexed_file;
 pub use pipeline::{CodeIndexPlan, prepare_full_index_plan};
 use scope::{
-    discover_source_layout, effective_index_path_filters, load_ignore_rules,
-    load_ignore_rules_from_commit, path_is_selected_with_layout, path_is_selected_with_rules,
+    discover_source_layout, effective_index_path_filters, path_is_selected_with_layout,
     path_scope_overlaps, selection_exclusion_reason_with_layout,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
@@ -212,6 +209,26 @@ pub(crate) struct SourceDeclarationMatch {
 
 const MAX_SOURCE_DECLARATION_FILES: usize = 8;
 const MAX_SOURCE_DECLARATION_BYTES: usize = 512 * 1024;
+const WORKTREE_UNTRACKED_BROAD_SEGMENTS: &[&str] = &[
+    ".cache",
+    ".next",
+    ".nuxt",
+    ".parcel-cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "third_party",
+    "vendor",
+    "venv",
+];
 
 /// Reads a bounded set of indexed Git blobs and returns exact declaration lines.
 pub(crate) fn source_declarations_for_identity(
@@ -406,7 +423,6 @@ pub fn deleted_symbol_names_for_diff(
     let root = PathBuf::from(&registration.root_path);
     let base_commit = resolve_ref(&root, base_ref)?;
     let changes = diff_changes(&root, base_ref, head_ref)?;
-    let ignore_rules = load_ignore_rules_from_commit(&root, &base_commit)?;
     let base_entries = tracked_entries(&root, &base_commit)?;
     let source_layout = discover_source_layout(&base_entries);
     let mut names = Vec::new();
@@ -418,13 +434,7 @@ pub fn deleted_symbol_names_for_diff(
             | GitChange::Copied { .. }
             | GitChange::TypeChanged { .. } => continue,
         };
-        if !path_is_selected_with_layout(
-            &deleted_path,
-            registration,
-            selector,
-            &ignore_rules,
-            &source_layout,
-        ) {
+        if !path_is_selected_with_layout(&deleted_path, registration, selector, &source_layout) {
             continue;
         }
         let bytes = git_bytes(&root, ["show", &format!("{base_commit}:{deleted_path}")])?;
@@ -475,7 +485,6 @@ fn build_full_snapshot(
 ) -> Result<CodeIndexSnapshot, CodeIndexError> {
     let commit = resolve_ref(root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(root, &commit)?;
-    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let entries = tracked_entries(root, &commit)?;
     let source_layout = discover_source_layout(&entries);
     let path_filters = effective_index_path_filters(registration, selector, &source_layout);
@@ -485,14 +494,8 @@ fn build_full_snapshot(
         .into_iter()
         .map(|entry| entry.path)
         .filter(|path| {
-            selection_exclusion_reason_with_layout(
-                path,
-                registration,
-                selector,
-                &ignore_rules,
-                &source_layout,
-            )
-            .is_none()
+            selection_exclusion_reason_with_layout(path, registration, selector, &source_layout)
+                .is_none()
         })
         .collect::<Vec<_>>();
     let mut build = SnapshotBuild::new_with_scope_filters(
@@ -528,8 +531,6 @@ fn build_incremental_snapshot(
     let commit = resolve_ref(root, head_ref)?;
     let tree_hash = resolve_tree(root, &commit)?;
     let changes = diff_changes(root, base_ref, head_ref)?;
-    let base_ignore_rules = load_ignore_rules_from_commit(root, &base_commit)?;
-    let ignore_rules = load_ignore_rules_from_commit(root, &commit)?;
     let base_entries = tracked_entries(root, &base_commit)?;
     let base_source_layout = discover_source_layout(&base_entries);
     let head_entries = tracked_entries(root, &commit)?;
@@ -555,20 +556,14 @@ fn build_incremental_snapshot(
         selector,
         root,
         previous_hashes,
-        ignore_rules: &ignore_rules,
         source_layout: &source_layout,
     };
 
     for change in changes {
         match change {
             GitChange::Deleted { path } => {
-                if path_is_selected_with_layout(
-                    &path,
-                    registration,
-                    selector,
-                    &base_ignore_rules,
-                    &base_source_layout,
-                ) {
+                if path_is_selected_with_layout(&path, registration, selector, &base_source_layout)
+                {
                     build.deleted_paths.push(path);
                 }
             }
@@ -577,7 +572,6 @@ fn build_incremental_snapshot(
                     &old_path,
                     registration,
                     selector,
-                    &base_ignore_rules,
                     &base_source_layout,
                 ) {
                     build.deleted_paths.push(old_path.clone());
@@ -593,13 +587,7 @@ fn build_incremental_snapshot(
                 parse_changed_path(&mut build, &parse_context, &new_path)?;
             }
             GitChange::Copied { old_path, new_path } => {
-                if path_is_selected_with_layout(
-                    &new_path,
-                    registration,
-                    selector,
-                    &ignore_rules,
-                    &source_layout,
-                ) {
+                if path_is_selected_with_layout(&new_path, registration, selector, &source_layout) {
                     build.tombstones.push(CodePathTombstone {
                         repository_id: registration.repository_id.clone(),
                         source_scope: build.source_scope.clone(),
@@ -646,11 +634,9 @@ fn build_worktree_overlay_snapshot(
     let mut deleted_paths = Vec::new();
     let mut files_to_parse = Vec::new();
     let mut skipped_unchanged_count = 0;
-    let ignore_rules = load_ignore_rules(root)?;
-
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            if path_is_selected_with_rules(deleted_path, registration, selector, &ignore_rules) {
+            if scope::path_is_selected(deleted_path, registration, selector) {
                 overlay_hash_input.extend_from_slice(b"D\0");
                 overlay_hash_input.extend_from_slice(deleted_path.as_bytes());
                 overlay_hash_input.push(0);
@@ -661,11 +647,16 @@ fn build_worktree_overlay_snapshot(
         if !path_scope_overlaps(path, registration, selector) {
             continue;
         }
+        if change.is_untracked()
+            && !worktree_untracked_path_is_selected(path, registration, selector)
+        {
+            continue;
+        }
         let full_path = root.join(path);
         let metadata = match fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
+                if scope::path_is_selected(path, registration, selector) {
                     overlay_hash_input.extend_from_slice(b"D\0");
                     overlay_hash_input.extend_from_slice(path.as_bytes());
                     overlay_hash_input.push(0);
@@ -677,21 +668,20 @@ fn build_worktree_overlay_snapshot(
         };
         let file_type = metadata.file_type();
         if file_type.is_symlink() {
-            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
+            if scope::path_is_selected(path, registration, selector) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
         if file_type.is_dir() {
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
-                if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
+                if scope::path_is_selected(path, registration, selector) {
                     record_worktree_status_marker(path, &mut overlay_hash_input);
                 }
                 continue;
             }
             for nested_path in worktree_directory_files(root, path)? {
-                if path_is_selected_with_rules(&nested_path, registration, selector, &ignore_rules)
-                {
+                if worktree_untracked_path_is_selected(&nested_path, registration, selector) {
                     record_worktree_file(
                         root,
                         &nested_path,
@@ -705,12 +695,12 @@ fn build_worktree_overlay_snapshot(
             continue;
         }
         if !file_type.is_file() {
-            if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
+            if scope::path_is_selected(path, registration, selector) {
                 record_worktree_status_marker(path, &mut overlay_hash_input);
             }
             continue;
         }
-        if path_is_selected_with_rules(path, registration, selector, &ignore_rules) {
+        if scope::path_is_selected(path, registration, selector) {
             record_worktree_file(
                 root,
                 path,
@@ -745,6 +735,53 @@ fn build_worktree_overlay_snapshot(
     }
 
     Ok(build.finish())
+}
+
+fn worktree_untracked_path_is_selected(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    scope::path_is_selected(path, registration, selector)
+        && (!worktree_untracked_path_contains_broad_segment(path)
+            || explicit_worktree_path_filter_covers(path, registration, selector))
+}
+
+fn worktree_untracked_path_contains_broad_segment(path: &str) -> bool {
+    normalize_worktree_path(path)
+        .split('/')
+        .any(|segment| WORKTREE_UNTRACKED_BROAD_SEGMENTS.contains(&segment))
+}
+
+fn explicit_worktree_path_filter_covers(
+    path: &str,
+    registration: &CodeRepositoryRegistration,
+    selector: &CodeRepositorySelector,
+) -> bool {
+    registration
+        .path_filters
+        .iter()
+        .chain(selector.path_filters.iter())
+        .any(|filter| explicit_worktree_filter_matches_path(path, filter))
+}
+
+fn explicit_worktree_filter_matches_path(path: &str, filter: &str) -> bool {
+    let path = normalize_worktree_path(path);
+    let filter = normalize_worktree_path(filter);
+    if filter.is_empty() || filter == "." {
+        return false;
+    }
+
+    path == filter
+        || path.starts_with(&format!("{filter}/"))
+        || filter.starts_with(&format!("{path}/"))
+}
+
+fn normalize_worktree_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_owned()
 }
 
 fn record_worktree_status_marker(path: &str, overlay_hash_input: &mut Vec<u8>) {
@@ -839,7 +876,6 @@ struct ChangedPathParseContext<'a> {
     selector: &'a CodeRepositorySelector,
     root: &'a Path,
     previous_hashes: &'a BTreeMap<String, String>,
-    ignore_rules: &'a [scope::IgnoreRule],
     source_layout: &'a scope::SourceLayoutDiscovery,
 }
 
@@ -852,7 +888,6 @@ fn parse_changed_path(
         path,
         context.registration,
         context.selector,
-        context.ignore_rules,
         context.source_layout,
     ) {
         return Ok(());

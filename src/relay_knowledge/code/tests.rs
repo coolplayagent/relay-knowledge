@@ -200,24 +200,20 @@ fn dot_path_filter_selects_repository_root() {
 }
 
 #[test]
-fn explicit_default_exclusion_opt_in_stays_path_scoped() {
+fn explicit_file_preset_opt_in_stays_path_scoped() {
     let registration = CodeRepositoryRegistration::new(
         "repo",
         "alias",
         "/tmp/repo",
-        vec![".".to_owned(), "dist".to_owned()],
+        vec![".".to_owned(), "manual.pdf".to_owned()],
         Vec::new(),
     )
     .expect("registration should validate");
     let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
         .expect("selector should validate");
 
-    assert!(path_is_selected("dist/bundle.js", &registration, &selector));
-    assert!(!path_is_selected(
-        "target/generated.rs",
-        &registration,
-        &selector
-    ));
+    assert!(path_is_selected("manual.pdf", &registration, &selector));
+    assert!(!path_is_selected("other.pdf", &registration, &selector));
 }
 
 #[test]
@@ -361,35 +357,43 @@ fn explicit_default_exclusion_opt_in_supports_dataset_paths() {
 }
 
 #[test]
-fn anchored_ignore_rules_only_match_repo_root_paths() {
-    let repo = TempGitRepo::create("anchored-ignore-rules");
-    repo.write(".relay-knowledgeignore", "/docs\n");
-    repo.write("docs/root.rs", "fn root() {}\n");
-    repo.write("src/docs/nested.rs", "fn nested() {}\n");
+fn git_tracked_build_directories_are_selected_without_directory_opt_in() {
+    let registration = CodeRepositoryRegistration::new(
+        "repo",
+        "alias",
+        "/tmp/repo",
+        vec![".".to_owned()],
+        Vec::new(),
+    )
+    .expect("registration should validate");
+    let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+        .expect("selector should validate");
 
-    let registration = repo.registration();
-    let selector = repo.selector();
-
-    assert!(!path_is_selected("docs/root.rs", &registration, &selector));
-    assert!(path_is_selected(
-        "src/docs/nested.rs",
-        &registration,
-        &selector
-    ));
+    for path in [
+        "build/workflow.yaml",
+        ".cloudbuild/cloudbuild.yaml",
+        ".cid/pipeline.yml",
+        ".build_config/settings.toml",
+        "target/generated.rs",
+        "vendor/pkg/lib.rs",
+        "third_party/pkg/lib.rs",
+    ] {
+        assert!(path_is_selected(path, &registration, &selector), "{path}");
+    }
 }
 
 #[test]
-fn incremental_deletions_survive_tighter_ignore_rules() {
-    let repo = TempGitRepo::create("incremental-tightened-ignore");
+fn incremental_deletions_survive_new_gitignore_rules() {
+    let repo = TempGitRepo::create("incremental-tightened-gitignore");
     repo.write("src/lib.rs", "fn kept() {}\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let base = repo.git_text(["rev-parse", "HEAD"]);
 
-    repo.write(".relay-knowledgeignore", "src\n");
+    repo.write(".gitignore", "src\n");
     fs::remove_file(repo.path.join("src/lib.rs")).expect("source file should delete");
     repo.git(["add", "."]);
-    repo.git(["commit", "-m", "tighten ignore and delete"]);
+    repo.git(["commit", "-m", "tighten gitignore and delete"]);
 
     let snapshot = build_index_snapshot(
         &repo.registration(),
@@ -607,15 +611,16 @@ fn deleted_symbol_names_are_extracted_from_base_diff() {
 }
 
 #[test]
-fn scope_preview_reports_default_and_ignore_exclusions() {
+fn scope_preview_reports_file_preset_exclusions_and_tracked_directories() {
     let repo = TempGitRepo::create("scope-preview");
     repo.write("src/lib.rs", "fn kept() {}\n");
+    repo.write("build/workflow.yaml", "steps:\n  - cargo test\n");
+    repo.write(".cloudbuild/cloudbuild.yaml", "steps:\n  - name: test\n");
     repo.write("dist/bundle.js", "function generated() {}\n");
     repo.write("data/events.jsonl", "{\"kind\":\"fixture\"}\n");
     repo.write("docs/notes.rs", "fn ignored() {}\n");
     repo.write("manual.pdf", "%PDF-1.7\n");
     repo.write("uv.lock", "version = 1\n");
-    repo.write(".relay-knowledgeignore", "docs\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
     let registration = CodeRepositoryRegistration::new(
@@ -631,7 +636,7 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
 
     let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
 
-    assert_eq!(preview.selected_file_count, 2);
+    assert_eq!(preview.selected_file_count, 6);
     assert!(
         preview
             .language_distribution
@@ -644,26 +649,37 @@ fn scope_preview_reports_default_and_ignore_exclusions() {
             .iter()
             .any(|language| language.language_id == "python")
     );
+    assert!(
+        preview
+            .largest_files
+            .iter()
+            .any(|file| file.path == "build/workflow.yaml")
+    );
+    assert!(
+        preview
+            .largest_files
+            .iter()
+            .any(|file| file.path == ".cloudbuild/cloudbuild.yaml")
+    );
     assert!(preview.excluded_paths.iter().any(|path| {
-        path.path == "dist/bundle.js" && path.reason == "excluded by source preset"
+        path.path == "data/events.jsonl" && path.reason == "excluded by file preset"
     }));
-    assert!(preview.excluded_paths.iter().any(|path| {
-        path.path == "data/events.jsonl" && path.reason == "excluded by source preset"
-    }));
-    assert!(preview.excluded_paths.iter().any(|path| {
-        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
-    }));
+    assert!(
+        preview
+            .excluded_paths
+            .iter()
+            .any(|path| { path.path == "manual.pdf" && path.reason == "excluded by file preset" })
+    );
 }
 
 #[test]
-fn scope_preview_uses_ignore_rules_from_requested_commit() {
-    let repo = TempGitRepo::create("scope-preview-commit-ignore");
+fn scope_preview_includes_tracked_paths_ignored_by_worktree_gitignore() {
+    let repo = TempGitRepo::create("scope-preview-gitignore");
     repo.write("src/lib.rs", "fn kept() {}\n");
-    repo.write("docs/notes.rs", "fn ignored() {}\n");
-    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.write("build/workflow.yaml", "steps:\n  - cargo test\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
-    repo.write(".relay-knowledgeignore", "");
+    repo.write(".gitignore", "build\n");
     let registration = CodeRepositoryRegistration::new(
         "repo",
         "alias",
@@ -677,21 +693,22 @@ fn scope_preview_uses_ignore_rules_from_requested_commit() {
 
     let preview = preview_repository_scope(&registration, &selector).expect("preview should build");
 
-    assert_eq!(preview.selected_file_count, 1);
-    assert!(preview.excluded_paths.iter().any(|path| {
-        path.path == "docs/notes.rs" && path.reason == "excluded by .relay-knowledgeignore"
-    }));
+    assert!(
+        preview
+            .largest_files
+            .iter()
+            .any(|file| file.path == "build/workflow.yaml")
+    );
 }
 
 #[test]
-fn impact_path_partition_uses_ignore_rules_from_selected_commit() {
-    let repo = TempGitRepo::create("impact-partition-commit-ignore");
+fn impact_path_partition_includes_gitignore_ignored_tracked_paths() {
+    let repo = TempGitRepo::create("impact-partition-gitignore");
     repo.write("src/lib.rs", "fn kept() {}\n");
-    repo.write("docs/notes.rs", "fn ignored() {}\n");
-    repo.write(".relay-knowledgeignore", "docs\n");
+    repo.write("build/workflow.yaml", "steps:\n  - cargo test\n");
     repo.git(["add", "."]);
     repo.git(["commit", "-m", "initial"]);
-    repo.write(".relay-knowledgeignore", "");
+    repo.write(".gitignore", "build\n");
     let registration = CodeRepositoryRegistration::new(
         "repo",
         "alias",
@@ -706,12 +723,19 @@ fn impact_path_partition_uses_ignore_rules_from_selected_commit() {
     let groups = partition_changed_paths_for_selector(
         &registration,
         &selector,
-        vec!["src/lib.rs".to_owned(), "docs/notes.rs".to_owned()],
+        vec![
+            "src/lib.rs".to_owned(),
+            "build/workflow.yaml".to_owned(),
+            "data/events.jsonl".to_owned(),
+        ],
     )
     .expect("paths should partition");
 
-    assert_eq!(groups.in_scope_changed_paths, ["src/lib.rs"]);
-    assert_eq!(groups.out_of_scope_changed_paths, ["docs/notes.rs"]);
+    assert_eq!(
+        groups.in_scope_changed_paths,
+        ["build/workflow.yaml", "src/lib.rs"]
+    );
+    assert_eq!(groups.out_of_scope_changed_paths, ["data/events.jsonl"]);
 }
 
 #[test]

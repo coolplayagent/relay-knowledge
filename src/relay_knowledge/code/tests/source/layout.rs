@@ -6,6 +6,10 @@ use crate::domain::{CodeIndexResourceBudget, CodeParseStatus};
 fn full_index_plan_discovers_nonstandard_source_roots_without_path_filters() {
     let repo = TempGitRepo::create("full-index-source-discovery");
     repo.write("src/lib.rs", "pub fn local_entry() {}\n");
+    repo.write("build/workflow.yaml", "steps:\n  - cargo test\n");
+    repo.write(".cloudbuild/cloudbuild.yaml", "steps:\n  - name: test\n");
+    repo.write(".cid/pipeline.yml", "jobs:\n  test: cargo test\n");
+    repo.write(".build_config/settings.toml", "profile = \"ci\"\n");
     repo.write(
         "external_deps/rust_sdk/lib.rs",
         "pub fn external_session_client() {}\n",
@@ -56,8 +60,16 @@ fn full_index_plan_discovers_nonstandard_source_roots_without_path_filters() {
     assert!(paths.iter().any(|path| {
         path == "modules/java_sdk/src/main/java/example/ExternalJavaSessionClient.java"
     }));
-    assert!(paths.iter().all(|path| !path.starts_with("vendor/")));
-    assert!(paths.iter().all(|path| !path.starts_with("third_party/")));
+    for path in [
+        "build/workflow.yaml",
+        ".cloudbuild/cloudbuild.yaml",
+        ".cid/pipeline.yml",
+        ".build_config/settings.toml",
+        "vendor/pkg/lib.rs",
+        "third_party/pkg/lib.rs",
+    ] {
+        assert!(paths.iter().any(|indexed| indexed == path), "{path}");
+    }
     assert!(
         symbol_names
             .iter()
@@ -67,6 +79,16 @@ fn full_index_plan_discovers_nonstandard_source_roots_without_path_filters() {
         symbol_names
             .iter()
             .any(|name| name == "ExternalJavaSessionClient")
+    );
+    assert!(
+        symbol_names
+            .iter()
+            .any(|name| name == "vendored_dependency")
+    );
+    assert!(
+        symbol_names
+            .iter()
+            .any(|name| name == "third_party_dependency")
     );
 }
 

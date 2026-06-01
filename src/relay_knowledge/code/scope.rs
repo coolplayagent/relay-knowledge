@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 use crate::domain::{
@@ -13,7 +12,6 @@ use crate::domain::{
 use super::{
     CodeIndexError,
     changes::{GitTreeEntry, tracked_entries},
-    git_bytes, git_object_exists,
     languages::language_id,
     parser::dependency_manifest_language_ids,
     parser::dependency_manifest_overrides_default_exclusion,
@@ -24,45 +22,12 @@ use super::{
 const PREVIEW_MAX_EXCLUDED_PATHS: usize = 50;
 const PREVIEW_MAX_LARGEST_FILES: usize = 10;
 const DEFAULT_TEXT_FILE_BUDGET_BYTES: usize = 512 * 1024;
-const DEFAULT_EXCLUDED_SEGMENTS: &[&str] = &[
-    ".git",
-    ".cache",
-    ".next",
-    ".nuxt",
-    ".parcel-cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".tox",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "out",
-    "target",
-    "third_party",
-    "vendor",
-    "venv",
-];
 const DEFAULT_EXCLUDED_EXTENSIONS: &[&str] = &[
     "7z", "avif", "bmp", "bz2", "class", "eot", "gif", "gz", "ico", "jar", "jpeg", "jpg", "jsonl",
     "lockb", "map", "mov", "mp4", "otf", "pdf", "png", "svg", "tar", "tgz", "ttf", "wasm", "webm",
     "woff", "woff2", "zip", "zst",
 ];
-const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &[".relay-knowledgeignore", "uv.lock"];
-const DEFAULT_DISTRIBUTION_SEGMENT: &str = "dist";
-const DEFAULT_DISTRIBUTION_LANGUAGE_SEGMENTS: &[&str] = &[
-    "javascript",
-    "js",
-    "src",
-    "source",
-    "sources",
-    "ts",
-    "typescript",
-];
-const DEFAULT_DISTRIBUTION_RUNTIME_SEGMENTS: &[&str] =
-    &["app", "client", "core", "runtime", "server"];
+const DEFAULT_EXCLUDED_FILENAMES: &[&str] = &["uv.lock"];
 const SOURCE_LAYOUT_DISCOVERY_MAX_PATHS: usize = 200_000;
 const SOURCE_LAYOUT_DISCOVERY_MAX_ROOTS: usize = 512;
 const AUTO_SOURCE_SCOPE_FILTERS: &[&str] = &[".", "src", "include", "lib", "Sources"];
@@ -75,7 +40,6 @@ pub fn preview_repository_scope(
     let root = PathBuf::from(&registration.root_path);
     let commit = resolve_ref(&root, &selector.ref_selector)?;
     let tree_hash = resolve_tree(&root, &commit)?;
-    let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
     let mut selected_byte_count = 0usize;
     let mut selected_file_count = 0usize;
     let mut unsupported_file_count = 0usize;
@@ -92,7 +56,6 @@ pub fn preview_repository_scope(
             &entry.path,
             registration,
             selector,
-            &ignore_rules,
             &source_layout,
         ) {
             if excluded_paths.len() < PREVIEW_MAX_EXCLUDED_PATHS {
@@ -169,20 +132,13 @@ pub fn partition_changed_paths_for_selector(
 ) -> Result<CodeImpactPathGroups, CodeIndexError> {
     let root = PathBuf::from(&registration.root_path);
     let commit = resolve_ref(&root, &selector.ref_selector)?;
-    let ignore_rules = load_ignore_rules_from_commit(&root, &commit)?;
     let entries = tracked_entries(&root, &commit)?;
     let source_layout = discover_source_layout(&entries);
     let mut in_scope_changed_paths = Vec::new();
     let mut out_of_scope_changed_paths = Vec::new();
     for path in paths {
-        if selection_exclusion_reason_with_layout(
-            &path,
-            registration,
-            selector,
-            &ignore_rules,
-            &source_layout,
-        )
-        .is_none()
+        if selection_exclusion_reason_with_layout(&path, registration, selector, &source_layout)
+            .is_none()
         {
             in_scope_changed_paths.push(path);
         } else {
@@ -200,55 +156,32 @@ pub fn partition_changed_paths_for_selector(
     })
 }
 
-#[cfg(test)]
 pub(super) fn path_is_selected(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
 ) -> bool {
-    let root = Path::new(&registration.root_path);
-    let ignore_rules = load_ignore_rules(root).expect("ignore rules should load in tests");
-
-    path_is_selected_with_rules(path, registration, selector, &ignore_rules)
-}
-
-pub(super) fn path_is_selected_with_rules(
-    path: &str,
-    registration: &CodeRepositoryRegistration,
-    selector: &CodeRepositorySelector,
-    ignore_rules: &[IgnoreRule],
-) -> bool {
-    selection_exclusion_reason(path, registration, selector, ignore_rules).is_none()
+    selection_exclusion_reason(path, registration, selector).is_none()
 }
 
 pub(super) fn path_is_selected_with_layout(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
-    ignore_rules: &[IgnoreRule],
     source_layout: &SourceLayoutDiscovery,
 ) -> bool {
-    selection_exclusion_reason_with_layout(
-        path,
-        registration,
-        selector,
-        ignore_rules,
-        source_layout,
-    )
-    .is_none()
+    selection_exclusion_reason_with_layout(path, registration, selector, source_layout).is_none()
 }
 
 pub(super) fn selection_exclusion_reason(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
-    ignore_rules: &[IgnoreRule],
 ) -> Option<String> {
     selection_exclusion_reason_with_layout(
         path,
         registration,
         selector,
-        ignore_rules,
         &SourceLayoutDiscovery::default(),
     )
 }
@@ -257,7 +190,6 @@ pub(super) fn selection_exclusion_reason_with_layout(
     path: &str,
     registration: &CodeRepositoryRegistration,
     selector: &CodeRepositorySelector,
-    ignore_rules: &[IgnoreRule],
     source_layout: &SourceLayoutDiscovery,
 ) -> Option<String> {
     if !path_scope_allows(path, registration, selector)
@@ -270,9 +202,6 @@ pub(super) fn selection_exclusion_reason_with_layout(
     {
         return Some("outside registered/requested language scope".to_owned());
     }
-    if ignore_rules.iter().any(|rule| rule.matches(path)) {
-        return Some("excluded by .relay-knowledgeignore".to_owned());
-    }
     if default_source_preset_excludes(path)
         && !dependency_manifest_overrides_default_exclusion(path)
         && !source_layout.keeps_default_excluded_source(path)
@@ -284,7 +213,7 @@ pub(super) fn selection_exclusion_reason_with_layout(
                 .chain(selector.path_filters.iter()),
         )
     {
-        return Some("excluded by source preset".to_owned());
+        return Some("excluded by file preset".to_owned());
     }
 
     None
@@ -470,81 +399,6 @@ pub(super) fn path_scope_overlaps(
         && path_filter_overlaps(path, &selector.path_filters)
 }
 
-pub(super) fn load_ignore_rules(root: &Path) -> Result<Vec<IgnoreRule>, CodeIndexError> {
-    let path = root.join(".relay-knowledgeignore");
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
-
-    Ok(parse_ignore_rules(&content))
-}
-
-pub(super) fn load_ignore_rules_from_commit(
-    root: &Path,
-    commit: &str,
-) -> Result<Vec<IgnoreRule>, CodeIndexError> {
-    let object = format!("{commit}:.relay-knowledgeignore");
-    if !git_object_exists(root, &object)? {
-        return Ok(Vec::new());
-    }
-    let content = String::from_utf8(git_bytes(root, ["show", &object])?).map_err(|error| {
-        CodeIndexError::InvalidInput(format!(
-            ".relay-knowledgeignore at {commit} is not valid UTF-8: {}",
-            error.utf8_error()
-        ))
-    })?;
-
-    Ok(parse_ignore_rules(&content))
-}
-
-fn parse_ignore_rules(content: &str) -> Vec<IgnoreRule> {
-    content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
-        .map(|line| IgnoreRule {
-            pattern: line.trim_start_matches('/').to_owned(),
-            anchored: line.starts_with('/'),
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct IgnoreRule {
-    pattern: String,
-    anchored: bool,
-}
-
-impl IgnoreRule {
-    fn matches(&self, path: &str) -> bool {
-        let pattern = normalize_path_filter(&self.pattern);
-        let path = normalize_path_filter(path);
-        if pattern.is_empty() {
-            return false;
-        }
-        if let Some(extension) = pattern.strip_prefix("*.") {
-            return if self.anchored {
-                path.rsplit_once('/').is_none()
-                    && path
-                        .rsplit_once('.')
-                        .is_some_and(|(_, path_extension)| path_extension == extension)
-            } else {
-                path.rsplit_once('.')
-                    .is_some_and(|(_, path_extension)| path_extension == extension)
-            };
-        }
-        if pattern.contains('/') {
-            return path == pattern || path.starts_with(&format!("{pattern}/"));
-        }
-        if self.anchored {
-            return path == pattern || path.starts_with(&format!("{pattern}/"));
-        }
-        path.split('/').any(|segment| segment == pattern)
-    }
-}
-
 fn path_filter_allows(path: &str, filters: &[String]) -> bool {
     filters.is_empty()
         || filters
@@ -582,42 +436,12 @@ fn default_source_preset_excludes(path: &str) -> bool {
     {
         return true;
     }
-    if normalized
-        .split('/')
-        .any(|segment| default_excluded_segment_excludes_path(segment, normalized))
-    {
-        return true;
-    }
     normalized
         .rsplit_once('.')
         .map(|(_, extension)| {
             DEFAULT_EXCLUDED_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
         })
         .unwrap_or(false)
-}
-
-fn default_excluded_segment_excludes_path(segment: &str, path: &str) -> bool {
-    DEFAULT_EXCLUDED_SEGMENTS.contains(&segment)
-        && (segment != DEFAULT_DISTRIBUTION_SEGMENT || distribution_segment_excludes_path(path))
-}
-
-fn distribution_segment_excludes_path(path: &str) -> bool {
-    let segments = path.split('/').collect::<Vec<_>>();
-
-    !distribution_runtime_source_path_is_indexable(path, &segments)
-}
-
-fn distribution_runtime_source_path_is_indexable(path: &str, segments: &[&str]) -> bool {
-    language_id(path).is_some()
-        && !path
-            .rsplit('/')
-            .next()
-            .is_some_and(|file_name| file_name.to_ascii_lowercase().contains(".min."))
-        && segments.windows(3).any(|window| {
-            window[0] == DEFAULT_DISTRIBUTION_SEGMENT
-                && DEFAULT_DISTRIBUTION_LANGUAGE_SEGMENTS.contains(&window[1])
-                && DEFAULT_DISTRIBUTION_RUNTIME_SEGMENTS.contains(&window[2])
-        })
 }
 
 fn explicit_path_filter_opts_into_default_exclusion<'a>(
@@ -634,8 +458,7 @@ fn explicit_path_filter_opts_into_default_exclusion<'a>(
         }
         let filter_segments = filter.split('/').collect::<Vec<_>>();
         let targets_default_exclusion = filter_segments.iter().any(|segment| {
-            DEFAULT_EXCLUDED_SEGMENTS.contains(segment)
-                || DEFAULT_EXCLUDED_FILENAMES.contains(segment)
+            DEFAULT_EXCLUDED_FILENAMES.contains(segment)
                 || segment
                     .rsplit_once('.')
                     .map(|(_, ext)| ext.to_ascii_lowercase())
@@ -691,27 +514,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_preset_keeps_distribution_runtime_sources_indexable() {
-        assert!(!default_source_preset_excludes(
-            "frontend/dist/js/core/stream.js"
-        ));
-        assert!(!default_source_preset_excludes(
-            "frontend/dist/js/app/bootstrap.js"
-        ));
-        assert!(!default_source_preset_excludes(
-            "web/dist/src/runtime/session.ts"
-        ));
-        assert!(default_source_preset_excludes("dist/bundle.js"));
-        assert!(default_source_preset_excludes(
-            "frontend/dist/js/components/sidebar.js"
-        ));
-        assert!(default_source_preset_excludes(
-            "frontend/dist/js/core/highlight.min.js"
-        ));
-        assert!(default_source_preset_excludes("frontend/dist/css/app.css"));
-        assert!(default_source_preset_excludes(
-            "node_modules/pkg/dist/js/core/index.js"
-        ));
+    fn source_preset_does_not_exclude_tracked_directory_names() {
+        for path in [
+            "build/workflow.yaml",
+            ".cloudbuild/cloudbuild.yaml",
+            ".cid/pipeline.yml",
+            ".build_config/settings.toml",
+            "dist/bundle.js",
+            "frontend/dist/js/components/sidebar.js",
+            "node_modules/pkg/dist/js/core/index.js",
+            "target/generated.rs",
+            "vendor/pkg/lib.rs",
+            "third_party/pkg/lib.rs",
+        ] {
+            assert!(!default_source_preset_excludes(path), "{path}");
+        }
     }
 
     #[test]
@@ -735,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn default_source_preset_excludes_dataset_dumps_and_uv_lock() {
+    fn default_file_preset_excludes_dataset_dumps_and_keeps_uv_lock_facts() {
         let registration = CodeRepositoryRegistration::new(
             "repo",
             "alias",
@@ -757,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn nonstandard_source_roots_are_selected_without_opt_in() {
+    fn git_tracked_directory_names_are_selected_without_opt_in() {
         let registration = CodeRepositoryRegistration::new(
             "repo",
             "alias",
@@ -770,44 +587,37 @@ mod tests {
             .expect("selector should validate");
 
         for path in [
+            "build/workflow.yaml",
+            ".cloudbuild/cloudbuild.yaml",
+            ".cid/pipeline.yml",
+            ".build_config/settings.toml",
             "external_deps/python_sdk/session_client.py",
             "packages/ui/src/index.ts",
             "modules/java_sdk/src/main/java/example/SessionClient.java",
             "plugins/example.com/nonstandard/session/client.go",
             "Sources/SwiftSdk/SessionClient.swift",
             "lib/app/controller.rb",
+            "vendor/pkg/session_client.py",
+            "third_party/pkg/session_client.py",
         ] {
             assert!(path_is_selected(path, &registration, &selector), "{path}");
         }
-        assert!(!path_is_selected(
-            "vendor/pkg/session_client.py",
-            &registration,
-            &selector
-        ));
-        assert!(!path_is_selected(
-            "third_party/pkg/session_client.py",
-            &registration,
-            &selector
-        ));
     }
 
     #[test]
-    fn explicit_vendor_source_opt_in_stays_supported() {
+    fn default_source_preset_keeps_file_extension_opt_in_scoped() {
         let registration = CodeRepositoryRegistration::new(
             "repo",
             "alias",
             "/tmp/repo",
-            vec![".".to_owned(), "vendor".to_owned()],
+            vec![".".to_owned(), "manual.pdf".to_owned()],
             Vec::new(),
         )
         .expect("registration should validate");
         let selector = CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
             .expect("selector should validate");
 
-        assert!(path_is_selected(
-            "vendor/pkg/session_client.py",
-            &registration,
-            &selector
-        ));
+        assert!(path_is_selected("manual.pdf", &registration, &selector));
+        assert!(!path_is_selected("other.pdf", &registration, &selector));
     }
 }
