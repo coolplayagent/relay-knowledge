@@ -121,6 +121,21 @@ fn parses_repo_command_forms_and_validation_errors() {
         }
     );
     assert_eq!(
+        parse_repo(&["index-worker".to_owned()]).expect("index worker should parse"),
+        RepoCommand::IndexWorker { task_id: None }
+    );
+    assert_eq!(
+        parse_repo(&[
+            "index-worker".to_owned(),
+            "--task-id".to_owned(),
+            "code-index-task:1".to_owned(),
+        ])
+        .expect("task-specific index worker should parse"),
+        RepoCommand::IndexWorker {
+            task_id: Some("code-index-task:1".to_owned())
+        }
+    );
+    assert_eq!(
         parse_repo(&[
             "index".to_owned(),
             "core".to_owned(),
@@ -377,7 +392,7 @@ fn run_worker() {
         "src/lib.rs"
     );
 
-    run_repo(
+    let idle_worker = run_repo(
         &service,
         RepoCommand::IndexWorker { task_id: None },
         context("index-worker"),
@@ -385,6 +400,27 @@ fn run_worker() {
     )
     .await
     .expect("index worker should complete queued index");
+    let idle_worker_value = json_value(&idle_worker);
+    assert_eq!(idle_worker_value["claimed"], false);
+    assert!(idle_worker_value["task"].is_null());
+    let idle_worker_stream = run_repo(
+        &service,
+        RepoCommand::IndexWorker { task_id: None },
+        context("index-worker-stream"),
+        OutputFormat::StreamingJson,
+    )
+    .await
+    .expect("streaming index worker should return events");
+    let stream_events = idle_worker_stream
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("event should be JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(stream_events.len(), 3);
+    assert_eq!(stream_events[0]["event"], "started");
+    assert_eq!(stream_events[1]["event"], "item");
+    assert_eq!(stream_events[1]["payload"]["claimed"], false);
+    assert!(stream_events[1]["payload"]["task"].is_null());
+    assert_eq!(stream_events[2]["event"], "completed");
 
     let definitions = run_repo(
         &service,

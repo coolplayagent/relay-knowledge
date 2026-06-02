@@ -229,6 +229,40 @@
       "expect_empty": true
     }
   ],
+  "cli_contract_cases": [
+    {
+      "id": "repo_index_worker_help_is_agent_visible",
+      "command": ["help", "repo", "index-worker", "--format", "json"],
+      "guardrail": true,
+      "stdout_contains": ["index-worker", "streaming-json"]
+    },
+    {
+      "id": "repo_index_worker_idle_json_reports_no_claim",
+      "command": ["repo", "index-worker", "--format", "json"],
+      "guardrail": true,
+      "json_expect": {
+        "claimed": false,
+        "task": null
+      }
+    },
+    {
+      "id": "repo_index_worker_idle_streaming_json_reports_events",
+      "command": ["repo", "index-worker", "--format", "streaming-json"],
+      "guardrail": true,
+      "json_lines_expect": [
+        {"event": "started", "operation": "code.repo.index_worker"},
+        {
+          "event": "item",
+          "operation": "code.repo.index_worker",
+          "payload": {
+            "claimed": false,
+            "task": null
+          }
+        },
+        {"event": "completed", "operation": "code.repo.index_worker"}
+      ]
+    }
+  ],
   "semantic_vector_suite": {
     "source_scope": "self-iteration-semantic-vector",
     "probe_provider_when_external": true,

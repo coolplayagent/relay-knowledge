@@ -55,6 +55,13 @@ struct RegistrationCaseReport {
 }
 
 #[derive(Debug, Clone)]
+struct CliContractReport {
+    commands: Vec<CommandResult>,
+    cases: Vec<CaseObservation>,
+    gates: Vec<GateObservation>,
+}
+
+#[derive(Debug, Clone)]
 struct EvalRuntime {
     binary: PathBuf,
     workspace: PathBuf,
@@ -210,6 +217,17 @@ pub fn evaluate_candidate(
         writer_lock: Arc::new(Mutex::new(())),
         query_jobs: job_plan.queries,
     };
+
+    let cli_contract_report = evaluate_cli_contract_cases(
+        &runtime,
+        &run_home,
+        cases_config,
+        &config.profile,
+        config.categories.as_ref(),
+    );
+    commands.extend(cli_contract_report.commands);
+    cases.extend(cli_contract_report.cases);
+    gates.extend(cli_contract_report.gates);
 
     let query_cases = array_field(cases_config, "query_cases");
     let software_query_cases = array_field(cases_config, "software_query_cases");

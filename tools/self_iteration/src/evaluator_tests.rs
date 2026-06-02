@@ -440,6 +440,88 @@ mod tests {
     }
 
     #[test]
+    fn cli_contract_case_scores_idle_index_worker_json() {
+        let case = serde_json::json!({
+            "id": "repo_index_worker_idle_json_reports_no_claim",
+            "guardrail": true,
+            "json_expect": {
+                "claimed": false,
+                "task": null
+            }
+        });
+        let result = CommandResult {
+            name: "index_worker".to_owned(),
+            command: vec!["relay-knowledge".to_owned()],
+            exit_code: 0,
+            duration_ms: 1,
+            stdout: "{\"claimed\":false,\"task\":null}\n".to_owned(),
+            stderr: String::new(),
+        };
+
+        let observation = score_cli_contract_case(&case, &result);
+
+        assert!(observation.passed, "{}", observation.message);
+        assert!(observation.guardrail);
+        assert_eq!(observation.repository, "cli_contract");
+    }
+
+    #[test]
+    fn cli_contract_case_scores_idle_index_worker_stream() {
+        let case = serde_json::json!({
+            "id": "repo_index_worker_idle_streaming_json_reports_events",
+            "guardrail": true,
+            "json_lines_expect": [
+                {"event": "started", "operation": "code.repo.index_worker"},
+                {
+                    "event": "item",
+                    "operation": "code.repo.index_worker",
+                    "payload": {
+                        "claimed": false,
+                        "task": null
+                    }
+                },
+                {"event": "completed", "operation": "code.repo.index_worker"}
+            ]
+        });
+        let result = CommandResult {
+            name: "index_worker_stream".to_owned(),
+            command: vec!["relay-knowledge".to_owned()],
+            exit_code: 0,
+            duration_ms: 1,
+            stdout: concat!(
+                "{\"event\":\"started\",\"operation\":\"code.repo.index_worker\"}\n",
+                "{\"event\":\"item\",\"operation\":\"code.repo.index_worker\",\"payload\":{\"claimed\":false,\"task\":null}}\n",
+                "{\"event\":\"completed\",\"operation\":\"code.repo.index_worker\"}\n"
+            )
+            .to_owned(),
+            stderr: String::new(),
+        };
+
+        let observation = score_cli_contract_case(&case, &result);
+
+        assert!(observation.passed, "{}", observation.message);
+        assert!(observation.guardrail);
+    }
+
+    #[test]
+    fn cli_contract_cases_are_preserved_for_fast() {
+        let cases = vec![
+            serde_json::json!({"id": "regular"}),
+            serde_json::json!({
+                "id": "repo_index_worker_idle_json_reports_no_claim",
+                "guardrail": true
+            }),
+        ];
+
+        let selected = select_cli_contract_cases_for_profile("fast", None, cases);
+
+        assert!(selected.iter().any(|case| {
+            string_or(case, "id", "") == "repo_index_worker_idle_json_reports_no_claim"
+                && case.get("guardrail").and_then(Value::as_bool) == Some(true)
+        }));
+    }
+
+    #[test]
     fn fast_preserves_grep_and_external_import_guardrail_cases() {
         let cases = vec![
             serde_json::json!({"id": "regular_a", "kind": "definition"}),

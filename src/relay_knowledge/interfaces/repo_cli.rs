@@ -1,7 +1,7 @@
 use crate::{
     api::{
-        CodeRepositoryIndexStartResponse, CodeRepositoryRegisterRequest,
-        CodeRepositoryReportResponse, RequestContext,
+        ApiStreamEvent, CodeRepositoryIndexStartResponse, CodeRepositoryRegisterRequest,
+        CodeRepositoryReportResponse, RequestContext, StreamEventKind,
     },
     application::RelayKnowledgeService,
     domain::{
@@ -11,7 +11,9 @@ use crate::{
     },
 };
 
-use super::{CliError, OutputFormat, parse_freshness, render_response, value_after};
+use super::{
+    CliError, OutputFormat, parse_freshness, render_response, serialize_line, value_after,
+};
 
 /// Parsed `repo` CLI command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +79,12 @@ pub enum RepoCommand {
         freshness: FreshnessPolicy,
         limit: usize,
     },
+}
+
+#[derive(serde::Serialize)]
+struct CodeIndexWorkerRunResponse {
+    claimed: bool,
+    task: Option<crate::domain::CodeIndexTaskRecord>,
 }
 
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
@@ -174,12 +182,11 @@ pub async fn run_repo(
                 .run_code_index_task_once(task_id, context)
                 .await
                 .map_err(|error| CliError::api_failed(error, format))?;
-            Ok(match completed {
-                Some(task) => serde_json::to_string(&task)
-                    .map(|json| format!("{json}\n"))
-                    .map_err(|error| CliError::invalid_api_argument(error.to_string(), format))?,
-                None => String::new(),
-            })
+            let response = CodeIndexWorkerRunResponse {
+                claimed: completed.is_some(),
+                task: completed,
+            };
+            render_index_worker_response(&response, format)
         }
         RepoCommand::ScopePreview {
             alias,
@@ -380,6 +387,45 @@ pub async fn run_repo(
                 format,
             )
         }
+    }
+}
+
+fn render_index_worker_response(
+    response: &CodeIndexWorkerRunResponse,
+    format: OutputFormat,
+) -> Result<String, CliError> {
+    if format != OutputFormat::StreamingJson {
+        return serialize_line(response);
+    }
+    let payload = serde_json::to_value(response)
+        .map_err(|error| CliError::RenderFailed(error.to_string()))?;
+    let events = [
+        index_worker_event(StreamEventKind::Started, "index worker started", None),
+        index_worker_event(StreamEventKind::Item, "index worker result", Some(payload)),
+        index_worker_event(StreamEventKind::Completed, "index worker completed", None),
+    ];
+    let mut output = String::new();
+    for event in events {
+        output.push_str(&serialize_line(&event)?);
+    }
+
+    Ok(output)
+}
+
+fn index_worker_event(
+    event: StreamEventKind,
+    message: &str,
+    payload: Option<serde_json::Value>,
+) -> ApiStreamEvent {
+    ApiStreamEvent {
+        event,
+        operation: "code.repo.index_worker".to_owned(),
+        message: Some(message.to_owned()),
+        project_name: None,
+        runtime: None,
+        payload,
+        error_kind: None,
+        metadata: None,
     }
 }
 

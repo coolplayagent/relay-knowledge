@@ -28,6 +28,12 @@ For feature flag, config gate, environment-variable gate, settings gate, or
 guarded-code questions, agents should use `repo feature-flags`. Feature flags
 are not a `repo query --kind` value.
 
+For cold repository indexing in non-interactive sessions, agents can use the
+published `repo index-worker` command to run bounded single-shot worker
+attempts after `repo index` returns a durable task handle. The worker exposes
+machine-readable JSON and streaming JSON results for no-task and completed-task
+states.
+
 ## Package Contents
 
 - `SKILL.md`: agent instructions and skill metadata.

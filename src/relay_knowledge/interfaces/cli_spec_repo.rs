@@ -81,6 +81,34 @@ pub(super) fn repo_index() -> CliCommandSpec {
     )
 }
 
+pub(super) fn repo_index_worker() -> CliCommandSpec {
+    command!(
+        @formats &["json", "streaming-json"],
+        &["repo", "index-worker"],
+        "relay-knowledge repo index-worker [--task-id <id>]",
+        "Run one queued repository index task attempt.",
+        "code.repo.index_worker",
+        CommandEffect::WritesIndexes,
+        &[],
+        &[opt(
+            "--task-id",
+            Some("id"),
+            false,
+            false,
+            "Specific code-index task to claim; omitted claims the next eligible task.",
+            None,
+            &[],
+        )],
+        &["relay-knowledge repo index-worker --task-id code-index-task:1 --format json"],
+        &[
+            "Use this single-shot worker in non-interactive agent sessions when a queued or retrying cold full index needs explicit progress without starting the foreground service.",
+            "When no eligible task is claimed, JSON output reports `claimed=false` and `task=null`.",
+            "`--format streaming-json` emits started, item, and completed events with the worker result in the item payload.",
+            "The command respects durable task leases, retry backoff, checkpoints, and the single-writer indexing boundary.",
+        ],
+    )
+}
+
 pub(super) fn repo_scope_preview() -> CliCommandSpec {
     command!(
         &["repo", "scope", "preview"],

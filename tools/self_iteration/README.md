@@ -68,7 +68,7 @@ Each iteration:
 1. Verifies the worktree is clean unless `--use-current-candidate` is passed.
 2. Prompts local Codex to make one focused code retrieval improvement.
 3. Saves the candidate patch from the iteration start commit under `.git/relay-knowledge-self-iteration/patches-v2/`.
-4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, the Linux glibc compatibility policy gate, a product debug build, harness `cargo check`, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
+4. Runs profile-specific gates and evaluation. The default `fast` profile runs formatting checks, the Linux glibc compatibility policy gate, a product debug build, harness `cargo check`, agent-facing CLI contract cases, an expanded normal-repository subset, repository-set guards, and a semantic/vector guardrail query. `full` and `exhaustive` restore both release builds, product `clippy -> test` and harness `clippy -> test` rails, plus the full repository evaluation, repository-set cases, local-file fixtures, semantic/vector fixtures, and research judge.
 5. Records a report under `.git/relay-knowledge-self-iteration/reports-v2/`.
 6. Appends scoring history to `.git/relay-knowledge-self-iteration/runs-v2.jsonl`.
 7. Writes charts to `.git/relay-knowledge-self-iteration/score-v2.csv` and `.git/relay-knowledge-self-iteration/score-v2.svg`; `accepted` means a git commit was created.
@@ -113,6 +113,10 @@ clippy, full test suite, local-file fixtures, or research judge by default. The
 skill metadata policy gate rejects CLI skill command examples that put Windows
 `.exe` assets in bash/POSIX code fences, so agent-facing instructions stay
 shell-specific.
+The CLI contract cases run after the debug product build and before repository
+evaluation. They verify that agent-visible help exposes `repo index-worker` and
+that idle worker attempts return parseable JSON plus `started`/`item`/`completed`
+streaming JSON events instead of empty stdout.
 The code-index recovery gate covers expired task lease recovery, stale worker
 completion rejection, attempt-budget dead-lettering, and checkpoint-batch lease
 renewal without indexing exhaustive large repositories.
@@ -478,6 +482,11 @@ enumerating cases.
   `iac`, `design`, and `all` projection kinds, including unresolved external
   SDK metadata, documentation/config relationships, build targets, IaC
   resources, and design elements derived from indexed evidence only.
+- CLI contract cases in `cases.json` run product CLI commands without indexing
+  a large repository. Default fast guardrails cover `repo index-worker`
+  machine-readable help and idle JSON/streaming JSON output so
+  non-interactive agents can explicitly drain durable code-index tasks when a
+  long-running service is unavailable.
 - The fast profile runs `code_index_health_isolation_cases` as a product gate.
   The case indexes a no-language-filter repository update while checking that
   health remains bounded and `repo query --freshness allow-stale` can read the
