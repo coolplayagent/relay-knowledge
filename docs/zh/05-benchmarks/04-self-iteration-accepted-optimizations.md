@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780398992-import-query-shape-scoring
+- 算法/架构：Imports 结构化 ranking 继续用规范化 module path token 做候选召回、路径重叠、target-symbol 和 line-priority scoring，但 `import_statement_shape_bonus` 改为读取原始用户 query，使 `import "./module"`、`import("./module")`、side-effect import 与 static `from` declaration 的语法意图不会在 path-token normalization 后丢失。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net、QoS、任务 lease/checkpoint、安装发布或 harness；预期改善 JS/TS dynamic import、side-effect import 和 re-export/import declaration 的同 module 排序，并保持普通 `./module` path 查询优先返回声明性 graph evidence。风险是显式 import 语法 query 会让 runtime import expression 相对早行 static declaration 上移，受 positive-base scoring、bounded line-priority、plain-path negative storage test 和既有 fallback graph-first tests 控制。
+- 策略关联：建立在 run-1779597327 JS/TS import edge extraction、run-1780159030 structured import prefilter、run-1780217458 intent-aware dynamic fallback 和 run-1780397808 chunk-first planner的结构化证据优先策略之上；避免扩大 source fallback、增加无界候选、枚举 fixture 字符串或削弱 protected semantic/vector、foundational、competitive 与 stability floors。
 ## 候选优化说明：run-1780397808-rust-workflow-chunk-first
 - 算法/架构：Hybrid chunk-first planner 将 Rust 纳入已有语言作用域 workflow/dataflow gate，并在 workflow signal 计数时拆分 snake_case 查询标识符，使 `*_dispatch`、`*_pipeline` 等 Rust/系统代码常见 API 名称中的通用 workflow 词可触发既有有界 chunk FTS。是否提前返回仍由原 dense non-`text_fallback` chunk coverage gate 判定；覆盖不足时继续执行 Symbol、Reference、Call、Import 与 source fallback。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate 上限、chunk scoring、repo-set overlay、semantic/vector read model、source fallback、env/paths/net、QoS、任务 lease/checkpoint 或安装发布；不枚举仓库、路径、case id、fixture query 或符号。预期改善 Rust workflow/dataflow Hybrid 查询和 `index_performance_*` 跨 shard pipeline 类查询的首批 chunk evidence 与尾延迟；风险是带 Rust 过滤的探索式 Hybrid 查询可能先多一次 bounded chunk FTS，受 high-signal gate、snake_case signal 单测、dense coverage gate 和完整 graph fallback 控制。
@@ -987,6 +991,20 @@
 - key improvements: none recorded
 - known degradations: none recorded
 - latency metrics: cargo_fmt_check_ms=7090ms; self_iteration_cargo_fmt_check_ms=931ms; linux_glibc_compatibility_policy_ms=333ms; skill_metadata_policy_cases_ms=814ms; cargo_build_debug_ms=446ms; self_iteration_cargo_check_ms=5496ms; code_index_recovery_cases_ms=1554ms; code_index_sqlite_lock_cases_ms=2116ms
+
+Adopted optimization notes:
+
+Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
+
+## run-1780398992
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780398992.patch`
+- score: 0.979356 (foundational=1.000000, competitive=0.996795, accuracy=0.998397, semantic_vector=1.000000, research_judge=n/a, performance=0.889226, stability=1.000000)
+- cases: 108/108 passed
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_import_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_imports.rs`
+- key improvements: score_component:competitive_capability 0.987179->0.9967948717948718; case_score:typescript_syntax_references_dynamic_import 0.25->1.0; case_rank:typescript_syntax_references_dynamic_import 4->1; metric:cargo_fmt_check_ms 7090.0->3405.0; metric:self_iteration_cargo_fmt_check_ms 931.0->383.0; metric:linux_glibc_compatibility_policy_ms 333.0->121.0; metric:skill_metadata_policy_cases_ms 814.0->282.0; metric:cargo_build_debug_ms 446.0->383.0
+- known degradations: score_component:performance 0.896652->0.8892260583660839; metric:software_global_fixture_software_query_p95_ms 183.0->426.0; metric:leveldb_cpp_query_p95_ms 243.0->285.0; metric:index_performance_many_files_query_p50_ms 81.0->204.0; metric:index_performance_many_files_query_p95_ms 81.0->204.0; metric:project_alias_fixture_register_index_ms 283.0->348.0; metric:project_alias_fixture_query_p50_ms 61.0->162.0; metric:project_alias_fixture_query_p95_ms 61.0->162.0
+- latency metrics: cargo_fmt_check_ms=3405ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=282ms; cargo_build_debug_ms=383ms; self_iteration_cargo_check_ms=623ms; code_index_recovery_cases_ms=1066ms; code_index_sqlite_lock_cases_ms=1531ms
 
 Adopted optimization notes:
 

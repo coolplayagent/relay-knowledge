@@ -293,7 +293,7 @@ fn import_rows_to_hits(
                 )
                 + import_statement_shape_bonus(
                     base_score,
-                    scoring_query,
+                    &request.query,
                     &row.module,
                     request.code_query_kind,
                 )
