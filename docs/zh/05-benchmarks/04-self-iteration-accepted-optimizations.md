@@ -1,6 +1,10 @@
 # 自迭代采纳优化记录
 ## 记录格式与记忆
 每条记录保留 patch、score、cases、changed paths、改善/退化、耗时与优化说明；渐进式记忆写入 `.git/relay-knowledge-self-iteration/memory/`，后续 Codex 应先读 index 与相关 summary，再按需读取 detail 或 patch。
+## 候选优化说明：run-1780401183-hybrid-api-direct-coverage-gate
+- 算法/架构：Hybrid direct-evidence gate 在单个 dense chunk/symbol 命中之外，允许多条 direct Symbol+Definition 命中共同覆盖 query 中抽取出的 bounded API identity facets；只有所有 facets 都由当前 indexed scope 的 canonical symbol 覆盖、请求 limit 足以返回这些 facets、且 query 没有 callers/callees/references/imports 等 graph expansion intent 时，才在 Hybrid 协调层跳过 References、Calls 与 Imports 扩展。
+- 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、ranking score、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net、QoS、任务 lease/checkpoint、安装发布或 harness；预期减少 Temporal/Go、SDK/workflow 和多仓 API-sequence Hybrid 查询在 direct symbol evidence 已足够时的 graph fanout、SQL 往返和 p95 抖动。风险是带有额外自然语言上下文的 API 查询更早停在 symbol surface，受 graph-intent guard、limit coverage guard、scoped canonical-symbol match 和 direct-gate 单测控制。
+- 策略关联：建立在 run-1779849566 dense hybrid API chunk-first、run-1780153116 Hybrid direct-evidence graph-fanout gate、run-1780397808 chunk-first planner 和 run-1780398992 import-aware ranking 的结构化证据优先策略之上；避免 run-1780400118 rejected pattern 中局部 import-context 过滤因运行时抖动未稳定胜出的路线，也不扩大 fallback、枚举 fixture 字符串或削弱 protected foundational、competitive、semantic/vector 与 stability floors。
 ## 候选优化说明：run-1780398992-import-query-shape-scoring
 - 算法/架构：Imports 结构化 ranking 继续用规范化 module path token 做候选召回、路径重叠、target-symbol 和 line-priority scoring，但 `import_statement_shape_bonus` 改为读取原始用户 query，使 `import "./module"`、`import("./module")`、side-effect import 与 static `from` declaration 的语法意图不会在 path-token normalization 后丢失。
 - 不变量/预期影响/风险：不改变 parser facts、SQLite schema、FTS 文档、candidate limit、source `text_fallback`、repo-set overlay、semantic/vector read model、env/paths/net、QoS、任务 lease/checkpoint、安装发布或 harness；预期改善 JS/TS dynamic import、side-effect import 和 re-export/import declaration 的同 module 排序，并保持普通 `./module` path 查询优先返回声明性 graph evidence。风险是显式 import 语法 query 会让 runtime import expression 相对早行 static declaration 上移，受 positive-base scoring、bounded line-priority、plain-path negative storage test 和既有 fallback graph-first tests 控制。
@@ -982,29 +986,19 @@
 - summary: Python function type annotations now emit structured reference facts while preserving nested generic/default-expression/comment boundaries, Go type signatures keep the declaration keyword in symbol excerpts, import ranking separates package re-export surfaces from consuming source files and reuses robust test-path detection for path overlap bonuses, and reference ranking prefers return/type-use and external consumer contexts over same-name definition files. The compacted `run-1780219799` to `run-1780224921` records continue to cover atomic QoS, Go type-spec surface/deduping, Python/TypeScript type-reference recall, edge source-context ranking, and exported parameter reference ranking.
 - invariants: changes are query/parser scoring only; no durable task lease, queue bound, SQLite checkpoint, graph schema, service manager, env, paths, net, QoS, release, or installation behavior changed.
 
-## run-1780397808
+## run-1780397808-to-run-1780398992 compacted
+- summary: accepted Rust workflow chunk-first (`run-1780397808`, score 0.978577, 108/108 cases) and import query shape scoring (`run-1780398992`, score 0.979356, 108/108 cases) preserved foundational=1.000000, semantic_vector=1.000000, and stability=1.000000 while improving TypeScript dynamic import rank from 4 to 1 and competitive capability to 0.996795. Full patches, changed paths, improvements, degradations, and latency metrics remain in `.git/relay-knowledge-self-iteration/patches-v2/`, reports, and progressive memory.
+- performance memory: `run-1780398992` improved competitive capability but recorded performance=0.889226 with software-global, LevelDB, index-performance, and project-alias latency regressions. Later candidates should prefer general read-path or planning work reduction over more local scorer-only import tweaks.
 
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780397808.patch`
-- score: 0.978577 (foundational=1.000000, competitive=0.987179, accuracy=0.993590, semantic_vector=1.000000, research_judge=n/a, performance=0.896652, stability=1.000000)
+## run-1780401183
+
+- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780401183.patch`
+- score: 0.980895 (foundational=1.000000, competitive=0.996795, accuracy=0.998397, semantic_vector=1.000000, research_judge=n/a, performance=0.897779, stability=1.000000)
 - cases: 108/108 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_planning.rs`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_symbol_planner_tests.rs`
-- key improvements: none recorded
-- known degradations: none recorded
-- latency metrics: cargo_fmt_check_ms=7090ms; self_iteration_cargo_fmt_check_ms=931ms; linux_glibc_compatibility_policy_ms=333ms; skill_metadata_policy_cases_ms=814ms; cargo_build_debug_ms=446ms; self_iteration_cargo_check_ms=5496ms; code_index_recovery_cases_ms=1554ms; code_index_sqlite_lock_cases_ms=2116ms
-
-Adopted optimization notes:
-
-Rust self-iteration v2 accepted this candidate through the independent tools/self_iteration harness. The candidate is expected to improve the general retrieval, indexing, evaluation, or harness behavior described by the changed paths and recorded metrics.
-
-## run-1780398992
-
-- patch: `/opt/workspace/relay-knowledge-main/.git/relay-knowledge-self-iteration/patches-v2/run-1780398992.patch`
-- score: 0.979356 (foundational=1.000000, competitive=0.996795, accuracy=0.998397, semantic_vector=1.000000, research_judge=n/a, performance=0.889226, stability=1.000000)
-- cases: 108/108 passed
-- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_import_ranking_tests.rs`, `src/relay_knowledge/storage/sqlite/code_query_imports.rs`
-- key improvements: score_component:competitive_capability 0.987179->0.9967948717948718; case_score:typescript_syntax_references_dynamic_import 0.25->1.0; case_rank:typescript_syntax_references_dynamic_import 4->1; metric:cargo_fmt_check_ms 7090.0->3405.0; metric:self_iteration_cargo_fmt_check_ms 931.0->383.0; metric:linux_glibc_compatibility_policy_ms 333.0->121.0; metric:skill_metadata_policy_cases_ms 814.0->282.0; metric:cargo_build_debug_ms 446.0->383.0
-- known degradations: score_component:performance 0.896652->0.8892260583660839; metric:software_global_fixture_software_query_p95_ms 183.0->426.0; metric:leveldb_cpp_query_p95_ms 243.0->285.0; metric:index_performance_many_files_query_p50_ms 81.0->204.0; metric:index_performance_many_files_query_p95_ms 81.0->204.0; metric:project_alias_fixture_register_index_ms 283.0->348.0; metric:project_alias_fixture_query_p50_ms 61.0->162.0; metric:project_alias_fixture_query_p95_ms 61.0->162.0
-- latency metrics: cargo_fmt_check_ms=3405ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=282ms; cargo_build_debug_ms=383ms; self_iteration_cargo_check_ms=623ms; code_index_recovery_cases_ms=1066ms; code_index_sqlite_lock_cases_ms=1531ms
+- changed paths: `docs/zh/05-benchmarks/04-self-iteration-accepted-optimizations.md`, `src/relay_knowledge/storage/sqlite/code_query_hybrid_direct_gate.rs`
+- key improvements: score_component:performance 0.875658->0.8977789443296978; metric:cargo_fmt_check_ms 4528.0->3409.0; metric:self_iteration_cargo_fmt_check_ms 566.0->383.0; metric:skill_metadata_policy_cases_ms 384.0->282.0; metric:cargo_build_debug_ms 39057.0->283.0; metric:self_iteration_cargo_check_ms 623.0->303.0; metric:code_index_recovery_cases_ms 25372.0->946.0; metric:code_index_sqlite_lock_cases_ms 25912.0->1188.0
+- known degradations: metric:software_global_fixture_index_ms 142.0->183.0; metric:software_global_fixture_register_index_ms 203.0->244.0; metric:nonstandard_layout_fixture_index_ms 162.0->225.0; metric:nonstandard_layout_fixture_register_index_ms 223.0->286.0; metric:relay_teams_query_p50_ms 243.0->463.0; metric:relay_teams_query_p95_ms 746.0->1389.0; metric:cpp_syntax_fixture_index_ms 222.0->262.0; metric:cpp_syntax_fixture_register_index_ms 283.0->323.0
+- latency metrics: cargo_fmt_check_ms=3409ms; self_iteration_cargo_fmt_check_ms=383ms; linux_glibc_compatibility_policy_ms=121ms; skill_metadata_policy_cases_ms=282ms; cargo_build_debug_ms=283ms; self_iteration_cargo_check_ms=303ms; code_index_recovery_cases_ms=946ms; code_index_sqlite_lock_cases_ms=1188ms
 
 Adopted optimization notes:
 
