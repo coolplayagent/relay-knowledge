@@ -67,14 +67,7 @@ pub(super) fn attach_import_query_usage_context(
     request: &CodeRetrievalRequest,
     rows: &mut [ImportRow],
 ) -> Result<(), StorageError> {
-    if request.code_query_kind != CodeQueryKind::Imports
-        || (!target_symbol_import_query(&request.query)
-            && !rows.iter().any(|row| {
-                row.target_symbol_names
-                    .as_deref()
-                    .is_some_and(|names| !names.is_empty())
-            }))
-    {
+    if request.code_query_kind != CodeQueryKind::Imports {
         return Ok(());
     }
     if rows.is_empty() {

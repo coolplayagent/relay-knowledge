@@ -1,10 +1,13 @@
 schema_version: 1
-map_version: 1
-updated_at: unix:1779897600
+map_version: 2
+updated_at: unix:1780329600
 topics:
 - id: architecture
   title: Architecture knowledge
   description: Architecture specs and hard constraints that guide implementation.
+- id: benchmarks
+  title: Benchmark knowledge
+  description: Self-iteration and benchmark guardrail documentation.
 - id: cli
   title: CLI knowledge
   description: CLI command reference and agent workflow guidance.
@@ -29,6 +32,16 @@ sources:
   status: active
   version: 1
   description: User-facing CLI command reference.
+- id: code-index-fact-versioning
+  topic: benchmarks
+  kind: doc
+  uri: docs/zh/05-benchmarks/08-code-index-fact-versioning.md
+  source_scope: docs
+  read_policy: direct
+  write_policy: manual-review
+  status: active
+  version: 1
+  description: Code index fact-version policy for parser and retrieval benchmark changes.
 - id: cli-skill-workflows
   topic: cli
   kind: doc
@@ -44,12 +57,20 @@ routes:
   source_order:
   - architecture-hard-constraints
   fallback: bounded-search
+- topic: benchmarks
+  source_order:
+  - code-index-fact-versioning
+  fallback: bounded-search
 - topic: cli
   source_order:
   - cli-command-reference
   - cli-skill-workflows
   fallback: bounded-search
 history:
+- version: 2
+  action: update
+  actor: codex
+  summary: Added benchmark fact-versioning documentation route.
 - version: 1
   action: init
   actor: cli

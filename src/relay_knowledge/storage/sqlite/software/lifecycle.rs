@@ -558,8 +558,10 @@ fn design_element_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Software
 
 pub(super) fn push_build_target(
     targets: &mut Vec<SoftwareBuildTarget>,
-    input: SoftwareBuildTargetInput,
+    mut input: SoftwareBuildTargetInput,
 ) -> Result<(), StorageError> {
+    input.command = non_empty_optional(input.command);
+    input.output_hint = non_empty_optional(input.output_hint);
     let target = SoftwareBuildTarget::new(input)
         .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
     if !targets
@@ -569,6 +571,12 @@ pub(super) fn push_build_target(
         targets.push(target);
     }
     Ok(())
+}
+
+fn non_empty_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|text| clean_scalar(&text))
+        .filter(|text| !text.is_empty())
 }
 
 pub(super) fn push_iac_resource(

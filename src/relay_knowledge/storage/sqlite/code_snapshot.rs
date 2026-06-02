@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{Connection, params, params_from_iter, types::Value};
 
 use crate::{
-    domain::{CodeFileFingerprint, CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary},
+    domain::{
+        CodeFileFingerprint, CodeIndexProgressSummary, CodeIndexSnapshot, CodeIndexSummary,
+        code_snapshot_expected_scope_id,
+    },
     storage::StorageError,
 };
 
@@ -276,7 +279,7 @@ fn clone_active_scope_for_incremental(
     let requested_language_filters = canonical_filter_values(&snapshot.language_filters);
     let mut statement = transaction.prepare(
         "
-        SELECT source_scope, path_filters_json, language_filters_json
+        SELECT source_scope, tree_hash, path_filters_json, language_filters_json
         FROM code_repository_scopes
         WHERE repository_id = ?1
           AND resolved_commit_sha = ?4
@@ -304,16 +307,24 @@ fn clone_active_scope_for_incremental(
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                parse_json_list(row.get::<_, String>(1)?)?,
+                row.get::<_, String>(1)?,
                 parse_json_list(row.get::<_, String>(2)?)?,
+                parse_json_list(row.get::<_, String>(3)?)?,
             ))
         },
     )?;
     let mut previous_scope = None;
     for row in rows {
-        let (source_scope, stored_path_filters, stored_language_filters) = row?;
+        let (source_scope, tree_hash, stored_path_filters, stored_language_filters) = row?;
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
             && canonical_filter_values(&stored_language_filters) == requested_language_filters
+            && code_snapshot_expected_scope_id(
+                &snapshot.repository_id,
+                &tree_hash,
+                &stored_path_filters,
+                &stored_language_filters,
+            )
+            .is_some_and(|expected| expected == source_scope)
         {
             previous_scope = Some(source_scope);
             break;
@@ -321,7 +332,7 @@ fn clone_active_scope_for_incremental(
     }
     let previous_scope = previous_scope.ok_or_else(|| {
         StorageError::InvalidInput(format!(
-            "code repository '{}' has no matching indexed scope for incremental filters at the current base commit",
+            "code repository '{}' has no matching indexed scope for incremental filters at the current base commit and code fact version",
             snapshot.repository_id
         ))
     })?;

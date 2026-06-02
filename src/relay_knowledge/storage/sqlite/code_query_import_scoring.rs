@@ -10,7 +10,15 @@ pub(super) fn import_line_priority(base_score: f64, line_start: u32, query: &str
         return 0.0;
     }
 
-    1.0 / f64::from(line_start.clamp(1, 1_000))
+    let query = query.trim();
+    let weight = if (query.starts_with("./") || query.starts_with("../"))
+        && !query_contains_file_extension(query)
+    {
+        5.0
+    } else {
+        1.0
+    };
+    weight / f64::from(line_start.clamp(1, 1_000))
 }
 
 pub(super) fn import_surface_bonus(base_score: f64, path: &str, kind: CodeQueryKind) -> f64 {

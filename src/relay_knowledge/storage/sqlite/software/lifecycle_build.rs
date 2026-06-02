@@ -113,13 +113,17 @@ fn collect_package_json(
             )?;
         }
         if trimmed.starts_with("\"scripts\"") && trimmed.contains('{') {
-            in_scripts = true;
+            in_scripts = !trimmed.contains('}');
             continue;
         }
         if in_scripts && trimmed.starts_with('}') {
             in_scripts = false;
+            continue;
         }
         if in_scripts && let Some((name, command)) = json_string_pair(trimmed) {
+            if command.is_empty() {
+                continue;
+            }
             let mut input = build_input(
                 document,
                 graph_version,
@@ -167,6 +171,10 @@ fn collect_pyproject(
         if matches!(section, "project.scripts" | "tool.poetry.scripts")
             && let Some((name, command)) = key_value(trimmed, '=')
         {
+            let command = clean_scalar(command);
+            if command.is_empty() {
+                continue;
+            }
             let mut input = build_input(
                 document,
                 graph_version,
@@ -176,7 +184,7 @@ fn collect_pyproject(
                 "pyproject.toml",
                 line,
             );
-            input.command = Some(clean_scalar(command));
+            input.command = Some(command);
             push_build_target(targets, input)?;
         }
     }

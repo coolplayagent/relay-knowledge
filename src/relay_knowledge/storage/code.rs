@@ -452,6 +452,19 @@ pub trait CodeRepositoryStore: Send + Sync {
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>>;
 
+    fn analyze_code_impact_scope(
+        &self,
+        source_scope: String,
+        _request: CodeImpactRequest,
+        _changes: CodeImpactChanges,
+    ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
+        Box::pin(async move {
+            Err(StorageError::InvalidInput(format!(
+                "code impact analysis for source scope '{source_scope}' is unavailable"
+            )))
+        })
+    }
+
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {
         Box::pin(async { Ok(CodeRepositoryTotals::default()) })
     }

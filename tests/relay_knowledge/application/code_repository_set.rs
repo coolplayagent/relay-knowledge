@@ -10,12 +10,17 @@ use relay_knowledge::{
     api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeIndexMode, CodeIndexRequest, CodeQueryKind, CodeRepositorySelector,
-        CodeRepositorySetAddMemberRequest, CodeRepositorySetCreateRequest,
-        CodeRepositorySetQueryRequest, CodeRetrievalLayer, FreshnessPolicy,
+        CodeIndexMode, CodeIndexRequest, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
+        CodeRepositoryRegistration, CodeRepositorySelector, CodeRepositorySetAddMemberRequest,
+        CodeRepositorySetCreateRequest, CodeRepositorySetQueryRequest, CodeRetrievalLayer,
+        FreshnessPolicy, RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        code_snapshot_scope_id,
     },
     env::{EnvironmentConfig, PlatformKind},
-    storage::SqliteGraphStore,
+    storage::{
+        CodeRepositorySetMemberSeed, CodeRepositorySetSeed, CodeRepositoryStore, KnowledgeStore,
+        SqliteGraphStore,
+    },
 };
 
 #[tokio::test]
@@ -457,6 +462,75 @@ pub fn original() -> u32 {
 }
 
 #[tokio::test]
+async fn repository_set_refresh_persists_fact_version_member_scope_before_overlay() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(store.clone()).await;
+    let current_scope = code_snapshot_scope_id("repo-app", "tree-current", &[], &[]);
+    let legacy_scope = "git_snapshot:0000000000000000";
+
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo-app", "app", "/tmp/app", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    store
+        .apply_code_index_snapshot(snapshot_for_scope(
+            "repo-app",
+            &current_scope,
+            "tree-current",
+        ))
+        .await
+        .expect("current scope should persist");
+    store
+        .apply_code_index_snapshot(snapshot_for_scope("repo-app", legacy_scope, "tree-current"))
+        .await
+        .expect("legacy scope should persist");
+    store
+        .create_code_repository_set(CodeRepositorySetSeed {
+            alias: "workspace".to_owned(),
+            description: None,
+            default_ref_policy_json: "{}".to_owned(),
+            now_ms: 1,
+        })
+        .await
+        .expect("set should persist");
+    store
+        .add_code_repository_set_member(CodeRepositorySetMemberSeed {
+            set_alias: "workspace".to_owned(),
+            repository_id: "repo-app".to_owned(),
+            repository_alias: "app".to_owned(),
+            ref_selector: "commit".to_owned(),
+            resolved_commit_sha: "commit".to_owned(),
+            source_scope: legacy_scope.to_owned(),
+            path_filters: Vec::new(),
+            language_filters: Vec::new(),
+            priority: 0,
+        })
+        .await
+        .expect("legacy member should persist");
+
+    let response = service
+        .refresh_code_repository_set("workspace".to_owned(), context("fact-refresh"))
+        .await
+        .expect("set refresh should persist the replacement scope first");
+    let persisted = store
+        .code_repository_set_status("workspace".to_owned())
+        .await
+        .expect("set status should load")
+        .expect("set should exist");
+
+    assert_eq!(
+        response.status.members[0].member.source_scope,
+        current_scope
+    );
+    assert_eq!(persisted.members[0].member.source_scope, current_scope);
+    assert_eq!(persisted.overlay.state, "fresh");
+    assert!(!persisted.overlay.stale);
+}
+
+#[tokio::test]
 async fn repository_set_import_query_reports_external_dependency_source_fallback() {
     let repo = FixtureRepo::create("repo-set-external-import");
     repo.write(
@@ -611,6 +685,11 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    service_with_store(store).await
+}
+
+async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
     let environment = EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
@@ -623,9 +702,66 @@ async fn service_with_memory_store() -> RelayKnowledgeService {
     let runtime = RuntimeConfiguration::from_environment(&environment)
         .await
         .expect("runtime should compose");
-    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
 
     RelayKnowledgeService::with_store(runtime, store)
+}
+
+fn snapshot_for_scope(
+    repository_id: &str,
+    source_scope: &str,
+    tree_hash: &str,
+) -> CodeIndexSnapshot {
+    let path = "src/lib.rs";
+    let content = "pub fn current() {}\n";
+    let byte_end = u32::try_from(content.len()).expect("fixture content should fit in u32");
+    CodeIndexSnapshot {
+        repository_id: repository_id.to_owned(),
+        source_scope: source_scope.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: tree_hash.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![RepositoryCodeFileRecord {
+            repository_id: repository_id.to_owned(),
+            source_scope: source_scope.to_owned(),
+            file_id: format!("file-{source_scope}"),
+            path: path.to_owned(),
+            language_id: "rust".to_owned(),
+            blob_hash: format!("blob-{source_scope}"),
+            byte_len: content.len(),
+            line_count: 1,
+            parse_status: CodeParseStatus::Parsed,
+            degraded_reason: None,
+        }],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![RepositoryCodeChunkRecord {
+            repository_id: repository_id.to_owned(),
+            source_scope: source_scope.to_owned(),
+            chunk_id: format!("chunk-{source_scope}"),
+            file_id: format!("file-{source_scope}"),
+            path: path.to_owned(),
+            language_id: "rust".to_owned(),
+            content: content.to_owned(),
+            byte_range: RepositoryCodeRange {
+                start: 0,
+                end: byte_end,
+            },
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
+            symbol_snapshot_id: None,
+        }],
+        diagnostics: Vec::new(),
+    }
 }
 
 struct FixtureRepo {

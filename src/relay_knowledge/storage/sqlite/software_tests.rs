@@ -332,6 +332,51 @@ fn projection_orders_lifecycle_deployable_surfaces_first() {
 }
 
 #[test]
+fn refresh_projection_skips_empty_package_script_commands() {
+    let mut connection = Connection::open_in_memory().expect("sqlite should open");
+    create_test_schema(&connection);
+    initialize_schema(&connection).expect("software schema should initialize");
+    seed_scope(&connection);
+    connection
+        .execute(
+            "INSERT INTO code_repository_files (
+                repository_id, source_scope, file_id, path, language_id, parse_status
+            ) VALUES ('repo', 'scope-1', 'package-json', 'frontend/package.json', 'json', 'parsed')",
+            [],
+        )
+        .expect("package file should insert");
+    connection
+        .execute(
+            "INSERT INTO code_repository_chunks (
+                repository_id, source_scope, chunk_id, path, language_id, content,
+                line_start, line_end
+            ) VALUES ('repo', 'scope-1', 'package-json-chunk', 'frontend/package.json',
+                'json', ?1, 1, 8)",
+            [r#"{
+  "name": "frontend",
+  "scripts": {
+    "empty": "",
+    "build": "vite build"
+  }
+}"#],
+        )
+        .expect("package chunk should insert");
+
+    let projection =
+        refresh_projection(&mut connection, "scope-1").expect("projection should refresh");
+
+    assert!(projection.build_targets.iter().any(|target| {
+        target.name == "build" && target.command.as_deref() == Some("vite build")
+    }));
+    assert!(
+        !projection
+            .build_targets
+            .iter()
+            .any(|target| target.name == "empty")
+    );
+}
+
+#[test]
 fn projection_configuration_relationship_targets_preserve_source_identity() {
     let mut connection = Connection::open_in_memory().expect("sqlite should open");
     create_test_schema(&connection);

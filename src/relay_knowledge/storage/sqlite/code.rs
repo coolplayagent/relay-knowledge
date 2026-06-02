@@ -99,6 +99,10 @@ mod code_query_import_target_tests;
 mod code_query_import_ranking_tests;
 
 #[cfg(test)]
+#[path = "code_query_import_foundational_ranking_tests.rs"]
+mod code_query_import_foundational_ranking_tests;
+
+#[cfg(test)]
 #[path = "code_query_sbom_tests.rs"]
 mod code_query_sbom_tests;
 
@@ -442,6 +446,17 @@ impl CodeRepositoryStore for SqliteGraphStore {
         changes: CodeImpactChanges,
     ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
         self.run_read(move |connection| code_impact::analyze_impact(connection, request, changes))
+    }
+
+    fn analyze_code_impact_scope(
+        &self,
+        source_scope: String,
+        request: CodeImpactRequest,
+        changes: CodeImpactChanges,
+    ) -> StorageFuture<'_, Vec<CodeRetrievalHit>> {
+        self.run_read(move |connection| {
+            code_impact::analyze_impact_scope(connection, &source_scope, request, changes)
+        })
     }
 
     fn code_repository_totals(&self) -> StorageFuture<'_, CodeRepositoryTotals> {

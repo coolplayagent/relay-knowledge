@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::{
-    domain::{CodeRepositoryRegistration, CodeRepositoryStatus},
+    domain::{CodeRepositoryRegistration, CodeRepositoryStatus, code_snapshot_expected_scope_id},
     storage::StorageError,
 };
 
@@ -103,15 +103,23 @@ pub(super) fn repository_scope_status(
     let requested_language_filters = canonical_filter_values(language_filters);
     let mut statement = connection.prepare(
         "
-        SELECT source_scope, tree_hash, indexed_file_count, symbol_count,
-               reference_count, chunk_count, stale, degraded_reason,
-               path_filters_json, language_filters_json
-        FROM code_repository_scopes
-        WHERE repository_id = ?1
-          AND resolved_commit_sha = ?2
+        SELECT scope.source_scope, scope.tree_hash, scope.indexed_file_count,
+               scope.symbol_count, scope.reference_count, scope.chunk_count,
+               scope.stale, scope.degraded_reason,
+               scope.path_filters_json, scope.language_filters_json
+        FROM code_repository_scopes scope
+        LEFT JOIN code_repository_index_checkpoints checkpoint
+          ON checkpoint.source_scope = scope.source_scope
+        WHERE scope.repository_id = ?1
+          AND scope.resolved_commit_sha = ?2
         ORDER BY
-          CASE WHEN path_filters_json = ?3 AND language_filters_json = ?4 THEN 0 ELSE 1 END,
-          source_scope ASC
+          CASE
+            WHEN scope.path_filters_json = ?3 AND scope.language_filters_json = ?4 THEN 0
+            ELSE 1
+          END,
+          CASE WHEN scope.source_scope = ?5 THEN 0 ELSE 1 END,
+          coalesce(checkpoint.updated_at_ms, 0) DESC,
+          scope.source_scope DESC
         ",
     )?;
     let rows = statement.query_map(
@@ -119,7 +127,8 @@ pub(super) fn repository_scope_status(
             base.repository_id,
             resolved_commit_sha,
             path_filters_json,
-            language_filters_json
+            language_filters_json,
+            base.last_indexed_scope_id.as_deref().unwrap_or("")
         ],
         |row| {
             let stored_path_filters = parse_json_list(row.get::<_, String>(8)?)?;
@@ -147,26 +156,30 @@ pub(super) fn repository_scope_status(
             ))
         },
     )?;
-    let mut compatible = None;
+    let mut current_compatible = None;
     for row in rows {
         let (status, stored_path_filters, stored_language_filters) = row?;
         if canonical_path_filters(&stored_path_filters) == requested_path_filters
             && canonical_filter_values(&stored_language_filters) == requested_language_filters
         {
-            return Ok(Some(status));
+            if scope_matches_current_fact_version(&status) {
+                return Ok(Some(status));
+            }
+            continue;
         }
-        if compatible.is_none()
-            && compatible_path_filters_cover_request(&stored_path_filters, &requested_path_filters)
+        if compatible_path_filters_cover_request(&stored_path_filters, &requested_path_filters)
             && compatible_value_filters_cover_request(
                 &stored_language_filters,
                 &requested_language_filters,
             )
+            && scope_matches_current_fact_version(&status)
+            && current_compatible.is_none()
         {
-            compatible = Some(status);
+            current_compatible = Some(status);
         }
     }
 
-    Ok(compatible)
+    Ok(current_compatible)
 }
 
 pub(super) fn latest_repository_scope_status(
@@ -231,7 +244,8 @@ pub(super) fn latest_repository_scope_status(
             &stored_language_filters,
             &base_language_filters,
             &requested_language_filters,
-        ) {
+        ) && scope_matches_current_fact_version(&status)
+        {
             return Ok(Some(status));
         }
     }
@@ -345,6 +359,33 @@ pub(super) fn parse_json_list(value: String) -> rusqlite::Result<Vec<String>> {
     serde_json::from_str(&value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
     })
+}
+
+fn scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
+    let (Some(source_scope), Some(tree_hash)) = (
+        status.last_indexed_scope_id.as_deref(),
+        status.tree_hash.as_deref(),
+    ) else {
+        return false;
+    };
+    if !is_generated_git_snapshot_scope(source_scope) {
+        return true;
+    }
+
+    code_snapshot_expected_scope_id(
+        &status.repository_id,
+        tree_hash,
+        &status.path_filters,
+        &status.language_filters,
+    )
+    .is_some_and(|expected| expected == source_scope)
+}
+
+fn is_generated_git_snapshot_scope(source_scope: &str) -> bool {
+    let Some(hash) = source_scope.strip_prefix("git_snapshot:") else {
+        return false;
+    };
+    hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub(super) fn canonical_path_filters(filters: &[String]) -> Vec<String> {

@@ -30,11 +30,12 @@ use super::support::{
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
     apply_code_grep_fallback, code_index_worker_lease_owner, code_status_checkpoint,
     feature_flag_request_at_indexed_ref, fresh_full_index_probe, index_start_from_completed,
-    latest_compatible_code_scope_status, now_millis, previous_index_state_for_index,
-    recover_code_index_task_leases, recover_orphaned_code_index_task_leases,
-    refresh_code_index_task_lease, registration_from_status, required_code_repository,
-    resolve_code_ref_for_selector, resolved_code_scope_status, retrieval_request_at_indexed_ref,
-    run_blocking_code, storage_api_error,
+    indexed_source_scope, latest_compatible_code_scope_status, missing_indexed_source_scope_error,
+    now_millis, previous_index_state_for_index, recover_code_index_task_leases,
+    recover_orphaned_code_index_task_leases, refresh_code_index_task_lease,
+    registration_from_status, required_code_repository, resolve_code_ref_for_selector,
+    resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
+    storage_api_error,
 };
 
 impl RelayKnowledgeService {
@@ -678,20 +679,12 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let mut results = match served_stale_scope {
-            true => {
-                let source_scope =
-                    scoped_status.last_indexed_scope_id.clone().ok_or_else(|| {
-                        ApiError::invalid_argument(format!(
-                            "code repository '{}' does not have an indexed source scope",
-                            scoped_status.alias
-                        ))
-                    })?;
-                store.search_code_scope(source_scope, request.clone()).await
-            }
-            false => store.search_code(request.clone()).await,
-        }
-        .map_err(storage_api_error)?;
+        let source_scope = indexed_source_scope(&scoped_status)
+            .ok_or_else(|| missing_indexed_source_scope_error(&scoped_status))?;
+        let mut results = store
+            .search_code_scope(source_scope, request.clone())
+            .await
+            .map_err(storage_api_error)?;
         let fallback_degraded_reason =
             apply_code_grep_fallback(&store, &status, &scoped_status, &request, &mut results)
                 .await?;
@@ -791,22 +784,12 @@ impl RelayKnowledgeService {
             .current_graph_version()
             .await
             .map_err(storage_api_error)?;
-        let flags = match served_stale_scope {
-            true => {
-                let source_scope =
-                    scoped_status.last_indexed_scope_id.clone().ok_or_else(|| {
-                        ApiError::invalid_argument(format!(
-                            "code repository '{}' does not have an indexed source scope",
-                            scoped_status.alias
-                        ))
-                    })?;
-                store
-                    .search_code_feature_flags_scope(source_scope, request.clone())
-                    .await
-            }
-            false => store.search_code_feature_flags(request.clone()).await,
-        }
-        .map_err(storage_api_error)?;
+        let source_scope = indexed_source_scope(&scoped_status)
+            .ok_or_else(|| missing_indexed_source_scope_error(&scoped_status))?;
+        let flags = store
+            .search_code_feature_flags_scope(source_scope, request.clone())
+            .await
+            .map_err(storage_api_error)?;
         let mut scope = crate::api::CodeRepositoryScopeMetadata::from_status(
             &scoped_status,
             &request.repository,
@@ -914,8 +897,11 @@ impl RelayKnowledgeService {
             deleted_symbol_names_for_diff(&registration, &selector, &base_ref, &head_ref)
         })
         .await?;
+        let source_scope = indexed_source_scope(&scoped_status)
+            .ok_or_else(|| missing_indexed_source_scope_error(&scoped_status))?;
         let results = store
-            .analyze_code_impact(
+            .analyze_code_impact_scope(
+                source_scope,
                 request.clone(),
                 CodeImpactChanges {
                     paths: changed_paths.clone(),

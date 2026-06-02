@@ -623,6 +623,7 @@ async fn exact_reference_queries_do_not_treat_object_literal_values_as_type_anno
 #[tokio::test]
 async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fields() {
     let session_path = "packages/opencode/src/session/session.ts";
+    let bus_path = "packages/opencode/src/bus/index.ts";
     let sync_path = "packages/opencode/src/sync/index.ts";
     let test_path = "packages/opencode/test/config/config.test.ts";
     let store = store_with_snapshot(CodeIndexSnapshot {
@@ -640,6 +641,7 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
         tombstones: Vec::new(),
         files: vec![
             file("session-file", session_path, "typescript"),
+            file("bus-file", bus_path, "typescript"),
             file("sync-file", sync_path, "typescript"),
             file("test-file", test_path, "typescript"),
         ],
@@ -657,6 +659,13 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
                 session_path,
                 "InstanceContext",
                 372,
+            ),
+            typed_reference_on_line(
+                "bus-publish-ctx",
+                "bus-file",
+                bus_path,
+                "InstanceContext",
+                190,
             ),
             typed_reference_on_line(
                 "sync-publish-instance",
@@ -684,6 +693,13 @@ async fn exact_reference_queries_rank_exported_parameter_types_before_passive_fi
                 session_path,
                 "export function plan(\n  input: PlanInput,\n  instance: InstanceContext,\n) {\n  return instance.directory\n}",
                 range(370, 374),
+            ),
+            chunk(
+                "bus-chunk",
+                "bus-file",
+                bus_path,
+                "export async function publish(\n  ctx: InstanceContext,\n) {\n  return publishWith(ctx)\n}",
+                range(188, 192),
             ),
             chunk(
                 "sync-chunk",

@@ -5,7 +5,8 @@ use super::{
     error::required_text,
 };
 
-const CODE_SNAPSHOT_FACT_VERSION: &str = "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2";
+const CODE_SNAPSHOT_FACT_VERSION: &str =
+    "code-facts-js-ts-import-edges-v1-sbom-dependencies-v2-python-type-refs-v1-scope-compat-v1";
 
 /// Builds the stable source scope id for a Git snapshot partition.
 pub fn code_snapshot_scope_id(

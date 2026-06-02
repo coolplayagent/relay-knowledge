@@ -44,6 +44,63 @@ class ConnectorService:
 }
 
 #[test]
+fn python_protocol_method_annotations_are_reference_facts() {
+    let snapshot = parse_source_snapshot(
+        "src/relay_teams/connector/service.py",
+        br#"
+from __future__ import annotations
+from typing import Protocol
+
+class W3ConnectorSaveRequest:
+    pass
+
+class W3ConnectorSaveResponse:
+    pass
+
+class W3ConnectorServiceLike(Protocol):
+    async def save_credentials(
+        self,
+        request: W3ConnectorSaveRequest,
+    ) -> W3ConnectorSaveResponse:
+        raise NotImplementedError
+
+    async def save_credentials_and_import(
+        self,
+        request: W3ConnectorSaveRequest,
+    ) -> W3ConnectorSaveResponse:
+        raise NotImplementedError
+"#,
+    );
+
+    assert_eq!(snapshot.files[0].parse_status, CodeParseStatus::Parsed);
+    let request_references = snapshot
+        .references
+        .iter()
+        .filter(|reference| reference.name == "W3ConnectorSaveRequest" && reference.kind == "type")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        request_references.len(),
+        2,
+        "protocol request annotations should be indexed as type references: {:?}",
+        snapshot.references
+    );
+    assert!(
+        request_references
+            .iter()
+            .any(|reference| reference.line_range.start == 14),
+        "first protocol method parameter should be indexed: {:?}",
+        snapshot.references
+    );
+    assert!(
+        request_references
+            .iter()
+            .any(|reference| reference.line_range.start == 20),
+        "second protocol method parameter should be indexed: {:?}",
+        snapshot.references
+    );
+}
+
+#[test]
 fn python_quoted_forward_annotations_are_reference_facts() {
     let snapshot = parse_source_snapshot(
         "src/relay_teams/connector/service.py",

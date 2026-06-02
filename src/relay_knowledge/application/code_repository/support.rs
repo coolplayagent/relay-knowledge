@@ -12,6 +12,7 @@ use crate::{
         CodeFeatureFlagRequest, CodeIndexCheckpoint, CodeIndexMode, CodeIndexRequest,
         CodeIndexResourceBudget, CodeIndexTaskRecord, CodeRepositoryRegistration,
         CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest,
+        code_snapshot_expected_scope_id,
     },
     storage::{
         CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
@@ -368,12 +369,18 @@ pub(super) async fn previous_index_state_for_index(
                 .unwrap_or("unscoped")
         )));
     }
-    let source_scope = base_scope.last_indexed_scope_id.ok_or_else(|| {
+    let source_scope = base_scope.last_indexed_scope_id.clone().ok_or_else(|| {
         ApiError::invalid_argument(format!(
             "incremental base ref '{}' has no persisted source scope",
             base_ref
         ))
     })?;
+    if !code_scope_matches_current_fact_version(&base_scope) {
+        return Err(ApiError::invalid_argument(format!(
+            "incremental base ref '{}' resolves to scope '{}' built with an older code fact version; run repo index --ref {} before repo update",
+            base_ref, source_scope, base_ref
+        )));
+    }
 
     let fingerprints = store
         .code_file_fingerprints_for_scope(source_scope)
@@ -505,7 +512,8 @@ pub(super) async fn resolved_code_scope_status(
             language_filters,
         )
         .await
-        .map_err(storage_api_error)?;
+        .map_err(storage_api_error)?
+        .filter(code_scope_matches_current_fact_version);
     let scoped_status = match exact_scope {
         Some(status) => Some(status),
         None if (!selector.path_filters.is_empty() || !selector.language_filters.is_empty())
@@ -520,12 +528,13 @@ pub(super) async fn resolved_code_scope_status(
                 )
                 .await
                 .map_err(storage_api_error)?
+                .filter(code_scope_matches_current_fact_version)
         }
         None => None,
     };
     scoped_status.ok_or_else(|| {
         ApiError::invalid_argument(format!(
-            "code repository '{}' has no index for ref {} and requested filters",
+            "code repository '{}' has no index for ref {} and requested filters at the current code fact version",
             selector.repository, selector.ref_selector
         ))
     })
@@ -544,7 +553,45 @@ pub(super) async fn latest_compatible_code_scope_status(
         .await
         .map_err(storage_api_error)?;
 
-    Ok(status)
+    Ok(status.filter(code_scope_matches_current_fact_version))
+}
+
+pub(super) fn code_scope_matches_current_fact_version(status: &CodeRepositoryStatus) -> bool {
+    let Some(source_scope) = status.last_indexed_scope_id.as_deref() else {
+        return false;
+    };
+    if !is_generated_git_snapshot_scope(source_scope) {
+        return true;
+    }
+    let Some(tree_hash) = status.tree_hash.as_deref() else {
+        return false;
+    };
+
+    code_snapshot_expected_scope_id(
+        &status.repository_id,
+        tree_hash,
+        &status.path_filters,
+        &status.language_filters,
+    )
+    .is_some_and(|expected| expected == source_scope)
+}
+
+fn is_generated_git_snapshot_scope(source_scope: &str) -> bool {
+    let Some(hash) = source_scope.strip_prefix("git_snapshot:") else {
+        return false;
+    };
+    hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub(super) fn indexed_source_scope(status: &CodeRepositoryStatus) -> Option<String> {
+    status.last_indexed_scope_id.clone()
+}
+
+pub(super) fn missing_indexed_source_scope_error(status: &CodeRepositoryStatus) -> ApiError {
+    ApiError::invalid_argument(format!(
+        "code repository '{}' does not have an indexed source scope",
+        status.alias
+    ))
 }
 
 pub(super) fn merged_filters(left: &[String], right: &[String]) -> Vec<String> {
@@ -877,6 +924,45 @@ mod tests {
     }
 
     #[test]
+    fn current_fact_version_scope_requires_expected_source_scope() {
+        let expected_scope =
+            code_snapshot_expected_scope_id("repo", "tree-a", &["src".to_owned()], &[])
+                .expect("code snapshots should have a fact-version scope");
+        let compatible = status_for_scope(
+            Some(expected_scope),
+            Some("tree-a"),
+            vec!["src".to_owned()],
+            Vec::new(),
+        );
+        let custom_scope = status_for_scope(
+            Some("git_snapshot:legacy".to_owned()),
+            Some("tree-a"),
+            vec!["src".to_owned()],
+            Vec::new(),
+        );
+        let legacy = status_for_scope(
+            Some("git_snapshot:0000000000000000".to_owned()),
+            Some("tree-a"),
+            vec!["src".to_owned()],
+            Vec::new(),
+        );
+        let missing_scope =
+            status_for_scope(None, Some("tree-a"), vec!["src".to_owned()], Vec::new());
+        let missing_tree = status_for_scope(
+            Some("git_snapshot:0000000000000000".to_owned()),
+            None,
+            vec!["src".to_owned()],
+            Vec::new(),
+        );
+
+        assert!(code_scope_matches_current_fact_version(&compatible));
+        assert!(code_scope_matches_current_fact_version(&custom_scope));
+        assert!(!code_scope_matches_current_fact_version(&legacy));
+        assert!(!code_scope_matches_current_fact_version(&missing_scope));
+        assert!(!code_scope_matches_current_fact_version(&missing_tree));
+    }
+
+    #[test]
     fn active_path_filters_preserve_registration_scope_boundaries() {
         let registration = vec!["src".to_owned()];
         let narrow_task = vec!["src".to_owned(), "src/a.rs".to_owned()];
@@ -930,5 +1016,30 @@ mod tests {
             &["python".to_owned()],
             &["rust".to_owned()]
         ));
+    }
+
+    fn status_for_scope(
+        source_scope: Option<String>,
+        tree_hash: Option<&str>,
+        path_filters: Vec<String>,
+        language_filters: Vec<String>,
+    ) -> CodeRepositoryStatus {
+        CodeRepositoryStatus {
+            repository_id: "repo".to_owned(),
+            alias: "fixture".to_owned(),
+            root_path: "/tmp/repo".to_owned(),
+            path_filters,
+            language_filters,
+            last_indexed_scope_id: source_scope,
+            last_indexed_commit: Some("commit".to_owned()),
+            tree_hash: tree_hash.map(str::to_owned),
+            state: "indexed".to_owned(),
+            indexed_file_count: 1,
+            symbol_count: 0,
+            reference_count: 0,
+            chunk_count: 0,
+            stale: false,
+            degraded_reason: None,
+        }
     }
 }
