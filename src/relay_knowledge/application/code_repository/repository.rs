@@ -28,12 +28,12 @@ use crate::application::service::RelayKnowledgeService;
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
-    apply_code_grep_fallback, feature_flag_request_at_indexed_ref, fresh_full_index_probe,
-    index_start_from_completed, latest_compatible_code_scope_status, now_millis,
-    previous_index_state_for_index, recover_code_index_task_leases, refresh_code_index_task_lease,
-    registration_from_status, required_code_repository, resolve_code_ref_for_selector,
-    resolved_code_scope_status, retrieval_request_at_indexed_ref, run_blocking_code,
-    storage_api_error,
+    apply_code_grep_fallback, code_status_checkpoint, feature_flag_request_at_indexed_ref,
+    fresh_full_index_probe, index_start_from_completed, latest_compatible_code_scope_status,
+    now_millis, previous_index_state_for_index, recover_code_index_task_leases,
+    refresh_code_index_task_lease, registration_from_status, required_code_repository,
+    resolve_code_ref_for_selector, resolved_code_scope_status, retrieval_request_at_indexed_ref,
+    run_blocking_code, storage_api_error,
 };
 
 impl RelayKnowledgeService {
@@ -917,19 +917,7 @@ impl RelayKnowledgeService {
             .active_code_index_task(status.repository_id.clone())
             .await
             .map_err(storage_api_error)?;
-        let checkpoint = match active_task.as_ref() {
-            Some(task) => store
-                .code_index_checkpoint(task.source_scope.clone())
-                .await
-                .map_err(storage_api_error)?,
-            None => match status.last_indexed_scope_id.clone() {
-                Some(scope) => store
-                    .code_index_checkpoint(scope)
-                    .await
-                    .map_err(storage_api_error)?,
-                None => None,
-            },
-        };
+        let checkpoint = code_status_checkpoint(&store, &status, active_task.as_ref()).await?;
         let retention = store
             .code_scope_retention(status.repository_id.clone())
             .await

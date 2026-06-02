@@ -233,11 +233,13 @@ where
             value["results"].as_array().map_or(0, Vec::len)
         ),
         "code.repo.status" => format!(
-            "repo={} files={} symbols={} stale={}",
+            "repo={} files={} symbols={} stale={} task={} checkpoint={}",
             value["status"]["alias"].as_str().unwrap_or(""),
             value["status"]["indexed_file_count"].as_u64().unwrap_or(0),
             value["status"]["symbol_count"].as_u64().unwrap_or(0),
-            value["status"]["stale"].as_bool().unwrap_or(true)
+            value["status"]["stale"].as_bool().unwrap_or(true),
+            value["active_task"]["state"].as_str().unwrap_or("none"),
+            value["checkpoint"]["state"].as_str().unwrap_or("none")
         ),
         "code.repo.report" => format!(
             "repo={} files={} freshness={}",

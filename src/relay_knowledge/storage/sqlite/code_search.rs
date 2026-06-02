@@ -1,9 +1,10 @@
-use rusqlite::params;
+use rusqlite::{params, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
 pub(crate) struct SearchDocumentInserter<'transaction> {
     statement: rusqlite::Statement<'transaction>,
+    metadata_statement: rusqlite::Statement<'transaction>,
     content: String,
     symbol_terms: Vec<String>,
 }
@@ -20,9 +21,18 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             ",
         )?;
+        let metadata_statement = transaction.prepare(
+            "
+            INSERT OR REPLACE INTO code_repository_search_metadata (
+                source_scope, document_kind, record_id, path, search_rowid
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ",
+        )?;
 
         Ok(Self {
             statement,
+            metadata_statement,
             content: String::new(),
             symbol_terms: Vec::new(),
         })
@@ -43,7 +53,7 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
             document_kind,
             fields,
         );
-        self.statement.execute(params![
+        let search_rowid = self.statement.insert(params![
             source_scope,
             document_kind,
             record_id,
@@ -51,9 +61,134 @@ impl<'transaction> SearchDocumentInserter<'transaction> {
             language_id,
             self.content.as_str()
         ])?;
+        self.metadata_statement.execute(params![
+            source_scope,
+            document_kind,
+            record_id,
+            path,
+            search_rowid
+        ])?;
 
         Ok(())
     }
+}
+
+pub(super) fn delete_search_documents_for_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search
+        WHERE rowid IN (
+            SELECT search_rowid
+            FROM code_repository_search_metadata
+            WHERE source_scope = ?1
+        )
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "DELETE FROM code_repository_search_metadata WHERE source_scope = ?1",
+        params![source_scope],
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn backfill_search_metadata_for_scope(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        INSERT OR IGNORE INTO code_repository_search_metadata (
+            source_scope, document_kind, record_id, path, search_rowid
+        )
+        SELECT source_scope, document_kind, record_id, path, rowid
+        FROM code_repository_search
+        WHERE source_scope = ?1
+        ",
+        params![source_scope],
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn delete_search_documents_for_kind(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    document_kind: &str,
+) -> Result<(), StorageError> {
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search
+        WHERE rowid IN (
+            SELECT search_rowid
+            FROM code_repository_search_metadata
+            WHERE source_scope = ?1 AND document_kind = ?2
+        )
+        ",
+        params![source_scope, document_kind],
+    )?;
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search_metadata
+        WHERE source_scope = ?1 AND document_kind = ?2
+        ",
+        params![source_scope, document_kind],
+    )?;
+
+    Ok(())
+}
+
+pub(super) fn delete_search_documents_for_paths<'path>(
+    transaction: &rusqlite::Transaction<'_>,
+    source_scope: &str,
+    paths: impl IntoIterator<Item = &'path str>,
+) -> Result<(), StorageError> {
+    let mut paths = paths.into_iter().collect::<Vec<_>>();
+    paths.sort_unstable();
+    paths.dedup();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    for path_chunk in paths.chunks(500) {
+        let placeholders = std::iter::repeat_n("?", path_chunk.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values = Vec::with_capacity(path_chunk.len() + 1);
+        values.push(Value::Text(source_scope.to_owned()));
+        values.extend(
+            path_chunk
+                .iter()
+                .map(|path| Value::Text((*path).to_owned())),
+        );
+        transaction.execute(
+            &format!(
+                "
+                DELETE FROM code_repository_search
+                WHERE rowid IN (
+                    SELECT search_rowid
+                    FROM code_repository_search_metadata
+                    WHERE source_scope = ? AND path IN ({placeholders})
+                )
+                "
+            ),
+            params_from_iter(values.clone()),
+        )?;
+        transaction.execute(
+            &format!(
+                "
+                DELETE FROM code_repository_search_metadata
+                WHERE source_scope = ? AND path IN ({placeholders})
+                "
+            ),
+            params_from_iter(values),
+        )?;
+    }
+
+    Ok(())
 }
 
 pub(super) fn insert_search_document<'a>(

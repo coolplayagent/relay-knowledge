@@ -10,8 +10,9 @@ use relay_knowledge::{
     api::{CodeRepositoryRegisterRequest, InterfaceKind, RequestContext},
     application::{RelayKnowledgeService, RuntimeConfiguration},
     domain::{
-        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexTaskState, CodeQueryKind,
-        CodeRepositorySelector, CodeRetrievalRequest, FreshnessPolicy,
+        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
+        CodeIndexSession, CodeIndexTaskState, CodeQueryKind, CodeRepositorySelector,
+        CodeRetrievalRequest, FreshnessPolicy,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{CodeIndexTaskClaimRequest, CodeRepositoryStore, KnowledgeStore, SqliteGraphStore},
@@ -188,6 +189,88 @@ async fn background_index_prunes_scopes_beyond_active_and_recent_budget() {
         .expect_err("oldest pruned scope should no longer query");
 
     assert!(old.message.contains("no index for ref"));
+}
+
+#[tokio::test]
+async fn repository_status_reports_checkpoint_without_active_task() {
+    let repo = FixtureRepo::create("code-background-orphan-checkpoint");
+    repo.write(
+        "src/lib.rs",
+        "pub fn orphan_checkpoint_policy() -> u32 { 1 }\n",
+    );
+    repo.git(["add", "."]);
+    repo.git(["commit", "-m", "initial"]);
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    let service = service_with_store(store.clone()).await;
+    register_fixture_repo(&service, &repo, "register-orphan-checkpoint").await;
+    let baseline = service
+        .start_code_repository_index(
+            CodeIndexRequest {
+                repository: selector("fixture", "HEAD"),
+                mode: CodeIndexMode::Full,
+                freshness_policy: FreshnessPolicy::AllowStale,
+            },
+            context("start-orphan-checkpoint-baseline"),
+        )
+        .await
+        .expect("baseline index should queue");
+    service
+        .run_code_index_task_once(
+            baseline.task.map(|task| task.task_id),
+            context("run-orphan-checkpoint-baseline"),
+        )
+        .await
+        .expect("baseline worker should run")
+        .expect("baseline worker should complete");
+    let registered = store
+        .code_repository_status("fixture".to_owned())
+        .await
+        .expect("registered status should load")
+        .expect("repository should be registered");
+    let session = CodeIndexSession {
+        repository_id: registered.repository_id,
+        source_scope: "git_snapshot:orphan-checkpoint".to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        total_path_count: 8,
+        changed_path_count: 8,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        resource_budget: CodeIndexResourceBudget::default(),
+    };
+    store
+        .begin_code_index_session(session)
+        .await
+        .expect("session should begin");
+
+    let status = service
+        .code_repository_status(
+            selector("fixture", "HEAD"),
+            context("status-orphan-checkpoint"),
+        )
+        .await
+        .expect("status should load checkpoint");
+
+    assert!(status.active_task.is_none());
+    assert_eq!(
+        status
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.state.as_str()),
+        Some("indexing")
+    );
+    assert_eq!(
+        status
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.source_scope.as_str()),
+        Some("git_snapshot:orphan-checkpoint")
+    );
 }
 
 #[tokio::test]

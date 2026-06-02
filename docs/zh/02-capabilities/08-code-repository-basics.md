@@ -27,7 +27,7 @@ relay-knowledge repo status relay-knowledge --format json
 
 `definition`、`references` 和 `hybrid` 查询会先使用已索引代码图与 SQLite FTS；当这些层存在明确召回缺口时，才在已索引 commit 的候选文件上执行有界内部 exact-text source fallback。兜底结果以 `lexical` 和 `text_fallback` layer 暴露，不能替代 resolved reference/call/import edge。
 
-冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`repo status` 暴露 active task、checkpoint 进度和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。
+冷启动 full `repo index` 会返回 queued task handle，由后台 code-index worker 在 lease 下执行解析和 SQLite 写入。`repo status` 暴露 active task、checkpoint 进度、finalization 阶段和 retention 摘要；worker 成功后会保留 active scope、最近两个完成 scope 和未完成任务 scope。如果任务已经不再 active 但仓库仍处于 `indexing`，status 会报告最近 checkpoint，便于区分 finalization 慢和进度缺失。
 
 ## 竞争力特性
 

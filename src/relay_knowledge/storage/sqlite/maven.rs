@@ -122,6 +122,25 @@ fn refresh_effective_dependency_records(
     transaction.execute(
         "
         DELETE FROM code_repository_search
+        WHERE rowid IN (
+            SELECT search_rowid
+            FROM code_repository_search_metadata
+            WHERE source_scope = ?1
+              AND document_kind = 'dependency'
+              AND record_id IN (
+                  SELECT dependency_id
+                  FROM code_repository_dependencies
+                  WHERE source_scope = ?1
+                    AND ecosystem = 'maven'
+                    AND source_kind = 'pom.xml'
+              )
+        )
+        ",
+        params![source_scope],
+    )?;
+    transaction.execute(
+        "
+        DELETE FROM code_repository_search_metadata
         WHERE source_scope = ?1
           AND document_kind = 'dependency'
           AND record_id IN (

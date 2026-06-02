@@ -2,6 +2,8 @@ use rusqlite::{OptionalExtension, params, params_from_iter, types::Value};
 
 use crate::storage::StorageError;
 
+use super::code_search::{delete_search_documents_for_paths, delete_search_documents_for_scope};
+
 const MAX_PATH_DELETE_PATHS_PER_STATEMENT: usize = 500;
 
 pub(super) fn delete_scope_index(
@@ -19,7 +21,6 @@ pub(super) fn delete_scope_index(
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
-        "code_repository_search",
         "software_components",
         "software_dependency_usages",
         "software_sdk_usages",
@@ -33,6 +34,7 @@ pub(super) fn delete_scope_index(
             params![source_scope],
         )?;
     }
+    delete_search_documents_for_scope(transaction, source_scope)?;
 
     Ok(())
 }
@@ -107,7 +109,6 @@ pub(super) fn delete_path_indexes<'path>(
         "code_repository_references",
         "code_repository_symbols",
         "code_repository_files",
-        "code_repository_search",
     ] {
         for path_chunk in paths.chunks(MAX_PATH_DELETE_PATHS_PER_STATEMENT) {
             let placeholders = std::iter::repeat_n("?", path_chunk.len())
@@ -126,6 +127,7 @@ pub(super) fn delete_path_indexes<'path>(
             )?;
         }
     }
+    delete_search_documents_for_paths(transaction, source_scope, paths)?;
 
     Ok(())
 }
@@ -214,6 +216,7 @@ mod tests {
                 [],
             )
             .expect("search table should create");
+        create_search_metadata_table(&connection);
         connection
             .execute(
                 "
@@ -226,6 +229,7 @@ mod tests {
                 [],
             )
             .expect("search rows should insert");
+        backfill_search_metadata(&connection);
 
         let transaction = connection.transaction().expect("transaction should open");
         delete_scope_index(&transaction, "scope").expect("scope should delete");
@@ -283,6 +287,7 @@ mod tests {
                 [],
             )
             .expect("search table should create");
+        create_search_metadata_table(&connection);
 
         for path in ["src/a.rs", "src/b.rs", "src/c.rs"] {
             for table in PATH_TABLES {
@@ -305,6 +310,7 @@ mod tests {
                 )
                 .expect("search row should insert");
         }
+        backfill_search_metadata(&connection);
 
         let transaction = connection.transaction().expect("transaction should open");
         assert!(
@@ -333,5 +339,38 @@ mod tests {
                 .expect("remaining row count should load");
             assert_eq!(remaining, 1, "{table} should keep only the unmatched path");
         }
+    }
+
+    fn create_search_metadata_table(connection: &Connection) {
+        connection
+            .execute(
+                "
+                CREATE TABLE code_repository_search_metadata (
+                    source_scope TEXT NOT NULL,
+                    document_kind TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    search_rowid INTEGER NOT NULL UNIQUE,
+                    PRIMARY KEY (source_scope, document_kind, record_id)
+                )
+                ",
+                [],
+            )
+            .expect("search metadata table should create");
+    }
+
+    fn backfill_search_metadata(connection: &Connection) {
+        connection
+            .execute(
+                "
+                INSERT INTO code_repository_search_metadata (
+                    source_scope, document_kind, record_id, path, search_rowid
+                )
+                SELECT source_scope, document_kind, record_id, path, rowid
+                FROM code_repository_search
+                ",
+                [],
+            )
+            .expect("search metadata rows should insert");
     }
 }

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use super::{
     CALL_SEARCH_SIGNATURE_MIGRATION, EDGE_SEARCH_LANGUAGE_ID_MIGRATION, SEARCH_BACKFILL_MIGRATION,
-    code_schema_migration_applied, initialize_code_schema,
+    SEARCH_METADATA_BACKFILL_MIGRATION, code_schema_migration_applied, initialize_code_schema,
 };
 
 #[test]
@@ -261,6 +261,51 @@ fn search_backfill_is_marked_after_one_legacy_pass() {
     initialize_code_schema(&connection).expect("marked search backfill should skip");
 
     assert_eq!(search_row_count(&connection, "symbol-1"), 0);
+}
+
+#[test]
+fn search_metadata_backfill_tracks_existing_fts_rows() {
+    let connection = Connection::open_in_memory().expect("database should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE code_repository_schema_migrations (name TEXT PRIMARY KEY);
+            CREATE VIRTUAL TABLE code_repository_search USING fts5(
+                source_scope UNINDEXED,
+                document_kind UNINDEXED,
+                record_id UNINDEXED,
+                path UNINDEXED,
+                language_id UNINDEXED,
+                content
+            );
+            INSERT INTO code_repository_search (
+                source_scope, document_kind, record_id, path, language_id, content
+            )
+            VALUES ('scope', 'symbol', 'symbol-1', 'src/lib.rs', 'rust', 'LegacyThing');
+            ",
+        )
+        .expect("legacy search row should initialize");
+
+    initialize_code_schema(&connection).expect("metadata should backfill");
+
+    let metadata_count: i64 = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM code_repository_search_metadata
+            WHERE source_scope = 'scope'
+              AND document_kind = 'symbol'
+              AND record_id = 'symbol-1'
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .expect("metadata count should load");
+    assert_eq!(metadata_count, 1);
+    assert!(
+        code_schema_migration_applied(&connection, SEARCH_METADATA_BACKFILL_MIGRATION)
+            .expect("metadata migration marker should load")
+    );
 }
 
 #[test]

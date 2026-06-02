@@ -109,6 +109,24 @@
       "case_group": "index_performance"
     },
     {
+      "id": "index_performance_wide_ref_available_after_finalize",
+      "repository": "index_performance_wide_mixed_files",
+      "kind": "definition",
+      "query": "rk_wide_bridge_dispatch",
+      "guardrail": true,
+      "limit": 10,
+      "max_rank": 1,
+      "language_filters": ["rust"],
+      "expected": [
+        {
+          "path": "crates/perf_core/src/bridge.rs",
+          "excerpt_contains": "rk_wide_bridge_dispatch"
+        }
+      ],
+      "degraded_reason": false,
+      "case_group": "index_performance"
+    },
+    {
       "id": "index_performance_wide_cross_shard_hybrid",
       "repository": "index_performance_wide_mixed_files",
       "kind": "hybrid",
