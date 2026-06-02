@@ -9,9 +9,9 @@ use crate::{
         source_grep_matches,
     },
     domain::{
-        CodeFeatureFlagRequest, CodeIndexMode, CodeIndexRequest, CodeIndexResourceBudget,
-        CodeIndexTaskRecord, CodeRepositoryRegistration, CodeRepositorySelector,
-        CodeRepositoryStatus, CodeRetrievalRequest,
+        CodeFeatureFlagRequest, CodeIndexCheckpoint, CodeIndexMode, CodeIndexRequest,
+        CodeIndexResourceBudget, CodeIndexTaskRecord, CodeRepositoryRegistration,
+        CodeRepositorySelector, CodeRepositoryStatus, CodeRetrievalRequest,
     },
     storage::{
         CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
@@ -51,6 +51,37 @@ pub(super) async fn required_code_repository(
         .ok_or_else(|| {
             ApiError::invalid_argument(format!("code repository '{repository}' is not registered"))
         })
+}
+
+pub(super) async fn code_status_checkpoint(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    status: &CodeRepositoryStatus,
+    active_task: Option<&CodeIndexTaskRecord>,
+) -> Result<Option<CodeIndexCheckpoint>, ApiError> {
+    if let Some(task) = active_task {
+        return store
+            .code_index_checkpoint(task.source_scope.clone())
+            .await
+            .map_err(storage_api_error);
+    }
+    if status.state == "indexing"
+        && let Some(checkpoint) = store
+            .latest_code_index_checkpoint(status.repository_id.clone())
+            .await
+            .map_err(storage_api_error)?
+    {
+        return Ok(Some(checkpoint));
+    }
+    if let Some(scope) = status.last_indexed_scope_id.clone()
+        && let Some(checkpoint) = store
+            .code_index_checkpoint(scope)
+            .await
+            .map_err(storage_api_error)?
+    {
+        return Ok(Some(checkpoint));
+    }
+
+    Ok(None)
 }
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,8 @@ use crate::{
     domain::{
         CodeCallRecord, CodeIndexSnapshot, CodeParseStatus, CodeQueryKind,
         CodeRepositoryRegistration, CodeRepositorySelector, FreshnessPolicy,
-        RepositoryCodeFileRecord, RepositoryCodeRange, RepositoryCodeSymbolRecord,
+        RepositoryCodeChunkRecord, RepositoryCodeFileRecord, RepositoryCodeRange,
+        RepositoryCodeSymbolRecord,
     },
     storage::SqliteGraphStore,
 };
@@ -167,6 +168,85 @@ async fn incremental_call_search_batches_cloned_symbol_signature_lookups() {
     assert!(hits[0].excerpt.contains("ReadBlock519"));
 }
 
+#[tokio::test]
+async fn incremental_path_cleanup_deletes_cloned_search_rows() {
+    let store = store_with_repository_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: BASE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file(BASE_SCOPE, "doc-file", "src/doc.rs")],
+        symbols: Vec::new(),
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![chunk(
+            BASE_SCOPE,
+            "doc-chunk",
+            "doc-file",
+            "src/doc.rs",
+            "staleonly237xyz",
+        )],
+        diagnostics: Vec::new(),
+    })
+    .await;
+    let mut incremental = incremental_snapshot();
+    incremental.files = vec![file(NEXT_SCOPE, "doc-file-next", "src/doc.rs")];
+    incremental.chunks = vec![chunk(
+        NEXT_SCOPE,
+        "doc-chunk-next",
+        "doc-file-next",
+        "src/doc.rs",
+        "freshonly237xyz",
+    )];
+    store
+        .apply_code_index_snapshot(incremental)
+        .await
+        .expect("incremental snapshot should apply");
+
+    let selector = CodeRepositorySelector::new("fixture", "commit-next", Vec::new(), Vec::new())
+        .expect("selector should validate");
+    let stale_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "staleonly237xyz",
+                selector.clone(),
+                CodeQueryKind::Hybrid,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("stale search should query");
+    let fresh_hits = store
+        .search_code(
+            crate::domain::CodeRetrievalRequest::new(
+                "freshonly237xyz",
+                selector,
+                CodeQueryKind::Hybrid,
+                10,
+                FreshnessPolicy::AllowStale,
+            )
+            .expect("request should validate"),
+        )
+        .await
+        .expect("fresh search should query");
+
+    assert!(stale_hits.is_empty());
+    assert_eq!(fresh_hits[0].path, "src/doc.rs");
+}
+
 fn incremental_snapshot() -> CodeIndexSnapshot {
     CodeIndexSnapshot {
         repository_id: "repo".to_owned(),
@@ -190,6 +270,30 @@ fn incremental_snapshot() -> CodeIndexSnapshot {
         feature_flags: Vec::new(),
         chunks: Vec::new(),
         diagnostics: Vec::new(),
+    }
+}
+
+fn chunk(
+    source_scope: &str,
+    chunk_id: &str,
+    file_id: &str,
+    path: &str,
+    content: &str,
+) -> RepositoryCodeChunkRecord {
+    RepositoryCodeChunkRecord {
+        repository_id: "repo".to_owned(),
+        source_scope: source_scope.to_owned(),
+        chunk_id: chunk_id.to_owned(),
+        file_id: file_id.to_owned(),
+        path: path.to_owned(),
+        language_id: "rust".to_owned(),
+        content: content.to_owned(),
+        byte_range: RepositoryCodeRange {
+            start: 0,
+            end: content.len() as u32,
+        },
+        line_range: RepositoryCodeRange { start: 1, end: 1 },
+        symbol_snapshot_id: None,
     }
 }
 

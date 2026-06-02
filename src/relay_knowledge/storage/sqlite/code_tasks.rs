@@ -370,6 +370,29 @@ pub(super) fn checkpoint(
         .map_err(StorageError::from)
 }
 
+pub(super) fn latest_checkpoint_for_repository(
+    connection: &mut Connection,
+    repository_id: &str,
+) -> Result<Option<CodeIndexCheckpoint>, StorageError> {
+    connection
+        .query_row(
+            "
+            SELECT repository_id, source_scope, state, total_path_count, parsed_file_count,
+                   committed_file_count, committed_symbol_count, committed_reference_count,
+                   committed_chunk_count, batch_count, last_path, resource_budget_json,
+                   updated_at_ms
+            FROM code_repository_index_checkpoints
+            WHERE repository_id = ?1
+            ORDER BY updated_at_ms DESC, source_scope DESC
+            LIMIT 1
+            ",
+            params![repository_id],
+            checkpoint_from_row,
+        )
+        .optional()
+        .map_err(StorageError::from)
+}
+
 pub(super) fn recover_expired_task_leases(
     connection: &mut Connection,
     now_ms: u64,

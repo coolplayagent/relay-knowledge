@@ -5,6 +5,7 @@ use crate::storage::StorageError;
 const CALL_SEARCH_SIGNATURE_MIGRATION: &str = "call-search-symbol-signatures-v1";
 const EDGE_SEARCH_LANGUAGE_ID_MIGRATION: &str = "edge-search-language-ids-v1";
 const SEARCH_BACKFILL_MIGRATION: &str = "code-search-backfill-v1";
+const SEARCH_METADATA_BACKFILL_MIGRATION: &str = "code-search-metadata-backfill-v1";
 
 pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), StorageError> {
     connection.execute_batch(
@@ -373,6 +374,19 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
             content
         );
 
+        CREATE TABLE IF NOT EXISTS code_repository_search_metadata (
+            source_scope TEXT NOT NULL,
+            document_kind TEXT NOT NULL,
+            record_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            search_rowid INTEGER NOT NULL UNIQUE,
+            PRIMARY KEY (source_scope, document_kind, record_id)
+        );
+        CREATE INDEX IF NOT EXISTS code_repository_search_metadata_scope_kind
+            ON code_repository_search_metadata(source_scope, document_kind);
+        CREATE INDEX IF NOT EXISTS code_repository_search_metadata_scope_path
+            ON code_repository_search_metadata(source_scope, path);
+
         CREATE INDEX IF NOT EXISTS code_repository_symbols_lookup
             ON code_repository_symbols(source_scope, name, qualified_name, path);
         CREATE INDEX IF NOT EXISTS code_repository_symbols_name_path_lookup
@@ -420,6 +434,7 @@ pub(super) fn initialize_code_schema(connection: &Connection) -> Result<(), Stor
     }
     backfill_code_repository_aliases(connection)?;
     backfill_code_repository_search(connection)?;
+    backfill_code_repository_search_metadata(connection)?;
     rebuild_call_search_documents_after_signature_upgrade(connection)?;
     backfill_edge_search_language_ids(connection)?;
 
@@ -455,6 +470,29 @@ fn backfill_code_repository_search(connection: &Connection) -> Result<(), Storag
     backfill_search_calls(connection)?;
     backfill_search_chunks(connection)?;
     mark_code_schema_migration(connection, SEARCH_BACKFILL_MIGRATION)?;
+
+    Ok(())
+}
+
+fn backfill_code_repository_search_metadata(connection: &Connection) -> Result<(), StorageError> {
+    if code_schema_migration_applied(connection, SEARCH_METADATA_BACKFILL_MIGRATION)? {
+        return Ok(());
+    }
+    sync_code_repository_search_metadata(connection)?;
+    mark_code_schema_migration(connection, SEARCH_METADATA_BACKFILL_MIGRATION)
+}
+
+fn sync_code_repository_search_metadata(connection: &Connection) -> Result<(), StorageError> {
+    connection.execute(
+        "
+        INSERT OR IGNORE INTO code_repository_search_metadata (
+            source_scope, document_kind, record_id, path, search_rowid
+        )
+        SELECT source_scope, document_kind, record_id, path, rowid
+        FROM code_repository_search
+        ",
+        [],
+    )?;
 
     Ok(())
 }
@@ -680,11 +718,24 @@ fn rebuild_call_search_documents_with_migration_marker(
     if code_schema_migration_applied(connection, CALL_SEARCH_SIGNATURE_MIGRATION)? {
         return Ok(());
     }
+    sync_code_repository_search_metadata(connection)?;
     connection.execute(
-        "DELETE FROM code_repository_search WHERE document_kind = 'call'",
+        "
+        DELETE FROM code_repository_search
+        WHERE rowid IN (
+            SELECT search_rowid
+            FROM code_repository_search_metadata
+            WHERE document_kind = 'call'
+        )
+        ",
+        [],
+    )?;
+    connection.execute(
+        "DELETE FROM code_repository_search_metadata WHERE document_kind = 'call'",
         [],
     )?;
     insert_search_calls(connection)?;
+    sync_code_repository_search_metadata(connection)?;
     mark_code_schema_migration(connection, CALL_SEARCH_SIGNATURE_MIGRATION)
 }
 

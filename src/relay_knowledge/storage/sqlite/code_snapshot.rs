@@ -10,7 +10,7 @@ use crate::{
 use super::{
     MAX_SYMBOL_SIGNATURE_LOOKUP_IDS_PER_STATEMENT,
     code_cleanup::{count_code_rows, delete_path_index, delete_path_indexes, delete_scope_index},
-    code_search::insert_search_document,
+    code_search::{backfill_search_metadata_for_scope, insert_search_document},
     code_status::{canonical_filter_values, canonical_path_filters, parse_json_list},
 };
 
@@ -399,6 +399,7 @@ fn clone_active_scope_for_incremental(
         &previous_scope,
         &snapshot.source_scope,
     )?;
+    backfill_search_metadata_for_scope(transaction, &snapshot.source_scope)?;
 
     Ok(())
 }

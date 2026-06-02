@@ -67,7 +67,14 @@ async fn checkpointed_batches_store_edge_search_languages_after_finalize() {
         .expect("session should finalize");
 
     let languages = search_document_languages(&store, source_scope).await;
+    let checkpoint = store
+        .code_index_checkpoint(source_scope.to_owned())
+        .await
+        .expect("checkpoint should read")
+        .expect("checkpoint should exist");
 
+    assert_eq!(checkpoint.state, "completed");
+    assert_eq!(edge_search_metadata_count(&store, source_scope).await, 3);
     assert_eq!(
         languages.get(&("reference".to_owned(), "src/lib.rs".to_owned())),
         Some(&"rust".to_owned())
@@ -644,6 +651,27 @@ async fn search_document_languages(
         })
         .await
         .expect("search document languages should load")
+}
+
+async fn edge_search_metadata_count(store: &SqliteGraphStore, source_scope: &str) -> usize {
+    let source_scope = source_scope.to_owned();
+    store
+        .run(move |connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT COUNT(*)
+                    FROM code_repository_search_metadata
+                    WHERE source_scope = ?1
+                      AND document_kind IN ('reference', 'import', 'call')
+                    ",
+                    params![source_scope],
+                    |row| row.get(0),
+                )
+                .map_err(crate::storage::StorageError::from)
+        })
+        .await
+        .expect("edge search metadata count should load")
 }
 
 async fn call_search_document_content(store: &SqliteGraphStore, source_scope: &str) -> String {

@@ -818,6 +818,14 @@ fn create_refresh_schema(connection: &Connection) {
                 language_id UNINDEXED,
                 content
             );
+            CREATE TABLE code_repository_search_metadata (
+                source_scope TEXT NOT NULL,
+                document_kind TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                search_rowid INTEGER NOT NULL UNIQUE,
+                PRIMARY KEY (source_scope, document_kind, record_id)
+            );
             ",
         )
         .expect("schema should create");
@@ -850,6 +858,18 @@ fn seed_existing_dependency(connection: &Connection) {
             [],
         )
         .expect("search row should seed");
+    let search_rowid = connection.last_insert_rowid();
+    connection
+        .execute(
+            "
+            INSERT INTO code_repository_search_metadata (
+                source_scope, document_kind, record_id, path, search_rowid
+            )
+            VALUES ('scope', 'dependency', 'dep-old', 'pom.xml', ?1)
+            ",
+            [search_rowid],
+        )
+        .expect("search metadata row should seed");
 }
 
 fn count_rows(connection: &Connection, sql: &str) -> i64 {

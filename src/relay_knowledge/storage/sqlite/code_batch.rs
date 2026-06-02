@@ -19,6 +19,8 @@ use super::{
 pub(super) mod dependencies;
 #[path = "code_batch/finalize.rs"]
 mod finalize;
+#[path = "code_batch/progress.rs"]
+mod progress;
 
 pub(super) fn begin_session(
     connection: &mut Connection,
@@ -126,13 +128,66 @@ fn finalize_session_once(
     connection: &mut Connection,
     session: &CodeIndexSession,
 ) -> Result<crate::domain::CodeIndexSummary, StorageError> {
-    let transaction = connection.transaction()?;
-    finalize::resolve_scope(
-        &transaction,
+    run_finalize_phase(
+        connection,
         &session.source_scope,
-        &session.repository_id,
-        &session.language_filters,
+        finalize::phases::RESOLVE_REFERENCES,
+        |transaction| finalize::phases::resolve_references(transaction, &session.source_scope),
     )?;
+    let mut symbol_cache = finalize::phases::FinalizeSymbolCache::default();
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::RESOLVE_IMPORTS,
+        |transaction| {
+            finalize::phases::resolve_imports(transaction, &session.source_scope, &mut symbol_cache)
+        },
+    )?;
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::RESOLVE_CALL_TARGETS,
+        |transaction| finalize::phases::resolve_call_targets(transaction, &session.source_scope),
+    )?;
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::REFRESH_DEPENDENCIES,
+        |transaction| {
+            finalize::phases::refresh_dependencies(
+                transaction,
+                &session.source_scope,
+                &session.language_filters,
+            )
+        },
+    )?;
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::REBUILD_REFERENCE_SEARCH,
+        |transaction| {
+            finalize::phases::rebuild_reference_search(transaction, &session.source_scope)
+        },
+    )?;
+    run_finalize_phase(
+        connection,
+        &session.source_scope,
+        finalize::phases::REBUILD_CALLS,
+        |transaction| {
+            finalize::phases::rebuild_calls(
+                transaction,
+                &session.source_scope,
+                &session.repository_id,
+                &mut symbol_cache,
+            )
+        },
+    )?;
+    progress::mark_checkpoint_state(
+        connection,
+        &session.source_scope,
+        finalize::phases::PUBLISH_SCOPE,
+    )?;
+    let transaction = connection.transaction()?;
     update_repository_after_session(&transaction, session)?;
     mark_checkpoint_completed(&transaction, &session.source_scope)?;
     transaction.commit()?;
@@ -175,6 +230,20 @@ fn finalize_session_once(
             resource_budget: session.resource_budget,
         },
     })
+}
+
+fn run_finalize_phase(
+    connection: &mut Connection,
+    source_scope: &str,
+    state: &str,
+    operation: impl FnOnce(&Transaction<'_>) -> Result<(), StorageError>,
+) -> Result<(), StorageError> {
+    progress::mark_checkpoint_state(connection, source_scope, state)?;
+    let transaction = connection.transaction()?;
+    operation(&transaction)?;
+    transaction.commit()?;
+
+    Ok(())
 }
 
 fn insert_checkpoint(

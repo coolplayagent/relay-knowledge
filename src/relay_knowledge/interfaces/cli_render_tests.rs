@@ -97,8 +97,14 @@ fn render_text_covers_operational_and_code_repository_summaries() {
                     "symbol_count": 3,
                     "stale": false,
                 },
+                "active_task": {
+                    "state": "running",
+                },
+                "checkpoint": {
+                    "state": "finalizing:rebuild_calls",
+                },
             }),
-            "repo=repo files=2 symbols=3 stale=false\n",
+            "repo=repo files=2 symbols=3 stale=false task=running checkpoint=finalizing:rebuild_calls\n",
         ),
         (
             "code.repo.report",

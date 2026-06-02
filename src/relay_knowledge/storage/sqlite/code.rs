@@ -255,6 +255,15 @@ impl CodeRepositoryStore for SqliteGraphStore {
         self.run_read(move |connection| code_tasks::checkpoint(connection, &source_scope))
     }
 
+    fn latest_code_index_checkpoint(
+        &self,
+        repository_id: String,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeIndexCheckpoint>> {
+        self.run_read(move |connection| {
+            code_tasks::latest_checkpoint_for_repository(connection, &repository_id)
+        })
+    }
+
     fn code_scope_retention(
         &self,
         repository_id: String,

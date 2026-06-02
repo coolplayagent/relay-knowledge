@@ -243,6 +243,13 @@ pub trait CodeRepositoryStore: Send + Sync {
         source_scope: String,
     ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>>;
 
+    fn latest_code_index_checkpoint(
+        &self,
+        _repository_id: String,
+    ) -> StorageFuture<'_, Option<CodeIndexCheckpoint>> {
+        Box::pin(async { Ok(None) })
+    }
+
     fn code_scope_retention(
         &self,
         repository_id: String,
