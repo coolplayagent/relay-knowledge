@@ -504,6 +504,90 @@ async fn path_import_queries_rank_public_header_importers_before_implementation_
 }
 
 #[tokio::test]
+async fn path_import_queries_keep_public_header_importers_first_with_target_symbol_usage() {
+    let header_path = "include/store/pipeline.hpp";
+    let implementation_path = "src/cache.cpp";
+    let target_path = "include/store/cache.hpp";
+    let mut header_import = import(
+        "header-cache-import",
+        "header-file",
+        header_path,
+        "#include \"store/cache.hpp\"",
+    );
+    header_import.target_hint = Some(target_path.to_owned());
+    header_import.resolution_state = "resolved".to_owned();
+    header_import.line_range = range(3, 3);
+    let mut implementation_import = import(
+        "implementation-cache-import",
+        "implementation-file",
+        implementation_path,
+        "#include \"store/cache.hpp\"",
+    );
+    implementation_import.target_hint = Some(target_path.to_owned());
+    implementation_import.resolution_state = "resolved".to_owned();
+    implementation_import.line_range = range(1, 1);
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        full_replace: true,
+        changed_path_count: 3,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![
+            file("header-file", header_path, "cpp"),
+            file("implementation-file", implementation_path, "cpp"),
+            file("target-file", target_path, "cpp"),
+        ],
+        symbols: vec![
+            symbol("cache-symbol", "target-file", target_path, "Cache"),
+            symbol("insert-symbol", "target-file", target_path, "Insert"),
+            symbol("writer-symbol", "target-file", target_path, "Writer"),
+        ],
+        references: Vec::new(),
+        imports: vec![implementation_import, header_import],
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk(
+                "header-chunk",
+                "header-file",
+                header_path,
+                "std::unique_ptr<Cache<std::string>> BuildCache(std::unique_ptr<Writer> writer);",
+            ),
+            chunk(
+                "implementation-chunk",
+                "implementation-file",
+                implementation_path,
+                "void Cache<Key>::Insert(const Key& key) {\n  writer_->Append(std::string(key));\n}",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request("store/cache.hpp", CodeQueryKind::Imports))
+        .await
+        .expect("import query should succeed");
+
+    assert_eq!(hits[0].path, header_path);
+    let header_score = score_for_path(&hits, header_path).expect("header import should match");
+    let implementation_score =
+        score_for_path(&hits, implementation_path).expect("implementation import should match");
+    assert!(
+        header_score > implementation_score,
+        "public header importer should outrank implementation importer with target usage: {header_score} <= {implementation_score}",
+    );
+}
+
+#[tokio::test]
 async fn path_import_queries_rank_importer_path_and_target_symbol_usage() {
     let active_path = "src/cache/cache_consumer.cc";
     let bootstrap_path = "src/bootstrap/consumer.cc";
