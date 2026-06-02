@@ -201,22 +201,23 @@ impl RelayKnowledgeService {
             .buffer_unordered(REPOSITORY_SET_QUERY_MEMBER_CONCURRENCY)
             .collect::<Vec<_>>()
             .await;
-        let mut fallback_degraded_reasons = Vec::new();
+        let mut outcomes = Vec::new();
         for outcome in member_outcomes {
-            let outcome = outcome?;
-            fallback_degraded_reasons.push(outcome.degraded_reason);
-            for hit in outcome.hits {
-                let overlay_evidence = edge_index.evidence_for_hit(&hit);
-                let score = repository_set_score(&hit, &outcome.member_status, &overlay_evidence);
-                results.push(CodeRepositorySetQueryHit {
-                    member: outcome.member_status.member.clone(),
-                    hit,
-                    overlay_evidence,
-                    score,
-                });
-            }
+            outcomes.push(outcome?);
         }
+        results.extend(repository_set_results_from_outcomes(&outcomes, &edge_index));
         apply_bridge_support_bonus(&mut results);
+        if repository_set_deferred_source_fallback_needed(&request, &outcomes, &results) {
+            apply_repository_set_deferred_source_fallbacks(
+                Arc::clone(&store),
+                &request,
+                &mut outcomes,
+            )
+            .await?;
+            results.clear();
+            results.extend(repository_set_results_from_outcomes(&outcomes, &edge_index));
+            apply_bridge_support_bonus(&mut results);
+        }
         let truncated = dedupe_sort_truncate(&mut results, request.limit, &request.query);
         prune_returned_overlay_evidence(&mut results);
         let mut degraded_reasons = vec![
@@ -226,7 +227,7 @@ impl RelayKnowledgeService {
                 .stale
                 .then(|| "repository set overlay is stale".to_owned()),
         ];
-        degraded_reasons.extend(fallback_degraded_reasons);
+        degraded_reasons.extend(outcomes.into_iter().map(|outcome| outcome.degraded_reason));
         let degraded_reason = join_degraded_reasons(degraded_reasons);
 
         Ok(CodeRepositorySetQueryResponse {
@@ -391,6 +392,21 @@ impl RelayKnowledgeService {
 struct RepositorySetMemberQueryOutcome {
     member_status: CodeRepositorySetMemberStatus,
     hits: Vec<CodeRetrievalHit>,
+    active_request: CodeRetrievalRequest,
+    dependency_symbol_plan_satisfied: bool,
+    degraded_reason: Option<String>,
+}
+
+struct RepositorySetMemberSourceFallbackInput {
+    index: usize,
+    member_status: CodeRepositorySetMemberStatus,
+    active_request: CodeRetrievalRequest,
+    hits: Vec<CodeRetrievalHit>,
+}
+
+struct RepositorySetMemberSourceFallbackOutput {
+    index: usize,
+    hits: Vec<CodeRetrievalHit>,
     degraded_reason: Option<String>,
 }
 
@@ -446,29 +462,129 @@ async fn query_repository_set_member(
             .map_err(storage_api_error)?;
         hits = merge_dependency_symbol_fallback_hits(symbol_plan_hits, fallback_hits);
     }
-    let degraded_reason = if repository_set_member_source_fallback_needed(
-        &request,
-        &active_request,
-        hits.len(),
-        dependency_symbol_plan_satisfied,
-    ) {
-        let base_status = required_member_repository(&store, &member.repository_id).await?;
-        let scoped_member_status =
-            code_status_for_repository_set_member(&base_status, &member_status);
-        apply_code_grep_fallback(
-            &store,
-            &base_status,
-            &scoped_member_status,
-            &active_request,
-            &mut hits,
-        )
-        .await?
-    } else {
-        None
-    };
-
     Ok(RepositorySetMemberQueryOutcome {
         member_status,
+        hits,
+        active_request,
+        dependency_symbol_plan_satisfied,
+        degraded_reason: None,
+    })
+}
+
+fn repository_set_results_from_outcomes(
+    outcomes: &[RepositorySetMemberQueryOutcome],
+    edge_index: &OverlayEvidenceIndex<'_>,
+) -> Vec<CodeRepositorySetQueryHit> {
+    let mut results = Vec::new();
+    for outcome in outcomes {
+        for hit in &outcome.hits {
+            let overlay_evidence = edge_index.evidence_for_hit(hit);
+            let score = repository_set_score(hit, &outcome.member_status, &overlay_evidence);
+            results.push(CodeRepositorySetQueryHit {
+                member: outcome.member_status.member.clone(),
+                hit: hit.clone(),
+                overlay_evidence,
+                score,
+            });
+        }
+    }
+
+    results
+}
+
+fn repository_set_deferred_source_fallback_needed(
+    request: &CodeRepositorySetQueryRequest,
+    outcomes: &[RepositorySetMemberQueryOutcome],
+    initial_results: &[CodeRepositorySetQueryHit],
+) -> bool {
+    if outcomes.iter().any(|outcome| {
+        outcome.active_request.code_query_kind != CodeQueryKind::Hybrid
+            && repository_set_member_source_fallback_needed(
+                request,
+                &outcome.active_request,
+                outcome.hits.len(),
+                outcome.dependency_symbol_plan_satisfied,
+            )
+    }) {
+        return true;
+    }
+    if outcomes.iter().any(|outcome| {
+        outcome.hits.is_empty()
+            && repository_set_member_source_fallback_needed(
+                request,
+                &outcome.active_request,
+                outcome.hits.len(),
+                outcome.dependency_symbol_plan_satisfied,
+            )
+    }) {
+        return true;
+    }
+
+    let mut ranked = initial_results.to_vec();
+    dedupe_sort_truncate(&mut ranked, request.limit, &request.query);
+    ranked.len() < request.limit.max(1)
+}
+
+async fn apply_repository_set_deferred_source_fallbacks(
+    store: Arc<dyn crate::storage::KnowledgeStore>,
+    request: &CodeRepositorySetQueryRequest,
+    outcomes: &mut [RepositorySetMemberQueryOutcome],
+) -> Result<(), ApiError> {
+    let fallback_inputs = outcomes
+        .iter()
+        .enumerate()
+        .filter(|(_, outcome)| {
+            repository_set_member_source_fallback_needed(
+                request,
+                &outcome.active_request,
+                outcome.hits.len(),
+                outcome.dependency_symbol_plan_satisfied,
+            )
+        })
+        .map(|(index, outcome)| RepositorySetMemberSourceFallbackInput {
+            index,
+            member_status: outcome.member_status.clone(),
+            active_request: outcome.active_request.clone(),
+            hits: outcome.hits.clone(),
+        })
+        .collect::<Vec<_>>();
+    let fallback_outputs = stream::iter(fallback_inputs)
+        .map(|input| {
+            let store = Arc::clone(&store);
+            async move { apply_repository_set_member_source_fallback(store, input).await }
+        })
+        .buffer_unordered(REPOSITORY_SET_QUERY_MEMBER_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    for output in fallback_outputs {
+        let output = output?;
+        outcomes[output.index].hits = output.hits;
+        outcomes[output.index].degraded_reason = output.degraded_reason;
+    }
+
+    Ok(())
+}
+
+async fn apply_repository_set_member_source_fallback(
+    store: Arc<dyn crate::storage::KnowledgeStore>,
+    input: RepositorySetMemberSourceFallbackInput,
+) -> Result<RepositorySetMemberSourceFallbackOutput, ApiError> {
+    let mut hits = input.hits;
+    let base_status =
+        required_member_repository(&store, &input.member_status.member.repository_id).await?;
+    let scoped_member_status =
+        code_status_for_repository_set_member(&base_status, &input.member_status);
+    let degraded_reason = apply_code_grep_fallback(
+        &store,
+        &base_status,
+        &scoped_member_status,
+        &input.active_request,
+        &mut hits,
+    )
+    .await?;
+
+    Ok(RepositorySetMemberSourceFallbackOutput {
+        index: input.index,
         hits,
         degraded_reason,
     })
@@ -731,228 +847,5 @@ pub(super) fn storage_api_error(error: StorageError) -> ApiError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        api::ErrorKind,
-        domain::CodeRepositorySetMemberStatus,
-        domain::{CodeRepositorySet, CodeRepositorySetMember, CodeRepositorySetOverlayStatus},
-        storage::SqliteGraphStore,
-    };
-    use std::sync::Arc;
-
-    #[test]
-    fn helper_policy_reports_wait_until_fresh_blockers() {
-        let request = CodeRepositorySetQueryRequest::new(
-            "workspace",
-            "serve",
-            crate::domain::CodeQueryKind::Definition,
-            5,
-            FreshnessPolicy::WaitUntilFresh,
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("request should validate");
-        let empty = status_with_members(Vec::new(), overlay(true));
-        assert!(
-            unfresh_set_error_for_wait_policy(&request, &empty)
-                .expect("empty set should block")
-                .message
-                .contains("has no members")
-        );
-
-        let mut stale_member = member_status("app", "scope-app", 0);
-        stale_member.stale = true;
-        let stale_status = status_with_members(vec![stale_member], overlay(false));
-        assert!(
-            unfresh_set_error_for_wait_policy(&request, &stale_status)
-                .expect("stale member should block")
-                .message
-                .contains("member 'app'")
-        );
-
-        let overlay_status =
-            status_with_members(vec![member_status("app", "scope-app", 0)], overlay(true));
-        assert!(
-            unfresh_set_error_for_wait_policy(&request, &overlay_status)
-                .expect("stale overlay should block")
-                .message
-                .contains("overlay is stale")
-        );
-
-        let allow_stale = CodeRepositorySetQueryRequest::new(
-            "workspace",
-            "serve",
-            crate::domain::CodeQueryKind::Definition,
-            5,
-            FreshnessPolicy::AllowStale,
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("request should validate");
-        assert!(unfresh_set_error_for_wait_policy(&allow_stale, &overlay_status).is_none());
-    }
-
-    #[test]
-    fn helper_fingerprint_and_error_mapping_are_stable() {
-        let status = status_with_members(
-            vec![
-                member_status("app", "scope-app", 1),
-                member_status("svc", "scope-svc", 0),
-            ],
-            overlay(false),
-        );
-        let fingerprint = repository_set_refresh_fingerprint(&status);
-        assert!(fingerprint.contains("set-workspace"));
-        assert!(fingerprint.contains("repo-app:scope-app:commit-scope-app:tree-scope-app:false"));
-        assert_eq!(
-            merged_filters(&["src".to_owned()], &["src".to_owned(), "tests".to_owned()]),
-            ["src".to_owned(), "tests".to_owned()]
-        );
-        assert_eq!(
-            code_api_error(CodeIndexError::InvalidInput("bad ref".to_owned())).error_kind,
-            ErrorKind::InvalidArgument
-        );
-        assert_eq!(
-            code_api_error(CodeIndexError::Io(std::io::Error::other("disk"))).error_kind,
-            ErrorKind::StorageUnavailable
-        );
-        assert_eq!(
-            storage_api_error(StorageError::InvalidInput("bad storage".to_owned())).error_kind,
-            ErrorKind::InvalidArgument
-        );
-    }
-
-    #[test]
-    fn helper_source_fallback_policy_uses_final_set_limit_for_hybrid() {
-        let set_request = set_query_request(CodeQueryKind::Hybrid, 2);
-        let hybrid_member_request = member_retrieval_request(CodeQueryKind::Hybrid, 8);
-
-        assert!(!repository_set_member_source_fallback_needed(
-            &set_request,
-            &hybrid_member_request,
-            2,
-            false
-        ));
-        assert!(repository_set_member_source_fallback_needed(
-            &set_request,
-            &hybrid_member_request,
-            1,
-            false
-        ));
-        assert!(repository_set_member_source_fallback_needed(
-            &set_request,
-            &member_retrieval_request(CodeQueryKind::Imports, 8),
-            8,
-            false
-        ));
-        assert!(!repository_set_member_source_fallback_needed(
-            &set_request,
-            &member_retrieval_request(CodeQueryKind::Symbol, 8),
-            2,
-            true
-        ));
-        assert!(repository_set_member_source_fallback_needed(
-            &set_request,
-            &member_retrieval_request(CodeQueryKind::Symbol, 8),
-            2,
-            false
-        ));
-    }
-
-    #[tokio::test]
-    async fn helper_required_status_reports_missing_sets() {
-        let store: Arc<dyn crate::storage::KnowledgeStore> =
-            Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
-        let error = required_set_status(&store, "missing")
-            .await
-            .expect_err("missing set should fail");
-
-        assert_eq!(error.error_kind, ErrorKind::InvalidArgument);
-        assert!(error.message.contains("is not registered"));
-    }
-
-    fn status_with_members(
-        members: Vec<CodeRepositorySetMemberStatus>,
-        overlay: CodeRepositorySetOverlayStatus,
-    ) -> CodeRepositorySetStatus {
-        CodeRepositorySetStatus {
-            repository_set: CodeRepositorySet {
-                set_id: "set-workspace".to_owned(),
-                alias: "workspace".to_owned(),
-                description: None,
-                default_ref_policy_json: "{\"default_ref\":\"HEAD\"}".to_owned(),
-                created_at_ms: 1,
-                updated_at_ms: 1,
-            },
-            members,
-            overlay,
-            freshness_state: "fresh".to_owned(),
-            degraded_reason: None,
-        }
-    }
-
-    fn set_query_request(kind: CodeQueryKind, limit: usize) -> CodeRepositorySetQueryRequest {
-        CodeRepositorySetQueryRequest::new(
-            "workspace",
-            "worker.New RegisterWorkflow",
-            kind,
-            limit,
-            FreshnessPolicy::AllowStale,
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("set query request should validate")
-    }
-
-    fn member_retrieval_request(kind: CodeQueryKind, limit: usize) -> CodeRetrievalRequest {
-        let selector =
-            CodeRepositorySelector::new("app", "commit", Vec::new(), Vec::new()).expect("selector");
-        CodeRetrievalRequest::new(
-            "worker.New RegisterWorkflow",
-            selector,
-            kind,
-            limit,
-            FreshnessPolicy::AllowStale,
-        )
-        .expect("member request should validate")
-    }
-
-    fn member_status(
-        repository_alias: &str,
-        source_scope: &str,
-        priority: i32,
-    ) -> CodeRepositorySetMemberStatus {
-        CodeRepositorySetMemberStatus {
-            member: CodeRepositorySetMember {
-                set_id: "set-workspace".to_owned(),
-                repository_id: format!("repo-{repository_alias}"),
-                repository_alias: repository_alias.to_owned(),
-                ref_selector: "HEAD".to_owned(),
-                resolved_commit_sha: format!("commit-{source_scope}"),
-                source_scope: source_scope.to_owned(),
-                path_filters: vec!["src".to_owned()],
-                language_filters: vec!["rust".to_owned()],
-                priority,
-            },
-            tree_hash: format!("tree-{source_scope}"),
-            freshness_state: "fresh".to_owned(),
-            stale: false,
-            indexed_file_count: 1,
-            symbol_count: 1,
-            reference_count: 0,
-            chunk_count: 1,
-            degraded_reason: None,
-        }
-    }
-
-    fn overlay(stale: bool) -> CodeRepositorySetOverlayStatus {
-        CodeRepositorySetOverlayStatus {
-            state: if stale { "overlay_stale" } else { "fresh" }.to_owned(),
-            stale,
-            edge_count: usize::from(!stale),
-            refreshed_at_ms: (!stale).then_some(10),
-            degraded_reason: None,
-        }
-    }
-}
+#[path = "service_tests.rs"]
+mod tests;

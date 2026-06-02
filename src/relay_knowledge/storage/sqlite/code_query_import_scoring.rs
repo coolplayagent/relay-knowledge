@@ -76,7 +76,7 @@ pub(super) fn import_public_dependency_surface_bonus(
         .and_then(parent_dir)
         .filter(|target_parent| parent_dir(path) == Some(*target_parent))
         .map_or(0.0, |_| 0.75);
-    0.85 + same_public_directory_bonus
+    1.15 + same_public_directory_bonus
 }
 
 pub(super) fn import_source_path_query_overlap_bonus(
