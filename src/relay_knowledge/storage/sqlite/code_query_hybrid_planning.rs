@@ -54,6 +54,7 @@ pub(super) fn workflow_language_scope_language_ids(scope: &str) -> &'static [&'s
         "php" => &["php"],
         "python" => &["py", "python"],
         "ruby" => &["rb", "ruby"],
+        "rust" => &["rs", "rust"],
         "scala" => &["scala"],
         "swift" => &["swift"],
         "typescript" => &["ts", "tsx", "typescript"],
@@ -163,13 +164,14 @@ fn workflow_surface_chunk_first_plan(
         return None;
     }
 
-    let workflow_terms = raw_terms
+    let signal_terms = workflow_surface_signal_terms(raw_terms);
+    let workflow_terms = signal_terms
         .iter()
         .filter(|term| workflow_surface_term(term))
         .count();
     let workflow_surface_matches = workflow_terms >= 2
         || workflow_terms == 1
-            && raw_terms
+            && signal_terms
                 .iter()
                 .filter(|term| dataflow_surface_term(term))
                 .count()
@@ -221,7 +223,7 @@ fn workflow_chunk_first_query_scope(term: &str) -> Option<&'static str> {
     let term = term.to_ascii_lowercase();
     if matches!(
         term.as_str(),
-        "cs" | "go" | "js" | "kt" | "py" | "rb" | "ts"
+        "cs" | "go" | "js" | "kt" | "py" | "rb" | "rs" | "ts"
     ) {
         return None;
     }
@@ -244,6 +246,7 @@ fn workflow_language_family(language: &str) -> Option<&'static str> {
         "php",
         "python",
         "ruby",
+        "rust",
         "scala",
         "swift",
         "typescript",
@@ -276,6 +279,24 @@ fn workflow_surface_term(term: &str) -> bool {
             | "worker"
             | "workflow"
     )
+}
+
+fn workflow_surface_signal_terms(raw_terms: &[String]) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in raw_terms {
+        push_unique_signal_term(&mut terms, &raw.to_ascii_lowercase());
+        for part in raw.split('_').filter(|part| !part.is_empty()) {
+            push_unique_signal_term(&mut terms, &part.to_ascii_lowercase());
+        }
+    }
+
+    terms
+}
+
+fn push_unique_signal_term(terms: &mut Vec<String>, term: &str) {
+    if !terms.iter().any(|existing| existing == term) {
+        terms.push(term.to_owned());
+    }
 }
 
 fn dataflow_surface_term(term: &str) -> bool {

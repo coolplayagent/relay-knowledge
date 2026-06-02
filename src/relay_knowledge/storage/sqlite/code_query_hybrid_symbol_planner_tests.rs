@@ -280,6 +280,22 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
     ));
     assert!(hybrid_query_prefers_chunk_first(
         &request_with_language_filters(
+            "rk_wide_bridge_dispatch rk_wide_target_2047 cross shard pipeline",
+            CodeQueryKind::Hybrid,
+            12,
+            vec!["rust".to_owned()],
+        )
+    ));
+    assert_eq!(
+        query_language_scoped_workflow_surface_scopes(&request(
+            "rust rk_wide_bridge_dispatch rk_wide_target_2047 cross shard pipeline",
+            CodeQueryKind::Hybrid,
+            12,
+        )),
+        vec!["rust"]
+    );
+    assert!(hybrid_query_prefers_chunk_first(
+        &request_with_language_filters(
             "java provider effect response filter payload",
             CodeQueryKind::Hybrid,
             12,
@@ -313,6 +329,88 @@ fn chunk_first_plan_accepts_multi_api_or_structured_sequence_queries() {
         CodeQueryKind::Hybrid,
         10,
     )));
+}
+
+#[tokio::test]
+async fn rust_workflow_identifier_chunk_plan_answers_before_symbol_noise() {
+    let path = "crates/perf_core/src/bridge.rs";
+    let mut bridge_symbol = qualified_symbol(
+        "bridge-symbol",
+        "bridge-file",
+        path,
+        "rk_wide_bridge_dispatch",
+        "perf_core::bridge::rk_wide_bridge_dispatch",
+    );
+    bridge_symbol.language_id = "rust".to_owned();
+    bridge_symbol.kind = "function".to_owned();
+    bridge_symbol.signature = "fn rk_wide_bridge_dispatch()".to_owned();
+    let mut tail_symbol = qualified_symbol(
+        "tail-symbol",
+        "bridge-file",
+        path,
+        "rk_wide_target_2047",
+        "perf_core::bridge::rk_wide_target_2047",
+    );
+    tail_symbol.language_id = "rust".to_owned();
+    tail_symbol.kind = "function".to_owned();
+    tail_symbol.signature = "fn rk_wide_target_2047()".to_owned();
+    let store = store_with_snapshot(CodeIndexSnapshot {
+        repository_id: "repo".to_owned(),
+        source_scope: TEST_SOURCE_SCOPE.to_owned(),
+        base_resolved_commit_sha: None,
+        resolved_commit_sha: "commit".to_owned(),
+        tree_hash: "tree".to_owned(),
+        path_filters: Vec::new(),
+        language_filters: vec!["rust".to_owned()],
+        full_replace: true,
+        changed_path_count: 1,
+        skipped_unchanged_count: 0,
+        deleted_paths: Vec::new(),
+        tombstones: Vec::new(),
+        files: vec![file_with_language("bridge-file", path, "rust")],
+        symbols: vec![bridge_symbol, tail_symbol],
+        references: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        dependencies: Vec::new(),
+        feature_flags: Vec::new(),
+        chunks: vec![
+            chunk_with_language(
+                "bridge-start",
+                "bridge-file",
+                path,
+                "rust",
+                "rk_wide_bridge_dispatch calls rk_wide_target_2047 in a cross shard pipeline",
+            ),
+            chunk_with_language(
+                "bridge-end",
+                "bridge-file",
+                path,
+                "rust",
+                "cross shard pipeline dispatch preserves rk_wide_bridge_dispatch and rk_wide_target_2047",
+            ),
+        ],
+        diagnostics: Vec::new(),
+    })
+    .await;
+
+    let hits = store
+        .search_code(request_with_language_filters(
+            "rk_wide_bridge_dispatch rk_wide_target_2047 cross shard pipeline",
+            CodeQueryKind::Hybrid,
+            2,
+            vec!["rust".to_owned()],
+        ))
+        .await
+        .expect("rust workflow chunk query should succeed");
+
+    assert!(!hits.is_empty());
+    assert!(
+        hits.iter().all(
+            |hit| hit.path == path && hit.retrieval_layers == vec![CodeRetrievalLayer::Lexical]
+        ),
+        "dense Rust workflow chunks should avoid symbol-layer fanout: {hits:?}",
+    );
 }
 
 #[tokio::test]
