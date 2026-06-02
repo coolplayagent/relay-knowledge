@@ -47,6 +47,42 @@ fn text_help_uses_canonical_cli_name_for_root_namespaces_and_commands() {
 }
 
 #[test]
+fn repo_index_worker_help_is_public_and_machine_readable() {
+    let command = cli_spec::render_help(
+        &["repo".to_owned(), "index-worker".to_owned()],
+        OutputFormat::Json,
+    )
+    .expect("repo index-worker help should render");
+    let namespace = cli_spec::render_help(&["repo".to_owned()], OutputFormat::Json)
+        .expect("repo namespace help should render");
+    let command_json: serde_json::Value =
+        serde_json::from_str(command.trim()).expect("command help should be JSON");
+    let namespace_json: serde_json::Value =
+        serde_json::from_str(namespace.trim()).expect("namespace help should be JSON");
+
+    assert_eq!(
+        command_json["path"],
+        serde_json::json!(["repo", "index-worker"])
+    );
+    assert_eq!(command_json["operation"], "code.repo.index_worker");
+    assert_eq!(command_json["effect"], "writes-indexes");
+    assert!(
+        command_json["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .any(|option| option["flag"] == "--task-id")
+    );
+    assert!(
+        namespace_json["commands"]
+            .as_array()
+            .expect("namespace commands")
+            .iter()
+            .any(|command| command["path"] == serde_json::json!(["repo", "index-worker"]))
+    );
+}
+
+#[test]
 fn parse_diagnostics_use_canonical_cli_name_in_suggestions_and_usage() {
     let flag_style = CliCommand::parse(["--ingest", "--source", "docs", "--content", "x"])
         .expect_err("flag-style command should fail")

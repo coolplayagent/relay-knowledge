@@ -252,7 +252,21 @@ relay-knowledge repo status core --format json
 ```
 
 Use `repo status` after cold full indexing because initial indexing may return a
-durable background task handle. Query only an indexed ref:
+durable background task handle. In non-interactive agent sessions where a
+long-running platform service is not already draining the queue, run one or
+more explicit single-shot worker attempts with the returned task id:
+
+```bash
+relay-knowledge repo index-worker --task-id <task-id> --format json
+relay-knowledge repo status core --format json
+```
+
+`repo index-worker --format json` always returns a parseable result. When no
+eligible task is available it reports `claimed=false` and `task=null`.
+`--format streaming-json` emits `started`, `item`, and `completed` events, with
+the worker result in the `item.payload`. Each worker attempt still uses durable
+leases, checkpoints, retry backoff, and the single-writer indexing boundary.
+Query only an indexed ref:
 
 ```bash
 relay-knowledge repo query core \

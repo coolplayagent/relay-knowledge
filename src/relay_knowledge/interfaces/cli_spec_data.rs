@@ -107,6 +107,7 @@ pub(super) fn command_specs() -> Vec<CliCommandSpec> {
         files_query(),
         cli_spec_repo::repo_register(),
         cli_spec_repo::repo_index(),
+        cli_spec_repo::repo_index_worker(),
         cli_spec_repo::repo_scope_preview(),
         cli_spec_repo::repo_update(),
         cli_spec_repo::repo_query(),

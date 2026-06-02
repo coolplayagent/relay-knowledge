@@ -50,7 +50,19 @@ relay-knowledge repo index repo --ref <commit-sha> --format json
 
 全量索引通过 Git 从 clean tree 读取普通 blob，或从非 Git source directory 读取 filesystem synthetic snapshot；随后先做受预算约束的 source-layout discovery，再由 tree-sitter 解析 Rust、Python、JavaScript/JSX、TypeScript/TSX、Go、Java、Kotlin、Scala、C、C++、C#、Ruby、PHP、Swift、Bash、SQL，以及常见项目配置、构建和模板文件。SQL 文件会贡献 table、view/materialized view、function/procedure、trigger、type 等 schema object 符号，以及 SQL 对象引用和函数/过程调用边。配置面覆盖 Markdown、XML、Bazel/Starlark、Make、CMake、Dockerfile/Containerfile、Java properties、TOML、INI、YAML、JSON、Go module、Ninja、Jinja2 和 Go template；层级配置会写入 `server.port`、`containers[].name`、`bin[].name` 这类稳定路径。同一 source scope 内的本地文件、模板和构建目标引用会在 finalize 阶段解析；外部或有歧义的引用保留为 unresolved metadata。Gitlink submodule 会在父仓 snapshot 中跳过；需要覆盖其内容时，应把 submodule 作为独立仓库注册。Unsupported、invalid UTF-8、binary、oversized 或 parser 失败文件会降级为 text-only 或 failed diagnostics，不会让整个批次失败。
 
-当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；`relay-knowledge service run` 也会用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。跨 batch finalization 期间，`checkpoint.state` 会报告 `finalizing:resolve_references`、`finalizing:rebuild_reference_search`、`finalizing:rebuild_calls` 和 `finalizing:publish_scope` 等具体阶段；只有 checkpoint 到达 `completed` 后，查询才会把该 ref 当作 fresh。
+当请求的 full scope 尚未 fresh 时，`repo index` 会排入持久化后台任务，并返回包含 `task.state=queued` 和目标 scope metadata 的 JSON，而不是把整个 cold parse 绑在前台请求上。CLI 会为该任务启动有界单次 `repo index-worker`；非交互式 agent 需要消费 queued 或 retrying 任务时，也可以显式调用 `repo index-worker --task-id <id> --format json`，不用维持一个前台 `service run` 进程。`relay-knowledge service run` 也会用同一队列上的有界 code-index worker pool 消费任务，默认并发度为 2，可通过 `RELAY_KNOWLEDGE_CODE_INDEX_MAX_IN_FLIGHT` 调整。不同 fingerprint 的任务独立排队、独立 lease、独立 checkpoint；完全相同的 full-index fingerprint 会复用当前任务，避免重复 full rebuild。跨 batch finalization 期间，`checkpoint.state` 会报告 `finalizing:resolve_references`、`finalizing:rebuild_reference_search`、`finalizing:rebuild_calls` 和 `finalizing:publish_scope` 等具体阶段；只有 checkpoint 到达 `completed` 后，查询才会把该 ref 当作 fresh。
+
+面向 agent 的初始化应让每条命令都能有限返回:
+
+```bash
+relay-knowledge repo register /path/to/repo --format json
+relay-knowledge repo index repo --ref HEAD --format json
+relay-knowledge repo status repo --format json
+relay-knowledge repo index-worker --task-id <task-id-from-repo-index> --format json
+relay-knowledge repo status repo --format json
+```
+
+如果 `repo index` 已经完成单次 worker，后续 `repo index-worker` 会返回 `claimed=false` 和 `task=null` 的 JSON；此时以 `repo status` 的 checkpoint 进度和 freshness 为准。
 
 已经 fresh 的 full index 仍会立即返回完成态 `summary`。freshness 检查会比较嵌入 `scope_id` 的代码事实版本，因此 SBOM 依赖事实这类抽取面变化即使 Git tree hash 不变，也会要求重建。增量 `repo update` 保持同步执行，因为它绑定显式 base-to-head diff，工作量受 changed path 集合约束；新增文件落在 `external_deps/`、`modules/` 等非 `src/` source root 时会沿用同一 source-layout 策略进入增量索引。
 

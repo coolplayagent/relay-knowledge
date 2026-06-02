@@ -70,6 +70,8 @@ MCP HTTP 404: common causes are unknown, expired, or retired session IDs. Run in
 
 `repo impact` reports missing head snapshot: index or update the target head before impact analysis.
 
+`repo status` shows `active_task.state=running` but `checkpoint.parsed_file_count` stays at 0: inspect `active_task.lease_expires_at_ms` and `checkpoint.updated_at_ms` in `repo status --format json`. In a non-interactive agent session, do not repeatedly start `service run`; it is a foreground resident process. If the task is queued or retrying, run `repo index-worker --task-id <active_task.task_id> --format json` to make one bounded worker attempt. If a previous service process claimed the lease and exited, wait for lease recovery before retrying; do not kill relay-knowledge processes or bypass task leases.
+
 `repo query` reports a source fallback candidate or budget degraded reason: only the exact-text fallback layer is degraded. Tree-sitter code graph and SQLite FTS results remain usable. Narrow `--path`, `--language`, `--ref`, or the registered scope, then use `repo status --format json` to confirm that the target snapshot is fresh.
 
 ## 13.4 Isolated Reproduction

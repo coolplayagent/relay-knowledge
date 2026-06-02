@@ -132,6 +132,23 @@ relay-knowledge repo index core --ref HEAD --format json
 relay-knowledge repo status core --format json
 ```
 
+When `repo index` returns a durable task handle and no managed service is
+already draining background work, non-interactive agents should run bounded
+single-shot worker attempts instead of waiting for an unmanaged loop:
+
+```bash
+relay-knowledge repo index-worker --task-id <task-id> --format json
+relay-knowledge repo status core --format json
+```
+
+The idle worker case is still machine-readable: JSON output reports
+`claimed=false` and `task=null`. For event consumers, use streaming JSON and
+read the worker result from the `item.payload` event:
+
+```bash
+relay-knowledge repo index-worker --task-id <task-id> --format streaming-json
+```
+
 Query:
 
 ```bash
