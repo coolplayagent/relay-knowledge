@@ -15,7 +15,7 @@ use super::{
     parser::parse_indexed_file,
     scope,
     snapshot::SnapshotBuild,
-    source::{source_bytes_after_content_verification, source_commit_is_filesystem, source_kind},
+    source::{source_commit_is_filesystem, source_kind},
     source_gitlink,
 };
 
@@ -99,6 +99,20 @@ pub(super) fn build_worktree_overlay_snapshot(
         {
             continue;
         }
+        {
+            let mut recorder = WorktreeOverlayRecorder {
+                registration,
+                selector,
+                previous_hashes,
+                overlay_hash_input: &mut overlay_hash_input,
+                deleted_paths: &mut deleted_paths,
+                files_to_parse: &mut files_to_parse,
+                skipped_unchanged_count: &mut skipped_unchanged_count,
+            };
+            if record_staged_gitlink_overlay(change, root, &commit, &mut recorder)? {
+                continue;
+            }
+        }
         let full_path = root.join(path);
         let metadata = match fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
@@ -129,18 +143,6 @@ pub(super) fn build_worktree_overlay_snapshot(
         }
         if file_type.is_dir() {
             if contains_git_metadata(root, Path::new(path))? {
-                let mut recorder = WorktreeOverlayRecorder {
-                    registration,
-                    selector,
-                    previous_hashes,
-                    overlay_hash_input: &mut overlay_hash_input,
-                    deleted_paths: &mut deleted_paths,
-                    files_to_parse: &mut files_to_parse,
-                    skipped_unchanged_count: &mut skipped_unchanged_count,
-                };
-                if record_staged_gitlink_overlay(change, root, &commit, &mut recorder)? {
-                    continue;
-                }
                 continue;
             }
             if !change.is_untracked() || !worktree_directory_is_expandable(root, path)? {
@@ -339,16 +341,13 @@ impl WorktreeOverlayRecorder<'_> {
 
     fn record_staged_gitlink_file(
         &mut self,
-        submodule_root: &Path,
+        root: &Path,
+        submodule_path: &str,
         commit: &str,
         entry: &source_gitlink::SubmodulePathEntry,
     ) -> Result<(), CodeIndexError> {
-        let bytes = source_bytes_after_content_verification(
-            submodule_root,
-            commit,
-            &entry.child_path,
-            None,
-        )?;
+        let bytes =
+            source_gitlink::submodule_entry_bytes(root, submodule_path, commit, &entry.child_path)?;
         let blob_hash = stable_content_hash(&bytes);
         self.overlay_hash_input.extend_from_slice(b"F\0");
         self.overlay_hash_input
@@ -398,10 +397,9 @@ fn record_staged_gitlink_overlay(
         }
     }
 
-    let submodule_root = source_gitlink::submodule_root(root, path)?;
     for entry in staged_entries {
         if recorder.path_is_selected(&entry.parent_path) {
-            recorder.record_staged_gitlink_file(&submodule_root, &staged_commit, &entry)?;
+            recorder.record_staged_gitlink_file(root, path, &staged_commit, &entry)?;
         }
     }
 

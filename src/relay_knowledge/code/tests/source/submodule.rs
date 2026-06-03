@@ -6,8 +6,8 @@ use std::fs;
 
 use super::{
     RepositorySourceKind, SourceGrepKind, SourceGrepRequest, build_index_snapshot,
-    changed_paths_for_diff, deleted_symbol_names_for_diff, git_show_call_count_for_root,
-    prepare_full_index_plan, reset_git_show_call_count_for_root,
+    changed_paths_for_diff, changed_paths_for_diff_with_filters, deleted_symbol_names_for_diff,
+    git_show_call_count_for_root, prepare_full_index_plan, reset_git_show_call_count_for_root,
     reset_tracked_entries_call_count_for_root, resolve_repository_snapshot_with_path_filters,
     source_grep_matches, source_snapshot_batch_bytes, test_fixtures::TempGitRepo, tracked_entries,
     tracked_entries_call_count_for_root,
@@ -42,6 +42,23 @@ fn tracked_entries_expand_deinitialized_submodule_files_from_gitdir() {
         entries
             .iter()
             .any(|entry| entry.path == "vendor/module/src/child.rs")
+    );
+}
+
+#[test]
+fn tracked_entries_expand_nested_submodules_from_deinitialized_gitdir() {
+    let fixture = NestedSubmoduleFixture::create("tracked-nested-deinit");
+    fixture
+        .parent
+        .git(["submodule", "deinit", "-f", "vendor/module"]);
+
+    let entries = tracked_entries(&fixture.parent.path, &fixture.parent_head())
+        .expect("tracked entries should recurse through deinitialized submodule gitdirs");
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.path == "vendor/module/nested/src/nested.rs")
     );
 }
 
@@ -214,6 +231,38 @@ fn incremental_index_expands_submodule_commit_updates() {
 }
 
 #[test]
+fn incremental_index_expands_nested_submodule_commit_updates() {
+    let fixture = NestedSubmoduleFixture::create("incremental-nested");
+    let base = fixture.parent_head();
+    let previous_hashes = fixture.previous_hashes();
+    fixture.update_nested_file("pub fn nested_value() -> u32 { 2 }\n");
+
+    let snapshot = build_index_snapshot(
+        &fixture.parent_registration(),
+        &fixture.parent_selector(),
+        CodeIndexMode::Incremental {
+            base_ref: base,
+            head_ref: "HEAD".to_owned(),
+        },
+        previous_hashes,
+    )
+    .expect("incremental snapshot should expand nested gitlink updates");
+
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .any(|file| file.path == "vendor/module/nested/src/nested.rs")
+    );
+    assert!(
+        snapshot
+            .files
+            .iter()
+            .all(|file| file.path != "vendor/module/nested")
+    );
+}
+
+#[test]
 fn incremental_submodule_deletion_deletes_expanded_base_child_paths() {
     let fixture = SubmoduleFixture::create("incremental-delete");
     let base = fixture.parent_head();
@@ -269,6 +318,54 @@ fn impact_diff_paths_only_include_changed_submodule_files() {
 
     assert!(paths.contains(&"vendor/module/src/child.rs".to_owned()));
     assert!(!paths.contains(&"vendor/module/src/unchanged.rs".to_owned()));
+}
+
+#[test]
+fn impact_diff_paths_expand_nested_submodule_commit_updates() {
+    let fixture = NestedSubmoduleFixture::create("impact-nested-submodule");
+    let base = fixture.parent_head();
+    fixture.update_nested_file("pub fn nested_value() -> u32 { 3 }\n");
+
+    let paths = changed_paths_for_diff(&fixture.parent.path, &base, "HEAD")
+        .expect("impact paths should expand nested gitlink updates");
+
+    assert!(paths.contains(&"vendor/module/nested/src/nested.rs".to_owned()));
+    assert!(!paths.contains(&"vendor/module/nested".to_owned()));
+}
+
+#[test]
+fn impact_diff_paths_do_not_expand_out_of_scope_submodule_updates() {
+    let fixture = SubmoduleFixture::create("impact-submodule-out-of-scope");
+    let base = fixture.parent_head();
+    let submodule_path = fixture.parent.path.join("vendor/module");
+    for index in 0..=CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH {
+        fs::write(
+            submodule_path.join(format!("src/generated_{index}.rs")),
+            format!("pub fn generated_{index}() -> u32 {{ {index} }}\n"),
+        )
+        .expect("generated submodule file should be written");
+    }
+    git_in(
+        &submodule_path,
+        ["config", "user.email", "relay@example.invalid"],
+    );
+    git_in(&submodule_path, ["config", "user.name", "Relay Test"]);
+    git_in(&submodule_path, ["add", "."]);
+    git_in(&submodule_path, ["commit", "-m", "large child update"]);
+    fixture.parent.git(["add", "vendor/module"]);
+    fixture.parent.git(["commit", "-m", "update submodule"]);
+    let path_filters = vec!["src".to_owned()];
+
+    let paths = changed_paths_for_diff_with_filters(
+        &fixture.parent.path,
+        &base,
+        "HEAD",
+        &path_filters,
+        &[],
+    )
+    .expect("out-of-scope submodule update should not expand");
+
+    assert_eq!(paths, ["vendor/module"]);
 }
 
 #[test]
@@ -522,6 +619,129 @@ impl SubmoduleFixture {
         git_in(&submodule_path, ["commit", "-m", "child update"]);
         self.parent.git(["add", "vendor/module"]);
         self.parent.git(["commit", "-m", "update submodule"]);
+    }
+}
+
+struct NestedSubmoduleFixture {
+    parent: TempGitRepo,
+    _child: TempGitRepo,
+    _nested: TempGitRepo,
+}
+
+impl NestedSubmoduleFixture {
+    fn create(name: &str) -> Self {
+        let nested = TempGitRepo::create(&format!("{name}-nested"));
+        nested.write("src/nested.rs", "pub fn nested_value() -> u32 { 1 }\n");
+        nested.git(["add", "."]);
+        nested.git(["commit", "-m", "nested"]);
+
+        let child = TempGitRepo::create(&format!("{name}-child"));
+        child.write("src/child.rs", "pub fn child_value() -> u32 { 1 }\n");
+        child.git(["add", "."]);
+        child.git(["commit", "-m", "child"]);
+        let nested_path = nested
+            .path
+            .to_str()
+            .expect("nested path should be unicode")
+            .to_owned();
+        child.git([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            nested_path.as_str(),
+            "nested",
+        ]);
+        child.git(["commit", "-am", "add nested submodule"]);
+
+        let parent = TempGitRepo::create(&format!("{name}-parent"));
+        parent.write("src/lib.rs", "pub fn parent_value() -> u32 { 1 }\n");
+        parent.git(["add", "."]);
+        parent.git(["commit", "-m", "parent"]);
+        let child_path = child
+            .path
+            .to_str()
+            .expect("child path should be unicode")
+            .to_owned();
+        parent.git([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            child_path.as_str(),
+            "vendor/module",
+        ]);
+        parent.git([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "vendor/module",
+        ]);
+        parent.git(["commit", "-am", "add outer submodule"]);
+
+        Self {
+            parent,
+            _child: child,
+            _nested: nested,
+        }
+    }
+
+    fn parent_registration(&self) -> CodeRepositoryRegistration {
+        CodeRepositoryRegistration::new(
+            "repo",
+            "alias",
+            self.parent.path.display().to_string(),
+            vec![".".to_owned()],
+            Vec::new(),
+        )
+        .expect("registration should validate")
+    }
+
+    fn parent_selector(&self) -> CodeRepositorySelector {
+        CodeRepositorySelector::new("alias", "HEAD", Vec::new(), Vec::new())
+            .expect("selector should validate")
+    }
+
+    fn parent_head(&self) -> String {
+        self.parent.git_text(["rev-parse", "HEAD"])
+    }
+
+    fn previous_hashes(&self) -> Vec<CodeFileFingerprint> {
+        build_index_snapshot(
+            &self.parent_registration(),
+            &self.parent_selector(),
+            CodeIndexMode::Full,
+            Vec::new(),
+        )
+        .expect("base full snapshot should build")
+        .files
+        .into_iter()
+        .map(|file| CodeFileFingerprint {
+            path: file.path,
+            blob_hash: file.blob_hash,
+        })
+        .collect()
+    }
+
+    fn update_nested_file(&self, content: &str) {
+        self.parent
+            .write("vendor/module/nested/src/nested.rs", content);
+        let nested_path = self.parent.path.join("vendor/module/nested");
+        git_in(
+            &nested_path,
+            ["config", "user.email", "relay@example.invalid"],
+        );
+        git_in(&nested_path, ["config", "user.name", "Relay Test"]);
+        git_in(&nested_path, ["add", "."]);
+        git_in(&nested_path, ["commit", "-m", "nested update"]);
+        let child_path = self.parent.path.join("vendor/module");
+        git_in(&child_path, ["add", "nested"]);
+        git_in(&child_path, ["commit", "-m", "update nested submodule"]);
+        self.parent.git(["add", "vendor/module"]);
+        self.parent.git(["commit", "-m", "update outer submodule"]);
     }
 }
 

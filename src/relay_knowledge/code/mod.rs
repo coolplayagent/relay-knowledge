@@ -312,7 +312,13 @@ pub fn changed_paths_for_diff_with_filters(
     }
     let changes = diff_changes(root_path.as_ref(), base_ref, head_ref)?;
 
-    impact_paths_from_changes_with_gitlinks(root_path.as_ref(), base_ref, head_ref, changes)
+    impact_paths_from_changes_with_gitlinks(
+        root_path.as_ref(),
+        base_ref,
+        head_ref,
+        changes,
+        path_filters,
+    )
 }
 
 #[cfg(test)]
@@ -341,6 +347,7 @@ fn impact_paths_from_changes_with_gitlinks(
     base_ref: &str,
     head_ref: &str,
     changes: Vec<GitChange>,
+    path_filters: &[String],
 ) -> Result<Vec<String>, CodeIndexError> {
     let base_commit = resolve_ref(root, base_ref)?;
     let head_commit = resolve_ref(root, head_ref)?;
@@ -353,46 +360,53 @@ fn impact_paths_from_changes_with_gitlinks(
     let mut paths = Vec::new();
     for change in changes {
         match change {
-            GitChange::Deleted { path } => push_expanded_impact_paths_or_original(
-                &mut paths,
-                &mut expander,
-                true,
-                false,
-                &path,
-            )?,
+            GitChange::Deleted { path } => {
+                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
+                    paths: &mut paths,
+                    expander: &mut expander,
+                    path_filters,
+                    include_base: true,
+                    include_head: false,
+                    path: &path,
+                })?
+            }
             GitChange::AddedOrModified { path } | GitChange::TypeChanged { path } => {
-                push_expanded_impact_paths_or_original(
-                    &mut paths,
-                    &mut expander,
-                    true,
-                    true,
-                    &path,
-                )?
+                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
+                    paths: &mut paths,
+                    expander: &mut expander,
+                    path_filters,
+                    include_base: true,
+                    include_head: true,
+                    path: &path,
+                })?
             }
             GitChange::Renamed { old_path, new_path } => {
-                push_expanded_impact_paths_or_original(
-                    &mut paths,
-                    &mut expander,
-                    true,
-                    false,
-                    &old_path,
-                )?;
-                push_expanded_impact_paths_or_original(
-                    &mut paths,
-                    &mut expander,
-                    false,
-                    true,
-                    &new_path,
-                )?;
+                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
+                    paths: &mut paths,
+                    expander: &mut expander,
+                    path_filters,
+                    include_base: true,
+                    include_head: false,
+                    path: &old_path,
+                })?;
+                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
+                    paths: &mut paths,
+                    expander: &mut expander,
+                    path_filters,
+                    include_base: false,
+                    include_head: true,
+                    path: &new_path,
+                })?;
             }
             GitChange::Copied { new_path, .. } => {
-                push_expanded_impact_paths_or_original(
-                    &mut paths,
-                    &mut expander,
-                    false,
-                    true,
-                    &new_path,
-                )?;
+                push_scoped_expanded_impact_paths_or_original(ImpactPathPush {
+                    paths: &mut paths,
+                    expander: &mut expander,
+                    path_filters,
+                    include_base: false,
+                    include_head: true,
+                    path: &new_path,
+                })?;
             }
         }
     }
@@ -402,19 +416,61 @@ fn impact_paths_from_changes_with_gitlinks(
     Ok(paths)
 }
 
-fn push_expanded_impact_paths_or_original(
-    paths: &mut Vec<String>,
-    expander: &mut source_gitlink::GitlinkImpactExpander<'_>,
+struct ImpactPathPush<'a, 'b> {
+    paths: &'a mut Vec<String>,
+    expander: &'a mut source_gitlink::GitlinkImpactExpander<'b>,
+    path_filters: &'a [String],
     include_base: bool,
     include_head: bool,
-    path: &str,
+    path: &'a str,
+}
+
+fn push_scoped_expanded_impact_paths_or_original(
+    request: ImpactPathPush<'_, '_>,
 ) -> Result<(), CodeIndexError> {
-    match expander.expanded_paths(path, include_base, include_head)? {
-        Some(expanded) if !expanded.is_empty() => paths.extend(expanded),
-        _ => paths.push(path.to_owned()),
+    if !impact_path_scope_overlaps(request.path, request.path_filters) {
+        request.paths.push(request.path.to_owned());
+        return Ok(());
+    }
+    match request.expander.expanded_paths(
+        request.path,
+        request.include_base,
+        request.include_head,
+    )? {
+        Some(expanded) if !expanded.is_empty() => request.paths.extend(expanded),
+        _ => request.paths.push(request.path.to_owned()),
     }
 
     Ok(())
+}
+
+fn impact_path_scope_overlaps(path: &str, path_filters: &[String]) -> bool {
+    path_filters.is_empty()
+        || path_filters
+            .iter()
+            .any(|filter| impact_path_overlaps_filter(path, filter))
+}
+
+fn impact_path_overlaps_filter(path: &str, filter: &str) -> bool {
+    let path = normalize_impact_path_filter(path);
+    let filter = normalize_impact_path_filter(filter);
+    if filter == "." {
+        return true;
+    }
+    !path.is_empty()
+        && !filter.is_empty()
+        && (path == filter
+            || path.starts_with(&format!("{filter}/"))
+            || filter.starts_with(&format!("{path}/")))
+}
+
+fn normalize_impact_path_filter(filter: &str) -> &str {
+    let mut filter = filter.trim_end_matches(['/', '\\']);
+    while let Some(stripped) = filter.strip_prefix("./") {
+        filter = stripped;
+    }
+
+    filter
 }
 
 /// Extracts symbol names removed by a diff so impact can include deleted APIs.

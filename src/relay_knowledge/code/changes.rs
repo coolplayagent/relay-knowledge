@@ -217,14 +217,14 @@ fn tracked_submodule_entries(
         Some(request.parent_commit),
         Some(request.submodule_commit),
     )?;
-    Ok(GitTrackedEntries {
-        entries: tracked_entries_from_git_dir_with_prefix(
-            &git_dir,
-            request.submodule_commit,
-            request.prefix,
-        )?,
-        submodule_states: Vec::new(),
-    })
+    tracked_entries_from_git_dir_inner(
+        &git_dir,
+        request.submodule_commit,
+        request.prefix,
+        request.depth,
+        visited,
+        scope,
+    )
 }
 
 fn push_blob_entry(prefix: &str, path: &str, fields: &[&str], entries: &mut Vec<GitTreeEntry>) {
@@ -273,20 +273,121 @@ fn tracked_entries_from_git_dir_with_prefix(
     commit: &str,
     prefix: &str,
 ) -> Result<Vec<GitTreeEntry>, CodeIndexError> {
-    let bytes = git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit])?;
-    let mut entries = Vec::new();
+    let mut visited = BTreeSet::new();
+    Ok(tracked_entries_from_git_dir_inner(
+        git_dir,
+        commit,
+        prefix,
+        0,
+        &mut visited,
+        &TrackedEntryScope::all(),
+    )?
+    .entries)
+}
+
+fn tracked_entries_from_git_dir_inner(
+    git_dir: &Path,
+    commit: &str,
+    prefix: &str,
+    depth: usize,
+    visited: &mut BTreeSet<(PathBuf, String)>,
+    scope: &TrackedEntryScope,
+) -> Result<GitTrackedEntries, CodeIndexError> {
+    let git_dir_key = git_dir
+        .canonicalize()
+        .unwrap_or_else(|_| git_dir.to_path_buf());
+    let visit_key = (git_dir_key, commit.to_owned());
+    if !visited.insert(visit_key.clone()) {
+        return Ok(GitTrackedEntries::default());
+    }
+    let bytes = match git_dir_bytes(git_dir, &["ls-tree", "-r", "-l", "-z", commit]) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            visited.remove(&visit_key);
+            return Err(error);
+        }
+    };
+    let mut state = GitTrackedEntries::default();
     for record in split_nul(&bytes) {
         let Some((metadata, path)) = record.split_once('\t') else {
             continue;
         };
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
-        if fields.get(1).copied() != Some("blob") {
-            continue;
+        match fields.get(1).copied() {
+            Some("blob") => push_blob_entry(prefix, path, &fields, &mut state.entries),
+            Some("commit")
+                if depth < MAX_SUBMODULE_EXPANSION_DEPTH
+                    && scope.allows_submodule_expansion(&format!("{prefix}{path}")) =>
+            {
+                let Some(submodule_commit) = fields.get(2) else {
+                    continue;
+                };
+                let next_prefix = format!("{prefix}{path}/");
+                match tracked_git_dir_submodule_entries(
+                    GitDirSubmoduleRequest {
+                        parent_git_dir: git_dir,
+                        parent_commit: commit,
+                        path,
+                        submodule_commit,
+                        prefix: &next_prefix,
+                        depth: depth + 1,
+                    },
+                    visited,
+                    scope,
+                ) {
+                    Ok(mut submodule_state) => {
+                        state
+                            .submodule_states
+                            .push(format!("expanded\0{prefix}{path}\0{submodule_commit}"));
+                        state.entries.append(&mut submodule_state.entries);
+                        state
+                            .submodule_states
+                            .append(&mut submodule_state.submodule_states);
+                    }
+                    Err(_) => {
+                        state
+                            .submodule_states
+                            .push(format!("unavailable\0{prefix}{path}\0{submodule_commit}"));
+                    }
+                }
+            }
+            _ => {}
         }
-        push_blob_entry(prefix, path, &fields, &mut entries);
     }
 
-    Ok(entries)
+    visited.remove(&visit_key);
+
+    Ok(state)
+}
+
+struct GitDirSubmoduleRequest<'a> {
+    parent_git_dir: &'a Path,
+    parent_commit: &'a str,
+    path: &'a str,
+    submodule_commit: &'a str,
+    prefix: &'a str,
+    depth: usize,
+}
+
+fn tracked_git_dir_submodule_entries(
+    request: GitDirSubmoduleRequest<'_>,
+    visited: &mut BTreeSet<(PathBuf, String)>,
+    scope: &TrackedEntryScope,
+) -> Result<GitTrackedEntries, CodeIndexError> {
+    let git_dir = submodule_git_dir_from_git_dir(
+        request.parent_git_dir,
+        request.path,
+        Some(request.parent_commit),
+        Some(request.submodule_commit),
+    )?;
+    tracked_entries_from_git_dir_inner(
+        &git_dir,
+        request.submodule_commit,
+        request.prefix,
+        request.depth,
+        visited,
+        scope,
+    )
 }
 
 pub(super) fn submodule_git_dir(
@@ -311,6 +412,33 @@ pub(super) fn submodule_git_dir(
 
     Err(CodeIndexError::InvalidInput(format!(
         "submodule git dir for path {path} is unavailable"
+    )))
+}
+
+pub(super) fn submodule_git_dir_from_git_dir(
+    git_dir: &Path,
+    path: &str,
+    parent_commit: Option<&str>,
+    submodule_commit: Option<&str>,
+) -> Result<PathBuf, CodeIndexError> {
+    for name in submodule_names_for_path_from_git_dir(git_dir, path, parent_commit) {
+        if let Ok(submodule_git_dir) = submodule_git_dir_for_name_from_git_dir(git_dir, &name) {
+            return Ok(submodule_git_dir);
+        }
+    }
+    if let Ok(submodule_git_dir) =
+        submodule_git_dir_for_name_from_git_dir(git_dir, path.trim_matches('/'))
+    {
+        return Ok(submodule_git_dir);
+    }
+    if let Some(commit) = submodule_commit
+        && let Some(submodule_git_dir) = scan_nested_submodule_git_dirs_for_commit(git_dir, commit)?
+    {
+        return Ok(submodule_git_dir);
+    }
+
+    Err(CodeIndexError::InvalidInput(format!(
+        "nested submodule git dir for path {path} is unavailable"
     )))
 }
 
@@ -365,6 +493,34 @@ fn submodule_names_for_path(
         let object = format!("{parent_commit}:.gitmodules");
         collect_submodule_names_from_gitmodules(
             git_bytes(root, ["show", &object]).ok().as_deref(),
+            path,
+            &mut names,
+        );
+    }
+
+    names
+}
+
+fn submodule_names_for_path_from_git_dir(
+    git_dir: &Path,
+    path: &str,
+    parent_commit: Option<&str>,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    collect_submodule_names_from_config(
+        git_dir_bytes(
+            git_dir,
+            &["config", "--get-regexp", "^submodule\\..*\\.path$"],
+        )
+        .ok()
+        .as_deref(),
+        path,
+        &mut names,
+    );
+    if let Some(parent_commit) = parent_commit {
+        let object = format!("{parent_commit}:.gitmodules");
+        collect_submodule_names_from_gitmodules(
+            git_dir_bytes(git_dir, &["show", &object]).ok().as_deref(),
             path,
             &mut names,
         );
@@ -462,6 +618,35 @@ fn submodule_git_dir_for_name(root: &Path, name: &str) -> Result<PathBuf, CodeIn
     )))
 }
 
+fn submodule_git_dir_for_name_from_git_dir(
+    git_dir: &Path,
+    name: &str,
+) -> Result<PathBuf, CodeIndexError> {
+    if name.is_empty() {
+        return Err(CodeIndexError::InvalidInput(
+            "submodule name is empty".to_owned(),
+        ));
+    }
+    let git_path = format!("modules/{name}");
+    let bytes = git_dir_bytes(
+        git_dir,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            &git_path,
+        ],
+    )?;
+    let submodule_git_dir = PathBuf::from(String::from_utf8_lossy(&bytes).trim().to_owned());
+    if submodule_git_dir.exists() {
+        return Ok(submodule_git_dir);
+    }
+
+    Err(CodeIndexError::InvalidInput(format!(
+        "nested submodule git dir for name {name} is unavailable"
+    )))
+}
+
 fn scan_submodule_git_dirs_for_commit(
     root: &Path,
     commit: &str,
@@ -508,6 +693,45 @@ fn submodule_modules_root(root: &Path) -> Result<PathBuf, CodeIndexError> {
     Ok(PathBuf::from(
         String::from_utf8_lossy(&bytes).trim().to_owned(),
     ))
+}
+
+fn scan_nested_submodule_git_dirs_for_commit(
+    git_dir: &Path,
+    commit: &str,
+) -> Result<Option<PathBuf>, CodeIndexError> {
+    let modules_root = git_dir.join("modules");
+    if !modules_root.exists() {
+        return Ok(None);
+    }
+    scan_submodule_git_dir_tree_for_commit(modules_root, commit)
+}
+
+fn scan_submodule_git_dir_tree_for_commit(
+    modules_root: PathBuf,
+    commit: &str,
+) -> Result<Option<PathBuf>, CodeIndexError> {
+    let mut stack = vec![modules_root];
+    let mut scanned = 0usize;
+    while let Some(candidate) = stack.pop() {
+        scanned += 1;
+        if scanned > MAX_SUBMODULE_GIT_DIR_SCAN {
+            return Ok(None);
+        }
+        if submodule_git_dir_has_commit(&candidate, commit) {
+            return Ok(Some(candidate));
+        }
+        let Ok(children) = fs::read_dir(&candidate) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn submodule_git_dir_has_commit(git_dir: &Path, commit: &str) -> bool {
