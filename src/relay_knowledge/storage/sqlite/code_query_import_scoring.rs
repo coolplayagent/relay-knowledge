@@ -403,7 +403,7 @@ fn import_expression_or_side_effect_bonus(module: &str) -> f64 {
         || module.starts_with("import \"")
         || module.starts_with("import '")
     {
-        0.65
+        2.25
     } else {
         0.0
     }
@@ -819,7 +819,7 @@ mod tests {
                 "await import(\"./protocol\")",
                 CodeQueryKind::Imports,
             ),
-            0.65
+            2.25
         );
     }
 
