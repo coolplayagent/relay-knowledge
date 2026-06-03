@@ -2,6 +2,7 @@ mod code_repository;
 mod code_repository_background;
 mod code_repository_grep;
 mod code_repository_query_filters;
+mod code_repository_recovery;
 mod code_repository_set;
 mod code_repository_software;
 mod code_repository_source_layout;

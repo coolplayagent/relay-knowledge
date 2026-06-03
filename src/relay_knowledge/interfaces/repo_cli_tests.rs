@@ -121,6 +121,41 @@ fn parses_repo_command_forms_and_validation_errors() {
         }
     );
     assert_eq!(
+        parse_repo(&["index".to_owned(), "core".to_owned(), "--reset".to_owned()])
+            .expect("index reset flag should parse"),
+        RepoCommand::IndexReset {
+            alias: "core".to_owned(),
+        }
+    );
+    assert_eq!(
+        parse_repo(&["index".to_owned(), "--reset".to_owned(), "core".to_owned()])
+            .expect("index reset prefix should parse"),
+        RepoCommand::IndexReset {
+            alias: "core".to_owned(),
+        }
+    );
+    assert_eq!(
+        parse_repo(&[
+            "index".to_owned(),
+            "core".to_owned(),
+            "--ref".to_owned(),
+            "HEAD".to_owned(),
+            "--reset".to_owned(),
+        ])
+        .expect_err("reset should reject explicit refs"),
+        CliError::UnexpectedArgument("--ref".to_owned())
+    );
+    assert_eq!(
+        parse_repo(&[
+            "index".to_owned(),
+            "core".to_owned(),
+            "--dry-run".to_owned(),
+            "--reset".to_owned(),
+        ])
+        .expect_err("reset should reject dry-run"),
+        CliError::UnexpectedArgument("--dry-run".to_owned())
+    );
+    assert_eq!(
         parse_repo(&["index-worker".to_owned()]).expect("index worker should parse"),
         RepoCommand::IndexWorker { task_id: None }
     );

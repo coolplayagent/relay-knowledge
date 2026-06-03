@@ -646,6 +646,20 @@ pub struct CodeRepositoryIndexStartResponse {
     pub checkpoint: Option<CodeIndexCheckpoint>,
 }
 
+/// Code repository index task reset response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRepositoryIndexResetResponse {
+    pub metadata: ApiMetadata,
+    pub status: CodeRepositoryStatus,
+    pub reset_task_count: usize,
+    pub reset_tasks: Vec<CodeIndexTaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_task: Option<CodeIndexTaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<CodeIndexCheckpoint>,
+    pub retention: CodeScopeRetentionSummary,
+}
+
 /// Code repository scope preview response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeRepositoryScopePreviewResponse {

@@ -244,6 +244,18 @@ pub trait CodeRepositoryStore: Send + Sync {
         })
     }
 
+    fn reset_code_index_tasks(
+        &self,
+        _repository_id: String,
+        _now_ms: u64,
+    ) -> StorageFuture<'_, Vec<CodeIndexTaskRecord>> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                "code index task reset is unavailable".to_owned(),
+            ))
+        })
+    }
+
     fn renew_code_index_task_lease(
         &self,
         _request: CodeIndexTaskLeaseRenewal,

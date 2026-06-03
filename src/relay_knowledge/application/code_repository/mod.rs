@@ -6,3 +6,4 @@ mod software_projection;
 mod source_fallback;
 mod source_surface;
 mod support;
+mod tasks;

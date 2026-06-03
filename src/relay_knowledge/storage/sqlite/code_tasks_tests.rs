@@ -7,8 +7,8 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed,
-        CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositoryStore,
+        CodeScopeRetentionRequest, SqliteGraphStore,
     },
 };
 
@@ -144,8 +144,21 @@ async fn code_index_task_queue_claim_complete_and_checkpoint_round_trip() {
 }
 
 #[tokio::test]
-async fn code_index_task_claim_skips_running_tasks_and_claims_independent_work() {
+async fn code_index_task_claim_skips_live_repository_writer_and_claims_other_repositories() {
     let store = registered_store().await;
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-other",
+                "fixture-other",
+                "/tmp/repo-other",
+                vec!["src".to_owned()],
+                vec!["rust".to_owned()],
+            )
+            .expect("second registration should validate"),
+        )
+        .await
+        .expect("second repository should persist");
     let first = store
         .run(|connection| code_tasks::queue_task(connection, seed("fp-a", "scope-a", 100)))
         .await
@@ -154,6 +167,15 @@ async fn code_index_task_claim_skips_running_tasks_and_claims_independent_work()
         .run(|connection| code_tasks::queue_task(connection, seed("fp-b", "scope-b", 101)))
         .await
         .expect("second task should queue");
+    let other_repository = store
+        .run(|connection| {
+            code_tasks::queue_task(
+                connection,
+                seed_for_repo("repo-other", "fixture-other", "fp-c", "scope-c", 102),
+            )
+        })
+        .await
+        .expect("other repository task should queue");
 
     let first_running = store
         .run({
@@ -174,7 +196,25 @@ async fn code_index_task_claim_skips_running_tasks_and_claims_independent_work()
         .await
         .expect("first claim should query")
         .expect("first task should claim");
-    let second_running = store
+    let same_repository_claim = store
+        .run({
+            let task_id = second.task_id.clone();
+            move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: "worker-blocked".to_owned(),
+                        lease_duration_ms: 100,
+                        max_attempts: 3,
+                        now_ms: 111,
+                    },
+                )
+            }
+        })
+        .await
+        .expect("same repository claim should query");
+    let other_repository_running = store
         .run(|connection| {
             code_tasks::claim_task(
                 connection,
@@ -188,14 +228,21 @@ async fn code_index_task_claim_skips_running_tasks_and_claims_independent_work()
             )
         })
         .await
-        .expect("second claim should query")
-        .expect("independent task should claim while first is running");
+        .expect("other repository claim should query")
+        .expect("other repository should claim while first is running");
 
     assert_eq!(first_running.task_id, first.task_id);
-    assert_eq!(second_running.task_id, second.task_id);
+    assert!(same_repository_claim.is_none());
+    assert_eq!(other_repository_running.task_id, other_repository.task_id);
     assert_eq!(first_running.lease_owner.as_deref(), Some("worker-a"));
-    assert_eq!(second_running.lease_owner.as_deref(), Some("worker-b"));
-    assert_ne!(first_running.source_scope, second_running.source_scope);
+    assert_eq!(
+        other_repository_running.lease_owner.as_deref(),
+        Some("worker-b")
+    );
+    assert_ne!(
+        first_running.repository_id,
+        other_repository_running.repository_id
+    );
 }
 
 #[tokio::test]
@@ -724,91 +771,6 @@ async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
 }
 
 #[tokio::test]
-async fn selected_running_code_index_task_leases_recover_before_ttl_expiry() {
-    let store = registered_store().await;
-    let queued_a = store
-        .run(|connection| code_tasks::queue_task(connection, seed("fp-a", "scope-a", 10)))
-        .await
-        .expect("first task should queue");
-    let queued_b = store
-        .run(|connection| code_tasks::queue_task(connection, seed("fp-b", "scope-b", 10)))
-        .await
-        .expect("second task should queue");
-    for (task_id, owner) in [
-        (queued_a.task_id.clone(), "worker-a"),
-        (queued_b.task_id.clone(), "worker-b"),
-    ] {
-        store
-            .run(move |connection| {
-                code_tasks::claim_task(
-                    connection,
-                    CodeIndexTaskClaimRequest {
-                        task_id: Some(task_id),
-                        lease_owner: owner.to_owned(),
-                        lease_duration_ms: 10_000,
-                        max_attempts: 3,
-                        now_ms: 20,
-                    },
-                )
-            })
-            .await
-            .expect("task should claim")
-            .expect("task should be running");
-    }
-
-    let leases = store
-        .run_read(code_tasks::running_task_leases)
-        .await
-        .expect("running leases should list");
-    assert_eq!(leases.len(), 2);
-    let recovered = store
-        .run({
-            let task_id = queued_a.task_id.clone();
-            move |connection| {
-                code_tasks::recover_task_leases_by_task(
-                    connection,
-                    CodeIndexTaskLeaseRecovery {
-                        task_ids: vec![task_id],
-                        now_ms: 30,
-                        max_attempts: 3,
-                        error_kind: "lease_orphaned".to_owned(),
-                        error_message: "owner exited".to_owned(),
-                    },
-                )
-            }
-        })
-        .await
-        .expect("selected lease should recover");
-    assert_eq!(recovered, 1);
-
-    let first = store
-        .run({
-            let task_id = queued_a.task_id.clone();
-            move |connection| code_tasks::task_by_id(connection, &task_id)
-        })
-        .await
-        .expect("first task should load")
-        .expect("first task should exist");
-    let second = store
-        .run({
-            let task_id = queued_b.task_id.clone();
-            move |connection| code_tasks::task_by_id(connection, &task_id)
-        })
-        .await
-        .expect("second task should load")
-        .expect("second task should exist");
-
-    assert_eq!(first.state, CodeIndexTaskState::Retrying);
-    assert!(first.lease_owner.is_none());
-    assert_eq!(first.lease_expires_at_ms, None);
-    assert_eq!(first.next_retry_at_ms, 30);
-    assert_eq!(first.last_error_kind.as_deref(), Some("lease_orphaned"));
-    assert_eq!(second.state, CodeIndexTaskState::Running);
-    assert_eq!(second.lease_owner.as_deref(), Some("worker-b"));
-    assert_eq!(second.lease_expires_at_ms, Some(10_020));
-}
-
-#[tokio::test]
 async fn code_scope_retention_prunes_only_non_retained_scopes() {
     let store = registered_store().await;
     store
@@ -903,9 +865,19 @@ async fn registered_store() -> SqliteGraphStore {
 }
 
 fn seed(fingerprint: &str, scope: &str, now_ms: u64) -> CodeIndexTaskSeed {
+    seed_for_repo("repo", "fixture", fingerprint, scope, now_ms)
+}
+
+fn seed_for_repo(
+    repository_id: &str,
+    alias: &str,
+    fingerprint: &str,
+    scope: &str,
+    now_ms: u64,
+) -> CodeIndexTaskSeed {
     CodeIndexTaskSeed {
-        repository_id: "repo".to_owned(),
-        alias: "fixture".to_owned(),
+        repository_id: repository_id.to_owned(),
+        alias: alias.to_owned(),
         ref_selector: "HEAD".to_owned(),
         resolved_commit_sha: format!("commit-{scope}"),
         tree_hash: format!("tree-{scope}"),

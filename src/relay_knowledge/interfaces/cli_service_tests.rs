@@ -123,12 +123,30 @@ async fn service_startup_recovers_orphaned_code_index_worker_leases() {
         )
         .await
         .expect("repository should persist");
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new(
+                "repo-b",
+                "service",
+                "/tmp/service",
+                Vec::new(),
+                Vec::new(),
+            )
+            .expect("second registration should validate"),
+        )
+        .await
+        .expect("second repository should persist");
     let live = store
         .queue_code_index_task(code_index_seed("fp-live", "scope-live"))
         .await
         .expect("live task should queue");
     let orphaned = store
-        .queue_code_index_task(code_index_seed("fp-orphaned", "scope-orphaned"))
+        .queue_code_index_task(code_index_seed_for_repo(
+            "repo-b",
+            "service",
+            "fp-orphaned",
+            "scope-orphaned",
+        ))
         .await
         .expect("orphaned task should queue");
     let now_ms = current_time_millis();
@@ -219,9 +237,18 @@ fn test_environment() -> EnvironmentConfig {
 }
 
 fn code_index_seed(fingerprint: &str, source_scope: &str) -> CodeIndexTaskSeed {
+    code_index_seed_for_repo("repo-a", "app", fingerprint, source_scope)
+}
+
+fn code_index_seed_for_repo(
+    repository_id: &str,
+    alias: &str,
+    fingerprint: &str,
+    source_scope: &str,
+) -> CodeIndexTaskSeed {
     CodeIndexTaskSeed {
-        repository_id: "repo-a".to_owned(),
-        alias: "app".to_owned(),
+        repository_id: repository_id.to_owned(),
+        alias: alias.to_owned(),
         ref_selector: "HEAD".to_owned(),
         resolved_commit_sha: format!("commit-{source_scope}"),
         tree_hash: format!("tree-{source_scope}"),
