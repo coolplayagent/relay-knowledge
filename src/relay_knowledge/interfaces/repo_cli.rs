@@ -24,6 +24,9 @@ pub enum RepoCommand {
         path_filters: Vec<String>,
         language_filters: Vec<String>,
     },
+    Remove {
+        alias: String,
+    },
     Index {
         alias: String,
         ref_selector: String,
@@ -93,6 +96,7 @@ struct CodeIndexWorkerRunResponse {
 pub fn parse_repo(tokens: &[String]) -> Result<RepoCommand, CliError> {
     match tokens.first().map(String::as_str) {
         Some("register") => parse_register(&tokens[1..]),
+        Some("remove") => parse_remove(&tokens[1..]),
         Some("index") => parse_index(&tokens[1..]),
         Some("index-worker") => parse_index_worker(&tokens[1..]),
         Some("scope") => parse_scope(&tokens[1..]),
@@ -136,6 +140,19 @@ pub async fn run_repo(
 
             render_response(
                 "code.repo.register",
+                response.metadata.clone(),
+                &response,
+                format,
+            )
+        }
+        RepoCommand::Remove { alias } => {
+            let response = service
+                .remove_code_repository(alias, context)
+                .await
+                .map_err(|error| CliError::api_failed(error, format))?;
+
+            render_response(
+                "code.repo.remove",
                 response.metadata.clone(),
                 &response,
                 format,
@@ -514,6 +531,15 @@ fn parse_register(tokens: &[String]) -> Result<RepoCommand, CliError> {
         path_filters,
         language_filters,
     })
+}
+
+fn parse_remove(tokens: &[String]) -> Result<RepoCommand, CliError> {
+    let alias = positional_alias(tokens)?;
+    if let Some(extra) = tokens.get(1) {
+        return Err(CliError::UnexpectedArgument(extra.clone()));
+    }
+
+    Ok(RepoCommand::Remove { alias })
 }
 
 fn parse_index(tokens: &[String]) -> Result<RepoCommand, CliError> {

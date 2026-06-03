@@ -92,6 +92,10 @@ pub(super) fn delete_search_documents_for_scope(
         "DELETE FROM code_repository_search_metadata WHERE source_scope = ?1",
         params![source_scope],
     )?;
+    transaction.execute(
+        "DELETE FROM code_repository_search WHERE source_scope = ?1",
+        params![source_scope],
+    )?;
 
     Ok(())
 }

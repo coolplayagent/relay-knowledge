@@ -111,6 +111,12 @@ fn parses_repo_command_forms_and_validation_errors() {
             language_filters: Vec::new(),
         }
     );
+    assert_eq!(
+        parse_repo(&["remove".to_owned(), "core".to_owned()]).expect("remove command should parse"),
+        RepoCommand::Remove {
+            alias: "core".to_owned()
+        }
+    );
 
     assert_eq!(
         parse_repo(&["index".to_owned(), "core".to_owned()]).expect("index command should parse"),
@@ -286,6 +292,15 @@ fn parses_repo_command_forms_and_validation_errors() {
     assert_eq!(
         parse_repo(&[]).expect_err("empty repo command should fail"),
         CliError::UnexpectedArgument("repo".to_owned())
+    );
+    assert_eq!(
+        parse_repo(&["remove".to_owned()]).expect_err("missing remove alias should fail"),
+        CliError::MissingValue("<alias>")
+    );
+    assert_eq!(
+        parse_repo(&["remove".to_owned(), "core".to_owned(), "extra".to_owned(),])
+            .expect_err("remove extra argument should fail"),
+        CliError::UnexpectedArgument("extra".to_owned())
     );
     assert_eq!(
         parse_repo(&["query".to_owned(), "core".to_owned()])
@@ -564,6 +579,61 @@ pub fn retry_policy_v2() -> u32 {
     .await
     .expect("status should run");
     assert!(status.contains("code.repo.status"));
+
+    let removed = run_repo(
+        &service,
+        RepoCommand::Remove {
+            alias: "fixture".to_owned(),
+        },
+        context("remove"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("remove should run");
+    let removed_value = json_value(&removed);
+    assert_eq!(
+        removed_value["summary"]["repository_id"],
+        removed_value["removed_status"]["repository_id"]
+    );
+    assert_eq!(removed_value["removed_status"]["alias"], "fixture");
+    assert_eq!(removed_value["summary"]["removed_scope_count"], 2);
+    assert_eq!(removed_value["summary"]["removed_index_task_count"], 1);
+    assert!(
+        removed_value["summary"]["aliases_removed"]
+            .as_array()
+            .expect("aliases should be an array")
+            .iter()
+            .any(|alias| alias.as_str() == Some("fixture"))
+    );
+
+    run_repo(
+        &service,
+        RepoCommand::Status {
+            alias: "fixture".to_owned(),
+        },
+        context("status-after-remove"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect_err("removed repository should no longer be registered");
+
+    let reregistered = run_repo(
+        &service,
+        RepoCommand::Register {
+            root_path: repo.path.display().to_string(),
+            alias: "fixture".to_owned(),
+            path_filters: vec!["src".to_owned()],
+            language_filters: Vec::new(),
+        },
+        context("reregister"),
+        OutputFormat::Json,
+    )
+    .await
+    .expect("repository should re-register after removal");
+    assert_eq!(
+        json_value(&reregistered)["registration"]["alias"],
+        "fixture"
+    );
 }
 
 #[tokio::test]
@@ -740,12 +810,20 @@ fn context(name: &str) -> RequestContext {
 }
 
 async fn service_with_memory_store() -> RelayKnowledgeService {
+    let temp_dir = std::env::temp_dir();
+    let home_dir = temp_dir.join("relay-knowledge-test-user-home");
+    let relay_home = temp_dir.join("relay-knowledge-test-runtime-home");
+    let temp_dir = temp_dir.to_string_lossy().into_owned();
+    let home_dir = home_dir.to_string_lossy().into_owned();
+    let relay_home = relay_home.to_string_lossy().into_owned();
     let environment = EnvironmentConfig::from_pairs(
-        PlatformKind::Unix,
+        PlatformKind::current(),
         [
-            ("HOME", "/home/alice"),
-            ("TMPDIR", "/tmp"),
-            ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
+            ("HOME", home_dir),
+            ("TMPDIR", temp_dir.clone()),
+            ("TEMP", temp_dir.clone()),
+            ("TMP", temp_dir),
+            ("RELAY_KNOWLEDGE_HOME", relay_home),
         ],
     )
     .expect("environment should parse");

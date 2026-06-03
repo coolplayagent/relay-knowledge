@@ -18,6 +18,14 @@ relay-knowledge repo register /path/to/repo \
 
 注册只记录仓库根路径、alias 和允许 scope，不立即解析文件。路径可以指向本机可读 Git worktree 或普通 source directory；索引时再解析目标 ref、worktree overlay 或 filesystem synthetic snapshot。再次注册同一个 root 时会为同一个 repository id 增加 alias，不会让旧 alias 失效；如果 alias 已经属于另一个 repository id，注册会失败。
 
+如果需要从头重建某个仓库的运行时状态，可以删除已注册仓库:
+
+```bash
+relay-knowledge repo remove repo --format json
+```
+
+删除会移除该 repository id 的注册记录、全部 alias、已索引 scope、code-index task、repository-set 成员和 overlay，以及软件全域投影行。它不会删除磁盘上的源码仓库。如果该仓库仍有 code-index task 正在运行，删除会被拒绝；删除成功后，同一路径或 alias 可以重新注册。
+
 ## 5.2 Scope 预览
 
 索引前预览当前 scope 会覆盖哪些文件:

@@ -5,8 +5,8 @@ use crate::{
         ApiError, ApiMetadata, CodeRepositoryFeatureFlagsResponse, CodeRepositoryImpactResponse,
         CodeRepositoryIndexResponse, CodeRepositoryIndexStartResponse, CodeRepositoryQueryResponse,
         CodeRepositoryRegisterRequest, CodeRepositoryRegisterResponse,
-        CodeRepositoryReportResponse, CodeRepositoryScopePreviewResponse,
-        CodeRepositoryStatusResponse, RequestContext,
+        CodeRepositoryRemoveResponse, CodeRepositoryReportResponse,
+        CodeRepositoryScopePreviewResponse, CodeRepositoryStatusResponse, RequestContext,
     },
     code::{
         REGISTRATION_LANGUAGE_FILTER_ERROR, build_index_snapshot_with_base_commit,
@@ -72,6 +72,35 @@ impl RelayKnowledgeService {
             metadata: ApiMetadata::graph_only(&context, graph_version),
             registration,
             status,
+        })
+    }
+
+    /// Removes a registered code repository and its derived index state.
+    pub async fn remove_code_repository(
+        &self,
+        repository: String,
+        context: RequestContext,
+    ) -> Result<CodeRepositoryRemoveResponse, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        let now_ms = now_millis();
+        recover_code_index_task_leases(&store, now_ms).await?;
+        let removed_status = required_code_repository(&store, &repository).await?;
+        let summary = store
+            .remove_code_repository(removed_status.repository_id.clone(), now_ms)
+            .await
+            .map_err(storage_api_error)?
+            .ok_or_else(|| {
+                ApiError::storage_unavailable("removed code repository disappeared before delete")
+            })?;
+        let graph_version = store
+            .current_graph_version()
+            .await
+            .map_err(storage_api_error)?;
+
+        Ok(CodeRepositoryRemoveResponse {
+            metadata: ApiMetadata::graph_only(&context, graph_version),
+            removed_status,
+            summary,
         })
     }
 

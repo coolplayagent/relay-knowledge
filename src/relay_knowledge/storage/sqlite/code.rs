@@ -27,6 +27,9 @@ mod code_schema;
 #[path = "code_status.rs"]
 mod code_status;
 
+#[path = "code_remove.rs"]
+mod code_remove;
+
 #[path = "code_batch.rs"]
 mod code_batch;
 
@@ -161,6 +164,14 @@ impl CodeRepositoryStore for SqliteGraphStore {
         repository: String,
     ) -> StorageFuture<'_, Option<CodeRepositoryStatus>> {
         self.run_read(move |connection| code_status::repository_status(connection, &repository))
+    }
+
+    fn remove_code_repository(
+        &self,
+        repository: String,
+        now_ms: u64,
+    ) -> StorageFuture<'_, Option<crate::domain::CodeRepositoryRemovalSummary>> {
+        self.run(move |connection| code_remove::remove_repository(connection, &repository, now_ms))
     }
 
     fn code_repository_scope_status(

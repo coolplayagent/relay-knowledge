@@ -211,6 +211,8 @@ Git 分支、标签和工作树选择器会解析为带作用域的提交/树快
 
 worktree overlay 使用 Git status：被 `.gitignore` 忽略的 untracked 文件会跳过，未跟踪的宽泛依赖、缓存或构建目录需要显式 path opt-in 后才会递归展开。
 
+`repo remove <alias>` 只删除该仓库在 relay-knowledge 中的注册记录、alias、索引 scope、task、repository-set 成员和 overlay，以及软件投影，不删除磁盘源码；删除后同一路径或 alias 可以重新注册。
+
 ### 代码检索
 
 代码图 v1 响应区分稳定的 `canonical_symbol_id` 和快照绑定的 `symbol_snapshot_id`。引用、调用、导入和 SBOM 依赖命中会暴露 `target_hint`、`resolution_state`、置信度基点和置信度等级，避免将未解析、有歧义、声明型或锁定型边误报为确定调用。

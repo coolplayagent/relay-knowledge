@@ -38,6 +38,31 @@ pub(super) fn repo_register() -> CliCommandSpec {
     )
 }
 
+pub(super) fn repo_remove() -> CliCommandSpec {
+    command!(
+        &["repo", "remove"],
+        "relay-knowledge repo remove <alias>",
+        "Remove a registered code repository and its index state.",
+        "code.repo.remove",
+        CommandEffect::WritesOperationalState,
+        &[arg(
+            "alias",
+            true,
+            false,
+            "Registered repository alias or repository id.",
+            None,
+            &[],
+        )],
+        &[],
+        &["relay-knowledge repo remove core --format json"],
+        &[
+            "Deletes the repository registration, all aliases for that repository id, code index scopes, code-index tasks, repository-set membership, repository-set overlays, and software projection rows.",
+            "Does not delete files from the source repository on disk.",
+            "Removal is rejected while the repository has a running code-index task lease.",
+        ],
+    )
+}
+
 pub(super) fn repo_index() -> CliCommandSpec {
     command!(
         &["repo", "index"],
