@@ -17,7 +17,7 @@
 
 存储层按 ref 或最新 checkpoint 查找生成的 `git_snapshot:<16 hex>` scope 时，必须在扫描候选 scope 的过程中优先选择当前事实版本，而不是先按 checkpoint 或 `source_scope` 排序缩窄到单行后再过滤。这样旧事实版本 scope 即使是当前 active 行或更新时间更晚，也不会遮蔽已经存在的当前事实版本索引；如果没有当前事实版本 scope，存储层不能把旧 `git_snapshot:<16 hex>` scope 作为兼容结果返回。非生成 scope（例如测试或外部调用显式传入的自定义 `source_scope`）不参与这个生成 scope 事实版本判定，仍按普通存储兼容性处理。
 
-Repository-set member 也必须在状态和查询前重新校验事实版本。既有 member 若保存了旧 `source_scope`，只能在找到同 commit/filter 的当前事实版本 scope 后使用当前 scope 查询并把 member/overlay 标记为 stale；如果执行 repository-set refresh，刷新 overlay 前必须先把替换后的 member scope 写回持久层，确保 overlay edges 和 member version manifest 基于当前事实版本重建。如果找不到当前 scope，查询必须跳过旧 scope，refresh 也不能通过旧 scope 重建 overlay 或通过 `AllowStale` 继续服务旧事实。
+Repository-set member 也必须在状态和查询前重新校验事实版本。既有 member 若保存了旧 `source_scope`，只能在找到同 commit/filter 的当前事实版本 scope 后使用当前 scope 查询并把 member/overlay 标记为 stale；如果执行 repository-set refresh，刷新 overlay 前必须先把替换后的 member scope 写回持久层，确保 overlay edges 和 member version manifest 基于当前事实版本重建。如果找不到当前 scope，查询必须跳过旧 scope，refresh 也不能通过旧 scope 重建 overlay 或通过 `AllowStale` 继续服务旧事实。member 自身的 path/language filters 仍是查询、source fallback 和 freshness 语义边界；事实版本校验需要使用实际 indexed scope filters，不能用宽 scope 覆盖 member row filters。
 
 ## 本次约束
 

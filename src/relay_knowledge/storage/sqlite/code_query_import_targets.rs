@@ -19,6 +19,7 @@ use super::{prepare_code_search_statement, required_scope};
 
 const SQLITE_BIND_BATCH_SIZE: usize = 500;
 const MAX_TARGET_SYMBOL_NAMES_PER_IMPORT: usize = 4;
+const MAX_IMPORT_USAGE_CONTEXT_CHUNKS_PER_PATH: usize = 64;
 
 pub(super) fn attach_import_target_symbols(
     connection: &Connection,
@@ -67,10 +68,7 @@ pub(super) fn attach_import_query_usage_context(
     request: &CodeRetrievalRequest,
     rows: &mut [ImportRow],
 ) -> Result<(), StorageError> {
-    if request.code_query_kind != CodeQueryKind::Imports {
-        return Ok(());
-    }
-    if rows.is_empty() {
+    if !import_usage_context_needed(request, rows) {
         return Ok(());
     }
 
@@ -138,6 +136,17 @@ fn import_usage_terms_for_row(query: &str, row: &ImportRow) -> Vec<String> {
     terms
 }
 
+fn import_usage_context_needed(request: &CodeRetrievalRequest, rows: &[ImportRow]) -> bool {
+    request.code_query_kind == CodeQueryKind::Imports
+        && !rows.is_empty()
+        && (target_symbol_import_query(&request.query)
+            || rows.iter().any(|row| {
+                row.target_symbol_names
+                    .as_deref()
+                    .is_some_and(|names| !names.trim().is_empty())
+            }))
+}
+
 fn import_context_chunks(
     connection: &Connection,
     status: &CodeRepositoryStatus,
@@ -145,14 +154,25 @@ fn import_context_chunks(
 ) -> Result<Vec<(String, String)>, StorageError> {
     let mut values = vec![Value::Text(required_scope(status)?.to_owned())];
     values.extend(paths.iter().map(|path| Value::Text((*path).to_owned())));
+    values.push(Value::Integer(
+        MAX_IMPORT_USAGE_CONTEXT_CHUNKS_PER_PATH as i64,
+    ));
     let placeholders = placeholders(paths.len());
     let sql = format!(
         "
         SELECT path, content
-        FROM code_repository_chunks
-        WHERE source_scope = ?
-          AND path IN ({placeholders})
-        ORDER BY path ASC, line_start ASC, chunk_id ASC
+        FROM (
+            SELECT path, content,
+                   row_number() OVER (
+                       PARTITION BY path
+                       ORDER BY line_start ASC, chunk_id ASC
+                   ) AS path_chunk_rank
+            FROM code_repository_chunks
+            WHERE source_scope = ?
+              AND path IN ({placeholders})
+        )
+        WHERE path_chunk_rank <= ?
+        ORDER BY path ASC, path_chunk_rank ASC
         "
     );
     let mut statement = connection.prepare(&sql)?;
@@ -549,4 +569,61 @@ fn strip_go_source_root(path: &str) -> &str {
     }
 
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CodeRepositorySelector, FreshnessPolicy};
+
+    #[test]
+    fn usage_context_is_limited_to_symbol_backed_import_queries() {
+        let selector = CodeRepositorySelector::new("repo", "commit", Vec::new(), Vec::new())
+            .expect("selector should validate");
+        let plain = CodeRetrievalRequest::new(
+            "./protocol",
+            selector.clone(),
+            CodeQueryKind::Imports,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+        let target_symbol = CodeRetrievalRequest::new(
+            "StreamEnvelope",
+            selector,
+            CodeQueryKind::Imports,
+            10,
+            FreshnessPolicy::AllowStale,
+        )
+        .expect("request should validate");
+        assert!(!import_usage_context_needed(
+            &plain,
+            &[import_row("./protocol")]
+        ));
+        assert!(import_usage_context_needed(
+            &target_symbol,
+            &[import_row("./protocol")]
+        ));
+
+        let mut row = import_row("./protocol");
+        row.target_symbol_names = Some("StreamEnvelope".to_owned());
+        assert!(import_usage_context_needed(&plain, &[row]));
+    }
+
+    fn import_row(module: &str) -> ImportRow {
+        ImportRow {
+            file_id: "file".to_owned(),
+            path: "src/provider.ts".to_owned(),
+            language_id: "typescript".to_owned(),
+            module: module.to_owned(),
+            matched_symbol_name: None,
+            target_symbol_names: None,
+            same_file_query_usage_count: 0,
+            line_range: RepositoryCodeRange { start: 1, end: 1 },
+            target_hint: None,
+            resolution_state: "unresolved".to_owned(),
+            confidence_basis_points: 0,
+            confidence_tier: "none".to_owned(),
+        }
+    }
 }

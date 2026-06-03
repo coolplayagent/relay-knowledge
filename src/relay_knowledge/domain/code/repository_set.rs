@@ -113,6 +113,10 @@ pub struct CodeRepositorySetMember {
 pub struct CodeRepositorySetMemberStatus {
     pub member: CodeRepositorySetMember,
     pub tree_hash: String,
+    #[serde(default, skip_serializing)]
+    pub indexed_path_filters: Vec<String>,
+    #[serde(default, skip_serializing)]
+    pub indexed_language_filters: Vec<String>,
     pub freshness_state: String,
     pub stale: bool,
     pub indexed_file_count: usize,

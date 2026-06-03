@@ -67,8 +67,8 @@ fn apply_current_fact_version_scope(
         return;
     };
     member_status.member.source_scope = current_scope.clone();
-    member_status.member.path_filters = current.path_filters;
-    member_status.member.language_filters = current.language_filters;
+    member_status.indexed_path_filters = current.path_filters;
+    member_status.indexed_language_filters = current.language_filters;
     if let Some(commit) = current.last_indexed_commit {
         member_status.member.resolved_commit_sha = commit;
     }
@@ -109,8 +109,8 @@ pub(super) fn member_scope_matches_current_fact_version(
     code_snapshot_expected_scope_id(
         &member_status.member.repository_id,
         &member_status.tree_hash,
-        &member_status.member.path_filters,
-        &member_status.member.language_filters,
+        &member_status.indexed_path_filters,
+        &member_status.indexed_language_filters,
     )
     .is_some_and(|expected| expected == member_status.member.source_scope)
 }

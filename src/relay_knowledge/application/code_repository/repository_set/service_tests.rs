@@ -196,6 +196,8 @@ fn helper_detects_repository_set_member_fact_version_scopes() {
     let mut current = member_status("app", "placeholder", 0);
     current.member.path_filters = Vec::new();
     current.member.language_filters = Vec::new();
+    current.indexed_path_filters = current.member.path_filters.clone();
+    current.indexed_language_filters = current.member.language_filters.clone();
     current.tree_hash = "tree-current".to_owned();
     current.member.source_scope = code_snapshot_scope_id(
         &current.member.repository_id,
@@ -371,6 +373,8 @@ fn member_status(
             priority,
         },
         tree_hash: format!("tree-{source_scope}"),
+        indexed_path_filters: vec!["src".to_owned()],
+        indexed_language_filters: vec!["rust".to_owned()],
         freshness_state: "fresh".to_owned(),
         stale: false,
         indexed_file_count: 1,

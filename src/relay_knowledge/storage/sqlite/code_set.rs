@@ -703,11 +703,13 @@ fn member_status_from_row(row: &Row<'_>) -> rusqlite::Result<CodeRepositorySetMe
             ref_selector: row.get(3)?,
             resolved_commit_sha: row.get(4)?,
             source_scope: row.get(5)?,
-            path_filters: parse_json_list(row.get::<_, String>(16)?)?,
-            language_filters: parse_json_list(row.get::<_, String>(17)?)?,
+            path_filters: parse_json_list(row.get::<_, String>(6)?)?,
+            language_filters: parse_json_list(row.get::<_, String>(7)?)?,
             priority: row.get(8)?,
         },
         tree_hash: row.get(9)?,
+        indexed_path_filters: parse_json_list(row.get::<_, String>(16)?)?,
+        indexed_language_filters: parse_json_list(row.get::<_, String>(17)?)?,
         freshness_state: if stale {
             "stale".to_owned()
         } else {
