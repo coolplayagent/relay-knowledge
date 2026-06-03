@@ -5,6 +5,9 @@ through the local CLI. It is for local knowledge graph ingestion, hybrid
 GraphRAG queries, code repository indexing, code graph search, multi-repository
 queries, software graph relationship queries, feature flag graph queries,
 impact analysis, setup diagnostics, installation checks, and upgrade checks.
+For large repositories, it tells agents to treat cold indexing and freshness
+refresh as durable background tasks so command-runner timeouts do not interrupt
+or obscure indexing progress.
 
 For code-structure questions such as function definitions, symbol locations,
 references, callers, callees, call graphs, and call chains, agents should use
@@ -28,11 +31,16 @@ For feature flag, config gate, environment-variable gate, settings gate, or
 guarded-code questions, agents should use `repo feature-flags`. Feature flags
 are not a `repo query --kind` value.
 
-For cold repository indexing in non-interactive sessions, agents can use the
-published `repo index-worker` command to run bounded single-shot worker
-attempts after `repo index` returns a durable task handle. The worker exposes
-machine-readable JSON and streaming JSON results for no-task and completed-task
-states.
+For cold repository indexing in non-interactive sessions, agents should run
+`repo index`, then inspect `repo status <alias> --format json` because the
+command may return a task id or may time out after claiming a durable lease.
+Agents should let a managed service drain active tasks, or wait for lease
+recovery when a killed foreground attempt left a running task in a no-service
+session. Use the published `repo index-worker` command for bounded single-shot
+attempts when status shows a queued or retrying task id. The worker exposes
+machine-readable JSON and streaming JSON results for claimed tasks and for the
+no-task case; a timed-out worker attempt should be followed by status
+inspection rather than treated as an indexing failure.
 
 ## Package Contents
 

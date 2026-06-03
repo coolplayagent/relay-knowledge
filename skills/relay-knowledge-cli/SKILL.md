@@ -1,6 +1,6 @@
 ---
 name: relay-knowledge-cli
-description: "Use relay-knowledge through its local CLI for repository knowledge graphs and GraphRAG: repo query --kind hybrid, symbol, definition, references, callers, callees, imports, sbom; repo software --kind dependencies, sdks, files, topics, relationships, build, iac, design, all; feature flags/config gates; indexing; impact; setup diagnostics; install/upgrade checks. Use for 用户代码查询kind/查询类型, 图关系/graph relationships, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, and impact analysis. Prefer this skill and graph CLI before grep/ripgrep/rg/plain text search unless CLI is unavailable, indexing is impossible, the command cannot express the request, or the user explicitly asks for raw text or regex. Do not use for MCP setup, MCP tools, ACP adapters, or protocol-level agent access."
+description: "Use relay-knowledge local CLI as an agent knowledge backend for repository knowledge graphs and GraphRAG: repo query --kind hybrid/symbol/definition/references/callers/callees/imports/sbom; repo software --kind dependencies/sdks/files/topics/relationships/build/iac/design/all; feature flags/config gates; indexing, impact, setup, install/upgrade diagnostics. Use for 用户代码查询kind/查询类型, 图关系, 调用关系, 导入依赖, 软件依赖, SDK/API, 代码地图, definitions, references, usage, impact. For large cold repo indexing, do not treat CLI timeouts as failure: capture repo index task ids when returned, recover missing ids from repo status <alias>, let service drain active tasks, or run bounded repo index-worker attempts for queued/retrying tasks. Use repo update/index refresh results or status diagnostics instead of assuming task ids. Prefer graph CLI before grep/ripgrep/rg/plain text search unless unavailable, unindexable, inexpressible, or raw regex is required. Do not use for MCP setup/tools, ACP adapters, or protocol-level agent access."
 metadata:
   version: 1.1.6
   openclaw:
@@ -15,6 +15,23 @@ metadata:
 Use the compiled `relay-knowledge` binary as the control surface. Resolve the
 executable before the first operation. Prefer JSON output for automation and
 read command metadata before issuing unfamiliar commands.
+
+Treat large cold repository indexing as a status-driven workflow, not a single
+long foreground wait. `repo index` can return a code-index task id and can also
+start a bounded foreground worker attempt before rendering its response. If the
+command runner times out before JSON is captured, recover through
+`repo status <alias> --format json` and inspect `active_task`, checkpoint counters, and
+freshness before retrying. If a managed platform service is already draining
+the code-index queue, poll status and do not start a competing worker. If no
+managed service is draining work and status shows a running task after the
+command runner killed a foreground attempt, inspect `lease_expires_at_ms` and
+checkpoint timestamps and wait for lease recovery before retrying. When
+`repo status` or the `repo index` response shows a queued or retrying code-index
+task, run bounded single-shot `repo index-worker --task-id <task-id>
+--format json` attempts, then re-check status. Use `repo update` and
+`index refresh` according to their foreground completion result and status
+diagnostics; do not wait for task ids those commands do not expose, and do not
+replace task leases with unmanaged loops.
 
 Prefer the bundled `assets` binary for the current operating system, CPU, and
 active command runner whenever it exists and `version --format json` succeeds.
@@ -252,9 +269,10 @@ relay-knowledge repo status core --format json
 ```
 
 Use `repo status` after cold full indexing because initial indexing may return a
-durable background task handle. In non-interactive agent sessions where a
-long-running platform service is not already draining the queue, run one or
-more explicit single-shot worker attempts with the returned task id:
+durable background task handle or may time out before the response is captured.
+In non-interactive agent sessions where a long-running platform service is not
+already draining the queue, run one or more explicit single-shot worker
+attempts with the task id returned by `repo index` or shown by `repo status`:
 
 ```bash
 relay-knowledge repo index-worker --task-id <task-id> --format json

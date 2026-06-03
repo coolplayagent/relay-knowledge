@@ -80,6 +80,17 @@ the runtime cache directory.
 - Treat `ingest`, `repo index`, `repo update`, `index refresh`,
   `worker run-once`, proposal state changes, and `service definition write` as
   commands that may write runtime state.
+- Treat large cold repository indexing as a status-driven code-index workflow.
+  `repo index` may return a task id or may time out while its bounded
+  foreground worker attempt is still making durable progress. Recover through
+  `repo status <alias> --format json`, inspect `active_task`, checkpoint
+  counters, and lease expiry, and let a managed service drain the queue when
+  one is running. Without a managed service, a killed foreground attempt can
+  leave a running lease behind; wait for lease recovery before retrying, then
+  use bounded `repo index-worker --task-id <task-id>` attempts only when the
+  `repo index` response or status shows a queued or retrying task id. Use
+  `repo update` and `index refresh` completion results or status diagnostics
+  instead of assuming they expose task ids.
 - Keep runtime state in the platform directories managed by relay-knowledge.
   Do not redirect databases, logs, or caches into arbitrary repository folders
   unless the user explicitly asks for an isolated test home.
