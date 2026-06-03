@@ -83,11 +83,9 @@ pub use resolution::{
     resolve_repository_ref_with_path_filters, resolve_repository_snapshot,
     resolve_repository_snapshot_with_filters, resolve_repository_snapshot_with_path_filters,
 };
-#[cfg(test)]
-use scope::path_scope_overlaps;
 use scope::{
     discover_source_layout, effective_index_path_filters, path_is_selected_with_layout,
-    scoped_source_snapshot_for_filters,
+    path_scope_overlaps, scoped_source_snapshot_for_filters,
 };
 pub use scope::{partition_changed_paths_for_selector, preview_repository_scope};
 use snapshot::{SnapshotBuild, SnapshotScopeFilters};
@@ -566,6 +564,9 @@ fn append_deleted_symbol_names_for_gitlink_update(
     head_commit: &str,
     path: &str,
 ) -> Result<(), CodeIndexError> {
+    if !path_scope_overlaps(path, context.registration, context.selector) {
+        return Ok(());
+    }
     let Some(expansion) = source_gitlink::changed_gitlink_path_expansion(
         context.root,
         path,

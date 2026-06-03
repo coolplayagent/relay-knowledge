@@ -409,6 +409,39 @@ fn deleted_symbol_names_include_symbols_removed_by_submodule_update() {
 }
 
 #[test]
+fn deleted_symbol_names_do_not_expand_out_of_scope_submodule_updates() {
+    let fixture = SubmoduleFixture::create("deleted-symbols-out-of-scope");
+    let base = fixture.parent_head();
+    let submodule_path = fixture.parent.path.join("vendor/module");
+    for index in 0..=CodeIndexResourceBudget::DEFAULT_MAX_FILES_PER_BATCH {
+        fs::write(
+            submodule_path.join(format!("src/deleted_symbol_generated_{index}.rs")),
+            format!("pub fn deleted_symbol_generated_{index}() -> u32 {{ {index} }}\n"),
+        )
+        .expect("generated submodule file should be written");
+    }
+    git_in(
+        &submodule_path,
+        ["config", "user.email", "relay@example.invalid"],
+    );
+    git_in(&submodule_path, ["config", "user.name", "Relay Test"]);
+    git_in(&submodule_path, ["add", "."]);
+    git_in(&submodule_path, ["commit", "-m", "large child update"]);
+    fixture.parent.git(["add", "vendor/module"]);
+    fixture.parent.git(["commit", "-m", "update submodule"]);
+
+    let names = deleted_symbol_names_for_diff(
+        &fixture.parent_src_registration(),
+        &fixture.parent_selector(),
+        &base,
+        "HEAD",
+    )
+    .expect("out-of-scope submodule update should not expand deleted-symbol seeds");
+
+    assert!(names.is_empty());
+}
+
+#[test]
 fn full_index_does_not_expand_submodules_outside_path_scope() {
     let fixture = SubmoduleFixture::create("scoped-full-index");
     let submodule_root = fixture.parent.path.join("vendor/module");
@@ -738,6 +771,11 @@ impl NestedSubmoduleFixture {
         git_in(&nested_path, ["add", "."]);
         git_in(&nested_path, ["commit", "-m", "nested update"]);
         let child_path = self.parent.path.join("vendor/module");
+        git_in(
+            &child_path,
+            ["config", "user.email", "relay@example.invalid"],
+        );
+        git_in(&child_path, ["config", "user.name", "Relay Test"]);
         git_in(&child_path, ["add", "nested"]);
         git_in(&child_path, ["commit", "-m", "update nested submodule"]);
         self.parent.git(["add", "vendor/module"]);

@@ -186,7 +186,7 @@ relay-knowledge repo index repo --ref worktree --format json
 relay-knowledge repo query repo --query retry_policy --ref worktree --format json
 ```
 
-overlay 绑定当前 checked-out `HEAD`，使用合成 snapshot 标识，包含已修改文件、未跟踪文件和 staged submodule gitlink 更新；如果 deinit 后只能从缓存 gitdir 读取 staged submodule commit，也会纳入 overlay。overlay 活跃时，clean commit ref 查询会被拒绝，避免把未提交内容误标成 clean Git snapshot。
+overlay 绑定当前 checked-out `HEAD`，使用合成 snapshot 标识，包含已修改文件、未跟踪文件和 staged submodule gitlink 更新；如果 deinit 后只能从缓存 gitdir 读取 staged submodule commit，也会纳入 overlay。staged submodule 的新增、删除、重命名以及 file/submodule 互换会按展开后的 child path 清理旧索引，而不是只处理 gitlink path。overlay 活跃时，clean commit ref 查询会被拒绝，避免把未提交内容误标成 clean Git snapshot。
 
 ## 5.7 影响分析
 

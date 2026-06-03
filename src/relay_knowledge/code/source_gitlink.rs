@@ -221,29 +221,6 @@ pub(super) fn gitlink_commit_at_tree(
         .map(|entry| entry.object))
 }
 
-pub(super) fn staged_gitlink_commit(
-    root: &Path,
-    path: &str,
-) -> Result<Option<String>, CodeIndexError> {
-    let bytes = git_bytes(root, ["ls-files", "-s", "-z", "--", path])?;
-    let Some(record) = bytes
-        .split(|byte| *byte == 0)
-        .find(|record| !record.is_empty())
-    else {
-        return Ok(None);
-    };
-    let record = String::from_utf8_lossy(record);
-    let Some((metadata, _)) = record.split_once('\t') else {
-        return Ok(None);
-    };
-    let fields = metadata.split_whitespace().collect::<Vec<_>>();
-    if fields.first().copied() != Some("160000") {
-        return Ok(None);
-    }
-
-    Ok(fields.get(1).map(|object| (*object).to_owned()))
-}
-
 pub(super) fn submodule_path_entries(
     root: &Path,
     path: &str,

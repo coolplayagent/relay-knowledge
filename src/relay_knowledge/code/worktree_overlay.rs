@@ -82,7 +82,18 @@ pub(super) fn build_worktree_overlay_snapshot(
     let mut skipped_unchanged_count = 0;
     for change in &changes {
         if let Some(deleted_path) = &change.deleted_source {
-            if scope::path_is_selected(deleted_path, registration, selector) {
+            if scope::path_scope_overlaps(deleted_path, registration, selector)
+                && !record_deleted_gitlink_overlay(
+                    root,
+                    &commit,
+                    deleted_path,
+                    registration,
+                    selector,
+                    &mut overlay_hash_input,
+                    &mut deleted_paths,
+                )?
+                && scope::path_is_selected(deleted_path, registration, selector)
+            {
                 record_worktree_deleted_path(
                     deleted_path,
                     &mut overlay_hash_input,
@@ -376,25 +387,31 @@ fn record_staged_gitlink_overlay(
         return Ok(false);
     }
     let path = &change.path;
-    let Some(staged_commit) = source_gitlink::staged_gitlink_commit(root, path)? else {
+    let Some(staged_kind) = staged_path_kind(root, path)? else {
+        return Ok(false);
+    };
+    let base_gitlink = source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?;
+    let StagedPathKind::Gitlink(staged_commit) = staged_kind else {
+        if let Some(base_gitlink_commit) = base_gitlink {
+            record_base_gitlink_child_deletions(root, path, &base_gitlink_commit, recorder)?;
+        }
         return Ok(false);
     };
     let staged_entries = bounded_submodule_path_entries(root, path, &staged_commit)?;
-    let staged_paths = staged_entries
-        .iter()
-        .map(|entry| entry.parent_path.clone())
-        .collect::<BTreeSet<_>>();
-    if let Some(base_gitlink_commit) =
-        source_gitlink::gitlink_commit_at_tree(root, base_commit, path)?
-    {
-        let base_entries = bounded_submodule_path_entries(root, path, &base_gitlink_commit)?;
-        for entry in base_entries {
-            if !staged_paths.contains(&entry.parent_path)
-                && recorder.path_is_selected(&entry.parent_path)
-            {
-                recorder.record_deleted_path(&entry.parent_path);
-            }
-        }
+    if let Some(base_gitlink_commit) = base_gitlink {
+        let staged_paths = staged_entries
+            .iter()
+            .map(|entry| entry.parent_path.clone())
+            .collect::<BTreeSet<_>>();
+        record_missing_base_gitlink_child_deletions(
+            root,
+            path,
+            &base_gitlink_commit,
+            &staged_paths,
+            recorder,
+        )?;
+    } else if base_path_exists(root, base_commit, path)? && recorder.path_is_selected(path) {
+        recorder.record_deleted_path(path);
     }
 
     for entry in staged_entries {
@@ -404,6 +421,81 @@ fn record_staged_gitlink_overlay(
     }
 
     Ok(true)
+}
+
+enum StagedPathKind {
+    Gitlink(String),
+    Regular,
+}
+
+fn staged_path_kind(root: &Path, path: &str) -> Result<Option<StagedPathKind>, CodeIndexError> {
+    let bytes = git_bytes(root, ["ls-files", "-s", "-z", "--", path])?;
+    let Some(record) = bytes
+        .split(|byte| *byte == 0)
+        .find(|record| !record.is_empty())
+    else {
+        return Ok(None);
+    };
+    let record = String::from_utf8_lossy(record);
+    let Some((metadata, _)) = record.split_once('\t') else {
+        return Ok(None);
+    };
+    let fields = metadata.split_whitespace().collect::<Vec<_>>();
+    if fields.first().copied() != Some("160000") {
+        return Ok(Some(StagedPathKind::Regular));
+    }
+
+    Ok(fields
+        .get(1)
+        .map(|object| StagedPathKind::Gitlink((*object).to_owned())))
+}
+
+fn record_base_gitlink_child_deletions(
+    root: &Path,
+    path: &str,
+    base_gitlink_commit: &str,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    for entry in bounded_submodule_path_entries(root, path, base_gitlink_commit)? {
+        if recorder.path_is_selected(&entry.parent_path) {
+            recorder.record_deleted_path(&entry.parent_path);
+        }
+    }
+
+    Ok(())
+}
+
+fn record_missing_base_gitlink_child_deletions(
+    root: &Path,
+    path: &str,
+    base_gitlink_commit: &str,
+    staged_paths: &BTreeSet<String>,
+    recorder: &mut WorktreeOverlayRecorder<'_>,
+) -> Result<(), CodeIndexError> {
+    for entry in bounded_submodule_path_entries(root, path, base_gitlink_commit)? {
+        if !staged_paths.contains(&entry.parent_path)
+            && recorder.path_is_selected(&entry.parent_path)
+        {
+            recorder.record_deleted_path(&entry.parent_path);
+        }
+    }
+
+    Ok(())
+}
+
+fn base_path_exists(root: &Path, base_commit: &str, path: &str) -> Result<bool, CodeIndexError> {
+    git_object_kind(root, base_commit, path).map(|kind| kind.is_some())
+}
+
+fn git_object_kind(
+    root: &Path,
+    commit: &str,
+    path: &str,
+) -> Result<Option<String>, CodeIndexError> {
+    match git_bytes(root, ["cat-file", "-t", &format!("{commit}:{path}")]) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).trim().to_owned())),
+        Err(_) => Ok(None),
+    }
 }
 
 fn bounded_submodule_path_entries(

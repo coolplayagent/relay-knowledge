@@ -186,7 +186,7 @@ relay-knowledge repo index repo --ref worktree --format json
 relay-knowledge repo query repo --query retry_policy --ref worktree --format json
 ```
 
-The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapshot identifier, and includes modified files, untracked files, and staged submodule gitlink updates, including staged submodule commits readable only from cached gitdirs after deinit. While an overlay is active, clean commit ref queries are rejected so uncommitted content is not mislabeled as a clean Git snapshot.
+The overlay is bound to the current checked-out `HEAD`, uses a synthetic snapshot identifier, and includes modified files, untracked files, and staged submodule gitlink updates, including staged submodule commits readable only from cached gitdirs after deinit. Staged submodule additions, removals, renames, and file/submodule replacements clean up the old indexed paths by expanded child path rather than by the gitlink path alone. While an overlay is active, clean commit ref queries are rejected so uncommitted content is not mislabeled as a clean Git snapshot.
 
 ## 5.7 Impact Analysis
 
