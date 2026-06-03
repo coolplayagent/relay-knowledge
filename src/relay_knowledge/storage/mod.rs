@@ -29,10 +29,11 @@ pub use canvas::{
 pub use code::{
     CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE, CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
     CodeImpactChanges, CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-    CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
-    CodeRepositorySetRefreshTaskClaimRequest, CodeRepositorySetRefreshTaskCompletion,
-    CodeRepositorySetRefreshTaskFailure, CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed,
-    CodeRepositoryStore, CodeScopeRetentionRequest,
+    CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
+    CodeIndexTaskSeed, CodeRepositorySetMemberSeed, CodeRepositorySetRefreshTaskClaimRequest,
+    CodeRepositorySetRefreshTaskCompletion, CodeRepositorySetRefreshTaskFailure,
+    CodeRepositorySetRefreshTaskSeed, CodeRepositorySetSeed, CodeRepositoryStore,
+    CodeScopeRetentionRequest,
 };
 pub use file_index::{
     FileIndexDiagnostics, FileIndexEntry, FileIndexRoot, FileIndexRootStatus, FileIndexRootUpdate,

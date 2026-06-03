@@ -65,6 +65,25 @@ pub struct CodeIndexTaskLeaseRenewal {
     pub now_ms: u64,
 }
 
+/// Active code-index task lease used by service startup recovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeIndexTaskLeaseRecord {
+    pub task_id: String,
+    pub lease_owner: String,
+    pub lease_expires_at_ms: Option<u64>,
+    pub attempt_count: u32,
+}
+
+/// Recovery request for running task leases known to be orphaned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeIndexTaskLeaseRecovery {
+    pub task_ids: Vec<String>,
+    pub now_ms: u64,
+    pub max_attempts: u32,
+    pub error_kind: String,
+    pub error_message: String,
+}
+
 /// Completion report guarded by task lease and attempt token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeIndexTaskCompletion {
@@ -203,6 +222,21 @@ pub trait CodeRepositoryStore: Send + Sync {
         _now_ms: u64,
         _max_attempts: u32,
     ) -> StorageFuture<'_, ()> {
+        Box::pin(async {
+            Err(StorageError::InvalidInput(
+                CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE.to_owned(),
+            ))
+        })
+    }
+
+    fn running_code_index_task_leases(&self) -> StorageFuture<'_, Vec<CodeIndexTaskLeaseRecord>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    fn recover_code_index_task_leases_by_task(
+        &self,
+        _request: CodeIndexTaskLeaseRecovery,
+    ) -> StorageFuture<'_, usize> {
         Box::pin(async {
             Err(StorageError::InvalidInput(
                 CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE.to_owned(),

@@ -867,7 +867,32 @@ async fn service_with_file_store(name: &str) -> RelayKnowledgeService {
 }
 
 async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeService {
-    let environment = EnvironmentConfig::from_pairs(
+    let environment = test_environment();
+    let runtime = RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose");
+
+    RelayKnowledgeService::with_store(runtime, store)
+}
+
+#[cfg(windows)]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("USERPROFILE", "C:\\Users\\alice"),
+            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
+            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
+            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
+            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+#[cfg(not(windows))]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
@@ -875,12 +900,7 @@ async fn service_with_store(store: Arc<dyn KnowledgeStore>) -> RelayKnowledgeSer
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
         ],
     )
-    .expect("environment should parse");
-    let runtime = RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose");
-
-    RelayKnowledgeService::with_store(runtime, store)
+    .expect("environment should parse")
 }
 
 struct FixtureRepo {

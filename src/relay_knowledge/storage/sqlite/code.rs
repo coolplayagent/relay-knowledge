@@ -213,6 +213,19 @@ impl CodeRepositoryStore for SqliteGraphStore {
         })
     }
 
+    fn running_code_index_task_leases(
+        &self,
+    ) -> StorageFuture<'_, Vec<crate::storage::CodeIndexTaskLeaseRecord>> {
+        self.run_read(code_tasks::running_task_leases)
+    }
+
+    fn recover_code_index_task_leases_by_task(
+        &self,
+        request: crate::storage::CodeIndexTaskLeaseRecovery,
+    ) -> StorageFuture<'_, usize> {
+        self.run(move |connection| code_tasks::recover_task_leases_by_task(connection, request))
+    }
+
     fn renew_code_index_task_lease(
         &self,
         request: crate::storage::CodeIndexTaskLeaseRenewal,

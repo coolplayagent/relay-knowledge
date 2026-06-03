@@ -24,6 +24,10 @@ pub(super) async fn run_service(
         .reconcile_startup_indexes(RequestContext::for_interface(InterfaceKind::Cli))
         .await
         .map_err(|error| CliError::ServiceRunFailed(error.message))?;
+    service
+        .recover_orphaned_code_index_tasks_on_startup()
+        .await
+        .map_err(|error| CliError::ServiceRunFailed(error.message))?;
     let (file_index_shutdown, file_index_shutdown_receiver) = tokio::sync::watch::channel(false);
     let file_index_task = if runtime.file_index.enabled {
         Some(tokio::spawn(files_cli::run_file_index_loop(

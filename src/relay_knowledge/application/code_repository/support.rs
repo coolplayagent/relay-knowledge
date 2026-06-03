@@ -27,6 +27,7 @@ pub(super) const CODE_INDEX_TASK_LEASE_MS: u64 = 30 * 60 * 1000;
 pub(super) const CODE_INDEX_TASK_MAX_ATTEMPTS: u32 = 3;
 pub(super) const CODE_INDEX_TASK_RETRY_BACKOFF_MS: u64 = 60_000;
 pub(super) const RETAIN_RECENT_CODE_SCOPES: usize = 2;
+pub(super) const CODE_INDEX_WORKER_LEASE_OWNER_PREFIX: &str = "code-index-worker-";
 
 pub(super) struct PreviousIndexState {
     pub(super) fingerprints: Vec<crate::domain::CodeFileFingerprint>,
@@ -135,8 +136,118 @@ pub(super) async fn recover_code_index_task_leases(
     }
 }
 
+pub(super) async fn recover_orphaned_code_index_task_leases(
+    store: &std::sync::Arc<dyn crate::storage::KnowledgeStore>,
+    now_ms: u64,
+) -> Result<usize, ApiError> {
+    recover_code_index_task_leases(store, now_ms).await?;
+    let running_leases = store
+        .running_code_index_task_leases()
+        .await
+        .map_err(storage_api_error)?;
+    if running_leases.is_empty() {
+        return Ok(0);
+    }
+    let orphaned_task_ids = tokio::task::spawn_blocking(move || {
+        running_leases
+            .into_iter()
+            .filter_map(|lease| {
+                let pid = code_index_worker_pid(&lease.lease_owner)?;
+                (!process_is_running(pid)).then_some(lease.task_id)
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|error| ApiError::storage_unavailable(error.to_string()))?;
+    if orphaned_task_ids.is_empty() {
+        return Ok(0);
+    }
+
+    match store
+        .recover_code_index_task_leases_by_task(crate::storage::CodeIndexTaskLeaseRecovery {
+            task_ids: orphaned_task_ids,
+            now_ms,
+            max_attempts: CODE_INDEX_TASK_MAX_ATTEMPTS,
+            error_kind: "lease_orphaned".to_owned(),
+            error_message: "code index task lease owner process is not running".to_owned(),
+        })
+        .await
+    {
+        Ok(recovered) => Ok(recovered),
+        Err(error)
+            if storage_error_message_is(&error, CODE_INDEX_TASK_LEASE_RECOVERY_UNAVAILABLE) =>
+        {
+            Ok(0)
+        }
+        Err(error) => Err(storage_api_error(error)),
+    }
+}
+
+pub(super) fn code_index_worker_lease_owner() -> String {
+    format!(
+        "{CODE_INDEX_WORKER_LEASE_OWNER_PREFIX}{}",
+        std::process::id()
+    )
+}
+
 fn storage_error_message_is(error: &StorageError, expected: &str) -> bool {
     matches!(error, StorageError::InvalidInput(message) if message == expected)
+}
+
+fn code_index_worker_pid(lease_owner: &str) -> Option<u32> {
+    let suffix = lease_owner.strip_prefix(CODE_INDEX_WORKER_LEASE_OWNER_PREFIX)?;
+    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+
+    suffix.parse::<u32>().ok()
+}
+
+fn process_is_running(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+
+    process_is_running_by_platform(pid)
+}
+
+#[cfg(windows)]
+fn process_is_running_by_platform(pid: u32) -> bool {
+    let needle = format!(",\"{pid}\",");
+    std::process::Command::new(windows_tasklist_command())
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&needle))
+        .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn windows_tasklist_command() -> std::path::PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(std::path::PathBuf::from)
+        .map(|root| root.join("System32").join("tasklist.exe"))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("tasklist.exe"))
+}
+
+#[cfg(unix)]
+fn process_is_running_by_platform(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "pid="])
+        .output()
+        .ok()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .any(|value| value == pid.to_string())
+        })
+        .unwrap_or(true)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_is_running_by_platform(_pid: u32) -> bool {
+    true
 }
 
 pub(super) fn registration_from_status(
@@ -750,6 +861,19 @@ mod tests {
             &StorageError::InvalidInput("code index task lease expired".to_owned()),
             CODE_INDEX_TASK_LEASE_RENEWAL_UNAVAILABLE,
         ));
+    }
+
+    #[test]
+    fn code_index_worker_pid_parses_only_owned_worker_leases() {
+        assert_eq!(code_index_worker_pid("code-index-worker-123"), Some(123));
+        assert_eq!(code_index_worker_pid("worker-123"), None);
+        assert_eq!(code_index_worker_pid("code-index-worker-"), None);
+        assert_eq!(code_index_worker_pid("code-index-worker-pid"), None);
+    }
+
+    #[test]
+    fn current_process_is_treated_as_running() {
+        assert!(process_is_running(std::process::id()));
     }
 
     #[test]

@@ -1,10 +1,15 @@
 use std::{
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{ChildStderr, ChildStdin, ChildStdout, Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
 
 use super::CodeIndexError;
+
+const GIT_CAT_FILE_BATCH_TIMEOUT: Duration = Duration::from_secs(120);
+const GIT_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 pub(super) fn resolve_git_root(path: &Path) -> Result<PathBuf, CodeIndexError> {
     let output = Command::new("git")
@@ -103,23 +108,7 @@ pub(super) fn git_batch_blobs(
             .collect();
     }
 
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["cat-file", "--batch"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    {
-        let stdin = child.stdin.as_mut().ok_or_else(|| {
-            CodeIndexError::InvalidInput("git cat-file stdin is unavailable".to_owned())
-        })?;
-        for path in paths {
-            writeln!(stdin, "{commit}:{path}")?;
-        }
-    }
-    let output = child.wait_with_output()?;
+    let output = cat_file_output(root, ["cat-file", "--batch"], commit, paths)?;
     if !output.status.success() {
         return Err(CodeIndexError::Git {
             args: vec!["cat-file".to_owned(), "--batch".to_owned()],
@@ -151,23 +140,7 @@ pub(super) fn git_batch_blob_sizes(
             .collect();
     }
 
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["cat-file", "--batch-check"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    {
-        let stdin = child.stdin.as_mut().ok_or_else(|| {
-            CodeIndexError::InvalidInput("git cat-file stdin is unavailable".to_owned())
-        })?;
-        for path in paths {
-            writeln!(stdin, "{commit}:{path}")?;
-        }
-    }
-    let output = child.wait_with_output()?;
+    let output = cat_file_output(root, ["cat-file", "--batch-check"], commit, paths)?;
     if !output.status.success() {
         return Err(CodeIndexError::Git {
             args: vec!["cat-file".to_owned(), "--batch-check".to_owned()],
@@ -176,6 +149,137 @@ pub(super) fn git_batch_blob_sizes(
     }
 
     parse_cat_file_batch_sizes(paths, &output.stdout)
+}
+
+fn cat_file_output<const N: usize>(
+    root: &Path,
+    args: [&str; N],
+    commit: &str,
+    paths: &[String],
+) -> Result<Output, CodeIndexError> {
+    let input = cat_file_batch_input(commit, paths);
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(args);
+
+    command_output_with_stdin(
+        command,
+        input,
+        GIT_CAT_FILE_BATCH_TIMEOUT,
+        args.iter().map(|arg| (*arg).to_owned()).collect(),
+    )
+}
+
+fn cat_file_batch_input(commit: &str, paths: &[String]) -> Vec<u8> {
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(commit.as_bytes());
+        input.push(b':');
+        input.extend_from_slice(path.as_bytes());
+        input.push(b'\n');
+    }
+
+    input
+}
+
+fn command_output_with_stdin(
+    mut command: Command,
+    input: Vec<u8>,
+    timeout: Duration,
+    timeout_args: Vec<String>,
+) -> Result<Output, CodeIndexError> {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| CodeIndexError::InvalidInput("child stdin is unavailable".to_owned()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| CodeIndexError::InvalidInput("child stdout is unavailable".to_owned()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| CodeIndexError::InvalidInput("child stderr is unavailable".to_owned()))?;
+    let stdin_writer = thread::spawn(move || write_stdin_and_close(stdin, input));
+    let stdout_reader = thread::spawn(move || read_child_output(stdout));
+    let stderr_reader = thread::spawn(move || read_child_error(stderr));
+    let deadline = Instant::now() + timeout;
+
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdin_writer.join();
+            let _ = stdout_reader.join();
+            let stderr = stderr_reader
+                .join()
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            return Err(CodeIndexError::Git {
+                args: timeout_args,
+                message: format!(
+                    "timed out after {} ms{}",
+                    timeout.as_millis(),
+                    timeout_stderr_suffix(&stderr)
+                ),
+            });
+        }
+        thread::sleep(GIT_PROCESS_POLL_INTERVAL);
+    };
+
+    let stdin_result = stdin_writer
+        .join()
+        .map_err(|_| CodeIndexError::InvalidInput("child stdin writer panicked".to_owned()))?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| CodeIndexError::InvalidInput("child stdout reader panicked".to_owned()))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| CodeIndexError::InvalidInput("child stderr reader panicked".to_owned()))??;
+    if status.success() {
+        stdin_result?;
+    }
+
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn write_stdin_and_close(mut stdin: ChildStdin, input: Vec<u8>) -> Result<(), std::io::Error> {
+    stdin.write_all(&input)
+}
+
+fn read_child_output(mut stdout: ChildStdout) -> Result<Vec<u8>, std::io::Error> {
+    let mut bytes = Vec::new();
+    stdout.read_to_end(&mut bytes)?;
+
+    Ok(bytes)
+}
+
+fn read_child_error(mut stderr: ChildStderr) -> Result<Vec<u8>, std::io::Error> {
+    let mut bytes = Vec::new();
+    stderr.read_to_end(&mut bytes)?;
+
+    Ok(bytes)
+}
+
+fn timeout_stderr_suffix(stderr: &[u8]) -> String {
+    let message = String::from_utf8_lossy(stderr).trim().to_owned();
+    if message.is_empty() {
+        String::new()
+    } else {
+        format!(": {message}")
+    }
 }
 
 fn parse_cat_file_batch(paths: &[String], bytes: &[u8]) -> Result<Vec<Vec<u8>>, CodeIndexError> {
@@ -291,6 +395,29 @@ mod tests {
         .expect("batch blob sizes should load");
 
         assert_eq!(sizes, vec![Some("pub fn alpha() {}\n".len()), None]);
+    }
+
+    #[test]
+    fn piped_command_closes_stdin_before_waiting() {
+        let output = command_output_with_stdin(
+            git_hash_object_command(),
+            b"alpha\n".to_vec(),
+            Duration::from_secs(5),
+            vec!["hash-object".to_owned(), "--stdin".to_owned()],
+        )
+        .expect("stdin-bound command should finish after EOF");
+
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "4a58007052a65fbc2fc3f910f2855f45a4058e74"
+        );
+    }
+
+    fn git_hash_object_command() -> Command {
+        let mut command = Command::new("git");
+        command.args(["hash-object", "--stdin"]);
+        command
     }
 
     struct TestRepo {

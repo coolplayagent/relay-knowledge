@@ -7,8 +7,8 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeRepositoryStore,
-        CodeScopeRetentionRequest, SqliteGraphStore,
+        CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed,
+        CodeRepositoryStore, CodeScopeRetentionRequest, SqliteGraphStore,
     },
 };
 
@@ -721,6 +721,91 @@ async fn code_index_task_lease_validation_recovery_and_renewal_are_explicit() {
         .expect("dead task should exist");
     assert_eq!(dead.state, CodeIndexTaskState::DeadLetter);
     assert!(dead.lease_owner.is_none());
+}
+
+#[tokio::test]
+async fn selected_running_code_index_task_leases_recover_before_ttl_expiry() {
+    let store = registered_store().await;
+    let queued_a = store
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-a", "scope-a", 10)))
+        .await
+        .expect("first task should queue");
+    let queued_b = store
+        .run(|connection| code_tasks::queue_task(connection, seed("fp-b", "scope-b", 10)))
+        .await
+        .expect("second task should queue");
+    for (task_id, owner) in [
+        (queued_a.task_id.clone(), "worker-a"),
+        (queued_b.task_id.clone(), "worker-b"),
+    ] {
+        store
+            .run(move |connection| {
+                code_tasks::claim_task(
+                    connection,
+                    CodeIndexTaskClaimRequest {
+                        task_id: Some(task_id),
+                        lease_owner: owner.to_owned(),
+                        lease_duration_ms: 10_000,
+                        max_attempts: 3,
+                        now_ms: 20,
+                    },
+                )
+            })
+            .await
+            .expect("task should claim")
+            .expect("task should be running");
+    }
+
+    let leases = store
+        .run_read(code_tasks::running_task_leases)
+        .await
+        .expect("running leases should list");
+    assert_eq!(leases.len(), 2);
+    let recovered = store
+        .run({
+            let task_id = queued_a.task_id.clone();
+            move |connection| {
+                code_tasks::recover_task_leases_by_task(
+                    connection,
+                    CodeIndexTaskLeaseRecovery {
+                        task_ids: vec![task_id],
+                        now_ms: 30,
+                        max_attempts: 3,
+                        error_kind: "lease_orphaned".to_owned(),
+                        error_message: "owner exited".to_owned(),
+                    },
+                )
+            }
+        })
+        .await
+        .expect("selected lease should recover");
+    assert_eq!(recovered, 1);
+
+    let first = store
+        .run({
+            let task_id = queued_a.task_id.clone();
+            move |connection| code_tasks::task_by_id(connection, &task_id)
+        })
+        .await
+        .expect("first task should load")
+        .expect("first task should exist");
+    let second = store
+        .run({
+            let task_id = queued_b.task_id.clone();
+            move |connection| code_tasks::task_by_id(connection, &task_id)
+        })
+        .await
+        .expect("second task should load")
+        .expect("second task should exist");
+
+    assert_eq!(first.state, CodeIndexTaskState::Retrying);
+    assert!(first.lease_owner.is_none());
+    assert_eq!(first.lease_expires_at_ms, None);
+    assert_eq!(first.next_retry_at_ms, 30);
+    assert_eq!(first.last_error_kind.as_deref(), Some("lease_orphaned"));
+    assert_eq!(second.state, CodeIndexTaskState::Running);
+    assert_eq!(second.lease_owner.as_deref(), Some("worker-b"));
+    assert_eq!(second.lease_expires_at_ms, Some(10_020));
 }
 
 #[tokio::test]

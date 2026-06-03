@@ -9,7 +9,8 @@ use crate::{
     },
     storage::{
         CodeIndexTaskClaimRequest, CodeIndexTaskCompletion, CodeIndexTaskFailure,
-        CodeIndexTaskLeaseRenewal, CodeIndexTaskSeed, CodeScopeRetentionRequest, StorageError,
+        CodeIndexTaskLeaseRecord, CodeIndexTaskLeaseRecovery, CodeIndexTaskLeaseRenewal,
+        CodeIndexTaskSeed, CodeScopeRetentionRequest, StorageError,
     },
 };
 
@@ -416,6 +417,77 @@ fn recover_expired_task_leases_once(
     recover_expired_leases(connection, now_ms, max_attempts)
 }
 
+pub(super) fn running_task_leases(
+    connection: &mut Connection,
+) -> Result<Vec<CodeIndexTaskLeaseRecord>, StorageError> {
+    let mut statement = connection.prepare(
+        "
+        SELECT task_id, lease_owner, lease_expires_at_ms, attempt_count
+        FROM code_repository_index_tasks
+        WHERE state = 'running'
+          AND lease_owner IS NOT NULL
+        ORDER BY created_at_ms ASC, task_id ASC
+        ",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(CodeIndexTaskLeaseRecord {
+            task_id: row.get(0)?,
+            lease_owner: row.get(1)?,
+            lease_expires_at_ms: row.get(2)?,
+            attempt_count: row.get(3)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StorageError::from)
+}
+
+pub(super) fn recover_task_leases_by_task(
+    connection: &mut Connection,
+    request: CodeIndexTaskLeaseRecovery,
+) -> Result<usize, StorageError> {
+    if request.max_attempts == 0 {
+        return Err(StorageError::InvalidInput(
+            "code index task max attempts must be greater than zero".to_owned(),
+        ));
+    }
+    if request.task_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let transaction = connection.transaction()?;
+    let mut recovered = 0usize;
+    for task_id in unique_task_ids(&request.task_ids) {
+        recovered = recovered.saturating_add(transaction.execute(
+            "
+            UPDATE code_repository_index_tasks
+            SET state = CASE
+                    WHEN attempt_count >= ?2 THEN 'dead_letter'
+                    ELSE 'retrying'
+                END,
+                lease_owner = NULL,
+                lease_expires_at_ms = NULL,
+                next_retry_at_ms = ?3,
+                last_error_kind = ?4,
+                last_error_message = ?5,
+                updated_at_ms = ?3
+            WHERE task_id = ?1
+              AND state = 'running'
+            ",
+            params![
+                task_id,
+                request.max_attempts,
+                request.now_ms,
+                &request.error_kind,
+                &request.error_message,
+            ],
+        )?);
+    }
+    transaction.commit()?;
+
+    Ok(recovered)
+}
+
 pub(super) fn retention_status(
     connection: &mut Connection,
     repository_id: &str,
@@ -490,6 +562,14 @@ fn validate_lease_owner(lease_owner: &str) -> Result<&str, StorageError> {
     }
 
     Ok(lease_owner)
+}
+
+fn unique_task_ids(task_ids: &[String]) -> BTreeSet<&str> {
+    task_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|task_id| !task_id.trim().is_empty())
+        .collect()
 }
 
 fn recover_expired_leases(

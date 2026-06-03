@@ -28,9 +28,10 @@ use crate::application::service::RelayKnowledgeService;
 use super::support::{
     CODE_INDEX_TASK_LEASE_MS, CODE_INDEX_TASK_MAX_ATTEMPTS, CODE_INDEX_TASK_RETRY_BACKOFF_MS,
     CodeIndexTaskLeaseContext, RETAIN_RECENT_CODE_SCOPES, active_index_matches_request,
-    apply_code_grep_fallback, code_status_checkpoint, feature_flag_request_at_indexed_ref,
-    fresh_full_index_probe, index_start_from_completed, latest_compatible_code_scope_status,
-    now_millis, previous_index_state_for_index, recover_code_index_task_leases,
+    apply_code_grep_fallback, code_index_worker_lease_owner, code_status_checkpoint,
+    feature_flag_request_at_indexed_ref, fresh_full_index_probe, index_start_from_completed,
+    latest_compatible_code_scope_status, now_millis, previous_index_state_for_index,
+    recover_code_index_task_leases, recover_orphaned_code_index_task_leases,
     refresh_code_index_task_lease, registration_from_status, required_code_repository,
     resolve_code_ref_for_selector, resolved_code_scope_status, retrieval_request_at_indexed_ref,
     run_blocking_code, storage_api_error,
@@ -364,7 +365,7 @@ impl RelayKnowledgeService {
         context: RequestContext,
     ) -> Result<Option<crate::domain::CodeIndexTaskRecord>, ApiError> {
         let store = self.store().await.map_err(storage_api_error)?;
-        let lease_owner = format!("code-index-worker-{}", std::process::id());
+        let lease_owner = code_index_worker_lease_owner();
         let Some(task) = store
             .claim_code_index_task(crate::storage::CodeIndexTaskClaimRequest {
                 task_id,
@@ -447,6 +448,14 @@ impl RelayKnowledgeService {
                 Err(error)
             }
         }
+    }
+
+    /// Recovers code-index worker leases that belonged to exited service processes.
+    pub(crate) async fn recover_orphaned_code_index_tasks_on_startup(
+        &self,
+    ) -> Result<usize, ApiError> {
+        let store = self.store().await.map_err(storage_api_error)?;
+        recover_orphaned_code_index_task_leases(&store, now_millis()).await
     }
 
     async fn fresh_full_index_response(

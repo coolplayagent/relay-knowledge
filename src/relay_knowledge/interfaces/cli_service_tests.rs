@@ -4,11 +4,13 @@ use super::*;
 use crate::{
     application::RuntimeConfiguration,
     domain::{
-        CodeIndexSnapshot, CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeFileRecord,
+        CodeIndexMode, CodeIndexResourceBudget, CodeIndexSnapshot, CodeIndexTaskState,
+        CodeParseStatus, CodeRepositoryRegistration, RepositoryCodeFileRecord,
     },
     env::{EnvironmentConfig, PlatformKind},
     storage::{
-        CodeRepositorySetMemberSeed, CodeRepositorySetSeed, CodeRepositoryStore, SqliteGraphStore,
+        CodeIndexTaskClaimRequest, CodeIndexTaskSeed, CodeRepositorySetMemberSeed,
+        CodeRepositorySetSeed, CodeRepositoryStore, SqliteGraphStore,
     },
 };
 
@@ -111,8 +113,101 @@ async fn service_code_index_worker_pool_uses_configured_parallelism() {
     }
 }
 
+#[tokio::test]
+async fn service_startup_recovers_orphaned_code_index_worker_leases() {
+    let store = Arc::new(SqliteGraphStore::open_in_memory().expect("store should open"));
+    store
+        .upsert_code_repository(
+            CodeRepositoryRegistration::new("repo-a", "app", "/tmp/repo", Vec::new(), Vec::new())
+                .expect("registration should validate"),
+        )
+        .await
+        .expect("repository should persist");
+    let live = store
+        .queue_code_index_task(code_index_seed("fp-live", "scope-live"))
+        .await
+        .expect("live task should queue");
+    let orphaned = store
+        .queue_code_index_task(code_index_seed("fp-orphaned", "scope-orphaned"))
+        .await
+        .expect("orphaned task should queue");
+    let now_ms = current_time_millis();
+    for (task_id, lease_owner) in [
+        (
+            live.task_id.clone(),
+            format!("code-index-worker-{}", std::process::id()),
+        ),
+        (
+            orphaned.task_id.clone(),
+            "code-index-worker-999999".to_owned(),
+        ),
+    ] {
+        store
+            .claim_code_index_task(CodeIndexTaskClaimRequest {
+                task_id: Some(task_id),
+                lease_owner,
+                lease_duration_ms: 60_000,
+                max_attempts: 3,
+                now_ms,
+            })
+            .await
+            .expect("task claim should read")
+            .expect("task should claim");
+    }
+
+    let service = RelayKnowledgeService::with_store(runtime().await, store.clone());
+    let recovered = service
+        .recover_orphaned_code_index_tasks_on_startup()
+        .await
+        .expect("startup recovery should run");
+    let live_after = store
+        .code_index_task(live.task_id)
+        .await
+        .expect("live task should load")
+        .expect("live task should exist");
+    let orphaned_after = store
+        .code_index_task(orphaned.task_id)
+        .await
+        .expect("orphaned task should load")
+        .expect("orphaned task should exist");
+
+    assert_eq!(recovered, 1);
+    let live_owner = format!("code-index-worker-{}", std::process::id());
+    assert_eq!(live_after.state, CodeIndexTaskState::Running);
+    assert_eq!(live_after.lease_owner.as_deref(), Some(live_owner.as_str()));
+    assert_eq!(orphaned_after.state, CodeIndexTaskState::Retrying);
+    assert!(orphaned_after.lease_owner.is_none());
+    assert_eq!(
+        orphaned_after.last_error_kind.as_deref(),
+        Some("lease_orphaned")
+    );
+}
+
 async fn runtime() -> RuntimeConfiguration {
-    let environment = EnvironmentConfig::from_pairs(
+    let environment = test_environment();
+    RuntimeConfiguration::from_environment(&environment)
+        .await
+        .expect("runtime should compose")
+}
+
+#[cfg(windows)]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
+        PlatformKind::Windows,
+        [
+            ("USERPROFILE", "C:\\Users\\alice"),
+            ("APPDATA", "C:\\Users\\alice\\AppData\\Roaming"),
+            ("LOCALAPPDATA", "C:\\Users\\alice\\AppData\\Local"),
+            ("TEMP", "C:\\Users\\alice\\AppData\\Local\\Temp"),
+            ("RELAY_KNOWLEDGE_HOME", "C:\\relay"),
+        ],
+    )
+    .expect("environment should parse")
+}
+
+#[cfg(not(windows))]
+fn test_environment() -> EnvironmentConfig {
+    EnvironmentConfig::from_pairs(
         PlatformKind::Unix,
         [
             ("HOME", "/home/alice"),
@@ -120,10 +215,33 @@ async fn runtime() -> RuntimeConfiguration {
             ("RELAY_KNOWLEDGE_HOME", "/srv/relay"),
         ],
     )
-    .expect("environment should parse");
-    RuntimeConfiguration::from_environment(&environment)
-        .await
-        .expect("runtime should compose")
+    .expect("environment should parse")
+}
+
+fn code_index_seed(fingerprint: &str, source_scope: &str) -> CodeIndexTaskSeed {
+    CodeIndexTaskSeed {
+        repository_id: "repo-a".to_owned(),
+        alias: "app".to_owned(),
+        ref_selector: "HEAD".to_owned(),
+        resolved_commit_sha: format!("commit-{source_scope}"),
+        tree_hash: format!("tree-{source_scope}"),
+        source_scope: source_scope.to_owned(),
+        path_filters: Vec::new(),
+        language_filters: Vec::new(),
+        mode: CodeIndexMode::Full,
+        input_fingerprint: fingerprint.to_owned(),
+        resource_budget: CodeIndexResourceBudget::default(),
+        payload_json: "{}".to_owned(),
+        now_ms: 1,
+    }
+}
+
+fn current_time_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn snapshot(repository_id: &str, source_scope: &str) -> CodeIndexSnapshot {
